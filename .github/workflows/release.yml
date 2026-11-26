@@ -67,7 +67,7 @@ jobs:
           merge-multiple: true
       - name: Checksums
         run: cd dist && sha256sum *.tar.gz *.spdx.json > SHA256SUMS
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         with:
           draft: true
           prerelease: ${{ startsWith(github.ref_name, 'v0.') || contains(github.ref_name, '-') }}
