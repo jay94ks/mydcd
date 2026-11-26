@@ -1,0 +1,15 @@
+# User profile: pinned cluster/server identity; no node identity_dir or password.
+# A system administrator must register this user first.
+# Private-key/password/token login, whoami, tenant selection and logout exist.
+# Password/token need a separately installed system credential backend.
+# manage apply/result/resume/prune preserve original signed metadata requests.
+# Member relay and explicit logout --resume-original are supported.
+# Managed init/join is provided by mydcd; compose deployment remains pending.
+version: 1
+auth: user
+cluster: "0101010101010101010101010101010101010101010101010101010101010101"
+peers:
+  - id: local
+    key: "0303030303030303030303030303030303030303030303030303030303030303"
+    endpoint: "127.0.0.1:7443"
+    voter: true

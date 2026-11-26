@@ -1,0 +1,434 @@
+// SPDX-License-Identifier: Apache-2.0
+
+import { useState, type ReactNode } from 'react';
+import { usePhone } from '../lib/viewport';
+import { MCards, MTiles, MWideNote, useReadOnlyTop } from '../mobile/ReadOnly';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useTenantRole } from '../auth/session';
+import { networks, registries, volumes } from '../api/endpoints';
+import type { NetworkView, Page, VolumeView } from '../api/types';
+import { Badge, Card, HelpBox, PageHeader } from '../components/ui';
+import { Load } from '../components/states';
+import { Refresh } from '../components/Refresh';
+import { Tabs } from '../components/Tabs';
+import { DataTable } from '../components/DataTable';
+import { usePoll } from '../lib/usePoll';
+import { ago, fmtBytes } from '../lib/format';
+import { NoTenant } from './Deploy';
+import { Menu } from '../components/Menu';
+import { appCount, NetworkDnsDialog, RetireNetworkDialog } from './NetworkChange';
+import { ResourceUsersDialog } from './ResourceUsers';
+import { RoutesCard } from './Routes';
+import { TunnelsDialog } from './Tunnels';
+import { BackupCard, CapacityDialog, DeleteVolumeDialog, NO_APP, RestoreCard, useVolumeDetail } from './VolumeOps';
+import { MoveCard, MoveDialog, moveBlocked } from './VolumeMove';
+import { BridgeNetworkDialog, FixedVolumeDialog, ManagedVolumeDialog, MeshNetworkDialog } from './SharedCreate';
+
+export const SHARED_TABS = [
+  { to: '/shared/networks', label: '망' },
+  { to: '/shared/ingress', label: '외부 접속' },
+  { to: '/shared/volumes', label: '데이터 저장소' },
+  { to: '/shared/vault', label: '비밀값' },
+  { to: '/shared/lifecycle', label: '상태 검사 규칙' },
+];
+
+const empty = <T,>(): Page<T> => ({ items: [], next: '', revision: 0, asOf: new Date().toISOString() });
+
+function useTenantList<T>(load: (t: string, s: AbortSignal) => Promise<Page<T>>) {
+  const { tenant } = useTenantRole();
+  const q = usePoll((s) => (tenant ? load(tenant, s) : Promise.resolve(empty<T>())), [tenant]);
+  return { tenant, q };
+}
+
+function Frame({ title, ids, help, q, actions, children, after }: { title: string; ids: string; help: React.ReactNode; q: Parameters<typeof Refresh>[0]['q']; actions?: React.ReactNode; children: React.ReactNode; after?: React.ReactNode }) {
+  const { tenant } = useTenantRole();
+  return (
+    <>
+      <PageHeader title="공유 자원" ids={ids} actions={<Refresh q={q} poll={false} />} />
+      <Tabs label="공유 자원 탭" items={SHARED_TABS} />
+      {help}
+      {!tenant ? <NoTenant /> : <Card title={`${title} · 작업 공간 ${tenant}`} actions={actions}>{children}</Card>}
+      {tenant && after}
+    </>
+  );
+}
+
+const NEED = '작업 공간 관리자 권한 필요';
+
+/** 카드 머리의 만들기 버튼 둘(보조 · 주) */
+function CreateButtons({ second, primary, onSecond, onPrimary }: { second: string; primary: string; onSecond: () => void; onPrimary: () => void }) {
+  const { canDeploy } = useTenantRole();
+  return (
+    <span className="row">
+      <button className="btn" disabled={!canDeploy} title={canDeploy ? undefined : NEED} onClick={onSecond}>
+        {second}
+      </button>
+      <button className="btn primary" disabled={!canDeploy} title={canDeploy ? undefined : NEED} onClick={onPrimary}>
+        {primary}
+      </button>
+    </span>
+  );
+}
+
+/** 참여 서버 칸: "node-a 10.x · node-b 10.y" (멤버가 없는 이전 데몬은 서버 목록과 CIDR) */
+function memberText(n: NetworkView) {
+  if (n.members.length) return n.members.map((m) => `${m.node} ${m.cidr}`).join(' · ');
+  return [n.nodes.join(', '), n.cidr].filter(Boolean).join(' ');
+}
+
+export function NetworksPage() {
+  return usePhone() ? <MNetworks /> : <DesktopNetworks />;
+}
+
+/** 휴대폰 공유 자원 머리: 탭 줄 + '보기만' 한 줄 (UI-M11 ③ 모양) */
+export function MFrame({ title, wide, children }: { title: string; wide: string; children: ReactNode }) {
+  const { tenant } = useTenantRole();
+  useReadOnlyTop(title, tenant ? `작업 공간 ${tenant}` : '공유 자원', wide, [tenant]);
+  return (
+    <>
+      <Tabs label="공유 자원 탭" items={SHARED_TABS} />
+      {!tenant ? <NoTenant /> : children}
+    </>
+  );
+}
+
+function MNetworks() {
+  const { q } = useTenantList(networks);
+  const [users, setUsers] = useState<NetworkView>();
+  const { tenant } = useTenantRole();
+  return (
+    <MFrame title="망" wide="망 만들기·변경·폐기는 넓은 화면에서">
+      <Load q={q} what="망을 불러오지 못했습니다">
+        {(p) => {
+          const tun = p.items.filter((n) => n.kind === 'tun').length;
+          const busy = p.items.filter((n) => n.members.some((x) => x.phase || x.draining)).length;
+          return (
+            <>
+              <MTiles
+                items={[
+                  { label: '망', value: p.items.length, sub: `서버 간 ${tun} · 서버 내부 ${p.items.length - tun}` },
+                  { label: '변경 중', value: busy, sub: busy ? '변경 계획 · 비우는 중' : '모두 활성', warn: busy > 0 },
+                ]}
+              />
+              <MCards
+                empty="망이 없습니다."
+                items={p.items.map((n) => {
+                  const draining = n.members.some((x) => x.draining);
+                  const changing = n.members.some((x) => x.phase);
+                  return {
+                    key: n.key,
+                    title: n.name,
+                    badge: draining ? ['wa', '비우는 중'] : changing ? ['pr', '변경 계획'] : ['ok', '활성'],
+                    tone: draining ? 'wa' : undefined,
+                    lines: [
+                      `${n.kind === 'tun' ? '서버 간' : '서버 내부'} · ${n.apps === undefined ? '사용 앱 —' : n.apps === 0 && !n.standalones ? '사용 앱 없음' : `사용 앱 ${appCount(n)}개`}${n.standalones ? ` · 단독 ${n.standalones}` : ''}`,
+                      <span className="mono" style={{ fontSize: 12 }}>
+                        {memberText(n) || '—'}
+                      </span>,
+                    ],
+                    meta: n.dns ? `도메인 영역 ${n.dns.zone}${n.dns.enabled ? '' : ' (꺼짐)'}` : undefined,
+                    onOpen: () => setUsers(n),
+                  };
+                })}
+              />
+              <MWideNote>카드를 누르면 쓰는 앱 · 연결(경로)과 도메인 이름 설정은 넓은 화면에서</MWideNote>
+            </>
+          );
+        }}
+      </Load>
+      {users && <ResourceUsersDialog tenant={tenant} kind="network" name={users.name} onClose={() => setUsers(undefined)} />}
+    </MFrame>
+  );
+}
+
+function DesktopNetworks() {
+  const { tenant, q } = useTenantList(networks);
+  const { canDeploy } = useTenantRole();
+  const nav = useNavigate();
+  const [dlg, setDlg] = useState<'bridge' | 'tun'>();
+  const [retire, setRetire] = useState<NetworkView>();
+  const [dns, setDns] = useState<NetworkView>();
+  const [users, setUsers] = useState<NetworkView>();
+  const [tunnels, setTunnels] = useState<NetworkView>();
+  const nets = q.data?.items ?? [];
+  const changing = (n: NetworkView) => n.members.some((x) => x.phase);
+  const draining = (n: NetworkView) => n.members.some((x) => x.draining);
+  const go = (n: NetworkView) => nav(`/shared/networks/${encodeURIComponent(n.name)}/change`);
+  const close = () => setDlg(undefined);
+  return (
+    <Frame
+      title="망"
+      ids="UI-50"
+      q={q}
+      actions={<CreateButtons second="서버 내부망 만들기" primary="서버 간 가상망 만들기" onSecond={() => setDlg('bridge')} onPrimary={() => setDlg('tun')} />}
+      help={
+        <HelpBox terms="망 (network) · bridge (한 서버 안) · tun (서버 사이 Mesh) · CIDR (주소 범위)">
+          <b>이 탭은</b> 작업 공간의 앱이 함께 쓰는 망입니다. app.yaml에서는 <code>external: true</code>로 이름만 참조합니다.
+        </HelpBox>
+      }
+      after={<RoutesCard tenant={tenant} nets={nets} canDeploy={canDeploy} />}
+    >
+      <Load q={q}>
+        {(p) => (
+          <DataTable
+            rows={p.items}
+            rowKey={(n) => n.key}
+            pageInfo={p}
+            emptyTitle="망이 없습니다"
+            columns={[
+              { key: 'name', header: '이름', value: (n) => n.name, render: (n) => <b>{n.name}</b> },
+              { key: 'kind', header: '종류', value: (n) => n.kind, render: (n) => (n.kind === 'tun' ? '서버 간' : '서버 내부') },
+              { key: 'members', header: '참여 서버 (서버 · CIDR)', value: (n) => memberText(n), render: (n) => <span className="mono">{memberText(n) || '—'}</span> },
+              { key: 'dns', header: '도메인 영역', value: (n) => n.dns?.zone ?? '', render: (n) => (n.dns ? <span className={n.dns.enabled ? 'mono' : 'mono muted'}>{n.dns.zone}{n.dns.enabled ? '' : ' (꺼짐)'}</span> : <span className="muted">—</span>) },
+              { key: 'apps', header: '사용 앱', value: (n) => n.apps ?? -1, render: (n) => (n.apps === undefined ? <span className="muted">—</span> : n.apps === 0 && !n.standalones ? <span className="muted">없음</span> : <span>{appCount(n)}개{n.standalones ? <span className="small muted"> · 단독 {n.standalones}</span> : null}</span>) },
+              { key: 'state', header: '상태', value: (n) => (draining(n) ? 2 : changing(n) ? 1 : 0), render: (n) => (draining(n) ? <Badge tone="wa">비우는 중</Badge> : changing(n) ? <Badge tone="pr">변경 계획</Badge> : <Badge tone="ok">활성</Badge>) },
+              {
+                key: 'act',
+                header: '',
+                render: (n) => {
+                  const tun = n.kind === 'tun';
+                  return (
+                    <span className="row" style={{ gap: 6, justifyContent: 'flex-end' }}>
+                      {draining(n) ? (
+                        <button className="btn sm danger" disabled={!canDeploy} title={canDeploy ? undefined : NEED} onClick={() => setRetire(n)}>
+                          폐기
+                        </button>
+                      ) : (
+                        tun && (
+                          <button className="btn sm" onClick={() => go(n)}>
+                            변경
+                          </button>
+                        )
+                      )}
+                      <Menu
+                        label={`${n.name} 작업`}
+                        items={[
+                          { label: '쓰는 앱 보기', onSelect: () => setUsers(n) },
+                          ...(tun
+                            ? [
+                                { label: '도메인 이름 설정', onSelect: () => setDns(n), disabledReason: !canDeploy ? NEED : undefined },
+                                { label: '터널 연결 보기…', onSelect: () => setTunnels(n) },
+                                { label: '변경…', onSelect: () => go(n), hint: changing(n) ? '진행 중 이어 하기' : undefined },
+                              ]
+                            : []),
+                          { label: '', sep: true },
+                          { label: '폐기…', danger: true, onSelect: () => setRetire(n), disabledReason: !canDeploy ? NEED : undefined },
+                        ]}
+                      />
+                    </span>
+                  );
+                },
+              },
+            ]}
+          />
+        )}
+      </Load>
+      <span className="small muted">CIDR은 클러스터 전역에서 겹칠 수 없습니다. 실제 컨테이너 주소는 Docker IPAM이 할당합니다. 서버 내부망은 서버·CIDR을 바꿀 수 없습니다. 바꿔야 하면 서버 간 가상망으로 새로 만드세요.</span>
+      {dns && <NetworkDnsDialog tenant={tenant} net={dns} onClose={() => setDns(undefined)} onDone={() => void q.refresh()} />}
+      {tunnels && <TunnelsDialog tenant={tenant} name={tunnels.name} onClose={() => setTunnels(undefined)} />}
+      {users && <ResourceUsersDialog tenant={tenant} kind="network" name={users.name} onClose={() => setUsers(undefined)} />}
+      {retire && <RetireNetworkDialog tenant={tenant} net={retire} onClose={() => setRetire(undefined)} onDone={() => void q.refresh()} />}
+      {dlg === 'bridge' && <BridgeNetworkDialog tenant={tenant} nets={nets} onClose={close} onDone={() => void q.refresh()} />}
+      {dlg === 'tun' && <MeshNetworkDialog tenant={tenant} nets={nets} onClose={close} onDone={() => void q.refresh()} />}
+    </Frame>
+  );
+}
+
+/** 종류: 고정 / 앱 소유(앱 이름 공간) / 관리(작업 공간 공유) */
+// 앱이 정한 저장소는 서버에 묶여 있어도(kind fixed) 앱 소유다. 등록한 고정 저장소만 '고정'
+const volKind = (v: VolumeView) => (v.app ? '앱 소유' : v.kind === 'fixed' ? '고정' : '관리');
+
+export function VolumesPage() {
+  return usePhone() ? <MVolumes /> : <DesktopVolumes />;
+}
+
+function MVolumes() {
+  const { tenant, q } = useTenantList(volumes);
+  const [users, setUsers] = useState<VolumeView>();
+  return (
+    <MFrame title="데이터 저장소" wide="만들기·백업·복원·이관·삭제는 넓은 화면에서">
+      <Load q={q} what="데이터 저장소를 불러오지 못했습니다">
+        {(p) => {
+          const moving = p.items.filter((v) => v.movePhase).length;
+          const used = p.items.reduce((a, v) => a + (v.usedBytes ?? 0), 0);
+          const cap = p.items.reduce((a, v) => a + (v.kind === 'shared' ? v.capacityBytes ?? 0 : 0), 0);
+          return (
+            <>
+              <MTiles
+                items={[
+                  { label: '데이터 저장소', value: p.items.length, sub: `사용 중 ${p.items.filter((v) => v.consumers > 0).length}${moving ? ` · 이관 중 ${moving}` : ''}` },
+                  { label: '관측 사용량', value: fmtBytes(used), sub: cap ? `공유 저장소 용량 ${fmtBytes(cap)}` : '고정 저장소는 관측만' },
+                ]}
+              />
+              <MCards
+                empty="데이터 저장소가 없습니다."
+                items={p.items.map((v) => ({
+                  key: v.key,
+                  title: v.name,
+                  badge: v.movePhase ? ['pr', '이관 중'] : v.consumers > 0 ? ['ok', '사용 중'] : ['un', '미사용'],
+                  lines: [
+                    `${volKind(v)} · ${v.node ? `${v.node}${v.kind === 'fixed' && v.storage ? ` · ${v.storage}` : ''}` : '서버 —'}`,
+                    v.kind === 'fixed' || !v.capacityBytes ? (v.usedBytes !== undefined ? `관측 ${fmtBytes(v.usedBytes)}` : '용량 —') : `${v.usedBytes !== undefined ? fmtBytes(v.usedBytes) : '—'} / ${fmtBytes(v.capacityBytes)}`,
+                  ],
+                  meta: v.writer ? `${v.writer} (쓰기 앱)` : v.consumers > 0 ? `${v.app ? `${v.app} · ` : ''}컨테이너 ${v.consumers}개` : '쓰는 앱 없음',
+                  onOpen: () => setUsers(v),
+                }))}
+              />
+              <MWideNote>관측 사용량은 강제 한도나 일관 백업의 증거가 아닙니다</MWideNote>
+            </>
+          );
+        }}
+      </Load>
+      {users && <ResourceUsersDialog tenant={tenant} kind="volume" name={users.name} app={users.app} onClose={() => setUsers(undefined)} />}
+    </MFrame>
+  );
+}
+
+function DesktopVolumes() {
+  const { tenant, q } = useTenantList(volumes);
+  const { isAdmin, canDeploy } = useTenantRole();
+  const [dlg, setDlg] = useState<'managed' | 'fixed'>();
+  const [search] = useSearchParams();
+  const [selKey, setSelKey] = useState<string>();
+  const [cap, setCap] = useState<VolumeView>();
+  const [move, setMove] = useState<VolumeView>();
+  const [del, setDel] = useState<VolumeView>();
+  const [users, setUsers] = useState<VolumeView>();
+  const items = q.data?.items ?? [];
+  const taken = items.map((v) => v.name);
+  // 고른 저장소. 처음에는 백업할 수 있는 첫 저장소
+  const sel = items.find((v) => v.key === selKey) ?? items.find((v) => v.kind === 'shared' && v.app) ?? items.find((v) => v.app) ?? items.find((v) => v.kind === 'shared');
+  const detail = useVolumeDetail(tenant, sel);
+  const close = () => setDlg(undefined);
+  const pick = (v: VolumeView) => {
+    setSelKey(v.key);
+    requestAnimationFrame(() => document.getElementById('volume-ops')?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+  };
+  return (
+    <Frame
+      title="데이터 저장소"
+      ids="UI-60 ~ UI-64"
+      q={q}
+      actions={<CreateButtons second="고정 데이터 저장소 등록" primary="공유 데이터 저장소 만들기" onSecond={() => setDlg('fixed')} onPrimary={() => setDlg('managed')} />}
+      help={
+        <HelpBox terms="데이터 저장소 (Volume) · 백업 (backup) · 복원 (restore) · 보존됨 (retained)">
+          <b>이 화면은</b> 앱 데이터가 저장되는 공간을 관리합니다. 공유 데이터 저장소는 클러스터가 백업·이동을 맡고, 고정 데이터 저장소는 한 서버의 경로에 묶입니다.
+        </HelpBox>
+      }
+      after={
+        sel && (
+          <div className="grid" id="volume-ops" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 20 }}>
+            <BackupCard key={`b-${sel.key}`} tenant={tenant} v={sel} q={detail} canDeploy={canDeploy} isAdmin={isAdmin} onChanged={() => void q.refresh()} />
+            <RestoreCard key={`r-${sel.key}`} tenant={tenant} v={sel} q={detail} canDeploy={canDeploy} taken={taken} onChanged={() => void q.refresh()} />
+            <MoveCard key={`m-${sel.key}`} tenant={tenant} v={sel} canDeploy={canDeploy} onRefresh={() => void q.refresh()} onStart={() => setMove(sel)} />
+          </div>
+        )
+      }
+    >
+      <Load q={q}>
+        {(p) => (
+          <DataTable
+            rows={p.items}
+            rowKey={(v) => v.key}
+            pageInfo={p}
+            initialQuery={search.get('q') ?? ''}
+            selectedKey={sel?.key}
+            emptyTitle="데이터 저장소가 없습니다"
+            columns={[
+              { key: 'name', header: '이름', value: (v) => v.name, render: (v) => <b>{v.name}</b> },
+              { key: 'kind', header: '종류', value: (v) => volKind(v), render: (v) => volKind(v) },
+              { key: 'where', header: '서버', value: (v) => `${v.node ?? ''}/${v.storage ?? ''}`, render: (v) => (v.node ? `${v.node}${v.kind === 'fixed' && v.storage ? ` · ${v.storage}` : ''}` : '—') },
+              {
+                key: 'use',
+                header: '용량',
+                value: (v) => v.usedBytes ?? 0,
+                render: (v) => (
+                  <span title={v.usageObservedAt ? `${ago(v.usageObservedAt)} 측정` : '최근 30분 안 측정 없음 (모름)'}>
+                    {v.kind === 'fixed' || !v.capacityBytes ? (
+                      <span className="muted">{v.usedBytes !== undefined ? `관측 ${fmtBytes(v.usedBytes)}` : '—'}</span>
+                    ) : (
+                      `${v.usedBytes !== undefined ? fmtBytes(v.usedBytes) : '—'} / ${fmtBytes(v.capacityBytes)}`
+                    )}
+                  </span>
+                ),
+              },
+              { key: 'cons', header: '사용 앱', value: (v) => v.writer ?? (v.consumers ? `~${v.consumers}` : ''), render: (v) => (v.writer ? <span>{v.writer} (쓰기 앱)</span> : v.consumers > 0 ? <span>{v.app ? `${v.app} · ` : ''}컨테이너 {v.consumers}개</span> : <span className="muted">없음</span>) },
+              {
+                key: 'state',
+                header: '상태',
+                value: (v) => (v.movePhase ? 2 : v.consumers > 0 ? 1 : 0),
+                render: (v) => (v.movePhase ? <Badge tone="pr">이관 중</Badge> : v.consumers > 0 ? <Badge tone="ok">사용 중</Badge> : <Badge tone="un">미사용</Badge>),
+              },
+              {
+                key: 'act',
+                header: '',
+                render: (v) => (
+                  <span className="row" style={{ gap: 6, justifyContent: 'flex-end' }}>
+                    {v.kind === 'fixed' && !v.app ? (
+                      <button className="btn sm danger" disabled={!canDeploy} title={canDeploy ? undefined : NEED} onClick={() => setDel(v)}>
+                        등록 해제
+                      </button>
+                    ) : (
+                      <>
+                        <button className="btn sm" onClick={() => pick(v)}>
+                          백업
+                        </button>
+                        <button className="btn sm" disabled={!!moveBlocked(v, canDeploy)} title={moveBlocked(v, canDeploy)} onClick={() => (pick(v), setMove(v))}>
+                          이관
+                        </button>
+                      </>
+                    )}
+                    <Menu
+                      label={`${v.name} 작업`}
+                      items={[
+                        { label: '쓰는 앱 보기', onSelect: () => setUsers(v) },
+                        { label: '백업 목록', onSelect: () => pick(v), disabledReason: v.app ? undefined : NO_APP },
+                        { label: '용량 늘리기…', onSelect: () => setCap(v), disabledReason: !isAdmin ? '시스템 관리자만 바꿀 수 있습니다' : undefined },
+                        { label: '', sep: true },
+                        { label: '이관…', onSelect: () => (pick(v), setMove(v)), disabledReason: moveBlocked(v, canDeploy) },
+                        { label: v.kind === 'fixed' ? '등록 해제…' : '삭제…', danger: true, onSelect: () => setDel(v), disabledReason: !canDeploy ? NEED : undefined },
+                      ]}
+                    />
+                  </span>
+                ),
+              },
+            ]}
+          />
+        )}
+      </Load>
+      <span className="small muted">사용량은 소유 서버가 주기적으로 잰 값이고, 최근 30분 안에 잰 값이 없으면 —입니다. 강제 사용 한도나 일관 백업의 증거가 아닙니다. 고정 데이터 저장소를 등록 해제해도 원 데이터는 삭제되지 않습니다.</span>
+      {users && <ResourceUsersDialog tenant={tenant} kind="volume" name={users.name} app={users.app} onClose={() => setUsers(undefined)} />}
+      {move && <MoveDialog tenant={tenant} v={move} onClose={() => setMove(undefined)} onDone={() => void q.refresh()} />}
+      {cap && <CapacityDialog tenant={tenant} v={cap} onClose={() => setCap(undefined)} onDone={() => void q.refresh()} />}
+      {del && <DeleteVolumeDialog tenant={tenant} v={del} onClose={() => setDel(undefined)} onDone={() => void q.refresh()} />}
+      {dlg === 'managed' && <ManagedVolumeDialog tenant={tenant} taken={taken} onClose={close} onDone={() => void q.refresh()} />}
+      {dlg === 'fixed' && <FixedVolumeDialog tenant={tenant} isAdmin={isAdmin} taken={taken} onClose={close} onDone={() => void q.refresh()} />}
+    </Frame>
+  );
+}
+
+/** 이미지 화면에서도 쓰는 저장소 목록 */
+export function RegistriesCard() {
+  const { tenant, q } = useTenantList(registries);
+  if (!tenant) return null;
+  return (
+    <Card title="이미지 저장소" actions={<Refresh q={q} poll={false} />}>
+      <Load q={q}>
+        {(p) => (
+          <DataTable
+            rows={p.items}
+            rowKey={(r) => r.id}
+            pageInfo={p}
+            emptyTitle="연결된 저장소가 없습니다"
+            columns={[
+              { key: 'name', header: '이름', value: (r) => r.name, render: (r) => <b>{r.name}</b> },
+              { key: 'ep', header: '주소', value: (r) => r.endpoint, render: (r) => <code>{r.endpoint}</code> },
+              { key: 'repo', header: '저장소 수', value: (r) => r.repositories, render: (r) => r.repositories },
+              { key: 'act', header: '상태', value: (r) => String(r.active), render: (r) => <Badge tone={r.active ? 'ok' : 'un'}>{r.active ? '사용 중' : '꺼짐'}</Badge> },
+            ]}
+          />
+        )}
+      </Load>
+    </Card>
+  );
+}

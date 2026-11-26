@@ -1,0 +1,630 @@
+// SPDX-License-Identifier: Apache-2.0
+
+package server
+
+import (
+	"context"
+	"net/http"
+
+	"github.com/jay94ks/mydcd/internal/web/mydc"
+)
+
+func (s *Server) routes() {
+	m := s.mux
+	a := s.authed
+
+	// login
+	m.HandleFunc("POST /api/v1/auth/credential/challenge", s.handleCredentialChallenge)
+	m.HandleFunc("POST /api/v1/auth/credential/login", s.handleCredentialLogin)
+	m.HandleFunc("POST /api/v1/auth/key/challenge", s.handleKeyChallenge)
+	m.HandleFunc("POST /api/v1/auth/key/login", s.handleKeyLogin)
+	m.HandleFunc("POST /api/v1/auth/key/approve", s.handleKeyApprove)
+	m.HandleFunc("POST /api/v1/auth/logout", s.handleLogout)
+	m.HandleFunc("GET /api/v1/auth/methods", s.handleAuthMethods)
+	m.HandleFunc("GET /api/v1/auth/session", a(s.handleSession))
+
+	// operations (UI-A0) and generic typed submit
+	m.HandleFunc("POST /api/v1/ops", a(s.handleSubmit))
+	m.HandleFunc("GET /api/v1/ops", a(s.handleListOps))
+	m.HandleFunc("GET /api/v1/ops/{id}", a(s.handleGetOp))
+	m.HandleFunc("POST /api/v1/ops/{id}/result", a(s.handleOpResult))
+	m.HandleFunc("POST /api/v1/ops/{id}/resume", a(s.handleOpResume))
+	m.HandleFunc("GET /api/v1/ops/{id}/reason", a(s.handleOpReason))
+
+	// system: cluster and nodes
+	m.HandleFunc("GET /api/v1/dashboard", a(s.handleDashboard))
+	m.HandleFunc("GET /api/v1/nodes", a(s.handleMembers))
+	m.HandleFunc("POST /api/v1/nodes", a(s.handleInviteNode))
+	m.HandleFunc("GET /api/v1/nodes/{node}/invitation", a(s.handleNodeInvitation))
+	m.HandleFunc("GET /api/v1/nodes/{node}/invitation/summary", a(s.handleNodeInvitationSummary))
+	m.HandleFunc("POST /api/v1/nodes/{node}/promote", a(s.handlePromoteNode))
+	m.HandleFunc("POST /api/v1/nodes/{node}/cordon", a(s.handleCordon(mydc.ActionCordonNode)))
+	m.HandleFunc("POST /api/v1/nodes/{node}/uncordon", a(s.handleCordon(mydc.ActionUncordonNode)))
+	m.HandleFunc("GET /api/v1/nodes/{node}/remove-plan", a(s.handleNodeRemovePlan))
+	m.HandleFunc("POST /api/v1/nodes/{node}/isolate", a(s.handleNodeLifecycle(mydc.ActionIsolateNode)))
+	m.HandleFunc("POST /api/v1/nodes/{node}/restore", a(s.handleNodeLifecycle(mydc.ActionRestoreNode)))
+	m.HandleFunc("POST /api/v1/nodes/{node}/remove", a(s.handleNodeLifecycle(mydc.ActionRemoveNode)))
+	m.HandleFunc("GET /api/v1/nodes/{node}/drain-plan", a(s.handleNodeDrainPlan))
+	m.HandleFunc("GET /api/v1/nodes/{node}/drain-status", a(s.handleNodeDrainStatus))
+	m.HandleFunc("POST /api/v1/nodes/{node}/drain", a(s.handleDrainNode))
+	m.HandleFunc("GET /api/v1/nodes/{node}/voter-plan", a(s.handleNodeVoterPlan))
+	m.HandleFunc("POST /api/v1/nodes/{node}/demote", a(s.handleDemoteNode))
+	m.HandleFunc("POST /api/v1/nodes/{node}/rotate-identity", a(s.handleRotateNodeIdentity))
+	m.HandleFunc("GET /api/v1/nodes/{node}/force-remove-plan", a(s.handleNodeForceRemovePlan))
+	m.HandleFunc("POST /api/v1/nodes/{node}/force-remove", a(s.handleForceRemoveNode))
+	m.HandleFunc("GET /api/v1/nodes/{node}/diagnostics", a(s.handleNodeDiagnostics))
+	m.HandleFunc("GET /api/v1/nodes/{node}/image-prune-plan", a(s.handleNodeImagePrunePlan))
+	m.HandleFunc("POST /api/v1/nodes/{node}/image-prune", a(s.handlePruneNodeImages))
+	m.HandleFunc("GET /api/v1/image-prunes/{operation}", a(s.handleImagePruneStatus))
+	m.HandleFunc("GET /api/v1/nodes/summary", a(s.handleNodeSummary))
+	m.HandleFunc("GET /api/v1/nodes/{node}/tasks", a(func(w http.ResponseWriter, r *http.Request, ws *webSession) {
+		readPage(s, w, r, ws, func(ctx context.Context, c mydc.Conn, after string) (mydc.Page[mydc.Task], error) {
+			return c.Tasks(ctx, mydc.TaskFilter{Node: r.PathValue("node"), Tenant: r.URL.Query().Get("tenant")}, after)
+		})
+	}))
+	m.HandleFunc("GET /api/v1/nodes/{node}/storage", a(func(w http.ResponseWriter, r *http.Request, ws *webSession) {
+		read(s, w, r, ws, func(ctx context.Context, c mydc.Conn) (listPage, error) {
+			p, err := c.NodeStorage(ctx, r.PathValue("node"), r.URL.Query().Get("after"))
+			if err != nil {
+				return listPage{}, err
+			}
+			return s.page(storageRows(ctx, c, p.Items), p.Next, p.Revision), nil
+		})
+	}))
+	m.HandleFunc("POST /api/v1/ledger/rotate", a(s.handleRotateLedger))
+	m.HandleFunc("POST /api/v1/nodes/{node}/storage", a(s.handleAddNodeStorage))
+	m.HandleFunc("PUT /api/v1/nodes/{node}/storage/{id}", a(s.handleSetNodeStoragePolicy))
+	m.HandleFunc("POST /api/v1/nodes/{node}/storage/{id}/drain", a(s.handleNodeStorageSelection(mydc.ActionDrainNodeStorage)))
+	m.HandleFunc("DELETE /api/v1/nodes/{node}/storage/{id}", a(s.handleNodeStorageSelection(mydc.ActionRemoveNodeStorage)))
+	m.HandleFunc("POST /api/v1/nodes/{node}/storage/{id}/remove", a(s.handleNodeStorageSelection(mydc.ActionRemoveNodeStorage)))
+	m.HandleFunc("GET /api/v1/nodes/{node}/storage/{id}/space", a(func(w http.ResponseWriter, r *http.Request, ws *webSession) {
+		read(s, w, r, ws, func(ctx context.Context, c mydc.Conn) (storageSpaceView, error) {
+			v, err := c.NodeStorageSpace(ctx, r.PathValue("node"), r.PathValue("id"))
+			return storageSpaceView{Node: v.Root.Node, ID: v.Root.ID, Generation: v.Root.Generation, Total: v.Total, Free: v.Free, Available: v.Available, ObservedIndex: v.ObservedIndex}, err
+		})
+	}))
+	m.HandleFunc("GET /api/v1/nodes/{node}/disks", a(s.handleNodeDisks))
+	m.HandleFunc("GET /api/v1/storage", a(func(w http.ResponseWriter, r *http.Request, ws *webSession) {
+		read(s, w, r, ws, func(ctx context.Context, c mydc.Conn) (listPage, error) {
+			p, err := c.NodeStorage(ctx, "", r.URL.Query().Get("after"))
+			if err != nil {
+				return listPage{}, err
+			}
+			return s.page(storageRows(ctx, c, p.Items), p.Next, p.Revision), nil
+		})
+	}))
+	m.HandleFunc("GET /api/v1/disks", a(s.handleNodeDisks))
+	m.HandleFunc("GET /api/v1/raft", a(s.handleRaftStatus))
+	m.HandleFunc("GET /api/v1/raft/compact", a(s.handleRaftCompact))
+	m.HandleFunc("POST /api/v1/raft/compact", a(s.handlePostRaftCompact))
+	m.HandleFunc("GET /api/v1/raft/compact/plan", a(s.handleRaftCompactPlan))
+	m.HandleFunc("GET /api/v1/raft/compactions/{operation}", a(s.handleRaftCompactionStatus))
+	m.HandleFunc("GET /api/v1/mesh", a(s.handleMeshLinks))
+	m.HandleFunc("GET /api/v1/node-cli-policy", a(func(w http.ResponseWriter, r *http.Request, ws *webSession) {
+		read(s, w, r, ws, func(ctx context.Context, c mydc.Conn) (mydc.NodeCLIPolicy, error) { return c.NodeCLIPolicy(ctx) })
+	}))
+	m.HandleFunc("GET /api/v1/events", a(s.handleEvents))
+
+	// system: tenants and users
+	m.HandleFunc("GET /api/v1/tenants", a(func(w http.ResponseWriter, r *http.Request, ws *webSession) {
+		readList(s, w, r, ws, func(ctx context.Context, c mydc.Conn) ([]mydc.TenantView, error) { return c.Tenants(ctx) })
+	}))
+	m.HandleFunc("GET /api/v1/tenants/{t}", a(func(w http.ResponseWriter, r *http.Request, ws *webSession) {
+		read(s, w, r, ws, func(ctx context.Context, c mydc.Conn) (mydc.TenantView, error) {
+			return c.SelectTenant(ctx, r.PathValue("t"))
+		})
+	}))
+	m.HandleFunc("GET /api/v1/tenants/{t}/members", a(func(w http.ResponseWriter, r *http.Request, ws *webSession) {
+		readPage(s, w, r, ws, func(ctx context.Context, c mydc.Conn, after string) (mydc.Page[mydc.TenantMember], error) {
+			return c.TenantMembers(ctx, r.PathValue("t"), after)
+		})
+	}))
+	m.HandleFunc("GET /api/v1/tenants/{t}/retirement", a(func(w http.ResponseWriter, r *http.Request, ws *webSession) {
+		read(s, w, r, ws, func(ctx context.Context, c mydc.Conn) (retirementView, error) {
+			v, err := c.TenantRetirement(ctx, r.PathValue("t"), r.URL.Query().Get("after"))
+			return newRetirementView(v), err
+		})
+	}))
+	m.HandleFunc("POST /api/v1/tenants/{t}/retire", a(s.handleTenantRetire(mydc.ActionBeginTenantRetirement)))
+	m.HandleFunc("POST /api/v1/tenants/{t}/retire/finish", a(s.handleTenantRetire(mydc.ActionFinishTenantRetirement)))
+	m.HandleFunc("GET /api/v1/users", a(func(w http.ResponseWriter, r *http.Request, ws *webSession) {
+		readPage(s, w, r, ws, func(ctx context.Context, c mydc.Conn, after string) (mydc.Page[publicUserView], error) {
+			p, err := c.Users(ctx, after)
+			return mapPage(p, publicUserRow), err
+		})
+	}))
+	m.HandleFunc("GET /api/v1/users/{u}", a(func(w http.ResponseWriter, r *http.Request, ws *webSession) {
+		read(s, w, r, ws, func(ctx context.Context, c mydc.Conn) (userView, error) {
+			u, err := c.UserCredentials(ctx, r.PathValue("u"))
+			return userView{User: u, AccountRevision: u.Revision}, err
+		})
+	}))
+	m.HandleFunc("GET /api/v1/users/{u}/scope", a(s.handleAccountScope))
+	m.HandleFunc("PUT /api/v1/users/{u}/scope", a(s.handleSetAccountScope))
+
+	// tenant resources
+	tenantPage := func(path string, fn func(context.Context, mydc.Conn, string, string) (any, string, uint64, error)) {
+		m.HandleFunc("GET /api/v1/t/{t}/"+path, a(func(w http.ResponseWriter, r *http.Request, ws *webSession) {
+			read(s, w, r, ws, func(ctx context.Context, c mydc.Conn) (listPage, error) {
+				items, next, rev, err := fn(ctx, c, r.PathValue("t"), r.URL.Query().Get("after"))
+				return s.page(items, next, rev), err
+			})
+		}))
+	}
+	tenantPage("resources", func(ctx context.Context, c mydc.Conn, t, after string) (any, string, uint64, error) {
+		p, err := c.Resources(ctx, t, after)
+		if err != nil {
+			return nil, "", 0, err
+		}
+		return resourceRows(ctx, c, t, p.Items), p.Next, p.Revision, nil
+	})
+	m.HandleFunc("PUT /api/v1/t/{t}/limits/{node}", a(s.handleSetTenantLimit))
+	tenantPage("storage", func(ctx context.Context, c mydc.Conn, t, after string) (any, string, uint64, error) {
+		p, err := c.TenantStoragePage(ctx, t, "", after)
+		if err != nil {
+			return nil, "", 0, err
+		}
+		return tenantStorageRows(ctx, c, t, p.Items), p.Next, p.Revision, nil
+	})
+	tenantPage("networks", func(ctx context.Context, c mydc.Conn, t, after string) (any, string, uint64, error) {
+		p, err := c.Resources(ctx, t, after)
+		if err != nil {
+			return nil, "", 0, err
+		}
+		// Networks are one kind of managed resource; the page cursor stays
+		// the resources cursor so paging does not skip entries.
+		var nets []mydc.ResourceEntry
+		for _, e := range p.Items {
+			if e.Network != nil {
+				nets = append(nets, e)
+			}
+		}
+		return nets, p.Next, p.Revision, nil
+	})
+	tenantPage("volumes", pageOf(func(ctx context.Context, c mydc.Conn, t, after string) (mydc.Page[volumeView], error) {
+		p, err := volumePage(ctx, c, t, after)
+		if err == nil {
+			fillWriters(ctx, c, p.Items)
+		}
+		return p, err
+	}))
+	tenantPage("volume-backups", pageOf(func(ctx context.Context, c mydc.Conn, t, after string) (mydc.Page[mydc.VolumeBackupView], error) {
+		return c.VolumeBackups(ctx, t, after)
+	}))
+	tenantPage("vault", pageOf(func(ctx context.Context, c mydc.Conn, t, after string) (mydc.Page[mydc.VaultView], error) {
+		return c.Vault(ctx, t, after)
+	}))
+	tenantPage("lifecycles", pageOf(func(ctx context.Context, c mydc.Conn, t, after string) (mydc.Page[mydc.LifecycleEntry], error) {
+		return c.Lifecycles(ctx, t, after)
+	}))
+	m.HandleFunc("GET /api/v1/t/{t}/registries", a(s.handleRegistries))
+	m.HandleFunc("POST /api/v1/t/{t}/images/resolve", a(s.handleImageResolve))
+	m.HandleFunc("GET /api/v1/t/{t}/image-trust", a(s.handleImageTrust))
+	m.HandleFunc("PUT /api/v1/t/{t}/image-trust", a(s.handleSetTrust))
+	m.HandleFunc("POST /api/v1/t/{t}/image-trust/preview", a(s.handleImageTrustPreview))
+	m.HandleFunc("PUT /api/v1/t/{t}/registries/{id}", a(s.handlePutRegistry))
+	m.HandleFunc("POST /api/v1/t/{t}/registries/{id}/credential", a(s.handleRegistryCredential))
+	m.HandleFunc("GET /api/v1/t/{t}/registries/{id}/images", a(s.handleRegistryImages))
+	m.HandleFunc("POST /api/v1/t/{t}/registries/{id}/images/delete", a(s.handleDeleteRegistryImage))
+	m.HandleFunc("POST /api/v1/t/{t}/registries/{id}/gc", a(s.handleRegistryGC))
+	m.HandleFunc("POST /api/v1/t/{t}/registries/{id}/prune/preview", a(s.handlePrunePreview))
+	m.HandleFunc("POST /api/v1/t/{t}/registries/{id}/prune", a(s.handlePrune))
+	m.HandleFunc("GET /api/v1/t/{t}/registry-maintenance/{operation}", a(s.handleMaintenanceStatus))
+	m.HandleFunc("GET /api/v1/t/{t}/registry-maintenance/{operation}/items", a(s.handlePruneResults))
+	m.HandleFunc("POST /api/v1/t/{t}/image-usage", a(s.handleImageUsage))
+	m.HandleFunc("GET /api/v1/t/{t}/registries/{id}/images/manifest", a(s.handleImageManifest))
+	m.HandleFunc("GET /api/v1/t/{t}/registries/{id}/images/layer", a(s.handleLayerFiles))
+	m.HandleFunc("POST /api/v1/t/{t}/registries/{id}/images/tag", a(s.handleTagImage))
+	m.HandleFunc("POST /api/v1/t/{t}/registries/{id}/uploads", a(s.handleCreateUpload))
+	m.HandleFunc("GET /api/v1/t/{t}/registries/{id}/uploads", a(s.handleListUploads))
+	m.HandleFunc("GET /api/v1/t/{t}/registries/{id}/uploads/{uid}", a(s.handleGetUpload))
+	m.HandleFunc("DELETE /api/v1/t/{t}/registries/{id}/uploads/{uid}", a(s.handleDeleteUpload))
+	m.HandleFunc("PUT /api/v1/t/{t}/registries/{id}/uploads/{uid}/chunks/{n}", a(s.handleUploadChunk))
+	m.HandleFunc("POST /api/v1/t/{t}/registries/{id}/uploads/{uid}/inspect", a(s.handleInspectUpload))
+	m.HandleFunc("POST /api/v1/t/{t}/registries/{id}/uploads/{uid}/push", a(s.handlePushUpload))
+	m.HandleFunc("GET /api/v1/t/{t}/external-registries", a(s.handleExternalRegistries))
+	m.HandleFunc("GET /api/v1/t/{t}/external-registries/{id}/users", a(s.handleExternalRegistryUsers))
+	m.HandleFunc("POST /api/v1/t/{t}/external-registries/{id}/test", a(s.handleTestExternalRegistry))
+	m.HandleFunc("PUT /api/v1/t/{t}/external-registries/{id}", a(s.handlePutExternalRegistry))
+	m.HandleFunc("DELETE /api/v1/t/{t}/external-registries/{id}", a(s.handleDeleteExternalRegistry))
+	m.HandleFunc("POST /api/v1/t/{t}/external-registries/{id}/bind", a(s.handleBindExternalRegistry))
+	m.HandleFunc("POST /api/v1/t/{t}/external-registries/{id}/bind/{op}/approve", a(s.handleBindApprove))
+	m.HandleFunc("POST /api/v1/t/{t}/external-registries/{id}/unbind", a(s.handleUnbindExternalRegistry))
+
+	// image builds (mydcd real contract; draft edits and zip uploads still
+	// on the REQ-19/47 mock, see image_builds.go)
+	m.HandleFunc("GET /api/v1/t/{t}/build-policy", a(s.handleBuildPolicy))
+	m.HandleFunc("PUT /api/v1/t/{t}/build-policy", a(s.handleSetImageBuildPolicy))
+	m.HandleFunc("GET /api/v1/t/{t}/build-contexts", a(s.handleImageBuildContexts))
+	m.HandleFunc("PUT /api/v1/t/{t}/build-contexts/{id}", a(s.handlePutImageBuildContext))
+	m.HandleFunc("POST /api/v1/t/{t}/build-contexts/{id}/delete", a(s.handleDeleteImageBuildContext))
+	m.HandleFunc("POST /api/v1/t/{t}/build-contexts/{id}/commit", a(s.handlePublishDraft))
+	m.HandleFunc("POST /api/v1/t/{t}/build-contexts/{id}/versions/{version}/delete", a(s.handleDeleteImageBuildVersion))
+	m.HandleFunc("GET /api/v1/t/{t}/build-contexts/{id}/tree", a(s.handleImageBuildTree))
+	m.HandleFunc("GET /api/v1/t/{t}/build-contexts/{id}/file", a(s.handleImageBuildFile))
+	m.HandleFunc("POST /api/v1/t/{t}/build-contexts/{id}/verify", a(s.handleCheckImageBuildContext))
+	m.HandleFunc("PUT /api/v1/t/{t}/build-contexts/{id}/zip", a(s.handleUploadBuildZip))
+	m.HandleFunc("POST /api/v1/t/{t}/build-contexts/{id}/zip-uploads", a(s.handleBeginZipUpload))
+	m.HandleFunc("GET /api/v1/t/{t}/build-contexts/{id}/zip-uploads/{upload}", a(s.handleZipUpload))
+	m.HandleFunc("PUT /api/v1/t/{t}/build-contexts/{id}/zip-uploads/{upload}/chunks/{n}", a(s.handleZipUploadChunk))
+	m.HandleFunc("POST /api/v1/t/{t}/build-contexts/{id}/zip-uploads/{upload}/finish", a(s.handleFinishZipUpload))
+	m.HandleFunc("DELETE /api/v1/t/{t}/build-contexts/{id}/zip-uploads/{upload}", a(s.handleAbortZipUpload))
+	m.HandleFunc("PUT /api/v1/t/{t}/build-contexts/{id}/files", a(s.draftEdit("put")))
+	m.HandleFunc("DELETE /api/v1/t/{t}/build-contexts/{id}/files", a(s.draftEdit("delete")))
+	m.HandleFunc("POST /api/v1/t/{t}/build-contexts/{id}/files/move", a(s.draftEdit("move")))
+	m.HandleFunc("POST /api/v1/t/{t}/build-contexts/{id}/build", a(s.handleBeginImageBuild))
+	m.HandleFunc("GET /api/v1/t/{t}/builds", a(s.handleImageBuildJobs))
+	m.HandleFunc("GET /api/v1/t/{t}/builds/{id}/log", a(s.handleImageBuildLog))
+	m.HandleFunc("POST /api/v1/t/{t}/builds/{id}/cancel", a(s.jobOp(mydc.ActionCancelImageBuild)))
+	m.HandleFunc("POST /api/v1/t/{t}/builds/{id}/delete", a(s.jobOp(mydc.ActionDeleteImageBuildJob)))
+	m.HandleFunc("GET /api/v1/t/{t}/build-cache", a(s.handleImageBuildCache))
+	m.HandleFunc("GET /api/v1/t/{t}/build-cache/entries", a(s.handleImageBuildCacheEntries))
+	m.HandleFunc("POST /api/v1/t/{t}/build-cache/prune", a(s.handlePruneImageBuildCache))
+	for _, v := range []string{"start", "stop", "delete"} {
+		m.HandleFunc("POST /api/v1/t/{t}/registries/{id}/"+v, a(s.handleRegistryAction(v)))
+	}
+	tenantPage("uploads", pageOf(func(ctx context.Context, c mydc.Conn, t, after string) (mydc.Page[mydc.AppUploadView], error) {
+		return c.AppUploads(ctx, t, after)
+	}))
+	tenantPage("apps", pageOf(func(ctx context.Context, c mydc.Conn, t, after string) (mydc.Page[mydc.AppView], error) {
+		return c.Apps(ctx, t, after)
+	}))
+	tenantPage("tasks", pageOf(func(ctx context.Context, c mydc.Conn, t, after string) (mydc.Page[mydc.Task], error) {
+		return c.Tasks(ctx, mydc.TaskFilter{Tenant: t}, after)
+	}))
+
+	// apps
+	m.HandleFunc("GET /api/v1/t/{t}/apps/{app}/tasks", a(func(w http.ResponseWriter, r *http.Request, ws *webSession) {
+		readPage(s, w, r, ws, func(ctx context.Context, c mydc.Conn, after string) (mydc.Page[mydc.Task], error) {
+			return c.Tasks(ctx, mydc.TaskFilter{Tenant: r.PathValue("t"), App: r.PathValue("app")}, after)
+		})
+	}))
+	m.HandleFunc("GET /api/v1/t/{t}/apps/{app}/operations/{id}", a(func(w http.ResponseWriter, r *http.Request, ws *webSession) {
+		read(s, w, r, ws, func(ctx context.Context, c mydc.Conn) (mydc.AppOperation, error) {
+			return c.AppOperation(ctx, r.PathValue("t"), r.PathValue("app"), r.PathValue("id"))
+		})
+	}))
+	m.HandleFunc("GET /api/v1/t/{t}/apps/{app}/source", a(func(w http.ResponseWriter, r *http.Request, ws *webSession) {
+		read(s, w, r, ws, func(ctx context.Context, c mydc.Conn) (appSourceView, error) {
+			src, err := c.AppSource(ctx, r.PathValue("t"), r.PathValue("app"), queryUint(r, "version"))
+			return viewSource(src), err
+		})
+	}))
+	m.HandleFunc("GET /api/v1/t/{t}/apps/{app}/revisions", a(func(w http.ResponseWriter, r *http.Request, ws *webSession) {
+		readPage(s, w, r, ws, func(ctx context.Context, c mydc.Conn, after string) (mydc.Page[mydc.AppRevision], error) {
+			return c.AppRevisions(ctx, r.PathValue("t"), r.PathValue("app"), after)
+		})
+	}))
+	m.HandleFunc("POST /api/v1/t/{t}/apps/{app}/observe", a(s.handleObserve))
+	for _, base := range []string{"/api/v1/t/{t}/apps/{app}/task", "/api/v1/t/{t}/standalone/{name}/task"} {
+		m.HandleFunc("GET "+base, a(s.handleTaskDetail))
+		m.HandleFunc("GET "+base+"/history", a(s.handleTaskHistory))
+		m.HandleFunc("GET "+base+"/logs", a(s.handleTaskLogs))
+		m.HandleFunc("GET "+base+"/stats", a(s.handleTaskStats))
+	}
+	m.HandleFunc("POST /api/v1/t/{t}/apps/{app}/task/restart", a(s.handleRestartTask))
+	m.HandleFunc("GET /api/v1/t/{t}/apps/{app}/logs-clear/plan", a(s.handleLogClearPlan))
+	m.HandleFunc("POST /api/v1/t/{t}/apps/{app}/logs-clear", a(s.handleClearAppLogs))
+	m.HandleFunc("GET /api/v1/t/{t}/apps/{app}/logs-clear/{op}", a(s.handleLogClearStatus))
+	m.HandleFunc("GET /api/v1/t/{t}/apps/{app}/relocation-check", a(s.handleRelocationCheck))
+	m.HandleFunc("GET /api/v1/t/{t}/apps/{app}/stream", a(s.handleStream))
+	m.HandleFunc("GET /api/v1/t/{t}/apps/{app}/exec", a(s.handleExec))
+	m.HandleFunc("POST /api/v1/t/{t}/apps/plan", a(s.handlePlan))
+	m.HandleFunc("POST /api/v1/t/{t}/apps/deploy", a(s.handleDeploy))
+	m.HandleFunc("POST /api/v1/t/{t}/apps/deploy/{op}/approve", a(s.handleDeployApprove))
+	m.HandleFunc("POST /api/v1/t/{t}/build-approvals/{op}/approve", a(s.handleBuildApprove))
+	m.HandleFunc("GET /api/v1/t/{t}/vault/approvals", a(s.handleVaultApprovals))
+	m.HandleFunc("GET /api/v1/t/{t}/vault/approvals/granted", a(s.handleGrantedApprovals))
+	m.HandleFunc("POST /api/v1/t/{t}/vault/approvals/granted/{id}/revoke", a(s.handleRevokeApproval))
+	m.HandleFunc("GET /api/v1/t/{t}/apps/{app}/cd", a(s.handleCD))
+	m.HandleFunc("PUT /api/v1/t/{t}/apps/{app}/cd/policy", a(s.handleCDPolicy))
+	m.HandleFunc("GET /api/v1/t/{t}/apps/{app}/cd/field", a(s.handleCDField))
+	m.HandleFunc("GET /api/v1/t/{t}/apps/{app}/cd/history", a(s.handleCDHistory))
+	m.HandleFunc("GET /api/v1/t/{t}/apps/{app}/cd/values", a(s.handleCDValues))
+	m.HandleFunc("GET /api/v1/t/{t}/apps/{app}/cd/changes", a(s.handleCDChanges))
+	m.HandleFunc("PUT /api/v1/t/{t}/apps/{app}/cd/overrides", a(s.handleCDOverride))
+	m.HandleFunc("DELETE /api/v1/t/{t}/apps/{app}/cd/overrides", a(s.handleCDOverride))
+	for _, v := range []string{"sync", "recover", "replan", "pause", "resume", "abandon"} {
+		m.HandleFunc("POST /api/v1/t/{t}/apps/{app}/cd/"+v, a(s.handleCDAction(v)))
+	}
+	m.HandleFunc("GET /api/v1/t/{t}/apps/{app}/cd/approvals", a(s.handleCDApprovals))
+	m.HandleFunc("POST /api/v1/t/{t}/apps/{app}/cd/probe", a(s.handleCDProbe))
+	m.HandleFunc("POST /api/v1/t/{t}/apps/{app}/cd/approvals", a(s.handleCDApprove))
+	m.HandleFunc("GET /api/v1/t/{t}/apps/{app}/cd/local", a(s.handleCDLocal))
+	m.HandleFunc("PUT /api/v1/t/{t}/apps/{app}/cd/local", a(s.handlePutCDLocal))
+	m.HandleFunc("POST /api/v1/t/{t}/apps/{app}/cd/candidate/approve", a(s.handleCDDecision(mydc.ActionApproveAppCD)))
+	m.HandleFunc("POST /api/v1/t/{t}/apps/{app}/cd/candidate/reject", a(s.handleCDDecision(mydc.ActionRejectAppCD)))
+	m.HandleFunc("GET /api/v1/t/{t}/apps/{app}/cd/approvers", a(s.handleCDApprovers))
+	m.HandleFunc("POST /api/v1/t/{t}/apps/{app}/cd/approvers", a(s.handleCDApprover(mydc.ActionGrantCDApprover)))
+	m.HandleFunc("DELETE /api/v1/t/{t}/apps/{app}/cd/approvers", a(s.handleCDApprover(mydc.ActionDropCDApprover)))
+	m.HandleFunc("POST /api/v1/t/{t}/apps/{app}/call", a(s.handleServiceCall))
+	m.HandleFunc("POST /api/v1/t/{t}/apps/{app}/down", a(s.handleDown))
+	m.HandleFunc("POST /api/v1/t/{t}/networks", a(s.handleCreateNetwork))
+	m.HandleFunc("POST /api/v1/t/{t}/networks/{name}/dns", a(s.handleNetworkDNS))
+	m.HandleFunc("GET /api/v1/t/{t}/networks/{name}/change", a(s.handleNetworkChangeStatus))
+	m.HandleFunc("POST /api/v1/t/{t}/networks/{name}/change", a(s.handleNetworkChangePlan))
+	m.HandleFunc("POST /api/v1/t/{t}/networks/{name}/change/drain", a(s.handleNetworkChangeDrain))
+	m.HandleFunc("POST /api/v1/t/{t}/networks/{name}/change/cancel", a(s.handleNetworkChangeCancel))
+	m.HandleFunc("POST /api/v1/t/{t}/networks/{name}/change/fence", a(s.handleNetworkChangeFence))
+	m.HandleFunc("POST /api/v1/t/{t}/networks/{name}/change/commit", a(s.handleNetworkChangeCommit))
+	m.HandleFunc("POST /api/v1/t/{t}/networks/{name}/reconfigure", a(s.handleNetworkReconfigure))
+	m.HandleFunc("POST /api/v1/t/{t}/networks/{name}/retire", a(s.handleNetworkRetire))
+	m.HandleFunc("POST /api/v1/t/{t}/networks/{name}/members", a(s.handleNetworkJoin))
+	m.HandleFunc("POST /api/v1/t/{t}/networks/{name}/members/leave", a(s.handleNetworkLeave))
+	m.HandleFunc("POST /api/v1/t/{t}/networks/{name}/toggles", a(s.handleNetworkToggle))
+	m.HandleFunc("GET /api/v1/t/{t}/routes", a(s.handleRouteList))
+	m.HandleFunc("GET /api/v1/t/{t}/route-endpoints", a(s.handleRouteEndpoints))
+	m.HandleFunc("POST /api/v1/t/{t}/routes", a(s.handleRoutePropose))
+	m.HandleFunc("POST /api/v1/t/{t}/routes/{source}/{id}/approve", a(s.handleRouteSelect(mydc.ActionApproveRoute)))
+	m.HandleFunc("POST /api/v1/t/{t}/routes/{source}/{id}/withdraw", a(s.handleRouteSelect(mydc.ActionWithdrawRoute)))
+	m.HandleFunc("POST /api/v1/t/{t}/volumes", a(s.handleCreateVolume))
+	m.HandleFunc("GET /api/v1/t/{t}/volumes/{name}", a(s.handleVolumeDetail))
+	m.HandleFunc("DELETE /api/v1/t/{t}/volumes/{name}", a(s.handleVolumeDelete))
+	m.HandleFunc("POST /api/v1/t/{t}/volumes/{name}/backups", a(s.handleVolumeBackup))
+	m.HandleFunc("POST /api/v1/t/{t}/volumes/{name}/backups/{id}/cancel", a(s.handleVolumeBackupSelection(mydc.ActionCancelVolumeBackup)))
+	m.HandleFunc("DELETE /api/v1/t/{t}/volumes/{name}/backups/{id}", a(s.handleVolumeBackupSelection(mydc.ActionDeleteVolumeBackup)))
+	m.HandleFunc("POST /api/v1/t/{t}/volumes/{name}/restore", a(s.handleVolumeRestore))
+	m.HandleFunc("POST /api/v1/t/{t}/volumes/{name}/restores/{id}/cancel", a(s.handleVolumeRestoreCancel))
+	m.HandleFunc("PUT /api/v1/t/{t}/volumes/{name}/capacity", a(s.handleVolumeCapacity))
+	m.HandleFunc("POST /api/v1/t/{t}/volumes/{name}/move-plan", a(s.handleVolumeMovePlan))
+	m.HandleFunc("POST /api/v1/t/{t}/volumes/{name}/move", a(s.handleVolumeMove))
+	m.HandleFunc("GET /api/v1/t/{t}/volumes/{name}/files", a(s.handleVolumeFiles))
+	m.HandleFunc("GET /api/v1/t/{t}/volumes/{name}/file", a(s.handleVolumeFileGet))
+	m.HandleFunc("PUT /api/v1/t/{t}/volumes/{name}/file", a(s.handlePutVolumeFile))
+	m.HandleFunc("DELETE /api/v1/t/{t}/volumes/{name}/file", a(s.handleDeleteVolumeFile))
+	m.HandleFunc("POST /api/v1/t/{t}/volumes/{name}/file-grants", a(s.handleVolumeFileGrant))
+	m.HandleFunc("DELETE /api/v1/t/{t}/volumes/{name}/file-grants", a(s.handleVolumeFileGrant))
+	m.HandleFunc("POST /api/v1/t/{t}/volumes/{name}/move/cancel", a(s.handleVolumeMoveCancel))
+	m.HandleFunc("DELETE /api/v1/t/{t}/volumes/{name}/retained/{id}", a(s.handleRetainedDelete))
+	m.HandleFunc("PUT /api/v1/t/{t}/backup-limits/{node}", a(s.handleBackupLimit))
+	m.HandleFunc("GET /api/v1/t/{t}/backup-limits", a(s.handleBackupLimits))
+	m.HandleFunc("GET /api/v1/t/{t}/volumes/{name}/users", a(s.handleVolumeUsers))
+	m.HandleFunc("GET /api/v1/t/{t}/networks/{name}/users", a(s.handleNetworkUsers))
+	m.HandleFunc("GET /api/v1/t/{t}/networks/{name}/tunnels", a(s.handleNetworkTunnels))
+	m.HandleFunc("POST /api/v1/t/{t}/networks/{name}/tunnels/reconnect", a(s.handleReconnectTunnel))
+	m.HandleFunc("POST /api/v1/nodes/{node}/tunnels/{peer}/reconnect", a(s.handleReconnectTunnel))
+	m.HandleFunc("GET /api/v1/tunnel-reconnects/{operation}", a(s.handleTunnelReconnectStatus))
+	// REQ-67 (mock) server shell
+	m.HandleFunc("GET /api/v1/node-shell", a(s.handleNodeShellPolicy))
+	m.HandleFunc("PUT /api/v1/node-shell", a(s.handleNodeShellPolicyPut))
+	m.HandleFunc("PUT /api/v1/node-shell/nodes/{node}", a(s.handleNodeShellNodePut))
+	m.HandleFunc("PUT /api/v1/node-shell/grants/{user}", a(s.handleNodeShellGrantPut))
+	m.HandleFunc("GET /api/v1/node-shell/sessions", a(s.handleNodeShellSessions))
+	m.HandleFunc("POST /api/v1/node-shell/sessions/{id}/close", a(s.handleNodeShellClose))
+	m.HandleFunc("GET /api/v1/nodes/{node}/shell", a(s.handleNodeShellOpen))
+	m.HandleFunc("POST /api/v1/t/{t}/vault", a(s.handleCreateVault))
+	m.HandleFunc("POST /api/v1/t/{t}/vault/value", a(s.handleVaultValue))
+	m.HandleFunc("POST /api/v1/t/{t}/vault/password", a(s.handleVaultPassword))
+	m.HandleFunc("PUT /api/v1/t/{t}/vault/acl", a(s.handleVaultACL))
+	m.HandleFunc("POST /api/v1/t/{t}/vault/move", a(s.handleVaultMove))
+	m.HandleFunc("PUT /api/v1/t/{t}/vault/approval-age", a(s.handleVaultApprovalAge))
+	m.HandleFunc("POST /api/v1/t/{t}/vault/revoke", a(s.handleVaultSelection(mydc.ActionVaultRevoke)))
+	m.HandleFunc("POST /api/v1/t/{t}/vault/retire", a(s.handleVaultSelection(mydc.ActionVaultRetire)))
+	m.HandleFunc("GET /api/v1/t/{t}/vault/usages", a(s.handleVaultUsages))
+	// cluster Vault (realm ""; mydcd admits system administrators only)
+	cv := func(h func(http.ResponseWriter, *http.Request, *webSession)) http.HandlerFunc {
+		return a(clusterRealm(h))
+	}
+	m.HandleFunc("GET /api/v1/vault", a(s.handleClusterVault))
+	m.HandleFunc("POST /api/v1/vault/init", a(s.handleClusterVaultInit))
+	m.HandleFunc("POST /api/v1/vault", cv(s.handleCreateVault))
+	m.HandleFunc("POST /api/v1/vault/value", cv(s.handleVaultValue))
+	m.HandleFunc("POST /api/v1/vault/password", cv(s.handleVaultPassword))
+	m.HandleFunc("PUT /api/v1/vault/acl", cv(s.handleVaultACL))
+	m.HandleFunc("POST /api/v1/vault/move", cv(s.handleVaultMove))
+	m.HandleFunc("PUT /api/v1/vault/approval-age", cv(s.handleVaultApprovalAge))
+	m.HandleFunc("POST /api/v1/vault/revoke", cv(s.handleVaultSelection(mydc.ActionVaultRevoke)))
+	m.HandleFunc("POST /api/v1/vault/retire", cv(s.handleVaultSelection(mydc.ActionVaultRetire)))
+	m.HandleFunc("GET /api/v1/vault/usages", cv(s.handleVaultUsages))
+	// lifecycle (state check) scripts and policy (UI-90/91)
+	m.HandleFunc("GET /api/v1/t/{t}/lifecycle-scripts", a(s.handleLifecycleScripts))
+	m.HandleFunc("GET /api/v1/t/{t}/lifecycles/{name}", a(s.handleLifecycleScript))
+	m.HandleFunc("PUT /api/v1/t/{t}/lifecycles/{name}", a(s.handleLifecyclePut))
+	m.HandleFunc("POST /api/v1/t/{t}/lifecycles/{name}/retire", a(s.handleLifecycleSelect(mydc.ActionRetireLifecycleScript)))
+	m.HandleFunc("DELETE /api/v1/t/{t}/lifecycles/{name}", a(s.handleLifecycleSelect(mydc.ActionDeleteLifecycleScript)))
+	m.HandleFunc("GET /api/v1/t/{t}/lifecycle-policy", a(s.handleLifecyclePolicy))
+	m.HandleFunc("PUT /api/v1/t/{t}/lifecycle-policy", a(s.handleLifecyclePolicyPut))
+	// standalone containers
+	m.HandleFunc("GET /api/v1/t/{t}/standalone", a(s.handleStandaloneList))
+	m.HandleFunc("POST /api/v1/t/{t}/standalone/plan", a(s.handleStandalonePlan))
+	m.HandleFunc("POST /api/v1/t/{t}/standalone/up", a(s.handleStandaloneUp))
+	m.HandleFunc("GET /api/v1/t/{t}/standalone/{name}", a(s.handleStandaloneGet))
+	m.HandleFunc("POST /api/v1/t/{t}/standalone/{name}/{verb}", a(s.handleStandaloneChange))
+	m.HandleFunc("POST /api/v1/t/{t}/standalone/{name}/observe", a(s.handleObserve))
+	m.HandleFunc("GET /api/v1/t/{t}/standalone/{name}/stream", a(s.handleStream))
+	m.HandleFunc("GET /api/v1/t/{t}/standalone/{name}/exec", a(s.handleExec))
+	m.HandleFunc("GET /api/v1/t/{t}/apps/{app}/layout", a(s.handleGetLayout))
+	m.HandleFunc("PUT /api/v1/t/{t}/apps/{app}/layout", a(s.handlePutLayout))
+
+	// archived apps (web bbolt, UI-36/37)
+	m.HandleFunc("GET /api/v1/t/{t}/archived", a(s.handleListArchived))
+	m.HandleFunc("GET /api/v1/t/{t}/archived/{key}", a(s.handleGetArchived))
+	m.HandleFunc("POST /api/v1/t/{t}/archived/{key}/purge", a(s.handlePurgeArchived))
+
+	m.HandleFunc("GET /api/v1/me/credentials", a(s.handleOwnCredentials))
+
+	// per-user UI preferences
+	m.HandleFunc("GET /api/v1/prefs", a(s.handleGetPrefs))
+	m.HandleFunc("PUT /api/v1/prefs", a(s.handlePutPrefs))
+	m.HandleFunc("GET /api/v1/system/seal", a(s.handleSealStatus))
+	m.HandleFunc("POST /api/v1/system/seal/reset", a(s.handleSealReset))
+	m.HandleFunc("GET /api/v1/system/settings", a(s.handleGetSettings))
+	m.HandleFunc("PUT /api/v1/system/settings", a(s.handlePutSettings))
+	m.HandleFunc("GET /api/v1/system/backup", a(s.handleBackup))
+	m.HandleFunc("POST /api/v1/system/restore", a(s.handleRestore))
+	m.HandleFunc("DELETE /api/v1/system/restore", a(s.handleCancelRestore))
+	m.HandleFunc("POST /api/v1/system/restore-from", a(s.handleRestoreFrom))
+	m.HandleFunc("GET /api/v1/system/ai", a(s.handleGetAI))
+	m.HandleFunc("PUT /api/v1/system/ai/settings", a(s.handlePutAISettings))
+	m.HandleFunc("PUT /api/v1/system/ai/keys/{provider}", a(s.handlePutAIKey))
+	m.HandleFunc("DELETE /api/v1/system/ai/keys/{provider}", a(s.handleDeleteAIKey))
+	m.HandleFunc("GET /api/v1/system/ai/models/{provider}", a(s.handleGetAIModels))
+	m.HandleFunc("POST /api/v1/system/ai/models/{provider}/refresh", a(s.handleRefreshAIModels))
+	m.HandleFunc("GET /api/v1/system/ai/usage", a(s.handleGetAIUsage))
+	m.HandleFunc("GET /api/v1/system/ai/audit", a(s.handleGetAIAudit))
+	m.HandleFunc("DELETE /api/v1/system/ai/audit", a(s.handleDeleteAIAudit))
+	m.HandleFunc("GET /api/v1/ai/conversations", a(s.handleAIConversations))
+	m.HandleFunc("POST /api/v1/ai/conversations", a(s.handleAICreateConversation))
+	m.HandleFunc("DELETE /api/v1/ai/conversations", a(s.handleAIDeleteConversation))
+	m.HandleFunc("GET /api/v1/ai/conversations/{id}", a(s.handleAIConversation))
+	m.HandleFunc("PATCH /api/v1/ai/conversations/{id}", a(s.handleAIRenameConversation))
+	m.HandleFunc("DELETE /api/v1/ai/conversations/{id}", a(s.handleAIDeleteConversation))
+	m.HandleFunc("GET /api/v1/ai/conversations/{id}/export", a(s.handleAIExport))
+	m.HandleFunc("POST /api/v1/ai/conversations/{id}/messages", a(s.handleAIMessage))
+	m.HandleFunc("POST /api/v1/ai/conversations/{id}/stop", a(s.handleAIStop))
+	m.HandleFunc("GET /api/v1/ai/proposals/{id}", a(s.handleAIProposal))
+	m.HandleFunc("PUT /api/v1/ai/proposals/{id}", a(s.handleAIEditProposal))
+	m.HandleFunc("POST /api/v1/ai/proposals/{id}/approve", a(s.handleAIApprove))
+	m.HandleFunc("POST /api/v1/ai/proposals/{id}/reject", a(s.handleAIReject))
+	m.HandleFunc("GET /api/v1/system/automation", a(s.handleGetAutomation))
+	m.HandleFunc("GET /api/v1/incidents", a(s.handleListIncidents))
+	m.HandleFunc("GET /api/v1/incidents/policy", a(s.handleGetIncidentPolicy))
+	m.HandleFunc("PUT /api/v1/incidents/policy", a(s.handlePutIncidentPolicy))
+	m.HandleFunc("POST /api/v1/incidents/stop", a(s.handleIncidentStop(true)))
+	m.HandleFunc("POST /api/v1/incidents/resume", a(s.handleIncidentStop(false)))
+	m.HandleFunc("GET /api/v1/incidents/{id}", a(s.handleGetIncident))
+	m.HandleFunc("DELETE /api/v1/incidents/{id}", a(s.handleDeleteIncident))
+	m.HandleFunc("POST /api/v1/incidents/{id}/approve", a(s.handleApproveIncident))
+	m.HandleFunc("POST /api/v1/incidents/{id}/reject", a(s.handleRejectIncident))
+	m.HandleFunc("GET /api/v1/t/{t}/apps/{app}/incident", a(s.handleGetAppIncident))
+	m.HandleFunc("GET /api/v1/guides", a(s.handleListGuides))
+	m.HandleFunc("GET /api/v1/ingress", a(s.handleIngress))
+	m.HandleFunc("GET /api/v1/ingress/blocks", a(s.handleIngressBlocks))
+	m.HandleFunc("POST /api/v1/ingress/blocks", a(s.handleCreateIngressBlock))
+	m.HandleFunc("PUT /api/v1/ingress/blocks/{id}", a(s.handleExtendIngressBlock))
+	m.HandleFunc("DELETE /api/v1/ingress/blocks/{id}", a(s.handleDeleteIngressBlock))
+	m.HandleFunc("GET /api/v1/t/{t}/apps/{app}/ingress", a(s.handleAppIngress))
+	m.HandleFunc("GET /api/v1/ingress/history", a(s.handleIngressHistory))
+	m.HandleFunc("GET /api/v1/nodes/{n}/gateways", a(s.handleGetGateways))
+	m.HandleFunc("PUT /api/v1/nodes/{n}/gateways", a(s.handlePutGateways))
+	m.HandleFunc("PUT /api/v1/t/{t}/apps/{app}/ingress/balance", a(s.handlePutIngressBalance))
+	m.HandleFunc("POST /api/v1/t/{t}/apps/{app}/ingress/drain", a(s.handleIngressDrain))
+	m.HandleFunc("DELETE /api/v1/t/{t}/apps/{app}/ingress/drain", a(s.handleIngressDrain))
+	m.HandleFunc("GET /api/v1/system/mcp", a(s.handleListMCP))
+	m.HandleFunc("POST /api/v1/system/mcp", a(s.handleCreateMCP))
+	m.HandleFunc("PUT /api/v1/system/mcp/{name}", a(s.handlePutMCP))
+	m.HandleFunc("DELETE /api/v1/system/mcp/{name}", a(s.handleDeleteMCP))
+	m.HandleFunc("POST /api/v1/system/mcp/{name}/refresh", a(s.handleRefreshMCP))
+	m.HandleFunc("GET /api/v1/system/mcp/oauth/callback", s.handleMCPOAuthCallback)
+	m.HandleFunc("GET /api/v1/system/mcp/{name}/oauth", a(s.handleMCPOAuthState))
+	m.HandleFunc("POST /api/v1/system/mcp/{name}/oauth/login", a(s.handleMCPOAuthLogin))
+	m.HandleFunc("POST /api/v1/system/mcp/{name}/tools/{tool}/test", a(s.handleTestMCPTool))
+	// provider diagnostic log (UI-C1)
+	m.HandleFunc("GET /api/v1/diag/provider-log/state", a(s.handleProviderLogState))
+	m.HandleFunc("POST /api/v1/diag/provider-log/enable", a(s.handleProviderLogEnable))
+	m.HandleFunc("POST /api/v1/diag/provider-log/disable", a(s.handleProviderLogDisable))
+	m.HandleFunc("GET /api/v1/diag/provider-log", s.handleProviderLogList)
+	m.HandleFunc("GET /api/v1/diag/provider-log/download", s.handleProviderLogDownload)
+	m.HandleFunc("GET /api/v1/diag/provider-log/stream", s.handleProviderLogStream)
+
+	m.HandleFunc("GET /api/v1/webhooks", a(s.handleListWebhooks))
+	m.HandleFunc("POST /api/v1/webhooks", a(s.handleCreateWebhook))
+	m.HandleFunc("GET /api/v1/webhooks/{name}", a(s.handleGetWebhook))
+	m.HandleFunc("PUT /api/v1/webhooks/{name}", a(s.handlePutWebhook))
+	m.HandleFunc("DELETE /api/v1/webhooks/{name}", a(s.handleDeleteWebhook))
+	m.HandleFunc("POST /api/v1/webhooks/{name}/rotate", a(s.handleRotateWebhook))
+	m.HandleFunc("POST /api/v1/webhooks/{name}/test", a(s.handleTestWebhook))
+	m.HandleFunc("GET /api/v1/webhooks/{name}/deliveries", a(s.handleWebhookDeliveries))
+	m.HandleFunc("GET /api/v1/webhook-links", a(s.handleListWebhookLinks))
+	m.HandleFunc("POST /api/v1/webhook-links", a(s.handlePutWebhookLink))
+	m.HandleFunc("PUT /api/v1/webhook-links/{id}", a(s.handlePutWebhookLink))
+	m.HandleFunc("DELETE /api/v1/webhook-links/{id}", a(s.handleDeleteWebhookLink))
+	m.HandleFunc("GET /api/v1/guides/cluster", a(s.handleGetGuide))
+	m.HandleFunc("PUT /api/v1/guides/cluster", a(s.handlePutGuide))
+	m.HandleFunc("DELETE /api/v1/guides/cluster", a(s.handleDeleteGuide))
+	m.HandleFunc("GET /api/v1/guides/cluster/versions", a(s.handleGuideVersions))
+	m.HandleFunc("GET /api/v1/guides/cluster/versions/{v}", a(s.handleGuideVersion))
+	m.HandleFunc("POST /api/v1/guides/cluster/restore", a(s.handleRestoreGuide))
+	m.HandleFunc("POST /api/v1/guides/cluster/test", a(s.handleTestGuide))
+	m.HandleFunc("GET /api/v1/guides/tenant/{t}", a(s.handleGetGuide))
+	m.HandleFunc("PUT /api/v1/guides/tenant/{t}", a(s.handlePutGuide))
+	m.HandleFunc("DELETE /api/v1/guides/tenant/{t}", a(s.handleDeleteGuide))
+	m.HandleFunc("GET /api/v1/guides/tenant/{t}/versions", a(s.handleGuideVersions))
+	m.HandleFunc("GET /api/v1/guides/tenant/{t}/versions/{v}", a(s.handleGuideVersion))
+	m.HandleFunc("POST /api/v1/guides/tenant/{t}/restore", a(s.handleRestoreGuide))
+	m.HandleFunc("POST /api/v1/guides/tenant/{t}/test", a(s.handleTestGuide))
+	m.HandleFunc("GET /api/v1/guides/app/{t}/{app}", a(s.handleGetGuide))
+	m.HandleFunc("PUT /api/v1/guides/app/{t}/{app}", a(s.handlePutGuide))
+	m.HandleFunc("DELETE /api/v1/guides/app/{t}/{app}", a(s.handleDeleteGuide))
+	m.HandleFunc("GET /api/v1/guides/app/{t}/{app}/versions", a(s.handleGuideVersions))
+	m.HandleFunc("GET /api/v1/guides/app/{t}/{app}/versions/{v}", a(s.handleGuideVersion))
+	m.HandleFunc("POST /api/v1/guides/app/{t}/{app}/restore", a(s.handleRestoreGuide))
+	m.HandleFunc("POST /api/v1/guides/app/{t}/{app}/test", a(s.handleTestGuide))
+	m.HandleFunc("PUT /api/v1/t/{t}/apps/{app}/incident", a(s.handlePutAppIncident))
+	m.HandleFunc("GET /api/v1/t/{t}/apps/{app}/incident/versions", a(s.handleAppIncidentVersions))
+	m.HandleFunc("PUT /api/v1/t/{t}/apps/{app}/incident/versions/{v}", a(s.handlePutAppIncidentVersion))
+	m.HandleFunc("PUT /api/v1/system/automation", a(s.handlePutAutomation))
+	m.HandleFunc("DELETE /api/v1/system/automation", a(s.handleDeleteAutomation))
+	m.HandleFunc("POST /api/v1/system/automation/check", a(s.handleCheckAutomation))
+	m.HandleFunc("GET /api/v1/system/auto-backup", a(s.handleGetAutoBackup))
+	m.HandleFunc("PUT /api/v1/system/auto-backup", a(s.handlePutAutoBackup))
+	m.HandleFunc("POST /api/v1/system/auto-backup/run", a(s.handleRunAutoBackup))
+	m.HandleFunc("GET /api/v1/audit", a(s.handleAudit))
+	m.HandleFunc("GET /api/v1/notifications", a(s.handleNotifications))
+	m.HandleFunc("POST /api/v1/notifications/read-all", a(s.handleNotificationReadAll))
+	m.HandleFunc("POST /api/v1/notifications/{id}/read", a(s.handleNotificationRead))
+	m.HandleFunc("GET /api/v1/notify-prefs", a(s.handleGetNotifyPrefs))
+	m.HandleFunc("PUT /api/v1/notify-prefs", a(s.handlePutNotifyPrefs))
+
+	m.HandleFunc("GET /api/v1/certificates", a(s.handleCertificates))
+	m.HandleFunc("POST /api/v1/certificates/check", a(s.handleCertificateCheck))
+	m.HandleFunc("POST /api/v1/certificates", a(s.handleCertificatePut))
+	m.HandleFunc("GET /api/v1/certificates/{id}", a(s.handleCertificate))
+	m.HandleFunc("GET /api/v1/certificates/{id}/chain", a(s.handleCertificateChain))
+	m.HandleFunc("DELETE /api/v1/certificates/{id}", a(s.handleCertificateDelete))
+	m.HandleFunc("POST /api/v1/certificates/{id}/disable", a(s.handleCertificateDisable))
+	m.HandleFunc("GET /api/v1/acme/responder", a(s.handleACMEResponder))
+	m.HandleFunc("GET /api/v1/acme/auto", a(s.handleACMEAuto))
+	m.HandleFunc("PUT /api/v1/acme/auto", a(s.handlePutACMEAuto))
+	m.HandleFunc("POST /api/v1/acme/auto/ignore", a(s.handleACMEAutoIgnore))
+	m.HandleFunc("GET /api/v1/acme/cas", a(s.handleACMECAs))
+	m.HandleFunc("GET /api/v1/acme/accounts", a(s.handleACMEAccounts))
+	m.HandleFunc("POST /api/v1/acme/accounts", a(s.handleACMEAddAccount))
+	m.HandleFunc("DELETE /api/v1/acme/accounts/{id}", a(s.handleACMEDeleteAccount))
+	m.HandleFunc("GET /api/v1/acme/certs", a(s.handleACMECerts))
+	m.HandleFunc("POST /api/v1/acme/certs", a(s.handleACMEAddCert))
+	m.HandleFunc("GET /api/v1/acme/certs/{name}", a(s.handleACMECert))
+	m.HandleFunc("PUT /api/v1/acme/certs/{name}", a(s.handleACMEUpdateCert))
+	m.HandleFunc("DELETE /api/v1/acme/certs/{name}", a(s.handleACMEDeleteCert))
+	m.HandleFunc("POST /api/v1/acme/certs/{name}/issue", a(s.handleACMEIssue))
+	m.HandleFunc("GET /api/v1/acme/certs/{name}/chain", a(s.handleACMEChain))
+	m.HandleFunc("POST /api/v1/acme/certs/{name}/revoke", a(s.handleACMERevoke))
+
+	m.HandleFunc("GET /api/v1/dns/vendors", a(s.handleDNSVendors))
+	m.HandleFunc("GET /api/v1/dns/providers", a(s.handleDNSProviders))
+	m.HandleFunc("POST /api/v1/dns/providers", a(s.handleDNSAddProvider))
+	m.HandleFunc("POST /api/v1/dns/providers/{id}/check", a(s.handleDNSCheckProvider))
+	m.HandleFunc("PUT /api/v1/dns/providers/{id}/token", a(s.handleDNSProviderToken))
+	m.HandleFunc("PUT /api/v1/dns/providers/{id}", a(s.handleDNSRenameProvider))
+	m.HandleFunc("DELETE /api/v1/dns/providers/{id}", a(s.handleDNSDeleteProvider))
+	m.HandleFunc("GET /api/v1/dns/providers/{id}/domains", a(s.handleDNSProviderDomains))
+	m.HandleFunc("GET /api/v1/dns/domains", a(s.handleDNSDomains))
+	m.HandleFunc("POST /api/v1/dns/domains", a(s.handleDNSAddDomain))
+	m.HandleFunc("PUT /api/v1/dns/domains/{domain}", a(s.handleDNSUpdateDomain))
+	m.HandleFunc("DELETE /api/v1/dns/domains/{domain}", a(s.handleDNSDeleteDomain))
+	m.HandleFunc("GET /api/v1/dns/domains/{domain}/records", a(s.handleDNSRecords))
+	m.HandleFunc("GET /api/v1/dns/domains/{domain}/servers", a(s.handleDNSServers))
+	m.HandleFunc("PUT /api/v1/dns/domains/{domain}/servers/{node}", a(s.handlePutDNSServer))
+	m.HandleFunc("POST /api/v1/dns/domains/{domain}/servers/check", a(s.handleCheckDNSServers))
+	m.HandleFunc("POST /api/v1/dns/domains/{domain}/plan", a(s.handleDNSPlan))
+	m.HandleFunc("POST /api/v1/dns/domains/{domain}/apply", a(s.handleDNSApply))
+	m.HandleFunc("GET /api/v1/dns/domains/{domain}/history", a(s.handleDNSHistory))
+	m.HandleFunc("GET /api/v1/dns/domains/{domain}/propagation", a(s.handleDNSPropagation))
+	m.HandleFunc("POST /api/v1/dns/domains/{domain}/history/{id}/revert", a(s.handleDNSRevert))
+	m.HandleFunc("DELETE /api/v1/dns/domains/{domain}/history/{id}", a(s.handleDNSDeleteHistory))
+	m.HandleFunc("GET /api/v1/dns/domains/{domain}/snapshots", a(s.handleDNSSnapshots))
+	m.HandleFunc("POST /api/v1/dns/domains/{domain}/snapshots/{id}/restore", a(s.handleDNSRestoreSnapshot))
+
+	m.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
+		writeError(w, http.StatusNotFound, "not-found", "no such API endpoint")
+	})
+	m.Handle("/", s.static())
+}
+
+// pageOf adapts a typed paged method to the tenant page helper.
+func pageOf[T any](fn func(context.Context, mydc.Conn, string, string) (mydc.Page[T], error)) func(context.Context, mydc.Conn, string, string) (any, string, uint64, error) {
+	return func(ctx context.Context, c mydc.Conn, t, after string) (any, string, uint64, error) {
+		p, err := fn(ctx, c, t, after)
+		return p.Items, p.Next, p.Revision, err
+	}
+}

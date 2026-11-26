@@ -1,0 +1,5 @@
+## Lifecycle 원본 편집·읽기 메시지
+
+Unix TLS에서도 사용자 Session으로 `lifecycle-source-stage`/`lifecycle-module-stage`와 정확 버전 `lifecycle-source`를 사용한다. stage header는 `{Schema:1,Method,Nonce,Tenant,Node?,CheckerSource:{Tenant,Digest,Length,SDK,Modules},CheckerUpload:[32]byte,CheckerModule?:ModulePin}`이다. 기존 User kind4 입력의 길이/SHA-256/EOF 이후 SourceFact 또는 최대32개 `{Line,Column,Message}` 진단을 `Reply.LifecycleStage`로 반환하며 진단 때 fact는 없다. source는256KiB, ZIP은 기존64MiB·정확 lock/cache 예산이다. recover는 동일 원 Node/descriptor/token과 EOF만 보낸다. 읽기 Request의 `LifecycleSource:{Name,Revision,Offset}`는 `Reply.LifecycleSource:{Tenant,Name,Revision,Offset,Total,Next,Digest,Data}`로 최대24KiB씩 반환하고 삭제 버전은 missing이다. [전체 API·SDK·오류](../lifecycle-sources.md)를 따른다. 내부 member source-version permit/owner는 Unix 사용자 허용 method가 아니다.
+
+설치 키 교체의 내부 Management `node-identity-activation`은 `{ID,Operation}` → `{Schema:1,Index,Proof}`의 Latest quorum 읽기다. 현재 설치된 새 키가 자기 원 활성화만 복구하며 구키·다른 원 작업은 거부한다. User/CLI에 새 관리 명령을 추가하지 않고 UID/session으로 node proof를 대체하지 않는다. 상세 경계는 [MYDCP](../../protocol/mydcp.md)의 설치 신원 교체를 따른다.

@@ -1,0 +1,108 @@
+// SPDX-License-Identifier: Apache-2.0
+
+package state
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"io"
+	"strings"
+	"testing"
+)
+
+func TestCommandCanonicalBytesAndTruncation(t *testing.T) {
+	c := command("request", "task", strings.Repeat("\x00", 64*1024), 12)
+	b, err := EncodeCommand(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := DecodeCommand(b)
+	if err != nil || got != c || Digest(got) != Digest(c) {
+		t.Fatal(err)
+	}
+	for _, n := range []int{0, 1, 19, 20, 23, 24, len(b) - 1} {
+		if _, err := DecodeCommand(b[:n]); err == nil {
+			t.Fatal("truncated command", n)
+		}
+	}
+	if _, err := DecodeCommand(append(b, 0)); err == nil {
+		t.Fatal("trailing data")
+	}
+	b[3] = 2
+	if _, err := DecodeCommand(b); err == nil {
+		t.Fatal("invalid bool")
+	}
+	c.Value += "x"
+	if _, err := EncodeCommand(c); err == nil {
+		t.Fatal("oversized command")
+	}
+}
+
+type snapshotWriter struct {
+	bytes.Buffer
+	maximum int
+}
+
+func (w *snapshotWriter) Write(b []byte) (int, error) {
+	if len(b) > w.maximum {
+		w.maximum = len(b)
+	}
+	return w.Buffer.Write(b)
+}
+
+type failingWriter struct{}
+
+func (failingWriter) Write([]byte) (int, error) { return 0, io.ErrClosedPipe }
+
+func TestSnapshotStreamingPreservesCanonicalBytesAndLargeState(t *testing.T) {
+	s, _ := New("admin")
+	for i := 0; i < 100; i++ {
+		c := command(fmt.Sprint(i), fmt.Sprint(i), strings.Repeat("x", 64<<10), 0)
+		if r := mustApply(t, &s, c); r.Code != Applied {
+			t.Fatal(r)
+		}
+	}
+	var output snapshotWriter
+	if err := EncodeTo(&output, s); err != nil {
+		t.Fatal(err)
+	}
+	if output.Len() <= 8<<20 || output.maximum > 128<<10 {
+		t.Fatal("state total and individual write were conflated", output.Len(), output.maximum)
+	}
+	legacy, err := json.Marshal(rows(s))
+	if err != nil || !bytes.Equal(legacy, output.Bytes()) {
+		t.Fatal("schema=1 canonical bytes changed", err)
+	}
+	restored, err := DecodeFrom(bytes.NewReader(output.Bytes()))
+	if err != nil || restored.Index() != 100 || restored.Object("workload/99") != s.Object("workload/99") {
+		t.Fatal("large state roundtrip", err)
+	}
+	if _, err = Decode(append(append([]byte(nil), output.Bytes()...), '\n')); err == nil {
+		t.Fatal("noncanonical trailing whitespace accepted")
+	}
+	if err = EncodeTo(failingWriter{}, s); err == nil {
+		t.Fatal("writer error ignored")
+	}
+	t.Logf("canonical bytes=%d, largest write=%d", output.Len(), output.maximum)
+}
+
+func TestSnapshotPreservesBinaryValues(t *testing.T) {
+	s, _ := New("admin")
+	c := command("binary", "task", string([]byte{0xff, 0xfe, 0, 1}), 0)
+	if r := mustApply(t, &s, c); r.Code != Applied {
+		t.Fatal(r)
+	}
+	b, err := Encode(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	restored, err := Decode(b)
+	if err != nil || restored.Object(c.Key).Value != c.Value {
+		t.Fatal("snapshot corrupted non-UTF8 bytes", err)
+	}
+	c.RequestID = string([]byte{0xff})
+	if r := mustApply(t, &s, c); r.Code != Invalid {
+		t.Fatal("invalid identity bytes", r)
+	}
+}

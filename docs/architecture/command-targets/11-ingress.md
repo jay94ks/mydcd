@@ -1,0 +1,18 @@
+## Ingress 운영과 인증서
+
+| CLI / API | 인증·대상 | 원 결과·효과 |
+|---|---|---|
+| `ingress list/show/metrics/errors/blocks` → User `ingresses` | 현재 사용자 Read tenant/node; `--all`도 현재 credential 범위만. owner member `ingress-observe`는 원 사용자 Session을 재검사 | mapping/실제 snapshot·60초 계수·가린 오류·적용 기록. 노드 수신 주소 요약은 보이는 shared listener를 한 번씩 계상. BlockRevision은 정책 book 목표, Runtime.BlockRevision은 같은 단위의 owner 설치 revision이다. RootRevision/블록별 CAS와 구분하고 목표 ID 부재만으로 해제 완료를 판정하지 않음. query는 Task/Desired를 변경하지 않음. [형식](../../reference/ingress-management.md) |
+| `ingress block/unblock/extend` → typed `ingress-block/ingress-unblock/ingress-block-extend` | tenant ManageNetwork·현재 operation ceiling. node/tenant/gateway·cross-tenant host는 시스템 관리자. 여러 tenant 조회는 `--all` | 별도 Raft block 기록·record CAS·원 사용자 operation/journal. 만료는 레코드 삭제가 아님. 같은 `--id`의 재실행·`mydc op resume`은 원 입력만 재개 |
+| `ingress gateways show/set NODE` → User `ingresses` Part=gateways / `set-node-gateways` | 현재 시스템 관리자·명시 node. 변경은 대상 owner의 현재 주소 preflight evidence와 record CAS | 원 gateway claim·사용자 operation을 Raft에 보존. 파일/클러스터 목표·AppliedRevision/Error 구분. 앱·단독 `ports:`와 실제 listener 충돌 검사 |
+| `ingress balance/drain/undrain` → `set-ingress-balance/drain-ingress/undrain-ingress` | 현재 tenant Network 관리 권한, 선택 tenant와 입력 일치, item CAS(기본은 읽은 값, `--if-revision`)·원 작업 ID | 관리 overlay만 변경하며 Task/container/native generation 보존. 진행 flow는 drain deadline까지 유지하고 기한에 취소. 같은 `--id`는 원 입력 |
+| `ingress history` → User `ingresses` Part=history | 현재 tenant/node Read, 시스템 전역 조회는 ManageCluster. app/node/tenant·사용자/현재 권한에 cursor 결합 | 원 At/Actor/Request와 공개 Detail/Previous 최신8행. 승인/Session 원문·비밀 제외; 실제 적용 완료와 구분 |
+| `ingress hosts show/set` → `set-ingress-host-policy` | 시스템 관리자·명시 tenant 대상. 현재 tenant profile과 입력 Tenant 일치 | tenant host 권한의 item CAS. 기존 앱 참조 보존, 새 native/실제 gateway는 현재 정책 검사 |
+| `certificate list/show` → User `certificates` | 시스템 관리자·현재 credential read ceiling | 공개 metadata·상태·연결만, 보관함 revision 고정 cursor. `show`는 ID 조회로 공개 체인도 받음 |
+| `certificate put/delete/disable` → `put-certificate`/`delete-certificate`/`disable-certificate` | 시스템 관리자·동작별 ceiling; put의 PEM/key 파일(또는 stdin)은 SecretInput `Mode:certificate` | 보호 입력 intent/원 sealed receipt→사용자 signed typed operation(`Expected` 0). 인증서는 ID로 고르며, 이미 있는 ID는 보내지 않음. 같은 `--id`의 재실행은 원 provider receipt와 서명된 원 operation만 이어 보냄 |
+| `domain list` → User `certificates` 첫 페이지의 `Domains` | 시스템 관리자·현재 credential read ceiling(`certificates`) | 등록 도메인 전체(A-label·추가한 사람·시각)와 보관함 revision. 따로 query method는 없음. [도메인](../../cli/domain.md) |
+| `domain add/remove` → typed `add-domain/remove-domain` | 시스템 관리자(`ManageCluster`)·동작별 ceiling | payload `DomainChange{Name}`(정규화한 A-label 또는 정규형 IP. 와일드카드·한 단어·공개 접미사·zone/미지정/멀티캐스트 IP는 Invalid), CAS는 인증서 보관함 전체 revision. 이미 있는 이름의 add나 없는 이름의 remove는 ConditionFailed. remove는 그 도메인 아래 호스트에 인증서 링크가 있어도 거절하지 않음(링크만 끊김). 최대 128개 |
+| `domain acme-responder show` → User `certificates` 첫 페이지의 `ACMEResponder` | 시스템 관리자·현재 credential read ceiling(`certificates`) | 주소·설정한 사람·시각. 없으면 비어 있음 |
+| `domain acme-responder set/clear` → typed `set-acme-responder` | 시스템 관리자(`ManageCluster`)·동작별 ceiling. 웹 자동화 계정은 이 동작을 위임받아 시작할 때 채움 | payload `ACMEResponderChange{Address}`(정규형 IP:port, 비우면 지움. 이름·port 0·zone·미지정·멀티캐스트는 Invalid), CAS는 보관함 전체 revision. 같은 주소를 다시 넣거나 없는 것을 지우면 ConditionFailed |
+| member `CertificateMaterial=17` | 답하는 쪽은 마스터 키를 가진 현재 voter. Read는 현재 설치 ingress owner·정확한 goal revision/generation/ref/host, Seal은 WorkKey 멤버·키 소유 증명, Master는 현재 voter | 유도한 인증서 key(Read: 그 host에 연결된 인증서만, Seal: 아직 없는 업로드) 또는 마스터 키 공급. User/SecretFetch/Unix·relay·early data·datagram으로 우회 불가 |
+

@@ -1,0 +1,12 @@
+--- a/expr/ct.go
++++ b/expr/ct.go
+@@ -182,6 +182,9 @@
+ 		switch ad.Type() {
+ 		case unix.NFTA_CT_KEY:
+ 			e.Key = CtKey(ad.Uint32())
++		case unix.NFTA_CT_SREG:
++			e.Register = ad.Uint32()
++			e.SourceRegister = true
+ 		case unix.NFTA_CT_DREG:
+ 			e.Register = ad.Uint32()
+ 		case unix.NFTA_CT_DIRECTION:

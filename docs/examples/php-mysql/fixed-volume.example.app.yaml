@@ -1,0 +1,19 @@
+# node-fixed 참조 문법의 최소 발췌. 완전한 PHP/MySQL 실행 입력이 아니다.
+# node-a의 tenant 관리 fixed Volume db-data를 먼저 등록해야 한다.
+# 앱은 원 등록의 consumer만 빌리며 앱 소유 Volume 생성/삭제 대상으로 삼지 않는다.
+# 경로/UID/GID/mode·quota/이관 설정은 이 이름 참조에 추가하지 않는다.
+# 이미지/secret/network/health 등은 실제 앱 입력에서 별도로 지정한다.
+name: fixed-volume-sample
+services:
+  db:
+    image: <MYSQL_IMAGE_AT_VERIFIED_DIGEST>
+    x-mydc:
+      node: node-a
+    volumes:
+      - type: volume
+        source: database
+        target: /var/lib/mysql
+volumes:
+  database:
+    external: true
+    name: db-data

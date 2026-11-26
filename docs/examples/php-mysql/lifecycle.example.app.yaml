@@ -1,0 +1,97 @@
+# app.yaml lifecycle 선언 예시(schema=1). 실제 이미지·관리 policy/source와 담당 node의 runner/builder 준비가 필요하다.
+# 관리 named script ready-file revision1·관리 망 php-mysql-network를 먼저 등록한다.
+# builder spawn 위치/이미지·resolver/cache 정책은 별도 tenant 관리 입력이다.
+# 이미지는 PHP·/healthz endpoint를 제공하고 앱이 /run/mydc/ready marker를 생성해야 한다.
+name: php-lifecycle-demo
+x-mydc:
+  lifecycle:
+    optimizer:
+      compile: true
+    scripts:
+      php-endpoint:
+        compile: true
+        modules: [] # inline의 고정 의존 lock. 외부 의존은 path/version/digest(32-byte 배열)/length를 명시
+        source: |
+          package checker
+
+          import (
+            "context"
+            lifecycle "github.com/jay94ks/mydcd/lifecycle/v1"
+          )
+
+          func Check(ctx context.Context, in lifecycle.Request, probe lifecycle.Probe) (lifecycle.Result, error) {
+            r, err := probe.Connect(ctx, lifecycle.TCPProbe{
+              Service: "web", Port: 8080,
+              Request: []byte("GET /healthz HTTP/1.1\r\nHost: web\r\nConnection: close\r\n\r\n"),
+              ReadBytes: 12,
+            })
+            if err != nil {
+              return lifecycle.Result{Schema: 1, Status: "unknown", Reason: "probe-error"}, err
+            }
+            if !r.Connected || (string(r.Data) != "HTTP/1.1 200" && string(r.Data) != "HTTP/1.0 200") {
+              return lifecycle.Result{Schema: 1, Status: "fail", Reason: "endpoint-not-ready"}, nil
+            }
+            return lifecycle.Result{Schema: 1, Status: "pass", Reason: "endpoint-ready"}, nil
+          }
+      ready-marker:
+        ref:
+          name: ready-file
+          revision: 1
+        compile: false # 앱 optimizer=true보다 우선하며 내장 Yaegi로 실행
+    templates:
+      image-health:
+        builtin: docker_health
+    checks:
+      - id: app-ready
+        phase: readiness
+        builtin: depends_on
+        interval: 5s
+        timeout: 3s
+        retries: 3
+        parameters:
+          services: [web]
+          condition: service_healthy
+services:
+  web:
+    image: docker.io/library/php@sha256:<WEB_IMAGE_DIGEST>
+    command: [php, -S, '0.0.0.0:8080', -t, /app/public]
+    cpus: 0.5
+    mem_limit: 128m
+    healthcheck: # Docker 호환 내장 동작. named script를 거치지 않는다.
+      test: [CMD, php, -r, 'exit(is_file("/app/public/index.php") ? 0 : 1);']
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 30s
+    networks:
+      app:
+        ipv4_address: 10.240.10.40
+    x-mydc:
+      node: node-a
+      lifecycle:
+        checks:
+          - id: docker-health
+            phase: readiness
+            use: image-health
+          - id: http-alive
+            phase: liveness
+            script: php-endpoint
+            # 명시 결과별 정책. 실제 컨테이너 제어는 MyDC/Docker SDK가 수행한다.
+            actions: {on_alive: keep, on_dead: restart}
+            interval: 5s
+            timeout: 3s
+            retries: 3
+            start_period: 30s
+          - id: marker-ready
+            phase: startup
+            script: ready-marker
+            parameters:
+              path: /run/mydc/ready
+            interval: 2s
+            timeout: 1s
+            retries: 15
+            start_period: 30s
+networks:
+  app:
+    external: true
+    name: php-mysql-network

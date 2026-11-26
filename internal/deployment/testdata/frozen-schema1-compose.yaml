@@ -1,0 +1,340 @@
+# P0 분리 대상 설계 자료: 새 app.yaml의 실행 예시가 아니다.
+# 계약: docs/architecture/app-and-cluster-spec.md. 예시/제품 parser 전환은 Milestones P0에서 함께 수행한다.
+# 과거 통합 입력/테스트 fixture(schema=1). 일부 원 코어 시험에서만 읽으며 새 앱 제출·docker compose 실행 예시가 아니다.
+# 앱 입력에는 서비스·이름 기반 관리 망/Secret 참조·Volume/이관 허용 정책·앱 CD만 남긴다.
+# 별도 예시 YAML은 설명용이며 include/자동 merge/추가 배포 입력이 아니다.
+# 이미지 digest/노드 신원/인증서/설치 credential profile은 실제 환경에서 고정해야 한다.
+# 비밀 원문·Group 비밀번호·Vault/git token·개인키는 이 파일/Git에 기록하지 않는다.
+# Group keyset의 명시 secrets projection만 mount한다. 다른 key를 Env에 자동 주입하지 않는다.
+# UID10001 이미지의 Env/Entrypoint/Volumes/쓰기 디렉터리는 D1에서 실제 검증해야 한다.
+# 모든 객체는 tenant-demo 소유다. CIDR은 다른 tenant/노드와도 중복/겹칠 수 없다.
+# N2/Q2: 1대 장애 때 새 관리 변경은 불가. Volume은 node-local 단일 writer이며 DB HA가 아니다.
+# CD는 manual/report/prune=false로 시작한다. Git ref는 실제 작업 전에 commit으로 고정한다.
+# quota_mode=observe는 hard quota 적용이 아니다. migration은 허용 정책이며 자동 이관 명령이 아니다.
+# 계정/tenant·node 가입/투표·trust·Secret 값·backup/restore/이관 실행은 별도 명시 관리 작업이다.
+# 입력 경계: docs/architecture/commands-and-declarations.md. 이 파일에는 목표 구성/정책만 둔다.
+name: php-mysql-demo
+x-mydc:
+  nodes: # 기존 등록 값의 일치 조건만 검사한다. 노드 생성/주소 변경/투표권 부여가 아니다.
+    node-a:
+      underlay: 192.0.2.11
+      voter: true
+    node-b:
+      underlay: 192.0.2.12
+      voter: true
+  ingress:
+    runtime:
+      max_requests: 8
+      max_connections: 32
+      max_header_bytes: 16384
+      max_body_bytes: 1048576
+      buffer_bytes: 524288
+      request_timeout_ms: 30000
+      dial_timeout_ms: 2000
+      response_header_timeout_ms: 5000
+      health_interval_ms: 1000
+    node: node-b
+    host: php-mysql.test
+    listeners:
+    - address: 192.0.2.12:8080
+    - address: 192.0.2.12:8443
+      tls: true
+      http3: true
+    backend:
+      service: web
+      port: 8080
+      health_path: /readyz
+  delivery:
+    enabled: true
+    source:
+      kind: git
+      repository: https://example.invalid/team/php-mysql.git
+      ref: main
+      path: mydc-compose.yaml
+      credential_profile: git-readonly
+    poll_interval_seconds: 60
+    sync:
+      mode: manual
+      drift: report
+      prune: false
+      allow_empty: false
+    runtime_edits:
+      mode: require-explicit-override
+      expiry: manual-release
+    limits:
+      fetch_timeout_seconds: 30
+      source_bytes: 4194304
+      queued_revisions: 1
+      active_operations: 1
+  # 신뢰 출처는 이 파일에서 자가 부여하지 않는다. tenant 생성 기본값은 docker.io/**뿐이다.
+  # 아래 registry는 생성만 하고 자동 신뢰하지 않는다. private ref 사용 전 manager가 명시 추가한다.
+  routing:
+    cross_tenant_default: deny
+    routes: [] # 양측 tenant의 유효한 승인 없이는 개통하지 않는다.
+  registries:
+    private:
+      enabled: true
+      node: node-a
+      image: "docker.io/library/registry@sha256:<REGISTRY_IMAGE_DIGEST>"
+      network: app
+      ipv4_address: 10.240.10.30
+      container_port: 5000
+      volume: registry-data
+      listener: {address: "192.0.2.11:5443", host: registry.php-mysql.test, certificate: local}
+      auth: {mode: tenant-token, issuer: builtin, anonymous: false, max_token_seconds: 300}
+      register_as_trusted: false
+      resources: {cpus: 0.5, memory_bytes: 268435456}
+  vault:
+    mode: groups
+    tree:
+      root:
+        entries:
+        - secret: tenant-defaults
+        - group: applications
+      groups:
+        applications:
+          id: group-applications
+          parent: tenant
+          password_required: false
+          entries:
+          - group: php-mysql
+        php-mysql:
+          id: group-php-mysql
+          parent: applications
+          password_required: true
+          entries:
+          - group: common
+          - group: db-admin
+          - secret: web-runtime-overrides
+        common:
+          id: group-php-mysql-common
+          parent: php-mysql
+          password_required: true
+          entries:
+          - secret: db-runtime
+        db-admin:
+          id: group-php-mysql-db-admin
+          parent: php-mysql
+          password_required: true
+          allowed_services:
+          - db
+          entries:
+          - secret: db-root
+      secrets:
+        tenant-defaults:
+          id: secret-tenant-defaults
+          parent: tenant
+          provider_profile: app-vault
+          object: tenant-demo/defaults
+          revision: 1
+          keys:
+          - DB_HOST
+          - DB_PORT
+        db-runtime:
+          id: secret-db-runtime
+          parent: common
+          provider_profile: app-vault
+          object: php-mysql-demo/db-runtime
+          revision: 1
+          keys:
+          - DB_HOST
+          - DB_PORT
+          - DB_USER
+          - DB_PASSWORD
+        db-root:
+          id: secret-db-root
+          parent: db-admin
+          provider_profile: app-vault
+          object: php-mysql-demo/db-root
+          revision: 1
+          keys:
+          - MYSQL_ROOT_PASSWORD
+        web-runtime-overrides:
+          id: secret-web-runtime-overrides
+          parent: php-mysql
+          provider_profile: app-vault
+          object: php-mysql-demo/web-runtime-overrides
+          revision: 1
+          keys:
+          - DB_HOST
+    approval:
+      prompt: once-per-required-group-without-valid-approval
+      reuse: same-deployment-and-valid-group-scope
+      signed_payload_fields:
+      - approved_at
+      - fact
+      - target
+services:
+  web:
+    image: docker.io/mydc-example/php-demo@sha256:<WEB_IMAGE_DIGEST>
+    command:
+    - apache2-foreground
+    user: 10001:10001
+    read_only: true
+    cap_drop:
+    - ALL
+    security_opt:
+    - no-new-privileges:true
+    cpus: 0.5
+    mem_limit: 256m
+    environment:
+      DB_HOST: db.php-mysql.mydc.test
+      DB_PORT: '3306'
+      DB_DATABASE: demo
+      DB_USER: demo
+      DB_PASSWORD_FILE: /run/secrets/db-password
+    secrets:
+    - source: db-password
+      target: db-password
+      uid: '10001'
+      gid: '10001'
+      mode: '0400'
+    tmpfs:
+    - /tmp:size=16m,mode=1777
+    - /run/apache2:size=4m,uid=10001,gid=10001,mode=0750
+    - /run/lock/apache2:size=4m,uid=10001,gid=10001,mode=0750
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      app:
+        ipv4_address: 10.240.10.10
+    x-mydc:
+      node: node-a
+      ready: {http: /readyz, port: 8080}
+      secrets_from: [tenant-defaults, group/common, web-runtime-overrides]
+    dns:
+    - 10.240.10.1
+    dns_search:
+    - php-mysql.mydc.test
+  db:
+    image: docker.io/mydc-example/mysql-demo@sha256:<DB_IMAGE_DIGEST>
+    command:
+    - mysqld
+    - --bind-address=0.0.0.0
+    - --port=3306
+    user: 10001:10001
+    read_only: true
+    cap_drop:
+    - ALL
+    security_opt:
+    - no-new-privileges:true
+    cpus: 1.0
+    mem_limit: 768m
+    environment:
+      MYSQL_DATABASE: demo
+      MYSQL_USER: demo
+      MYSQL_PASSWORD_FILE: /run/secrets/db-password
+      MYSQL_ROOT_PASSWORD_FILE: /run/secrets/db-root-password
+    secrets:
+    - source: db-password
+      target: db-password
+      uid: '10001'
+      gid: '10001'
+      mode: '0400'
+    - source: db-root-password
+      target: db-root-password
+      uid: '10001'
+      gid: '10001'
+      mode: '0400'
+    volumes:
+    - type: volume
+      source: mysql-data
+      target: /var/lib/mysql
+    tmpfs:
+    - /tmp:size=32m,mode=1777
+    - /var/run/mysqld:size=8m,uid=10001,gid=10001,mode=0750
+    healthcheck:
+      test:
+      - CMD
+      - /usr/local/bin/mydc-db-ready
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 60s
+    networks:
+      app:
+        ipv4_address: 10.240.20.10
+    x-mydc:
+      node: node-b
+      secrets_from: [tenant-defaults, group/common, group/db-admin]
+    dns:
+    - 10.240.20.1
+    dns_search:
+    - php-mysql.mydc.test
+networks:
+  app:
+    x-mydc:
+      mtu: 1280
+      pools:
+        node-a:
+          cidr: 10.240.10.0/24
+          gateway: 10.240.10.1
+          address_plan:
+            docker_ip_range: 10.240.10.0/25
+            static_first: 10.240.10.2
+            static_last: 10.240.10.127
+        node-b:
+          cidr: 10.240.20.0/24
+          gateway: 10.240.20.1
+          address_plan:
+            docker_ip_range: 10.240.20.0/25
+            static_first: 10.240.20.2
+            static_last: 10.240.20.127
+      tunnel_addresses:
+        node-a: 10.240.30.1/32
+        node-b: 10.240.30.2/32
+      runtime_changes:
+        authority: authenticated-mydcp-raft-cas
+        daemon_restart: false
+        strategy: staged
+        existing_lease_deadlines: preserve
+        disruptive_changes: explicit-transition-plan
+        status_fields:
+        - desired_revision
+        - applied_revision
+        - observed_revision
+        - operation_id
+        - phase
+        - pending_reason
+      dns:
+        zone: php-mysql.mydc.test.
+        ttl_seconds: 30
+        negative_ttl_seconds: 5
+        transports:
+        - udp
+        - tcp
+        forward:
+          enabled: false
+          upstreams: []
+        records:
+        - name: web
+          task: workload/task/php-mysql-demo/web
+        - name: db
+          task: workload/task/php-mysql-demo/db
+        limits:
+          cache_entries: 1024
+          queries_inflight: 32
+          tcp_connections: 16
+          request_timeout_ms: 2000
+        enabled: true
+volumes:
+  registry-data:
+    x-mydc:
+      node: node-a
+      size: 2147483648
+      # registry image의 실제 UID/쓰기 경로/준비 probe는 D5.09에서 고정한다.
+  mysql-data:
+    x-mydc:
+      node: node-b
+      uid: 10001
+      gid: 10001
+      mode: '0750'
+      size: 2147483648
+secrets:
+  db-password:
+    x-mydc:
+      key: DB_PASSWORD
+  db-root-password:
+    x-mydc:
+      key: MYSQL_ROOT_PASSWORD

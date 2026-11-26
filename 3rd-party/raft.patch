@@ -1,0 +1,387 @@
+--- a/api.go
++++ b/api.go
+@@ -215,6 +215,12 @@
+ 	// followerNotifyCh is used to tell followers that config has changed
+ 	followerNotifyCh chan struct{}
+ 
++	// peerLostCh carries PeerConnectionLost reports to the main loop.
++	peerLostCh chan peerLost
++
++	// peerFoundCh carries PeerConnected reports to the main loop.
++	peerFoundCh chan ServerID
++
+ 	// mainThreadSaturation measures the saturation of the main raft goroutine.
+ 	mainThreadSaturation *saturationMetric
+ 
+@@ -580,6 +586,8 @@
+ 		leadershipTransferCh:  make(chan *leadershipTransferFuture, 1),
+ 		leaderNotifyCh:        make(chan struct{}, 1),
+ 		followerNotifyCh:      make(chan struct{}, 1),
++		peerLostCh:            make(chan peerLost, 16),
++		peerFoundCh:           make(chan ServerID, 16),
+ 		mainThreadSaturation:  newSaturationMetric([]string{"raft", "thread", "main", "saturation"}, 1*time.Second),
+ 		preVoteDisabled:       conf.PreVoteDisabled || !transportSupportPreVote,
+ 		noLegacyTelemetry:     conf.NoLegacyTelemetry,
+@@ -1171,6 +1179,41 @@
+ 	return fmt.Sprintf("Node at %s [%v]", r.localAddr, r.getState())
+ }
+ 
++// peerLost is a PeerConnectionLost report.
++type peerLost struct {
++	id ServerID
++	at time.Time
++}
++
++// PeerConnectionLost tells Raft that the transport lost its connection to
++// id (idle timeout, peer shutdown or reset), not that it closed one itself.
++// A follower whose leader is id starts an election after a short random
++// delay instead of waiting for HeartbeatTimeout. A leader treats id as not
++// contacted and re-checks its lease at once, stepping down if it no longer
++// reaches a quorum. Contact after the report cancels it. Terms, votes, the
++// lease rule and log matching are unchanged, so it only changes how soon a
++// failure is acted on. It never blocks; reports beyond a small buffer are
++// dropped and the timers still apply.
++func (r *Raft) PeerConnectionLost(id ServerID) {
++	select {
++	case r.peerLostCh <- peerLost{id: id, at: time.Now()}:
++	default:
++	}
++}
++
++// PeerConnected tells Raft that the transport has a connection to id again
++// (for example the peer restarted). A leader sends that follower a heartbeat
++// at once instead of at its next HeartbeatInterval, so a restarted follower
++// learns its leader without waiting a whole interval. Others ignore it. It
++// never blocks; reports beyond a small buffer are dropped and the timers
++// still apply.
++func (r *Raft) PeerConnected(id ServerID) {
++	select {
++	case r.peerFoundCh <- id:
++	default:
++	}
++}
++
+ // LastContact returns the time of last contact by a leader.
+ // This only makes sense if we are currently a follower.
+ func (r *Raft) LastContact() time.Time {
+--- a/commands.go
++++ b/commands.go
+@@ -66,6 +66,12 @@
+ 	// There are scenarios where this request didn't succeed
+ 	// but there's no need to wait/back-off the next attempt.
+ 	NoRetryBackoff bool
++
++	// CommitIndex is the follower's commit index after handling the
++	// request. The leader skips empty AppendEntries while it already covers
++	// the leader's commit index. A follower that does not set it (0) gets
++	// the upstream behaviour: an empty AppendEntries every CommitTimeout.
++	CommitIndex uint64
+ }
+ 
+ // GetRPCHeader - See WithRPCHeader.
+--- a/config.go
++++ b/config.go
+@@ -150,6 +150,16 @@
+ 	// from a leader before we attempt an election.
+ 	HeartbeatTimeout time.Duration
+ 
++	// HeartbeatInterval is how often the leader sends a heartbeat to each
++	// follower, with up to 10% added jitter. Zero keeps the upstream
++	// interval of HeartbeatTimeout/10 (up to 2x). When set, it must be
++	// shorter than LeaderLeaseTimeout, and ElectionTimeout may be shorter
++	// than HeartbeatTimeout: a transport that reports lost connections
++	// through PeerConnectionLost detects a failed leader long before
++	// HeartbeatTimeout, and the candidate then only waits ElectionTimeout
++	// for votes.
++	HeartbeatInterval time.Duration
++
+ 	// ElectionTimeout specifies the time in candidate state without contact
+ 	// from a leader before we attempt an election.
+ 	ElectionTimeout time.Duration
+@@ -382,7 +392,13 @@
+ 	if config.LeaderLeaseTimeout > config.HeartbeatTimeout {
+ 		return fmt.Errorf("LeaderLeaseTimeout (%s) cannot be larger than heartbeat timeout (%s)", config.LeaderLeaseTimeout, config.HeartbeatTimeout)
+ 	}
+-	if config.ElectionTimeout < config.HeartbeatTimeout {
++	if config.HeartbeatInterval < 0 {
++		return fmt.Errorf("HeartbeatInterval cannot be negative")
++	}
++	if config.HeartbeatInterval > 0 && config.HeartbeatInterval+config.HeartbeatInterval/10 >= config.LeaderLeaseTimeout {
++		return fmt.Errorf("HeartbeatInterval (%s) plus jitter must be shorter than LeaderLeaseTimeout (%s)", config.HeartbeatInterval, config.LeaderLeaseTimeout)
++	}
++	if config.HeartbeatInterval == 0 && config.ElectionTimeout < config.HeartbeatTimeout {
+ 		return fmt.Errorf("ElectionTimeout (%s) must be equal or greater than Heartbeat Timeout (%s)", config.ElectionTimeout, config.HeartbeatTimeout)
+ 	}
+ 	return nil
+--- a/raft.go
++++ b/raft.go
+@@ -155,13 +155,29 @@
+ 	}
+ }
+ 
++// followerTimeout is how long a follower goes without leader contact before
++// it starts an election. With HeartbeatInterval set, a follower that knows
++// no leader (startup, or the leader stepped down) only waits ElectionTimeout:
++// HeartbeatTimeout is sized for a long heartbeat interval and would delay the
++// first election for no reason.
++func (r *Raft) followerTimeout() time.Duration {
++	c := r.config()
++	if c.HeartbeatInterval > 0 {
++		if _, id := r.LeaderWithID(); id == "" {
++			return c.ElectionTimeout
++		}
++	}
++	return c.HeartbeatTimeout
++}
++
+ // runFollower runs the main loop while in the follower state.
+ func (r *Raft) runFollower() {
+ 	didWarn := false
++	var leaderLostAt time.Time
+ 	leaderAddr, leaderID := r.LeaderWithID()
+ 	r.logger.Info("entering follower state", "follower", r, "leader-address", leaderAddr, "leader-id", leaderID)
+ 	metrics.IncrCounter([]string{"raft", "state", "follower"}, 1)
+-	heartbeatTimer := randomTimeout(r.config().HeartbeatTimeout)
++	heartbeatTimer := randomTimeout(r.followerTimeout())
+ 
+ 	for r.getState() == Follower {
+ 		r.mainThreadSaturation.sleeping()
+@@ -208,18 +224,39 @@
+ 		case <-r.leaderNotifyCh:
+ 			//  Ignore since we are not the leader
+ 
++		case <-r.peerFoundCh:
++			//  Ignore since we are not the leader
++
+ 		case <-r.followerNotifyCh:
+ 			heartbeatTimer = time.After(0)
+ 
++		case lost := <-r.peerLostCh:
++			r.mainThreadSaturation.working()
++			if _, id := r.LeaderWithID(); id == "" || id != lost.id || !r.LastContact().Before(lost.at) {
++				continue
++			}
++			r.logger.Warn("lost connection to leader", "leader-id", lost.id)
++			leaderLostAt = lost.at
++			// Spread followers that lost the same leader, so one usually
++			// collects the votes before the others start.
++			heartbeatTimer = randomDelay(r.config().ElectionTimeout / 2)
++
+ 		case <-heartbeatTimer:
+ 			r.mainThreadSaturation.working()
+ 			// Restart the heartbeat timer
+-			hbTimeout := r.config().HeartbeatTimeout
++			hbTimeout := r.followerTimeout()
+ 			heartbeatTimer = randomTimeout(hbTimeout)
+ 
+ 			// Check if we have had a successful contact
+ 			lastContact := r.LastContact()
+-			if time.Since(lastContact) < hbTimeout {
++			if !leaderLostAt.IsZero() {
++				// Contact after the loss means the connection came back.
++				lost := leaderLostAt
++				leaderLostAt = time.Time{}
++				if lastContact.After(lost) {
++					continue
++				}
++			} else if time.Since(lastContact) < hbTimeout {
+ 				continue
+ 			}
+ 
+@@ -421,6 +458,9 @@
+ 		case <-r.leaderNotifyCh:
+ 			//  Ignore since we are not the leader
+ 
++		case <-r.peerFoundCh:
++			//  Ignore since we are not the leader
++
+ 		case <-r.followerNotifyCh:
+ 			if electionTimeout != r.config().ElectionTimeout {
+ 				electionTimeout = r.config().ElectionTimeout
+@@ -789,6 +829,13 @@
+ 			oldCommitIndex := r.getCommitIndex()
+ 			commitIndex := r.leaderState.commitment.getCommitIndex()
+ 			r.setCommitIndex(commitIndex)
++			if commitIndex > oldCommitIndex {
++				// Tell followers about the new commit index now instead of on
++				// the next CommitTimeout poll.
++				for _, f := range r.leaderState.replState {
++					asyncNotifyCh(f.triggerCh)
++				}
++			}
+ 
+ 			// New configuration has been committed, set it as the committed
+ 			// value.
+@@ -932,6 +979,14 @@
+ 				r.dispatchLogs(ready)
+ 			}
+ 
++		case lost := <-r.peerLostCh:
++			r.mainThreadSaturation.working()
++			if f, ok := r.leaderState.replState[lost.id]; ok && f.LastContact().Before(lost.at) {
++				r.logger.Warn("lost connection to follower", "server-id", lost.id)
++				f.clearLastContact()
++				r.checkLeaderLease()
++			}
++
+ 		case <-lease:
+ 			r.mainThreadSaturation.working()
+ 			// Check if we've exceeded the lease, potentially stepping down
+@@ -952,6 +1007,13 @@
+ 				asyncNotifyCh(repl.notifyCh)
+ 			}
+ 
++		case id := <-r.peerFoundCh:
++			// A follower that came back gets a heartbeat now, so it learns
++			// this leader without waiting for HeartbeatInterval.
++			if f, ok := r.leaderState.replState[id]; ok {
++				asyncNotifyCh(f.notifyCh)
++			}
++
+ 		case <-r.followerNotifyCh:
+ 			//  Ignore since we are not a follower
+ 
+@@ -1467,6 +1529,7 @@
+ 	}
+ 	var rpcErr error
+ 	defer func() {
++		resp.CommitIndex = r.getCommitIndex()
+ 		rpc.Respond(resp, rpcErr)
+ 	}()
+ 
+--- a/replication.go
++++ b/replication.go
+@@ -77,6 +77,12 @@
+ 	// used to apply backoff.
+ 	failures uint64
+ 
++	// followerCommit is the commit index the follower reported in its latest
++	// AppendEntries response (heartbeats included). It can go down when the
++	// follower restarts with its log intact, which is why it is the
++	// follower's own report and not what the leader last sent.
++	followerCommit atomic.Uint64
++
+ 	// notifyCh is notified to send out a heartbeat, which is used to check that
+ 	// this server is still leader.
+ 	notifyCh chan struct{}
+@@ -95,6 +101,15 @@
+ 	allowPipeline bool
+ }
+ 
++// clearLastContact forgets the last contact after the transport reported the
++// connection to this follower lost, so the lease check stops counting it
++// until it answers again.
++func (s *followerReplication) clearLastContact() {
++	s.lastContactLock.Lock()
++	s.lastContact = time.Time{}
++	s.lastContactLock.Unlock()
++}
++
+ // notifyAll is used to notify all the waiting verify futures
+ // if the follower believes we are still the leader.
+ func (s *followerReplication) notifyAll(leader bool) {
+@@ -168,6 +183,9 @@
+ 		// follower. See https://github.com/hashicorp/raft/issues/282.
+ 		case <-randomTimeout(r.config().CommitTimeout):
+ 			lastLogIdx, _ := r.getLastLog()
++			if r.replicationIdle(s, lastLogIdx) {
++				continue
++			}
+ 			shouldStop = r.replicateTo(s, lastLogIdx)
+ 		}
+ 
+@@ -243,6 +261,7 @@
+ 
+ 	// Update the last contact
+ 	s.setLastContact()
++	s.followerCommit.Store(resp.CommitIndex)
+ 
+ 	// Update s based on success
+ 	if resp.Success {
+@@ -399,7 +418,7 @@
+ 		// Wait for the next heartbeat interval or forced notify
+ 		select {
+ 		case <-s.notifyCh:
+-		case <-randomTimeout(r.config().HeartbeatTimeout / 10):
++		case <-heartbeatWait(r.config()):
+ 		case <-stopCh:
+ 			return
+ 		}
+@@ -426,6 +445,17 @@
+ 			}
+ 			s.setLastContact()
+ 			failures = 0
++			if resp.Term > req.Term || !resp.Success {
++				// Upstream left these to the next CommitTimeout replicateTo,
++				// which now skips idle followers: let it handle the stale
++				// term (step down) or the rejection right away.
++				asyncNotifyCh(s.triggerCh)
++			} else {
++				s.followerCommit.Store(resp.CommitIndex)
++				if resp.CommitIndex < r.getCommitIndex() {
++					asyncNotifyCh(s.triggerCh)
++				}
++			}
+ 			labels := []metrics.Label{{Name: "peer_id", Value: string(peer.ID)}}
+ 			metrics.MeasureSinceWithLabels([]string{"raft", "replication", "heartbeat"}, start, labels)
+ 
+@@ -494,6 +524,9 @@
+ 			shouldStop = r.pipelineSend(s, pipeline, &nextIndex, lastLogIdx)
+ 		case <-randomTimeout(r.config().CommitTimeout):
+ 			lastLogIdx, _ := r.getLastLog()
++			if r.replicationIdle(s, lastLogIdx) && nextIndex > lastLogIdx {
++				continue
++			}
+ 			shouldStop = r.pipelineSend(s, pipeline, &nextIndex, lastLogIdx)
+ 		}
+ 	}
+@@ -552,6 +585,7 @@
+ 
+ 			// Update the last contact
+ 			s.setLastContact()
++			s.followerCommit.Store(resp.CommitIndex)
+ 
+ 			// Abort pipeline if not successful
+ 			if !resp.Success {
+@@ -566,6 +600,18 @@
+ 	}
+ }
+ 
++// replicationIdle reports whether the follower already holds every entry up
++// to lastLogIdx and reported the leader's current commit index, so an empty
++// AppendEntries would tell it nothing. The leader wakes replication on every
++// commit index advance (leaderLoop) and whenever a heartbeat response shows
++// the follower behind, so the CommitTimeout poll only retries what those
++// wake-ups could not deliver.
++func (r *Raft) replicationIdle(s *followerReplication, lastLogIdx uint64) bool {
++	return s.failures == 0 &&
++		atomic.LoadUint64(&s.nextIndex) > lastLogIdx &&
++		s.followerCommit.Load() >= r.getCommitIndex()
++}
++
+ // setupAppendEntries is used to setup an append entries request.
+ func (r *Raft) setupAppendEntries(s *followerReplication, req *AppendEntriesRequest, nextIndex, lastIndex uint64) error {
+ 	req.RPCHeader = r.getRPCHeader()
+--- a/util.go
++++ b/util.go
+@@ -34,6 +34,20 @@
+ 	return time.After(minVal + extra)
+ }
+ 
++// heartbeatWait returns the wait before the next heartbeat.
++func heartbeatWait(c Config) <-chan time.Time {
++	if c.HeartbeatInterval <= 0 {
++		return randomTimeout(c.HeartbeatTimeout / 10)
++	}
++	jitter := time.Duration(rand.Int63n(int64(c.HeartbeatInterval/10) + 1))
++	return time.After(c.HeartbeatInterval + jitter)
++}
++
++// randomDelay returns a channel that fires after a random wait in [0, maxVal].
++func randomDelay(maxVal time.Duration) <-chan time.Time {
++	return time.After(time.Duration(rand.Int63n(int64(maxVal) + 1)))
++}
++
+ // min returns the minimum.
+ func min(a, b uint64) uint64 {
+ 	if a <= b {
