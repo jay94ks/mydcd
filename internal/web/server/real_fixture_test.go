@@ -118,7 +118,8 @@ func realShop(t *testing.T, c *clusterfixture.Cluster) {
 }
 
 // realShopOn is realShop with "lan" pools on the given nodes (more than one
-// needs NewIsolated: in one namespace their routes collide).
+// needs NewIsolated: in one namespace their routes collide); with none,
+// there is no "lan".
 func realShopOn(t *testing.T, c *clusterfixture.Cluster, lan ...string) {
 	t.Helper()
 	c.Change(0, "shop", "create-tenant", 0, control.TenantID{ID: "shop"})
@@ -140,6 +141,9 @@ func realShopOn(t *testing.T, c *clusterfixture.Cluster, lan ...string) {
 	pools := map[string]tenancy.TUNNode{
 		"node-0": {Node: "node-0", Pools: []tenancy.Subnet{{ID: "pool", Prefix: netip.MustParsePrefix("10.199.1.0/24"), Gateway: netip.MustParseAddr("10.199.1.1"), MTU: 1280}}, Addresses: []netip.Prefix{netip.MustParsePrefix("10.199.2.0/32")}},
 		"node-1": {Node: "node-1", Pools: []tenancy.Subnet{{ID: "pool", Prefix: netip.MustParsePrefix("10.199.0.0/24"), Gateway: netip.MustParseAddr("10.199.0.1"), MTU: 1280}}, Addresses: []netip.Prefix{netip.MustParsePrefix("10.199.2.1/32")}},
+	}
+	if len(lan) == 0 {
+		return
 	}
 	var members []tenancy.TUNNode
 	for _, node := range lan {

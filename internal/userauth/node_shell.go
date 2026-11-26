@@ -64,7 +64,7 @@ func nodeShellResponse(stream mydcp.Stream, f mydcp.Frame, digest [32]byte, repl
 	if err != nil {
 		return err
 	}
-	return mydcp.WriteFrame(stream, mydcp.Frame{Purpose: mydcp.NodeShell, Kind: 2, Request: f.Request, Fields: []mydcp.Field{{1, true, raw}, {2, true, digest[:]}}})
+	return mydcp.WriteFrame(stream, mydcp.Frame{Purpose: mydcp.NodeShell, Kind: 2, Request: f.Request, Fields: []mydcp.Field{{Tag: 1, Required: true, Value: raw}, {Tag: 2, Required: true, Value: digest[:]}}})
 }
 func (s Service) handleNodeShell(ctx context.Context, conn *mydcp.Session, stream mydcp.Stream, frame mydcp.Frame) error {
 	if frame.Kind != 1 && frame.Kind != 3 {
@@ -256,7 +256,7 @@ func (c Client) nodeShellExchange(ctx context.Context, peer mydcp.Peer, q NodeSh
 	deadline, _ := setup.Deadline()
 	_ = stream.SetDeadline(deadline)
 	id := c.Mesh.NextRequest()
-	f := mydcp.Frame{Purpose: mydcp.NodeShell, Kind: kind, Request: id, Fields: []mydcp.Field{{1, true, raw}, {2, true, digest[:]}}}
+	f := mydcp.Frame{Purpose: mydcp.NodeShell, Kind: kind, Request: id, Fields: []mydcp.Field{{Tag: 1, Required: true, Value: raw}, {Tag: 2, Required: true, Value: digest[:]}}}
 	if err = mydcp.WriteFrame(stream, f); err != nil {
 		return nil, reply, &Error{Code: "transport", Phase: mydcp.Unknown, Cause: err}
 	}

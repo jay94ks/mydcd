@@ -958,7 +958,7 @@ func (r *Runtime) reconcileManagedOwners(v cluster.View) (dnsVisited bool, err e
 					continue
 				}
 				now := uint64(time.Now().Unix())
-				if old := stage.Observation; old != nil && old.Native == native && old.Generation == o.Generation && old.Revision == o.Revision && old.Applied && !old.Released && !old.Expired && old.At <= now && now-r.renewedAt(*old) < control.AppObservationMaxAge/2 {
+				if old := stage.Observation; old != nil && old.Native == native && old.Generation == o.Generation && old.Revision == o.Revision && old.Applied && !old.Released && !old.Expired && old.At <= now && r.renewalFresh(*old, now) {
 					continue
 				}
 				sequence := uint64(1)

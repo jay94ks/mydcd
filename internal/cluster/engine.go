@@ -77,6 +77,7 @@ type Engine struct {
 	closed           bool
 	stopOnce         sync.Once
 	stopErr          error
+	stopped          chan struct{} // closed once native raft has shut down
 	closeOnce        sync.Once
 	closeErr         error
 	pending          chan struct{}
@@ -104,7 +105,7 @@ func Open(o Options) (*Engine, error) {
 	if identityErr != nil {
 		return nil, identityErr
 	}
-	e := &Engine{root: o.Root, pending: make(chan struct{}, 64), done: make(chan struct{}), id: o.ID, cluster: o.Cluster, mesh: o.Mesh, resolve: o.Resolve, fatal: make(chan error, 1), readModule: o.ReadModule, commandModule: o.CommandModule}
+	e := &Engine{root: o.Root, pending: make(chan struct{}, 64), done: make(chan struct{}), stopped: make(chan struct{}), id: o.ID, cluster: o.Cluster, mesh: o.Mesh, resolve: o.Resolve, fatal: make(chan error, 1), readModule: o.ReadModule, commandModule: o.CommandModule}
 	e.nodeCLIAllowed = o.NodeCLIAllowed
 	ok := false
 	defer func() {
@@ -342,7 +343,23 @@ func (e *Engine) await(ctx context.Context, start func() raft.Future) error {
 			result <- err
 			return
 		}
-		result <- start().Error()
+		// A future raft accepted but never answers before its shutdown (one
+		// handed to the FSM queue the FSM no longer reads) would hold Close
+		// forever; it is given up once native raft has stopped.
+		future := start()
+		answer := make(chan error, 1)
+		go func() { answer <- future.Error() }()
+		select {
+		case err := <-answer:
+			result <- err
+		case <-e.stopped:
+			select {
+			case err := <-answer:
+				result <- err
+			default:
+				result <- raft.ErrRaftShutdown
+			}
+		}
 	}()
 	select {
 	case err := <-result:
@@ -706,6 +723,6 @@ func (v View) MarshalView() ([]byte, error) {
 // Every shutdown caller waits for the same native owner termination. A second
 // Raft.Shutdown future alone may return before the first shutdown has finished.
 func (e *Engine) stopNative() error {
-	e.stopOnce.Do(func() { e.stopErr = e.raft.Shutdown().Error() })
+	e.stopOnce.Do(func() { e.stopErr = e.raft.Shutdown().Error(); close(e.stopped) })
 	return e.stopErr
 }

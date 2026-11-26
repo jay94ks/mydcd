@@ -15,6 +15,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 )
 
 // Actual pinned AuthServer callback types, with injected token authority.
@@ -125,9 +126,9 @@ func TestBuildKitAuthForwardsCompleteMergedScopeAndChecksPermissionAfterExchange
 		t.Fatal("merged token escaped after grant revocation", err, fetches)
 	}
 	revoked, revokeAfter = false, false
-	bad := *q
+	bad := proto.Clone(q).(*auth.FetchTokenRequest)
 	bad.Scopes = []string{"repository:team/one:pull", "repository:team/other:pull"}
-	if token, err := provider.FetchToken(context.Background(), &bad); token != nil || status.Code(err) != codes.PermissionDenied || fetches != 2 {
+	if token, err := provider.FetchToken(context.Background(), bad); token != nil || status.Code(err) != codes.PermissionDenied || fetches != 2 {
 		t.Fatal("unfrozen merged scope reached credential exchange", err, fetches)
 	}
 }

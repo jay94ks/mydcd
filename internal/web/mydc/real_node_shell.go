@@ -39,13 +39,22 @@ func (c *realConn) OpenNodeShell(ctx context.Context, op SignedOp) (NodeShell, e
 		return nil, fail(m, CodeTransport, err.Error())
 	}
 	client := userauth.Client{Cluster: c.c.Cluster, Self: self, Mesh: mesh, Peers: []mydcp.Peer{peer}}
-	channel, session, err := client.OpenNodeShell(ctx, peer, s, o.RequestID)
+	// The channel lives as long as the shell, not as long as ctx (the
+	// server's short call context for the open): ctx only bounds the open.
+	life, end := context.WithCancel(context.WithoutCancel(ctx))
+	opening := context.AfterFunc(ctx, end)
+	channel, session, err := client.OpenNodeShell(life, peer, s, o.RequestID)
+	if !opening() && err == nil {
+		_ = channel.Close()
+		err = ctx.Err()
+	}
 	if err != nil {
+		end()
 		_ = mesh.Close()
 		clear(self.Private)
 		return nil, realError(m, err)
 	}
-	return &realShell{session: session, channel: channel, mesh: mesh, self: self}, nil
+	return &realShell{session: session, channel: channel, mesh: mesh, self: self, end: end}, nil
 }
 
 type realShell struct {
@@ -53,8 +62,9 @@ type realShell struct {
 	channel *userauth.NodeShellChannel
 	mesh    *mydcp.Transport
 	self    *identity.Identity
+	end     context.CancelFunc // ends the channel's life (OpenNodeShell)
 	mu      sync.Mutex
-	end     *NodeShellEnd
+	exit    *NodeShellEnd
 	once    sync.Once
 }
 
@@ -82,7 +92,7 @@ func (s *realShell) Recv(ctx context.Context) ([]byte, error) {
 				end.ClosedBy = &NodeShellUser{User: by.User, Username: by.Username}
 			}
 			s.mu.Lock()
-			s.end = &end
+			s.exit = &end
 			s.mu.Unlock()
 			return nil, io.EOF
 		}
@@ -118,16 +128,17 @@ func (s *realShell) Exit() (int, string) {
 func (s *realShell) End() NodeShellEnd {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.end == nil {
+	if s.exit == nil {
 		return NodeShellEnd{}
 	}
-	return *s.end
+	return *s.exit
 }
 
 // Close ends the channel; mydcd closes the PTY when its client goes.
 func (s *realShell) Close() error {
 	s.once.Do(func() {
 		_ = s.channel.Close()
+		s.end()
 		_ = s.mesh.Close()
 		clear(s.self.Private)
 	})

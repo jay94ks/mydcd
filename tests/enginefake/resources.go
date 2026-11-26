@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -111,6 +112,18 @@ func networkRoutes() {
 	handle("POST", "/networks/*/disconnect", (*Engine).networkDisconnect)
 	handle("GET", "/networks/*", (*Engine).networkInspect)
 	handle("DELETE", "/networks/*", (*Engine).networkRemove)
+}
+
+// Networks lists the names of the networks the engine holds, sorted.
+func (e *Engine) Networks() []string {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	var out []string
+	for _, n := range e.networks {
+		out = append(out, n.Name)
+	}
+	slices.Sort(out)
+	return out
 }
 
 // lookupNetwork finds a network by ID, unique ID prefix or name. The caller

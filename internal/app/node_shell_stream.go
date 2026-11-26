@@ -153,6 +153,12 @@ func (s *NodeShellStream) finish() {
 		}
 		s.mu.Unlock()
 	}
+	// A terminal report whose delivery is only pending stays in the receipt,
+	// and the owner reconcile delivers it later; the client still gets the
+	// end this daemon saw.
+	if end.Reason != "" && errors.Is(err, reconcile.ErrPending) {
+		err = nil
+	}
 	s.mu.Lock()
 	s.receipt, s.err = p, err
 	s.row.State, s.row.End, s.row.ClosedAt = "closed", &end, time.Now().Unix()

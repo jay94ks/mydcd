@@ -66,7 +66,9 @@ func RunCompiled(ctx context.Context, expected CompiledExpectation, check contra
 	if err != nil || request.Tenant != expected.Tenant || request.SourceDigest != expected.SourceDigest {
 		return
 	}
-	ctx, cancel = context.WithDeadline(ctx, time.UnixMilli(request.DeadlineUnixMilli))
+	// The deferred result writer cancels after it has read ctx.Err().
+	deadlineCtx, stop := context.WithDeadline(ctx, time.UnixMilli(request.DeadlineUnixMilli))
+	ctx, cancel = deadlineCtx, stop
 	if ctx.Err() != nil {
 		return
 	}

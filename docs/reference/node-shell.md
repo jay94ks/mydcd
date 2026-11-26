@@ -36,7 +36,15 @@ mydc --user alice node shell sessions
 
 ## 노드의 로컬 준비
 
-기존 `sshd`가 `127.0.0.1:22`에서 동작하고 Ed25519 host key의 공개 파일 `/etc/ssh/ssh_host_ed25519_key.pub`를 root 소유로 제공해야 한다. 운영자가 필요한 `sshd`, `useradd`, 선택 sudo용 `sudo`/`visudo`를 설치·관리한다. MyDC는 패키지 설치·sshd 시작·전역 sshd 설정 변경을 수행하지 않는다. 아래 경로/주소는 현재 Runtime의 고정 기본값이며 별도 CLI나 node YAML 옵션으로 변경하는 설정은 아니다.
+기존 `sshd`가 `127.0.0.1:22`에서 동작하고 Ed25519 host key의 공개 파일 `/etc/ssh/ssh_host_ed25519_key.pub`를 root 소유로 제공해야 한다. 운영자가 필요한 `sshd`, `useradd`, 선택 sudo용 `sudo`/`visudo`를 설치·관리한다. MyDC는 패키지 설치·sshd 시작·전역 sshd 설정 변경을 수행하지 않는다. 아래 경로/주소는 기본값이며, node.yaml의 `node_shell`로 바꿀 수 있다. 비운 항목은 기본값을 쓴다. `ssh_endpoint`는 loopback IP와 포트만, 나머지는 정리된 절대 경로만 받으며 home 아래에 원 `node.state_dir`이 있으면 안 된다. 어기면 준비되지 않은 상태(`Ready=false`)로 남는다.
+
+```yaml
+node_shell:
+  ssh_endpoint: 127.0.0.1:22                            # 노드의 sshd (loopback)
+  host_public_key: /etc/ssh/ssh_host_ed25519_key.pub    # root 소유 host 공개키
+  home: /var/lib/mydc-shell                             # mydc-shell 계정 home
+  sudoers_dir: /etc/sudoers.d                           # Sudo=true 규칙을 두는 곳
+```
 
 | 로컬 자료 | 소유와 용도 |
 |---|---|

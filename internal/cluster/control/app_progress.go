@@ -19,6 +19,12 @@ import (
 
 const AppObservationMaxAge uint64 = 30
 
+// AppObservationLinkedMaxAge replaces AppObservationMaxAge while the owner
+// has stayed connected to the leader since its last fact or renewal: the
+// owner reports a changed fact at once, so a renewal only has to prove its
+// loop is still running.
+const AppObservationLinkedMaxAge uint64 = 300
+
 // CheckAppBinding uses the actual immutable reducer before a member proposes a
 // reservation. Missing approval/quota is a waiting condition, not a reason to
 // create an endless stream of denied Raft entries. The FSM still rechecks the

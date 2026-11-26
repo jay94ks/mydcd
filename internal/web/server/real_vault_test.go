@@ -117,6 +117,15 @@ func TestRealServerVault(t *testing.T) {
 	base := "/api/v1/t/shop/vault"
 	step("POST", base, map[string]any{"opId": op(), "parent": "shop", "id": "db", "kind": "group"})
 	step("POST", base, map[string]any{"opId": op(), "parent": "db", "id": "mysql", "kind": "secret", "profile": "values", "object": "shop/mysql", "keys": []string{"PASSWORD"}})
+	for _, b := range []map[string]any{
+		{"opId": op(), "parent": "shop", "id": "x", "kind": "secret"},
+		{"opId": op(), "parent": "shop", "id": "x", "kind": "group", "keys": []string{"A"}},
+		{"opId": op(), "realm": "payments", "parent": "shop", "id": "x", "kind": "group"},
+	} {
+		if code, out := f.do("POST", base, b); code != 422 {
+			t.Fatalf("bad %v: %d %v", b, code, out)
+		}
+	}
 	// The reference stays pending until the first value is written; the
 	// web sends the value to node-0, which writes it into Vault.
 	r := row(base, "mysql")

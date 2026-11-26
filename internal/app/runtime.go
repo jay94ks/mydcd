@@ -139,9 +139,12 @@ type Runtime struct {
 	appWaitMu                 sync.Mutex
 	appWaits                  map[string]string // app step -> last logged wait reason
 	renewMu                   sync.Mutex
-	renewSent                 map[string]observationRenewal // owner: stage key -> last renewal sent
-	renewSeen                 map[string]observationRenewal // leader: tenant/app/stage -> last renewal admitted
-	leaderSince               uint64                        // leader: when this node last became leader
+	inputPermitMu             sync.Mutex
+	inputPermits              map[string]appInputPermitEntry            // PrepareAppInputs gate permits by binding
+	observationSent           map[[32]byte]map[string]observationSentAt // managedObservationLoop only: peer -> source -> last delivery
+	renewSent                 map[string]observationRenewal             // owner: stage key -> last renewal sent
+	renewSeen                 map[string]observationRenewal             // leader: tenant/app/stage -> last renewal admitted
+	leaderSince               uint64                                    // leader: when this node last became leader
 	reportError               error
 	deliveryErrors            map[string]string
 	gitFetcher                *deployment.GitFetcher
@@ -419,7 +422,7 @@ func Open(c config.Node) (*Runtime, error) {
 	if err = r.openHistoricalOwners(c, original, installation, peers); err != nil {
 		return nil, err
 	}
-	if err = r.openNodeShell(c.Node.ID, original.Node.StateDir); err != nil {
+	if err = r.openNodeShell(c.Node.ID, original.Node.StateDir, c.NodeShell); err != nil {
 		return nil, err
 	}
 	if err = r.openServiceCalls(c); err != nil {

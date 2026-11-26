@@ -18,11 +18,21 @@ import (
 // owner whose stage facts are unchanged sends the re-signed observation to the
 // leader over MyDCP; the leader keeps the last renewal in memory and records
 // an expiry in Raft only when renewals stop.
+//
+// A changed fact is reported at once, so renewals only prove the owner's loop
+// still runs. While the owner and the leader stay connected (same leader, same
+// term, no gap in the MYDCP connection since the last renewal) both sides use
+// AppObservationLinkedMaxAge instead of AppObservationMaxAge: the owner renews
+// every 150s instead of every 15s, and the leader expires after 300s instead
+// of 30s. Any break falls back to the short window on both sides. The cost:
+// an owner whose connection stays up but whose reconcile loop has stopped is
+// noticed only after up to 300s (5 minutes) instead of 30s.
 
 // observationRenewal is the last renewal of the stored observation with
 // sequence base.
 type observationRenewal struct {
 	base, at uint64
+	link     leaderLink // owner: the leader link the renewal was sent over
 }
 
 // renewedAt returns when o's owner last renewed it, or o.At.
@@ -33,6 +43,25 @@ func (r *Runtime) renewedAt(o deployment.Observation) uint64 {
 		return max(o.At, n.at)
 	}
 	return o.At
+}
+
+// renewalFresh reports whether the owner can still skip renewing o: its last
+// fact or renewal is younger than half the window the leader will apply.
+func (r *Runtime) renewalFresh(o deployment.Observation, now uint64) bool {
+	at := r.renewedAt(o)
+	if at > now {
+		return false
+	}
+	limit := control.AppObservationMaxAge / 2
+	r.renewMu.Lock()
+	n, ok := r.renewSent[o.Key]
+	r.renewMu.Unlock()
+	if ok && n.base == o.Sequence {
+		if l, linked := r.leaderLink(); linked && l.heldSince(n.link, time.Unix(int64(n.at), 0)) {
+			limit = control.AppObservationLinkedMaxAge / 2
+		}
+	}
+	return now-at < limit
 }
 
 // renewAppObservation sends report to the leader as a renewal when its
@@ -55,6 +84,7 @@ func (r *Runtime) renewAppObservation(ctx context.Context, report control.AppPro
 	if !ok || stage.Observation == nil || stage.Observation.Expired || !deployment.ObservationRenews(*stage.Observation, *report.Observation) {
 		return false, nil
 	}
+	link, _ := r.leaderLink()
 	raw, _ := json.Marshal(report)
 	if _, err = r.appCall(ctx, "app-observation-renew", raw); err != nil {
 		// No Raft fallback on purpose: a lost renewal only lets the leader
@@ -66,7 +96,7 @@ func (r *Runtime) renewAppObservation(ctx context.Context, report control.AppPro
 	if r.renewSent == nil {
 		r.renewSent = map[string]observationRenewal{}
 	}
-	r.renewSent[report.Key] = observationRenewal{base: stage.Observation.Sequence, at: report.Observation.At}
+	r.renewSent[report.Key] = observationRenewal{base: stage.Observation.Sequence, at: report.Observation.At, link: link}
 	r.renewMu.Unlock()
 	return true, nil
 }
@@ -129,7 +159,11 @@ func (r *Runtime) expireAppObservations(ctx context.Context, v cluster.View, app
 			if n, ok := seen[app.Tenant+"/"+app.App+"/"+step.Key]; ok && n.base == o.Sequence {
 				last = max(last, n.at)
 			}
-			if now <= last+control.AppObservationMaxAge || now-o.At <= control.AppObservationMaxAge {
+			limit := control.AppObservationMaxAge
+			if r.ownerLinkedSince(o.Owner, time.Unix(int64(last), 0)) {
+				limit = control.AppObservationLinkedMaxAge
+			}
+			if now <= last+limit || now-o.At <= control.AppObservationMaxAge {
 				continue
 			}
 			report := r.newAppProgress(v, app, "expire-observation", step.Key, nil)

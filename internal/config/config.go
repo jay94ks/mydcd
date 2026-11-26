@@ -108,6 +108,18 @@ type Node struct {
 	ServiceCAs     []ServiceCA        `yaml:"service_cas,omitempty" json:",omitempty"`
 	GitCredentials []GitCredential    `yaml:"git_credentials,omitempty" json:",omitempty"`
 	NodeApps       NodeApps           `yaml:"node_apps,omitempty" json:",omitempty"`
+	NodeShell      NodeShell          `yaml:"node_shell,omitempty" json:",omitempty"`
+}
+
+// NodeShell is node.yaml node_shell: where the node's own SSH server and
+// the mydc-shell account live (docs/reference/node-shell.md). Empty fields
+// keep the defaults: 127.0.0.1:22, /etc/ssh/ssh_host_ed25519_key.pub,
+// /var/lib/mydc-shell and /etc/sudoers.d.
+type NodeShell struct {
+	SSHEndpoint   string `yaml:"ssh_endpoint,omitempty" json:",omitempty"`
+	HostPublicKey string `yaml:"host_public_key,omitempty" json:",omitempty"`
+	Home          string `yaml:"home,omitempty" json:",omitempty"`
+	SudoersDir    string `yaml:"sudoers_dir,omitempty" json:",omitempty"`
 }
 
 // NodeApps is node.yaml node_apps: the node apps this node runs

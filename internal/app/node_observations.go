@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/ed25519"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -329,6 +330,33 @@ func (r *Runtime) publishTaskMeasurement(v cluster.View, app control.AppView, st
 	return publisher.storeNodeObservation(mydcp.Identity(signer.Public), raw)
 }
 
+// observationResend is how long an unchanged report waits before it is sent
+// to a peer again. Receivers treat reports older than observability.MaxAge
+// (120s) as stale, so an unchanged one must still arrive within that.
+const observationResend = 60 * time.Second
+
+type observationSentAt struct {
+	digest [32]byte
+	at     time.Time
+}
+
+// observationDigest identifies a report's content apart from when it was
+// taken, the index it was taken at and its signature.
+func observationDigest(raw []byte) (string, [32]byte, bool) {
+	report, err := observability.Decode(raw)
+	if err != nil {
+		return "", [32]byte{}, false
+	}
+	report.At, report.Index, report.Signature = 0, 0, nil
+	return report.Source(), sha256.Sum256(observability.SigningBytes(report)), true
+}
+
+// observationDue reports whether peer needs report b: its content changed,
+// it was last sent observationResend ago, or the link to peer broke since.
+func observationDue(last observationSentAt, known bool, digest [32]byte, linkedSince time.Time, linked bool, now time.Time) bool {
+	return !known || last.digest != digest || now.Sub(last.at) >= observationResend || !linked || linkedSince.After(last.at)
+}
+
 func (r *Runtime) managedObservationLoop() {
 	tick := time.NewTicker(30 * time.Second)
 	defer tick.Stop()
@@ -339,17 +367,28 @@ func (r *Runtime) managedObservationLoop() {
 		if err == nil {
 			raw, err = r.collectNodeObservations(ctx, v)
 		}
-		stored := make([][]byte, 0, len(raw))
+		allStored := make([][]byte, 0, len(raw))
 		for _, b := range raw {
 			if writeErr := r.storeNodeObservation(mydcp.Identity(r.Identity.Public), b); writeErr != nil {
 				err = errors.Join(err, writeErr)
 				break
 			}
-			stored = append(stored, b)
+			allStored = append(allStored, b)
 		}
-		if len(stored) != 0 {
+		if len(allStored) != 0 {
 			d, directoryErr := r.controlPolicy.Members(v.State)
 			if directoryErr == nil {
+				if r.observationSent == nil {
+					r.observationSent = map[[32]byte]map[string]observationSentAt{}
+				}
+				now := time.Now()
+				type delivery struct {
+					sources []string
+					digests [][32]byte
+					ok      bool
+				}
+				deliveries := map[[32]byte]*delivery{}
+				var deliveriesMu sync.Mutex
 				var workers sync.WaitGroup
 				slots := make(chan struct{}, 4)
 				for _, entry := range d.Entries {
@@ -361,6 +400,25 @@ func (r *Runtime) managedObservationLoop() {
 					if !known {
 						continue
 					}
+					sent := r.observationSent[key]
+					linkedSince, linked := r.Mesh.ConnectedSince(mydcp.Identity(key))
+					due := &delivery{}
+					var stored [][]byte
+					for _, b := range allStored {
+						source, digest, ok := observationDigest(b)
+						last, seen := sent[source]
+						if ok && !observationDue(last, seen, digest, linkedSince, linked, now) {
+							continue
+						}
+						stored = append(stored, b)
+						if ok {
+							due.sources, due.digests = append(due.sources, source), append(due.digests, digest)
+						}
+					}
+					if len(stored) == 0 {
+						continue
+					}
+					deliveries[key] = due
 					workers.Add(1)
 					go func() {
 						defer workers.Done()
@@ -390,9 +448,24 @@ func (r *Runtime) managedObservationLoop() {
 							r.deliveryErrors[peer.ID] = sendErr.Error()
 						}
 						r.mu.Unlock()
+						deliveriesMu.Lock()
+						due.ok = sendErr == nil
+						deliveriesMu.Unlock()
 					}()
 				}
 				workers.Wait()
+				for key, due := range deliveries {
+					if !due.ok {
+						delete(r.observationSent, key)
+						continue
+					}
+					if r.observationSent[key] == nil {
+						r.observationSent[key] = map[string]observationSentAt{}
+					}
+					for i, source := range due.sources {
+						r.observationSent[key][source] = observationSentAt{digest: due.digests[i], at: now}
+					}
+				}
 			} else {
 				err = errors.Join(err, directoryErr)
 			}

@@ -176,8 +176,7 @@ func (r *Runtime) freshAppEvidence(stage deployment.StageRecord, native string, 
 		return false
 	}
 	// A renewal sent over MyDCP counts as fresh; Raft keeps only the fact.
-	at := r.renewedAt(*o)
-	return at <= now && now-at < control.AppObservationMaxAge/2
+	return r.renewalFresh(*o, now)
 }
 
 func (r *Runtime) freshAppTaskObservation(stage deployment.StageRecord, status workload.ContainerStatus, checks ...*deployment.AppCheckResult) bool {

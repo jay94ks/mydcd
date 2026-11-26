@@ -67,8 +67,8 @@ func buildKitSolveOptions(ctx context.Context, spec JobSpec, inputs []FrozenSour
 	if err != nil {
 		return bkclient.SolveOpt{}, err
 	}
-	var policy spb.Policy
-	if json.Unmarshal(policyBytes, &policy) != nil {
+	policy := &spb.Policy{}
+	if json.Unmarshal(policyBytes, policy) != nil {
 		return bkclient.SolveOpt{}, ErrInvalid
 	}
 	var stores map[string]content.Store
@@ -85,7 +85,7 @@ func buildKitSolveOptions(ctx context.Context, spec JobSpec, inputs []FrozenSour
 		if err != nil {
 			return bkclient.SolveOpt{}, err
 		}
-		policy = *converted
+		policy = converted
 		stores = map[string]content.Store{}
 		for _, frozen := range inputs {
 			key := sourceContentStoreID(frozen.Image)
@@ -111,7 +111,7 @@ func buildKitSolveOptions(ctx context.Context, spec JobSpec, inputs []FrozenSour
 		attrs["build-arg:"+key] = value
 	}
 	digest := spec.Digest()
-	return bkclient.SolveOpt{Ref: hex.EncodeToString(digest[:]), Frontend: "dockerfile.v0", FrontendAttrs: attrs, LocalMounts: map[string]fsutil.FS{"context": contextFS, "dockerfile": contextFS}, SourcePolicy: &policy, OCIStores: stores,
+	return bkclient.SolveOpt{Ref: hex.EncodeToString(digest[:]), Frontend: "dockerfile.v0", FrontendAttrs: attrs, LocalMounts: map[string]fsutil.FS{"context": contextFS, "dockerfile": contextFS}, SourcePolicy: policy, OCIStores: stores,
 		Session: []session.Attachable{auth, secretsprovider.NewSecretProvider(buildKitSecretStore{store, auth})},
 		Exports: []bkclient.ExportEntry{{Type: bkclient.ExporterOCI, Attrs: map[string]string{"tar": "false"}, OutputDir: fmt.Sprintf("/proc/self/fd/%d", output.Fd())}}}, nil
 }

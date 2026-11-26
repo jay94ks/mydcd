@@ -292,7 +292,7 @@ func TestCheckerActualSourceRejectsWrongOffsetHeaderAndTrailingBytes(t *testing.
 			raw, _ := json.Marshal(envelope)
 			header := sha256.Sum256(raw)
 			id := c.Mesh.NextRequest()
-			if err := mydcp.WriteFrame(stream, mydcp.Frame{Purpose: mydcp.User, Kind: 1, Request: id, Fields: []mydcp.Field{{1, true, raw}, {2, true, header[:]}}}); err != nil {
+			if err := mydcp.WriteFrame(stream, mydcp.Frame{Purpose: mydcp.User, Kind: 1, Request: id, Fields: []mydcp.Field{{Tag: 1, Required: true, Value: raw}, {Tag: 2, Required: true, Value: header[:]}}}); err != nil {
 				t.Fatal(err)
 			}
 			ready, err := mydcp.ReadFrame(stream, 128<<10)
@@ -307,7 +307,7 @@ func TestCheckerActualSourceRejectsWrongOffsetHeaderAndTrailingBytes(t *testing.
 			if mode == "header" {
 				header[0] ^= 1
 			}
-			if err := mydcp.WriteFrame(stream, mydcp.Frame{Purpose: mydcp.User, Kind: 4, Request: id, Fields: []mydcp.Field{{1, true, offset[:]}, {2, true, data}, {3, true, header[:]}}}); err != nil {
+			if err := mydcp.WriteFrame(stream, mydcp.Frame{Purpose: mydcp.User, Kind: 4, Request: id, Fields: []mydcp.Field{{Tag: 1, Required: true, Value: offset[:]}, {Tag: 2, Required: true, Value: data}, {Tag: 3, Required: true, Value: header[:]}}}); err != nil {
 				t.Fatal(err)
 			}
 			if mode == "trailing" {

@@ -18,6 +18,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -201,7 +202,7 @@ func (c *Cluster) Join(n *Node, inv membership.Invitation) {
 		c.t.Fatal("join", n.ID, err)
 	}
 	c.serve(n)
-	c.client.Peers = append(c.client.Peers, c.Peer(len(c.Nodes)-1))
+	c.client.Peers = append(c.client.Peers, c.Peer(slices.Index(c.Nodes, n)))
 }
 
 // node prepares a node's directories, MyDCP endpoint (loopback, or the

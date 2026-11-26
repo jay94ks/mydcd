@@ -25,7 +25,7 @@ import (
 // The PTY is a tiny line shell: it echoes keys, answers whoami (the
 // account), id, hostname, echo $MYDC_USER, sudo -i (root prompt only when
 // sudo is allowed for this session) and exit; anything else is "command not
-// found". Fake.CloseNodeShellNow ends a session as if by close-node-shell.
+// found".
 // A policy/grant change that no longer allows a session ends it with reason
 // "policy" and ClosedBy = the change's signer.
 // The idle limit is checked against the fake clock on every call.
@@ -64,14 +64,6 @@ func (f *Fake) SetNodeShellNotReady(node, reason string) {
 	} else {
 		s.notReady[node] = reason
 	}
-}
-
-// CloseNodeShellNow ends a session as close-node-shell by the system
-// admin u-admin does.
-func (f *Fake) CloseNodeShellNow(sessionID string) bool {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return f.w.endShell(sessionID, "closed", "u-admin", f.now())
 }
 
 func (w *world) shellNode(node string) NodeShellNode {

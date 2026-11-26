@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"math"
 	"path/filepath"
 	"time"
@@ -85,9 +86,19 @@ func (r *Runtime) PrepareAppInputs(ctx context.Context, request control.AppBindi
 	stop := context.AfterFunc(r.ctx, cancel)
 	defer stop()
 	request.At = time.Now().Unix()
-	permit, err := r.appInputPermit(ctx, request)
-	if err != nil {
-		return workload.InputRef{}, err
+	// The first permit only gates finding an already published projection;
+	// the one before Materialize below is always asked fresh.
+	permit, reused := r.reusableAppInputPermit(ctx, request)
+	if !reused {
+		link, _ := r.leaderLink()
+		asked := time.Now()
+		var err error
+		permit, err = r.appInputPermit(ctx, request)
+		if err != nil {
+			r.forgetAppInputPermit(request)
+			return workload.InputRef{}, err
+		}
+		r.rememberAppInputPermit(request, permit, link, asked)
 	}
 	b, err := deployment.DecodeBinding(permit.Binding)
 	if err != nil || permit.Inputs.Key == "" || !b.Needs().HasSources() {
@@ -158,6 +169,62 @@ func (r *Runtime) PrepareAppInputs(ctx context.Context, request control.AppBindi
 	}
 	defer stage.Destroy()
 	return store.Publish(ctx, b, stage, latest.Inputs.Revision, latest.MaxConsumers)
+}
+
+// appInputPermitReuse bounds how long PrepareAppInputs lets an earlier
+// permit for the same binding stand for a new one.
+const appInputPermitReuse = 30 * time.Second
+
+type appInputPermitEntry struct {
+	permit control.AppBindingPermit
+	asked  time.Time
+	link   leaderLink
+}
+
+func appInputPermitKey(request control.AppBindingRequest) string {
+	return fmt.Sprintf("%s/%d/%d/%x", request.Task.Key, request.Task.Generation, request.Task.Revision, request.Digest)
+}
+
+// reusableAppInputPermit returns the last permit for request when the leader
+// would answer the same: it was asked less than appInputPermitReuse ago over
+// a leader link (same leader and term) that has not broken since, and this
+// replica has applied nothing after the permit's command index. A committed
+// change of any kind, a leader change or a broken link asks again.
+func (r *Runtime) reusableAppInputPermit(ctx context.Context, request control.AppBindingRequest) (control.AppBindingPermit, bool) {
+	r.inputPermitMu.Lock()
+	entry, ok := r.inputPermits[appInputPermitKey(request)]
+	r.inputPermitMu.Unlock()
+	if !ok || time.Since(entry.asked) >= appInputPermitReuse {
+		return control.AppBindingPermit{}, false
+	}
+	if l, linked := r.leaderLink(); !linked || !l.heldSince(entry.link, entry.asked) {
+		return control.AppBindingPermit{}, false
+	}
+	v, err := r.Engine().Read(ctx, false)
+	if err != nil || v.State.Index() != entry.permit.CommandIndex {
+		return control.AppBindingPermit{}, false
+	}
+	return entry.permit, true
+}
+
+func (r *Runtime) rememberAppInputPermit(request control.AppBindingRequest, permit control.AppBindingPermit, link leaderLink, asked time.Time) {
+	r.inputPermitMu.Lock()
+	defer r.inputPermitMu.Unlock()
+	if r.inputPermits == nil {
+		r.inputPermits = map[string]appInputPermitEntry{}
+	}
+	for key, old := range r.inputPermits {
+		if time.Since(old.asked) >= appInputPermitReuse {
+			delete(r.inputPermits, key)
+		}
+	}
+	r.inputPermits[appInputPermitKey(request)] = appInputPermitEntry{permit: permit, asked: asked, link: link}
+}
+
+func (r *Runtime) forgetAppInputPermit(request control.AppBindingRequest) {
+	r.inputPermitMu.Lock()
+	delete(r.inputPermits, appInputPermitKey(request))
+	r.inputPermitMu.Unlock()
 }
 
 // RetireAppInputs settles files only after the original owner's positive Task

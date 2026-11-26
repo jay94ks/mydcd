@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"testing"
+	"time"
 
 	quic "github.com/quic-go/quic-go"
 )
@@ -118,6 +119,37 @@ func TestSessionEndedReportsOnlyTheLastLostMemberConnection(t *testing.T) {
 	s := session(plain, 6, true)
 	plain.sessionEnded(s, idle)
 	plain.wg.Wait()
+}
+
+func TestConnectedSinceCoversOnlyAnUnbrokenLink(t *testing.T) {
+	tr := &Transport{}
+	key := Identity{9}
+	if _, ok := tr.ConnectedSince(key); ok {
+		t.Fatal("connected before any session")
+	}
+	first := &Session{transport: tr, peer: Peer{ID: "node-9", Policy: Policy{Key: key, Member: true}}}
+	second := &Session{transport: tr, peer: first.peer}
+	tr.sessionStarted(first)
+	since, ok := tr.ConnectedSince(key)
+	if !ok || since.IsZero() {
+		t.Fatal("no link after the first session")
+	}
+	time.Sleep(2 * time.Millisecond)
+	tr.sessionStarted(second)
+	tr.sessionEnded(first, &quic.IdleTimeoutError{})
+	if again, ok := tr.ConnectedSince(key); !ok || !again.Equal(since) {
+		t.Fatal("overlapping sessions restarted the link", again, since)
+	}
+	tr.sessionEnded(second, &quic.IdleTimeoutError{})
+	if _, ok := tr.ConnectedSince(key); ok {
+		t.Fatal("link reported after the last session ended")
+	}
+	time.Sleep(2 * time.Millisecond)
+	tr.sessionStarted(first)
+	if later, ok := tr.ConnectedSince(key); !ok || !later.After(since) {
+		t.Fatal("reconnect kept the old link start", later, since)
+	}
+	tr.wg.Wait()
 }
 
 func TestSessionStartedReportsOnlyTheFirstMemberConnection(t *testing.T) {

@@ -18,6 +18,7 @@ import (
 	"github.com/jay94ks/mydcd/internal/cluster"
 	"github.com/jay94ks/mydcd/internal/cluster/control"
 	"github.com/jay94ks/mydcd/internal/cluster/state"
+	"github.com/jay94ks/mydcd/internal/config"
 	"github.com/jay94ks/mydcd/internal/identity"
 	"github.com/jay94ks/mydcd/internal/nodeshell"
 	"github.com/jay94ks/mydcd/internal/reconcile"
@@ -59,11 +60,11 @@ type nodeShellRuntime struct {
 // historical observation stores have acquired their original exclusive locks.
 // Account/key provisioning remains deferred until the own-node policy enables
 // it. Historical native owners never create their own SSH account/worker.
-func (r *Runtime) openNodeShell(node, stateRoot string) error {
+func (r *Runtime) openNodeShell(node, stateRoot string, shell config.NodeShell) error {
 	if r.historicalOwner {
 		return nil
 	}
-	adapter, err := nodeshell.New(nodeshell.Config{StateDir: filepath.Join(stateRoot, "node-shell")})
+	adapter, err := nodeshell.New(nodeshell.Config{StateDir: filepath.Join(stateRoot, "node-shell"), Endpoint: shell.SSHEndpoint, HostPublicKeyFile: shell.HostPublicKey, Home: shell.Home, SudoersDir: shell.SudoersDir})
 	if err != nil {
 		return err
 	}
@@ -357,6 +358,12 @@ func (r *Runtime) OpenNodeShell(ctx context.Context, id string) (*NodeShellStrea
 		live.mu.Lock()
 		live.receipt = p
 		live.mu.Unlock()
+		// The signed "opened" report is kept in the receipt. When only its
+		// delivery is pending (another report moved the root under it), the
+		// owner reconcile delivers it later; the open shell stays.
+		if p.Pending != nil && errors.Is(err, reconcile.ErrPending) {
+			err = nil
+		}
 	}
 	if err != nil {
 		_ = live.Close()

@@ -61,6 +61,7 @@ type Transport struct {
 	next               atomic.Uint64
 	packetsDelivered   atomic.Uint64
 	livePeers          map[Identity]int
+	liveSince          map[Identity]time.Time
 	peerLost           func(Peer)
 	peerFound          func(Peer)
 	packetsDropped     atomic.Uint64
@@ -459,8 +460,9 @@ func (t *Transport) OnPeerLost(f func(Peer)) {
 	t.mu.Unlock()
 }
 
-// sessionStarted counts a live session; the first one to a cluster member
-// reports OnPeerConnected.
+// sessionStarted counts a live session. The first one to a peer starts its
+// unbroken-link time (ConnectedSince) and, for a cluster member, reports
+// OnPeerConnected.
 func (t *Transport) sessionStarted(s *Session) {
 	t.mu.Lock()
 	if t.livePeers == nil {
@@ -468,6 +470,12 @@ func (t *Transport) sessionStarted(s *Session) {
 	}
 	t.livePeers[s.peer.Key]++
 	first := t.livePeers[s.peer.Key] == 1
+	if first {
+		if t.liveSince == nil {
+			t.liveSince = map[Identity]time.Time{}
+		}
+		t.liveSince[s.peer.Key] = time.Now()
+	}
 	found, closed := t.peerFound, t.closed
 	t.mu.Unlock()
 	if found != nil && first && !closed && (s.peer.Member || s.peer.Replicate) {
@@ -485,12 +493,27 @@ func (t *Transport) OnPeerConnected(f func(Peer)) {
 	t.mu.Unlock()
 }
 
+// ConnectedSince reports since when this node has had at least one
+// authenticated connection to key without a gap, and whether it has one now.
+// Callers use it to trust that a peer that would report a change has stayed
+// reachable since some earlier time.
+func (t *Transport) ConnectedSince(key Identity) (time.Time, bool) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.livePeers[key] <= 0 {
+		return time.Time{}, false
+	}
+	since, ok := t.liveSince[key]
+	return since, ok
+}
+
 func (t *Transport) sessionEnded(s *Session, cause error) {
 	t.mu.Lock()
 	t.livePeers[s.peer.Key]--
 	last := t.livePeers[s.peer.Key] <= 0
 	if last {
 		delete(t.livePeers, s.peer.Key)
+		delete(t.liveSince, s.peer.Key)
 	}
 	f := t.peerLost
 	closed := t.closed
