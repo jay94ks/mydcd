@@ -1,0 +1,184 @@
+# app.yaml은 tenant의 앱/서비스와 기존 망·Volume·Secret 참조만 정의한다.
+# CIDR·IPAM·DNS 등 클러스터 관리 자원은 cluster.yaml/관리 명령으로 미리 준비한다.
+# 컨테이너 앱 소스는 apps/php/, apps/mysql/에서 관리한다.
+# 범용 MyDC 엔진의 샘플 앱이다. PHP/MySQL의 이름·포트·데이터 경로·검사 조건을 제품 코어에 고정하지 않는다.
+# app.yaml 명세의 PHP + MySQL 두 노드 설계 예시(schema=1).
+# lifecycle/Yaegi/선택 컴파일의 별도 앱 예시는 lifecycle.example.app.yaml을 참고한다.
+# 고정 digest/profile/승인된 node와 이름 있는 tenant network·Secret Group을 먼저 준비한다.
+# 실제 이미지/노드 값과 별도 cluster.yaml 관리 망 준비가 필요하다. CD를 켜려면 Git source·접속 자격과 앱 CD 정책을 먼저 준비한다.
+# cluster.yaml은 별도 partial 관리 입력이며 이 앱에 include/자동 merge하지 않는다.
+# 아래 ingress runtime은 앱의 요구 예산이다. node/tenant의 확정 상한을 변경하지 않는다.
+# Secret/Group 선택 순서와 projection, Volume retain/단일 writer·명시 이관 규칙을 유지한다.
+# 비밀번호/토큰/설치 자격·실제 데이터/승인 서명·작업 진행 증거는 파일에 넣지 않는다.
+# CIDR과 주소는 사전 관리한 php-mysql-network의 node-a/node-b pool을 사용한다.
+# DB 이동은 새 목표 app와 별도 명시 volume move operation으로 승인하며 up/CD만으로 시작하지 않는다.
+# aliases는 관리 DNS의 앱 이름 등록이다. 해당 망의 DNS 정책과 담당 node의 managed-dns capability가 없으면 계획을 거부한다.
+name: php-mysql-demo
+x-mydc:
+  ingress:
+    runtime:
+      max_requests: 8
+      max_connections: 32
+      max_header_bytes: 16384
+      max_body_bytes: 1048576
+      buffer_bytes: 524288
+      request_timeout_ms: 30000
+      dial_timeout_ms: 2000
+      response_header_timeout_ms: 5000
+      health_interval_ms: 1000
+    node: node-b
+    host: php-mysql.test
+    listeners:
+    - address: 192.0.2.12:8080
+    - address: 192.0.2.12:8443
+      tls: true
+      http3: true
+    backend:
+      service: web
+      port: 8080
+      health_path: /readyz
+  delivery:
+    enabled: true
+    source:
+      kind: git
+      repository: https://example.invalid/team/php-mysql.git
+      ref: main
+      path: app.yaml
+      credential_profile: git-readonly
+    poll_interval_seconds: 60
+    sync:
+      mode: manual
+      drift: report
+      prune: false
+      allow_empty: false
+    runtime_edits:
+      mode: require-explicit-override
+      expiry: manual-release
+    limits:
+      fetch_timeout_seconds: 30
+      source_bytes: 4194304
+      queued_revisions: 1
+      active_operations: 1
+services:
+  web:
+    image: docker.io/mydc-example/php-demo@sha256:<WEB_IMAGE_DIGEST>
+    stop_grace_period: 30s
+    command:
+    - apache2-foreground
+    user: 10001:10001
+    read_only: true
+    cap_drop:
+    - ALL
+    security_opt:
+    - no-new-privileges:true
+    cpus: 0.5
+    mem_limit: 256m
+    environment:
+      DB_HOST: db.php-mysql.mydc.test
+      DB_PORT: '3306'
+      DB_DATABASE: demo
+      DB_USER: demo
+      DB_PASSWORD_FILE: /run/secrets/db-password
+    secrets:
+    - source: db-password
+      target: db-password
+      uid: '10001'
+      gid: '10001'
+      mode: '0400'
+    tmpfs:
+    - /tmp:size=16m,mode=1777
+    - /run/apache2:size=4m,uid=10001,gid=10001,mode=0750
+    - /run/lock/apache2:size=4m,uid=10001,gid=10001,mode=0750
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      app:
+        ipv4_address: 10.240.10.10
+        aliases: [web]
+    x-mydc:
+      node: node-a
+      ready: {http: /readyz, port: 8080}
+      secrets_from: [tenant-defaults, group/common, web-runtime-overrides]
+    dns:
+    - 10.240.10.1
+    dns_search:
+    - php-mysql.mydc.test
+  db:
+    image: docker.io/mydc-example/mysql-demo@sha256:<DB_IMAGE_DIGEST>
+    # 앱의 명시 정책 예시. 엔진은 이미지 이름으로 유예를 변경하지 않는다.
+    stop_grace_period: 2m
+    stop_signal: SIGTERM
+    command:
+    - mysqld
+    - --bind-address=0.0.0.0
+    - --port=3306
+    user: 10001:10001
+    read_only: true
+    cap_drop:
+    - ALL
+    security_opt:
+    - no-new-privileges:true
+    cpus: 1.0
+    mem_limit: 768m
+    environment:
+      MYSQL_DATABASE: demo
+      MYSQL_USER: demo
+      MYSQL_PASSWORD_FILE: /run/secrets/db-password
+      MYSQL_ROOT_PASSWORD_FILE: /run/secrets/db-root-password
+    secrets:
+    - source: db-password
+      target: db-password
+      uid: '10001'
+      gid: '10001'
+      mode: '0400'
+    - source: db-root-password
+      target: db-root-password
+      uid: '10001'
+      gid: '10001'
+      mode: '0400'
+    volumes:
+    - type: volume
+      source: mysql-data
+      target: /var/lib/mysql
+    tmpfs:
+    - /tmp:size=32m,mode=1777
+    - /var/run/mysqld:size=8m,uid=10001,gid=10001,mode=0750
+    healthcheck:
+      test:
+      - CMD
+      - /usr/local/bin/mydc-db-ready
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 60s
+    networks:
+      app:
+        ipv4_address: 10.240.20.10
+        aliases: [db]
+    x-mydc:
+      node: node-b
+      secrets_from: [tenant-defaults, group/common, group/db-admin]
+    dns:
+    - 10.240.20.1
+    dns_search:
+    - php-mysql.mydc.test
+networks:
+  app:
+    external: true
+    name: php-mysql-network
+volumes:
+  mysql-data:
+    x-mydc:
+      node: node-b
+      uid: 10001
+      gid: 10001
+      mode: '0750'
+      size: 2GiB
+secrets:
+  db-password:
+    x-mydc:
+      key: DB_PASSWORD
+  db-root-password:
+    x-mydc:
+      key: MYSQL_ROOT_PASSWORD

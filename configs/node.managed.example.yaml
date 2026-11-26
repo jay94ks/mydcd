@@ -1,0 +1,50 @@
+# Explicit init currently supports an empty managed N1/Q1 cluster.
+# Approved target joining uses node.join.example.yaml; explicit promotion
+# uses a separate current system-admin operation after durable installation.
+# mydcd --config configs/node.managed.example.yaml init \
+#   --admin-public-key PUBLIC_KEY --request-id init-local \
+#   --client-config-out configs/local.user.yaml
+# Then run the SAME installation with mydcd --config FILE run.
+version: 1
+node:
+  id: local
+  state_dir: ../work/managed/state
+  identity_dir: ../work/managed/identity
+  listen: "127.0.0.1:7443"
+# network.enabled: true connects accepted app-owned Bridge steps to the local
+# Docker Engine. Commit positive global AND tenant NodeLimit.MaxConsumers first.
+# workload connects original Task/Volume/private-input ownership. ingress also
+# needs network, cluster store certificates and explicit global/tenant ingress budgets.
+# Enabling a module does not create tenant/app/network resources.
+# An enabled network names the Docker socket: docker_socket: unix:///var/run/docker.sock
+modules:
+  network:
+    enabled: false
+  workload:
+    enabled: false
+  ingress:
+    enabled: false
+
+# Optional system-only protected password/token reader. Install an explicit
+# trusted CA/private reader token and fixed credential material first.
+# credentials:
+#   profile: system
+#   address: https://vault.example.test:8200
+#   mount: kv
+#   ca_file: /etc/mydc/credential-vault-ca.pem
+#   token_file: /etc/mydc/credential-vault.token
+
+# Optional installed tenant value writer. Files contain the trusted CA and a
+# private token; neither token nor this endpoint belongs in Compose/Common.
+# Register the SAME realm/profile/node public role separately via vault-* CAS.
+# This does not create a realm, approve a Group, or enable Task input injection.
+# vaults:
+#   - realm: demo
+#     profile: app-values
+#     address: https://vault.example.test:8200
+#     mount: kv
+#     prefix: values/demo
+#     ca_file: /etc/mydc/app-vault-ca.pem
+#     token_file: /etc/mydc/app-vault-writer.token
+#     values: true
+#     verifiers: false

@@ -1,0 +1,14 @@
+## 이관 대상 실행과 전송 정산
+
+보존 source 삭제는 기존 인증 관리 변경 `delete-retained-volume`의 VolumeMoveSelection(Scope/원 ID)과 현재 Volume revision CAS로 수락한다. 원 삭제 사용자 서명은 같은 Volume checkpoint에, optional Move.SourceDeletion(Revision/Gone)은 기존 Volume FSM에 보존하며 원 move job/digest를 수정하지 않는다. owner는 latest quorum의 `volume-retained-delete-permit`으로 원 source NativeReady·삭제 revision·Retained ID를 받고 기존 native A2 삭제를 수행한다. `volume-delete-report`의 optional Retained ID와 signed NativeRemoved는 원 source key/물리 generation·삭제 revision을 고정한다. payload/호스트 경로를 새 native로 해석하지 않는다. 일반 삭제 report/permit와 nil/빈 필드의 기존 schema1 bytes는 유지한다. 실제 Gone 확정 전에는 물리 예약/보존 참조를 유지하며 현재 target/consumer·다른 보존본과 구분한다.
+
+이관 사실 보고는 기존 schema1 `volume-move-report`와 root/Volume revision CAS를 사용한다. `active`는 target member의 중첩 ActiveProof를 받으며 같은 원 Inventory operation·현재 Task/Binding/Volume consumer를 다시 검사한다. `volume-move-permit`의 Task 소비 경로는 공개 ActiveTask 참조만 반환하고 실제 native Running/recipe/mount/activation pin 확인은 그 target owner가 수행한다. `cleanup-source`/`cleanup-target`은 해당 원 owner의 CleanupProof를 받는다. 양쪽 확정 후에만 Completed가 되며 원 target 데이터·Task pin과 보존 source fence를 유지한다. active/cleanup의 사실 정산은 새 Start 허가와 구분하고 현재 member/latest quorum은 계속 요구한다. report의 새 optional Active/Cleanup과 Move.ReaderClosed가 nil이면 기존 schema1 bytes를 유지한다.
+
+ActiveTask는 원 writable 또는 readonly Task consumer다. readonly 다중 선언은 모든 원 Binding/consumer를 검사한 뒤 Task key 순으로 하나를 선택하며 실제 실행은 그 owner가 확인한다. 원 목표에 mount가 없고 공유 consumer0인 경우에만 같은 permit의 optional ActiveIdle=true/ActiveTask=nil을 반환한다. 이에 대응하는 ActiveProof.Idle은 Running=false·빈 Consumer이며 원 native/activation/Start·native pin/실제 Engine 연결의 명시 확인을 요구한다. reducer는 현재 원 목표와 consumer0을 다시 검사하며 Running/Idle 혼합·임의 reader/빈 journal·query 실패의 부재 추정을 허용하지 않는다. ActiveIdle/Idle의 false는 생략해 기존 schema1 bytes를 유지하며 Idle도 양쪽 cleanup·source fence·owner 커밋의 불가역 상태를 바꾸지 않는다.
+
+원 source의 `reader-gone`은 서명된 Gone과 consumer 반환을 같은 FSM 변경으로 보존한다. 이미 종료한 reader는 새 read/취득에 사용할 수 없다. 전송 정리는 원 worker/stream·A2 journal·local A3 pin·파일 제거/sync의 실제 확인을 요구하며, 원 기록 부재/timeout/응답 유실을 종료로 가정하지 않는다. Active 이후 target 수신 파일 정리는 별도 cleanup-target 권한만 사용하고 취소 권한 거부 뒤 fallback하거나 재전송하지 않는다.
+
+취소 수락 뒤 source는 `cancel-source`/`cancel-fence`, target은 `cancel-target`의 같은 latest quorum permit/report 경계를 사용한다. CleanupProof.Unchanged는 source의 실제 미변경 관측이며 원 앱 retirement·reader floor/Manifest/fence가 없는 상태에서만 인정한다. 두 서명 사실이 모이면 같은 FSM 변경에서 Cancelled까지 확정하고 이 경우 기존 writer/owner revision을 보존한다. fenced 취소는 원 reader Gone·양쪽 종료와 새 owner revision을 요구한다. target의 optional CancelledTarget은 중첩 CancelProof이며 원 native/restore/receive worker join·실제 Gone·file pin/sync 뒤에만 보고한다. 전송 기한 만료가 원 정산을 금지하지 않는다. 새 optional 필드의 nil/false는 기존 schema1 bytes/서명을 바꾸지 않는다.
+
+미정산 앱 이관은 원 source/target Inventory를 보존하며 다른 upload의 일반 begin-app도 이를 교체하지 못한다. 원 target의 활성 커밋만 기존 handoff를 소비한다. 다음 이관은 기존 FSM의 직전 확정 native와 새 signed Source를 대조하고 마지막 확정 값만 현재 registry와 비교한다. 원 move ID/서명·보존 source 예약과 Snapshot 참조를 유지하며 별도 동기화 계층/스키마 번호를 추가하지 않는다.
+

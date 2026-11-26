@@ -1,0 +1,709 @@
+diff --git a/pkg/registry/blobs.go b/pkg/registry/blobs.go
+index 5b666dd..c95ef05 100644
+--- a/pkg/registry/blobs.go
++++ b/pkg/registry/blobs.go
+@@ -162,6 +162,7 @@ func (m *memHandler) Delete(_ context.Context, _ string, h v1.Hash) error {
+ 
+ // blobs
+ type blobs struct {
++	uploadStore UploadStore
+ 	blobHandler BlobHandler
+ 
+ 	// Each upload gets a unique id that writes occur to until finalized.
+@@ -191,6 +192,18 @@ func (b *blobs) handle(resp http.ResponseWriter, req *http.Request) *regError {
+ 	rangeHeader := req.Header.Get("Range")
+ 
+ 	repo := req.URL.Host + path.Join(elem[1:len(elem)-2]...)
++	if b.uploadStore != nil {
++		// A serving instance already has a fixed registry audience. Preserve
++		// the repository path; neither Host nor path.Clean may change its ACL.
++		repo = strings.Join(elem[1:len(elem)-2], "/")
++	}
++	if b.uploadStore != nil && (service == "uploads" || target == "uploads" && req.Method == http.MethodPost) {
++		uploadRepo := repo
++		if service == "uploads" {
++			uploadRepo = strings.Join(elem[1:len(elem)-3], "/")
++		}
++		return b.handleStoredUpload(resp, req, uploadRepo, service, target)
++	}
+ 
+ 	switch req.Method {
+ 	case http.MethodHead:
+diff --git a/pkg/registry/manifest.go b/pkg/registry/manifest.go
+index fc9c4a7..1a48073 100644
+--- a/pkg/registry/manifest.go
++++ b/pkg/registry/manifest.go
+@@ -17,6 +17,7 @@ package registry
+ import (
+ 	"bytes"
+ 	"encoding/json"
++	"errors"
+ 	"fmt"
+ 	"io"
+ 	"log"
+@@ -45,6 +46,8 @@ type manifest struct {
+ }
+ 
+ type manifests struct {
++	store   ManifestStore
++	maxBody int64
+ 	// maps repo -> manifest tag/digest -> manifest
+ 	manifests map[string]map[string]manifest
+ 	lock      sync.RWMutex
+@@ -98,67 +101,43 @@ func (m *manifests) handle(resp http.ResponseWriter, req *http.Request) *regErro
+ 	repo := strings.Join(elem[1:len(elem)-2], "/")
+ 
+ 	switch req.Method {
+-	case http.MethodGet:
++	case http.MethodGet, http.MethodHead:
+ 		m.lock.RLock()
+ 		defer m.lock.RUnlock()
+-
+-		c, ok := m.manifests[repo]
+-		if !ok {
+-			return &regError{
+-				Status:  http.StatusNotFound,
+-				Code:    "NAME_UNKNOWN",
+-				Message: "Unknown name",
+-			}
+-		}
+-		m, ok := c[target]
+-		if !ok {
+-			return &regError{
+-				Status:  http.StatusNotFound,
+-				Code:    "MANIFEST_UNKNOWN",
+-				Message: "Unknown manifest",
+-			}
++		mf, err := m.readManifest(req.Context(), repo, target)
++		if err != nil {
++			return manifestStoreError(err)
+ 		}
+-
+-		h, _, _ := v1.SHA256(bytes.NewReader(m.blob))
++		h, _, _ := v1.SHA256(bytes.NewReader(mf.blob))
+ 		resp.Header().Set("Docker-Content-Digest", h.String())
+-		resp.Header().Set("Content-Type", m.contentType)
+-		resp.Header().Set("Content-Length", fmt.Sprint(len(m.blob)))
++		resp.Header().Set("Content-Type", mf.contentType)
++		resp.Header().Set("Content-Length", fmt.Sprint(len(mf.blob)))
+ 		resp.WriteHeader(http.StatusOK)
+-		io.Copy(resp, bytes.NewReader(m.blob))
+-		return nil
+-
+-	case http.MethodHead:
+-		m.lock.RLock()
+-		defer m.lock.RUnlock()
+-
+-		if _, ok := m.manifests[repo]; !ok {
+-			return &regError{
+-				Status:  http.StatusNotFound,
+-				Code:    "NAME_UNKNOWN",
+-				Message: "Unknown name",
+-			}
+-		}
+-		m, ok := m.manifests[repo][target]
+-		if !ok {
+-			return &regError{
+-				Status:  http.StatusNotFound,
+-				Code:    "MANIFEST_UNKNOWN",
+-				Message: "Unknown manifest",
+-			}
++		if req.Method == http.MethodGet {
++			_, _ = io.Copy(resp, bytes.NewReader(mf.blob))
+ 		}
+-
+-		h, _, _ := v1.SHA256(bytes.NewReader(m.blob))
+-		resp.Header().Set("Docker-Content-Digest", h.String())
+-		resp.Header().Set("Content-Type", m.contentType)
+-		resp.Header().Set("Content-Length", fmt.Sprint(len(m.blob)))
+-		resp.WriteHeader(http.StatusOK)
+ 		return nil
+ 
+ 	case http.MethodPut:
+ 		b := &bytes.Buffer{}
+-		io.Copy(b, req.Body)
++		var input io.Reader = req.Body
++		if m.store != nil {
++			if m.maxBody < 1 {
++				return regErrUnsupported
++			}
++			input = io.LimitReader(input, m.maxBody+1)
++		}
++		if _, err := io.Copy(b, input); err != nil {
++			return regErrInternal(err)
++		}
++		if m.store != nil && int64(b.Len()) > m.maxBody {
++			return &regError{Status: http.StatusRequestEntityTooLarge, Code: "MANIFEST_INVALID", Message: "manifest exceeds configured limit"}
++		}
+ 		h, _, _ := v1.SHA256(bytes.NewReader(b.Bytes()))
+ 		digest := h.String()
++		if strings.Contains(target, ":") && target != digest {
++			return regErrDigestMismatch
++		}
+ 		mf := manifest{
+ 			blob:        b.Bytes(),
+ 			contentType: req.Header.Get("Content-Type"),
+@@ -186,7 +165,10 @@ func (m *manifests) handle(resp http.ResponseWriter, req *http.Request) *regErro
+ 						continue
+ 					}
+ 					if desc.MediaType.IsIndex() || desc.MediaType.IsImage() {
+-						if _, found := m.manifests[repo][desc.Digest.String()]; !found {
++						if _, err := m.readManifest(req.Context(), repo, desc.Digest.String()); err != nil {
++							if !errors.Is(err, ErrNotFound) && !errors.Is(err, ErrNameUnknown) {
++								return regErrInternal(err)
++							}
+ 							return &regError{
+ 								Status:  http.StatusNotFound,
+ 								Code:    "MANIFEST_UNKNOWN",
+@@ -207,14 +189,9 @@ func (m *manifests) handle(resp http.ResponseWriter, req *http.Request) *regErro
+ 		m.lock.Lock()
+ 		defer m.lock.Unlock()
+ 
+-		if _, ok := m.manifests[repo]; !ok {
+-			m.manifests[repo] = make(map[string]manifest, 2)
++		if err := m.writeManifest(req.Context(), repo, target, digest, mf); err != nil {
++			return manifestStoreError(err)
+ 		}
+-
+-		// Allow future references by target (tag) and immutable digest.
+-		// See https://docs.docker.com/engine/reference/commandline/pull/#pull-an-image-by-digest-immutable-identifier.
+-		m.manifests[repo][digest] = mf
+-		m.manifests[repo][target] = mf
+ 		resp.Header().Set("Docker-Content-Digest", digest)
+ 		resp.WriteHeader(http.StatusCreated)
+ 		return nil
+@@ -222,24 +199,9 @@ func (m *manifests) handle(resp http.ResponseWriter, req *http.Request) *regErro
+ 	case http.MethodDelete:
+ 		m.lock.Lock()
+ 		defer m.lock.Unlock()
+-		if _, ok := m.manifests[repo]; !ok {
+-			return &regError{
+-				Status:  http.StatusNotFound,
+-				Code:    "NAME_UNKNOWN",
+-				Message: "Unknown name",
+-			}
+-		}
+-
+-		_, ok := m.manifests[repo][target]
+-		if !ok {
+-			return &regError{
+-				Status:  http.StatusNotFound,
+-				Code:    "MANIFEST_UNKNOWN",
+-				Message: "Unknown manifest",
+-			}
++		if err := m.deleteManifest(req.Context(), repo, target); err != nil {
++			return manifestStoreError(err)
+ 		}
+-
+-		delete(m.manifests[repo], target)
+ 		resp.WriteHeader(http.StatusAccepted)
+ 		return nil
+ 
+@@ -261,18 +223,13 @@ func (m *manifests) handleTags(resp http.ResponseWriter, req *http.Request) *reg
+ 		m.lock.RLock()
+ 		defer m.lock.RUnlock()
+ 
+-		c, ok := m.manifests[repo]
+-		if !ok {
+-			return &regError{
+-				Status:  http.StatusNotFound,
+-				Code:    "NAME_UNKNOWN",
+-				Message: "Unknown name",
+-			}
++		refs, err := m.manifestReferences(req.Context(), repo)
++		if err != nil {
++			return manifestStoreError(err)
+ 		}
+-
+ 		var tags []string
+-		for tag := range c {
+-			if !strings.Contains(tag, "sha256:") {
++		for _, tag := range refs {
++			if !strings.Contains(tag, ":") {
+ 				tags = append(tags, tag)
+ 			}
+ 		}
+@@ -281,17 +238,13 @@ func (m *manifests) handleTags(resp http.ResponseWriter, req *http.Request) *reg
+ 		// https://github.com/opencontainers/distribution-spec/blob/b505e9cc53ec499edbd9c1be32298388921bb705/detail.md#tags-paginated
+ 		// Offset using last query parameter.
+ 		if last := req.URL.Query().Get("last"); last != "" {
+-			for i, t := range tags {
+-				if t > last {
+-					tags = tags[i:]
+-					break
+-				}
+-			}
++			i := sort.Search(len(tags), func(i int) bool { return tags[i] > last })
++			tags = tags[i:]
+ 		}
+ 
+ 		// Limit using n query parameter.
+ 		if ns := req.URL.Query().Get("n"); ns != "" {
+-			if n, err := strconv.Atoi(ns); err != nil {
++			if n, err := strconv.Atoi(ns); err != nil || n < 0 {
+ 				return &regError{
+ 					Status:  http.StatusBadRequest,
+ 					Code:    "BAD_REQUEST",
+@@ -333,16 +286,16 @@ func (m *manifests) handleCatalog(resp http.ResponseWriter, req *http.Request) *
+ 		m.lock.RLock()
+ 		defer m.lock.RUnlock()
+ 
+-		var repos []string
+-		countRepos := 0
+-		// TODO: implement pagination
+-		for key := range m.manifests {
+-			if countRepos >= n {
+-				break
+-			}
+-			countRepos++
+-
+-			repos = append(repos, key)
++		repos, err := m.repositories(req.Context())
++		if err != nil {
++			return manifestStoreError(err)
++		}
++		sort.Strings(repos)
++		if n < 0 {
++			return &regError{Status: http.StatusBadRequest, Code: "BAD_REQUEST", Message: "invalid page size"}
++		}
++		if n < len(repos) {
++			repos = repos[:n]
+ 		}
+ 
+ 		repositoriesToList := catalog{
+@@ -391,13 +344,9 @@ func (m *manifests) handleReferrers(resp http.ResponseWriter, req *http.Request)
+ 	m.lock.RLock()
+ 	defer m.lock.RUnlock()
+ 
+-	digestToManifestMap, repoExists := m.manifests[repo]
+-	if !repoExists {
+-		return &regError{
+-			Status:  http.StatusNotFound,
+-			Code:    "NAME_UNKNOWN",
+-			Message: "Unknown name",
+-		}
++	refs, err := m.manifestReferences(req.Context(), repo)
++	if err != nil {
++		return manifestStoreError(err)
+ 	}
+ 
+ 	im := v1.IndexManifest{
+@@ -405,11 +354,15 @@ func (m *manifests) handleReferrers(resp http.ResponseWriter, req *http.Request)
+ 		MediaType:     types.OCIImageIndex,
+ 		Manifests:     []v1.Descriptor{},
+ 	}
+-	for digest, manifest := range digestToManifestMap {
++	for _, digest := range refs {
+ 		h, err := v1.NewHash(digest)
+ 		if err != nil {
+ 			continue
+ 		}
++		manifest, err := m.readManifest(req.Context(), repo, digest)
++		if err != nil {
++			return manifestStoreError(err)
++		}
+ 		var refPointer struct {
+ 			Subject *v1.Descriptor `json:"subject"`
+ 		}
+diff --git a/pkg/registry/storage.go b/pkg/registry/storage.go
+new file mode 100644
+index 0000000..b8e06a1
+--- /dev/null
++++ b/pkg/registry/storage.go
+@@ -0,0 +1,146 @@
++// Copyright 2026 MyDC Authors.
++// Licensed under the Apache License, Version 2.0 (the "License");
++// you may not use this file except in compliance with the License.
++// You may obtain a copy at https://www.apache.org/licenses/LICENSE-2.0
++
++package registry
++
++import (
++	"context"
++	"errors"
++	"io"
++	"net/http"
++)
++
++// ManifestData is the original manifest body and media type, not a parsed or
++// re-encoded document. Digest and tag must be published in one durable write.
++type ManifestData struct {
++	ContentType string
++	Body        []byte
++}
++
++type ManifestStore interface {
++	GetManifest(context.Context, string, string) (ManifestData, error)
++	PutManifest(ctx context.Context, repo, target, digest string, data ManifestData) error
++	DeleteManifest(context.Context, string, string) error
++	ManifestReferences(context.Context, string) ([]string, error)
++	Repositories(context.Context) ([]string, error)
++}
++
++// Upload describes the original durable upload, including a completed receipt.
++// Stores serialize Append/Commit/Cancel for an ID and bind every ID to repo.
++type Upload struct {
++	ID     string
++	Offset int64
++	Digest string
++}
++
++type UploadStore interface {
++	Begin(context.Context, string) (Upload, error)
++	Status(ctx context.Context, repo, id string) (Upload, error)
++	// Append requires the current offset. A failed/incomplete body must not
++	// advance it. length=-1 means an unknown body length, never unbounded RAM.
++	Append(ctx context.Context, repo, id string, offset, length int64, body io.Reader) (Upload, error)
++	Commit(ctx context.Context, repo, id, digest string) (Upload, error)
++	Cancel(ctx context.Context, repo, id string) error
++}
++
++var (
++	ErrReadOnly        = errors.New("registry deletion disabled")
++	ErrNameUnknown     = errors.New("unknown repository")
++	ErrUploadOffset    = errors.New("upload offset mismatch")
++	ErrDigestMismatch  = errors.New("digest does not match content")
++	ErrManifestInvalid = errors.New("invalid manifest descriptor")
++	ErrBlobUnknown     = errors.New("manifest blob is not available in this repository")
++)
++
++// WithManifestStore replaces all manifest/tag/catalog/referrer map authority.
++// Storage errors must not be acknowledged as successful in-memory mutations.
++func WithManifestStore(s ManifestStore, maxBody int64) Option {
++	return func(r *registry) { r.manifests.store = s; r.manifests.maxBody = maxBody }
++}
++
++// WithUploadStore replaces the in-memory chunk map with streaming storage.
++func WithUploadStore(s UploadStore) Option {
++	return func(r *registry) { r.blobs.uploadStore = s }
++}
++
++func manifestStoreError(err error) *regError {
++	if errors.Is(err, ErrManifestInvalid) {
++		return &regError{Status: http.StatusBadRequest, Code: "MANIFEST_INVALID", Message: "Invalid manifest descriptor"}
++	}
++	if errors.Is(err, ErrBlobUnknown) {
++		return &regError{Status: http.StatusBadRequest, Code: "MANIFEST_BLOB_UNKNOWN", Message: "Referenced content is not available in this repository"}
++	}
++	if errors.Is(err, ErrReadOnly) {
++		return regErrUnsupported
++	}
++	if errors.Is(err, ErrNameUnknown) {
++		return &regError{Status: http.StatusNotFound, Code: "NAME_UNKNOWN", Message: "Unknown name"}
++	}
++	if errors.Is(err, ErrNotFound) {
++		return &regError{Status: http.StatusNotFound, Code: "MANIFEST_UNKNOWN", Message: "Unknown manifest"}
++	}
++	return regErrInternal(err)
++}
++
++// Callers hold the existing manifest lock, including the default map path.
++func (m *manifests) readManifest(ctx context.Context, repo, target string) (manifest, error) {
++	if m.store != nil {
++		v, err := m.store.GetManifest(ctx, repo, target)
++		return manifest{contentType: v.ContentType, blob: v.Body}, err
++	}
++	r, ok := m.manifests[repo]
++	if !ok {
++		return manifest{}, ErrNameUnknown
++	}
++	v, ok := r[target]
++	if !ok {
++		return manifest{}, ErrNotFound
++	}
++	return v, nil
++}
++func (m *manifests) writeManifest(ctx context.Context, repo, target, digest string, v manifest) error {
++	if m.store != nil {
++		return m.store.PutManifest(ctx, repo, target, digest, ManifestData{ContentType: v.contentType, Body: v.blob})
++	}
++	if m.manifests[repo] == nil {
++		m.manifests[repo] = map[string]manifest{}
++	}
++	m.manifests[repo][digest], m.manifests[repo][target] = v, v
++	return nil
++}
++func (m *manifests) deleteManifest(ctx context.Context, repo, target string) error {
++	if m.store != nil {
++		return m.store.DeleteManifest(ctx, repo, target)
++	}
++	if _, err := m.readManifest(ctx, repo, target); err != nil {
++		return err
++	}
++	delete(m.manifests[repo], target)
++	return nil
++}
++func (m *manifests) manifestReferences(ctx context.Context, repo string) ([]string, error) {
++	if m.store != nil {
++		return m.store.ManifestReferences(ctx, repo)
++	}
++	r, ok := m.manifests[repo]
++	if !ok {
++		return nil, ErrNameUnknown
++	}
++	refs := make([]string, 0, len(r))
++	for k := range r {
++		refs = append(refs, k)
++	}
++	return refs, nil
++}
++func (m *manifests) repositories(ctx context.Context) ([]string, error) {
++	if m.store != nil {
++		return m.store.Repositories(ctx)
++	}
++	repos := make([]string, 0, len(m.manifests))
++	for k := range m.manifests {
++		repos = append(repos, k)
++	}
++	return repos, nil
++}
+diff --git a/pkg/registry/uploads.go b/pkg/registry/uploads.go
+new file mode 100644
+index 0000000..4083e85
+--- /dev/null
++++ b/pkg/registry/uploads.go
+@@ -0,0 +1,141 @@
++// Copyright 2026 MyDC Authors.
++// Licensed under the Apache License, Version 2.0 (the "License");
++// you may not use this file except in compliance with the License.
++// You may obtain a copy at https://www.apache.org/licenses/LICENSE-2.0
++
++package registry
++
++import (
++	"errors"
++	"fmt"
++	"net/http"
++	"strconv"
++	"strings"
++
++	v1 "github.com/google/go-containerregistry/pkg/v1"
++)
++
++func uploadStoreError(err error) *regError {
++	switch {
++	case errors.Is(err, ErrNotFound):
++		return &regError{Status: 404, Code: "BLOB_UPLOAD_UNKNOWN", Message: "Unknown upload"}
++	case errors.Is(err, ErrUploadOffset):
++		return &regError{Status: 416, Code: "BLOB_UPLOAD_INVALID", Message: "Upload offset mismatch"}
++	case errors.Is(err, ErrDigestMismatch):
++		return regErrDigestMismatch
++	default:
++		return regErrInternal(err)
++	}
++}
++
++func (b *blobs) handleStoredUpload(w http.ResponseWriter, r *http.Request, repo, service, id string) *regError {
++	if r.Method == http.MethodPost && service == "uploads" {
++		return regErrUnsupported
++	}
++	digest := r.URL.Query().Get("digest")
++	if r.Method == http.MethodPut || r.Method == http.MethodPost && digest != "" {
++		h, err := v1.NewHash(digest)
++		if err != nil || h.Algorithm != "sha256" {
++			return regErrDigestInvalid
++		}
++	}
++	var u Upload
++	var err error
++	if r.Method == http.MethodPost {
++		u, err = b.uploadStore.Begin(r.Context(), repo)
++	} else {
++		if service != "uploads" {
++			return regErrUnsupported
++		}
++		u, err = b.uploadStore.Status(r.Context(), repo, id)
++	}
++	if err != nil {
++		return uploadStoreError(err)
++	}
++	location := strings.TrimSuffix(r.URL.Path, "/")
++	if r.Method == http.MethodPost {
++		location += "/" + u.ID
++	}
++	headers := func() {
++		w.Header().Set("Docker-Upload-UUID", u.ID)
++		w.Header().Set("Location", location)
++		w.Header().Set("Range", fmt.Sprintf("0-%d", max(int64(0), u.Offset-1)))
++	}
++	appendBody := func() error {
++		length := r.ContentLength
++		if raw := r.Header.Get("Content-Range"); raw != "" {
++			parts := strings.Split(raw, "-")
++			if len(parts) != 2 {
++				return ErrUploadOffset
++			}
++			start, e1 := strconv.ParseInt(parts[0], 10, 64)
++			end, e2 := strconv.ParseInt(parts[1], 10, 64)
++			if e1 != nil || e2 != nil || start != u.Offset || start < 0 || end < start || end == 1<<63-1 {
++				return ErrUploadOffset
++			}
++			if length >= 0 && length != end-start+1 {
++				return ErrUploadOffset
++			}
++			length = end - start + 1
++		}
++		// Finalizing a closed ID is only an original digest/receipt lookup.
++		if u.Digest != "" {
++			if length != 0 {
++				return ErrUploadOffset
++			}
++			return nil
++		}
++		next, appendErr := b.uploadStore.Append(r.Context(), repo, u.ID, u.Offset, length, r.Body)
++		if appendErr != nil {
++			return appendErr
++		}
++		u = next
++		return nil
++	}
++	finish := func() *regError {
++		next, finishErr := b.uploadStore.Commit(r.Context(), repo, u.ID, digest)
++		if finishErr != nil {
++			headers()
++			return uploadStoreError(finishErr)
++		}
++		u = next
++		prefix := strings.LastIndex(location, "/blobs/uploads/")
++		if prefix < 0 {
++			return regErrUnsupported
++		}
++		w.Header().Set("Docker-Content-Digest", u.Digest)
++		w.Header().Set("Location", location[:prefix]+"/blobs/"+u.Digest)
++		w.Header().Set("Docker-Upload-UUID", u.ID)
++		w.WriteHeader(http.StatusCreated)
++		return nil
++	}
++	switch r.Method {
++	case http.MethodGet:
++		headers()
++		w.WriteHeader(http.StatusNoContent)
++	case http.MethodPost, http.MethodPatch:
++		if err = appendBody(); err != nil {
++			headers()
++			return uploadStoreError(err)
++		}
++		if r.Method == http.MethodPost && digest != "" {
++			return finish()
++		}
++		headers()
++		w.WriteHeader(http.StatusAccepted)
++	case http.MethodPut:
++		if err = appendBody(); err != nil {
++			headers()
++			return uploadStoreError(err)
++		}
++		return finish()
++	case http.MethodDelete:
++		if err = b.uploadStore.Cancel(r.Context(), repo, u.ID); err != nil {
++			return uploadStoreError(err)
++		}
++		w.WriteHeader(http.StatusNoContent)
++	default:
++		return regErrUnsupported
++	}
++	return nil
++}
+diff --git a/pkg/registry/storage_hooks_test.go b/pkg/registry/storage_hooks_test.go
+new file mode 100644
+index 0000000..06019ef
+--- /dev/null
++++ b/pkg/registry/storage_hooks_test.go
+@@ -0,0 +1,97 @@
++// Copyright 2026 MyDC Authors. Licensed under the Apache License, Version 2.0.
++package registry
++
++import (
++	"context"
++	"crypto/sha256"
++	"fmt"
++	"io"
++	"log"
++	"net/http"
++	"net/http/httptest"
++	"strings"
++	"testing"
++)
++
++// A protocol adapter double only: real durability belongs to MyDC's store.
++type recordedUpload struct {
++	repo  string
++	value Upload
++	data  string
++	fail  error
++}
++
++func (s *recordedUpload) Begin(_ context.Context, repo string) (Upload, error) {
++	s.repo = repo
++	s.value = Upload{ID: "original"}
++	return s.value, s.fail
++}
++func (s *recordedUpload) Status(_ context.Context, repo, id string) (Upload, error) {
++	if repo != s.repo || id != s.value.ID {
++		return Upload{}, ErrNotFound
++	}
++	return s.value, s.fail
++}
++func (s *recordedUpload) Append(_ context.Context, repo, id string, offset, length int64, r io.Reader) (Upload, error) {
++	if _, err := s.Status(context.Background(), repo, id); err != nil {
++		return Upload{}, err
++	}
++	if offset != s.value.Offset {
++		return Upload{}, ErrUploadOffset
++	}
++	data, err := io.ReadAll(io.LimitReader(r, 1024))
++	if err != nil {
++		return Upload{}, err
++	}
++	s.data += string(data)
++	s.value.Offset += int64(len(data))
++	return s.value, s.fail
++}
++func (s *recordedUpload) Commit(_ context.Context, repo, id, digest string) (Upload, error) {
++	if _, err := s.Status(context.Background(), repo, id); err != nil {
++		return Upload{}, err
++	}
++	if fmt.Sprintf("sha256:%x", sha256.Sum256([]byte(s.data))) != digest {
++		return Upload{}, ErrDigestMismatch
++	}
++	s.value.Digest = digest
++	return s.value, s.fail
++}
++func (s *recordedUpload) Cancel(context.Context, string, string) error { return s.fail }
++
++func TestDurableUploadHookPreservesNestedRepositoryOffsetAndOriginalURL(t *testing.T) {
++	s := &recordedUpload{}
++	h := New(WithUploadStore(s), Logger(log.New(io.Discard, "", 0)))
++	call := func(method, path, body string) *httptest.ResponseRecorder {
++		t.Helper()
++		w := httptest.NewRecorder()
++		h.ServeHTTP(w, httptest.NewRequest(method, path, strings.NewReader(body)))
++		return w
++	}
++	base := "/v2/team/blobs/uploads/app/blobs/uploads/"
++	w := call(http.MethodPost, base, "")
++	if w.Code != 202 || s.repo != "team/blobs/uploads/app" {
++		t.Fatal(w.Code, s.repo)
++	}
++	location := w.Header().Get("Location")
++	if !strings.HasSuffix(location, "/original") {
++		t.Fatal(location)
++	}
++	w = call(http.MethodPatch, location, "payload")
++	if w.Code != 202 || s.value.Offset != 7 {
++		t.Fatal(w.Code, s.value)
++	}
++	w = call(http.MethodGet, location, "")
++	if w.Code != 204 || w.Header().Get("Range") != "0-6" {
++		t.Fatal(w.Code, w.Header())
++	}
++	w = call(http.MethodPatch, "/v2/other/blobs/uploads/original", "bad")
++	if w.Code != 404 || s.data != "payload" {
++		t.Fatal("repository retarget", w.Code, s.data)
++	}
++	digest := fmt.Sprintf("sha256:%x", sha256.Sum256([]byte("payload")))
++	w = call(http.MethodPut, location+"?digest="+digest, "")
++	if w.Code != 201 || w.Header().Get("Location") != "/v2/team/blobs/uploads/app/blobs/"+digest {
++		t.Fatal(w.Code, w.Header())
++	}
++}

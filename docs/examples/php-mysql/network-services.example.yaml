@@ -1,0 +1,68 @@
+# 주제별 설명용 발췌/대안이다. 별도 배포 입력이나 include/자동 merge 파일이 아니다.
+# D3 설계 입력 예시. 현재 mydc/mydcd/docker compose에 전달하지 않는다.
+# 기존 D1 Bridge의 IPAM 변경은 같은 daemon에서 Drain/새 generation 전환으로 처리한다.
+# source key/generation/owner 전체 키는 실제 승인 입력으로 고정해야 한다.
+schema: 1
+tenant: tenant-demo
+network: app
+execution: builtin-mydcd-network
+runtime_changes:
+  authority: authenticated-mydcp-raft-cas
+  daemon_restart: false
+  strategy: staged
+  existing_address_references: preserve
+  disruptive_changes: explicit-transition-plan
+  status_fields:
+    - desired_revision
+    - applied_revision
+    - observed_revision
+    - operation_id
+    - phase
+    - pending_reason
+
+dns:
+  zone: php-mysql.mydc.test.
+  reverse: true # IPv4 /24 또는 IPv6 nibble 경계의 소유 pool만 허용.
+  ttl_seconds: 30
+  negative_ttl_seconds: 5
+  transports: [udp, tcp]
+  forward:
+    enabled: false
+    upstreams: []
+  # 서비스 이름은 app.yaml attachment의 aliases에서 요청한다.
+  limits:
+    cache_entries: 1024
+    queries_inflight: 32
+    tcp_connections: 16
+    request_timeout_ms: 2000
+
+cidrs:
+  app-a-v4:
+    owner_node: node-a
+    bridge: network/bridge/php-mysql-demo/a
+    bridge_generation: "<COMMITTED_BRIDGE_GENERATION_A>"
+    prefix: 10.240.10.0/24
+    gateway: 10.240.10.1
+    mtu: 1280
+    dns_listen: "10.240.10.1:53"
+    address_plan:
+      docker_ip_range: 10.240.10.0/25
+      static_first: 10.240.10.2
+      static_last: 10.240.10.127
+  app-b-v4:
+    owner_node: node-b
+    bridge: network/bridge/php-mysql-demo/b
+    bridge_generation: "<COMMITTED_BRIDGE_GENERATION_B>"
+    prefix: 10.240.20.0/24
+    gateway: 10.240.20.1
+    mtu: 1280
+    dns_listen: "10.240.20.1:53"
+    address_plan:
+      docker_ip_range: 10.240.20.0/25
+      static_first: 10.240.20.2
+      static_last: 10.240.20.127
+workload_dns:
+  web: {servers: [10.240.10.1], search: [php-mysql.mydc.test]}
+  db: {servers: [10.240.20.1], search: [php-mysql.mydc.test]}
+app_environment:
+  web: {DB_HOST: db.php-mysql.mydc.test}

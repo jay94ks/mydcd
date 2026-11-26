@@ -1,0 +1,12 @@
+/build/
+/work/*
+!/work/go.mod
+/compile_commands.json
+/apps/lifecycle-compiler/rootfs/
+*.swp
+__pycache__/
+
+*.py[cod]
+/mydc
+/mydcd
+/mydc-web

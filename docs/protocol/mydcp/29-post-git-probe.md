@@ -1,0 +1,4 @@
+## 서비스 POST·Git probe
+
+User purpose8 `service-call`은 서명된 `{Tenant,ServiceCall,ServiceInput:{Length,Digest}}` header 뒤 기존 kind4 순차 입력과 EOF를 받는다. 최대256KiB body의 원 길이/SHA-256/EOF가 확정되기 전에는 POST하지 않는다. kind2 `continue` 뒤 최종 `Reply.ServiceCall`은 Status·Content-Type·최대64KiB Body·원 Task/Node/ElapsedMS 또는 제한된 Code다. 원 사용자 proof는 kind3 relay에서도 보존하고, relay 서명은 정확 Target·Epoch·목적 node/새 connection challenge에 고정한다. owner는 member Management `service-call-permit`으로 현재 CallService 권한·원 Task·quorum을 검사한다. User `cd-probe`는 `{Tenant,CDProbe:{App,Repository,Branch,Path,Credential?}}`를 받아 `Reply.CDProbe:{Code,Commit,Node,Size}`만 반환한다. 현재 Deploy 권한·고정 commit/file·설치 credential 이름·기존 CD fetch 예산을 적용하며 CD/app을 변경하지 않는다. [전체 형식·오류·한도](../../reference/service-diagnostics.md)를 따른다. 서비스 POST timeout/결과 유실을 미실행으로 바꾸거나 자동 재전송하지 않는다.
+

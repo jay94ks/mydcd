@@ -1,0 +1,110 @@
+// SPDX-License-Identifier: Apache-2.0
+
+package app
+
+import (
+	"context"
+	"encoding/json"
+	"time"
+
+	"github.com/jay94ks/mydcd/internal/cluster"
+	"github.com/jay94ks/mydcd/internal/cluster/control"
+	"github.com/jay94ks/mydcd/internal/imagebuild"
+	"github.com/jay94ks/mydcd/internal/mydcp"
+	"github.com/jay94ks/mydcd/internal/registryclient"
+	"github.com/jay94ks/mydcd/internal/schema"
+)
+
+func (r *Runtime) imageBuildBaseWork(ctx context.Context, spec imagebuild.JobSpec, source imagebuild.Source) (control.ImageBuildBaseRead, error) {
+	if spec.Validate() != nil || spec.Cluster != r.controlPolicy.Cluster || spec.Scope.Root.Key != r.Identity.Public || !source.Valid() {
+		return control.ImageBuildBaseRead{}, mydcp.ErrAdmission
+	}
+	q := control.ImageBuildBaseQuery{Tenant: spec.Tenant, Job: spec.ID, Snapshot: spec.Digest(), Source: source, At: time.Now().Unix()}
+	raw, _ := json.Marshal(q)
+	reply, err := r.appCall(ctx, "image-build-base-work", raw)
+	if err != nil || reply.Local {
+		return control.ImageBuildBaseRead{}, mydcp.ErrAdmission
+	}
+	read, err := schema.Decode[control.ImageBuildBaseRead](reply.Data)
+	if err != nil || read.Cluster != spec.Cluster || read.Builder != r.Identity.Public || read.Query.Tenant != q.Tenant || read.Query.Job != q.Job || read.Query.Snapshot != q.Snapshot || read.Query.Source != source || read.Index == 0 || read.Epoch == 0 {
+		return control.ImageBuildBaseRead{}, mydcp.ErrAdmission
+	}
+	view, err := r.Engine().ReadAtLeast(ctx, read.Index)
+	if err != nil {
+		return control.ImageBuildBaseRead{}, mydcp.ErrAdmission
+	}
+	return r.controlPolicy.CurrentImageBuildBaseRead(view.State, read, time.Now().Unix())
+}
+func (r *Runtime) currentImageBuildBase(ctx context.Context, read control.ImageBuildBaseRead) (control.ImageBuildBaseRead, error) {
+	view, err := r.currentView(ctx)
+	if err != nil || view.Local {
+		return control.ImageBuildBaseRead{}, mydcp.ErrAdmission
+	}
+	return r.controlPolicy.CurrentImageBuildBaseRead(view.State, read, time.Now().Unix())
+}
+
+func (r *Runtime) resolveImageBuildBaseOwner(ctx context.Context, read control.ImageBuildBaseRead) (control.ImageBuildBaseResult, error) {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	stop := context.AfterFunc(r.ctx, cancel)
+	defer stop()
+	current, err := r.currentImageBuildBase(ctx, read)
+	if err != nil || current.Target.Code != "" || current.Target.Owner != r.Identity.Public {
+		return control.ImageBuildBaseResult{}, mydcp.ErrAdmission
+	}
+	image, err := r.readImageResolveTarget(ctx, read.Query.Tenant, current.Target)
+	result := current.Result(current.Target.Result("OK", &image))
+	if err != nil {
+		result = current.Result(current.Target.Result(registryclient.Sanitize(err).Error(), nil))
+	}
+	view, err := r.currentView(ctx)
+	if err != nil || view.Local {
+		return control.ImageBuildBaseResult{}, mydcp.ErrAdmission
+	}
+	if err := r.controlPolicy.ValidateImageBuildBaseResult(view.State, read, result, time.Now().Unix()); err != nil {
+		return control.ImageBuildBaseResult{}, err
+	}
+	return result, nil
+}
+
+func (r *Runtime) resolveImageBuildBase(ctx context.Context, spec imagebuild.JobSpec, source imagebuild.Source) (string, error) {
+	read, err := r.imageBuildBaseWork(ctx, spec, source)
+	if err != nil {
+		return "", err
+	}
+	if read.Target.Code != "" {
+		if read.Target.Code == "UNTRUSTED" {
+			return "", imagebuild.ErrUntrustedBase
+		}
+		return "", imagebuild.ErrSourceFetch
+	}
+	var result control.ImageBuildBaseResult
+	if read.Target.Owner == r.Identity.Public {
+		result, err = r.resolveImageBuildBaseOwner(ctx, read)
+	} else {
+		peer, known := r.Mesh.Peer(mydcp.Identity(read.Target.Owner))
+		if !known || !peer.Member {
+			return "", mydcp.ErrAdmission
+		}
+		raw, _ := json.Marshal(read)
+		reply, cause := cluster.CallManagement(ctx, r.Mesh, r.Identity, r.controlPolicy.Cluster, peer, cluster.ManagementRequest{Method: "image-build-base-owner", Input: raw})
+		if cause != nil || reply.Code != "ok" {
+			return "", mydcp.ErrAdmission
+		}
+		result, err = schema.Decode[control.ImageBuildBaseResult](reply.Data)
+	}
+	if err != nil || !result.Valid(read) {
+		return "", mydcp.ErrAdmission
+	}
+	view, err := r.currentView(ctx)
+	if err != nil || view.Local {
+		return "", mydcp.ErrAdmission
+	}
+	if err := r.controlPolicy.ValidateImageBuildBaseResult(view.State, read, result, time.Now().Unix()); err != nil {
+		return "", err
+	}
+	if result.Result.Code != "OK" || result.Result.Image == nil {
+		return "", imagebuild.ErrSourceFetch
+	}
+	return result.Result.Image.Pinned, nil
+}

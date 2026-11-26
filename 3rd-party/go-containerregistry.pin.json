@@ -1,0 +1,21 @@
+{
+  "schema": 1,
+  "module": "github.com/google/go-containerregistry",
+  "version": "v0.22.1",
+  "upstream": "https://github.com/google/go-containerregistry.git",
+  "commit": "8a72a424fdecb4caa14f2d525e5d2503331442b5",
+  "patch": "go-containerregistry.patch",
+  "patch_sha256": "4f634aa37eb5e89b49bdae16b4c4e9c0af9d384fa124453c6789d9f3ae2808cb",
+  "changed_files": {
+    "pkg/registry/blobs.go": "230877fa0c274fb4fac53819c9da245fde27c1f41648aa5448a93f9dd8f6fa4c",
+    "pkg/registry/manifest.go": "c965ae6a82e68643b57549edd8bc4c496ccd8cb7060c306dc23f06a2bcdf67a2",
+    "pkg/registry/storage.go": "02a1870f77778286ac086b0d006b5eefe41d03108e431600191dd29b11263957",
+    "pkg/registry/uploads.go": "e06b997ccb5e51cc97b1723c85b9d0eedbe198226aa97d643a119bd52a06d932",
+    "pkg/registry/storage_hooks_test.go": "55a568051232605b03c03e6cbfbee3e0003a9536e84d058d31e6e3ec528c4e7e"
+  },
+  "license": "Apache-2.0",
+  "license_sha256": "58d1e17ffe5109a7ae296caafcadfdbe6a7d176f0bc4ab01e12a689b0499d8bd",
+  "notice_files": [],
+  "module_selection": "require v0.22.1; replace ./3rd-party/go-containerregistry; submodule points to upstream commit and tracked patch supplies local storage hooks",
+  "build_behavior": "No clone/update/apply/download/toolchain change during normal build. New clean source preparation must apply this patch explicitly."
+}

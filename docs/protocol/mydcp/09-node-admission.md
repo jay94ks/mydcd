@@ -1,0 +1,38 @@
+## 동적 node admission/회수
+
+내부 Management의 `node-runtime-work`는 현재 installed caller 자신의 node operation·원 config index·공유 잔여 참조와 CAS/epoch만 latest quorum으로 반환한다. `member-report`는 동일 caller key의 기존 MemberReport 서명을 같은 A1/FSM에 제출하며 원 report receipt를 조회할 때도 caller를 바꾸지 않는다. 다른 노드의 실제 종료는 그 owner의 Proof 서명 없이 대신하지 못한다. 이 read의 SharedActivity0과 CLI 수락은 실제 native/IO closure가 아니며 local manager/SDK·수명 barrier를 결합한 owner proof가 별도로 필요하다.
+
+User/SecretInput의 새 요청은 현재 Work admission을 확인하며 격리 node의 제어 identity를 새 실행 grant로 사용하지 않는다. Active 입구의 signed relay는 합의 leader 역할과 분리하고, 격리 입구에는 현재 관리자 복구 login·조회·원 결과/취소/반환·명시 이관을 남긴다. 기존 Vault write의 recover와 accepted move/CD operation 승인은 원 기록·현재 quorum permit에 결합하고 새 candidate와 구분한다. session/원 operation/서명 바이트와 schema1은 그대로 유지한다.
+
+runtime node 명령은 기존 User 목적의 signed `isolate-node`·`restore-node`·`remove-node`·`resume-node-operation`·`rotate-node-operations`를 같은 `control/members` root CAS로 적용한다. target에는 node ID/원 operation ID·node policy revision·operational epoch를 고정하며 epoch는 schema 번호1과 별개다. 기존 MemberReport의 선택 Configuration/Proof/Operation은 각각 실제 내구 구성 게시, owner-signed 원 closure/Ready, 원 RemoveServer dispatch/unknown에만 사용한다. 나머지 action에 이 필드를 혼합하면 거부한다. 원 보고 서명 domain과 A1 request/root CAS를 재사용하고 새 purpose나 비인증 RPC를 추가하지 않는다.
+
+User `node-remove-plan`과 `node-demote-plan`은 `Node`만 받으며 system-admin의 현재 ManageCluster 권한을 요구한다. 응답 `NodeRemovePlan`/`NodeVotingPlan`의 `Expected`는 각각 lifecycle node/entry revision이며, `Epoch`, `RootRevision`, `ConfigurationIndex`, 설치 구성의 `VotersBefore/VotersAfter/QuorumAfter/FaultToleranceAfter`를 함께 반환한다. 제거 계획의 Tasks·Volumes·Storage·Activity는 reducer가 제거를 막을 때 쓰는 같은 원 accepted 참조다. 계획의 `Blockers.Code`와 거부된 원 operation의 선택 `Result.Reason`은 `LAST_VOTER`, `QUORUM_LOSS`, `NODE_OPERATION_PENDING`, `FIXED_VOLUME_PRESENT`, `NODE_STORAGE_NOT_DRAINED`, `TASKS_PRESENT`, `NATIVE_UNSETTLED`, `CONFIGURATION_NOT_INSTALLED`로 연결한다. 기존 Result Code 숫자는 유지하고 새 거부 Code만 덧붙인다. Reason은 원 A1 결과와 Snapshot에 보존하며 결과 읽기에서 현재 상태로 다시 계산하지 않는다. 성공/기존 Code의 JSON에는 빈 Reason을 넣지 않는다.
+
+`demote-node`는 `NodeSelection{ID}`와 원 entry/root CAS를 쓰며 원 administrator 승인과 설치 ACK를 보존한다. 기존 A2 Prepared→Dispatched→관측/Unknown으로 SDK `DemoteVoter`를 실행하고 실제 구성 게시 뒤에만 non-voter로 확정한다. demote·재승격은 TLS/owner 신원을 바꾸지 않는다. leader 본인을 내릴 때는 원 dispatch 전에 SDK leadership transfer를 수행한다.
+
+User `node-drain-plan`의 `NodeDrain:{Node,Operation}`과 `node-drain-status`의 `NodeDrain:{Node,Operation?}`은 현재 system-admin과 원 drain을 조회한다. 계획은 원 Task별 `Movable/Target/Reason`, `Expected/AppsRoot/RootRevision/Index/At/Digest`와 기존 Volume 이관 recipe/목표 앱을 반환한다. signed `drain-node`의 `{ID,Operation,At,LeaveBlocked,AppsRoot,Plan,Jobs}`를 reducer가 같은 시점 입력·현재 CAS/권한으로 재계산한다. 수락은 cordon과 원 앱 목표를 연결하며 membership을 보존한다. Volume child 시작은 같은 signed parent에만 묶인 `member-report/drain-move-start`이고 별도 관리 서명/작업으로 바꾸지 않는다. 동일 앱의 모든 원 writer fence·검증된 copy/target 사실을 확인한 뒤 owner/Arm·Inventory/CD 목표를 같은 FSM에 게시한다. status는 고정된 원 Task 수와 실제 원 child 앱의 Succeeded로 Moved를 계산하며 blocked/Unknown을 완료로 바꾸지 않는다.
+
+`node-drain-status`만 NodeDrain.Operation 생략/빈 값을 허용한다. 시스템 관리자의 현재 권한으로 같은 노드의 진행 중 원 drain을 우선하고 없으면 가장 최근 결과를 조회한다. 후보 선택은 Directory의 확정 등록 순서이며 응답 Operation은 선택한 원 ID다. 명시 ID는 정확한 원 작업만 조회하고 기록 없음은 denied다. drain-plan/변경의 원 ID 필수·서명/CAS·실행/정산 코어는 유지한다.
+
+
+Tasks의 `Standalone`은 단독 컨테이너의 현재 공개 이름이고 Task/owner 참조는 원 식별자를 유지한다. Volume 이관으로 증명하지 못한 단독 컨테이너의 writable layer는 `STANDALONE_WRITABLE_LAYER_PRESENT`로 막으며 새 컨테이너로 원 작업 공간을 대체하지 않는다. 미정산 VolumeFiles의 원 job·consumer·local intent/pinned/applying/completed journal도 activity에 포함하고, 취소·연결 종료·키 교체로 Gone이나 writer fence를 합성하지 않는다.
+
+signed `rotate-node-identity`의 `{ID,Operation}`과 entry/root CAS는 내구 준비→양쪽 키 proof→공유 activation→로컬 Root/selector 전환→실제 TLS/runtime 재시작→Installed 보고를 분리한다. `IdentityProof`는 schema1·cluster/node/operation·Old/New·Prepared digest를 `mydc-node-identity-1\x00` domain으로 old/new 각각 서명한다. `member-report`의 `identity-prepared`만 이 proof를 받고 `identity-activate/identity-installed/identity-failed`는 원 operation/phase와 현재 자기 키를 확인한다. activation은 Directory·물리 quota lineage·명시 Vault issuer 정책을 같은 FSM patch로 연결한다. history key archive는 원 설치 ACK/genesis/Task·Volume 사실 검증과 로컬 sealed 자료 정산에만 쓰며 현재 TLS/issuer/명령 lookup으로 fallback하지 않는다. 새 배포의 Goal/Binding/Task는 현재 key와 동결된 검증 lineage를 담고, 원 Volume/망 source·native journal/gate는 원 owner로 소비한다. 기존 owner proof·예약·Unknown을 신키 자료로 재서명/초기화하지 않는다.
+
+Management `node-identity-activation`은 내구 준비된 **새 키**가 자기 원 `{ID,Operation}`의 확정 activation을 복구하는 내부 Latest 읽기다. 현재 member·quorum을 요구하고 `{Schema:1,Index,Proof}`만 반환한다. 호출키는 원 proof의 New와 같아야 하며 Prepared/다른 node·operation/구키는 거부한다. activation 확정 직후 구키를 폐기하면 대상 follower가 아직 Prepared prefix에 머물 수 있으므로, 대상은 기존 준비 키로 유한 연결을 열어 같은 확정 proof/index를 읽고 원 local Root/selector를 전환한다. 연결은 실제 daemon 재시작 전에 닫는다. 구키 TLS 허용·새 관리 operation·재제출·키/DB 재생성·node CLI 정책 우회는 없다.
+
+`IdentityTransition.Index/Revision`은 관리 FSM 명령 순번이며, 로컬 Root의 `Installed.Index/AppliedIndex`는 실제 Raft 구성/적용 위치다. 키 전환은 원 Raft 설치 근거를 보존하고 두 번호를 비교하거나 서로 덮어쓰지 않는다. 원 activation 순서는 transition 사이의 단조 증가와 quorum의 확정 proof/index로 확인한다.
+
+
+
+원 standalone attach/exec/read와 VolumeFiles는 현재 설치키의 quorum permit으로 동일 물리 노드의 exact retained source를 소비한다. Volume file report의 제어 서명은 현재 키, 원 `Gone`은 원 consumer owner의 서명을 유지한다. standalone policy report는 현재 `Reporter`가 서명하며 원 Task owner가 다를 때만 선택 `ResourceOwner`를 서명 본문에 포함한다. 생략한 기존 schema1 보고의 서명 바이트는 유지한다. 이 필드는 과거 키의 현재 명령·사용자·TLS 권한을 허용하지 않는다.
+
+User `node-diagnostics`의 `Node`는 현재 ManageCluster/system-admin으로 공개 allowlist 묶음을 조회한다. owner는 인증된 Management `node-diagnostics-permit`의 session/target/owner/index/members-root/epoch를 고정하고 `ReadAtLeast(index)` 후 같은 session bytes/signature·현재 권한·정확한 대상/root/epoch를 재검사한다. 이 API의 Local view는 받은 quorum permit까지 로컬 durable prefix를 기다린 결과이며 Local 표시 자체를 거부하지 않는다. `NodeDiagnosticsBundle`은 schema1·Node/Format=tar+gzip/CreatedAt·Bytes/LimitBytes=65536/ExpandedLimitBytes=131072·Digest/Truncated/Data를 반환한다. config-summary.json/status.json/mydcd-events.json만 포함하며 설정 원문·키/Secret/환경·자유 형식 Reason/로그 본문을 제외한다. archive의 과거 owner 이벤트는 현재 인증 키를 추가하지 않는다.
+
+User `node-force-remove-plan`은 `NodeForce:{Node,Operation}`을 받고 제거 계획의 잔여 Task/Volume/Storage와 `Forceable`, 선택 `Probe`를 반환한다. `force-remove-node`의 payload는 `{ID,Operation,Epoch,Probe}`다. Probe는 schema1·cluster·target node/key·원 operation·epoch/expected/configuration/root·시작/종료 시각·challenge·Responding·installed active voter observer와 그 서명을 고정한다. 서명 domain은 `mydc-force-removal-probe-1\x00`이다. observer는 새 인증된 MYDCP Management `status` 요청의 응답을 확인하며, 인증된 오류 응답도 Responding이다. probe 실패는 논리 퇴출 근거로만 사용한다. 새 제출은 완료30초 이내 probe와 현재 CAS를 요구하고 reducer는 원 op 시각과 고정 probe를 재검사한다. `NODE_RESPONDING`/`SELF_REMOVAL` 거부도 원 결과에 보존한다. force는 owner Closed proof 없이 별도 `retiring`→SDK RemoveServer 원 A2→`retired`로 진행한다. `Closure`는 nil로 남고 기존 Task/native/Volume/retained 원 데이터·writer/fence 참조를 반환하지 않는다. 원 SDK outcome Unknown은 새 ID나 재전송으로 바꾸지 않는다. 퇴출한 key는 현재 membership/replication/session 발급에서 제외하고 이미 수락된 역사 증명 검증에만 남긴다.
+
+
+isolating/isolated/restoring/removing은 새 Work admission을 주지 않지만 현재 구성의 Member/Raft/Snapshot·원 결과/복구 identity를 보존한다. 실제 Removed 뒤 복제/Member를 회수하고 과거 join Source·원 closure의 서명 검증 키는 남긴다. 원 native dispatch와 현재 configuration index의 양성 owner closure 없는 단순 구성 부재는 제품의 삭제 완료 증거가 아니다. 복귀 Ready도 원 operation과 현재 관리 grant를 검사한다. 전체 owner census/정산·기존 연결의 업무 회수는 실제 owner 증거로 확인하며 서명 사실이나 CLI 수락만으로 실제 종료를 표시하지 않는다.
+
+bootstrap/runtime node의 가입은 대상 cluster/전체 신원·현재 가입 승인·원 ID에 결합하고 non-voter 동기화/명시 승격으로 진행한다. 실행 중 격리/복귀/삭제는 업무 admission과 Raft 구성/필수 복구 채널을 구분한다. 폐기된 node의 일반 관리/관측/packet 접근을 기존 연결 때문에 계속 허용하지 않으며 원 연결·flow 회수를 실제 정산한다. 단절 node에 미전달된 정책을 즉시 적용했다고 응답하지 않는다. 관련 목적/필수 capability/가입 증거·원 요청 복구는 같은 schema1 바이트 계약을 유지한다. 현재 handshake 성공은 동적 node lifecycle 완료가 아니다.
+

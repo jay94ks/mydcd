@@ -1,0 +1,17 @@
+MyDC
+Copyright 2026 Jay
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+This product includes modified copies of third-party software under 3rd-party/:
+
+- hashicorp/raft v1.8.0, Mozilla Public License 2.0.
+  Copyright IBM Corp. Changes: 3rd-party/raft.patch.
+- google/go-containerregistry v0.22.1, Apache License 2.0.
+  Copyright Google LLC. Changes: 3rd-party/go-containerregistry.patch.
+- google/nftables v0.3.0, Apache License 2.0.
+  Copyright Google LLC. Changes: 3rd-party/nftables.patch.
+
+Each keeps its original LICENSE file and file headers. The licenses and
+notices of other third-party dependencies ship with each release in
+THIRD_PARTY_NOTICES.
