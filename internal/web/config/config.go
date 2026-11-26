@@ -11,7 +11,6 @@ import (
 	"net/netip"
 	"os"
 	"regexp"
-	"strconv"
 	"strings"
 	"time"
 )
@@ -22,22 +21,26 @@ type Config struct {
 	Listen  string // HTTP listen address
 	TLSCert string // optional TLS certificate file
 	TLSKey  string // optional TLS key file
-	Socket  string // mydcd Unix socket path (mounted into the container)
+	Socket  string // mydcd Unix socket path (the node app socket mydcd opens for this container)
 	// Cluster, Node and NodeKey pin the mydcd behind Socket (hex cluster ID,
 	// node ID, hex node identity key), as a CLI context trusts a node out of
 	// band. Required.
 	Cluster       string
 	Node          string
 	NodeKey       string
-	DataDir       string        // directory of web.db
-	StaticDir     string        // serve the UI from disk instead of the embedded build
-	ACMEListen    string        // ACME HTTP-01 responder address (empty: off)
-	ACMEAdvertise string        // responder IP:port ingress dials (default: ACMEListen when it is a concrete IP:port)
-	CookieSecure  bool          // set Secure on the session cookie
-	OpRetention   time.Duration // keep settled ops this long
-	LoginTimeout  time.Duration // pending login (ticket) lifetime
-	SealKey       string        // MYDC_WEB_SEAL_KEY (hex or base64 of 32 bytes); env only, never a flag
-	SealKeyFile   string        // file holding the seal key (a Docker secret)
+	DataDir       string // directory of web.db
+	StaticDir     string // serve the UI from disk instead of the embedded build
+	ACMEListen    string // ACME HTTP-01 responder address (empty: off)
+	ACMEAdvertise string // responder IP:port ingress dials (default: ACMEListen when it is a concrete IP:port)
+	// TrustedProxies: comma-separated IPs or CIDRs of the ingress that
+	// forwards to this container (the node TUN host addresses on
+	// mydc-system). Only a connection from one of them may say, by
+	// X-Forwarded-Proto, that the browser's request was HTTPS.
+	TrustedProxies string
+	OpRetention    time.Duration // keep settled ops this long
+	LoginTimeout   time.Duration // pending login (ticket) lifetime
+	SealKey        string        // MYDC_WEB_SEAL_KEY (hex or base64 of 32 bytes); env only, never a flag
+	SealKeyFile    string        // file holding the seal key (a Docker secret)
 	// SealKeyNext / SealKeyNextFile: a new seal key. On start every sealed
 	// file is sealed again with it; then it replaces SealKey.
 	SealKeyNext     string
@@ -54,9 +57,8 @@ type Config struct {
 func Default() Config {
 	return Config{
 		Listen:       ":8080",
-		Socket:       "/var/run/mydc.sock",
+		Socket:       "/var/run/mydc/mydc.sock",
 		DataDir:      "/var/lib/mydc-web",
-		CookieSecure: true,
 		OpRetention:  30 * 24 * time.Hour,
 		LoginTimeout: 5 * time.Minute,
 	}
@@ -88,13 +90,7 @@ func Parse(args []string, getenv func(string) string) (Config, error) {
 	env("MYDC_WEB_AI_CLAUDE_URL", &c.AIClaudeURL)
 	env("MYDC_WEB_AI_OPENAI_URL", &c.AIOpenAIURL)
 	env("MYDC_WEB_AI_HIDE_MODELS_FILE", &c.AIHideModelFile)
-	if v := getenv("MYDC_WEB_COOKIE_SECURE"); v != "" {
-		b, err := strconv.ParseBool(v)
-		if err != nil {
-			return c, fmt.Errorf("MYDC_WEB_COOKIE_SECURE: %w", err)
-		}
-		c.CookieSecure = b
-	}
+	env("MYDC_WEB_TRUSTED_PROXIES", &c.TrustedProxies)
 	if v := getenv("MYDC_WEB_OP_RETENTION"); v != "" {
 		d, err := time.ParseDuration(v)
 		if err != nil {
@@ -115,7 +111,7 @@ func Parse(args []string, getenv func(string) string) (Config, error) {
 	fs.StringVar(&c.ACMEListen, "acme-listen", c.ACMEListen, "plain HTTP address of the ACME HTTP-01 responder that ingress forwards /.well-known/acme-challenge/ to (empty: off)")
 	fs.StringVar(&c.ACMEAdvertise, "acme-advertise", c.ACMEAdvertise, "IP:port ingress dials to reach the responder; filled into the cluster setting (default: -acme-listen when it is a concrete IP:port)")
 	fs.StringVar(&c.StaticDir, "static-dir", c.StaticDir, "serve UI files from this directory instead of the embedded build")
-	fs.BoolVar(&c.CookieSecure, "cookie-secure", c.CookieSecure, "set Secure on the session cookie")
+	fs.StringVar(&c.TrustedProxies, "trusted-proxies", c.TrustedProxies, "comma-separated IPs or CIDRs of the ingress allowed to say by X-Forwarded-Proto that a request was HTTPS")
 	fs.StringVar(&c.SealKeyFile, "seal-key-file", c.SealKeyFile, "file holding the seal key for sealed secrets (MYDC_WEB_SEAL_KEY is the env alternative)")
 	fs.StringVar(&c.SealKeyNextFile, "seal-key-next-file", c.SealKeyNextFile, "file holding a new seal key; sealed files are sealed again with it on start")
 	fs.StringVar(&c.AIHideModelFile, "ai-hide-models-file", c.AIHideModelFile, "file of OpenAI model ID patterns hidden from AI role pickers (one regexp per line)")
@@ -148,7 +144,31 @@ func (c Config) validate() error {
 	if c.SealKeyNext != "" && c.SealKeyNextFile != "" {
 		return errors.New("set MYDC_WEB_SEAL_KEY_NEXT or seal-key-next-file, not both")
 	}
+	if _, err := c.TrustedProxyNets(); err != nil {
+		return err
+	}
 	return nil
+}
+
+// TrustedProxyNets parses TrustedProxies; a bare IP is a single address.
+func (c Config) TrustedProxyNets() ([]netip.Prefix, error) {
+	var out []netip.Prefix
+	for _, f := range strings.Split(c.TrustedProxies, ",") {
+		f = strings.TrimSpace(f)
+		if f == "" {
+			continue
+		}
+		if a, err := netip.ParseAddr(f); err == nil {
+			out = append(out, netip.PrefixFrom(a.Unmap(), a.Unmap().BitLen()))
+			continue
+		}
+		p, err := netip.ParsePrefix(f)
+		if err != nil {
+			return nil, fmt.Errorf("trusted-proxies: %q is not an IP or CIDR", f)
+		}
+		out = append(out, p.Masked())
+	}
+	return out, nil
 }
 
 // SealKeySource is where the seal key comes from: "env", "file" or "" (none).

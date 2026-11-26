@@ -332,7 +332,7 @@ export function AppContainerPage() {
         ) : null;
       })()}
       {raw && d && (
-        <Dialog title={`${name} 원 JSON`} width={800} onClose={() => setRaw(false)}>
+        <Dialog title={`${name} 원 JSON`} width={720} onClose={() => setRaw(false)}>
           <pre className="preview-yaml">{JSON.stringify(d, null, 2)}</pre>
           <span className="small muted">서버가 보고한 그대로입니다. 비밀값은 참조만 있고 값은 없습니다.</span>
         </Dialog>
@@ -677,9 +677,9 @@ function Overview({ r, d, task, hist, revision, base, onRefresh }: { r: TaskRef;
           <span className="muted small">비밀값은 공급 방식과 위치만 보이고 값은 보이지 않습니다.</span>
         </Card>
       </div>
-      <div className="row" style={{ flexWrap: 'wrap', gap: 16, alignItems: 'flex-start', marginTop: 16 }}>
+      <div className="main-side" style={{ marginTop: 20 }}>
         <Card
-          className="grow-log"
+         
           title="최근 로그"
           actions={
             <span className="row" style={{ gap: 6 }}>
@@ -718,7 +718,7 @@ function Overview({ r, d, task, hist, revision, base, onRefresh }: { r: TaskRef;
             {logOpts['max-size'] ? ` · 최대 ${logOpts['max-size']} × ${logOpts['max-file'] ?? 1}개` : ''}.
           </span>
         </Card>
-        <Card className="grow-ev" title="최근 이벤트">
+        <Card title="최근 이벤트">
           <div className="tl">
             {evs.slice(0, 5).map((e, i) => (
               <div key={i}>
@@ -1668,9 +1668,8 @@ function ResTab({ r, d, task, base }: { r: TaskRef; d: D.DTaskDetail; task?: Tas
         )}
         {tile('프로세스', last?.pids ?? '—', 'PID 수')}
       </div>
-      <div className="row" style={{ flexWrap: 'wrap', gap: 16, alignItems: 'flex-start', marginTop: 16 }}>
+      <div className="grid-2" style={{ marginTop: 20 }}>
         <Card
-          className="grow-half"
           title={
             <h2>
               자원 사용{' '}
@@ -1703,7 +1702,6 @@ function ResTab({ r, d, task, base }: { r: TaskRef; d: D.DTaskDetail; task?: Tas
           <span className="muted small">서버가 30초마다 모아 둔 최근 1시간 표본입니다. 웹은 표본을 저장하지 않습니다. '↻ 새로고침'은 간격을 기다리지 않고 바로 다시 읽고, 간격 시계를 그때부터 다시 셉니다. 값이 없으면 0 대신 '—'로 둡니다.</span>
         </Card>
         <Card
-          className="grow-half"
           title="프로세스"
           actions={
             <Link to={`${base}/exec`} className="small">

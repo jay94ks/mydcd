@@ -286,7 +286,7 @@ export function MTopList({ task, pids }: { task: TaskView; pids?: number }) {
 export function ContainerConsole({ task, canExec, onClose, initial = 'logs' }: { task: TaskView; canExec: boolean; onClose: () => void; initial?: Tab }) {
   const [tab, setTab] = useState<Tab>(initial);
   return (
-    <Dialog title={<code>{task.standalone ?? `${task.app}-${task.service}-${task.instance}`}</code>} onClose={onClose} width={800}>
+    <Dialog title={<code>{task.standalone ?? `${task.app}-${task.service}-${task.instance}`}</code>} onClose={onClose} width={720}>
       <div className="row between" style={{ marginBottom: 10 }}>
         <Segmented
           label="보기"

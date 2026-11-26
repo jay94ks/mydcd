@@ -351,7 +351,7 @@ function ActDialog({ tenant, r, act, apps, onClose, onDone }: { tenant: string; 
     <Dialog
       title={title}
       danger={act !== 'start'}
-      width={act === 'start' ? 400 : 560}
+      width={act === 'start' ? 420 : 560}
       onClose={onClose}
       footer={
         finished ? (

@@ -620,7 +620,7 @@ function IssueDialog({ domains, accounts, cas, taken, onClose, onChanged, onAcco
           인증서 발급 <span className="ids">UI-58</span>
         </>
       }
-      width={800}
+      width={720}
       onClose={onClose}
       footer={
         step === 4 ? (
@@ -1038,7 +1038,7 @@ function AutoSettingsDialog({ a, accounts, cas, regs, onClose, onDone }: { a: Ac
   return (
     <Dialog
       title="자동 발급"
-      width={800}
+      width={720}
       onClose={onClose}
       footer={
         <>

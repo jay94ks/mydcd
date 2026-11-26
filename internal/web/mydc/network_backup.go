@@ -11,8 +11,8 @@ import (
 
 // NetworkClosure is the owner-signed tenancy.NetworkClosure; put it as is in
 // fence-network-change (control.NetworkChangeFence.Closed, Expected = the
-// change Revision) or as the retire-network payload (Expected = the member
-// Revision; bridge members only).
+// change Revision) or as the leave-tun-network payload (Expected = the
+// member Revision).
 type NetworkClosure = tenancy.NetworkClosure
 
 // NetworkChangeFence: the real fence-network-change payload.

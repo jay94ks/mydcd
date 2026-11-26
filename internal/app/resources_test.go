@@ -188,11 +188,13 @@ func TestRealManagedResourceAuthorityQuotasCIDRAndSameDB(t *testing.T) {
 	fakeOwner := tenancy.Reservation{Key: "workload/task/first/app/spoof", Tenant: "first", Node: cfg.Node.ID, Owner: aliceKey.Public, Need: workload.Resources{CPU: 1, Memory: 1}}
 	apply(alice, prepare(alice, aliceSession, "spoof-owner", "reserve-task", resources().Quotas.Revision(), fakeOwner), state.Forbidden)
 	// Each caller gets only its own resources, while collisions use the full view.
-	network := tenancy.Network{Tenant: "first", ID: "private", Node: cfg.Node.ID, Pools: []tenancy.Subnet{{ID: "v4", Prefix: netip.MustParsePrefix("10.70.0.0/24"), Gateway: netip.MustParseAddr("10.70.0.1"), MTU: 1400}}}
-	apply(alice, prepare(alice, aliceSession, "network-first", "create-network", resources().Networks.Revision(), network), state.Applied)
+	network := tenancy.TUNDefinition{Tenant: "first", Name: "private", Members: []tenancy.TUNNode{{Node: cfg.Node.ID, Pools: []tenancy.Subnet{{ID: "v4", Prefix: netip.MustParsePrefix("10.70.0.0/24"), Gateway: netip.MustParseAddr("10.70.0.1"), MTU: 1400}}, Addresses: []netip.Prefix{netip.MustParsePrefix("10.71.0.1/32")}}}}
+	apply(alice, prepare(alice, aliceSession, "network-first", "create-tun-network", resources().Networks.Revision(), network), state.Applied)
 	overlap := network
-	overlap.Tenant, overlap.ID = "second", "other"
-	conflict := apply(bob, prepare(bob, bobSession, "overlap-other-tenant", "create-network", resources().Networks.Revision(), overlap), state.ConditionFailed)
+	overlap.Tenant, overlap.Name = "second", "other"
+	overlap.Members = []tenancy.TUNNode{network.Members[0]}
+	overlap.Members[0].Addresses = []netip.Prefix{netip.MustParsePrefix("10.72.0.1/32")}
+	conflict := apply(bob, prepare(bob, bobSession, "overlap-other-tenant", "create-tun-network", resources().Networks.Revision(), overlap), state.ConditionFailed)
 	if conflict.Code != state.ConditionFailed || len(resources().Networks.VisibleNetworks(catalog(), "bob")) != 0 {
 		t.Fatal("global CIDR conflict did not retain existing owner")
 	}
@@ -265,15 +267,20 @@ func TestRealManagedResourceAuthorityQuotasCIDRAndSameDB(t *testing.T) {
 	if used.CPU != 4e9 {
 		t.Fatal("verified metadata closure not released")
 	}
-	n, _ := resources().Networks.Network("first", "private")
+	// The last member leaving deletes the network, even after its server
+	// was revoked: drain, then leave with the owner's closure.
+	n, _ := resources().Networks.NamedNetwork("first", "private", cfg.Node.ID)
 	apply(alice, prepare(alice, aliceSession, "drain-network", "drain-network", n.Revision, control.NetworkSelection{Tenant: "first", ID: n.ID}), state.Applied)
-	apply(bob, prepare(bob, bobSession, "drained-still-collides", "create-network", resources().Networks.Revision(), overlap), state.ConditionFailed)
-	n, _ = resources().Networks.Network("first", "private")
+	apply(bob, prepare(bob, bobSession, "drained-still-collides", "create-tun-network", resources().Networks.Revision(), overlap), state.ConditionFailed)
+	n, _ = resources().Networks.Network("first", n.ID)
 	closed := tenancy.NetworkClosure{Cluster: clusterID, Tenant: n.Tenant, Network: n.ID, Node: n.Node, Owner: n.Owner, Generation: n.Generation, Revision: n.Revision, NativeGone: true}
 	closed.Signature = ed25519.Sign(runtime.Identity.Private, tenancy.NetworkClosureBytes(closed))
-	apply(alice, prepare(alice, aliceSession, "retire-network", "retire-network", n.Revision, closed), state.Applied)
-	apply(bob, prepare(bob, bobSession, "CIDR-after-original-proof", "create-network", resources().Networks.Revision(), overlap), state.Applied)
-	recreated, _ := resources().Networks.Network("second", "other")
+	apply(alice, prepare(alice, aliceSession, "leave-last", "leave-tun-network", n.Revision, closed), state.Applied)
+	if _, ok := resources().Networks.Network("first", n.ID); ok {
+		t.Fatal("the last member left but the network stayed")
+	}
+	apply(bob, prepare(bob, bobSession, "CIDR-after-original-proof", "create-tun-network", resources().Networks.Revision(), overlap), state.Applied)
+	recreated, _ := resources().Networks.NamedNetwork("second", "other", cfg.Node.ID)
 	if recreated.Generation <= n.Generation {
 		t.Fatal("CIDR reuse lost generation floor")
 	}

@@ -43,6 +43,7 @@ func networkCommand(g *globals) *cli.Command {
 			networkUpdateCommand(g),
 			networkDeleteCommand(g),
 			networkUsersCommand(g),
+			networkSystemCommand(g),
 		},
 	}
 }
@@ -278,7 +279,6 @@ type netMember struct {
 // netState is a network read from the tenant's resources.
 type netState struct {
 	Tenant, Name string
-	TUN          bool
 	Members      []netMember // sorted by node
 	DNS          *control.DNSPolicyView
 	Networks     uint64 // revision of the tenant networks (CAS of create/commit)
@@ -344,7 +344,7 @@ func groupNetworks(rows []control.ResourceEntry, networks uint64) []*netState {
 		key := e.Network.Tenant + "/" + memberName(*e.Network)
 		v := byName[key]
 		if v == nil {
-			v = &netState{Tenant: e.Network.Tenant, Name: memberName(*e.Network), TUN: e.Network.Logical != "", Networks: networks}
+			v = &netState{Tenant: e.Network.Tenant, Name: memberName(*e.Network), Networks: networks}
 			byName[key] = v
 			out = append(out, v)
 		}
@@ -484,13 +484,10 @@ func nextNetworkStep(v *netState, want *networkSpec) (netStep, error) {
 		p, _ := wantDNS(v.DNS, nil)
 		return dnsStep(p), nil
 	}
-	if want != nil && !v.TUN {
-		return netStep{}, fmt.Errorf("%s is a single-server bridge network; it can only be deleted", v.Name)
-	}
 	if want != nil {
 		want = keepMTU(v, want)
 	}
-	if want != nil && v.TUN {
+	if want != nil {
 		for _, t := range tenancy.NetworkToggles() {
 			on := slices.Contains(v.toggles(), t)
 			if _, named := want.Toggles[t]; !named && !tenancy.ToggleAllowed(t, on, len(want.Members)) {
@@ -507,18 +504,18 @@ func nextNetworkStep(v *netState, want *networkSpec) (netStep, error) {
 		}
 		return netStep{Done: true}, nil
 	}
-	if !v.TUN {
-		// A bridge network on one server: drain, then retire with the
-		// owner's closure.
+	if want == nil {
+		// Delete: each server leaves on its owner's closure; the last one
+		// to leave removes the network. A server whose change is in
+		// progress finishes that first (op resume continues it).
 		for i := range v.Members {
-			m := &v.Members[i]
-			if !m.Source.Draining {
-				return netStep{Label: "stop new use on " + m.Source.Node, Key: fmt.Sprintf("d%d-%d", i, m.Source.Revision), Action: "drain-network", Expected: m.Source.Revision,
-					Payload: control.NetworkSelection{Tenant: v.Tenant, ID: m.Source.ID}}, nil
+			if m := &v.Members[i]; m.phase() == "" {
+				return leaveStep(v, m), nil
 			}
-			return netStep{Label: "remove from " + m.Source.Node, Key: fmt.Sprintf("r%d-%d", i, m.Source.Revision), Action: "retire-network", Expected: m.Source.Revision, Closure: m}, nil
 		}
-		return netStep{Done: true}, nil
+		if len(v.Members) == 0 {
+			return netStep{Done: true}, nil
+		}
 	}
 	if step, ok := memberStep(v, want); ok {
 		return step, nil
@@ -612,6 +609,15 @@ func keepMTU(v *netState, want *networkSpec) *networkSpec {
 // The other servers keep their devices; only their routes change. ok is
 // false when the change needs the fenced path (addresses or MTU change, or
 // a change already in progress).
+// leaveStep drains one server, then has it leave on its owner's closure.
+func leaveStep(v *netState, m *netMember) netStep {
+	if !m.Source.Draining {
+		return netStep{Label: "stop new use on " + m.Source.Node, Key: fmt.Sprintf("d%s-%d", m.Source.Node, m.Source.Revision), Action: "drain-network", Expected: m.Source.Revision,
+			Payload: control.NetworkSelection{Tenant: v.Tenant, ID: m.Source.ID}}
+	}
+	return netStep{Label: "remove " + m.Source.Node, Key: fmt.Sprintf("l%s-%d", m.Source.Node, m.Source.Revision), Action: "leave-tun-network", Expected: m.Source.Revision, Closure: m}
+}
+
 func memberStep(v *netState, want *networkSpec) (netStep, bool) {
 	if want == nil || len(v.Members) == 0 || len(v.Members[0].Source.Pools) == 0 {
 		return netStep{}, false
@@ -653,13 +659,7 @@ func memberStep(v *netState, want *networkSpec) (netStep, bool) {
 	if len(joining) == 0 && len(leaving) == 0 {
 		return netStep{}, false
 	}
-	leave := func(m *netMember) netStep {
-		if !m.Source.Draining {
-			return netStep{Label: "stop new use on " + m.Source.Node, Key: fmt.Sprintf("d%s-%d", m.Source.Node, m.Source.Revision), Action: "drain-network", Expected: m.Source.Revision,
-				Payload: control.NetworkSelection{Tenant: v.Tenant, ID: m.Source.ID}}
-		}
-		return netStep{Label: "remove " + m.Source.Node, Key: fmt.Sprintf("l%s-%d", m.Source.Node, m.Source.Revision), Action: "leave-tun-network", Expected: m.Source.Revision, Closure: m}
-	}
+	leave := func(m *netMember) netStep { return leaveStep(v, m) }
 	// A server being removed blocks joins until it is gone, so finish it
 	// first; otherwise add before removing, so the network never runs out
 	// of servers.
@@ -754,7 +754,7 @@ func applyNetwork(c *cli.Context, g *globals, s *session, opID, tenant, name str
 			if mode == netShow {
 				return cli.Accepted, "next: " + step.Label, nil
 			}
-			if step.Action == "retire-network" || step.Action == "leave-tun-network" {
+			if step.Action == "leave-tun-network" {
 				step.Payload = *closure
 			} else {
 				step.Payload = control.NetworkChangeFence{Tenant: tenant, ID: step.Closure.Source.ID, Generation: step.Closure.Change.Generation, Closed: *closure}
@@ -886,17 +886,13 @@ type networkDNSView struct {
 func (v *netState) view() networkView {
 	// configured: the cluster has the network. Whether each server has
 	// opened it is reported by that server, not by this record.
-	out := networkView{Tenant: v.Tenant, Name: v.Name, Kind: "bridge", State: "configured", Members: []networkMemberView{}}
-	if v.TUN {
-		out.Kind = "tun"
-		out.Toggles = map[string]bool{}
-		for _, t := range tenancy.NetworkToggles() {
-			out.Toggles[string(t)] = slices.Contains(v.toggles(), t)
-		}
+	out := networkView{Tenant: v.Tenant, Name: v.Name, Kind: "tun", State: "configured", Members: []networkMemberView{}, Toggles: map[string]bool{}}
+	for _, t := range tenancy.NetworkToggles() {
+		out.Toggles[string(t)] = slices.Contains(v.toggles(), t)
 	}
 	if len(v.Members) > 0 && len(v.Members[0].Source.Pools) > 0 {
 		out.MTU = v.Members[0].Source.Pools[0].MTU
-		if v.TUN && len(v.Members) > 1 {
+		if len(v.Members) > 1 {
 			out.UnderlayMTU = mydcp.TUNUnderlayMTU(out.MTU)
 		}
 	}
@@ -1009,8 +1005,11 @@ func networkCreateCommand(g *globals) *cli.Command {
 			if v != nil {
 				return fmt.Errorf("network %s already exists; change it with 'mydc network update -f'", spec.Name)
 			}
-			_, networks, err := readResources(c, g, s, tenant)
+			rows, networks, err := readResources(c, g, s, tenant)
 			if err != nil {
+				return err
+			}
+			if err = systemRangeConflict(rows, spec); err != nil {
 				return err
 			}
 			opID := id.Get()
@@ -1078,8 +1077,12 @@ interrupted, continue with 'mydc op resume ID'.`,
 			if v == nil {
 				return fmt.Errorf("no network %s in %s; create it with 'mydc network create -f'", spec.Name, tenant)
 			}
-			if !v.TUN {
-				return fmt.Errorf("%s is a single-server bridge network; it can only be deleted", spec.Name)
+			rows, _, err := readResources(c, g, s, tenant)
+			if err != nil {
+				return err
+			}
+			if err = systemRangeConflict(rows, spec); err != nil {
+				return err
 			}
 			if sameTopology(v, &spec) {
 				if _, changed := wantDNS(v.DNS, spec.DNS); !changed {
@@ -1320,4 +1323,27 @@ func mtuWarning(spec networkSpec) string {
 		return fmt.Sprintf("Note: mtu %d needs a server network MTU of at least %d on every server; on a 1500 network the servers cannot connect (use %d or leave mtu out).", mtu, need, 1500-(need-mtu))
 	}
 	return ""
+}
+
+// systemRangeConflict refuses a network.yaml whose subnets or tunnel
+// addresses overlap the system network's range; mydcd refuses it too.
+func systemRangeConflict(rows []control.ResourceEntry, spec networkSpec) error {
+	for _, e := range rows {
+		if e.System == nil {
+			continue
+		}
+		r := e.System.RangeOrDefault()
+		for _, m := range spec.Members {
+			var prefixes []netip.Prefix
+			for _, p := range m.Pools {
+				prefixes = append(prefixes, p.Prefix)
+			}
+			for _, p := range append(prefixes, m.Addresses...) {
+				if p.Overlaps(r) {
+					return fmt.Errorf("server %s: %s overlaps the system network range %s; pick another range", m.Node, p, r)
+				}
+			}
+		}
+	}
+	return nil
 }

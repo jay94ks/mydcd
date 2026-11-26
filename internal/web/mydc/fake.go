@@ -533,7 +533,7 @@ type world struct {
 	retiring     map[string]string          // tenant → retirement operation
 	retired      map[string]bool            // tenant phase deleted
 	ledgerBusy   bool                       // !storageQuiescent
-	netRev       uint64                     // Networks.Revision (create-network Expected)
+	netRev       uint64                     // Networks.Revision (create-tun-network Expected)
 	netTargets   map[string]tenancy.Network // planned change targets by tenant/member
 	routeOpen    map[string]bool            // tenant/network offered as route destination
 	routes       []tenancy.Route            // cross-tenant routes (fake_routes.go)

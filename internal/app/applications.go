@@ -267,6 +267,9 @@ func (r *Runtime) appCommand(method, caller string, input []byte, v cluster.View
 	if method == "tenant-retirement-report" {
 		return r.controlPolicy.ResolveTenantRetirementReport(v.State, key, input)
 	}
+	if method == "system-network-report" {
+		return r.controlPolicy.ResolveSystemNetworkReport(v.State, key, input)
+	}
 	if method == "node-storage-report" {
 		return r.controlPolicy.ResolveNodeStorageReport(v.State, key, input)
 	}

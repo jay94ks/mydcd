@@ -81,7 +81,7 @@ func TestNextNetworkStep(t *testing.T) {
 	cur := tenancy.Network{Tenant: "shop", ID: "m1", Node: "node-a", Logical: "shop-net", Revision: 7, Generation: 3,
 		Pools:           []tenancy.Subnet{{ID: "pool", Prefix: netip.MustParsePrefix("10.240.10.0/24"), Gateway: netip.MustParseAddr("10.240.10.1"), MTU: defaultMTU}},
 		TunnelAddresses: []netip.Prefix{netip.MustParsePrefix("10.240.30.1/32")}}
-	v := &netState{Tenant: "shop", Name: "shop-net", TUN: true, Networks: 40, Members: []netMember{{Source: cur}}}
+	v := &netState{Tenant: "shop", Name: "shop-net", Networks: 40, Members: []netMember{{Source: cur}}}
 	step, err := nextNetworkStep(v, &spec)
 	if err != nil || step.Action != "plan-network-change" || step.Expected != 7 {
 		t.Fatal(step, err)
@@ -116,6 +116,25 @@ func TestNextNetworkStep(t *testing.T) {
 	if step, err = nextNetworkStep(v, nil); err != nil || step.Action != "configure-network-dns" || step.Expected != 2 {
 		t.Fatal(step, err)
 	}
+	// Then each server drains and leaves; the last to leave removes the
+	// network. A server mid-change finishes its change first.
+	v.DNS = nil
+	v.Members[0].Change = nil
+	v.Members = append(v.Members, netMember{Source: tenancy.Network{Tenant: "shop", ID: "m2", Node: "node-b", Logical: "shop-net", Revision: 8}})
+	if step, err = nextNetworkStep(v, nil); err != nil || step.Action != "drain-network" || step.Expected != 7 {
+		t.Fatal(step, err)
+	}
+	v.Members[0].Source.Draining = true
+	if step, err = nextNetworkStep(v, nil); err != nil || step.Action != "leave-tun-network" || step.Closure != &v.Members[0] {
+		t.Fatal(step, err)
+	}
+	v.Members = v.Members[1:]
+	if step, err = nextNetworkStep(v, nil); err != nil || step.Action != "drain-network" || step.Expected != 8 {
+		t.Fatal(step, err)
+	}
+	if step, err = nextNetworkStep(&netState{Tenant: "shop", Name: "shop-net"}, nil); err != nil || !step.Done {
+		t.Fatal(step, err)
+	}
 }
 
 // Adding or removing servers, with the staying servers unchanged, goes one
@@ -136,7 +155,7 @@ func TestNextNetworkStepAddsAndRemovesOneServerAtATime(t *testing.T) {
 	}
 	// A lone server at the one-server MTU must lower it to add a second:
 	// that is an MTU change, so the fenced path.
-	v := &netState{Tenant: "shop", Name: "shop-net", TUN: true, Networks: 40, Members: []netMember{source(one.Members[0], 7)}}
+	v := &netState{Tenant: "shop", Name: "shop-net", Networks: 40, Members: []netMember{source(one.Members[0], 7)}}
 	if step, err := nextNetworkStep(v, &two); err != nil || step.Action != "plan-network-change" {
 		t.Fatal(step, err)
 	}
@@ -327,14 +346,15 @@ func TestTenantAndUserCommands(t *testing.T) {
 	var res resourcesView
 	f.json(&res, "tenant", "resources", "shop")
 	rows := res.Items
-	if res.QuotaRevision == 0 || len(rows) != 1 || rows[0].Limit == nil || rows[0].Limit.Capacity.CPU != 1.5*cpuUnit || rows[0].Limit.Capacity.Memory != 2<<30 {
+	// the tenant's limit and the system range row
+	if res.QuotaRevision == 0 || len(rows) != 2 || rows[1].System == nil || rows[0].Limit == nil || rows[0].Limit.Capacity.CPU != 1.5*cpuUnit || rows[0].Limit.Capacity.Memory != 2<<30 {
 		t.Fatalf("%+v", rows)
 	}
 	// Connections: kept by default, set with --consumers up to the server's.
 	f.run(1, "tenant", "quota", "set", "shop", "node-a", "--cpu", "1.5", "--memory", "2GiB", "--consumers", "17")
 	f.run(0, "tenant", "quota", "set", "shop", "node-a", "--cpu", "1.5", "--memory", "2GiB", "--consumers", "3")
 	f.json(&res, "tenant", "resources", "shop")
-	if rows = res.Items; len(rows) != 1 || rows[0].Limit == nil || rows[0].Limit.MaxConsumers != 3 {
+	if rows = res.Items; len(rows) != 2 || rows[0].Limit == nil || rows[0].Limit.MaxConsumers != 3 {
 		t.Fatalf("%+v", rows)
 	}
 	// Packet queue: both flags together, within the server's own.
@@ -343,12 +363,12 @@ func TestTenantAndUserCommands(t *testing.T) {
 	f.run(0, "tenant", "quota", "set", "shop", "node-a", "--cpu", "1.5", "--memory", "2GiB", "--packet-queue", "0", "--packet-queue-bytes", "0")
 	res = resourcesView{} // omitempty: a 0 field must not keep the old value
 	f.json(&res, "tenant", "resources", "shop")
-	if rows = res.Items; len(rows) != 1 || rows[0].Limit == nil || rows[0].Limit.PacketQueuePackets != 0 || rows[0].Limit.PacketQueueBytes != 0 {
+	if rows = res.Items; len(rows) != 2 || rows[0].Limit == nil || rows[0].Limit.PacketQueuePackets != 0 || rows[0].Limit.PacketQueueBytes != 0 {
 		t.Fatalf("%+v", rows)
 	}
 	f.run(0, "tenant", "quota", "set", "shop", "node-a", "--cpu", "1.5", "--memory", "2GiB", "--packet-queue", "8", "--packet-queue-bytes", "64KiB")
 	f.json(&res, "tenant", "resources", "shop")
-	if rows = res.Items; len(rows) != 1 || rows[0].Limit == nil || rows[0].Limit.PacketQueuePackets != 8 || rows[0].Limit.PacketQueueBytes != 64<<10 || rows[0].Limit.MaxConsumers != 3 {
+	if rows = res.Items; len(rows) != 2 || rows[0].Limit == nil || rows[0].Limit.PacketQueuePackets != 8 || rows[0].Limit.PacketQueueBytes != 64<<10 || rows[0].Limit.MaxConsumers != 3 {
 		t.Fatalf("%+v", rows)
 	}
 
@@ -500,7 +520,7 @@ func TestNextNetworkStepSetsTogglesAroundServerChanges(t *testing.T) {
 		return netMember{Source: tenancy.Network{Tenant: "shop", ID: "id-" + w.Node, Node: w.Node, Logical: "shop-net", Revision: rev, Generation: 3, Pools: slices.Clone(w.Pools), TunnelAddresses: slices.Clone(w.Addresses), Toggles: toggles}}
 	}
 	one := spec("", "")
-	v := &netState{Tenant: "shop", Name: "shop-net", TUN: true, Networks: 40, Members: []netMember{source(one.Members[0], 7, tenancy.ToggleLocal)}}
+	v := &netState{Tenant: "shop", Name: "shop-net", Networks: 40, Members: []netMember{source(one.Members[0], 7, tenancy.ToggleLocal)}}
 	// Adding a server to a local network without naming the toggle is an error.
 	if _, err := nextNetworkStep(v, ptr(spec(nodeB, ""))); err == nil {
 		t.Fatal("a server was added to a local network")

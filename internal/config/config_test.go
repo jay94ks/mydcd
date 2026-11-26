@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/jay94ks/mydcd/internal/nodeapp"
 )
 
 func TestRealBoundaryConfigFilesAndSelection(t *testing.T) {
@@ -119,6 +121,15 @@ func TestNodeAppWebNeedsNetworkAndResolvesTheSealKeyFile(t *testing.T) {
 	c, err := load("true", "node_apps:\n  web: {enabled: true, seal_key_file: web-seal.key}\n")
 	if err != nil || c.NodeApps.Web.SealKeyFile != filepath.Join(root, "web-seal.key") || len(c.NodeApps.Enabled()) != 1 || c.NodeApps.Enabled()[0] != "web" {
 		t.Fatal(c.NodeApps, err)
+	}
+	if c.NodeApps.Web.UID != nodeapp.DefaultUID {
+		t.Fatal("default uid", c.NodeApps.Web.UID)
+	}
+	if c, err = load("true", "node_apps:\n  web: {enabled: true, uid: 20002}\n"); err != nil || c.NodeApps.Web.UID != 20002 {
+		t.Fatal("uid", c.NodeApps, err)
+	}
+	if _, err = load("true", "node_apps:\n  web: {enabled: true, uid: 4294967295}\n"); err == nil {
+		t.Fatal("out-of-range uid accepted")
 	}
 	if _, err = load("false", "node_apps:\n  web: {enabled: true}\n"); err == nil {
 		t.Fatal("web without network accepted")

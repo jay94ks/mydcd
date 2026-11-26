@@ -390,7 +390,7 @@ function PruneDialog({ node, onClose }: { node: string; onClose: () => void }) {
   return (
     <Dialog
       title={`${node} 이미지 캐시 정리`}
-      width={800}
+      width={720}
       onClose={onClose}
       footer={
         done ? (

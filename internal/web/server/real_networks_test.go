@@ -39,7 +39,7 @@ func realMembers(t *testing.T, c interface {
 	return alice, bob
 }
 
-// A workspace manager creates bridge and TUN networks and sets a TUN
+// A workspace manager creates one-server and TUN networks and sets a TUN
 // network's managed DNS through the web on real mydcd.
 func TestRealServerNetworks(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
@@ -52,9 +52,9 @@ func TestRealServerNetworks(t *testing.T) {
 		t.Fatalf("alice login: %d %v", code, out)
 	}
 
-	body := map[string]any{"opId": op(), "name": "cache-net", "node": "node-1", "cidr": "10.40.0.0/24"}
+	body := map[string]any{"opId": op(), "kind": "tun", "name": "cache-net", "toggles": map[string]bool{"local": true}, "members": []map[string]any{{"node": "node-1", "cidr": "10.40.0.0/24", "tunnel": "10.255.60.1"}}}
 	code, out := f.do("POST", "/api/v1/t/shop/networks", body)
-	if code != 200 || opState(t, code, out) != "applied" || out["op"].(map[string]any)["action"] != "create-network" {
+	if code != 200 || opState(t, code, out) != "applied" || out["op"].(map[string]any)["action"] != "create-tun-network" {
 		t.Fatalf("create: %d %v", code, out)
 	}
 	c.Wait("listed", func() bool {
@@ -64,17 +64,19 @@ func TestRealServerNetworks(t *testing.T) {
 	if code, out := f.do("POST", "/api/v1/t/shop/networks", body); code != 200 || opState(t, code, out) != "applied" {
 		t.Fatalf("repeat: %d %v", code, out)
 	}
-	if code, out := f.do("POST", "/api/v1/t/shop/networks", map[string]any{"opId": body["opId"], "name": "other", "node": "node-1", "cidr": "10.41.0.0/24"}); code != 409 || errCode(out) != "op-conflict" {
+	if code, out := f.do("POST", "/api/v1/t/shop/networks", map[string]any{"opId": body["opId"], "kind": "tun", "name": "other", "toggles": map[string]bool{"local": true}, "members": []map[string]any{{"node": "node-1", "cidr": "10.41.0.0/24", "tunnel": "10.255.61.1"}}}); code != 409 || errCode(out) != "op-conflict" {
 		t.Fatalf("conflict: %d %v", code, out)
 	}
-	if code, out := f.do("POST", "/api/v1/t/shop/networks", map[string]any{"opId": op(), "name": "cache-net", "node": "node-0", "cidr": "10.42.0.0/24"}); opState(t, code, out) != "failed" {
+	if code, out := f.do("POST", "/api/v1/t/shop/networks", map[string]any{"opId": op(), "kind": "tun", "name": "cache-net", "toggles": map[string]bool{"local": true}, "members": []map[string]any{{"node": "node-0", "cidr": "10.42.0.0/24", "tunnel": "10.255.62.1"}}}); opState(t, code, out) != "failed" {
 		t.Fatalf("duplicate: %d %v", code, out)
 	}
 	bad := op()
 	for _, b := range []map[string]any{
-		{"opId": bad, "name": "x", "node": "node-1", "cidr": "10.40.0.1/24"},
-		{"opId": bad, "name": "x", "node": "node-1", "cidr": "10.43.0.0/24", "gateway": "10.44.0.1"},
-		{"opId": bad, "name": "Bad Name", "node": "node-1", "cidr": "10.43.0.0/24"},
+		{"opId": bad, "name": "x", "node": "node-1", "cidr": "10.43.0.0/24"}, // no kind: no bridge networks
+		{"opId": bad, "kind": "bridge", "name": "x", "node": "node-1", "cidr": "10.43.0.0/24"},
+		{"opId": bad, "kind": "tun", "name": "x", "members": []map[string]any{{"node": "node-1", "cidr": "10.40.0.1/24", "tunnel": "10.255.63.1"}}},
+		{"opId": bad, "kind": "tun", "name": "x", "members": []map[string]any{{"node": "node-1", "cidr": "10.43.0.0/24", "gateway": "10.44.0.1", "tunnel": "10.255.63.1"}}},
+		{"opId": bad, "kind": "tun", "name": "Bad Name", "members": []map[string]any{{"node": "node-1", "cidr": "10.43.0.0/24", "tunnel": "10.255.63.1"}}},
 	} {
 		if code, out := f.do("POST", "/api/v1/t/shop/networks", b); code != 422 {
 			t.Fatalf("bad %v: %d %v", b, code, out)
@@ -138,10 +140,6 @@ func TestRealServerNetworks(t *testing.T) {
 		d, _ := networkRow(t, f, "mesh")["dns"].(map[string]any)
 		return d != nil && d["enabled"] == false
 	})
-	// a bridge network has no managed DNS in mydcd
-	if code, out := f.do("POST", "/api/v1/t/shop/networks/cache-net/dns", map[string]any{"opId": op(), "zone": "cache.internal"}); code == 200 && opState(t, code, out) == "applied" {
-		t.Fatalf("bridge dns applied: %d %v", code, out)
-	}
 	if code, out := f.do("POST", "/api/v1/t/shop/networks/mesh/dns", map[string]any{"opId": op(), "zone": "bad zone!", "upstreams": []string{"x"}}); code != 422 {
 		t.Fatalf("bad dns: %d %v", code, out)
 	}
@@ -150,7 +148,7 @@ func TestRealServerNetworks(t *testing.T) {
 	if code, out := keyLogin(f, "bob", bob.Private); code != 200 {
 		t.Fatalf("bob login: %d %v", code, out)
 	}
-	code, out = f.do("POST", "/api/v1/t/shop/networks", map[string]any{"opId": op(), "name": "bob-net", "node": "node-1", "cidr": "10.45.0.0/24"})
+	code, out = f.do("POST", "/api/v1/t/shop/networks", map[string]any{"opId": op(), "kind": "tun", "name": "bob-net", "toggles": map[string]bool{"local": true}, "members": []map[string]any{{"node": "node-1", "cidr": "10.45.0.0/24", "tunnel": "10.255.65.1"}}})
 	if opState(t, code, out) != "failed" || out["op"].(map[string]any)["resultCode"] != float64(mydc.ResultForbidden) {
 		t.Fatalf("viewer: %d %v", code, out)
 	}

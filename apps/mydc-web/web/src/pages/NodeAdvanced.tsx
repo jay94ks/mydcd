@@ -81,7 +81,7 @@ function usePlanOp() {
   return { m, changed, done };
 }
 
-function Shell({ title, onClose, done, busy, ok, danger, label, onSend, children, width = 560 }: { title: string; onClose: () => void; done: boolean; busy: boolean; ok: boolean; danger?: boolean; label: string; onSend: () => void; children: ReactNode; width?: 400 | 560 | 800 }) {
+function Shell({ title, onClose, done, busy, ok, danger, label, onSend, children, width = 560 }: { title: string; onClose: () => void; done: boolean; busy: boolean; ok: boolean; danger?: boolean; label: string; onSend: () => void; children: ReactNode; width?: 420 | 560 | 720 }) {
   return (
     <Dialog
       title={title}
@@ -143,7 +143,7 @@ export function DrainDialog({ node, onClose }: { node: NodeView; onClose: () => 
   };
   const ok = !!p && !p.code && p.tasks.length > 0 && (!blocked || leave) && !(changed && sent === p.plan);
   return (
-    <Shell title={`${node.id} 비우기`} width={800} onClose={onClose} done={done} busy={m.busy} ok={ok} label="비우기 시작" onSend={() => void send()}>
+    <Shell title={`${node.id} 비우기`} width={720} onClose={onClose} done={done} busy={m.busy} ok={ok} label="비우기 시작" onSend={() => void send()}>
       <p style={{ margin: 0 }}>이 서버의 컨테이너를 다른 서버로 옮기고 새 배치를 막습니다. 서버는 클러스터에 남습니다.</p>
       {q.error ? (
         <ErrorBand error={q.error} what="비우기 계획을 읽지 못했습니다" onRetry={q.refresh} />

@@ -179,7 +179,7 @@ function DesktopLifecycle() {
           </div>
           {pol && !pol.configured && <div className="note">상태 검사 정책이 아직 없어 스크립트를 올릴 수 없습니다. 아래 정책을 저장하면 기본값으로 시작합니다.</div>}
           {pol && pol.configured && !pol.enabled && <div className="note wa">상태 검사 정책이 꺼져 있어 스크립트를 올릴 수 없습니다. 아래 정책에서 켜세요.</div>}
-          <div className="row" style={{ alignItems: 'flex-start', gap: 20, flexWrap: 'wrap' }}>
+          <div className="side-main">
             <Card title="이름 붙인 스크립트" className="lc-list">
               {forbidden ? (
                 <span className="small muted">상태 검사 스크립트는 작업 공간 관리자만 볼 수 있습니다.</span>
@@ -410,7 +410,7 @@ function RetireDeleteDialog({ kind, tenant, name, revision, expected, uses, onCl
     <Dialog
       title={del ? `${name} 버전 ${revision}${eulReul(String(revision))} 삭제할까요?` : `${name}${eulReul(name)} 폐기할까요?`}
       danger
-      width={400}
+      width={420}
       onClose={onClose}
       footer={
         m.op ? (

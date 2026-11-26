@@ -824,7 +824,7 @@ function RebuildDialog({ tenant, c, onClose, onDone }: { tenant: string; c: Buil
   return (
     <Dialog
       title={`${c.id} 다시 빌드`}
-      width={400}
+      width={420}
       onClose={onClose}
       footer={
         <>
@@ -872,7 +872,7 @@ function CancelDialog({ tenant, b, onClose, onDone }: { tenant: string; b: Build
   return (
     <Dialog
       title={`${b.label} 빌드를 취소할까요?`}
-      width={400}
+      width={420}
       danger
       onClose={onClose}
       footer={

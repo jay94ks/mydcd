@@ -163,6 +163,11 @@ func validDefinition(v Network) bool {
 // A same-network overlapping candidate is a reservation, never a second live
 // address pool. All other networks and their staged targets are excluded.
 func (n Networks) reservedOverlap(v Network, except string) bool {
+	// A tenant network never takes the system network's range, whether or
+	// not the system network exists now.
+	if !v.System && n.overlapsSystemRange(v) {
+		return true
+	}
 	for k, old := range n.networks {
 		if k == except {
 			continue

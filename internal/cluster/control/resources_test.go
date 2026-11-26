@@ -137,7 +137,8 @@ func TestResourceCheckpointLargeTypedRestoreAndTenantAuthority(t *testing.T) {
 		}
 		cursor = next
 	}
-	if count != reserveCount+1 {
+	// the tenant's rows and the system range row
+	if count != reserveCount+2 {
 		t.Fatal("tenant-scoped page count", count)
 	}
 	// Changing one fragment without its root/other fragment revision is rejected.

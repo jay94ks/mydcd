@@ -11,6 +11,8 @@ export interface MenuItem {
   sep?: boolean;
   /** 항목 옆 작은 설명 */
   hint?: string;
+  /** 흐린 항목의 툴팁. 없으면 disabledReason */
+  tip?: string;
 }
 
 export function Menu({ label = '더보기', items, button, align = 'right', className = 'btn sm' }: { label?: string; items: MenuItem[]; button?: ReactNode; align?: 'left' | 'right'; className?: string }) {
@@ -70,7 +72,7 @@ function MenuList({ items, style, onPick }: { items: MenuItem[]; style: CSSPrope
             role="menuitem"
             className={it.danger ? 'danger' : ''}
             aria-disabled={!!it.disabledReason}
-            title={it.disabledReason}
+            title={it.tip ?? it.disabledReason}
             onClick={() => {
               if (it.disabledReason) return;
               onPick();

@@ -84,7 +84,7 @@ func (s *Server) mcpRedirect(r *http.Request) string {
 		return strings.TrimSuffix(o, "/") + mcpOAuthCallback
 	}
 	scheme := "https"
-	if r.TLS == nil && !s.opt.CookieSecure {
+	if !s.requestHTTPS(r) {
 		scheme = "http"
 	}
 	return scheme + "://" + r.Host + mcpOAuthCallback

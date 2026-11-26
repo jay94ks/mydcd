@@ -19,16 +19,16 @@ func TestManagementInputRejectsDHCPServerAndKeepsCIDRIPAMTyped(t *testing.T) {
 			t.Fatal("removed DHCP management action accepted", action)
 		}
 	}
-	base := `{"schema":1,"action":"create-network","payload":{"Tenant":"tenant","ID":"lan","Node":"node-a","Pools":[{"ID":"pool","Prefix":"10.81.0.0/24","Gateway":"10.81.0.1","MTU":1280,"IPAM":{"Dynamic":"10.81.0.0/25"}}]}}`
+	base := `{"schema":1,"action":"create-tun-network","payload":{"Tenant":"tenant","Name":"lan","Members":[{"Node":"node-a","Pools":[{"ID":"pool","Prefix":"10.81.0.0/24","Gateway":"10.81.0.1","MTU":1280,"IPAM":{"Dynamic":"10.81.0.0/25"}}],"Addresses":["10.82.0.1/32"]}]}}`
 	change, err := InputChange([]byte(base), "current-admin")
-	if err != nil || change.Action != "create-network" || !bytes.Contains(change.Payload, []byte(`"Dynamic":"10.81.0.0/25"`)) {
+	if err != nil || change.Action != "create-tun-network" || !bytes.Contains(change.Payload, []byte(`"Dynamic":"10.81.0.0/25"`)) {
 		t.Fatal("typed CIDR/Docker IPAM metadata lost", err)
 	}
 	var raw map[string]any
 	if err = json.Unmarshal([]byte(base), &raw); err != nil {
 		t.Fatal(err)
 	}
-	payload := raw["payload"].(map[string]any)
+	payload := raw["payload"].(map[string]any)["Members"].([]any)[0].(map[string]any)
 	ipam := payload["Pools"].([]any)[0].(map[string]any)["IPAM"].(map[string]any)
 	ipam["DHCP"] = map[string]any{"First": "10.81.0.128", "Last": "10.81.0.223"}
 	bad, _ := json.Marshal(raw)
@@ -123,7 +123,7 @@ func TestReplacementActionsRequireEveryReplacedField(t *testing.T) {
 			}
 		}
 	}
-	if !explicitFields("create-network", []byte(`[]`)) {
+	if !explicitFields("drain-network", []byte(`[]`)) {
 		t.Fatal("an action without replaced fields was checked")
 	}
 }

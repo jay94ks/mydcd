@@ -676,7 +676,7 @@ function ToolTestDialog({ s, t, onClose }: { s: McpServer; t: McpTool; onClose: 
   return (
     <Dialog
       title="지난 사건으로 시험"
-      width={400}
+      width={420}
       onClose={onClose}
       footer={
         <button className="btn" onClick={onClose}>
@@ -975,7 +975,7 @@ function ReloginDialog({ s, onClose, onSaved }: { s: McpServer; onClose: () => v
   return (
     <Dialog
       title={`${s.name} 다시 로그인`}
-      width={400}
+      width={420}
       onClose={onClose}
       footer={
         <>
@@ -1026,7 +1026,7 @@ function TokenDialog({ s, onClose, onSaved }: { s: McpServer; onClose: () => voi
   return (
     <Dialog
       title={`${s.name} 토큰 바꾸기`}
-      width={400}
+      width={420}
       onClose={onClose}
       footer={
         <>

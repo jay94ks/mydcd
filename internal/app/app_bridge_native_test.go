@@ -1180,7 +1180,7 @@ func runManagedAppOwnerWithVolumeFileRead(t *testing.T, withWorkload, withVolume
 				if err != nil || reply.Result == nil || reply.Result.Code != want {
 					t.Fatal(id, reply.Result, err)
 				}
-				if action == "create-network" && reply.Result.Revision != op.RootRevision {
+				if action == "create-tun-network" && reply.Result.Revision != op.RootRevision {
 					t.Fatal("network rejection used a stale root rather than the declared overlap", id, op.RootRevision, reply.Result)
 				}
 			}

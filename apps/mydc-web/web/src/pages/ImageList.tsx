@@ -1278,7 +1278,7 @@ function PruneDialog({ tenant, groups, onClose, onDone }: { tenant: string; grou
   return (
     <Dialog
       title="사용하지 않는 이미지 정리"
-      width={800}
+      width={720}
       onClose={onClose}
       footer={
         finished ? (

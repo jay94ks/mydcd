@@ -180,6 +180,7 @@ type Runtime struct {
 	moveCancelLog             sync.Map // move/side -> last cancel wait line
 	reportHold                sync.Map // report stream -> moveReportBackoff after a rejection
 	nodeShell                 *nodeShellRuntime
+	systemNetworkFull         atomic.Uint64 // networks revision last logged as out of system addresses
 }
 
 func Open(c config.Node) (*Runtime, error) {

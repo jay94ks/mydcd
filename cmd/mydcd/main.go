@@ -117,7 +117,7 @@ func run(args []string, out, diagnostic io.Writer) int {
 		return fail(diagnostic, errors.Join(err, closeErr), 1)
 	}
 
-	if err = runtime.Mesh.ListenUnix(c.Node.ManagementSocket); err != nil {
+	if err = runtime.ListenManagement(c); err != nil {
 		_ = runtime.Close()
 		return fail(diagnostic, err, 1)
 	}
@@ -139,7 +139,7 @@ func run(args []string, out, diagnostic io.Writer) int {
 				_ = runtime.Close()
 				return fail(diagnostic, err, 1)
 			}
-			if err = runtime.Mesh.ListenUnix(c.Node.ManagementSocket); err != nil {
+			if err = runtime.ListenManagement(c); err != nil {
 				_ = runtime.Close()
 				return fail(diagnostic, err, 1)
 			}

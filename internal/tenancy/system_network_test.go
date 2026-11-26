@@ -69,7 +69,7 @@ func TestSystemNetworkRefusesManualManagement(t *testing.T) {
 		t.Fatal("drain-network reached the system network")
 	}
 	if _, err = n.Retire(f.c, "admin", NetworkClosure{Tenant: "", Network: member.ID}); err == nil {
-		t.Fatal("retire-network reached the system network")
+		t.Fatal("a member retire reached the system network")
 	}
 	target := member
 	target.Pools = append([]Subnet(nil), member.Pools...)

@@ -27,7 +27,7 @@ function CreateTenantDialog({ onClose, onDone }: { onClose: () => void; onDone: 
   return (
     <Dialog
       title="새 작업 공간"
-      width={400}
+      width={420}
       onClose={onClose}
       footer={
         m.op ? (
@@ -399,7 +399,7 @@ function Members({ tenant, revision, canManage, onDone }: { tenant: string; revi
       }
     });
   return (
-    <div className="split">
+    <div className="grid-2">
       <Card className="primary" title="구성원 · 권한" actions={<Refresh q={list} poll={false} />}>
         <Load q={list}>
           {(p) => (
@@ -473,7 +473,7 @@ function Members({ tenant, revision, canManage, onDone }: { tenant: string; revi
       {removing && (
         <Dialog
           title="구성원 빼기"
-          width={400}
+          width={420}
           onClose={() => (setRemoving(undefined), m.reset())}
           footer={
             m.op ? (

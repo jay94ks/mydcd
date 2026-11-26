@@ -645,7 +645,7 @@ function Editor({ cur, taken, onSaved }: { cur?: BuildContext; taken: string[]; 
         </div>
         <span className="small muted">{isNew ? '방식은 저장 전까지 바꿀 수 있습니다. 직접 작성도 컨텍스트 파일을 올릴 수 있어, 저장하면 Dockerfile과 파일이 함께 한 버전이 됩니다' : ''}</span>
       </div>
-      <div className="grid" style={{ gridTemplateColumns: 'minmax(0,1.7fr) minmax(300px,1fr)', gap: 16, alignItems: 'start' }}>
+      <div className="main-side">
         <div className="col" style={{ gap: 16 }}>
           {f.kind === 'draft' && (
             <>
@@ -1093,7 +1093,7 @@ function Editor({ cur, taken, onSaved }: { cur?: BuildContext; taken: string[]; 
       {tpl && (
         <Dialog
           title={`${TEMPLATES[tpl][0]} 템플릿으로 바꿀까요?`}
-          width={400}
+          width={420}
           onClose={() => setTpl(undefined)}
           footer={
             <>
@@ -1112,7 +1112,7 @@ function Editor({ cur, taken, onSaved }: { cur?: BuildContext; taken: string[]; 
       {missingDlg && lint && (
         <Dialog
           title="빌드할 수 없습니다"
-          width={400}
+          width={420}
           onClose={() => setMissingDlg(false)}
           footer={
             <>
@@ -1155,7 +1155,7 @@ function Editor({ cur, taken, onSaved }: { cur?: BuildContext; taken: string[]; 
       {leave && (
         <Dialog
           title="저장하지 않고 나갈까요?"
-          width={400}
+          width={420}
           onClose={() => setLeave(false)}
           footer={
             <>
@@ -1331,7 +1331,7 @@ function MoveDialog({ file, folders, copyLines, taken, onClose, onMove }: { file
   return (
     <Dialog
       title={`${name} 옮기기`}
-      width={400}
+      width={420}
       onClose={onClose}
       footer={
         <>

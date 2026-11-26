@@ -703,6 +703,8 @@ func tenantResourcesCommand(g *globals) *cli.Command {
 						r.Add("route", e.Route.ID, string(e.Route.Phase))
 					case e.Reservation != nil:
 						r.Add("reservation", e.Key, "")
+					case e.System != nil:
+						r.Add("system-network", tenancy.SystemNetwork, e.System.RangeOrDefault().String())
 					}
 				}
 				return r

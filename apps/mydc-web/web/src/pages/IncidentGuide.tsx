@@ -559,7 +559,7 @@ function RestoreDialog({ scope, g, version, onClose, onSaved }: { scope: GuideSc
   return (
     <Dialog
       danger
-      width={400}
+      width={420}
       title={`v${version}으로 되돌릴까요?`}
       onClose={onClose}
       footer={
@@ -618,7 +618,7 @@ function TestDialog({ scope, g, dirty, text, fields, canSave, onClose, onSave }:
   return (
     <Dialog
       title="지침 시험 (실행 안 함)"
-      width={800}
+      width={720}
       onClose={onClose}
       footer={
         <>

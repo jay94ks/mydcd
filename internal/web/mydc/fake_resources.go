@@ -4,7 +4,6 @@ package mydc
 
 import (
 	"errors"
-	"net/netip"
 	"path"
 	"slices"
 
@@ -15,32 +14,13 @@ import (
 )
 
 // applySharedCreate models the creation of tenant shared resources with the
-// real payload types: a bridge or TUN network and its managed DNS, a managed or node-fixed volume and a
+// real payload types: a TUN network and its managed DNS, a managed or node-fixed volume and a
 // Vault object. Only the list rows change; addresses, native volumes and
 // secret values are not modeled. f.mu is held.
 func (c *fakeConn) applySharedCreate(op UserOperation, actor string, next uint64) error {
 	w := c.f.w
 	ch := op.Change
 	switch ch.Action {
-	case ActionCreateNetwork:
-		var v tenancy.Network
-		if decodePayload(ch.Payload, &v) != nil || v.ID == "" || v.Node == "" || len(v.Pools) == 0 {
-			return errors.New("payload")
-		}
-		if !w.canManage(actor, v.Tenant) {
-			return errForbidden
-		}
-		if ch.Expected != w.netRev || slices.ContainsFunc(w.resources, func(e ResourceEntry) bool {
-			return e.Tenant == v.Tenant && e.Network != nil && e.Network.Name == v.ID
-		}) {
-			return errCAS
-		}
-		row := &Network{Name: v.ID, Kind: "bridge", CIDR: v.Pools[0].Prefix.String(), Nodes: []string{v.Node}, Revision: next}
-		row.Members = []NetworkMember{fakeMember(v.Tenant, v.ID, v.Node, "bridge", v.Pools[0], netip.Prefix{}, next)}
-		w.resources = append(w.resources, ResourceEntry{Key: v.Tenant + "/network/" + v.ID, Tenant: v.Tenant, Network: row})
-		w.netRev = next
-		return nil
-
 	case ActionCreateTUNNetwork:
 		var v tenancy.TUNDefinition
 		if decodePayload(ch.Payload, &v) != nil || v.Name == "" || len(v.Members) == 0 || len(v.Members) > 32 {

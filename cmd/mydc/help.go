@@ -70,6 +70,9 @@ Global --reason TEXT, --incident-id ID and --approved-by ACCOUNT_ID label new
 signed user operations; labels do not replace approval signatures or alter a
 stored original when querying/resuming it.
 
+`)
+	skillHelp(out)
+	fmt.Fprint(out, `
 Global options:
 `)
 }

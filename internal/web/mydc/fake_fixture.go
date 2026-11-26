@@ -265,7 +265,7 @@ func DefaultFixture() Fixture {
 			{Node: "node-c", ID: "hdd", Path: "/srv/mydc-hdd", Tenants: []string{"payments"}, MaxVolumes: 32, Generation: 1, Revision: 15, Attested: true},
 		},
 		Resources: []ResourceEntry{
-			{Key: "shop/network/shop-net", Tenant: "shop", Network: &Network{Name: "shop-net", Kind: "bridge", CIDR: "10.20.0.0/24", Nodes: []string{"node-a", "node-b"}, Revision: 20}},
+			{Key: "shop/network/shop-net", Tenant: "shop", Network: &Network{Name: "shop-net", Kind: "tun", CIDR: "10.20.0.0/24", Nodes: []string{"node-a", "node-b"}, Revision: 20}},
 			// node-wide limits (tenant ""): the ceiling of every tenant limit
 			{Key: "_cluster/limit/node-a", Limit: &NodeLimit{Node: "node-a", CPUs: 8, MemoryBytes: 32 * gib, Networks: 16, MaxConsumers: 256, Revision: 16}},
 			{Key: "_cluster/limit/node-b", Limit: &NodeLimit{Node: "node-b", CPUs: 16, MemoryBytes: 64 * gib, Networks: 16, MaxConsumers: 256, Revision: 16}},

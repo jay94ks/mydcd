@@ -45,8 +45,7 @@ type Transport struct {
 	connections        map[*quic.Conn]struct{}
 	handlers           map[Purpose]Handler
 	managementHandlers map[Purpose]ManagementHandler
-	localListener      *net.UnixListener
-	localSocket        *ownedSocket
+	localListeners     []unixListener
 	localConnections   map[*localConnection]struct{}
 	localSessions      map[Identity]*Session
 	localClosed        bool

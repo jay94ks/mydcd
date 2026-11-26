@@ -345,7 +345,7 @@ export interface DTenantRetirement {
 export interface DResourceEntry {
   key: string;
   tenant: string;
-  network?: { name: string; kind: 'bridge' | 'tun'; cidr: string; nodes: string[] | null; revision: number; dns?: { zone: string; enabled: boolean; revision: number; upstreams?: string[] | null; ttl?: number; negativeTtl?: number; reverse?: boolean; resolver?: string }; members?: DNetworkMember[] | null; apps?: number; standalones?: number };
+  network?: { name: string; kind: 'bridge' | 'tun'; cidr: string; nodes: string[] | null; revision: number; dns?: { zone: string; enabled: boolean; revision: number; upstreams?: string[] | null; ttl?: number; negativeTtl?: number; reverse?: boolean; resolver?: string }; members?: DNetworkMember[] | null; toggles?: string[] | null; apps?: number; standalones?: number };
   route?: { host: string; path: string; app: string; service: string; port: number; revision: number };
   limit?: { node: string; cpus: number; memoryBytes: number; maxContainers: number; revision: number; nodeCpus?: number; nodeMemoryBytes?: number };
 }

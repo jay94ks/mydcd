@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// 망 › 서버 간 가상망의 터널 연결 (RQ4, 데몬 #307). 끊긴 서버 쌍만 다시 연결한다.
+// 망의 터널 연결 (RQ4, 데몬 #307). 끊긴 서버 쌍만 다시 연결한다.
 // 실제로는 시스템 관리자만 되지만 판단은 mydcd가 한다: 웹은 미리 막지 않고 거절을 그대로 보여 준다.
 import { useEffect, useState } from 'react';
 import { ApiError, noEndpoint } from '../api/client';
@@ -26,9 +26,9 @@ export function TunnelsDialog({ tenant, name, onClose }: { tenant: string; name:
   const q = usePoll((s) => networkTunnels(tenant, name, s), [tenant, name], 10_000);
   const wait = !!q.error && noEndpoint(q.error);
   return (
-    <Dialog title={`${name} 터널 연결`} width={800} onClose={onClose} footer={<button className="btn" onClick={onClose}>닫기</button>}>
+    <Dialog title={`${name} 터널 연결`} width={720} onClose={onClose} footer={<button className="btn" onClick={onClose}>닫기</button>}>
       <div className="row between">
-        <span className="small muted">서버 간 가상망의 서버 쌍마다 터널 상태입니다. ‘다시 연결’은 끊긴 쌍에만 있고, 누르면 그 줄 아래에 진행이 나옵니다. 시스템 관리자만 할 수 있지만 미리 막지 않고 거절을 보여 줍니다. 계속 끊기면 서버 › Mesh 링크에서 원인을 봅니다.</span>
+        <span className="small muted">이 망의 서버 쌍마다 터널 상태입니다. ‘다시 연결’은 끊긴 쌍에만 있고, 누르면 그 줄 아래에 진행이 나옵니다. 시스템 관리자만 할 수 있지만 미리 막지 않고 거절을 보여 줍니다. 계속 끊기면 서버 › Mesh 링크에서 원인을 봅니다.</span>
         <Refresh q={q} poll={false} />
       </div>
       {wait ? (

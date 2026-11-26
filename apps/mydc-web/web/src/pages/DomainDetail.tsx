@@ -535,7 +535,7 @@ function RecordsTab({
       {dlg?.kind === 'discard' && (
         <Dialog
           title={`바꿀 내용 ${nStaged}개를 모두 버릴까요?`}
-          width={400}
+          width={420}
           danger
           onClose={() => setDlg(undefined)}
           footer={
@@ -555,7 +555,7 @@ function RecordsTab({
       {dlg?.kind === 'del' && (
         <Dialog
           title={`${dlg.r.type} ${dlg.r.name} 레코드를 지울까요?`}
-          width={400}
+          width={420}
           danger
           onClose={() => setDlg(undefined)}
           footer={
@@ -955,7 +955,7 @@ function SettingsDialog({ domain, onClose, onSaved }: { domain: DnsDomain; onClo
   return (
     <Dialog
       title={`${domain.domain} 설정`}
-      width={400}
+      width={420}
       onClose={onClose}
       footer={
         <>
@@ -1197,7 +1197,7 @@ function ConfirmUnlink({ domain, x, revision, onClose, onDone }: { domain: strin
   return (
     <Dialog
       title={`${x.node} 연결을 끊을까요?`}
-      width={400}
+      width={420}
       onClose={onClose}
       footer={
         <>
@@ -1544,7 +1544,7 @@ function DeleteHistoryDialog({ domain, h, onClose, onDone }: { domain: string; h
   return (
     <Dialog
       title="이 기록을 지울까요?"
-      width={400}
+      width={420}
       danger
       onClose={onClose}
       footer={

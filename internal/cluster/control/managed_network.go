@@ -33,12 +33,20 @@ func (p Policy) managedNetworkNativePermit(s state.State, caller [32]byte, reque
 		return NativePermit{}, catalogReason("server %s no longer owns network %s/%s", n.Node, n.Tenant, n.ID)
 	case n.Draining || n.PendingChange != 0:
 		return NativePermit{}, catalogReason("network %s/%s has a change in progress", n.Tenant, n.ID)
+	case n.System:
+		// The system network has no tenant: only the server's own current
+		// membership and its server-wide limit apply.
+		if !slices.ContainsFunc(view.Resources.Networks.SystemMembers(), func(m tenancy.Network) bool {
+			return m.Node == n.Node && m.ID == n.ID && m.Generation == n.Generation && m.Revision == n.Revision && !m.Draining
+		}) {
+			return NativePermit{}, catalogReason("server %s is no longer a member of %s", n.Node, tenancy.SystemNetwork)
+		}
 	case !exists || !tenant.Enabled || tenant.Phase != access.TenantActive:
 		return NativePermit{}, catalogReason("tenant %s is not active", n.Tenant)
 	case !slices.Contains(tenant.AllowedNodes, n.Node):
 		return NativePermit{}, catalogReason("tenant %s may not use server %s", n.Tenant, n.Node)
 	}
-	if n.Logical != "" {
+	if n.Logical != "" && !n.System {
 		if current, ok := view.Resources.Networks.NamedNetwork(n.Tenant, n.Logical, n.Node); !ok || current.Generation != n.Generation || current.Revision != n.Revision {
 			return NativePermit{}, catalogReason("network %s/%s was replaced", n.Tenant, n.Logical)
 		}
@@ -49,10 +57,15 @@ func (p Policy) managedNetworkNativePermit(s state.State, caller [32]byte, reque
 		return NativePermit{}, err
 	}
 	capacity := min(global.MaxConsumers, scoped.MaxConsumers)
-	if err := admitIngressConsumers(view, deployment.GoalResources{Goal: deployment.GoalCommand{Tenant: n.Tenant, Node: n.Node, Owner: caller}}); err != nil {
-		return NativePermit{}, err
+	// A tenant's projected consumers are admitted against its own and the
+	// server-wide limit. The system network has no tenant limit; its
+	// consumers count against the server-wide budget (Consumers below).
+	if !n.System {
+		if err := admitIngressConsumers(view, deployment.GoalResources{Goal: deployment.GoalCommand{Tenant: n.Tenant, Node: n.Node, Owner: caller}}); err != nil {
+			return NativePermit{}, err
+		}
 	}
-	permit := NativePermit{Source: request.Source, Owner: caller, MaxConsumers: capacity, Consumers: p.nativeConsumerBudget(n.Tenant, n.Node, caller, global, scoped)}
+	permit := NativePermit{Source: request.Source, Owner: caller, MaxConsumers: capacity, Consumers: p.nativeConsumerBudget(n.Scope(), n.Node, caller, global, scoped)}
 	var spec any
 	if source.Bridge != nil {
 		permit.Kind, spec = "bridge", *source.Bridge
@@ -134,16 +147,20 @@ func newManagedNetworkSources(s state.State, networks tenancy.Networks, tenant, 
 // related control source rows. The FSM's native/legacy namespace prohibition
 // remains intact; apps cannot publish these rows or acquire their ownership.
 func (p Policy) admitManagedNetworkPatch(s state.State, cmd state.Command, keys []string) bool {
-	if cmd.Kind != state.Module || cmd.Key != ResourcesKey || !strings.HasPrefix(cmd.Actor, "user/") {
-		return false
+	var writes map[string][]byte
+	code := state.Forbidden
+	switch {
+	case cmd.Key != ResourcesKey:
+	case cmd.Kind == state.Module && strings.HasPrefix(cmd.Actor, "user/"):
+		writes, code = p.reduceResources(s, cmd)
+	case cmd.Kind == state.ModuleReport && strings.HasPrefix(cmd.Actor, "node/"):
+		// a server's own system network step
+		writes, code = p.reduceSystemNetworkReport(s, cmd)
 	}
-	writes, code := p.reduceResources(s, cmd)
 	if code != state.Applied {
 		return false
 	}
 	expected := map[string]bool{}
-	var operation UserOperation
-	_ = json.Unmarshal([]byte(cmd.Value), &operation)
 	for key := range writes {
 		if managedSourceKey(key) || key == AppsKey || strings.HasPrefix(key, AppsKey+"/part/") {
 			expected[key] = true

@@ -429,7 +429,7 @@ func verifyManagedAppMoveQuiesce(t *testing.T, ctx context.Context, source, targ
 	if _, err = resources.Networks.Create(c, "admin", resources.Networks.Revision(), competitor); !errors.Is(err, tenancy.ErrPolicy) {
 		t.Fatal("CIDR competition must reject the reserved subnet", err)
 	}
-	reject("move-target-cidr-competition", "create-network", resources.Networks.Revision(), competitor, state.ConditionFailed)
+	reject("move-target-cidr-competition", "create-tun-network", resources.Networks.Revision(), tenancy.TUNDefinition{Tenant: competitor.Tenant, Name: competitor.ID, Members: []tenancy.TUNNode{{Node: competitor.Node, Pools: competitor.Pools, Addresses: []netip.Prefix{netip.MustParsePrefix("10.99.250.1/32")}}}}, state.ConditionFailed)
 	if read().State.Object(control.ResourcesKey) != rootBefore {
 		t.Fatal("rejected competition changed original policy")
 	}

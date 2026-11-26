@@ -715,7 +715,7 @@ function YamlDrawer({ s, onClose }: { s: StandaloneView; onClose: () => void }) 
         </span>
       }
       onClose={onClose}
-      width={800}
+      width={720}
       footer={
         <>
           <button className="btn" onClick={() => void navigator.clipboard?.writeText(s.yaml).then(() => setCopied(true))}>

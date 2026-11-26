@@ -18,14 +18,15 @@ import { AppDetailPage } from './pages/AppDetail';
 import { IncidentPolicyPage, IncidentsPage } from './pages/Incidents';
 import { IncidentGuidePage } from './pages/IncidentGuide';
 import { IncidentHooksPage } from './pages/IncidentHooks';
-import { NetworksPage, VolumesPage } from './pages/Shared';
+import { NetworkRoutesPage, NetworksPage, VolumesPage } from './pages/Shared';
 import { VaultPage } from './pages/Vault';
 import { LifecyclePage } from './pages/Lifecycle';
 import { NetworkChangePage } from './pages/NetworkChange';
 import { ImagesPage } from './pages/Images';
 import { StandalonePage } from './pages/Standalone';
 import { StandaloneNewPage } from './pages/StandaloneNew';
-import { OpsClusterPage, OpsResourcesPage } from './pages/OpsTabs';
+import { OpsResourcesPage } from './pages/OpsTabs';
+import { OpsChangesPage } from './pages/OpsChanges';
 import { OperationsPage } from './pages/Operations';
 import { NotificationsPage, NotifyPrefsPage } from './pages/Notifications';
 import { WebSettingsPage } from './pages/WebSettings';
@@ -101,6 +102,7 @@ export function App() {
         <Route path="incidents/:id" element={<IncidentsPage />} />
 
         <Route path="shared/networks" element={<NetworksPage />} />
+        <Route path="shared/networks/routes" element={<NetworkRoutesPage />} />
         <Route path="shared/networks/:name/change" element={<NetworkChangePage />} />
         <Route path="shared/ingress" element={<IngressPage />} />
         <Route path="shared/ingress/:tenant/:app" element={<IngressDetailPage />} />
@@ -116,7 +118,8 @@ export function App() {
         <Route path="system/domains/:domain/*" element={<DomainDetailPage />} />
         <Route path="system/users" element={<UsersPage />} />
         <Route path="system/ops" element={<OperationsPage />} />
-        <Route path="system/ops/cluster" element={<OpsClusterPage />} />
+        <Route path="system/ops/changes" element={<OpsChangesPage />} />
+        <Route path="system/ops/cluster" element={<Navigate to="/system/ops/changes" replace />} />
         <Route path="system/ops/resources" element={<OpsResourcesPage />} />
         <Route path="system/ops/web" element={<AuditPage />} />
         <Route path="system/ai" element={<AiSettingsPage />} />

@@ -94,10 +94,10 @@ func (r *Runtime) buildIsolationSpec(v cluster.View, projection control.Resource
 	}
 	for _, definition := range projection.Resources.Networks.AllNetworks() {
 		for _, pool := range definition.Pools {
-			spec.Prefixes = append(spec.Prefixes, network.TenantPrefix{Tenant: definition.Tenant, Prefix: pool.Prefix})
+			spec.Prefixes = append(spec.Prefixes, network.TenantPrefix{Tenant: definition.Scope(), Prefix: pool.Prefix})
 		}
 		for _, address := range definition.TunnelAddresses {
-			spec.Prefixes = append(spec.Prefixes, network.TenantPrefix{Tenant: definition.Tenant, Prefix: address})
+			spec.Prefixes = append(spec.Prefixes, network.TenantPrefix{Tenant: definition.Scope(), Prefix: address})
 		}
 	}
 	addBridge := func(tenant, key string, generation uint64, native reconcile.Resource) error {
@@ -149,7 +149,7 @@ func (r *Runtime) buildIsolationSpec(v cluster.View, projection control.Resource
 			tunnel.Lifecycle = schema.Lifecycle{}
 			raw, _ := json.Marshal(tunnel)
 			object := v.State.Object(key)
-			if err := addTunnel(source.Network.Tenant, key, reconcile.Resource{Generation: object.Generation, Present: true, Spec: string(raw)}); err != nil {
+			if err := addTunnel(source.Network.Scope(), key, reconcile.Resource{Generation: object.Generation, Present: true, Spec: string(raw)}); err != nil {
 				return spec, err
 			}
 		}
@@ -158,7 +158,7 @@ func (r *Runtime) buildIsolationSpec(v cluster.View, projection control.Resource
 		}
 		bridge := *source.Bridge
 		bridge.Lifecycle = schema.Lifecycle{}
-		if err := addDesired(source.Network.Tenant, key, bridge); err != nil {
+		if err := addDesired(source.Network.Scope(), key, bridge); err != nil {
 			return spec, err
 		}
 	}
@@ -184,10 +184,10 @@ func (r *Runtime) buildIsolationSpec(v cluster.View, projection control.Resource
 			}
 			tenant := row.Scope.Tenant
 			if source, exists := projection.ManagedSources[key]; exists {
-				if tenant != "" && tenant != source.Network.Tenant {
+				if tenant != "" && tenant != source.Network.Scope() {
 					return spec, errors.New("original isolation TUN tenant changed")
 				}
-				tenant = source.Network.Tenant
+				tenant = source.Network.Scope()
 			} else if goal, exists := projection.Goals[key]; exists {
 				if tenant != "" && tenant != goal.Goal.Tenant {
 					return spec, errors.New("original app TUN tenant changed")
@@ -217,10 +217,10 @@ func (r *Runtime) buildIsolationSpec(v cluster.View, projection control.Resource
 			}
 			tenant := row.Scope.Tenant
 			if source, ok := projection.ManagedSources[key]; ok {
-				if tenant != "" && tenant != source.Network.Tenant {
+				if tenant != "" && tenant != source.Network.Scope() {
 					return spec, errors.New("isolation Bridge tenant changed")
 				}
-				tenant = source.Network.Tenant
+				tenant = source.Network.Scope()
 			} else if goal, ok := projection.Goals[key]; ok {
 				if tenant != "" && tenant != goal.Goal.Tenant {
 					return spec, errors.New("isolation app Bridge tenant changed")

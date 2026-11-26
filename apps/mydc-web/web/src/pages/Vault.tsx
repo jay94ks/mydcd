@@ -595,7 +595,7 @@ function PolicyDialog({ title, action, danger, method = 'POST', path, body, vali
     <Dialog
       title={title}
       danger={danger}
-      width={danger ? 400 : 560}
+      width={danger ? 420 : 560}
       onClose={onClose}
       footer={
         finished ? (
@@ -790,7 +790,7 @@ function UsagesDialog({ scope, v, onClose }: { scope: VaultScope; v: SecretView;
   return (
     <Dialog
       title={`${label}${eulReul(label)} 쓰는 곳`}
-      width={800}
+      width={720}
       onClose={onClose}
       footer={
         <button className="btn primary" onClick={onClose}>
@@ -861,7 +861,7 @@ function InitDialog({ onClose, onDone }: { onClose: () => void; onDone: () => vo
   return (
     <Dialog
       title="클러스터 보관함을 초기화할까요?"
-      width={400}
+      width={420}
       onClose={onClose}
       footer={
         finished ? (

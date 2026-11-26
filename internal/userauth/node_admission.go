@@ -77,7 +77,7 @@ func nodeIngressAllowed(self [32]byte, members membership.Directory, catalog acc
 		switch request.Operation.Change.Action {
 		case "close-node-shell", "begin-tenant-retirement", "finish-tenant-retirement", "drain-node", "demote-node", "isolate-node", "restore-node", "remove-node", "force-remove-node", "resume-node-operation", "rotate-node-operations",
 			"down-app", "resume-app-retirement", "pause-app-cd", "abandon-app-sync", "rotate-app-history",
-			"drain-network", "retire-network", "leave-tun-network", "fence-network-change", "cancel-network-change", "withdraw-route", "drain-reservation", "release-reservation",
+			"drain-network", "leave-tun-network", "fence-network-change", "cancel-network-change", "withdraw-route", "drain-reservation", "release-reservation",
 			"cancel-volume-create", "unregister-fixed-volume", "delete-volume", "delete-retained-volume", "cancel-volume-backup", "delete-volume-backup", "cancel-volume-restore", "cancel-volume-move", "release-volume",
 			"cancel-image-build", "delete-image-build-job", "delete-build-version", "abort-build-zip-upload", "delete-build-context", "delete-image-build-policy", "stop-registry", "delete-registry", "drain-node-storage", "remove-node-storage",
 			"vault-observe-write", "vault-publish-write", "vault-abandon-write", "vault-revoke", "vault-retire", "vault-revoke-approval", "vault-rotate-writes",

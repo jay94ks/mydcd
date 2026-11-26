@@ -59,6 +59,19 @@ type Network struct {
 // share. User apps cannot resolve it.
 const SystemNetwork = "mydc-system"
 
+// SystemScope stands for the system network where a tenant name is needed
+// (native consumer budgets, tenant isolation). It is not a valid tenant ID,
+// so no tenant shares it.
+const SystemScope = "mydc:system"
+
+// Scope is the network's tenant, or SystemScope for the system network.
+func (v Network) Scope() string {
+	if v.System {
+		return SystemScope
+	}
+	return v.Tenant
+}
+
 // validScope: a tenant network names a tenant; a system network names none.
 func validScope(v Network) bool {
 	if v.System {
@@ -75,6 +88,7 @@ type Networks struct {
 	networks map[string]Network
 	routes   map[string]Route
 	changes  map[string]NetworkChange
+	system   SystemPolicy
 }
 
 func New(cluster [32]byte) (Networks, error) {
@@ -131,6 +145,7 @@ func (n Networks) clone() (Networks, error) {
 	for k, v := range n.changes {
 		q.changes[k] = ownChange(v)
 	}
+	q.system = n.SystemPolicy()
 	return q, nil
 }
 
@@ -228,6 +243,21 @@ func (n Networks) Drain(c access.Catalog, actor, tenant, id string, expected uin
 	if !mayRetire(c, actor, tenant, access.ManageNetwork) {
 		return n, access.ErrDenied
 	}
+	return n.drain(tenant, id, expected)
+}
+
+// DrainSystem drains one server's own system network member. The caller
+// decides that the member may leave (no server uses the network, or the
+// server is being removed); no user reaches it.
+func (n Networks) DrainSystem(node string, expected uint64) (Networks, error) {
+	v, ok := n.networks[key("", logicalMemberID("", SystemNetwork, node))]
+	if !ok || !v.System || v.Node != node {
+		return n, ErrPolicy
+	}
+	return n.drain("", v.ID, expected)
+}
+
+func (n Networks) drain(tenant, id string, expected uint64) (Networks, error) {
 	v, ok := n.networks[key(tenant, id)]
 	if !ok || v.Revision != expected {
 		return n, access.ErrConflict
@@ -283,6 +313,20 @@ func (n Networks) Retire(c access.Catalog, actor string, p NetworkClosure) (Netw
 	if !mayRetire(c, actor, p.Tenant, access.ManageNetwork) {
 		return n, access.ErrDenied
 	}
+	return n.retire(p)
+}
+
+// RetireSystem removes one drained system network member on its own signed
+// closure. The member's server signs it; no user reaches it.
+func (n Networks) RetireSystem(p NetworkClosure) (Networks, error) {
+	v, ok := n.networks[key("", p.Network)]
+	if p.Tenant != "" || !ok || !v.System {
+		return n, ErrPolicy
+	}
+	return n.retire(p)
+}
+
+func (n Networks) retire(p NetworkClosure) (Networks, error) {
 	if ch, exists := n.changes[key(p.Tenant, p.Network)]; exists && changeActive(ch) {
 		return n, ErrPolicy
 	}
@@ -310,6 +354,7 @@ type snapshot struct {
 	Networks []Network
 	Routes   []Route
 	Changes  []NetworkChange `json:",omitempty"`
+	System   *SystemPolicy   `json:",omitempty"`
 }
 
 func (n Networks) Encode() ([]byte, error) {
@@ -317,6 +362,13 @@ func (n Networks) Encode() ([]byte, error) {
 		return nil, ErrPolicy
 	}
 	s := snapshot{Schema: 1, Cluster: n.cluster, Revision: n.revision}
+	if !n.system.empty() {
+		if !validSystemPolicy(n.system) {
+			return nil, ErrPolicy
+		}
+		p := n.SystemPolicy()
+		s.System = &p
+	}
 	for _, v := range n.networks {
 		if v.PendingChange != 0 {
 			ch, ok := n.changes[key(v.Tenant, v.ID)]
@@ -359,6 +411,12 @@ func Decode(b []byte) (Networks, error) {
 		return Networks{}, err
 	}
 	n.revision = s.Revision
+	if s.System != nil {
+		if s.System.empty() || !validSystemPolicy(*s.System) {
+			return Networks{}, ErrPolicy
+		}
+		n.system = SystemPolicy{Range: s.System.Range, Users: slices.Clone(s.System.Users)}
+	}
 	for _, v := range s.Networks {
 		k := key(v.Tenant, v.ID)
 		if _, dup := n.networks[k]; dup || !validNetwork(v) || v.Revision > n.revision {

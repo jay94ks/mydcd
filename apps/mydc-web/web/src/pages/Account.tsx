@@ -296,7 +296,7 @@ export function AccountPage() {
       {disabling && (
         <Dialog
           title="로그인 수단 끄기"
-          width={400}
+          width={420}
           onClose={() => setDisabling(undefined)}
           footer={
             dis.op ? (

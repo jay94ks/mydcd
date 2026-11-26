@@ -306,7 +306,7 @@ function RevokeApprovalDialog({ tenant, g, expected, onClose, onDone }: { tenant
     <Dialog
       title="승인을 회수할까요?"
       danger
-      width={400}
+      width={420}
       onClose={onClose}
       footer={
         finished ? (

@@ -595,7 +595,7 @@ function ConnectDialog({ vendors, existing, domains, legacy, onClose, onDone }: 
           DNS 공급자 연결 <span className="ids">UI-55</span>
         </>
       }
-      width={800}
+      width={720}
       onClose={onClose}
       footer={
         <>
@@ -806,7 +806,7 @@ function TokenDialog({ provider, onClose, onDone }: { provider: DnsProvider; onC
   return (
     <Dialog
       title={`${provider.name} 토큰 바꾸기`}
-      width={400}
+      width={420}
       onClose={onClose}
       footer={
         <>
@@ -846,7 +846,7 @@ function RenameDialog({ provider, onClose, onDone }: { provider: DnsProvider; on
   return (
     <Dialog
       title="연결 이름 바꾸기"
-      width={400}
+      width={420}
       onClose={onClose}
       footer={
         <>

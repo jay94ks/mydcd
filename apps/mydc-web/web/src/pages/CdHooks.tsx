@@ -477,7 +477,7 @@ function UnlinkDialog({ l, onClose, onDone }: { l: WebhookLink; onClose: () => v
   return (
     <Dialog
       title={`${l.webhook} 연결을 끊을까요?`}
-      width={400}
+      width={420}
       onClose={onClose}
       footer={
         <>

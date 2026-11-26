@@ -58,6 +58,8 @@ const CODE_TEXT: Record<string, string> = {
   'confirm-mismatch': '확인용 입력이 맞지 않습니다',
   'ticket-expired': '로그인 확인 시간이 지났습니다. 처음부터 다시 해 주세요',
   settled: '이미 결과가 확정된 작업입니다',
+  'system-range': '10.254.0.0/16은 시스템 망(mydc-system)이 쓰는 대역이라 쓸 수 없습니다',
+  'system-range-overlap': '시스템 망(mydc-system) 대역과 겹쳐 mydcd가 거절했습니다. 시스템 망 대역이 바뀌었을 수 있으니 다른 CIDR을 고르세요',
   'cursor-expired': '목록 위치가 만료됐습니다. 처음부터 다시 읽어 주세요',
   missing: '찾지 못했습니다',
   unsupported: '아직 지원하지 않는 기능입니다',

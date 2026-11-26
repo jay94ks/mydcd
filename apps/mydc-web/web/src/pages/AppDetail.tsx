@@ -382,7 +382,7 @@ function Edit({ a, current }: { a: AppView; current?: string }) {
             </button>
           )}
         </div>
-        <div className="aside" style={{ maxWidth: 560, flexBasis: 420 }}>
+        <div className="aside">
           <DeployFlow tenant={a.tenant} yaml={value} canDeploy={canDeploy} onStep={setStep} deployment={a.deployment} currentVersion={a.revision} gitWarning={!!a.cd} />
         </div>
       </div>

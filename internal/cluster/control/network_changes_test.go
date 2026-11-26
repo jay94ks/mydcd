@@ -121,8 +121,8 @@ func TestNetworkCandidateTransactionRetainsAppAndDNSButClosesFreshGroupUse(t *te
 	if _, err = f.p.NativePermit(f.s, owner, refRequest); err == nil {
 		t.Fatal("accepted network-ref became a fresh native permission")
 	}
-	competing := tenancy.Network{Tenant: "tenant", ID: "other-network", Node: "node-b", Pools: append([]tenancy.Subnet(nil), plan.Target.Pools...)}
-	managedDNSChange(t, f, "candidate-cidr-competition", "create-network", r.Networks.Revision(), competing, state.ConditionFailed)
+	competing := tenancy.TUNDefinition{Tenant: "tenant", Name: "other-network", Members: []tenancy.TUNNode{{Node: "node-b", Pools: append([]tenancy.Subnet(nil), plan.Target.Pools...), Addresses: []netip.Prefix{netip.MustParsePrefix("10.99.250.1/32")}}}}
+	managedDNSChange(t, f, "candidate-cidr-competition", "create-tun-network", r.Networks.Revision(), competing, state.ConditionFailed)
 	catalog, _ := f.p.Catalog(f.s)
 	page, _, err := r.Page(catalog, "admin", "tenant", "")
 	listed := false

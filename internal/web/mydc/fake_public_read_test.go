@@ -49,7 +49,7 @@ func TestPublicRead(t *testing.T) {
 	// network-closure needs ManageNetwork; a reader is refused.
 	_, err = read(bob, "network-closure", "shop", control.PublicReadQuery{Name: "shop-net"}, "")
 	wantCode(t, err, CodeDenied)
-	if p, err := read(alice, "network-closure", "shop", control.PublicReadQuery{Name: "shop-net"}, ""); err != nil || len(p.Rows) != 1 || p.Rows[0].Closure == nil || p.Rows[0].Closure.State == "" {
+	if p, err := read(alice, "network-closure", "shop", control.PublicReadQuery{Name: "shop-net-node-a"}, ""); err != nil || len(p.Rows) != 1 || p.Rows[0].Closure == nil || p.Rows[0].Closure.State == "" {
 		t.Fatalf("network-closure %+v %v", p, err)
 	}
 	_, err = read(alice, "network-closure", "shop", control.PublicReadQuery{Name: "shop-net"}, "x")

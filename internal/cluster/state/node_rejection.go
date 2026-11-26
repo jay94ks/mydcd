@@ -20,6 +20,9 @@ const (
 	NodeShellNotReady
 	NodeShellLimit
 	NodeShellUnreachable
+	// NetworkSystemRange: a workspace network's subnet or tunnel address
+	// overlaps the system network range.
+	NetworkSystemRange
 )
 
 func RejectionReason(code Code) string {
@@ -52,10 +55,12 @@ func RejectionReason(code Code) string {
 		return "limit"
 	case NodeShellUnreachable:
 		return "node-unreachable"
+	case NetworkSystemRange:
+		return "system-range-overlap"
 	}
 	return ""
 }
-func ValidResultCode(code Code) bool { return code <= NodeShellUnreachable }
+func ValidResultCode(code Code) bool { return code <= NetworkSystemRange }
 func (r Result) ValidReason() bool {
 	return ValidResultCode(r.Code) && r.Reason == RejectionReason(r.Code)
 }

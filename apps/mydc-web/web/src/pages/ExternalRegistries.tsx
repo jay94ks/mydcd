@@ -736,7 +736,7 @@ function RegisterDialog({ tenant, secrets, builtin, taken, onClose, onDone, onSe
   return (
     <Dialog
       title="외부 저장소 등록"
-      width={800}
+      width={720}
       onClose={onClose}
       footer={
         <>
@@ -1077,7 +1077,7 @@ function UnbindDialog({ tenant, r, onClose, onDone }: { tenant: string; r: Exter
   return (
     <Dialog
       title={`${snap.authority} 서버 연결을 해제할까요?`}
-      width={400}
+      width={420}
       danger
       onClose={onClose}
       footer={

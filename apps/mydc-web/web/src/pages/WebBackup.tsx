@@ -415,7 +415,7 @@ function BackupListDialog({ cfg, onClose, onRestore }: { cfg: DAutoBackup; onClo
   return (
     <>
       <Dialog
-        width={800}
+        width={720}
         title={
           <>
             자동 백업 · {cfg.volume}/{cfg.prefix || PREFIX}

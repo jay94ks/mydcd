@@ -6,7 +6,7 @@
 
 명령 사용법은 [mydc node shell](../cli/node.md#셸)에 있다. 이 명령군은 cluster/node 범위이며 기본 tenant가 대상 노드를 바꾸지 않는다. `USER`는 MyDC 계정의 `User` ID이고, OS 계정은 항상 `mydc-shell`이다.
 
-세 정책 변경(클러스터 기본값, 서버별 설정, grant)은 모두 `node shell policy`의 **공유 Policy.Revision**을 CAS로 쓴다. CLI가 보내기 직전에 읽고, 스크립트는 `--if-revision`으로 고정한다. `RootRevision`은 준비/세션 보고도 갱신하는 저장 checkpoint revision이므로 정책 revision과 구분한다. shell open/close는 내부 Expected=0을 사용한다. 끊긴 변경은 `mydc op show|resume ID`로 이어 간다.
+세 정책 변경(클러스터 기본값, 서버별 설정, grant)은 모두 `node shell policy`의 **공유 Policy.Revision**을 CAS로 쓴다. CLI가 보내기 직전에 읽고, 스크립트는 `--if-revision`으로 고정한다. `RootRevision`은 준비/세션 보고도 갱신하는 저장 checkpoint revision이므로 정책 revision과 구분한다. 그래서 shell 사용자 명령은 읽은 뒤 노드 보고가 root를 옮겨도 그대로 적용된다(root가 지금보다 크면 거부). 정책 변경은 정책 revision으로, open은 지금 준비 상태로 확인한다. shell open/close는 내부 Expected=0을 사용한다. 끊긴 변경은 `mydc op show|resume ID`로 이어 간다.
 
 새 클러스터의 기본 정책은 `Enabled=false`, `MaxSessions=4`, `IdleSeconds=1800`, `Account=mydc-shell`이다. 노드의 기본 설정은 `Shell=inherit`, `Sudo=false`다. `inherit`은 전역 기본값을 따르고 `on`/`off`는 노드에서 이를 덮어쓴다. 전역 `Enabled=false`도 명시 `on` 노드의 사용을 해제하지 않으므로, 그 노드를 닫으려면 `node shell policy NODE --shell off`를 사용한다.
 

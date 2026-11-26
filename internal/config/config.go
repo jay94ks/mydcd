@@ -13,6 +13,7 @@ import (
 	"github.com/jay94ks/mydcd/internal/ingress"
 	"github.com/jay94ks/mydcd/internal/nodeapp"
 	"io"
+	"math"
 	"net"
 	"net/netip"
 	"os"
@@ -134,6 +135,10 @@ type NodeAppWeb struct {
 	// SealKeyFile holds mydc-web's seal key; without it mydc-web runs with
 	// AI, DNS, certificate automation and notifications off.
 	SealKeyFile string `yaml:"seal_key_file,omitempty" json:",omitempty"`
+	// UID is the non-root UID the container runs as; it owns the node app's
+	// management socket and data directory. Empty (or 0: root is never used)
+	// is nodeapp.DefaultUID.
+	UID uint32 `yaml:"uid,omitempty" json:",omitempty"`
 }
 
 // Enabled lists the enabled node apps by node app image name.
@@ -451,6 +456,12 @@ func LoadNode(path string) (Node, error) {
 		}
 		if w.SealKeyFile != "" {
 			w.SealKeyFile = pathFrom(path, w.SealKeyFile)
+		}
+		if w.UID == 0 {
+			w.UID = nodeapp.DefaultUID
+		}
+		if w.UID > math.MaxInt32 {
+			return c, errors.New("node app web uid must be a non-root UID")
 		}
 	}
 	if m := c.Modules["ingress"]; m.Enabled {

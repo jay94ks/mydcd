@@ -60,24 +60,14 @@ func TestRealServerNodeShell(t *testing.T) {
 	if code, out := keyLogin(f, "admin", c.Admin.Private); code != 200 {
 		t.Fatalf("admin login: %d %v", code, out)
 	}
-	// node-0's readiness reports move the node shell root, so a change
-	// signed just before one fails its CAS; it is sent again.
+	// node-0's readiness reports move the node shell root while these are
+	// signed; each change still applies on its first send.
 	put := func(path string, body map[string]any) {
 		t.Helper()
-		c.Wait("put "+path, func() bool {
-			body["opId"] = op()
-			code, out := f.do("PUT", "/api/v1/node-shell"+path, body)
-			switch opState(t, code, out) {
-			case "applied":
-				return true
-			case "failed":
-				if out["op"].(map[string]any)["resultCode"] == float64(mydc.ResultConditionFailed) {
-					return false
-				}
-			}
+		body["opId"] = op()
+		if code, out := f.do("PUT", "/api/v1/node-shell"+path, body); opState(t, code, out) != "applied" {
 			t.Fatalf("%s %v: %d %v", path, body, code, out)
-			return false
-		})
+		}
 	}
 	if code, out := f.do("PUT", "/api/v1/node-shell", map[string]any{"opId": op(), "idleSeconds": 10}); code != 422 {
 		t.Fatalf("bad idle: %d %v", code, out)

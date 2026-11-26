@@ -857,7 +857,7 @@ function DeleteDialog({ x, onClose, onDone }: { x: Incident; onClose: () => void
   return (
     <Dialog
       danger
-      width={400}
+      width={420}
       title={`${x.id} 기록을 지울까요?`}
       onClose={onClose}
       footer={
@@ -1004,7 +1004,7 @@ function ApprovalCard({ x, onDone }: { x: Incident; onDone: () => void }) {
       {confirm && (
         <Dialog
           danger
-          width={400}
+          width={420}
           title={`${ap.title.replace(/잠시 제외$/, '제외')}할까요?`}
           onClose={() => setConfirm(false)}
           footer={
@@ -1402,7 +1402,7 @@ function PolicyBody({ p, onChange }: { p: Policy; onChange: () => void }) {
       {lv && (
         <Dialog
           danger={lv === 'auto-low'}
-          width={400}
+          width={420}
           title={LEVEL_CONFIRM[lv](p)[0]}
           onClose={() => setLv(undefined)}
           footer={
@@ -1423,7 +1423,7 @@ function PolicyBody({ p, onChange }: { p: Policy; onChange: () => void }) {
       {stop && (
         <Dialog
           danger={!p.stopped}
-          width={400}
+          width={420}
           title={p.stopped ? '장애 자동 대응을 다시 켤까요?' : '장애 자동 대응을 모두 멈출까요?'}
           onClose={() => setStop(false)}
           footer={
@@ -1457,7 +1457,7 @@ function PolicyDetail({ p, busy, error, onClose, onSave }: { p: Policy; busy: bo
   return (
     <Dialog
       title="클러스터 정책 상세"
-      width={400}
+      width={420}
       onClose={onClose}
       footer={
         <>

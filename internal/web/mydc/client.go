@@ -488,7 +488,6 @@ const (
 	ActionReleaseOverride = "release-app-override"
 
 	// Shared tenant resources (real actions; the fake models creation only).
-	ActionCreateNetwork       = "create-network"
 	ActionCreateTUNNetwork    = "create-tun-network"
 	ActionConfigureNetworkDNS = "configure-network-dns"
 	ActionProposeRoute        = "propose-route"
@@ -503,7 +502,6 @@ const (
 	ActionJoinTUN             = "join-tun-network"
 	ActionLeaveTUN            = "leave-tun-network"
 	ActionSetNetworkToggle    = "set-network-toggle"
-	ActionRetireNetwork       = "retire-network"
 	ActionBeginVolumeCreate   = "begin-volume-create"
 	ActionRegisterFixedVolume = "register-fixed-volume"
 	ActionBeginVolumeBackup   = "begin-volume-backup"

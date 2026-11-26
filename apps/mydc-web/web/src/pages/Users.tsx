@@ -31,7 +31,7 @@ function NewUserDialog({ onClose, onDone }: { onClose: () => void; onDone: () =>
   return (
     <Dialog
       title="사용자 만들기"
-      width={400}
+      width={420}
       onClose={onClose}
       footer={
         m.op ? (

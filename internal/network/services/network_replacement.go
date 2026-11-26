@@ -149,20 +149,21 @@ func (a Authority) ReplaceTUN(c access.Catalog, n tenancy.Networks, quotas tenan
 // and keeps every other member: the caller rewrites their TUN route sets in
 // place. sources are the leaving member's exact closed Bridge/TUN facts.
 func (a Authority) LeaveTUN(c access.Catalog, n tenancy.Networks, actor string, p tenancy.NetworkClosure, sources []RetiredNativeSource) (Authority, tenancy.Networks, error) {
+	return a.leaveTUN(n, p, sources, func() (tenancy.Networks, error) { return n.Retire(c, actor, p) })
+}
+
+// LeaveSystemTUN is LeaveTUN for a system network member, on its server's
+// own closure.
+func (a Authority) LeaveSystemTUN(n tenancy.Networks, p tenancy.NetworkClosure, sources []RetiredNativeSource) (Authority, tenancy.Networks, error) {
+	return a.leaveTUN(n, p, sources, func() (tenancy.Networks, error) { return n.RetireSystem(p) })
+}
+
+func (a Authority) leaveTUN(n tenancy.Networks, p tenancy.NetworkClosure, sources []RetiredNativeSource, retire func() (tenancy.Networks, error)) (Authority, tenancy.Networks, error) {
 	v, live := n.Network(p.Tenant, p.Network)
 	if !live || v.Logical == "" || n.Cluster() != a.cluster || !a.networkQuiescent(v) || len(sources) != 2 {
 		return a, n, ErrLease
 	}
-	others := 0
-	for _, m := range n.AllNetworks() {
-		if m.Tenant == v.Tenant && m.Logical == v.Logical && m.ID != v.ID {
-			others++
-		}
-	}
-	if others == 0 {
-		return a, n, ErrLease
-	}
-	next, err := n.Retire(c, actor, p)
+	next, err := retire()
 	if err != nil {
 		return a, n, err
 	}

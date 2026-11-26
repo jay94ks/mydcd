@@ -50,10 +50,9 @@ func TestRealServerNetworkChange(t *testing.T) {
 	if st := status("mesh"); st["kind"] != "tun" || member(st)["phase"] != "none" || st["next"] != "" {
 		t.Fatalf("initial: %v", st)
 	}
-	// node-0 makes the network's bridge before the change starts: mydcd
-	// cannot close a member drained before its bridge exists. The
-	// engine starts with bridge, host and none.
-	c.Wait("mesh bridge", func() bool { return len(c.Nodes[0].Engine.Networks()) > 3 })
+	// The change starts at once, so node-0 may never build the bridge
+	// (a planned change holds its permit); a member drained before its
+	// bridge exists still closes.
 
 	// TUN: plan, drain, fence, commit
 	plan := step("/mesh/change", map[string]any{"node": "node-0", "cidr": "10.50.9.0/24"})

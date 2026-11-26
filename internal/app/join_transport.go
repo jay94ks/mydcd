@@ -77,7 +77,7 @@ func (r *Runtime) membershipRequest(ctx context.Context, session *mydcp.Session,
 				if membership.FullMember(entry) {
 					reply.Code = "ok"
 				} else {
-					err = r.memberReport(ctx, view, control.MemberReport{Action: "installed", Node: req.Node, Expected: entry.Revision, Ack: req.Ack})
+					err = r.reportInstalled(ctx, view, entry, req)
 					if err == nil {
 						reply.Code = "ok"
 					} else {
@@ -106,6 +106,33 @@ func (r *Runtime) membershipRequest(ctx context.Context, session *mydcp.Session,
 		return err
 	}
 	return mydcp.WriteFrame(stream, mydcp.Frame{Purpose: mydcp.Membership, Kind: 2, Request: f.Request, Fields: []mydcp.Field{{Tag: 1, Required: true, Value: raw}, {Tag: 2, Required: true, Value: digest[:]}}})
+}
+
+// reportInstalled commits the joiner's signed ACK. Other nodes' reports
+// (their configuration after the join, node proofs) move the directory's
+// root revision at the same time, so a refused CAS is read again and the
+// same ACK reported on the new revisions while the entry is still this join
+// and not yet a full member. The ACK is immutable, so this never changes
+// what is reported.
+func (r *Runtime) reportInstalled(ctx context.Context, view cluster.View, entry membership.Entry, req MemberRequest) error {
+	for attempt := 0; ; attempt++ {
+		err := r.memberReport(ctx, view, control.MemberReport{Action: "installed", Node: req.Node, Expected: entry.Revision, Ack: req.Ack})
+		if !errors.Is(err, errMemberReportStale) || attempt == 4 {
+			return err
+		}
+		var d membership.Directory
+		if view, d, err = r.members(ctx, true); err != nil {
+			return err
+		}
+		current, ok := d.Entry(req.Node)
+		if !ok || current.JoinID != req.JoinID || current.Peer.Key != entry.Peer.Key {
+			return errMemberReportStale
+		}
+		if membership.FullMember(current) {
+			return nil
+		}
+		entry = current
+	}
 }
 
 // CallMembership sends once. Transport uncertainty never creates a new Join ID

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from 'vitest';
-import { cidrProblem, hostIn, parseCidr, suggestCidr } from './cidr';
+import { cidrProblem, hostIn, parseCidr, suggestCidr, SYSTEM_TEXT } from './cidr';
 
 describe('CIDR', () => {
   it('데몬과 같은 규칙으로 읽는다', () => {
@@ -21,5 +21,10 @@ describe('CIDR', () => {
     expect(hostIn(c, '10.40.2.1')).toBe(true);
     expect(hostIn(c, '10.40.2.0')).toBe(false);
     expect(hostIn(c, '10.40.3.1')).toBe(false);
+  });
+  it('시스템 망 대역 10.254.0.0/16은 쓸 수 없다', () => {
+    expect(cidrProblem('10.254.8.0/24', [])).toBe(SYSTEM_TEXT);
+    expect(cidrProblem('10.0.0.0/8', [])).toBe(SYSTEM_TEXT);
+    expect(cidrProblem('10.0.0.0/16', [])).toBeUndefined();
   });
 });

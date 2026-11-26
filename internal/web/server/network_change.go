@@ -302,6 +302,13 @@ func (s *Server) handleNetworkReconfigure(w http.ResponseWriter, r *http.Request
 		if len(req.Members) > 32 {
 			return "", nil, 0, invalid("members: at most 32")
 		}
+		// The network keeps its toggles; one that does not allow the new
+		// server count must be turned off first.
+		for _, t := range tenancy.NetworkToggles() {
+			if !tenancy.ToggleAllowed(t, slices.Contains(n.Toggles, t), len(req.Members)) {
+				return "", nil, 0, &httpErr{http.StatusConflict, "toggle-not-allowed", fmt.Sprintf("turn %s off before changing to %d servers", t, len(req.Members))}
+			}
+		}
 		versions, err := changeVersions(n)
 		if err != nil {
 			return "", nil, 0, err
@@ -334,6 +341,7 @@ func (s *Server) handleNetworkReconfigure(w http.ResponseWriter, r *http.Request
 		if err != nil {
 			return "", nil, 0, err
 		}
+		d.Toggles = slices.Clone(n.Toggles)
 		return mydc.ActionReconfigureTUN, control.NetworkReconfigure{Target: d, Members: versions}, expectedOr(req.Expected, rev), nil
 	})
 }
@@ -401,8 +409,9 @@ func (s *Server) handleNetworkJoin(w http.ResponseWriter, r *http.Request, ws *w
 
 // POST /t/{t}/networks/{name}/members/leave {opId, node} → leave-tun-network:
 // one drained server (POST …/change/drain first: 409 not-drained) leaves on
-// its owner's signed closure (409 in-use while containers use it). The
-// last server cannot leave; retire the network instead (409 last-member).
+// its owner's signed closure (409 in-use while containers use it). When the
+// last server leaves, the network is deleted; its DNS must be off first
+// (409 dns-enabled).
 func (s *Server) handleNetworkLeave(w http.ResponseWriter, r *http.Request, ws *webSession) {
 	var req struct {
 		OpID string `json:"opId"`
@@ -412,15 +421,13 @@ func (s *Server) handleNetworkLeave(w http.ResponseWriter, r *http.Request, ws *
 		return
 	}
 	s.networkStep(w, r, ws, req.OpID, req, func(ctx context.Context, c mydc.Conn, n *mydc.Network, _ uint64) (string, any, uint64, error) {
-		if n.Kind != "tun" {
-			return "", nil, 0, &httpErr{http.StatusConflict, "not-tun", "retire a bridge network instead"}
-		}
 		m, err := memberOn(n, req.Node)
 		if err != nil {
 			return "", nil, 0, err
 		}
-		if len(n.Members) < 2 {
-			return "", nil, 0, &httpErr{http.StatusConflict, "last-member", "the last server cannot leave; retire the network instead"}
+		// The last server leaving deletes the network; its DNS goes off first.
+		if len(n.Members) == 1 && n.DNS != nil && n.DNS.Enabled {
+			return "", nil, 0, &httpErr{http.StatusConflict, "dns-enabled", "turn the network's DNS off before the last server leaves"}
 		}
 		if !m.Draining {
 			return "", nil, 0, &httpErr{http.StatusConflict, "not-drained", "drain the server first (POST …/change/drain)"}
@@ -482,38 +489,17 @@ func firstAddr(v []netip.Prefix) netip.Addr {
 
 // POST /t/{t}/networks/{name}/retire {opId, expected?}: a TUN network is
 // retired by reconfigure-tun-network with no members (every member fenced,
-// DNS off first: 409 dns-enabled). A bridge network (body node? when it has
-// several members) is retired by retire-network with the owner's signed
-// closure, after drain-network (409 not-drained, 409 in-use while
-// containers still use it).
+// DNS off first: 409 dns-enabled). Removing the servers one by one with
+// …/members/leave also deletes it, and needs no planned change.
 func (s *Server) handleNetworkRetire(w http.ResponseWriter, r *http.Request, ws *webSession) {
 	var req struct {
 		OpID     string `json:"opId"`
-		Node     string `json:"node,omitempty"`
 		Expected uint64 `json:"expected,omitempty"`
 	}
 	if !readJSON(w, r, &req) {
 		return
 	}
-	s.networkStep(w, r, ws, req.OpID, req, func(ctx context.Context, c mydc.Conn, n *mydc.Network, rev uint64) (string, any, uint64, error) {
-		if n.Kind != "tun" {
-			// bridge: drain-network first, then the owner's closure
-			m, err := memberOn(n, req.Node)
-			if req.Node == "" && len(n.Members) == 1 {
-				m, err = &n.Members[0], nil
-			}
-			if err != nil {
-				return "", nil, 0, err
-			}
-			if !m.Draining {
-				return "", nil, 0, &httpErr{http.StatusConflict, "not-drained", "drain the network first (POST …/change/drain)"}
-			}
-			closed, err := memberClosed(ctx, c, m)
-			if err != nil {
-				return "", nil, 0, err
-			}
-			return mydc.ActionRetireNetwork, closed, m.Revision, nil
-		}
+	s.networkStep(w, r, ws, req.OpID, req, func(_ context.Context, _ mydc.Conn, n *mydc.Network, rev uint64) (string, any, uint64, error) {
 		if n.DNS != nil && n.DNS.Enabled {
 			return "", nil, 0, &httpErr{http.StatusConflict, "dns-enabled", "turn the network's DNS off first"}
 		}

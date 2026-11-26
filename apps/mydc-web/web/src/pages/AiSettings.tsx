@@ -783,7 +783,7 @@ function ExcludeDialog({ value, onClose, onSave }: { value: string[]; onClose: (
   return (
     <Dialog
       title="외부 AI 제외 작업 공간"
-      width={400}
+      width={420}
       onClose={onClose}
       footer={
         <>
@@ -843,7 +843,7 @@ function AuditDeleteDialog({ total, onClose, onDone }: { total?: number; onClose
     <Dialog
       danger
       title="감사 기록 지우기"
-      width={400}
+      width={420}
       onClose={onClose}
       footer={
         <>

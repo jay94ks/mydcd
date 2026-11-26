@@ -787,7 +787,7 @@ export function StandaloneNewPage() {
           )}
         </div>
 
-        <div className="aside col" style={{ gap: 16, flexBasis: 360 }}>
+        <div className="aside col" style={{ gap: 16 }}>
           <Card title="미리보기 (YAML)">
             <pre className="preview-yaml">
               <span className="d"># 단독 컨테이너 = app.yaml 서비스 하나와 같은 필드</span>
@@ -907,7 +907,7 @@ export function StandaloneNewPage() {
       {dlg === 'review' && fresh && (
         <Dialog
           title={`${name} 변경 · rev ${plan.revision} → ${plan.revision + 1}`}
-          width={800}
+          width={720}
           onClose={() => setDlg(undefined)}
           footer={
             <>
@@ -929,7 +929,7 @@ export function StandaloneNewPage() {
       {blocker.state === 'blocked' && (
         <Dialog
           title={editing ? '바꾼 내용을 버릴까요?' : '입력한 내용을 버릴까요?'}
-          width={400}
+          width={420}
           onClose={() => blocker.reset()}
           footer={
             editing ? (

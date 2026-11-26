@@ -465,7 +465,7 @@ export function TestDialog({ w, onClose }: { w: Webhook; onClose: () => void }) 
   return (
     <Dialog
       title="시험 보내기"
-      width={400}
+      width={420}
       onClose={onClose}
       footer={
         <button className="btn" onClick={onClose}>
@@ -531,7 +531,7 @@ function RotateDialog({ w, onClose, onDone }: { w: Webhook; onClose: () => void;
   return (
     <Dialog
       danger
-      width={400}
+      width={420}
       title={`${w.name} 서명 비밀을 바꿀까요?`}
       onClose={onClose}
       footer={
@@ -666,7 +666,7 @@ function AddDialog({ onClose, onSaved }: { onClose: () => void; onSaved: () => v
       <>
         <Dialog
           title={`${name} · 시험 보내기`}
-          width={400}
+          width={420}
           onClose={() => (secret ? undefined : done())}
           footer={
             !secret && (

@@ -98,6 +98,29 @@ func listed(p layout.Path, pin v1.Hash) bool {
 	return false
 }
 
+// DefaultUID is the non-root UID a node app container runs as unless
+// node.yaml sets another. Its management socket and data are owned by it.
+const DefaultUID = 10001
+
+// ContainerRunDir is where a node app container sees its run directory, so
+// its management socket is ContainerRunDir/mydc.sock.
+const ContainerRunDir = "/var/run/mydc"
+
+// socketName is the management socket's file name in a run directory.
+const socketName = "mydc.sock"
+
+// RunDir is the host directory that holds node app name's own management
+// socket: state_dir/node-apps/<name>/run. Only this directory is bound into
+// the container (at ContainerRunDir); never its parents or the host socket.
+func RunDir(stateDir, name string) string {
+	return filepath.Join(stateDir, "node-apps", name, "run")
+}
+
+// SocketPath is node app name's management socket on the host.
+func SocketPath(stateDir, name string) string {
+	return filepath.Join(RunDir(stateDir, name), socketName)
+}
+
 // Web is mydc-web, the web management UI.
 const Web = "web"
 

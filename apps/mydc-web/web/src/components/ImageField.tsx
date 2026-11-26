@@ -197,7 +197,7 @@ export function ImagePickDialog({ tenant, current = '', onPick, onClose }: { ten
     <Dialog
       title="이미지 고르기"
       onClose={onClose}
-      width={800}
+      width={720}
       footer={
         <>
           <button type="button" className="btn" onClick={onClose}>

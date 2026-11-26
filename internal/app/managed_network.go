@@ -98,12 +98,12 @@ func (r *Runtime) reconcileManagedNetworkBridges(ctx context.Context, v cluster.
 			}
 		}
 		if capacity < 1 {
-			if row.Network.Draining && !known {
-				// There was no local operation to stop; the shared reservation is
-				// retained until a separate terminal management proof is available.
-				continue
+			if !row.Network.Draining || known {
+				return errors.New("managed bridge needs committed positive consumer policy")
 			}
-			return errors.New("managed bridge needs committed positive consumer policy")
+			// Drained before this server built it: record the terminal
+			// state so the bridge can be proven Gone and the member closed.
+			capacity = 1
 		}
 		active := &spec
 		if row.Network.Draining {

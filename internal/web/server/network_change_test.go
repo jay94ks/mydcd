@@ -4,6 +4,7 @@ package server
 
 import (
 	"fmt"
+	"slices"
 	"testing"
 
 	"github.com/jay94ks/mydcd/internal/cluster/control"
@@ -77,6 +78,8 @@ func TestNetworkJoinAndLeaveOneServer(t *testing.T) {
 		{map[string]any{"opId": op(), "node": "node-b", "cidr": "10.30.6.0/24", "tunnel": "10.255.0.10"}, 409, "already-member"},
 		{map[string]any{"opId": op(), "node": "node-d", "cidr": "10.30.5.0/25", "tunnel": "10.255.0.11"}, 422, "invalid"},
 		{map[string]any{"opId": op(), "node": "node-d", "cidr": "10.30.7.0/24"}, 422, "invalid"},
+		{map[string]any{"opId": op(), "node": "node-d", "cidr": "10.254.5.0/24", "tunnel": "10.255.0.11"}, 422, "system-range"},
+		{map[string]any{"opId": op(), "node": "node-d", "cidr": "10.30.7.0/24", "tunnel": "10.254.0.11"}, 422, "system-range"},
 	} {
 		if code, out := f.do("POST", base+"/members", c.body); code != c.code || errCode(out) != c.err {
 			t.Fatalf("%v: %d %v", c.body, code, out)
@@ -110,7 +113,7 @@ func TestNetworkJoinAndLeaveOneServer(t *testing.T) {
 
 // Toggles: local needs one server, and a local network takes no server.
 func TestNetworkToggleLocal(t *testing.T) {
-	f, _ := newFakeFixture(t)
+	f, fake := newFakeFixture(t)
 	fakeLogin(t, f, "admin")
 	n := 0
 	op := func() string { n++; return fmt.Sprintf("b1b2c3d4-0000-4000-8000-%012d", n) }
@@ -144,6 +147,7 @@ func TestNetworkToggleLocal(t *testing.T) {
 	}
 	solo := "/api/v1/t/payments/networks/solo"
 	refused(solo+"/members", map[string]any{"opId": op(), "node": "node-c", "cidr": "10.62.0.0/24", "tunnel": "10.255.61.2"}, 409, "toggle-not-allowed")
+	refused(solo+"/reconfigure", map[string]any{"opId": op(), "members": []map[string]any{{"node": "node-a"}, {"node": "node-c", "cidr": "10.62.0.0/24", "tunnel": "10.255.61.2"}}}, 409, "toggle-not-allowed")
 	o = applied(solo+"/toggles", map[string]any{"toggle": "local", "on": false})
 	var set control.NetworkToggleSet
 	userPayload(t, f, "u-admin", o, &set)
@@ -152,4 +156,29 @@ func TestNetworkToggleLocal(t *testing.T) {
 	}
 	applied(solo+"/members", map[string]any{"node": "node-c", "cidr": "10.62.0.0/24", "tunnel": "10.255.61.2"})
 	refused(solo+"/toggles", map[string]any{"opId": op(), "toggle": "local", "on": true}, 409, "toggle-not-allowed")
+	applied("/api/v1/t/payments/networks", map[string]any{"kind": "tun", "name": "solo2", "toggles": map[string]bool{"local": true}, "members": []map[string]any{{"node": "node-a", "cidr": "10.65.0.0/24", "tunnel": "10.255.65.1"}}})
+	solo2 := "/api/v1/t/payments/networks/solo2"
+	// a reconfigure keeps the toggles
+	for _, p := range []string{"/change", "/change/drain"} {
+		body := map[string]any{"node": "node-a"}
+		if p == "/change" {
+			body["cidr"] = "10.63.0.0/24"
+		}
+		applied(solo2+p, body)
+	}
+	if err := fake.FenceNetworkChange("payments", "solo2", "node-a"); err != nil {
+		t.Fatal(err)
+	}
+	o = applied(solo2+"/reconfigure", map[string]any{"members": []map[string]any{{"node": "node-b", "cidr": "10.64.0.0/24", "tunnel": "10.255.61.3"}}})
+	var rc control.NetworkReconfigure
+	userPayload(t, f, "u-admin", o, &rc)
+	if !slices.Equal(rc.Target.Toggles, []tenancy.NetworkToggle{tenancy.ToggleLocal}) {
+		t.Fatalf("reconfigure dropped the toggles: %+v", rc.Target)
+	}
+	// the last server leaving deletes the network
+	applied(solo2+"/change/drain", map[string]any{"node": "node-b"})
+	applied(solo2+"/members/leave", map[string]any{"node": "node-b"})
+	if code, _ := f.do("GET", solo2+"/change", nil); code != 404 {
+		t.Fatalf("network kept after its last server left: %d", code)
+	}
 }

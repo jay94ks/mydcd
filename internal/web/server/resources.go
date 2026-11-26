@@ -166,6 +166,13 @@ func mockAction(action string) bool {
 
 func invalid(msg string) error { return &httpErr{http.StatusUnprocessableEntity, "invalid", msg} }
 
+// systemRange: a workspace network may not use the system network's range.
+// mydcd refuses it too (result reason system-range-overlap), also for a
+// range an administrator changed; this checks the default range.
+func systemRange(field string) error {
+	return &httpErr{http.StatusUnprocessableEntity, "system-range", field + ": " + tenancy.DefaultSystemRange.String() + " is the system network (mydc-system)"}
+}
+
 func validName(s string) bool { return certNameRE.MatchString(s) }
 
 // netPool is one server's address pool "main": an IPv4 network (at most
@@ -174,6 +181,9 @@ func netPool(cidr, gateway string, mtu int) (tenancy.Subnet, error) {
 	prefix, err := netip.ParsePrefix(cidr)
 	if err != nil || !prefix.Addr().Is4() || prefix != prefix.Masked() || prefix.Bits() > 29 {
 		return tenancy.Subnet{}, invalid("cidr: an IPv4 network such as 10.40.0.0/24 (at most /29)")
+	}
+	if prefix.Overlaps(tenancy.DefaultSystemRange) {
+		return tenancy.Subnet{}, systemRange("cidr")
 	}
 	gw := prefix.Addr().Next()
 	if gateway != "" {
@@ -186,10 +196,9 @@ func netPool(cidr, gateway string, mtu int) (tenancy.Subnet, error) {
 
 // POST /t/{t}/networks: a network (Expected is Networks.Revision).
 //
-//	{opId, kind?:"bridge", name, node, cidr, gateway?, mtu?}
-//	  → create-network: a bridge network on one server
-//	{opId, kind:"tun", name, members:[{node, cidr, gateway?, tunnel?}], tunnelCidr?, mtu?}
-//	  → create-tun-network: one network across servers. Each server has its
+//	{opId, kind:"tun", name, members:[{node, cidr, gateway?, tunnel?}], tunnelCidr?, mtu?, toggles?}
+//	  → create-tun-network: one network on one or more servers (a
+//	    one-server network is one member; toggles.local keeps it there). Each server has its
 //	    own pool and a tunnel host address outside every pool, given as
 //	    members[].tunnel or handed out in order from tunnelCidr.
 func (s *Server) handleCreateNetwork(w http.ResponseWriter, r *http.Request, ws *webSession) {
@@ -231,15 +240,6 @@ func (s *Server) handleCreateNetwork(w http.ResponseWriter, r *http.Request, ws 
 		var action string
 		var payload any
 		switch req.Kind {
-		case "", "bridge":
-			if !validName(req.Node) || len(req.Members) != 0 || req.TunnelCIDR != "" {
-				return "", nil, 0, "", invalid("a bridge network has one node (lowercase letters, digits and '-') and no members")
-			}
-			pool, err := netPool(req.CIDR, req.Gateway, mtu)
-			if err != nil {
-				return "", nil, 0, "", err
-			}
-			action, payload = mydc.ActionCreateNetwork, tenancy.Network{Tenant: tenant, ID: req.Name, Node: req.Node, Pools: []tenancy.Subnet{pool}}
 		case "tun":
 			d, err := tunDefinition(tenant, req.Name, mtu, req.TunnelCIDR, func(yield func(node, cidr, gateway, tunnel string) error) error {
 				if req.Node != "" || req.CIDR != "" || len(req.Members) == 0 || len(req.Members) > 32 {
@@ -271,7 +271,7 @@ func (s *Server) handleCreateNetwork(w http.ResponseWriter, r *http.Request, ws 
 			}
 			action, payload = mydc.ActionCreateTUNNetwork, d
 		default:
-			return "", nil, 0, "", invalid(`kind: "bridge" or "tun"`)
+			return "", nil, 0, "", invalid(`kind: "tun" (a network on one server is a tun network with one member; toggles.local keeps it there)`)
 		}
 		p, err := c.Resources(ctx, tenant, "")
 		if err != nil {
@@ -319,6 +319,9 @@ func tunDefinition(tenant, name string, mtu int, tunnelCIDR string, members func
 			addr = next
 		default:
 			return invalid("each member needs a tunnel address: members[].tunnel or tunnelCidr")
+		}
+		if tenancy.DefaultSystemRange.Contains(addr) {
+			return systemRange("members[].tunnel")
 		}
 		if slices.Contains(used, addr) {
 			return invalid("tunnel addresses must differ")

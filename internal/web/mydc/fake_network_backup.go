@@ -16,7 +16,7 @@ import (
 // --- REQ-33 ---
 //
 // The closure reads the member rows of fake_network_change.go (drain-network
-// lives there); fence-network-change and retire-network check the closure
+// lives there); fence-network-change and leave-tun-network check the closure
 // with memberClosureOK.
 
 // networkUsers: app services whose current definition names the network
@@ -172,37 +172,6 @@ func (c *fakeConn) applyFenceNetworkChange(op UserOperation, actor string, next 
 	}
 	m.Change.Phase, m.Change.Revision = string(tenancy.ChangeFenced), next
 	w.resources[i].Network = row
-	w.netRev = next
-	return nil
-}
-
-// applyRetireNetwork: the closure itself is the payload; Expected = the
-// member Revision. TUN members retire through reconfigure-tun-network.
-func (c *fakeConn) applyRetireNetwork(op UserOperation, actor string, next uint64) error {
-	w := c.f.w
-	var p NetworkClosure
-	if decodePayload(op.Change.Payload, &p) != nil || p.Tenant == "" {
-		return errors.New("payload")
-	}
-	if !w.canManage(actor, p.Tenant) {
-		return errForbidden
-	}
-	i, row, j := w.memberByID(p.Tenant, p.Network)
-	if i < 0 || row.Members[j].Revision != op.Change.Expected || row.Members[j].Source.Logical != "" {
-		return errCAS
-	}
-	m := row.Members[j]
-	if activeChange(m.Change) || !w.memberClosureOK(p.Tenant, m, p) {
-		return errors.New("closure")
-	}
-	row.Members = slices.Delete(row.Members, j, j+1)
-	row.Nodes = slices.DeleteFunc(slices.Clone(row.Nodes), func(n string) bool { return n == m.Node })
-	if len(row.Members) == 0 {
-		w.resources = slices.Delete(w.resources, i, i+1)
-	} else {
-		row.Revision = next
-		w.resources[i].Network = row
-	}
 	w.netRev = next
 	return nil
 }

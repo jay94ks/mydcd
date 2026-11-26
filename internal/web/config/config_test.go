@@ -50,3 +50,19 @@ func TestACMEAdvertiseAddress(t *testing.T) {
 		}
 	}
 }
+
+func TestTrustedProxies(t *testing.T) {
+	key := strings.Repeat("ab", 32)
+	env := map[string]string{"MYDC_WEB_CLUSTER": key, "MYDC_WEB_NODE": "node-a", "MYDC_WEB_NODE_KEY": key, "MYDC_WEB_TRUSTED_PROXIES": "10.88.0.1, 10.89.0.0/24"}
+	c, err := Parse(nil, func(k string) string { return env[k] })
+	if err != nil || c.Socket != "/var/run/mydc/mydc.sock" {
+		t.Fatalf("%+v %v", c, err)
+	}
+	nets, err := c.TrustedProxyNets()
+	if err != nil || len(nets) != 2 || nets[0].String() != "10.88.0.1/32" || nets[1].String() != "10.89.0.0/24" {
+		t.Fatalf("%v %v", nets, err)
+	}
+	if _, err := Parse([]string{"-trusted-proxies", "ingress"}, func(k string) string { return env[k] }); err == nil {
+		t.Fatal("accepted a name")
+	}
+}

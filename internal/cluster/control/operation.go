@@ -234,6 +234,10 @@ func (p Policy) AdmitModule(s state.State, command state.Command) bool {
 		_, err := p.imageCacheReport(s, command)
 		return err == nil
 	}
+	if command.Key == ResourcesKey && strings.HasPrefix(command.Actor, "node/") {
+		_, err := p.systemNetworkReport(s, command)
+		return err == nil
+	}
 	if command.Key == TunnelReconnectKey && strings.HasPrefix(command.Actor, "node/") {
 		_, err := p.tunnelReport(s, command)
 		return err == nil

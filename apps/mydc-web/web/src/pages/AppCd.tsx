@@ -554,7 +554,7 @@ function ActDialog({ a, cd, act, onClose, onDone }: { a: AppView; cd: Cd; act: A
     <Dialog
       title={d.title(snap)}
       danger={d.danger}
-      width={400}
+      width={420}
       onClose={onClose}
       footer={
         finished ? (
@@ -837,7 +837,7 @@ function LocalDialog({ a, local, svcs, kind, name, onClose, onDone }: { a: AppVi
     <Dialog
       title={kind === 'remove' ? `${name}${eulReul(name!)} 제거할까요?` : isNew ? '웹에서 서비스 추가' : `${name} 편집`}
       danger={kind === 'remove'}
-      width={kind === 'remove' ? 400 : 560}
+      width={kind === 'remove' ? 420 : 560}
       onClose={onClose}
       footer={
         finished ? (
@@ -939,7 +939,7 @@ function ApproversCard({ a, cd, canDeploy, onDone }: { a: AppView; cd: Cd; canDe
         <Dialog
           danger
           title={`${drop}${eulReul(drop)} 후보 승인 담당에서 뺄까요?`}
-          width={400}
+          width={420}
           onClose={() => setDrop(undefined)}
           footer={
             <>
@@ -1253,7 +1253,7 @@ function ReleaseDialog({ a, path, onClose, onDone }: { a: AppView; path: string[
     <Dialog
       title={`${name} 임시 변경을 풀까요?`}
       danger
-      width={400}
+      width={420}
       onClose={onClose}
       footer={
         finished ? (

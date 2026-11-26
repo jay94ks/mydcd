@@ -53,6 +53,7 @@ var reportMethods = map[string]ReportClass{
 	"volume-move-report":                 ReportWork,
 	"checker-build-report":               ReportWork,
 	"external-registry-closed":           ReportWork,
+	"system-network-report":              ReportWork,
 
 	"certificate-expiry-report":          ReportFact,
 	"image-build-git-observation-report": ReportFact,

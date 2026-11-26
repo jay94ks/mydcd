@@ -99,18 +99,18 @@ func TestNetworkClosure(t *testing.T) {
 	if m = member(t, admin, "payments", "payments-net", "node-a"); m.Change.Phase != "fenced" {
 		t.Fatalf("after fence %+v", m.Change)
 	}
-	// retire-network is for bridge members; a TUN member is refused.
-	if _, res := submit(t, admin, ActionRetireNetwork, m.Revision, *closed, rootFor(t, admin, ActionRetireNetwork)); res.Code != ResultConditionFailed {
-		t.Fatalf("tun retire %+v", res)
+	// A member whose change is fenced does not leave.
+	if _, res := submit(t, admin, ActionLeaveTUN, m.Revision, *closed, rootFor(t, admin, ActionLeaveTUN)); res.Code == ResultApplied {
+		t.Fatalf("fenced member left %+v", res)
 	}
 
-	// Bridge member with running tasks: pending until they stop.
+	// A member with running tasks: pending until they stop.
 	b := member(t, alice, "shop", "shop-net", "node-a")
 	if _, res := submit(t, bob, ActionDrainNetwork, b.Revision, control.NetworkSelection{Tenant: "shop", ID: b.ID}, rootFor(t, bob, ActionDrainNetwork)); res.Code != ResultForbidden {
 		t.Fatalf("viewer drain %+v", res)
 	}
 	if _, res := submit(t, alice, ActionDrainNetwork, b.Revision, control.NetworkSelection{Tenant: "shop", ID: b.ID}, rootFor(t, alice, ActionDrainNetwork)); res.Code != ResultApplied {
-		t.Fatalf("drain bridge %+v", res)
+		t.Fatalf("drain %+v", res)
 	}
 	v, _ = fc(alice).networkClosure(ctx, "shop", b.ID)
 	if !v.Draining || v.Closed != nil || v.NativeGone || len(v.Endpoints) == 0 || v.PendingEndpoints != uint64(len(v.Endpoints)) {
@@ -135,8 +135,8 @@ func TestNetworkClosure(t *testing.T) {
 		t.Fatalf("no closure after tasks stopped %+v", v)
 	}
 	b = member(t, alice, "shop", "shop-net", "node-a")
-	if _, res := submit(t, alice, ActionRetireNetwork, b.Revision, *v.Closed, rootFor(t, alice, ActionRetireNetwork)); res.Code != ResultApplied {
-		t.Fatalf("retire %+v", res)
+	if _, res := submit(t, alice, ActionLeaveTUN, b.Revision, *v.Closed, rootFor(t, alice, ActionLeaveTUN)); res.Code != ResultApplied {
+		t.Fatalf("leave %+v", res)
 	}
 	if n := member(t, alice, "shop", "shop-net", "node-b"); n.Node != "node-b" {
 		t.Fatalf("other member %+v", n)

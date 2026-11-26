@@ -184,7 +184,7 @@ export function ReloginDialog({ onLoggedOut, title = '세션이 만료됐습니�
   return (
     <Dialog
       title={title}
-      width={400}
+      width={420}
       onClose={onClose ?? (() => undefined)}
       footer={
         <button type="button" className="btn" onClick={() => void logout().then(onLoggedOut)}>

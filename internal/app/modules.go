@@ -340,6 +340,7 @@ func (r *Runtime) reconcileModules(view cluster.View) error {
 		{"node-storage", func() error { return r.reconcileNodeStorage(r.ctx, view) }},
 		{"compiler-closures", func() error { return r.reconcileCompilerClosures(r.ctx, view) }},
 		{"managed", func() error { return r.reconcileManaged(view) }},
+		{"system-network", func() error { return r.reconcileSystemNetwork(r.ctx, view) }},
 		{"registries", func() error { return r.reconcileRegistries(r.ctx, view) }},
 		{"external-registry-readers", func() error { return r.reconcileExternalRegistryReaders(r.ctx, view) }},
 		{"checker-cache", r.collectCheckerCache},

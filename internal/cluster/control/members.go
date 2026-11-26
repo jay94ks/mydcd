@@ -104,7 +104,7 @@ func CommandKey(action string) string {
 		return StorageKey
 	case "rotate-node-identity", "drain-node", "cordon-node", "uncordon-node", "invite-node", "promote-node", "demote-node", "isolate-node", "restore-node", "remove-node", "force-remove-node", "resume-node-operation", "rotate-node-operations":
 		return MembersKey
-	case "set-node-quota", "reserve-task", "drain-reservation", "release-reservation", "create-network", "create-tun-network", "join-tun-network", "leave-tun-network", "set-network-toggle", "configure-network-dns", "plan-network-change", "cancel-network-change", "fence-network-change", "commit-network-change", "reconfigure-tun-network", "propose-route", "approve-route", "withdraw-route", "drain-network", "retire-network":
+	case "set-node-quota", "reserve-task", "drain-reservation", "release-reservation", "create-tun-network", "join-tun-network", "leave-tun-network", "set-network-toggle", "set-system-network-range", "configure-network-dns", "plan-network-change", "cancel-network-change", "fence-network-change", "commit-network-change", "reconfigure-tun-network", "propose-route", "approve-route", "withdraw-route", "drain-network":
 		return ResourcesKey
 	default:
 		return CatalogKey

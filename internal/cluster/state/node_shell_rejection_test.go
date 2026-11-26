@@ -15,12 +15,15 @@ func TestNodeShellRefusalCodesKeepOriginalNumbersAndDeterministicReasons(t *test
 	for _, tc := range []struct {
 		code   Code
 		reason string
-	}{{NodeShellDisabled, "node-shell-disabled"}, {NodeShellNotReady, "node-shell-not-ready"}, {NodeShellLimit, "limit"}, {NodeShellUnreachable, "node-unreachable"}} {
+	}{{NodeShellDisabled, "node-shell-disabled"}, {NodeShellNotReady, "node-shell-not-ready"}, {NodeShellLimit, "limit"}, {NodeShellUnreachable, "node-unreachable"}, {NetworkSystemRange, "system-range-overlap"}} {
 		if RejectionReason(tc.code) != tc.reason || !(Result{Code: tc.code, Reason: tc.reason}).ValidReason() || (Result{Code: tc.code}).ValidReason() || (Result{Code: ConditionFailed, Reason: tc.reason}).ValidReason() {
 			t.Fatal("shell refusal reason was not fixed to its durable code", tc)
 		}
 	}
-	if ValidResultCode(NodeShellUnreachable+1) || (Result{Code: NodeShellUnreachable + 1}).ValidReason() {
+	if NetworkSystemRange != 21 {
+		t.Fatal("the system range refusal was not appended")
+	}
+	if ValidResultCode(NetworkSystemRange+1) || (Result{Code: NetworkSystemRange + 1}).ValidReason() {
 		t.Fatal("unknown future result code accepted")
 	}
 }

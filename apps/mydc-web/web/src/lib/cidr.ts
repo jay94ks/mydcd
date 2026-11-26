@@ -37,11 +37,17 @@ export function hostIn(c: Cidr, addr: string): boolean {
   return n !== undefined && (n & mask(c.bits)) >>> 0 === c.base && n !== c.base;
 }
 
+/** 시스템 망(mydc-system)이 쓰는 대역. 사용자 망의 CIDR·터널 주소는 이 안에 둘 수 없다 */
+export const SYSTEM_CIDR: Cidr = { base: ((10 << 24) | (254 << 16)) >>> 0, bits: 16 };
+export const SYSTEM_TEXT = '10.254.0.0/16은 시스템 망(mydc-system)이 쓰는 대역이라 쓸 수 없습니다';
+export const inSystem = (c: Cidr) => overlaps(c, SYSTEM_CIDR);
+
 /** 망 칸에 대한 문제. 없으면 undefined */
 export function cidrProblem(text: string, taken: { name: string; node?: string; cidr: string }[]): string | undefined {
   const c = parseCidr(text);
   if (!c) return '10.40.2.0/24 같은 IPv4 망 주소를 적어 주세요(호스트 비트는 0).';
   if (c.bits > 29) return '/29보다 좁은 망은 만들 수 없습니다.';
+  if (inSystem(c)) return SYSTEM_TEXT;
   for (const t of taken) {
     const o = parseCidr(t.cidr);
     if (o && overlaps(c, o)) return `${t.name}${t.node ? `(${t.node})` : ''}의 ${t.cidr}와 겹칩니다`;
@@ -54,7 +60,7 @@ export function suggestCidr(taken: string[]): string {
   const used = taken.map(parseCidr).filter((x): x is Cidr => !!x);
   for (let x = 0; x < 256; x++) {
     const c = { base: ((10 << 24) | (40 << 16) | (x << 8)) >>> 0, bits: 24 };
-    if (!used.some((u) => overlaps(c, u))) return cidrText(c);
+    if (!inSystem(c) && !used.some((u) => overlaps(c, u))) return cidrText(c);
   }
   return '10.41.0.0/24';
 }

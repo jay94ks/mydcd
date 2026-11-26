@@ -352,7 +352,7 @@ function Versions({ a, canWrite, base }: { a: AppView; canWrite: boolean; base: 
       </Load>
       {ask && (
         <Dialog
-          width={400}
+          width={420}
           title={`v${ask.version}에 데이터 이전 표시를 할까요?`}
           onClose={() => setAsk(undefined)}
           footer={

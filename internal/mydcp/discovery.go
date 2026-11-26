@@ -49,7 +49,7 @@ func publicNodeName(name string) bool {
 func (t *Transport) EnableDiscovery(node string) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	if !publicNodeName(node) || t.closed || t.publicNode != "" || t.underlay != nil || t.localListener != nil || len(t.localConnections) != 0 || len(t.dials) != 0 {
+	if !publicNodeName(node) || t.closed || t.publicNode != "" || t.underlay != nil || len(t.localListeners) != 0 || len(t.localConnections) != 0 || len(t.dials) != 0 {
 		return ErrAdmission
 	}
 	t.publicNode = node

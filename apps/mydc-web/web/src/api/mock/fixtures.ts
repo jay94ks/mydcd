@@ -260,7 +260,7 @@ export const uploads: (D.DUpload & { tenant: string })[] = [{ tenant: 'shop', id
 
 export const resources: D.DResourceEntry[] = [
   { key: 'net/shop/shop-net', tenant: 'shop', network: { name: 'shop-net', kind: 'tun', cidr: '10.40.0.0/24, 10.40.4.0/24', nodes: ['node-a', 'node-b'], revision: 18, dns: { zone: 'shop.mydc.test.', enabled: true, revision: 3, upstreams: ['1.1.1.1'], ttl: 300, negativeTtl: 5, reverse: false, resolver: '10.40.0.1' } } },
-  { key: 'net/shop/shop-db', tenant: 'shop', network: { name: 'shop-db', kind: 'bridge', cidr: '10.40.1.0/26', nodes: ['node-a'], revision: 4 } },
+  { key: 'net/shop/shop-db', tenant: 'shop', network: { name: 'shop-db', kind: 'tun', cidr: '10.40.1.0/26', nodes: ['node-a'], revision: 4, toggles: ['local'] } },
   { key: 'net/internal/mon-net', tenant: 'internal', network: { name: 'mon-net', kind: 'tun', cidr: '10.41.0.0/24', nodes: ['node-a', 'node-b'], revision: 6 } },
   { key: 'limit/shop/node-a', tenant: 'shop', limit: { node: 'node-a', cpus: 2, memoryBytes: 8 * GiB, maxContainers: 20, revision: 3 } },
   { key: 'limit/shop/node-b', tenant: 'shop', limit: { node: 'node-b', cpus: 2, memoryBytes: 8 * GiB, maxContainers: 20, revision: 3 } },
@@ -271,8 +271,8 @@ export const resources: D.DResourceEntry[] = [
 export const tenantNodes: Record<string, string[]> = { shop: ['node-a', 'node-b'], internal: ['node-a', 'node-b'], lab: ['node-b'], 'legacy-lab': [] };
 
 // 작업 공간 간 연결(tenancy.Route). 제안한 쪽의 승인은 제안과 함께 붙는다
-export type MockRoute = Omit<D.DRoute, 'side' | 'state' | 'source' | 'destination'> & { source: Required<Pick<D.DRouteEnd, 'tenant' | 'network' | 'node' | 'name'>>; destination: Required<Pick<D.DRouteEnd, 'tenant' | 'network' | 'node' | 'name'>> };
-const rEnd = (tenant: string, name: string, node: string) => ({ tenant, network: `${name}-${node}`, node, name });
+export type MockRoute = Omit<D.DRoute, 'side' | 'state' | 'source' | 'destination'> & { source: Required<Pick<D.DRouteEnd, 'tenant' | 'network' | 'node' | 'name'>> & Pick<D.DRouteEnd, 'cidr'>; destination: Required<Pick<D.DRouteEnd, 'tenant' | 'network' | 'node' | 'name'>> & Pick<D.DRouteEnd, 'cidr'> };
+const rEnd = (tenant: string, name: string, node: string, cidr?: string) => ({ tenant, network: `${name}-${node}`, node, name, ...(cidr ? { cidr } : {}) });
 /** 망·저장소를 쓰는 곳(network-users / volume-users). 키는 tenant/이름 */
 const svc = (app: string, service: string, node: string, n = 1): D.DResourceUser => ({ kind: 'service', app, service, node, attached: true, selection: Array.from({ length: n }, (_, i) => ({ app, service, instance: String(i + 1) })) });
 export const networkUsers: Record<string, D.DResourceUser[]> = {
@@ -286,9 +286,11 @@ export const volumeUsers: Record<string, D.DResourceUser[]> = {
   'internal/prom-data': [{ ...svc('monitoring', 'prometheus', 'node-b'), readOnly: false }],
 };
 export const routes: MockRoute[] = [
-  { key: 'route/shop/r-metrics', id: 'r-metrics', sourceTenant: 'shop', source: rEnd('shop', 'shop-net', 'node-a'), destination: rEnd('internal', 'mon-net', 'node-a'), protocol: 'tcp', ports: [{ first: 9090, last: 9090 }], phase: 'active', approvals: [{ tenant: 'shop', user: 'alice' }, { tenant: 'internal', user: 'carol' }], revision: 4 },
-  { key: 'route/shop/r-ingest', id: 'r-ingest', sourceTenant: 'shop', source: rEnd('shop', 'shop-net', 'node-a'), destination: rEnd('analytics', 'ingest', 'node-c'), protocol: 'tcp', ports: [{ first: 443, last: 443 }], phase: 'pending', approvals: [{ tenant: 'shop', user: 'alice' }], revision: 2 },
-  { key: 'route/internal/r-scrape', id: 'r-scrape', sourceTenant: 'internal', source: rEnd('internal', 'mon-net', 'node-b'), destination: rEnd('shop', 'shop-net', 'node-b'), protocol: 'tcp', ports: [{ first: 9100, last: 9100 }], phase: 'pending', approvals: [{ tenant: 'internal', user: 'carol' }], revision: 1 },
+  { key: 'route/shop/r-metrics', id: 'r-metrics', sourceTenant: 'shop', source: rEnd('shop', 'shop-net', 'node-a', '10.40.0.0/24'), destination: rEnd('internal', 'mon-net', 'node-a', '10.41.0.0/24'), protocol: 'tcp', ports: [{ first: 9090, last: 9090 }], phase: 'active', approvals: [{ tenant: 'shop', user: 'alice' }, { tenant: 'internal', user: 'carol' }], revision: 4 },
+  { key: 'route/shop/r-ingest', id: 'r-ingest', sourceTenant: 'shop', source: rEnd('shop', 'shop-net', 'node-a', '10.40.0.0/24'), destination: rEnd('analytics', 'ingest', 'node-c', '10.42.0.0/24'), protocol: 'tcp', ports: [{ first: 443, last: 443 }], phase: 'pending', approvals: [{ tenant: 'shop', user: 'alice' }], revision: 2 },
+  { key: 'route/internal/r-scrape', id: 'r-scrape', sourceTenant: 'internal', source: rEnd('internal', 'mon-net', 'node-b', '10.41.0.0/24'), destination: rEnd('shop', 'shop-net', 'node-b', '10.40.4.0/24'), protocol: 'tcp', ports: [{ first: 9100, last: 9100 }], phase: 'pending', approvals: [{ tenant: 'internal', user: 'carol' }], revision: 1 },
+  // 철회 뒤 양쪽 서버 닫힘 보고를 기다리는 연결(가짜 어댑터처럼 revoking에 머문다)
+  { key: 'route/shop/old-cache', id: 'old-cache', sourceTenant: 'shop', source: rEnd('shop', 'shop-net', 'node-b', '10.40.4.0/24'), destination: rEnd('lab', 'cache-net', 'node-b', '10.43.0.0/24'), protocol: 'udp', ports: [{ first: 6379, last: 6379 }], phase: 'revoking', approvals: [{ tenant: 'shop', user: 'alice' }, { tenant: 'lab', user: 'carol' }], revision: 6 },
 ];
 // 데이터 저장소 백업·복원 행(데몬 volume-backups / volume-restores 모양)
 export const volumeBackups: D.DVolumeBackup[] = [

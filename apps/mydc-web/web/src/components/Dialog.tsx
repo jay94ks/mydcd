@@ -16,7 +16,7 @@ export function Dialog({
   onClose: () => void;
   children: ReactNode;
   footer?: ReactNode;
-  width?: 400 | 560 | 800;
+  width?: 420 | 560 | 720;
   danger?: boolean;
 }) {
   // 휴대폰에서는 아래 시트 (UI-M1 ③): 내용만큼 높이, 단추는 아래에 가로로 꽉 차게
@@ -41,7 +41,7 @@ function DesktopDialog({
   onClose: () => void;
   children: ReactNode;
   footer?: ReactNode;
-  width: 400 | 560 | 800;
+  width: 420 | 560 | 720;
   danger: boolean;
 }) {
   const id = useId();

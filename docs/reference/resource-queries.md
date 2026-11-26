@@ -50,7 +50,7 @@
 
 ## 망 종료와 DNS
 
-`Closure`는 `{State,NativeGone?,PendingEndpoints?,PendingFlows?,PendingPins?,Closure?}`다. State는 pending/unreachable/closed다. pending의 endpoint 수는 종료를 막는 동일 IPAM allocation book, pin 수는 원 owner journal 관측이다. 측정되지 않은 flow 수·native 부재는 null이며 0으로 추정하지 않는다. owner에 닿지 않으면 unreachable이다. closed일 때 `Closure`는 원 owner가 서명한 `tenancy.NetworkClosure` 그대로이고, `fence-network-change`·`retire-network`에 복사할 수 있다. 반환 직전 현재 사용자 권한과 정확한 owner·멤버 generation/revision·native source를 다시 비교한다. 조회가 fence나 retire를 대신 실행하지 않는다.
+`Closure`는 `{State,NativeGone?,PendingEndpoints?,PendingFlows?,PendingPins?,Closure?}`다. State는 pending/unreachable/closed다. pending의 endpoint 수는 종료를 막는 동일 IPAM allocation book, pin 수는 원 owner journal 관측이다. 측정되지 않은 flow 수·native 부재는 null이며 0으로 추정하지 않는다. owner에 닿지 않으면 unreachable이다. closed일 때 `Closure`는 원 owner가 서명한 `tenancy.NetworkClosure` 그대로이고, `fence-network-change`·`leave-tun-network`에 복사할 수 있다. 반환 직전 현재 사용자 권한과 정확한 owner·멤버 generation/revision·native source를 다시 비교한다. 조회가 fence나 leave를 대신 실행하지 않는다.
 
 `resources` 망 행에는 `DNS:{Revision,Policy,Resolvers,Ready?,State}`가 붙는다. Policy는 Enabled/Reverse/Zone/ClientZone/TTL/NegativeTTL/Transports/Upstreams와 MaxQueries/MaxCacheEntries/MaxResponseBytes/MaxConnections/RequestTimeoutMS 전체다. Revision은 configure-network-dns에 사용할 source CAS다. Resolvers는 현재 원 DNS owner가 실제 socket·동일 source/applied/observed revision을 확인한 주소:53만 반환한다. desired Gateway 주소로 Ready를 만들지 않으며 미기동·실패·접속 불가 시 주소 목록은 비고 Ready/State로 구분한다. 원 instance가 이미 종료된 뒤 비활성 정책 revision만 바뀐 경우에도 정책은 읽히며, 새 revision의 native 관측이 없으면 Ready를 생략하고 Resolvers를 비운다. 정책 비활성화만으로 실제 종료를 증명하지 않는다. 한 페이지의 owner 조회에는 2초의 공통 진단 예산을 사용하고 끝에 현재 권한·원 source를 한 번 재검사한다.
 

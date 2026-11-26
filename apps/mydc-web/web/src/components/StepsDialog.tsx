@@ -17,7 +17,7 @@ export type Step = { key: string; label: string; send: (opId: string) => Promise
  * 여러 작업을 위에서부터 차례로 보내고, 하나가 적용되지 않으면 멈춘다.
  * 응답을 잃은(결과 모름) 단계는 같은 opId로, 거절·실패한 단계는 새 opId로 다시 보낸다.
  */
-export function StepsDialog({ title, steps: initial, intro, action, renderError, casText, onClose, onDone, width = 560 }: { title: string; steps: Step[]; intro?: ReactNode; action?: string; renderError?: (e: unknown) => ReactNode | undefined; casText?: string; onClose: () => void; onDone: () => void; width?: 400 | 560 | 800 }) {
+export function StepsDialog({ title, steps: initial, intro, action, renderError, casText, onClose, onDone, width = 560 }: { title: string; steps: Step[]; intro?: ReactNode; action?: string; renderError?: (e: unknown) => ReactNode | undefined; casText?: string; onClose: () => void; onDone: () => void; width?: 420 | 560 | 720 }) {
   const [steps, setSteps] = useState(initial);
   const ids = useRef<Record<string, string>>({});
   const [busy, setBusy] = useState(false);

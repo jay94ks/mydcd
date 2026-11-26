@@ -133,3 +133,29 @@ func TestSetNetworkToggleGatesJoinWithoutTouchingSources(t *testing.T) {
 	r, _ = f.p.Resources(f.s)
 	managedDNSChange(t, f, "edge-local-two", "set-network-toggle", r.Networks.Revision(), NetworkToggleSet{Tenant: "tenant", Name: "edge", Toggle: tenancy.ToggleLocal, On: true}, state.ConditionFailed)
 }
+
+func TestLeaveTUNNetworkOfTheLastServerDeletesTheNetwork(t *testing.T) {
+	f, _, _ := managedDNSProjectionFixture(t)
+	lone := tenancy.TUNDefinition{Tenant: "tenant", Name: "edge", Members: []tenancy.TUNNode{{Node: "node-a", Pools: []tenancy.Subnet{{ID: "pool", Prefix: netip.MustParsePrefix("10.81.1.0/24"), Gateway: netip.MustParseAddr("10.81.1.1"), MTU: 1280}}, Addresses: []netip.Prefix{netip.MustParsePrefix("10.81.3.1/32")}}}}
+	r, _ := f.p.Resources(f.s)
+	managedDNSChange(t, f, "edge-create", "create-tun-network", r.Networks.Revision(), lone, state.Applied)
+	r, _ = f.p.Resources(f.s)
+	m, _ := r.Networks.NamedNetwork("tenant", "edge", "node-a")
+	managedDNSChange(t, f, "edge-drain", "drain-network", m.Revision, NetworkSelection{Tenant: "tenant", ID: m.ID}, state.Applied)
+	r, _ = f.p.Resources(f.s)
+	drained, _ := r.Networks.Network("tenant", m.ID)
+	closure := tenancy.NetworkClosure{Cluster: f.p.Cluster, Tenant: "tenant", Network: m.ID, Node: "node-a", Owner: m.Owner, Generation: m.Generation, Revision: drained.Revision, NativeGone: true}
+	closure.Signature = ed25519.Sign(f.node, tenancy.NetworkClosureBytes(closure))
+	managedDNSChange(t, f, "edge-leave", "leave-tun-network", drained.Revision, closure, state.Applied)
+	r, _ = f.p.Resources(f.s)
+	if _, ok := r.Networks.Network("tenant", m.ID); ok {
+		t.Fatal("the network stayed after its last server left")
+	}
+	for _, kind := range []string{"bridge", "tun"} {
+		if f.s.Object((tenancy.SourceIdentity{Kind: kind, Tenant: "tenant", Network: "edge", Node: "node-a"}).Key()).Present {
+			t.Fatal("source kept after the last server left", kind)
+		}
+	}
+	// The same addresses are free again.
+	managedDNSChange(t, f, "edge-again", "create-tun-network", r.Networks.Revision(), lone, state.Applied)
+}

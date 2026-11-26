@@ -263,7 +263,7 @@ func (s *Server) finishLogin(w http.ResponseWriter, r *http.Request, p *pendingL
 		Path:     "/",
 		Expires:  ws.expiresAt,
 		HttpOnly: true,
-		Secure:   s.opt.CookieSecure,
+		Secure:   s.requestHTTPS(r),
 		SameSite: http.SameSiteStrictMode,
 	})
 	s.log.Info("login", "user", u.Username, "method", p.method)
@@ -277,7 +277,7 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 			s.sessions.end(ws, "logout")
 		}
 	}
-	http.SetCookie(w, &http.Cookie{Name: cookieName, Value: "", Path: "/", MaxAge: -1, HttpOnly: true, Secure: s.opt.CookieSecure, SameSite: http.SameSiteStrictMode})
+	http.SetCookie(w, &http.Cookie{Name: cookieName, Value: "", Path: "/", MaxAge: -1, HttpOnly: true, Secure: s.requestHTTPS(r), SameSite: http.SameSiteStrictMode})
 	w.WriteHeader(http.StatusNoContent)
 }
 

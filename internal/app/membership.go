@@ -49,19 +49,31 @@ func (r *Runtime) memberReport(ctx context.Context, view cluster.View, report co
 		if err != nil {
 			return err
 		}
-		if reply.Committed == nil || reply.Committed.Result.Code != state.Applied {
+		if reply.Committed == nil {
 			return fmt.Errorf("member report rejected: %v", reply.Committed)
 		}
-		return nil
+		return memberReportResult(reply.Committed.Result.Code)
 	}
 	committed, err := r.Engine().Submit(ctx, cmd)
 	if err != nil {
 		return err
 	}
-	if committed.Result.Code != state.Applied {
-		return fmt.Errorf("member report rejected: %d", committed.Result.Code)
+	return memberReportResult(committed.Result.Code)
+}
+
+// errMemberReportStale: the member directory changed between the read and
+// the commit (another node's report moved its root revision), so the CAS
+// refused the report. Nothing was written.
+var errMemberReportStale = errors.New("member report rejected: the member directory changed")
+
+func memberReportResult(code state.Code) error {
+	switch code {
+	case state.Applied:
+		return nil
+	case state.ConditionFailed:
+		return errMemberReportStale
 	}
-	return nil
+	return fmt.Errorf("member report rejected: %d", code)
 }
 func memberTarget(entry membership.Entry) (config.Peer, error) {
 	if entry.Job.Pending == nil {

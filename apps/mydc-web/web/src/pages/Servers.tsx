@@ -104,7 +104,7 @@ function LinkDrawer({ l, onClose, onDone }: { l: MeshLink; onClose: () => void; 
         <dt>마지막 관측</dt>
         <dd>{l.observedAt ? ago(l.observedAt) : '—'}</dd>
       </dl>
-      <span className="small muted">링크 관측은 REQ-13. 망 › 서버 간 가상망 화면에서 경로를 바꿀 수 있습니다.</span>
+      <span className="small muted">링크 관측은 REQ-13. 망 화면의 ‘터널 연결 보기’에서 경로를 바꿀 수 있습니다.</span>
       {act.view}
       <div className="row" style={{ justifyContent: 'flex-end', alignItems: 'center' }}>
         <span className="small muted">시스템 관리자만 · 진행은 터널 연결 창과 같음</span>
@@ -235,7 +235,7 @@ export function ServersPage() {
         {(p) => {
           const list = p.nodes.filter((n) => filter === 'all' || (filter === 'ready' ? n.phase === 'ready' : filter === 'joining' ? n.phase === 'joining' : n.phase !== 'ready' && n.phase !== 'joining'));
           return (
-            <div className="split">
+            <div className="split rev">
               <Card className="aside" title="서버 목록">
                 <div className="segmented" role="radiogroup" aria-label="상태 거르기">
                   {(

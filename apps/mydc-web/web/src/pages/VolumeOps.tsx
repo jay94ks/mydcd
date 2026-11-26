@@ -379,7 +379,7 @@ function OpConfirm({ title, action, danger, path, body, method = 'POST', confirm
     <Dialog
       title={title}
       danger={danger}
-      width={400}
+      width={420}
       onClose={onClose}
       footer={
         m.op ? (

@@ -63,6 +63,15 @@ func appObservation(c Command) bool {
 	return c.Kind == ModuleReport && c.Key == "control/apps" && strings.HasPrefix(c.Actor, "node/") && c.Target == AppObservationTarget
 }
 
+// nodeShellUserOperation: a user's node shell operation may carry a root
+// read before a node's readiness or session report moved it. Its reducer
+// checks its own CAS (the policy revision for policy changes) and the
+// current readiness for an open, so the shell book's root revision is not
+// what it depends on.
+func nodeShellUserOperation(c Command) bool {
+	return c.Kind == Module && c.Key == "control/node-shell" && strings.HasPrefix(c.Actor, "user/")
+}
+
 func applyModule(before, candidate State, index uint64, c Command, validate Validator, reduce Reducer, admitPatch ModulePatchAuthorizer) (State, Result) {
 	n, r, _ := applyModuleStage(before, candidate, index, c, validate, reduce, admitPatch)
 	return n, r
@@ -84,7 +93,7 @@ func applyModuleStage(before, candidate State, index uint64, c Command, validate
 	if reduce == nil || !strings.HasPrefix(c.Key, "control/") || len(c.Key) <= len("control/") || len(c.Key) > 512 || !utf8.ValidString(c.Key) || c.Delete || c.Target != "" && !scopedAppReport(c) || c.Rights != 0 || len(c.Value) > 64<<10 {
 		return candidate, result, "command"
 	}
-	if c.Expected != old.Revision && (c.Kind != ModuleUpload && c.Kind != ModuleAppDown && !scopedAppReport(c) || c.Expected > old.Revision) {
+	if c.Expected != old.Revision && (c.Kind != ModuleUpload && c.Kind != ModuleAppDown && !scopedAppReport(c) && !nodeShellUserOperation(c) || c.Expected > old.Revision) {
 		result.Code = ConditionFailed
 		return candidate, result, "cas"
 	}

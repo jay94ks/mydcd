@@ -3,7 +3,7 @@
 // 브라우저 안 목업 계층. docs/reference/web-api.md(/api/v1)와 같은 경로·DTO 모양·오류를 돌려준다.
 // 실제 성공 근거가 아니다. 화면 개발과 실패 상태 확인용이다.
 import YAML from 'yaml';
-import { cidrText, hostIn, overlaps, parseCidr, type Cidr } from '../../lib/cidr';
+import { cidrText, hostIn, inSystem, overlaps, parseCidr, type Cidr } from '../../lib/cidr';
 import type { RawResponse } from '../client';
 import type * as D from '../dto';
 import { lineDiff } from '../../lib/diff';
@@ -1243,46 +1243,44 @@ const rootView = (r: D.DStorageRoot): D.DStorageRoot => ({ maxVolumes: 32, attes
 const NODE_LIMIT: Record<string, { cpus: number; memoryBytes: number }> = { 'node-a': { cpus: 8, memoryBytes: 32 * 1024 ** 3 }, 'node-b': { cpus: 8, memoryBytes: 16 * 1024 ** 3 } };
 const validName = (s: unknown) => typeof s === 'string' && /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(s);
 const invalid = (msg: string) => err(422, 'invalid', msg);
+/** 시스템 망 대역(10.254.0.0/16)과 겹침: 실제 웹과 같은 422 system-range */
+const systemRange = (field: 'cidr' | 'members[].tunnel') => err(422, 'system-range', `${field}: 10.254.0.0/16 is the system network (mydc-system)`);
 const canWrite = (u: User, t: string) => u.systemAdmin || roleIn(u, t) === 'manager';
 on('POST', '/t/:t/networks', (m, body) => {
   const { user } = requireSession();
   requireTenant(user, m[0]);
   const t = m[0];
-  if (body.kind === 'tun') return createTun(user, t, body);
-  if (body.kind && body.kind !== 'bridge') return invalid('kind: "bridge" or "tun"');
-  if (!validName(body.name) || !validName(body.node)) return invalid("name and node: lowercase letters, digits and '-'");
-  const c = parseCidr(String(body.cidr ?? ''));
-  if (!c || c.bits > 29) return invalid('cidr: an IPv4 network such as 10.40.0.0/24 (at most /29)');
-  if (body.gateway && !hostIn(c, String(body.gateway))) return invalid('gateway must be a host address inside cidr');
-  const mtu = Number(body.mtu ?? 0) || 1500;
-  if (mtu < 1280 || mtu > 9000) return invalid('mtu: 1280..9000');
-  const name = String(body.name);
-  return submit(user, { ...body, tenant: t, target: name }, 'create-network', () => {
-    if (!canWrite(user, t)) return FORBIDDEN;
-    if (fx.resources.some((e) => e.tenant === t && e.network?.name === name)) return INVALID;
-    if (fx.resources.some((e) => e.network && overlaps(c, parseCidr(e.network.cidr) ?? { base: 0, bits: 32 }))) return INVALID;
-    fx.resources.push({ key: `net/${t}/${name}`, tenant: t, network: { name, kind: 'bridge', cidr: cidrText(c), nodes: [String(body.node)], revision: 1 } });
-    return { code: 0 };
-  });
+  // bridge 망은 없다(#547). 서버 하나의 망도 멤버 하나인 tun 망이다
+  if (body.kind !== 'tun') return invalid('kind: "tun" (a one-server network is a tun network with one member)');
+  return createTun(user, t, body);
 });
 function createTun(user: User, t: string, body: Record<string, unknown>): RawResponse {
   if (!validName(body.name)) return invalid("name: lowercase letters, digits and '-'");
-  const members = Array.isArray(body.members) ? (body.members as { node?: unknown; cidr?: unknown; tunnel?: unknown }[]) : [];
+  const members = Array.isArray(body.members) ? (body.members as { node?: unknown; cidr?: unknown; tunnel?: unknown; gateway?: unknown }[]) : [];
   if (!members.length) return invalid('members: at least one server');
+  const mtu = Number(body.mtu ?? 0) || 1500;
+  if (mtu < 1280 || mtu > 9000) return invalid('mtu: 1280..9000');
   const cs: Cidr[] = [];
   for (const mb of members) {
     const c = parseCidr(String(mb.cidr ?? ''));
     if (!validName(mb.node) || !c || c.bits > 29) return invalid('members[].node and cidr (IPv4, at most /29)');
     if (cs.some((x) => overlaps(x, c))) return invalid('members[].cidr must not overlap');
+    const tun = mb.tunnel ? parseCidr(`${String(mb.tunnel)}/32`) : undefined;
+    if (inSystem(c)) return systemRange('cidr');
+    if (tun && inSystem(tun)) return systemRange('members[].tunnel');
+    if (mb.gateway && !hostIn(c, String(mb.gateway))) return invalid('members[].gateway must be a host address inside cidr');
     cs.push(c);
   }
   if (!body.tunnelCidr && !members.every((mb) => mb.tunnel)) return invalid('tunnelCidr or members[].tunnel is required');
+  const toggles = body.toggles && typeof body.toggles === 'object' ? (body.toggles as Record<string, unknown>) : {};
+  if (Object.keys(toggles).some((k) => k !== 'local')) return invalid('toggles: one of [local]');
+  if (toggles.local === true && members.length !== 1) return invalid('toggles.local: only with one server');
   const name = String(body.name);
   return submit(user, { ...body, tenant: t, target: name }, 'create-tun-network', () => {
     if (!canWrite(user, t)) return FORBIDDEN;
     if (fx.resources.some((e) => e.tenant === t && e.network?.name === name)) return INVALID;
-    if (fx.resources.some((e) => e.network && cs.some((c) => overlaps(c, parseCidr(e.network!.cidr) ?? { base: 0, bits: 32 })))) return INVALID;
-    fx.resources.push({ key: `net/${t}/${name}`, tenant: t, network: { name, kind: 'tun', cidr: cs.map(cidrText).join(', '), nodes: members.map((mb) => String(mb.node)), revision: 1 } });
+    if (fx.resources.some((e) => e.network && cs.some((c) => e.network!.cidr.split(/,\s*/).some((x) => overlaps(c, parseCidr(x) ?? { base: 0, bits: 32 }))))) return INVALID;
+    fx.resources.push({ key: `net/${t}/${name}`, tenant: t, network: { name, kind: 'tun', cidr: cs.map(cidrText).join(', '), nodes: members.map((mb) => String(mb.node)), revision: 1, ...(toggles.local === true ? { toggles: ['local'] } : {}) } });
     return { code: 0 };
   });
 }
@@ -1426,6 +1424,7 @@ netStep('/change', 'plan-network-change', (f, body) => {
   if (!mb) return err(422, 'invalid', 'node: not a member of this network');
   const c = parseCidr(String(body.cidr ?? ''));
   if (!c || c.bits > 29) return invalid('cidr: an IPv4 network such as 10.40.0.0/24 (at most /29)');
+  if (inSystem(c)) return systemRange('cidr');
   if (activeChange(mb.change)) return err(409, 'change-pending', 'a change is already in progress');
   return () => {
     const clash = fx.resources.some((e) => e.network && e.network.name !== f.net.name && overlaps(c, parseCidr(e.network.cidr) ?? { base: 0, bits: 32 }));
@@ -1492,7 +1491,14 @@ netStep('/reconfigure', 'reconfigure-tun-network', (f, body) => {
   if (f.net.kind !== 'tun') return err(409, 'not-tun', 'only a tun network has members to change');
   const want = Array.isArray(body.members) ? (body.members as { node?: string; cidr?: string; tunnel?: string }[]) : [];
   if (!f.members.every((x) => x.change?.phase === 'fenced')) return err(409, 'not-fenced', 'every member must be fenced');
+  if (f.net.toggles?.includes('local') && want.length !== 1) return err(409, 'toggle-not-allowed', `turn local off before changing to ${want.length} servers`);
   for (const w of want) if (!memberOf(f, w.node) && (!parseCidr(String(w.cidr ?? '')) || !w.tunnel)) return invalid('members[]: a new server needs cidr and tunnel');
+  for (const w of want) {
+    const c = parseCidr(String(w.cidr ?? ''));
+    if (c && inSystem(c)) return systemRange('cidr');
+    const tun = w.tunnel ? parseCidr(`${String(w.tunnel).split('/')[0]}/32`) : undefined;
+    if (tun && inSystem(tun)) return systemRange('members[].tunnel');
+  }
   return () => {
     if (Number(body.expected ?? 0) !== networksRev) return CAS;
     const next = want.map((w, i): D.DNetworkMember => {
@@ -1507,28 +1513,46 @@ netStep('/reconfigure', 'reconfigure-tun-network', (f, body) => {
     return { code: 0 };
   };
 });
-netStep('/retire', (kind) => (kind === 'tun' ? 'reconfigure-tun-network' : 'retire-network'), (f, body) => {
-  if (f.net.kind !== 'tun') {
-    const mb = body.node ? memberOf(f, body.node) : f.members.length === 1 ? f.members[0] : undefined;
-    if (!mb) return err(422, 'invalid', 'node: which member to retire');
-    if (!mb.draining) return err(409, 'not-drained', 'drain the network first (POST …/change/drain)');
-    const e = closedOrErr(f, mb);
-    if (e) return e;
-    return () => {
-      f.members.splice(f.members.indexOf(mb), 1);
-      if (!f.members.length) {
-        fx.resources.splice(fx.resources.indexOf(f.e), 1);
-        delete netState[`${f.e.tenant}/${f.net.name}`];
-      } else f.net.nodes = f.members.map((x) => x.node);
-      return { code: 0 };
-    };
-  }
+netStep('/retire', 'reconfigure-tun-network', (f, body) => {
   if (f.net.dns?.enabled) return err(409, 'dns-enabled', 'turn the network DNS off first');
   if (!f.members.every((x) => x.change?.phase === 'fenced')) return err(409, 'not-fenced', 'every member must be fenced');
   return () => {
     if (Number(body.expected ?? 0) !== networksRev) return CAS;
     fx.resources.splice(fx.resources.indexOf(f.e), 1);
     delete netState[`${f.e.tenant}/${f.net.name}`];
+    return { code: 0 };
+  };
+});
+// 서버 하나 빼기(leave-tun-network). 비운 서버만, 쓰는 곳이 없어야 한다. 마지막 서버가 빠지면 망이 지워진다(DNS가 꺼져 있어야 함)
+netStep('/members/leave', 'leave-tun-network', (f, body) => {
+  const mb = memberOf(f, body.node);
+  if (!mb) return err(422, 'invalid', 'node: not a member of this network');
+  if (!mb.draining) return err(409, 'not-drained', 'drain the network first (POST …/change/drain)');
+  if (f.members.length === 1 && f.net.dns?.enabled) return err(409, 'dns-enabled', 'turn the network DNS off first');
+  const e = closedOrErr(f, mb);
+  if (e) return e;
+  return () => {
+    f.members.splice(f.members.indexOf(mb), 1);
+    delete closures[`${f.e.tenant}/${f.net.name}@${mb.node}`];
+    if (!f.members.length) {
+      fx.resources.splice(fx.resources.indexOf(f.e), 1);
+      delete netState[`${f.e.tenant}/${f.net.name}`];
+    } else {
+      f.net.nodes = f.members.map((x) => x.node);
+      f.net.cidr = f.members.map((x) => x.cidr).join(', ');
+    }
+    return { code: 0 };
+  };
+});
+// 망 옵션 하나 켜기·끄기(set-network-toggle). local은 서버가 하나일 때만 켠다
+netStep('/toggles', 'set-network-toggle', (f, body) => {
+  if (body.toggle !== 'local') return invalid('toggle: one of [local]');
+  const on = body.on === true;
+  if (!!f.net.toggles?.includes('local') === on) return err(409, 'same-value', 'the toggle already has this value');
+  if (on && f.members.length !== 1) return err(409, 'toggle-not-allowed', `local cannot be true with ${f.members.length} servers`);
+  if (f.members.some((x) => x.draining || activeChange(x.change))) return err(409, 'member-changing', 'a server is draining or changing');
+  return () => {
+    f.net.toggles = on ? ['local'] : [];
     return { code: 0 };
   };
 });
@@ -1725,11 +1749,11 @@ on('PUT', '/t/:t/lifecycle-policy', (m, body) => {
     return { code: 0 };
   });
 });
-// 작업 공간 간 연결 (UI-53). 웹 계약 요청 중인 모양
+// 작업 공간 간 연결 (UI-53). docs/reference/web-api/30-ui-53.md
 const routeView = (r: fx.MockRoute, t: string): D.DRoute => {
   const side = r.source.tenant === t ? 'source' : 'destination';
   const mine = r.approvals?.some((a) => a.tenant === t);
-  const end = (e: fx.MockRoute['source']) => (e.tenant === t ? e : { tenant: e.tenant, network: e.network, node: e.node });
+  const end = (e: fx.MockRoute['source']) => (e.tenant === t ? e : { tenant: e.tenant, network: e.network, node: e.node, cidr: e.cidr });
   return { ...r, source: end(r.source), destination: end(r.destination), side, state: r.phase === 'revoking' ? 'revoking' : r.phase === 'active' ? 'active' : mine ? 'waiting-peer' : 'waiting-me' };
 };
 on('GET', '/t/:t/routes', (m) => {
@@ -1766,11 +1790,14 @@ on('POST', '/t/:t/routes', (m, body) => {
   if (!cands.length) return err(422, 'destination-not-open', 'the destination network is not open for routes');
   if (new Set(cands.map((x) => x.node)).size > 1) return err(422, 'destination-node-required', 'the destination network spans several nodes; give destination.node');
   const dstNode = cands[0].node;
+  if (body.id !== undefined && !validName(body.id)) return invalid('id: lowercase letters, digits and -');
   const id = String(body.id ?? `rt-${String(body.opId).slice(0, 8)}`);
+  const cidrAt = (n: { cidr?: string; nodes?: string[] | null }, node: string) => String(n.cidr ?? '').split(',').map((x) => x.trim())[arrOf(n.nodes).indexOf(node)];
+  const dnet = fx.resources.find((e) => e.tenant === dst.tenant && e.network?.name === dst.network)?.network;
   return submit(user, { ...body, tenant: t, target: `route/${t}/${id}` }, 'propose-route', () => {
     if (!canWrite(user, t)) return FORBIDDEN;
     if (fx.routes.some((r) => r.sourceTenant === t && r.id === id)) return INVALID;
-    fx.routes.push({ key: `route/${t}/${id}`, id, sourceTenant: t, source: { tenant: t, network: `${net.name}-${srcNode}`, node: srcNode, name: net.name }, destination: { tenant: String(dst.tenant), network: `${String(dst.network)}-${dstNode}`, node: dstNode, name: String(dst.network) }, protocol: body.protocol as 'tcp' | 'udp', ports, phase: 'pending', approvals: [], revision: 1 });
+    fx.routes.push({ key: `route/${t}/${id}`, id, sourceTenant: t, source: { tenant: t, network: `${net.name}-${srcNode}`, node: srcNode, name: net.name, cidr: cidrAt(net, srcNode) }, destination: { tenant: String(dst.tenant), network: `${String(dst.network)}-${dstNode}`, node: dstNode, name: String(dst.network), cidr: dnet ? cidrAt(dnet, dstNode) : undefined }, protocol: body.protocol as 'tcp' | 'udp', ports, phase: 'pending', approvals: [], revision: 1 });
     return { code: 0 };
   });
 });

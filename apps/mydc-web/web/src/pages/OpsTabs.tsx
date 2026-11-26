@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// 작업 기록의 탭 (캔버스 Operations UI-A0~A3, 모바일 UI-M1 ①): 내 작업 · cluster.yaml 적용 · 공유 자원 전체 · 웹 설정 변경
+// 작업 기록의 탭 (캔버스 v198 Operations · OperationsChanges · OperationsResources · OperationsWeb, 모바일 UI-M1 ①): 내 작업 · 관리 변경 · 공유 자원 전체 · 웹 설정 변경
 import { useState, type ReactNode } from 'react';
-import { Navigate, useLocation } from 'react-router-dom';
+import { Link, Navigate, useLocation } from 'react-router-dom';
 import { useMobileTop } from '../mobile/top';
 import { resourcesPage } from '../api/endpoints';
 import type { DResourceEntry } from '../api/dto';
@@ -23,7 +23,7 @@ export function OpsTabs() {
       label="작업 기록 탭"
       items={[
         { to: '/system/ops', label: '내 작업' },
-        { to: '/system/ops/cluster', label: 'cluster.yaml 적용' },
+        { to: '/system/ops/changes', label: '관리 변경' },
         { to: '/system/ops/resources', label: phone ? '공유 자원' : '공유 자원 전체' },
         { to: '/system/ops/web', label: phone ? '웹 설정' : '웹 설정 변경' },
       ]}
@@ -31,38 +31,44 @@ export function OpsTabs() {
   );
 }
 
+/** 탭마다 머리 번호와 도움말이 다르다 (캔버스 v198) */
+const TAB_HELP: Record<string, { ids: string; terms: string; body: ReactNode }> = {
+  mine: { ids: 'UI-A0', terms: '작업 (operation) · 결과 불명 (응답 유실)', body: '내가 보낸 작업과 그 결과를 모아 봅니다. 응답이 끊겨 결과를 모르는 작업은 같은 작업으로 결과를 다시 묻거나 이어서 실행합니다.' },
+  changes: {
+    ids: 'UI-A1',
+    terms: '관리 변경 (typed change) · 변경 묶음 · 기준 버전 (expected) · 확정 · 결과 불명 · 재개',
+    body: (
+      <>
+        CLI의 관리 변경(<code>mydc manage apply</code>)으로 할 수 있는 동작을 파일 없이 화면에서 골라 만들고, 여러 개를 묶어 차례로 보냅니다. 전용 화면이 있는 동작은 그 화면으로 가는 길도 함께 보입니다. 변경 파일(JSON)을 불러오거나 내보낼 수도 있습니다.
+      </>
+    ),
+  },
+  resources: { ids: 'UI-A2', terms: '공유 자원 (managed resource) · 버전', body: '작업 공간의 공유 자원을 종류와 상관없이 한 목록으로 봅니다. 각 줄의 ‘보기’는 그 자원을 다루는 화면으로 갑니다.' },
+  web: { ids: 'UI-A3', terms: '웹 설정 변경 기록 (web-audit)', body: '웹 앱에서 바꾼 설정(AI, MCP 연동, 행동 지침, 웹훅, 외부 도메인, 웹 앱 설정)의 기록을 봅니다.' },
+};
+
 /** 네 탭이 함께 쓰는 머리: 제목 · 도움말 · 탭 */
 export function OpsHeader({ actions }: { actions?: ReactNode }) {
   const phone = usePhone();
   const path = useLocation().pathname;
-  const tab = path.endsWith('/cluster') ? 'cluster.yaml 적용' : path.endsWith('/resources') ? '공유 자원' : path.endsWith('/web') ? '웹 설정 변경' : '내 작업';
+  const key = path.endsWith('/changes') ? 'changes' : path.endsWith('/resources') ? 'resources' : path.endsWith('/web') ? 'web' : 'mine';
+  const tab = { changes: '관리 변경', resources: '공유 자원', web: '웹 설정 변경', mine: '내 작업' }[key];
   useMobileTop({ title: '작업 기록', sub: tab }, [tab]);
   // 휴대폰은 도움말 없이 탭만 (UI-M1 ①), 새로 고침은 끌어 내리기로
   if (phone) return <OpsTabs />;
+  const h = TAB_HELP[key];
   return (
     <>
-      <PageHeader title="작업 기록" ids="UI-A0 · UI-A1 · UI-A2 · UI-A3" actions={actions} />
-      <HelpBox terms="작업 (operation) · 결과 불명 (응답 유실) · 공유 자원 (managed resource)">
-        <b>이 화면은</b> 내가 보낸 작업과 그 결과를 모아 봅니다. 응답이 끊겨 결과를 모르는 작업은 같은 작업으로 결과를 다시 묻거나 이어서 실행합니다.
+      <PageHeader title="작업 기록" ids={h.ids} actions={actions} />
+      <HelpBox terms={h.terms}>
+        <b>이 화면은</b> {h.body}
       </HelpBox>
       <OpsTabs />
     </>
   );
 }
 
-/** cluster.yaml 적용 (UI-A1): 웹에서 부분 cluster.yaml을 보내는 기능이 아직 없다 */
-export function OpsClusterPage() {
-  return (
-    <>
-      <OpsHeader />
-      <Card title="부분 cluster.yaml 적용 (UI-A1)">
-        <div className="note un small">웹 기능 준비 중입니다. 지금은 CLI의 manage apply로 보낸 적용만 있고, 웹에서 보낸 부분 cluster.yaml 적용 기록은 아직 없습니다.</div>
-        <span className="small muted">확정된 앞 단계는 되돌린 것처럼 표시하지 않습니다. 누락한 객체는 유지되며 삭제되지 않습니다.</span>
-      </Card>
-    </>
-  );
-}
-
+/** 종류 · 이름 · 버전 · 내용 · 다루는 화면 */
 const kindOf = (e: DResourceEntry): [string, string, number | undefined, string] =>
   e.network
     ? ['망', e.network.name, e.network.revision, `${e.network.kind} · ${e.network.cidr}`]
@@ -78,6 +84,7 @@ export function OpsResourcesPage() {
   const first = usePoll((s) => (tenant ? resourcesPage(tenant, undefined, s) : Promise.resolve(undefined)), [tenant], DEFAULT_POLL_MS);
   const [more, setMore] = useState<{ items: DResourceEntry[]; next: string; for?: Date }>();
   const [moreErr, setMoreErr] = useState<unknown>();
+  const [kind, setKind] = useState('');
   const extra = more && more.for === first.asOf ? more : undefined;
   const rows = [...(first.data?.items ?? []), ...(extra?.items ?? [])];
   const next = extra ? extra.next : first.data?.next;
@@ -97,24 +104,46 @@ export function OpsResourcesPage() {
     }
   };
   if (!tenant) return <Navigate to="/system/ops" replace />;
+  const kinds = [...new Set(rows.map((e) => kindOf(e)[0]))];
+  const shown = kind ? rows.filter((e) => kindOf(e)[0] === kind) : rows;
+  const viewOf = (e: DResourceEntry) => (e.network ? '/shared/networks' : e.route ? '/shared/ingress' : e.limit ? `/system/tenants/${encodeURIComponent(e.tenant)}` : undefined);
   return (
     <>
       <OpsHeader actions={<Refresh q={first} />} />
-      <Card title={`공유 자원 전체 (UI-A2) · 작업 공간 ${tenant}`} flush>
-        <span className="small muted" style={{ padding: '0 14px' }}>
-          위쪽 막대에서 고른 작업 공간의 공유 자원만 보입니다. 종류는 망 · 외부 접속 경로 · 사용 한도입니다.
-        </span>
+      <Card title={`공유 자원 전체 · 작업 공간 ${tenant}`} flush>
+        <div className="row wrap" style={{ padding: '0 14px', gap: 12 }}>
+          <select aria-label="종류" value={kind} onChange={(e) => setKind(e.target.value)}>
+            <option value="">종류: 전체</option>
+            {kinds.map((k) => (
+              <option key={k} value={k}>
+                {k}
+              </option>
+            ))}
+          </select>
+          <span className="small muted">위쪽 막대에서 고른 작업 공간의 공유 자원만 보입니다. 버전은 자원이 바뀔 때마다 오르는 번호입니다.</span>
+        </div>
         <Load q={first} what="공유 자원을 불러오지 못했습니다">
           {() => (
             <DataTable
-              rows={rows}
+              rows={shown}
               rowKey={(e) => e.key}
               emptyTitle="공유 자원이 없습니다"
               columns={[
                 { key: 'k', header: '종류', value: (e) => kindOf(e)[0], render: (e) => kindOf(e)[0], m: 'badge' },
-                { key: 'n', header: '이름', value: (e) => kindOf(e)[1], render: (e) => <b>{kindOf(e)[1]}</b>, m: 'title' },
-                { key: 'd', header: '내용', value: (e) => kindOf(e)[3], render: (e) => <span className="muted">{kindOf(e)[3]}</span> },
+                { key: 'n', header: '이름', value: (e) => kindOf(e)[1], render: (e) => <b title={kindOf(e)[3] || undefined}>{kindOf(e)[1]}</b>, m: 'title' },
                 { key: 'v', header: '버전', value: (e) => kindOf(e)[2] ?? 0, render: (e) => <code>{kindOf(e)[2] ?? '—'}</code> },
+                {
+                  key: 'go',
+                  header: '',
+                  render: (e) => {
+                    const to = viewOf(e);
+                    return to ? (
+                      <Link className="btn sm" to={to}>
+                        보기
+                      </Link>
+                    ) : null;
+                  },
+                },
               ]}
             />
           )}

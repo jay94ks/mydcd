@@ -38,13 +38,20 @@ func nodeShellSessionFor(t *testing.T, f *backupCoreFixture, user string, key ed
 }
 func nodeShellApply(t *testing.T, f *backupCoreFixture, session access.Session, key ed25519.PrivateKey, id, action string, expected uint64, payload any, at int64, want state.Code) (UserOperation, state.Command, state.Result) {
 	t.Helper()
+	return nodeShellApplyRoot(t, f, session, key, id, action, expected, payload, at, f.s.Object(CommandKey(action)).Revision, want)
+}
+
+// nodeShellApplyRoot signs the operation on a given root revision, as a
+// client that read the shell book before a node's report moved it.
+func nodeShellApplyRoot(t *testing.T, f *backupCoreFixture, session access.Session, key ed25519.PrivateKey, id, action string, expected uint64, payload any, at int64, root uint64, want state.Code) (UserOperation, state.Command, state.Result) {
+	t.Helper()
 	raw, err := ChangeBytes(action, session.User, expected, payload)
 	if err != nil {
 		t.Fatal(err)
 	}
 	var change Change
 	_ = json.Unmarshal(raw, &change)
-	op := UserOperation{Schema: 1, Session: session, At: at, Epoch: f.s.ModuleEpoch(), RequestID: id, RootRevision: f.s.Object(CommandKey(action)).Revision, Change: change}
+	op := UserOperation{Schema: 1, Session: session, At: at, Epoch: f.s.ModuleEpoch(), RequestID: id, RootRevision: root, Change: change}
 	op.Signature = ed25519.Sign(key, OperationBytes(op))
 	cmd, err := op.Command()
 	if err != nil {
@@ -506,4 +513,28 @@ func TestNodeShellCoreRetainsOriginalTypedRefusalsAfterPolicyChangesAndSnapshot(
 			}
 		})
 	}
+}
+
+// A node's readiness report moves the shell book's root revision. A user
+// operation signed on the root it read just before still applies: the
+// policy changes carry their own CAS (the policy revision) and an open is
+// checked against the current readiness. A root from the future does not.
+func TestNodeShellUserOperationsSurviveANodeReportMovingTheRoot(t *testing.T) {
+	f := nodeShellCore(t)
+	nodeShellEnable(t, f, "node-b", false)
+	keyB := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{124}, 32))
+	defer clear(keyB)
+	read := f.s.Object(NodeShellKey).Revision
+	nodeShellOwnerReport(t, f, keyB, NodeShellReport{Node: "node-b", Kind: "ready", Ready: true, At: 2}, state.Applied)
+	if f.s.Object(NodeShellKey).Revision == read {
+		t.Fatal("the readiness report did not move the root")
+	}
+	b, _ := f.p.NodeShells(f.s)
+	nodeShellApplyRoot(t, f, f.session, f.admin, "stale-root-policy", "set-node-shell-node", b.Policy.Revision, NodeShellNodeChange{Node: "node-b", Shell: "on", Sudo: true}, 2, read, state.Applied)
+	// the policy CAS still holds
+	nodeShellApplyRoot(t, f, f.session, f.admin, "stale-policy", "set-node-shell-node", b.Policy.Revision, NodeShellNodeChange{Node: "node-b", Shell: "on"}, 2, f.s.Object(NodeShellKey).Revision, state.ConditionFailed)
+	read = f.s.Object(NodeShellKey).Revision
+	nodeShellOwnerReport(t, f, keyB, NodeShellReport{Node: "node-b", Kind: "ready", Ready: true, Sudo: true, At: 2}, state.Applied)
+	nodeShellApplyRoot(t, f, f.session, f.admin, "stale-root-open", "open-node-shell", 0, NodeShellOpen{Node: "node-b", Cols: 80, Rows: 24}, 2, read, state.Applied)
+	nodeShellApplyRoot(t, f, f.session, f.admin, "future-root", "open-node-shell", 0, NodeShellOpen{Node: "node-b", Cols: 80, Rows: 24}, 2, f.s.Object(NodeShellKey).Revision+1, state.ConditionFailed)
 }

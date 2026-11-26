@@ -84,31 +84,35 @@ func run(log *slog.Logger) error {
 	for _, c := range acme.LetsEncrypt(plog) {
 		cas.Register(c)
 	}
+	proxies, err := cfg.TrustedProxyNets()
+	if err != nil {
+		return err
+	}
 	hide, err := cfg.AIHideModels()
 	if err != nil {
 		return err
 	}
 	srv := server.New(server.Options{
-		AI:            ai.Endpoints{ClaudeURL: cfg.AIClaudeURL, OpenAIURL: cfg.AIOpenAIURL},
-		AIHideModels:  hide,
-		Client:        client,
-		Store:         st,
-		Static:        static,
-		CookieSecure:  cfg.CookieSecure,
-		LoginTTL:      cfg.LoginTimeout,
-		OpRetention:   cfg.OpRetention,
-		Logger:        log,
-		Seal:          box,
-		DataDir:       cfg.DataDir,
-		Version:       version,
-		DBPath:        cfg.DBPath(),
-		SealKeySource: cfg.SealKeySource(),
-		Socket:        cfg.Socket,
-		DNS:           dns.NewRegistry(plog),
-		ACME:          cas,
-		ProviderLog:   plog,
-		ACMEHTTP01:    cfg.ACMEListen != "",
-		ACMEAdvertise: cfg.ACMEAdvertiseAddress(),
+		AI:             ai.Endpoints{ClaudeURL: cfg.AIClaudeURL, OpenAIURL: cfg.AIOpenAIURL},
+		AIHideModels:   hide,
+		Client:         client,
+		Store:          st,
+		Static:         static,
+		TrustedProxies: proxies,
+		LoginTTL:       cfg.LoginTimeout,
+		OpRetention:    cfg.OpRetention,
+		Logger:         log,
+		Seal:           box,
+		DataDir:        cfg.DataDir,
+		Version:        version,
+		DBPath:         cfg.DBPath(),
+		SealKeySource:  cfg.SealKeySource(),
+		Socket:         cfg.Socket,
+		DNS:            dns.NewRegistry(plog),
+		ACME:           cas,
+		ProviderLog:    plog,
+		ACMEHTTP01:     cfg.ACMEListen != "",
+		ACMEAdvertise:  cfg.ACMEAdvertiseAddress(),
 	})
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

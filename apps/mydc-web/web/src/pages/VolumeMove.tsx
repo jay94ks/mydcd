@@ -284,7 +284,7 @@ function CancelMoveDialog({ tenant, v, onClose, onDone }: { tenant: string; v: V
     <Dialog
       title="이관을 취소할까요?"
       danger
-      width={400}
+      width={420}
       onClose={onClose}
       footer={
         m.op?.state === 'applied' ? (
@@ -323,7 +323,7 @@ function RetainedDeleteDialog({ tenant, v, r, onClose, onDone }: { tenant: strin
     <Dialog
       title={`${r.node}의 원본을 지울까요?`}
       danger
-      width={400}
+      width={420}
       onClose={onClose}
       footer={
         m.op?.state === 'applied' ? (

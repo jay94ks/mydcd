@@ -65,8 +65,17 @@ func (p Policy) leaveNetwork(s state.State, c access.Catalog, r Resources, op Us
 	if canonical(op.Change.Payload, &proof) != nil {
 		return r.Networks, nil, access.ErrInvalid
 	}
+	return p.leaveMember(s, r, proof, op.Change.Expected, func(a services.Authority, sources []services.RetiredNativeSource) (services.Authority, tenancy.Networks, error) {
+		return a.LeaveTUN(c, r.Networks, op.Change.Principal, proof, sources)
+	})
+}
+
+// leaveMember is the leave both a user's leave-tun-network and a system
+// network member's own report take: leave retires the member in the address
+// authority.
+func (p Policy) leaveMember(s state.State, r Resources, proof tenancy.NetworkClosure, expected uint64, leave func(services.Authority, []services.RetiredNativeSource) (services.Authority, tenancy.Networks, error)) (tenancy.Networks, map[string][]byte, error) {
 	v, ok := r.Networks.Network(proof.Tenant, proof.Network)
-	if !ok || v.Logical == "" || !v.Draining || v.Revision != op.Change.Expected {
+	if !ok || v.Logical == "" || !v.Draining || v.Revision != expected {
 		return r.Networks, nil, ErrCatalog
 	}
 	var sources []services.RetiredNativeSource
@@ -94,6 +103,20 @@ func (p Policy) leaveNetwork(s state.State, c access.Catalog, r Resources, op Us
 		}
 		sources = append(sources, source)
 	}
+	members := 0
+	for _, m := range r.Networks.AllNetworks() {
+		if m.Tenant == v.Tenant && m.Logical == v.Logical {
+			members++
+		}
+	}
+	if members == 1 && !v.System {
+		// The last member leaving deletes the network: its DNS must be off
+		// first, as for a reconfigure to no members.
+		policies, err := p.ManagedDNS(s)
+		if err != nil || policies[services.ManagedDNSKey(v.Tenant, v.Logical)].Definition.Policy.Enabled {
+			return r.Networks, nil, ErrCatalog
+		}
+	}
 	projection, err := p.ProjectResources(s)
 	if err != nil {
 		return r.Networks, nil, err
@@ -102,7 +125,7 @@ func (p Policy) leaveNetwork(s state.State, c access.Catalog, r Resources, op Us
 	if err != nil {
 		return r.Networks, nil, err
 	}
-	authority, next, err := authority.LeaveTUN(c, r.Networks, op.Change.Principal, proof, sources)
+	authority, next, err := leave(authority, sources)
 	if err != nil || r.Quotas.ValidateNetworks(next) != nil {
 		if err == nil {
 			err = ErrCatalog
@@ -115,6 +138,9 @@ func (p Policy) leaveNetwork(s state.State, c access.Catalog, r Resources, op Us
 	}
 	for _, source := range sources {
 		writes[source.Key] = nil
+	}
+	if members == 1 {
+		return next, writes, nil
 	}
 	rows, err := next.TUNSources(v.Tenant, v.Logical)
 	if err != nil {

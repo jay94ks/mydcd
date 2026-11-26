@@ -147,7 +147,7 @@ export function DeployNewPage() {
             </>
           )}
         </div>
-        <div className="aside" style={{ maxWidth: 560, flexBasis: 420 }}>
+        <div className="aside">
           <DeployFlow key={`${tenant}-${mode === 'form' ? 'form' : 'text'}`} tenant={tenant} yaml={yaml} canDeploy={canDeploy && !!session} onStep={setStep} />
         </div>
       </div>

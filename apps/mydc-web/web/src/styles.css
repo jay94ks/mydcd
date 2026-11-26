@@ -105,12 +105,21 @@ code, .mono { font-family: var(--mono); font-size: 12px; }
 .card-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px; }
 .grid { display: grid; gap: 16px; }
 .grid.tiles { grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
-.grid.cards { grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); }
-.grid.wide { grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); gap: 20px; }
-.grid.wide.three { grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
-.split { display: flex; flex-wrap: wrap; gap: 20px; align-items: flex-start; }
-.split > .primary { flex: 1 1 560px; min-width: 0; }
-.split > .aside { flex: 1 1 280px; max-width: 420px; min-width: 0; }
+/* 카드 배치 (web-ui-plan '카드 크기 · 배치', 캔버스 v200): 나란한 같은 급 카드는 2개 grid-2, 3개 이상 grid-3.
+   본문 + 보조는 main-side(목록·트리가 왼쪽이면 side-main). 간격 20, 위 맞춤. 좁아지면 1열 */
+.grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(380px, 100%), 1fr)); gap: 20px; align-items: start; }
+.grid-3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(340px, 100%), 1fr)); gap: 20px; align-items: start; }
+.main-side { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(320px, 1fr); gap: 20px; align-items: start; }
+.side-main { display: grid; grid-template-columns: minmax(320px, 1fr) minmax(0, 1.6fr); gap: 20px; align-items: start; }
+.main-side > *, .side-main > *, .grid-2 > *, .grid-3 > * { min-width: 0; }
+@media (max-width: 1023px) { .main-side, .side-main { grid-template-columns: minmax(0, 1fr); } }
+.grid.cards { grid-template-columns: repeat(auto-fit, minmax(min(340px, 100%), 1fr)); gap: 20px; align-items: start; }
+.grid.wide { grid-template-columns: repeat(auto-fit, minmax(min(380px, 100%), 1fr)); gap: 20px; align-items: start; }
+.grid.wide.three { grid-template-columns: repeat(auto-fit, minmax(min(340px, 100%), 1fr)); }
+.split { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(320px, 1fr); gap: 20px; align-items: start; }
+.split.rev { grid-template-columns: minmax(320px, 1fr) minmax(0, 1.6fr); }
+.split > * { min-width: 0; }
+@media (max-width: 1023px) { .split, .split.rev { grid-template-columns: minmax(0, 1fr); } }
 .tile { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; display: flex; flex-direction: column; gap: 6px; }
 .tile > .label { font-size: 13px; color: var(--muted); }
 .tile > b { font-size: 24px; }
@@ -215,7 +224,7 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
 /* ── 다이얼로그·드로어 ───────────────────────── */
 .backdrop { position: fixed; inset: 0; background: rgba(15, 18, 23, .45); display: flex; align-items: center; justify-content: center; padding: 16px; z-index: 50; }
 .dialog { background: #fff; border-radius: 12px; width: 100%; max-height: 85vh; display: flex; flex-direction: column; box-shadow: 0 12px 40px rgba(0, 0, 0, .25); }
-.dialog.w400 { max-width: 400px; } .dialog.w560 { max-width: 560px; } .dialog.w800 { max-width: 800px; }
+.dialog.w420 { max-width: 420px; } .dialog.w560 { max-width: 560px; } .dialog.w720 { max-width: 720px; }
 .dialog > header { padding: 16px 20px; border-bottom: 1px solid var(--line-2); display: flex; justify-content: space-between; align-items: center; gap: 12px; }
 .dialog > header.danger { border-top: 4px solid #cf222e; border-radius: 12px 12px 0 0; }
 .dialog > .dbody { padding: 16px 20px; overflow-y: auto; display: flex; flex-direction: column; gap: 14px; }
@@ -358,10 +367,11 @@ tr.selected td { background: var(--accent-bg); }
 .dnsdiff .r { color: var(--er); background: var(--er-bg); display: block; }
 
 /* 비밀값 보관함 트리 (캔버스 Vault) */
-.vault-split { display: flex; flex-wrap: wrap; gap: 20px; align-items: flex-start; }
-.vault-tree { flex: 1 1 300px; max-width: 360px; }
-.vault-side { flex: 999 1 480px; min-width: 0; display: flex; flex-direction: column; gap: 20px; }
-.vault-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; }
+.vault-split { display: grid; grid-template-columns: minmax(320px, 1fr) minmax(0, 1.6fr); gap: 20px; align-items: start; }
+@media (max-width: 1023px) { .vault-split { grid-template-columns: minmax(0, 1fr); } }
+.vault-tree { min-width: 0; }
+.vault-side { min-width: 0; display: flex; flex-direction: column; gap: 20px; }
+.vault-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(380px, 100%), 1fr)); gap: 20px; align-items: start; }
 .vault-grid:empty { display: none; }
 .vnode { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-radius: 6px; font-size: 13px; cursor: pointer; outline: none; }
 .vnode:hover { background: #f5f7fa; }
@@ -386,8 +396,7 @@ button.chip { cursor: pointer; font: inherit; font-size: 12px; color: inherit; }
 .menu.pop button.pop-item { flex-direction: row; }
 
 /* 컨테이너 상세 (UI-3A·3C) */
-.g3c { display: grid; grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); gap: 16px; }
-@media (max-width: 640px) { .g3c { grid-template-columns: minmax(0, 1fr); } }
+.g3c { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(340px, 100%), 1fr)); gap: 20px; align-items: start; }
 .kv2.c120 { grid-template-columns: 120px minmax(0, 1fr); }
 .kv2.c120 > span:nth-child(odd) { color: var(--muted); }
 .spark { display: flex; align-items: flex-end; gap: 2px; height: 44px; }
@@ -401,13 +410,9 @@ button.chip { cursor: pointer; font: inherit; font-size: 12px; color: inherit; }
 .lgrow { display: grid; grid-template-columns: 76px 56px minmax(0, 1fr); gap: 8px; }
 .lgrow.nt { grid-template-columns: 56px minmax(0, 1fr); }
 .drift { background: #fff4e5; color: #8a3300; border-radius: 3px; }
-.card.grow-log { flex: 999 1 620px; min-width: 0; }
-.card.grow-ev { flex: 1 1 320px; max-width: 420px; }
-.card.grow-half { flex: 1 1 420px; min-width: 0; }
-@media (max-width: 640px) { .card.grow-ev { max-width: none; } }
 
 /* 레이어 보기 (UI-89) · 이미지 업로드 (UI-88) */
-.dialog.w900 { max-width: 900px; outline: none; }
+.dialog.w720 { outline: none; }
 .dialog .tabs > button { padding: 10px 16px; color: var(--muted); background: none; border: 0; border-bottom: 2px solid transparent; margin-bottom: -1px; font: inherit; cursor: pointer; white-space: nowrap; }
 .dialog .tabs > button.active { border-bottom-color: var(--accent); color: var(--text); font-weight: 600; }
 .kind { font-size: 11px; padding: 1px 7px; border-radius: 999px; border: 1px solid #C9CED6; background: #fff; white-space: nowrap; width: fit-content; }
@@ -440,8 +445,7 @@ button.chip { cursor: pointer; font: inherit; font-size: 12px; color: inherit; }
 .pending-up .btn { height: 26px; font-size: 12px; padding: 0 10px; }
 
 /* 웹 앱 설정 (UI-C1) */
-.settings-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(520px, 1fr)); gap: 16px; align-items: start; }
-@media (max-width: 640px) { .settings-grid { grid-template-columns: minmax(0, 1fr); } }
+.settings-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(380px, 100%), 1fr)); gap: 20px; align-items: start; }
 .srow { display: grid; grid-template-columns: minmax(0, 1fr) 60px 120px; gap: 8px; align-items: center; padding: 8px 12px; border-top: 1px solid var(--line-2); }
 .srow.th { background: #F4F5F7; font-weight: 600; color: #3D4450; border-top: 0; }
 .srow.two { grid-template-columns: minmax(0, 1fr) 200px; }
@@ -457,7 +461,7 @@ button.chip { cursor: pointer; font: inherit; font-size: 12px; color: inherit; }
 .subbox { border: 1px solid var(--line); border-radius: 8px; padding: 12px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
 .strip { display: flex; align-items: center; gap: 8px; font-size: 12px; background: #F7F8FA; border-radius: 6px; padding: 6px 10px; }
 .strip b { font-weight: 600; }
-.g2.wide { grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: 20px; }
+.g2.wide { grid-template-columns: repeat(auto-fit, minmax(min(380px, 100%), 1fr)); gap: 20px; align-items: start; }
 .gtbl { border: 1px solid var(--line); border-radius: 8px; overflow: hidden; font-size: 13px; }
 .gtbl .gr { display: grid; padding: 10px 12px; border-top: 1px solid var(--line-2); gap: 8px; align-items: center; }
 .gtbl .gr.th { background: #F4F5F7; font-weight: 600; color: #3D4450; border-top: 0; }
@@ -520,7 +524,7 @@ button.chip { cursor: pointer; font: inherit; font-size: 12px; color: inherit; }
 .gtbl .gr.ainc { grid-template-columns: 90px minmax(0, 1.6fr) minmax(0, 1.4fr) 80px minmax(0, 1.3fr) 70px; }
 .conds { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: #3D4450; background: #F7F8FA; border-radius: 8px; padding: 10px 12px; }
 .conds b { font-weight: 600; }
-.inc-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 20px; }
+.inc-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(340px, 100%), 1fr)); gap: 20px; align-items: start; }
 .tl .textbtn.plain { color: inherit; }
 .gtbl .gr.items { grid-template-columns: minmax(0, 1.6fr) 70px 80px; padding: 6px 10px; }
 .coord-full { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start; }
@@ -534,8 +538,8 @@ button.chip { cursor: pointer; font: inherit; font-size: 12px; color: inherit; }
 .btn.ghost { border-color: transparent; background: none; }
 .top .chip.on { color: #fff; }
 /* 행동 지침 (UI-BA) */
-.guide-grid { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); gap: 20px; align-items: start; }
-@media (max-width: 1100px) { .guide-grid { grid-template-columns: minmax(0, 1fr); } }
+.guide-grid { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(320px, 1fr); gap: 20px; align-items: start; }
+@media (max-width: 1023px) { .guide-grid { grid-template-columns: minmax(0, 1fr); } }
 .guide-ed { min-height: 200px; height: auto; resize: vertical; padding: 12px 14px; border: 1px solid var(--input); border-radius: 8px; font-size: 13px; line-height: 21px; font-family: inherit; color: #1B1F24; word-break: keep-all; }
 .chip.no { border-color: #F3B6BC; background: #FFF5F5; color: #A0111F; }
 button.chip[disabled] { opacity: .5; cursor: not-allowed; }
@@ -550,10 +554,9 @@ button.chip[disabled] { opacity: .5; cursor: not-allowed; }
 .rulebox b { font-weight: 600; }
 .gtbl .gr.gvers { grid-template-columns: 0.5fr 1fr 0.9fr 1.6fr 0.8fr 0.6fr; }
 /* MCP 연동 (UI-B9) */
-.mcp-grid { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); gap: 20px; align-items: start; }
-@media (max-width: 1100px) { .mcp-grid { grid-template-columns: minmax(0, 1fr); } }
-.mcp-auto { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); gap: 20px; align-items: start; }
-@media (max-width: 900px) { .mcp-auto { grid-template-columns: minmax(0, 1fr); } }
+.mcp-grid { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(320px, 1fr); gap: 20px; align-items: start; }
+@media (max-width: 1023px) { .mcp-grid { grid-template-columns: minmax(0, 1fr); } }
+.mcp-auto { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(380px, 100%), 1fr)); gap: 20px; align-items: start; }
 .sel-card { outline: 2px solid #1F5FBF; outline-offset: -2px; }
 .gtbl .gr.mcps { grid-template-columns: 0.8fr 1.7fr 0.9fr 0.7fr 1.3fr 0.8fr 1fr 40px; }
 .gtbl .gr.mtools { grid-template-columns: 1.2fr 0.6fr 1.3fr 0.7fr 0.6fr 1.4fr; }
@@ -567,8 +570,7 @@ button.chip[disabled] { opacity: .5; cursor: not-allowed; }
 /* 웹훅 (UI-BB) */
 .gtbl .gr.hooks { grid-template-columns: 1.05fr 0.9fr 1.8fr 0.5fr 1.8fr 0.75fr 1.05fr; }
 .gtbl .gr.dlv { grid-template-columns: 0.8fr 1.6fr 0.8fr 0.7fr 0.6fr; font-size: 12px; }
-.hook-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 20px; align-items: start; }
-@media (max-width: 1100px) { .hook-grid { grid-template-columns: minmax(0, 1fr); } }
+.hook-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(380px, 100%), 1fr)); gap: 20px; align-items: start; }
 .kind { display: inline-flex; align-items: center; gap: 4px; height: 22px; padding: 0 8px; border-radius: 11px; font-size: 12px; font-weight: 600; width: fit-content; white-space: nowrap; }
 .kind.ext { background: #FFF4E5; color: #8A3300; }
 .kind.int { background: #E8F5EC; color: #1A7F37; }
@@ -747,7 +749,7 @@ button.chip[disabled] { opacity: .5; cursor: not-allowed; }
   .m-body .card { padding: 12px; border-radius: 12px; gap: 10px; }
   .m-body .grid.tiles, .m-body .grid.cards, .m-body .grid.wide, .m-body .grid.wide.three { grid-template-columns: minmax(0, 1fr); gap: 8px; }
   .m-body .grid.tiles { grid-template-columns: 1fr 1fr; }
-  .m-body .split > .aside { max-width: none; }
+  .m-body .split, .m-body .main-side, .m-body .side-main, .m-body .grid-2, .m-body .grid-3 { grid-template-columns: minmax(0, 1fr); gap: 8px; }
   .m-body .help { padding: 10px 12px; }
   .m-body pre, .m-body .code, .m-body .log { white-space: pre-wrap; word-break: break-all; }
   .m-body .btn { min-height: 36px; }

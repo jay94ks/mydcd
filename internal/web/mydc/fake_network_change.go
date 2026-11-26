@@ -17,7 +17,7 @@ import (
 // reserved; reconfigure-tun-network needs every member fenced, and an empty
 // target retires the group (DNS must be off). join-tun-network adds one
 // server while no member changes; leave-tun-network removes one drained
-// server on its closure (never the last). Fence and retire-network take
+// server on its closure (the last one deletes the network). Fence and leave take
 // the owner's signed closure from NetworkClosure (REQ-33 mock,
 // fake_network_backup.go); Fake.FenceNetworkChange skips that in tests.
 
@@ -280,9 +280,6 @@ func (c *fakeConn) applyNetworkChange(op UserOperation, actor string, next uint6
 		w.netRev = next
 		return nil
 
-	case ActionRetireNetwork:
-		return c.applyRetireNetwork(op, actor, next)
-
 	case ActionJoinTUN:
 		var q control.NetworkJoin
 		if decodePayload(ch.Payload, &q) != nil || len(q.Member.Pools) == 0 || len(q.Member.Addresses) == 0 {
@@ -350,12 +347,23 @@ func (c *fakeConn) applyNetworkChange(op UserOperation, actor string, next uint6
 			return errForbidden
 		}
 		i, row, j := w.memberByID(p.Tenant, p.Network)
-		if i < 0 || row.Members[j].Revision != ch.Expected || row.Members[j].Source.Logical == "" || !row.Members[j].Draining || len(row.Members) < 2 {
+		if i < 0 || row.Members[j].Revision != ch.Expected || row.Members[j].Source.Logical == "" || !row.Members[j].Draining {
+			return errCAS
+		}
+		// mydcd: the last member leaving deletes the network; its DNS must
+		// be off first.
+		last := len(row.Members) == 1
+		if last && row.DNS != nil && row.DNS.Enabled {
 			return errCAS
 		}
 		m := row.Members[j]
 		if activeChange(m.Change) || !w.memberClosureOK(p.Tenant, m, p) {
 			return errors.New("closure")
+		}
+		if last {
+			w.resources = slices.Delete(w.resources, i, i+1)
+			w.netRev = next
+			return nil
 		}
 		row.Members = slices.Delete(slices.Clone(row.Members), j, j+1)
 		row.Nodes = slices.DeleteFunc(slices.Clone(row.Nodes), func(n string) bool { return n == m.Node })

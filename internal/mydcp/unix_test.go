@@ -358,11 +358,11 @@ func TestU0UnixPinsOriginalPathInodeThroughListenerClose(t *testing.T) {
 	if err := server.ListenUnix(path); err != nil {
 		t.Fatal(err)
 	}
-	owned := server.localSocket
+	owned := server.localListeners[0].socket
 	if owned == nil || owned.pin == nil {
 		t.Fatal("original pathname inode not pinned")
 	}
-	if err := server.localListener.Close(); err != nil {
+	if err := server.localListeners[0].ln.Close(); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Remove(path); err != nil {

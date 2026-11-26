@@ -258,7 +258,7 @@ export function LayersDialog({
 
   return (
     <div className="backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div ref={ref} tabIndex={-1} className="dialog w900" role="dialog" aria-modal="true" aria-label={`${img.repository}:${tag || short(img.digest)} 레이어`} onKeyDown={onKey}>
+      <div ref={ref} tabIndex={-1} className="dialog w720" role="dialog" aria-modal="true" aria-label={`${img.repository}:${tag || short(img.digest)} 레이어`} onKeyDown={onKey}>
         <header style={{ alignItems: 'flex-start' }}>
           <div className="col" style={{ gap: 4, minWidth: 0 }}>
             <div className="row wrap" style={{ gap: 8 }}>
@@ -756,8 +756,8 @@ export function ImageUploadPage() {
         이름·태그를 정한 뒤 저장소에 올립니다. 인터넷이 막힌 곳에 이미지를 옮길 때 씁니다.
       </HelpBox>
       {!canDeploy && <div className="note un small">이미지 업로드는 이 작업 공간의 관리자만 할 수 있습니다(올린 파일이 웹 서버 디스크를 씁니다).</div>}
-      <div className="row wrap" style={{ gap: 16, alignItems: 'flex-start' }}>
-        <Card className="grow-log">
+      <div className="main-side">
+        <Card>
           <h2>1. 파일 올리기</h2>
           <div
             className="dropzone"
@@ -917,7 +917,7 @@ export function ImageUploadPage() {
             )}
           </div>
         </Card>
-        <Card className="grow-ev">
+        <Card>
           <h2>3. 올리는 중</h2>
           <div className="col" style={{ gap: 10, fontSize: 12 }}>
             {pushedList.length === 0 && <span className="muted">이름을 정하고 올리기를 누르면 이미지마다 진행을 보여 줍니다.</span>}

@@ -27,6 +27,10 @@ type ResourceEntry struct {
 	Route       *tenancy.Route       `json:",omitempty"`
 	Change      *NetworkChangeStatus `json:",omitempty"`
 	Reservation *tenancy.Reservation `json:",omitempty"`
+	// System is the system network setting (key "system"). A tenant's page
+	// carries only its range; the every-tenant page (tenant "") also its
+	// users. Its members are Network rows of tenant "".
+	System *tenancy.SystemPolicy `json:",omitempty"`
 }
 
 // Public current-candidate metadata. The full retained proof/previous-target
@@ -87,6 +91,14 @@ func (r Resources) Page(c access.Catalog, actor, tenant, after string, authoriti
 		v := reservation
 		entries = append(entries, ResourceEntry{Key: "reservation/" + v.Key, Reservation: &v})
 	}
+	// Every page names the system range, which no tenant network may
+	// overlap; only the every-tenant page names the servers using it.
+	v := r.Networks.SystemPolicy()
+	v.Range = v.RangeOrDefault()
+	if tenant != "" {
+		v.Users = nil
+	}
+	entries = append(entries, ResourceEntry{Key: "system", System: &v})
 	slices.SortFunc(entries, func(a, b ResourceEntry) int { return strings.Compare(a.Key, b.Key) })
 	var page []ResourceEntry
 	for _, entry := range entries {

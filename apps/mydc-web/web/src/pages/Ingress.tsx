@@ -1166,7 +1166,7 @@ export function UnlinkDialog({ l, onClose, onDone }: { l: WebhookLink; onClose: 
   return (
     <Dialog
       title={`${l.webhook} 연결을 끊을까요?`}
-      width={400}
+      width={420}
       onClose={onClose}
       footer={
         <>
@@ -1354,7 +1354,7 @@ export function ReleaseDialog({ b, onClose, onDone }: { b: IngressBlock; onClose
   return (
     <Dialog
       title={`${what} 차단을 해제할까요?`}
-      width={400}
+      width={420}
       onClose={onClose}
       footer={
         <>
@@ -1681,7 +1681,7 @@ export function BlockDialog({ v, preset, admin, onClose, onDone }: { v: IngressV
           ⛔ 긴급 차단 <span className="ids">UI-5C</span>
         </>
       }
-      width={800}
+      width={720}
       danger
       onClose={onClose}
       footer={

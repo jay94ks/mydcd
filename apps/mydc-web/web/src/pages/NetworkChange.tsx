@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// 망 변경 단계 화면(UI-51)과 망 폐기 확인(UI-50 행 메뉴).
+// 망 변경 단계 화면(UI-51)과 망 지우기(UI-50 행 메뉴).
 // 멤버(서버) 하나씩 계획 → 비우기 → 막기(사용 중지 확인) → 확정. payload는 데몬이 멤버 행에서 만들고, 판단은 mydcd가 한다.
-// 막기(사용 중지 확인)와 서버 내부망 폐기는 데몬이 서버가 서명한 정리 보고(closure)를 넣는다. 아직 쓰는 컨테이너가 있으면 409 in-use.
-import { useRef, useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
-import { api, ApiError } from '../api/client';
-import { networkChange, networkPath } from '../api/endpoints';
+// 막기(사용 중지 확인)와 서버 빼기는 데몬이 서버가 서명한 정리 보고(closure)를 넣는다. 아직 쓰는 컨테이너가 있으면 409 in-use.
+import { useEffect, useRef, useState } from 'react';
+import { Link, useParams } from 'react-router-dom';
+import { api, ApiError, newOpId } from '../api/client';
+import { networkChange, networkPath, toOp } from '../api/endpoints';
+import { eulReul } from '../lib/josa';
+import { inSystem, parseCidr, SYSTEM_TEXT } from '../lib/cidr';
 import type { DNetworkChange, DNetworkClosure, DOp } from '../api/dto';
 import type { DiffLine, NetworkDnsView, NetworkView, OpView } from '../api/types';
 import { DiffView } from '../components/Code';
@@ -27,21 +29,31 @@ type Member = DNetworkChange['members'][number];
 type Tone = 'ok' | 'pr' | 'wa' | 'er' | 'un';
 
 const CIDR = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})\/(\d{1,2})$/;
-const validCidr = (v: string) => {
+const cidrShape = (v: string) => {
   const m = CIDR.exec(v.trim());
   return !!m && m.slice(1, 5).every((x) => Number(x) <= 255) && Number(m[5]) >= 8 && Number(m[5]) <= 29;
 };
+/** 주소(CIDR 또는 터널 주소 하나)가 시스템 망 대역(10.254.0.0/16)과 겹치는가 */
+const systemHit = (v: string) => {
+  const t = v.trim();
+  const c = parseCidr(t.includes('/') ? t : `${t}/32`);
+  if (c) return inSystem(c);
+  const m = /^(\d{1,3})\.(\d{1,3})\./.exec(t);
+  return !!m && m[1] === '10' && m[2] === '254';
+};
+const validCidr = (v: string) => cidrShape(v) && !systemHit(v);
+const cidrMsg = (v: string) => (systemHit(v) ? SYSTEM_TEXT : 'IPv4 CIDR(/8~/29)로 넣으세요');
 
 const ERR: Record<string, string> = {
   'in-use': '아직 옛 주소를 쓰는 컨테이너가 있어 막을 수 없습니다. 그 컨테이너를 다시 시작하거나 멈춘 뒤 다시 하세요.',
   unreachable: '서버가 응답하지 않아 정리 보고를 받을 수 없습니다. 서버가 돌아온 뒤 다시 하세요.',
   'not-draining': '비우는 중인 서버만 사용 중지를 확인할 수 있습니다. 새로 읽은 뒤 다시 하세요.',
-  'not-drained': '먼저 비워야 폐기할 수 있습니다.',
+  'not-drained': '먼저 비워야 뺄 수 있습니다.',
   'not-fenced': '모든 참여 서버가 사용 중지되어야 합니다.',
   'not-reserved': '비우기를 시작한 뒤에는 취소할 수 없습니다.',
   'change-pending': '이미 진행 중인 변경이 있습니다. 새로 읽은 뒤 다시 하세요.',
-  'not-tun': '서버 내부망은 바꾸거나 이 방법으로 폐기할 수 없습니다.',
-  'dns-enabled': '도메인 이름을 먼저 꺼야 폐기할 수 있습니다.',
+  'dns-enabled': '도메인 이름을 먼저 꺼야 지울 수 있습니다.',
+  'toggle-not-allowed': '‘이 서버에서만’ 망에는 서버를 더할 수 없습니다. 먼저 망 줄 ⋯에서 ‘다른 서버와 잇게 바꾸기’를 하세요.',
 };
 export function netErr(e: unknown) {
   if (!(e instanceof ApiError) || !ERR[e.code]) return undefined;
@@ -102,12 +114,10 @@ function MNetworkChange() {
               badge={active ? ['pr', label || STEPS[cur - 1]] : ['un', '진행 중인 변경 없음']}
               rows={[
                 ['단계', active ? `${cur}/${STEPS.length} ${STEPS[cur - 1]}` : '—'],
-                ['종류', d.kind === 'tun' ? '서버 간 가상망' : '서버 내부망'],
                 chgId && ['변경 ID', <span key="c" className="mono">{chgId}</span>],
                 ['원 버전', <code key="r">{d.networksRevision}</code>],
               ]}
             />
-            {d.kind !== 'tun' && <div className="note small">서버 내부망은 mydcd가 변경을 확정하지 않습니다.</div>}
             <MSec>참여 서버 {d.members.length}</MSec>
             {d.members.map((m) => {
               const [t, tone] = PHASE[m.phase] ?? [m.phase, 'un'];
@@ -197,7 +207,6 @@ function DesktopNetworkChange() {
         {(d) =>
           !d ? null : (
             <>
-              {!tun && <div className="note">서버 내부망은 mydcd가 변경을 확정하지 않습니다. 주소를 바꿔야 하는 망은 서버 간 가상망(서버 하나여도 됨)으로 만드세요.</div>}
               <div className="grid wide">
                 <Card title="변경 내용">
                   <div className="table-wrap">
@@ -224,7 +233,7 @@ function DesktopNetworkChange() {
                                   {m.target}
                                 </b>
                               )}
-                              {m.phase === 'none' && edit(m).trim() !== m.cidr && !validCidr(edit(m)) && <div className="small" style={{ color: 'var(--er)' }}>IPv4 CIDR(/8~/29)로 넣으세요</div>}
+                              {m.phase === 'none' && edit(m).trim() !== m.cidr && !validCidr(edit(m)) && <div className="small" style={{ color: 'var(--er)' }}>{cidrMsg(edit(m))}</div>}
                             </td>
                           </tr>
                         ))}
@@ -457,7 +466,7 @@ function ReconfigureDialog({ base, name, view, want, onClose, onDone }: { base: 
   const have = new Set(view.members.map((x) => x.node));
   const rows = [...view.members.map((x) => ({ node: x.node, kind: want.includes(x.node) ? 'keep' : 'drop' })), ...want.filter((n) => !have.has(n)).map((node) => ({ node, kind: 'add' }))];
   const nw = (n: string) => add[n] ?? { cidr: '', tunnel: '' };
-  const missing = rows.some((r) => r.kind === 'add' && (!validCidr(nw(r.node).cidr) || !/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(nw(r.node).tunnel.trim())));
+  const missing = rows.some((r) => r.kind === 'add' && (!validCidr(nw(r.node).cidr) || !/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(nw(r.node).tunnel.trim()) || systemHit(nw(r.node).tunnel)));
   const empty = want.length === 0;
   const send = () =>
     empty
@@ -506,6 +515,11 @@ function ReconfigureDialog({ base, name, view, want, onClose, onDone }: { base: 
                       <Badge tone="pr">추가</Badge>
                       <input className="mono" aria-label={`${r.node} CIDR`} placeholder="CIDR" value={nw(r.node).cidr} onChange={(e) => setAdd((a) => ({ ...a, [r.node]: { ...nw(r.node), cidr: e.target.value } }))} style={{ width: 150 }} />
                       <input className="mono" aria-label={`${r.node} 터널 주소`} placeholder="터널 주소 (예: 10.255.40.3)" value={nw(r.node).tunnel} onChange={(e) => setAdd((a) => ({ ...a, [r.node]: { ...nw(r.node), tunnel: e.target.value } }))} style={{ width: 150 }} />
+                      {(systemHit(nw(r.node).cidr) || systemHit(nw(r.node).tunnel)) && (
+                        <span className="small" style={{ color: 'var(--er)', flexBasis: '100%' }}>
+                          {SYSTEM_TEXT}
+                        </span>
+                      )}
                     </span>
                   )}
                 </td>
@@ -539,132 +553,136 @@ export function dnsBody(d: NetworkDnsView, over: Partial<NetworkDnsView> = {}) {
 }
 
 /**
- * 망 줄의 '폐기…' 확인(UI-50). tun 망은 멤버 없는 재구성(모든 멤버 사용 중지·도메인 이름 꺼짐)이고,
- * 서버 내부망(bridge)은 먼저 비운(drain) 뒤 서버의 정리 보고로 retire-network를 보낸다.
+ * 망 지우기(UI-50). 한 번에 지우는 동작은 없다: 도메인 이름을 끈 뒤 서버마다 비우기(change/drain) → 쓰는 컨테이너가
+ * 없어지면 빼기(members/leave)를 차례로 하고, 마지막 서버가 빠지면 망이 없어진다. 창이 열려 있는 동안 다음 단계를 이어 보낸다.
  */
-export function RetireNetworkDialog({ tenant, net, onClose, onDone }: { tenant: string; net: NetworkView; onClose: () => void; onDone: () => void }) {
-  const m = useMutation();
+export function DeleteNetworkDialog({ tenant, net, onClose, onDone }: { tenant: string; net: NetworkView; onClose: () => void; onDone: () => void }) {
   const dnsOff = useMutation();
-  const nav = useNavigate();
   const [confirm, setConfirm] = useState('');
-  const [steps, setSteps] = useState<'drain' | 'retire'>();
-  // 처음 보낸 expected를 고정한다(같은 opId로 다시 보낼 때 본문이 같아야 한다)
-  const sent = useRef<number | undefined>(undefined);
-  // 서버 내부망은 비운 뒤 쓰던 컨테이너가 떠나기를 기다리므로 주기적으로 다시 읽는다
-  const q = usePoll((s) => networkChange(tenant, net.name, s), [tenant, net.name], net.kind === 'tun' ? 0 : DEFAULT_POLL_MS);
+  // 연 순간의 참여 서버(뺀 서버를 '끝남'으로 보여 주려고 고정한다)
+  const [nodes0] = useState(() => (net.members.length ? net.members.map((x) => x.node) : net.nodes));
+  const [cidrs] = useState(() => (net.members.length ? net.members.map((x) => x.cidr) : [net.cidr]));
+  const [running, setRunning] = useState(false);
+  const [error, setError] = useState<unknown>();
+  const ids = useRef<Record<string, string>>({});
+  const busy = useRef(false);
+  const q = usePoll((s) => networkChange(tenant, net.name, s), [tenant, net.name], DEFAULT_POLL_MS);
   const base = networkPath(tenant, net.name);
-  const tun = net.kind === 'tun';
-  const dnsOn = dnsOff.op?.state === 'applied' ? false : (q.data?.dnsEnabled ?? !!net.dns?.enabled);
-  const members = q.data?.members ?? [];
-  const notFenced = members.filter((x) => x.phase !== 'fenced');
-  // 서버 내부망: 비우지 않은 서버, 아직 쓰는(또는 응답 없는) 서버
-  const undrained = members.filter((x) => !x.draining);
+  // 마지막 서버가 빠지면 망 행이 없어진다(404)
+  const gone = q.error instanceof ApiError && q.error.status === 404;
+  const members = gone ? [] : (q.data?.members ?? []);
+  const dnsOn = !gone && (dnsOff.op?.state === 'applied' ? false : (q.data?.dnsEnabled ?? !!net.dns?.enabled));
   const closureOf = (node: string) => q.data?.closure.find((c) => c.node === node);
-  const free = (c?: DNetworkClosure) => !!c && !c.unreachable && pendingOf(c) === 0;
-  const busyNodes = members.filter((x) => x.draining && !free(closureOf(x.node)));
-  const nodes = (net.members.length ? net.members.map((x) => x.node) : net.nodes).join('·');
-  const retire = () => {
-    if (!tun) {
-      if (members.length > 1) return setSteps('retire');
-      return void m.run(`${base}/retire`, { node: members[0]?.node }).then((o) => o?.state === 'applied' && onDone());
+  const free = (c?: DNetworkClosure) => !!c && !c.unreachable && c.state !== 'unreachable' && pendingOf(c) === 0;
+  const started = nodes0.some((n) => !members.some((x) => x.node === n)) || members.some((x) => x.draining);
+  const send = async (key: string, path: string, body: Record<string, unknown>) => {
+    const id = (ids.current[key] ??= newOpId());
+    const r = await api.post<{ op: DOp }>(path, { ...body, opId: id });
+    const o = toOp(r.op);
+    if (o.state === 'failed' || o.state === 'rejected') {
+      delete ids.current[key];
+      throw new ApiError(409, { code: o.errorCode ?? 'failed', message: o.errorCode ?? '' });
     }
-    sent.current ??= q.data!.networksRevision;
-    void m.run(`${base}/retire`, { expected: sent.current }).then((o) => o?.state === 'applied' && onDone());
   };
+  // 비우지 않은 서버는 모두 비우고, 쓰는 곳이 없어진 서버를 하나씩 뺀다
+  useEffect(() => {
+    if (!running || !q.data || gone || dnsOn || busy.current) return;
+    const todo = members.find((x) => !x.draining && !ids.current[`drain/${x.node}`]);
+    const out = members.find((x) => x.draining && free(closureOf(x.node)) && !ids.current[`leave/${x.node}`]);
+    const next = todo ? (['drain', todo.node, `${base}/change/drain`] as const) : out ? (['leave', out.node, `${base}/members/leave`] as const) : undefined;
+    if (!next) return;
+    busy.current = true;
+    void send(`${next[0]}/${next[1]}`, next[2], { node: next[1] })
+      .catch((e) => (setError(e), setRunning(false)))
+      .finally(() => ((busy.current = false), q.refresh()));
+  }); // eslint-disable-line react-hooks/exhaustive-deps
+  const done = useRef(false);
+  useEffect(() => {
+    if (gone && !done.current) (done.current = true), onDone();
+  }, [gone, onDone]);
   const turnOff = () => void dnsOff.run(`${base}/dns`, dnsBody(net.dns!, { enabled: false })).then(() => q.refresh());
-  const blocked = !q.data || (tun ? dnsOn || notFenced.length > 0 : undrained.length > 0 || busyNodes.length > 0);
-  if (steps === 'drain')
-    return (
-      <StepsDialog
-        title={`${net.name} 비우기`}
-        action="비우기 시작"
-        renderError={netErr}
-        intro={<span>비우면 이 망에 새 컨테이너가 붙지 못합니다. 이미 쓰는 컨테이너가 모두 떠나면 폐기할 수 있습니다. 비우기는 되돌릴 수 없습니다.</span>}
-        steps={undrained.map((x) => ({ key: `drain/${x.node}`, label: `${x.node} 비우기`, send: post(`${base}/change/drain`, { node: x.node }) }))}
-        onClose={() => (setSteps(undefined), q.refresh())}
-        onDone={() => q.refresh()}
-      />
-    );
-  if (steps === 'retire')
-    return <StepsDialog title={`${net.name} 폐기`} action="폐기" renderError={netErr} steps={members.map((x) => ({ key: `retire/${x.node}`, label: `${x.node} 폐기`, send: post(`${base}/retire`, { node: x.node }) }))} onClose={onClose} onDone={onDone} />;
+  const stepState = (node: string): [string, 'done' | 'run' | 'wait' | 'er'] => {
+    const m = members.find((x) => x.node === node);
+    if (q.data && !m) return ['끝남', 'done'];
+    if (!m || !m.draining) return [running ? '비우는 중' : '', running ? 'run' : 'wait'];
+    const c = closureOf(node);
+    if (c?.unreachable || c?.state === 'unreachable') return ['서버가 응답하지 않습니다', 'er'];
+    const n = pendingOf(c);
+    if (free(c)) return ['빼는 중', 'run'];
+    return [n === null ? '쓰는 곳 확인 중' : '쓰는 컨테이너 기다리는 중', 'run'];
+  };
+  const mark = (st: 'done' | 'run' | 'wait' | 'er') => <span style={{ width: 18, textAlign: 'center', color: st === 'done' ? 'var(--ok)' : st === 'er' ? 'var(--er)' : st === 'run' ? 'var(--pr)' : 'var(--muted)' }}>{st === 'done' ? '✓' : st === 'er' ? '!' : st === 'run' ? '●' : '○'}</span>;
   return (
     <Dialog
-      title={`${net.name}을 폐기할까요?`}
+      title={`${net.name}${eulReul(net.name)} 지울까요?`}
       danger
       onClose={onClose}
       footer={
-        m.op ? (
+        gone ? (
           <button className="btn primary" onClick={onClose}>
             닫기
           </button>
         ) : (
           <>
             <button className="btn" onClick={onClose}>
-              취소
+              {started || running ? '닫기' : '취소'}
             </button>
-            {tun && dnsOn && net.dns && (
+            {dnsOn && net.dns && (
               <button className="btn" disabled={dnsOff.busy} onClick={turnOff}>
                 도메인 이름 끄기
               </button>
             )}
-            <button className="btn danger solid" disabled={confirm !== net.name || m.busy || blocked} onClick={retire}>
-              폐기
+            <button className="btn danger solid" disabled={confirm !== net.name || dnsOn || running || !q.data} onClick={() => (setError(undefined), setRunning(true))}>
+              {started ? '지우기 계속' : '지우기'}
             </button>
           </>
         )
       }
     >
-      {tun ? (
-        <p>
-          사용 앱 {appCount(net)}개. 서버 {nodes}의 CIDR을 돌려받습니다.
-        </p>
+      <p style={{ margin: 0 }}>
+        사용 앱 {appCount(net)}개. 서버 {nodes0.length}대의 CIDR <span className="mono">{cidrs.join(' · ')}</span>{eulReul(cidrs[cidrs.length - 1] ?? '')} 돌려받습니다.
+      </p>
+      {dnsOn && net.dns ? (
+        <div className="note wa">
+          도메인 이름({net.dns.zone})이 켜져 있어 지울 수 없습니다. 먼저 도메인 이름을 끄세요.
+        </div>
       ) : (
-        <p>
-          사용 앱 {appCount(net)}개. CIDR <span className="mono">{net.cidr}</span>를 돌려받습니다.
-        </p>
-      )}
-      {tun && dnsOn && net.dns && (
-        <div className="note wa">
-          도메인 이름({net.dns.zone})이 켜져 있어 폐기할 수 없습니다. 먼저 도메인 이름을 끄세요.
-        </div>
-      )}
-      {tun && q.data && notFenced.length > 0 && (
-        <div className="note wa">
-          먼저 모든 참여 서버를 비우고 사용 중지를 확인해야 합니다. 남은 서버: {notFenced.map((x) => x.node).join(', ')}.{' '}
-          <button className="btn sm" onClick={() => nav(`/shared/networks/${encodeURIComponent(net.name)}/change`)}>
-            변경 단계 화면
-          </button>
-        </div>
-      )}
-      {!tun && q.data && undrained.length > 0 && (
-        <div className="note wa">
-          폐기하려면 먼저 비워야 합니다. 비우면 새 컨테이너가 붙지 못하고, 쓰던 컨테이너가 모두 떠난 뒤 폐기할 수 있습니다.{' '}
-          <button className="btn sm" onClick={() => setSteps('drain')}>
-            비우기 시작
-          </button>
-        </div>
-      )}
-      {!tun && q.data && busyNodes.length > 0 && (
-        <div className="note wa">
-          {busyNodes.map((x) => {
-            const c = closureOf(x.node);
+        <div className="col" style={{ gap: 4, fontSize: 13 }}>
+          <div className="row" style={{ gap: 8 }}>
+            {mark('done')}
+            <span>도메인 이름 끄기</span>
+            <span className="muted small" style={{ marginLeft: 'auto' }}>
+              꺼져 있음
+            </span>
+          </div>
+          {nodes0.map((n) => {
+            const [text, st] = stepState(n);
+            const last = members.length === 1 && members[0].node === n;
             return (
-              <div key={x.node}>
-                {x.node}: {c?.unreachable ? '서버가 응답하지 않습니다.' : `아직 컨테이너 ${pendingOf(c) ?? '?'}개가 씁니다.`}
+              <div key={n} className="row" style={{ gap: 8 }}>
+                {mark(st)}
+                <span>
+                  {n} 비우고 빼기{last ? <span className="muted"> · 마지막 서버</span> : null}
+                </span>
+                <span className="muted small" style={{ marginLeft: 'auto' }}>
+                  {text}
+                </span>
               </div>
             );
           })}
-          <button className="btn sm" onClick={() => q.refresh()} disabled={q.loading}>
-            다시 확인
-          </button>
+          <div className="row" style={{ gap: 8 }}>
+            {mark(gone ? 'done' : 'wait')}
+            <span>망 없어짐</span>
+          </div>
         </div>
       )}
       <MutationError error={dnsOff.error} />
-      <Field label={<>확인하려면 <b className="mono">{net.name}</b>을(를) 입력하세요</>}>
-        <input className="mono" value={confirm} onChange={(e) => setConfirm(e.target.value)} disabled={!!m.op} />
-      </Field>
-      {m.error !== undefined && (netErr(m.error) ?? <MutationError error={m.error} />)}
-      {m.op && <OpPanel op={m.op} onChange={(o: OpView) => (m.setOp(o), o.state === 'applied' && onDone())} />}
+      {!gone && (
+        <Field label={<>확인하려면 <b className="mono">{net.name}</b>을(를) 입력하세요</>}>
+          <input className="mono" value={confirm} onChange={(e) => setConfirm(e.target.value)} disabled={running} />
+        </Field>
+      )}
+      {error !== undefined && (netErr(error) ?? <MutationError error={error} />)}
     </Dialog>
   );
 }

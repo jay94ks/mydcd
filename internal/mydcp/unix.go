@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net"
 	"os"
 	"path/filepath"
@@ -264,14 +265,40 @@ func (t *Transport) dialUnix(ctx context.Context, peer Peer, path string) (*Sess
 	}
 }
 
-// ListenUnix refuses any existing entry except a stale socket: a socket owned
-// by this user that refuses connections because its daemon crashed. It never
-// unlinks a live daemon's socket or any other kind of file. The daemon chooses its node-local path; library
-// Runtime.Open does not bind a host-global management socket implicitly.
+// unixListener is one management socket. Every listener admits the same
+// TLS + MYDCP authentication; only the socket file's owner differs.
+type unixListener struct {
+	ln      *net.UnixListener
+	socket  *ownedSocket
+	primary bool
+}
+
+// ListenUnix opens the host management socket (0600, owned by this user).
+// It refuses any existing entry except a stale socket: a socket owned by this
+// user that refuses connections because its daemon crashed. It never unlinks
+// a live daemon's socket or any other kind of file. The daemon chooses its
+// node-local path; library Runtime.Open does not bind a host-global
+// management socket implicitly.
 func (t *Transport) ListenUnix(path string) error {
 	if path == "" {
 		path = DefaultManagementSocket
 	}
+	return t.listenUnix(path, -1, true)
+}
+
+// ListenUnixOwned opens one more management socket whose file is owned by
+// uid (0600), for a node app container that runs as that UID
+// (devel/design/node-apps.md). It admits exactly what ListenUnix admits:
+// the same TLS, the same user login, the same purposes. The UID is not a
+// credential. A stale socket left by a crash may be owned by uid as well.
+func (t *Transport) ListenUnixOwned(path string, uid uint32) error {
+	if uid == 0 || uid > math.MaxInt32 {
+		return errors.New("node app socket owner must be a non-root UID")
+	}
+	return t.listenUnix(path, int(uid), false)
+}
+
+func (t *Transport) listenUnix(path string, owner int, primary bool) error {
 	if err := ValidateManagementSocket(path); err != nil {
 		return err
 	}
@@ -285,11 +312,16 @@ func (t *Transport) ListenUnix(path string) error {
 	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	if t.closed || t.localClosed || t.localListener != nil {
+	if t.closed || t.localClosed {
 		return net.ErrClosed
 	}
+	for _, l := range t.localListeners {
+		if l.primary && primary || l.socket.path == path {
+			return net.ErrClosed
+		}
+	}
 	if _, err := os.Lstat(path); !errors.Is(err, os.ErrNotExist) {
-		if removeErr := removeStaleSocket(path); removeErr != nil {
+		if removeErr := removeStaleSocket(path, owner); removeErr != nil {
 			return fmt.Errorf("management socket path must be absent: %w", errors.Join(err, os.ErrExist, removeErr))
 		}
 	}
@@ -327,52 +359,62 @@ func (t *Transport) ListenUnix(path string) error {
 		_ = ln.Close()
 		return errors.Join(err, owned.remove())
 	}
+	if owner >= 0 {
+		if err = os.Lchown(path, owner, -1); err != nil {
+			_ = ln.Close()
+			return errors.Join(err, owned.remove())
+		}
+	}
 	current, err := os.Lstat(path)
 	if err != nil || !os.SameFile(info, current) {
 		_ = ln.Close()
 		_ = pin.Close()
 		return errors.Join(err, errors.New("management socket replaced during setup"))
 	}
-	t.localListener, t.localSocket = ln, owned
+	t.localListeners = append(t.localListeners, unixListener{ln: ln, socket: owned, primary: primary})
 	t.wg.Add(1)
 	go t.acceptUnix(ln)
 	return nil
 }
 
-// CloseUnix stops local admission and cancels its live requests without closing
-// the node network needed for module retirement. The original pinned path is
-// removed after listener/connection closure, before unrelated worker waits.
-// Transport.Close still joins every handler; a request is never deemed unrun.
+// CloseUnix stops local admission on every management socket and cancels
+// their live requests without closing the node network needed for module
+// retirement. Each original pinned path is removed after listener/connection
+// closure, before unrelated worker waits. Transport.Close still joins every
+// handler; a request is never deemed unrun.
 func (t *Transport) CloseUnix() error {
 	t.localCloseOnce.Do(func() {
 		t.mu.Lock()
 		t.localClosed = true
-		listener, owned := t.localListener, t.localSocket
+		listeners := t.localListeners
 		connections := make([]*localConnection, 0, len(t.localConnections))
 		for c := range t.localConnections {
 			connections = append(connections, c)
 		}
 		t.mu.Unlock()
-		if listener != nil {
-			_ = listener.Close()
+		for _, l := range listeners {
+			_ = l.ln.Close()
 		}
 		for _, c := range connections {
 			_ = c.finish()
 		}
-		if owned != nil {
-			t.localCloseErr = owned.remove()
+		for _, l := range listeners {
+			t.localCloseErr = errors.Join(t.localCloseErr, l.socket.remove())
 		}
 	})
 	return t.localCloseErr
 }
 
+// ManagementAddr is the host management socket opened by ListenUnix.
 func (t *Transport) ManagementAddr() net.Addr {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	if t.localListener == nil {
-		return nil
+	for _, l := range t.localListeners {
+		if l.primary {
+			return l.ln.Addr()
+		}
 	}
-	return t.localListener.Addr()
+	return nil
 }
 
 func (t *Transport) acceptUnix(ln *net.UnixListener) {
@@ -495,15 +537,16 @@ func (t *Transport) handleUnix(ctx context.Context, s *Session, stream *localStr
 }
 
 // removeStaleSocket unlinks path only when it is a socket owned by this user
-// and nothing accepts connections on it. The parent was already checked to be
+// (or by owner, the UID a node app socket was handed to; -1 for none) and
+// nothing accepts connections on it. The parent was already checked to be
 // unwritable by group/other, so nobody else can swap the entry meanwhile.
-func removeStaleSocket(path string) error {
+func removeStaleSocket(path string, owner int) error {
 	info, err := os.Lstat(path)
 	if err != nil {
 		return err
 	}
 	stat, ok := info.Sys().(*syscall.Stat_t)
-	if !ok || info.Mode()&os.ModeSocket == 0 || stat.Uid != uint32(os.Geteuid()) {
+	if !ok || info.Mode()&os.ModeSocket == 0 || stat.Uid != uint32(os.Geteuid()) && (owner < 0 || stat.Uid != uint32(owner)) {
 		return errors.New("existing entry is not a stale socket of this user")
 	}
 	conn, err := net.DialTimeout("unix", path, time.Second)

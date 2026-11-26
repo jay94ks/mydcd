@@ -268,14 +268,14 @@ func InputChange(raw []byte, principal string) (Change, error) {
 		payload, err = normalizedPayload[ReservationSelection](d.Payload)
 	case "release-reservation":
 		payload, err = normalizedPayload[tenancy.ReservationClosure](d.Payload)
-	case "create-network":
-		payload, err = normalizedPayload[tenancy.Network](d.Payload)
 	case "create-tun-network":
 		payload, err = normalizedPayload[tenancy.TUNDefinition](d.Payload)
 	case "join-tun-network":
 		payload, err = normalizedPayload[NetworkJoin](d.Payload)
 	case "set-network-toggle":
 		payload, err = normalizedPayload[NetworkToggleSet](d.Payload)
+	case "set-system-network-range":
+		payload, err = normalizedPayload[SystemNetworkRange](d.Payload)
 	case "plan-network-change":
 		payload, err = normalizedPayload[NetworkChangePlan](d.Payload)
 	case "propose-route":
@@ -294,7 +294,7 @@ func InputChange(raw []byte, principal string) (Change, error) {
 		payload, err = managedDNSPayload(d.Payload)
 	case "drain-network":
 		payload, err = normalizedPayload[NetworkSelection](d.Payload)
-	case "retire-network", "leave-tun-network":
+	case "leave-tun-network":
 		payload, err = normalizedPayload[tenancy.NetworkClosure](d.Payload)
 	case "rotate-ledger":
 		payload, err = normalizedPayload[LedgerWindow](d.Payload)

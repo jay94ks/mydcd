@@ -162,7 +162,7 @@ export function BuildCacheTab() {
               <Empty title="빌드 캐시가 없습니다">빌드 설정에서 빌드 서버를 정하고 한 번 빌드하면 캐시가 여기 보입니다.</Empty>
             </Card>
           ) : (
-            <div className="grid" style={{ gridTemplateColumns: 'minmax(0,1fr) minmax(240px, 300px)', gap: 14, alignItems: 'start' }}>
+            <div className="main-side">
               <div className="col" style={{ gap: 14, minWidth: 0 }}>
                 <Card
                   title="서버·컨텍스트별 캐시"
@@ -530,7 +530,7 @@ function PruneDialog({ tenant, p, onClose, onDone }: { tenant: string; p: Prune;
     <Dialog
       title={p.title}
       danger
-      width={p.typed ? 560 : 400}
+      width={p.typed ? 560 : 420}
       onClose={onClose}
       footer={
         finished ? (

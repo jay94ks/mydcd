@@ -19,7 +19,7 @@ MyDC 웹 관리 UI를 서빙하고 화면 API(`/api/v1`)를 제공하는 데몬�
 |---|---|---|---|
 | `-listen` | `MYDC_WEB_LISTEN` | `:8080` | HTTP 주소 |
 | `-tls-cert`, `-tls-key` | `MYDC_WEB_TLS_CERT`, `MYDC_WEB_TLS_KEY` | 없음 | 직접 HTTPS로 받을 때 |
-| `-socket` | `MYDC_WEB_SOCKET` | `/var/run/mydc.sock` | 마운트된 mydcd 소켓 |
+| `-socket` | `MYDC_WEB_SOCKET` | `/var/run/mydc/mydc.sock` | mydcd가 이 서버 앱에 따로 여는 관리 소켓(호스트의 `state_dir/node-apps/web/run/`이 `/var/run/mydc`에 들어온다) |
 | `-cluster` | `MYDC_WEB_CLUSTER` |  | 소켓 뒤 mydcd의 클러스터 ID(hex 64자). 꼭 필요 |
 | `-node` | `MYDC_WEB_NODE` |  | 그 노드의 ID. 꼭 필요 |
 | `-node-key` | `MYDC_WEB_NODE_KEY` |  | 그 노드의 신원 키(hex 64자). CLI context처럼 설치 출력에서 받아 고정한다. 꼭 필요 |
@@ -27,7 +27,7 @@ MyDC 웹 관리 UI를 서빙하고 화면 API(`/api/v1`)를 제공하는 데몬�
 | `-acme-listen` | `MYDC_WEB_ACME_LISTEN` | 없음(끔) | ACME HTTP-01 응답 주소(평문 HTTP, 예 `:8081`). ingress가 `/.well-known/acme-challenge/`만 이리로 보낸다. 켜면 외부 도메인(DNS 공급자)에 없는 이름도 HTTP-01로 발급한다 |
 | `-acme-advertise` | `MYDC_WEB_ACME_ADVERTISE` | `-acme-listen`이 구체적인 IP:port면 그 값 | ingress가 응답기에 닿는 IP:port. 웹이 클러스터 응답기 설정에 채운다([web API](../../docs/reference/web-api/23-ui-57-59.md)) |
 | `-static-dir` | `MYDC_WEB_STATIC_DIR` | 없음 | 내장 UI 대신 디스크에서 서빙(개발용) |
-| `-cookie-secure` | `MYDC_WEB_COOKIE_SECURE` | `true` | 쿠키 Secure. HTTPS 앞단 없이 로컬 개발할 때만 false |
+| `-trusted-proxies` | `MYDC_WEB_TRUSTED_PROXIES` | 없음 | 이 컨테이너로 넘겨 주는 ingress의 IP·CIDR(쉼표로, mydc-system의 노드 TUN host 주소). 쿠키 Secure는 요청마다 정한다: 직접 받은 TLS이거나, 이 주소에서 온 연결이 `X-Forwarded-Proto: https`를 보낼 때 붙인다. 다른 연결의 그 헤더는 쓰지 않는다. 값이 없으면 보이지 않는 HTTPS 앞단이 있다고 보고 붙이되, loopback에서 직접 온 평문 연결(개발 실행)에서만 뺀다 |
 | `-op-retention` | `MYDC_WEB_OP_RETENTION` | `720h` | 확정된 작업 기록 보존 기간 |
 | (환경 변수만) | `MYDC_WEB_SEAL_KEY` | 없음 | 봉인 파일 키. 32바이트의 hex(64자) 또는 base64. 읽은 뒤 프로세스 환경에서 지운다. 명령줄 인자로는 받지 않는다 |
 | `-seal-key-file` | `MYDC_WEB_SEAL_KEY_FILE` | 없음 | 봉인 키를 담은 파일(Docker secret `/run/secrets/...`). `MYDC_WEB_SEAL_KEY`와 함께 쓰지 않는다 |
@@ -42,7 +42,7 @@ bbolt는 파일 잠금으로 한 프로세스만 연다. 웹 컨테이너는 하
 ```sh
 # 개발 노드의 mydcd 소켓과 그 노드의 클러스터 ID·노드 ID·신원 키(설치 출력)로
 go run ./cmd/mydc-web -socket /var/run/mydc.sock -cluster <hex> -node <노드> -node-key <hex> \
-  -data-dir ./work/mydc-web -cookie-secure=false
+  -data-dir ./work/mydc-web
 # 빌드된 UI를 디스크에서: 위에 -static-dir apps/mydc-web/web/dist
 ```
 

@@ -139,7 +139,7 @@ export function AddServerWizard({ initial, onClose }: { initial?: string; onClos
           </span>
         </span>
       }
-      width={800}
+      width={720}
       onClose={() => (inProgress ? setLeaving(true) : onClose())}
       footer={
         <>
@@ -240,7 +240,7 @@ export function AddServerWizard({ initial, onClose }: { initial?: string; onClos
       {leaving && (
         <Dialog
           title="나중에 이어 할까요?"
-          width={400}
+          width={420}
           onClose={() => setLeaving(false)}
           footer={
             <>

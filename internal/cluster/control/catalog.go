@@ -326,6 +326,9 @@ func (p Policy) Reduce(s state.State, command state.Command) (map[string][]byte,
 	if command.Kind == state.ModuleWindow {
 		return p.reduceStorage(s, command)
 	}
+	if command.Kind == state.ModuleReport && command.Key == ResourcesKey && strings.HasPrefix(command.Actor, "node/") {
+		return p.reduceSystemNetworkReport(s, command)
+	}
 	if command.Kind == state.Module && command.Key == ResourcesKey {
 		return p.reduceResources(s, command)
 	}

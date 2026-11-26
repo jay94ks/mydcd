@@ -163,6 +163,7 @@ func (p Policy) reduceResources(s state.State, cmd state.Command) (map[string][]
 	if err != nil {
 		return nil, state.Invalid
 	}
+	original := r.Networks
 	change := op.Change
 	var native map[string][]byte
 	switch change.Action {
@@ -206,6 +207,12 @@ func (p Policy) reduceResources(s state.State, cmd state.Command) (map[string][]
 		}
 	case "leave-tun-network":
 		r.Networks, native, err = p.leaveNetwork(s, c, r, op)
+	case "set-system-network-range":
+		var v SystemNetworkRange
+		if canonical(change.Payload, &v) != nil {
+			return nil, state.Invalid
+		}
+		r.Networks, err = r.Networks.SetSystemRange(change.Expected, v.Range)
 	case "set-network-toggle":
 		var v NetworkToggleSet
 		if canonical(change.Payload, &v) != nil {
@@ -268,20 +275,6 @@ func (p Policy) reduceResources(s state.State, cmd state.Command) (map[string][]
 			return nil, state.ConditionFailed
 		}
 		r.Quotas, err = r.Quotas.Release(c, change.Principal, proof)
-	case "create-network":
-		var network tenancy.Network
-		if canonical(change.Payload, &network) != nil {
-			return nil, state.Invalid
-		}
-		owner, e := p.workNodeOwner(s, network.Node)
-		if e != nil || network.Owner != ([32]byte{}) && network.Owner != owner {
-			return nil, state.Forbidden
-		}
-		network.Owner = owner
-		err = r.Quotas.AdmitNetwork(c, change.Principal, network.Tenant, network.Node, owner, r.Networks)
-		if err == nil {
-			r.Networks, err = r.Networks.Create(c, change.Principal, change.Expected, network)
-		}
 	case "drain-network":
 		var selection NetworkSelection
 		if canonical(change.Payload, &selection) != nil {
@@ -291,26 +284,14 @@ func (p Policy) reduceResources(s state.State, cmd state.Command) (map[string][]
 		if err == nil {
 			native, err = drainManagedNetworkSources(s, r.Networks, selection.Tenant, selection.ID, cmd)
 		}
-	case "retire-network":
-		var proof tenancy.NetworkClosure
-		if canonical(change.Payload, &proof) != nil {
-			return nil, state.Invalid
-		}
-		old, ok := r.Networks.Network(proof.Tenant, proof.Network)
-		if !ok || old.Revision != change.Expected {
-			return nil, state.ConditionFailed
-		}
-		if old.Logical != "" {
-			// Logical membership changes must also close/rebind every peer route
-			// source. The single-owner legacy proof cannot authorize that patch.
-			return nil, state.ConditionFailed
-		}
-		r.Networks, err = r.Networks.Retire(c, change.Principal, proof)
 	default:
 		return nil, state.Invalid
 	}
 	if errors.Is(err, access.ErrDenied) {
 		return nil, state.Forbidden
+	}
+	if err != nil && systemRangeRefusal(original, change) {
+		return nil, state.NetworkSystemRange
 	}
 	if err != nil {
 		return nil, state.ConditionFailed
@@ -399,7 +380,7 @@ func (p Policy) authorizeResource(s state.State, c access.Catalog, op UserOperat
 			return access.ErrInvalid
 		}
 		tenant, action = v.Tenant, access.ManageNetwork
-	case "set-node-quota":
+	case "set-node-quota", "set-system-network-range":
 		return c.AuthorizeSession(op.Session, p.Cluster, p.Issuer(op.Session.Issuer), op.At, "", access.ManageCluster, "")
 	case "reserve-task":
 		var v tenancy.Reservation
@@ -423,19 +404,13 @@ func (p Policy) authorizeResource(s state.State, c access.Catalog, op UserOperat
 			return access.ErrInvalid
 		}
 		tenant, cleanup = parts[2], true
-	case "create-network":
-		var v tenancy.Network
-		if canonical(op.Change.Payload, &v) != nil {
-			return access.ErrInvalid
-		}
-		tenant, node, action = v.Tenant, v.Node, access.ManageNetwork
 	case "drain-network":
 		var v NetworkSelection
 		if canonical(op.Change.Payload, &v) != nil {
 			return access.ErrInvalid
 		}
 		tenant, action, cleanup = v.Tenant, access.ManageNetwork, true
-	case "retire-network", "leave-tun-network":
+	case "leave-tun-network":
 		var v tenancy.NetworkClosure
 		if canonical(op.Change.Payload, &v) != nil {
 			return access.ErrInvalid

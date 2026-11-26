@@ -401,8 +401,10 @@ export interface NetworkView {
   cidr: string;
   nodes: string[];
   revision: number;
-  /** 망 도메인 이름(서버 간 가상망만). zone은 끝 점을 뗀 모양 */
+  /** 망 도메인 이름. zone은 끝 점을 뗀 모양 */
   dns?: NetworkDnsView;
+  /** 켜진 망 옵션(set-network-toggle). local = 이 서버에서만 쓰는 망 */
+  toggles: string[];
   /** 서버별 멤버(이전 데몬은 비어 있음). 변경 중이면 change가 붙는다 */
   members: { node: string; cidr: string; draining: boolean; phase?: string; resolver?: string }[];
   /** 이 망을 쓰는 앱·단독 컨테이너 수(이전 데몬은 없음) */

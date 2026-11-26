@@ -216,7 +216,7 @@ export function ServiceFields({ tenant, value: s, onChange: set, nodes, choices:
         </Field>
         <PortsField label="포트 (선택)" value={s.ports} onChange={(v) => set({ ports: v })} />
       </div>
-      <div className="grid wide" style={{ gap: 16 }}>
+      <div className="grid wide">
         <div className="col" style={{ gap: 6 }}>
           <b className="small">환경 변수</b>
           <Rows

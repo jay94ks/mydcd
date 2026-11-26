@@ -316,12 +316,12 @@ func (c *fakeConn) apply(op UserOperation, actor string, next uint64) (bool, err
 		return true, c.applyNodeShell(op, actor)
 	case ActionOpenNodeShell:
 		return true, c.applyOpenNodeShell(op, actor)
-	case ActionCreateNetwork, ActionCreateTUNNetwork, ActionConfigureNetworkDNS, ActionBeginVolumeCreate, ActionRegisterFixedVolume, ActionVaultCreate:
+	case ActionCreateTUNNetwork, ActionConfigureNetworkDNS, ActionBeginVolumeCreate, ActionRegisterFixedVolume, ActionVaultCreate:
 		return true, c.applySharedCreate(op, actor, next)
 	case ActionBeginTenantRetirement, ActionFinishTenantRetirement:
 		return true, c.applyTenantRetirement(op, actor, next)
 	case ActionPlanNetworkChange, ActionDrainNetwork, ActionCancelNetworkChange, ActionFenceNetworkChange,
-		ActionCommitNetworkChange, ActionReconfigureTUN, ActionRetireNetwork, ActionJoinTUN, ActionLeaveTUN, ActionSetNetworkToggle:
+		ActionCommitNetworkChange, ActionReconfigureTUN, ActionJoinTUN, ActionLeaveTUN, ActionSetNetworkToggle:
 		return true, c.applyNetworkChange(op, actor, next)
 	case ActionBeginVolumeMove:
 		return true, c.applyVolumeMove(op, actor, next)

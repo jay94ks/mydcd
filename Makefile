@@ -5,6 +5,7 @@
 #   make test       unit tests
 #   make lint       gofmt, go vet, SPDX headers, documentation links
 #   make dist       release archives, checksums, notices and SBOM in dist/
+#   make install    install binaries and the mydc agent guide under PREFIX
 
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 GOOS    ?= linux
@@ -13,8 +14,12 @@ LDFLAGS := -s -w -X main.version=$(VERSION)
 GO      := CGO_ENABLED=0 GOOS=$(GOOS) GOARCH=$(GOARCH) go
 WEB     := apps/mydc-web/web
 BINS    := mydcd mydc mydc-web
+PREFIX  ?= /usr/local
+# Agent guide for the mydc CLI. `mydc --help` looks next to the executable,
+# then at <bin>/../share/mydc/SKILL.md (see docs/cli/README.md).
+SKILL   := cmd/mydc/SKILL.md
 
-.PHONY: all build ui test lint notices sbom dist clean
+.PHONY: all build ui test lint notices sbom dist install clean
 
 all: build
 
@@ -50,10 +55,15 @@ sbom: build
 
 dist: build notices sbom
 	rm -rf dist/stage && mkdir -p dist/stage/mydc_$(VERSION)
-	cp bin/mydcd bin/mydc bin/mydc-web LICENSE NOTICE dist/THIRD_PARTY_NOTICES dist/stage/mydc_$(VERSION)/
+	cp bin/mydcd bin/mydc bin/mydc-web $(SKILL) LICENSE NOTICE dist/THIRD_PARTY_NOTICES dist/stage/mydc_$(VERSION)/
 	tar -C dist/stage -czf dist/mydc_$(VERSION)_$(GOOS)_$(GOARCH).tar.gz mydc_$(VERSION)
 	rm -rf dist/stage
 	cd dist && sha256sum *.tar.gz *.spdx.json > SHA256SUMS
+
+install:
+	install -d $(DESTDIR)$(PREFIX)/bin $(DESTDIR)$(PREFIX)/share/mydc
+	install -m 0755 bin/mydcd bin/mydc $(DESTDIR)$(PREFIX)/bin/
+	install -m 0644 $(SKILL) $(DESTDIR)$(PREFIX)/share/mydc/SKILL.md
 
 clean:
 	rm -rf bin dist

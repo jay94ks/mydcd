@@ -11,7 +11,7 @@ import { Field } from '../components/ui';
 import { MutationError, OpPanel, casFailed, useMutation } from '../components/OpPanel';
 import { usePoll } from '../lib/usePoll';
 import { fmtBytes } from '../lib/format';
-import { cidrProblem, firstHost, hostIn, overlaps, parseCidr, suggestCidr } from '../lib/cidr';
+import { cidrProblem, firstHost, hostIn, inSystem, overlaps, parseCidr, suggestCidr, SYSTEM_TEXT } from '../lib/cidr';
 
 const NAME_RE = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
 const nameProblem = (n: string, taken: string[], what: string) =>
@@ -221,83 +221,29 @@ function StepErrors({ ms }: { ms: ReturnType<typeof useMutation>[] }) {
 
 // ── 망 ─────────────────────────────────────────────
 
-export function BridgeNetworkDialog({ tenant, nets, onClose, onDone }: { tenant: string; nets: NetworkView[]; onClose: () => void; onDone: () => void }) {
+/** 망 만들기(UI-50). 쓰는 범위만 다르고 둘 다 같은 tun 망이다: '이 서버에서만'은 멤버 하나 + local 옵션 */
+export function NetworkCreateDialog({ tenant, nets, onClose, onDone }: { tenant: string; nets: NetworkView[]; onClose: () => void; onDone: () => void }) {
   const nodes = useNodes(tenant);
+  // 망마다 서버별 CIDR이 따로 있다(망 행의 cidr는 쉼표로 이은 글자)
+  const used0 = nets.flatMap((n) => (n.members.length ? n.members.map((x) => ({ name: n.name, node: x.node, cidr: x.cidr })) : n.cidr.split(/,\s*/).map((c) => ({ name: n.name, node: undefined as string | undefined, cidr: c }))));
   const [name, setName] = useState('');
+  const [scope, setScope] = useState<'local' | 'mesh'>('local');
+  const [zone, setZone] = useState('');
+  // 이 서버에서만: 서버 하나, CIDR, 고급(터널 주소·게이트웨이·MTU)
   const [node, setNode] = useState('');
-  const [cidr, setCidr] = useState(() => suggestCidr(nets.map((n) => n.cidr)));
+  const [cidr, setCidr] = useState(() => suggestCidr(used0.map((x) => x.cidr)));
+  const [tunnel, setTunnel] = useState('');
   const [gateway, setGateway] = useState('');
   const [mtu, setMtu] = useState('');
+  // 다른 서버와: 서버마다 CIDR과 터널 주소
+  const [rows, setRows] = useState<Record<string, { on: boolean; cidr: string; tunnel: string }>>({});
   useEffect(() => {
     if (!node && nodes[0]) setNode(nodes[0].id);
   }, [node, nodes]);
-  const taken = nets.map((n) => ({ name: n.name, node: n.nodes.length === 1 ? n.nodes[0] : undefined, cidr: n.cidr }));
-  const nameErr = nameProblem(name, nets.map((n) => n.name), '망');
-  const cidrErr = cidrProblem(cidr, taken);
-  const c = parseCidr(cidr);
-  const gwErr = gateway && c && !hostIn(c, gateway) ? `${cidr} 안의 호스트 주소여야 합니다` : undefined;
-  const mtuN = mtu ? Number(mtu) : 0;
-  const mtuErr = mtu && !(mtuN >= 1280 && mtuN <= 9000) ? '1280 ~ 9000' : undefined;
-  const valid = !!name && !nameErr && !!node && !cidrErr && !gwErr && !mtuErr;
-  const create = useStep('서버 내부망 만들기 (create-network)', `/t/${enc(tenant)}/networks`, () => ({ name, node, cidr, ...(gateway ? { gateway } : {}), ...(mtuN ? { mtu: mtuN } : {}) }));
-  return (
-    <CreateDialog ms={[create.m]}
-      title="서버 내부망 만들기"
-      ok="만들기"
-      review
-      valid={valid}
-      onClose={onClose}
-      onDone={onDone}
-      steps={[create.step]}
-      summary={[
-        ['이름', <code key="n">{name}</code>],
-        ['종류', '서버 내부망 (bridge)'],
-        ['서버', node],
-        ['CIDR', <code key="c">{cidr}</code>],
-        ['게이트웨이', <code key="g">{gateway || (c ? firstHost(c) : '')}</code>],
-        ['MTU', mtuN || 1500],
-      ]}
-    >
-      <Field label="이름" error={nameErr}>
-        <input className="mono" value={name} onChange={(e) => setName(e.target.value.trim())} placeholder="shop-cache" />
-      </Field>
-      <Field label="서버">
-        <select value={node} onChange={(e) => setNode(e.target.value)}>
-          {nodes.map((n) => (
-            <option key={n.id} value={n.id}>
-              {n.id}
-            </option>
-          ))}
-        </select>
-      </Field>
-      <Field label="CIDR" error={cidrErr} hint="추천 값 · 이 작업 공간의 망과 겹치지 않음(클러스터 전역 겹침은 mydcd가 확인)">
-        <input className="mono" value={cidr} onChange={(e) => setCidr(e.target.value.trim())} />
-      </Field>
-      <span className="small muted">도메인 영역은 서버 간 가상망에만 붙습니다. 서버 하나에 도메인이 필요하면 서버 간 가상망을 서버 하나로 만드세요.</span>
-      <details>
-        <summary className="small linkish">고급 · 게이트웨이 · MTU</summary>
-        <div className="g2" style={{ marginTop: 8 }}>
-          <Field label="게이트웨이" error={gwErr} hint="비우면 첫 주소">
-            <input className="mono" value={gateway} placeholder={c ? firstHost(c) : ''} onChange={(e) => setGateway(e.target.value.trim())} />
-          </Field>
-          <Field label="MTU" error={mtuErr} hint="비우면 1500">
-            <input inputMode="numeric" value={mtu} placeholder="1500" onChange={(e) => setMtu(e.target.value.replace(/\D/g, ''))} />
-          </Field>
-        </div>
-      </details>
-    </CreateDialog>
-  );
-}
-
-export function MeshNetworkDialog({ tenant, nets, onClose, onDone }: { tenant: string; nets: NetworkView[]; onClose: () => void; onDone: () => void }) {
-  const nodes = useNodes(tenant);
-  const [name, setName] = useState('');
-  const [zone, setZone] = useState('');
-  const [rows, setRows] = useState<Record<string, { on: boolean; cidr: string; tunnel: string }>>({});
   // 서버마다 겹치지 않는 /24와 터널 주소(/32)를 차례로 추천한다. 처음 두 서버를 켜 둔다.
   useEffect(() => {
     if (!nodes.length || Object.keys(rows).length) return;
-    const used = nets.map((n) => n.cidr);
+    const used = used0.map((x) => x.cidr);
     const next: typeof rows = {};
     nodes.forEach((n, i) => {
       const c = suggestCidr(used);
@@ -308,27 +254,54 @@ export function MeshNetworkDialog({ tenant, nets, onClose, onDone }: { tenant: s
   }, [nodes, nets, rows]);
   const set = (id: string, patch: Partial<{ on: boolean; cidr: string; tunnel: string }>) => setRows((x) => ({ ...x, [id]: { ...x[id], ...patch } }));
   const on = nodes.filter((n) => rows[n.id]?.on);
-  const taken = nets.map((n) => ({ name: n.name, cidr: n.cidr }));
+  const taken = used0;
+  const tunnelProblem = (t: string, cidrs: string[]) => {
+    const c = parseCidr(t);
+    if (!c || c.bits !== 32) return '10.250.0.1/32 같은 주소 하나(/32)';
+    if (inSystem(c)) return SYSTEM_TEXT;
+    if (cidrs.some((x) => { const m = parseCidr(x); return m && overlaps(m, c); })) return '망 CIDR 밖이어야 합니다';
+    return undefined;
+  };
   const cidrErr = (id: string) => {
     const others = on.filter((n) => n.id !== id).map((n) => ({ name: name || '이 망', node: n.id, cidr: rows[n.id].cidr }));
     return cidrProblem(rows[id]?.cidr ?? '', [...taken, ...others]);
   };
   const tunnelErr = (id: string) => {
     const t = rows[id]?.tunnel ?? '';
-    const c = parseCidr(t);
-    if (!c || c.bits !== 32) return '10.250.0.1/32 같은 주소 하나(/32)';
     if (on.some((n) => n.id !== id && rows[n.id].tunnel === t)) return '서버마다 달라야 합니다';
-    if (on.some((n) => { const m = parseCidr(rows[n.id].cidr); return m && overlaps(m, c); })) return '망 CIDR 밖이어야 합니다';
-    return undefined;
+    return tunnelProblem(t, on.map((n) => rows[n.id].cidr));
   };
+  const localTunnel = tunnel || '10.250.0.1/32';
+  const c = parseCidr(cidr);
+  const localCidrErr = cidrProblem(cidr, taken);
+  const localTunnelErr = tunnelProblem(localTunnel, [cidr]);
+  const gwErr = gateway && c && !hostIn(c, gateway) ? `${cidr} 안의 호스트 주소여야 합니다` : undefined;
+  const mtuN = mtu ? Number(mtu) : 0;
+  const mtuErr = mtu && !(mtuN >= 1280 && mtuN <= 9000) ? '1280 ~ 9000' : undefined;
   const nameErr = nameProblem(name, nets.map((n) => n.name), '망');
   const zoneErr = zone && !/^[a-z0-9.-]+\.[a-z0-9-]+$/.test(zone) ? 'shop.mydc.test 같은 도메인 이름' : undefined;
-  const valid = !!name && !nameErr && on.length >= 1 && on.every((n) => !cidrErr(n.id) && !tunnelErr(n.id)) && !zoneErr;
-  const create = useStep('서버 간 가상망 만들기 (create-tun-network)', `/t/${enc(tenant)}/networks`, () => ({ kind: 'tun', name, members: on.map((n) => ({ node: n.id, cidr: rows[n.id].cidr, tunnel: rows[n.id].tunnel.replace(/\/32$/, '') })) }));
+  const local = scope === 'local';
+  const valid = !!name && !nameErr && !zoneErr && (local ? !!node && !localCidrErr && !localTunnelErr && !gwErr && !mtuErr : on.length >= 1 && on.every((n) => !cidrErr(n.id) && !tunnelErr(n.id)));
+  const body = () =>
+    local
+      ? { kind: 'tun', name, members: [{ node, cidr, tunnel: localTunnel.replace(/\/32$/, ''), ...(gateway ? { gateway } : {}) }], ...(mtuN ? { mtu: mtuN } : {}), toggles: { local: true } }
+      : { kind: 'tun', name, members: on.map((n) => ({ node: n.id, cidr: rows[n.id].cidr, tunnel: rows[n.id].tunnel.replace(/\/32$/, '') })) };
+  const create = useStep('망 만들기 (create-tun-network)', `/t/${enc(tenant)}/networks`, body);
   const dns = useStep('도메인 이름 규칙 (configure-network-dns)', `/t/${enc(tenant)}/networks/${enc(name)}/dns`, () => ({ zone, expected: 0 }));
+  const radio = (k: 'local' | 'mesh', label: string, note: string) => (
+    <label className="check" style={{ alignItems: 'flex-start' }}>
+      <input type="radio" name="net-scope" checked={scope === k} onChange={() => setScope(k)} />
+      <span>
+        {label}
+        <span className="muted small" style={{ display: 'block' }}>
+          {note}
+        </span>
+      </span>
+    </label>
+  );
   return (
     <CreateDialog ms={[create.m, dns.m]}
-      title="서버 간 가상망 만들기"
+      title="망 만들기"
       ok="만들기"
       review
       valid={valid}
@@ -337,65 +310,106 @@ export function MeshNetworkDialog({ tenant, nets, onClose, onDone }: { tenant: s
       steps={zone ? [create.step, dns.step] : [create.step]}
       summary={[
         ['이름', <code key="n">{name}</code>],
-        ['종류', '서버 간 가상망 (tun)'],
-        ['참여 서버', on.map((n) => `${n.id} ${rows[n.id].cidr} · 터널 ${rows[n.id].tunnel}`).join(' / ')],
+        ['쓰는 범위', local ? '이 서버에서만 쓰는 망' : '다른 서버와 이을 수 있는 망'],
+        ['참여 서버', local ? `${node} ${cidr} · 터널 ${localTunnel}` : on.map((n) => `${n.id} ${rows[n.id].cidr} · 터널 ${rows[n.id].tunnel}`).join(' / ')],
+        ...(local ? ([['게이트웨이', <code key="g">{gateway || (c ? firstHost(c) : '')}</code>], ['MTU', mtuN || 1500]] as [string, ReactNode][]) : []),
         ['도메인 영역', zone || '없음'],
       ]}
     >
       <Field label="이름" error={nameErr}>
-        <input className="mono" value={name} onChange={(e) => setName(e.target.value.trim())} placeholder="shop-mesh" />
+        <input className="mono" value={name} onChange={(e) => setName(e.target.value.trim())} placeholder={local ? 'shop-cache' : 'shop-mesh'} />
       </Field>
-      <div className="table-wrap">
-        <table className="tbl">
-          <thead>
-            <tr>
-              <th style={{ width: 28 }} />
-              <th>서버</th>
-              <th>CIDR</th>
-              <th>터널 주소</th>
-            </tr>
-          </thead>
-          <tbody>
-            {nodes.map((n) => {
-              const r = rows[n.id];
-              const ce = r?.on ? cidrErr(n.id) : undefined;
-              const te = r?.on ? tunnelErr(n.id) : undefined;
-              return (
-                <tr key={n.id}>
-                  <td>
-                    <input type="checkbox" aria-label={`${n.id} 참여`} checked={!!r?.on} onChange={(e) => set(n.id, { on: e.target.checked })} />
-                  </td>
-                  <td>{n.id}</td>
-                  <td>
-                    {r?.on ? (
-                      <>
-                        <input className="mono" aria-label={`${n.id} CIDR`} value={r.cidr} onChange={(e) => set(n.id, { cidr: e.target.value.trim() })} />
-                        {ce && <div className="small" style={{ color: 'var(--er)' }}>{ce}</div>}
-                      </>
-                    ) : (
-                      '—'
-                    )}
-                  </td>
-                  <td>
-                    {r?.on ? (
-                      <>
-                        <input className="mono" aria-label={`${n.id} 터널 주소`} value={r.tunnel} onChange={(e) => set(n.id, { tunnel: e.target.value.trim() })} />
-                        {te && <div className="small" style={{ color: 'var(--er)' }}>{te}</div>}
-                      </>
-                    ) : (
-                      '—'
-                    )}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+      <div className="col" style={{ gap: 6 }}>
+        <span className="small">쓰는 범위</span>
+        {radio('local', '이 서버에서만 쓰는 망', '서버 한 대에 묶입니다. 다른 서버의 컨테이너는 붙을 수 없습니다.')}
+        {radio('mesh', '다른 서버와 이을 수 있는 망', '서버를 여럿 고르거나, 하나로 시작해 나중에 더할 수 있습니다.')}
       </div>
-      <span className="small muted">서버 하나만 골라도 됩니다. CIDR·터널 주소는 추천 값이 채워집니다.</span>
-      <Field label="도메인 영역 (선택)" error={zoneErr} hint="넣으면 만든 뒤 이름 규칙까지 한 번의 변경 검토로 보여 줍니다">
-        <input className="mono" value={zone} onChange={(e) => setZone(e.target.value.trim())} placeholder="shop-mesh.mydc.test" />
+      {local ? (
+        <>
+          <Field label="서버">
+            <select value={node} onChange={(e) => setNode(e.target.value)}>
+              {nodes.map((n) => (
+                <option key={n.id} value={n.id}>
+                  {n.id}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label="CIDR" error={localCidrErr} hint="직접 정합니다. 처음에는 겹치지 않는 추천 값이 채워집니다. 10.254.0.0/16은 시스템 망이 쓰므로 쓸 수 없습니다.">
+            <input className="mono" value={cidr} onChange={(e) => setCidr(e.target.value.trim())} />
+          </Field>
+        </>
+      ) : (
+        <>
+          <div className="table-wrap">
+            <table className="tbl">
+              <thead>
+                <tr>
+                  <th style={{ width: 28 }} />
+                  <th>서버</th>
+                  <th>CIDR</th>
+                  <th>터널 주소</th>
+                </tr>
+              </thead>
+              <tbody>
+                {nodes.map((n) => {
+                  const r = rows[n.id];
+                  const ce = r?.on ? cidrErr(n.id) : undefined;
+                  const te = r?.on ? tunnelErr(n.id) : undefined;
+                  return (
+                    <tr key={n.id}>
+                      <td>
+                        <input type="checkbox" aria-label={`${n.id} 참여`} checked={!!r?.on} onChange={(e) => set(n.id, { on: e.target.checked })} />
+                      </td>
+                      <td>{n.id}</td>
+                      <td>
+                        {r?.on ? (
+                          <>
+                            <input className="mono" aria-label={`${n.id} CIDR`} value={r.cidr} onChange={(e) => set(n.id, { cidr: e.target.value.trim() })} />
+                            {ce && <div className="small" style={{ color: 'var(--er)' }}>{ce}</div>}
+                          </>
+                        ) : (
+                          '—'
+                        )}
+                      </td>
+                      <td>
+                        {r?.on ? (
+                          <>
+                            <input className="mono" aria-label={`${n.id} 터널 주소`} value={r.tunnel} onChange={(e) => set(n.id, { tunnel: e.target.value.trim() })} />
+                            {te && <div className="small" style={{ color: 'var(--er)' }}>{te}</div>}
+                          </>
+                        ) : (
+                          '—'
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          <span className="small muted">서버 하나만 골라도 됩니다(나중에 더하기). CIDR·터널 주소는 직접 정하고, 처음에는 겹치지 않는 추천 값이 채워집니다. 10.254.0.0/16은 시스템 망이 쓰므로 쓸 수 없습니다.</span>
+        </>
+      )}
+      <Field label="도메인 영역 (선택)" error={zoneErr} hint={local ? undefined : '넣으면 만든 뒤 이름 규칙까지 한 번의 변경 검토로 보여 줍니다'}>
+        <input className="mono" value={zone} onChange={(e) => setZone(e.target.value.trim())} placeholder={local ? 'shop-cache.mydc.test' : 'shop-mesh.mydc.test'} />
       </Field>
+      {local && (
+        <details>
+          <summary className="small linkish">고급 · 터널 주소(추천 값 {localTunnel}) · 게이트웨이 · MTU</summary>
+          <div className="g2" style={{ marginTop: 8 }}>
+            <Field label="터널 주소" error={localTunnelErr} hint="비우면 추천 값 · 망 CIDR 밖의 /32">
+              <input className="mono" value={tunnel} placeholder="10.250.0.1/32" onChange={(e) => setTunnel(e.target.value.trim())} />
+            </Field>
+            <Field label="게이트웨이" error={gwErr} hint="비우면 첫 주소">
+              <input className="mono" value={gateway} placeholder={c ? firstHost(c) : ''} onChange={(e) => setGateway(e.target.value.trim())} />
+            </Field>
+            <Field label="MTU" error={mtuErr} hint="비우면 1500">
+              <input inputMode="numeric" value={mtu} placeholder="1500" onChange={(e) => setMtu(e.target.value.replace(/\D/g, ''))} />
+            </Field>
+          </div>
+        </details>
+      )}
     </CreateDialog>
   );
 }

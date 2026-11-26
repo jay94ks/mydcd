@@ -824,7 +824,7 @@ function GrantDialog({ u, p, cur, onClose }: { u: UserRecord; p: NodeShellPolicy
   return (
     <Dialog
       title={`${u.username} 서버 셸 권한`}
-      width={400}
+      width={420}
       onClose={onClose}
       footer={
         done ? (

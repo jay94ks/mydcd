@@ -669,7 +669,7 @@ func testRealAppExecution(t *testing.T, reportMode string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	userOp("manual-overlap-app", "create-network", baseResources.Networks.Revision(), tenancy.Network{Tenant: "tenant", ID: "overlap", Node: peer.ID, Pools: []tenancy.Subnet{{ID: "pool", Prefix: netip.MustParsePrefix("10.86.0.0/24"), Gateway: netip.MustParseAddr("10.86.0.1"), MTU: 1280}}}, state.ConditionFailed)
+	userOp("manual-overlap-app", "create-tun-network", baseResources.Networks.Revision(), tenancy.TUNDefinition{Tenant: "tenant", Name: "overlap", Members: []tenancy.TUNNode{{Node: peer.ID, Pools: []tenancy.Subnet{{ID: "pool", Prefix: netip.MustParsePrefix("10.86.0.0/24"), Gateway: netip.MustParseAddr("10.86.0.1"), MTU: 1280}}, Addresses: []netip.Prefix{netip.MustParsePrefix("10.99.250.1/32")}}}}, state.ConditionFailed)
 	globalLimit, _ := baseResources.Quotas.Limit("", peer.ID)
 	globalRevision := globalLimit.Revision
 	globalLimit.Revision = 0

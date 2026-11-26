@@ -30,20 +30,22 @@ import (
 
 // Options configures a Server.
 type Options struct {
-	Client       mydc.Client
-	Store        *store.Store
-	Static       fs.FS // UI build (index.html at root); nil serves a notice
-	CookieSecure bool
-	LoginTTL     time.Duration
-	OpRetention  time.Duration
-	Logger       *slog.Logger
-	Now          func() time.Time
-	CallTimeout  time.Duration // per mydcd call
-	Seal         *seal.Box     // sealed secrets; nil or not ready turns the features needing it off
-	DataDir      string        // data folder (staged restores go here)
-	Version      string        // shown in web app settings
-	Socket       string        // mydcd socket path, shown in web app settings
-	DBPath       string        // web.db path, shown in web app settings
+	Client mydc.Client
+	Store  *store.Store
+	Static fs.FS // UI build (index.html at root); nil serves a notice
+	// TrustedProxies: connections from these addresses (the ingress) may
+	// say by X-Forwarded-Proto that the browser's request was HTTPS.
+	TrustedProxies []netip.Prefix
+	LoginTTL       time.Duration
+	OpRetention    time.Duration
+	Logger         *slog.Logger
+	Now            func() time.Time
+	CallTimeout    time.Duration // per mydcd call
+	Seal           *seal.Box     // sealed secrets; nil or not ready turns the features needing it off
+	DataDir        string        // data folder (staged restores go here)
+	Version        string        // shown in web app settings
+	Socket         string        // mydcd socket path, shown in web app settings
+	DBPath         string        // web.db path, shown in web app settings
 	// SealKeySource: "env" or "file" (where MYDC_WEB_SEAL_KEY came from;
 	// empty without a key), shown in web app settings.
 	SealKeySource string
@@ -176,6 +178,28 @@ func setSecurityHeaders(w http.ResponseWriter) {
 	h.Set("Referrer-Policy", "no-referrer")
 	h.Set("X-Frame-Options", "DENY")
 	h.Set("Cross-Origin-Opener-Policy", "same-origin")
+}
+
+// requestHTTPS reports whether the browser's request was HTTPS: this
+// listener's own TLS, or X-Forwarded-Proto from a trusted ingress. Any
+// other connection's header is ignored (other node apps share mydc-system).
+func (s *Server) requestHTTPS(r *http.Request) bool {
+	if r.TLS != nil {
+		return true
+	}
+	ap, err := netip.ParseAddrPort(r.RemoteAddr)
+	if err != nil {
+		return false
+	}
+	from := ap.Addr().Unmap()
+	for _, p := range s.opt.TrustedProxies {
+		if p.Contains(from) {
+			return strings.EqualFold(strings.TrimSpace(r.Header.Get("X-Forwarded-Proto")), "https")
+		}
+	}
+	// Without a configured ingress the request is taken as HTTPS (an HTTPS
+	// front the web cannot see), except a plain connection from loopback.
+	return len(s.opt.TrustedProxies) == 0 && !from.IsLoopback()
 }
 
 // sameOrigin rejects requests whose Origin header names another host.

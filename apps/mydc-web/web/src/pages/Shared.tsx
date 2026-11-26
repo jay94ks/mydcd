@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { usePhone } from '../lib/viewport';
 import { MCards, MTiles, MWideNote, useReadOnlyTop } from '../mobile/ReadOnly';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useTenantRole } from '../auth/session';
-import { networks, registries, volumes } from '../api/endpoints';
+import { networkPath, networks, registries, volumes } from '../api/endpoints';
 import type { NetworkView, Page, VolumeView } from '../api/types';
 import { Badge, Card, HelpBox, PageHeader } from '../components/ui';
 import { Load } from '../components/states';
@@ -16,16 +16,21 @@ import { usePoll } from '../lib/usePoll';
 import { ago, fmtBytes } from '../lib/format';
 import { NoTenant } from './Deploy';
 import { Menu } from '../components/Menu';
-import { appCount, NetworkDnsDialog, RetireNetworkDialog } from './NetworkChange';
+import { appCount, DeleteNetworkDialog, NetworkDnsDialog } from './NetworkChange';
 import { ResourceUsersDialog } from './ResourceUsers';
-import { RoutesCard } from './Routes';
+import { RoutesCard, RoutesTable, useRoutes, type RoutesQ } from './Routes';
 import { TunnelsDialog } from './Tunnels';
 import { BackupCard, CapacityDialog, DeleteVolumeDialog, NO_APP, RestoreCard, useVolumeDetail } from './VolumeOps';
 import { MoveCard, MoveDialog, moveBlocked } from './VolumeMove';
-import { BridgeNetworkDialog, FixedVolumeDialog, ManagedVolumeDialog, MeshNetworkDialog } from './SharedCreate';
+import { FixedVolumeDialog, ManagedVolumeDialog, NetworkCreateDialog } from './SharedCreate';
+import { Dialog } from '../components/Dialog';
+import { MutationError, OpPanel, useMutation } from '../components/OpPanel';
+import { useToast } from '../components/Toast';
+import { ApiError } from '../api/client';
+import { eulReul } from '../lib/josa';
 
 export const SHARED_TABS = [
-  { to: '/shared/networks', label: '망' },
+  { to: '/shared/networks', label: '망', end: false },
   { to: '/shared/ingress', label: '외부 접속' },
   { to: '/shared/volumes', label: '데이터 저장소' },
   { to: '/shared/vault', label: '비밀값' },
@@ -40,13 +45,14 @@ function useTenantList<T>(load: (t: string, s: AbortSignal) => Promise<Page<T>>)
   return { tenant, q };
 }
 
-function Frame({ title, ids, help, q, actions, children, after }: { title: string; ids: string; help: React.ReactNode; q: Parameters<typeof Refresh>[0]['q']; actions?: React.ReactNode; children: React.ReactNode; after?: React.ReactNode }) {
+function Frame({ title, ids, help, q, actions, children, after, sub }: { title: string; ids: string; help: React.ReactNode; q: Parameters<typeof Refresh>[0]['q']; actions?: React.ReactNode; children: React.ReactNode; after?: React.ReactNode; sub?: React.ReactNode }) {
   const { tenant } = useTenantRole();
   return (
     <>
       <PageHeader title="공유 자원" ids={ids} actions={<Refresh q={q} poll={false} />} />
       <Tabs label="공유 자원 탭" items={SHARED_TABS} />
       {help}
+      {tenant && sub}
       {!tenant ? <NoTenant /> : <Card title={`${title} · 작업 공간 ${tenant}`} actions={actions}>{children}</Card>}
       {tenant && after}
     </>
@@ -54,6 +60,51 @@ function Frame({ title, ids, help, q, actions, children, after }: { title: strin
 }
 
 const NEED = '작업 공간 관리자 권한 필요';
+
+/** 망 화면 안의 탭: 망 | 작업 공간 간 연결 (UI-53, 캔버스 v194) */
+function NetworkSubTabs({ routes }: { routes: RoutesQ }) {
+  const n = routes.data?.items.length;
+  return (
+    <Tabs
+      sub
+      label="망 탭"
+      items={[
+        { to: '/shared/networks', label: '망' },
+        { to: '/shared/networks/routes', label: `작업 공간 간 연결${n === undefined ? '' : ` (${n})`}` },
+      ]}
+    />
+  );
+}
+
+const NETWORK_HELP_TAIL = '망은 작업 공간마다 따로 있는 자원이라, 다른 작업 공간에서는 보이지 않고 이름이 같아도 서로 다른 망입니다. 다른 작업 공간의 망과는 ‘작업 공간 간 연결’로만 잇습니다.';
+
+/** 작업 공간 간 연결 전체 화면 (UI-53) */
+export function NetworkRoutesPage() {
+  const { tenant, q: nq } = useTenantList(networks);
+  const { canDeploy } = useTenantRole();
+  const rq = useRoutes(tenant ?? '');
+  const [proposing, setProposing] = useState(false);
+  return (
+    <Frame
+      title="작업 공간 간 연결"
+      ids="UI-53"
+      q={rq}
+      sub={<NetworkSubTabs routes={rq} />}
+      actions={
+        <button className="btn primary" disabled={!canDeploy || !rq.data || !nq.data} title={canDeploy ? undefined : NEED} onClick={() => setProposing(true)}>
+          연결 제안
+        </button>
+      }
+      help={
+        <HelpBox terms="연결 (route) · 보내는 쪽 (source) · 받는 쪽 (destination) · 승인 (approve) · 철회 (withdraw)">
+          <b>이 화면은</b> 다른 작업 공간의 망과 정해진 포트로 잇는 연결을 관리합니다. 한쪽이 제안하고 양쪽 작업 공간 관리자가 모두 승인해야 열립니다. 어느 쪽이든 철회하면 닫힙니다. 망은 작업 공간마다 따로 있는 자원이라, 다른 작업 공간의 망과는 이 연결로만 닿습니다. 같은 작업 공간의 망끼리는 잇지 않습니다.
+        </HelpBox>
+      }
+    >
+      <RoutesTable tenant={tenant ?? ''} nets={nq.data?.items ?? []} canDeploy={canDeploy} q={rq} proposing={proposing} onProposeClose={() => setProposing(false)} />
+    </Frame>
+  );
+}
 
 /** 카드 머리의 만들기 버튼 둘(보조 · 주) */
 function CreateButtons({ second, primary, onSecond, onPrimary }: { second: string; primary: string; onSecond: () => void; onPrimary: () => void }) {
@@ -97,16 +148,16 @@ function MNetworks() {
   const [users, setUsers] = useState<NetworkView>();
   const { tenant } = useTenantRole();
   return (
-    <MFrame title="망" wide="망 만들기·변경·폐기는 넓은 화면에서">
+    <MFrame title="망" wide="망 만들기·변경·지우기는 넓은 화면에서">
       <Load q={q} what="망을 불러오지 못했습니다">
         {(p) => {
-          const tun = p.items.filter((n) => n.kind === 'tun').length;
+          const local = p.items.filter(isLocal).length;
           const busy = p.items.filter((n) => n.members.some((x) => x.phase || x.draining)).length;
           return (
             <>
               <MTiles
                 items={[
-                  { label: '망', value: p.items.length, sub: `서버 간 ${tun} · 서버 내부 ${p.items.length - tun}` },
+                  { label: '망', value: p.items.length, sub: `다른 서버와 ${p.items.length - local} · 이 서버에서만 ${local}` },
                   { label: '변경 중', value: busy, sub: busy ? '변경 계획 · 비우는 중' : '모두 활성', warn: busy > 0 },
                 ]}
               />
@@ -118,10 +169,10 @@ function MNetworks() {
                   return {
                     key: n.key,
                     title: n.name,
-                    badge: draining ? ['wa', '비우는 중'] : changing ? ['pr', '변경 계획'] : ['ok', '활성'],
+                    badge: deleting(n) ? ['wa', '지우는 중'] : draining ? ['wa', '비우는 중'] : changing ? ['pr', '변경 계획'] : ['ok', '활성'],
                     tone: draining ? 'wa' : undefined,
                     lines: [
-                      `${n.kind === 'tun' ? '서버 간' : '서버 내부'} · ${n.apps === undefined ? '사용 앱 —' : n.apps === 0 && !n.standalones ? '사용 앱 없음' : `사용 앱 ${appCount(n)}개`}${n.standalones ? ` · 단독 ${n.standalones}` : ''}`,
+                      `${scopeText(n)} · ${n.apps === undefined ? '사용 앱 —' : n.apps === 0 && !n.standalones ? '사용 앱 없음' : `사용 앱 ${appCount(n)}개`}${n.standalones ? ` · 단독 ${n.standalones}` : ''}`,
                       <span className="mono" style={{ fontSize: 12 }}>
                         {memberText(n) || '—'}
                       </span>,
@@ -141,32 +192,46 @@ function MNetworks() {
   );
 }
 
+/** 이 서버에서만 쓰는 망(local 옵션) */
+const isLocal = (n: NetworkView) => n.toggles.includes('local');
+const scopeText = (n: NetworkView) => (isLocal(n) ? '이 서버에서만' : '다른 서버와 이음');
+/** 지우는 중: 변경 계획 없이 비우는 서버가 있음 */
+const deleting = (n: NetworkView) => n.members.some((x) => x.draining && !x.phase);
+
 function DesktopNetworks() {
   const { tenant, q } = useTenantList(networks);
   const { canDeploy } = useTenantRole();
   const nav = useNavigate();
-  const [dlg, setDlg] = useState<'bridge' | 'tun'>();
-  const [retire, setRetire] = useState<NetworkView>();
+  const [dlg, setDlg] = useState<'create'>();
+  const [del, setDel] = useState<NetworkView>();
   const [dns, setDns] = useState<NetworkView>();
   const [users, setUsers] = useState<NetworkView>();
   const [tunnels, setTunnels] = useState<NetworkView>();
+  const [scope, setScope] = useState<NetworkView>();
+  const rq = useRoutes(tenant ?? '');
   const nets = q.data?.items ?? [];
   const changing = (n: NetworkView) => n.members.some((x) => x.phase);
   const draining = (n: NetworkView) => n.members.some((x) => x.draining);
   const go = (n: NetworkView) => nav(`/shared/networks/${encodeURIComponent(n.name)}/change`);
   const close = () => setDlg(undefined);
+  const serverCount = (n: NetworkView) => (n.members.length || n.nodes.length);
   return (
     <Frame
       title="망"
       ids="UI-50"
       q={q}
-      actions={<CreateButtons second="서버 내부망 만들기" primary="서버 간 가상망 만들기" onSecond={() => setDlg('bridge')} onPrimary={() => setDlg('tun')} />}
+      actions={
+        <button className="btn primary" disabled={!canDeploy} title={canDeploy ? undefined : NEED} onClick={() => setDlg('create')}>
+          망 만들기
+        </button>
+      }
       help={
-        <HelpBox terms="망 (network) · bridge (한 서버 안) · tun (서버 사이 Mesh) · CIDR (주소 범위)">
-          <b>이 탭은</b> 작업 공간의 앱이 함께 쓰는 망입니다. app.yaml에서는 <code>external: true</code>로 이름만 참조합니다.
+        <HelpBox terms="망 (network) · 참여 서버 (member) · 비우기 (drain) · CIDR (주소 범위) · 연결 (route, 다른 작업 공간의 포트에 접속 허락)">
+          <b>이 탭은</b> 작업 공간의 앱이 함께 쓰는 망입니다. app.yaml에서는 <code>external: true</code>로 이름만 참조합니다. {NETWORK_HELP_TAIL}
         </HelpBox>
       }
-      after={<RoutesCard tenant={tenant} nets={nets} canDeploy={canDeploy} />}
+      sub={<NetworkSubTabs routes={rq} />}
+      after={<RoutesCard tenant={tenant} canDeploy={canDeploy} q={rq} />}
     >
       <Load q={q}>
         {(p) => (
@@ -177,42 +242,64 @@ function DesktopNetworks() {
             emptyTitle="망이 없습니다"
             columns={[
               { key: 'name', header: '이름', value: (n) => n.name, render: (n) => <b>{n.name}</b> },
-              { key: 'kind', header: '종류', value: (n) => n.kind, render: (n) => (n.kind === 'tun' ? '서버 간' : '서버 내부') },
+              { key: 'scope', header: '쓰는 범위', value: (n) => scopeText(n), render: (n) => scopeText(n) },
               { key: 'members', header: '참여 서버 (서버 · CIDR)', value: (n) => memberText(n), render: (n) => <span className="mono">{memberText(n) || '—'}</span> },
               { key: 'dns', header: '도메인 영역', value: (n) => n.dns?.zone ?? '', render: (n) => (n.dns ? <span className={n.dns.enabled ? 'mono' : 'mono muted'}>{n.dns.zone}{n.dns.enabled ? '' : ' (꺼짐)'}</span> : <span className="muted">—</span>) },
               { key: 'apps', header: '사용 앱', value: (n) => n.apps ?? -1, render: (n) => (n.apps === undefined ? <span className="muted">—</span> : n.apps === 0 && !n.standalones ? <span className="muted">없음</span> : <span>{appCount(n)}개{n.standalones ? <span className="small muted"> · 단독 {n.standalones}</span> : null}</span>) },
-              { key: 'state', header: '상태', value: (n) => (draining(n) ? 2 : changing(n) ? 1 : 0), render: (n) => (draining(n) ? <Badge tone="wa">비우는 중</Badge> : changing(n) ? <Badge tone="pr">변경 계획</Badge> : <Badge tone="ok">활성</Badge>) },
+              {
+                key: 'state',
+                header: '상태',
+                value: (n) => (deleting(n) ? 3 : draining(n) ? 2 : changing(n) ? 1 : 0),
+                render: (n) =>
+                  deleting(n) ? (
+                    <span className="col" style={{ gap: 2 }}>
+                      <Badge tone="wa">지우는 중</Badge>
+                      <span className="muted" style={{ fontSize: 11 }}>
+                        서버 {n.members.filter((x) => x.draining).length}/{n.members.length} 비움
+                      </span>
+                    </span>
+                  ) : draining(n) ? (
+                    <Badge tone="wa">비우는 중</Badge>
+                  ) : changing(n) ? (
+                    <Badge tone="pr">변경 계획</Badge>
+                  ) : (
+                    <Badge tone="ok">활성</Badge>
+                  ),
+              },
               {
                 key: 'act',
                 header: '',
                 render: (n) => {
-                  const tun = n.kind === 'tun';
+                  const local = isLocal(n);
+                  const one = serverCount(n) === 1;
                   return (
                     <span className="row" style={{ gap: 6, justifyContent: 'flex-end' }}>
-                      {draining(n) ? (
-                        <button className="btn sm danger" disabled={!canDeploy} title={canDeploy ? undefined : NEED} onClick={() => setRetire(n)}>
-                          폐기
+                      {deleting(n) ? (
+                        <button className="btn sm danger" disabled={!canDeploy} title={canDeploy ? undefined : NEED} onClick={() => setDel(n)}>
+                          지우기 계속
                         </button>
                       ) : (
-                        tun && (
-                          <button className="btn sm" onClick={() => go(n)}>
-                            변경
-                          </button>
-                        )
+                        <button className="btn sm" onClick={() => go(n)}>
+                          변경
+                        </button>
                       )}
                       <Menu
                         label={`${n.name} 작업`}
                         items={[
                           { label: '쓰는 앱 보기', onSelect: () => setUsers(n) },
-                          ...(tun
-                            ? [
-                                { label: '도메인 이름 설정', onSelect: () => setDns(n), disabledReason: !canDeploy ? NEED : undefined },
-                                { label: '터널 연결 보기…', onSelect: () => setTunnels(n) },
-                                { label: '변경…', onSelect: () => go(n), hint: changing(n) ? '진행 중 이어 하기' : undefined },
-                              ]
-                            : []),
+                          ...(!local ? [{ label: '터널 연결 보기…', onSelect: () => setTunnels(n) }] : []),
+                          { label: '도메인 이름 설정', onSelect: () => setDns(n), disabledReason: !canDeploy ? NEED : undefined },
+                          { label: '변경…', onSelect: () => go(n), hint: changing(n) ? '진행 중 이어 하기' : '서버 더하기·빼기' },
+                          local
+                            ? { label: '다른 서버와 잇게 바꾸기…', onSelect: () => setScope(n), disabledReason: !canDeploy ? NEED : undefined }
+                            : {
+                                label: '이 서버에서만 쓰게 바꾸기',
+                                onSelect: () => setScope(n),
+                                disabledReason: !canDeploy ? NEED : !one ? '서버가 하나일 때만' : undefined,
+                                tip: canDeploy && !one ? `서버가 ${serverCount(n)}대인 망입니다. 서버를 하나만 남기면 바꿀 수 있습니다.` : undefined,
+                              },
                           { label: '', sep: true },
-                          { label: '폐기…', danger: true, onSelect: () => setRetire(n), disabledReason: !canDeploy ? NEED : undefined },
+                          { label: '지우기…', danger: true, onSelect: () => setDel(n), disabledReason: !canDeploy ? NEED : undefined },
                         ]}
                       />
                     </span>
@@ -223,14 +310,66 @@ function DesktopNetworks() {
           />
         )}
       </Load>
-      <span className="small muted">CIDR은 클러스터 전역에서 겹칠 수 없습니다. 실제 컨테이너 주소는 Docker IPAM이 할당합니다. 서버 내부망은 서버·CIDR을 바꿀 수 없습니다. 바꿔야 하면 서버 간 가상망으로 새로 만드세요.</span>
+      <span className="small muted">CIDR은 클러스터 전역에서 겹칠 수 없습니다. 실제 컨테이너 주소는 Docker IPAM이 할당합니다. ‘이 서버에서만’ 망은 언제든 다른 서버와 잇는 망으로 바꿀 수 있습니다. 반대로 바꾸려면 참여 서버가 하나만 남아야 합니다. 망을 지우면 서버를 하나씩 비우고 빼며, 마지막 서버가 빠지면 망이 없어집니다.</span>
       {dns && <NetworkDnsDialog tenant={tenant} net={dns} onClose={() => setDns(undefined)} onDone={() => void q.refresh()} />}
       {tunnels && <TunnelsDialog tenant={tenant} name={tunnels.name} onClose={() => setTunnels(undefined)} />}
       {users && <ResourceUsersDialog tenant={tenant} kind="network" name={users.name} onClose={() => setUsers(undefined)} />}
-      {retire && <RetireNetworkDialog tenant={tenant} net={retire} onClose={() => setRetire(undefined)} onDone={() => void q.refresh()} />}
-      {dlg === 'bridge' && <BridgeNetworkDialog tenant={tenant} nets={nets} onClose={close} onDone={() => void q.refresh()} />}
-      {dlg === 'tun' && <MeshNetworkDialog tenant={tenant} nets={nets} onClose={close} onDone={() => void q.refresh()} />}
+      {del && <DeleteNetworkDialog tenant={tenant} net={del} onClose={() => setDel(undefined)} onDone={() => void q.refresh()} />}
+      {scope && <NetworkScopeDialog tenant={tenant} net={scope} onClose={() => setScope(undefined)} onDone={() => void q.refresh()} />}
+      {dlg === 'create' && <NetworkCreateDialog tenant={tenant} nets={nets} onClose={close} onDone={() => void q.refresh()} />}
     </Frame>
+  );
+}
+
+/** 쓰는 범위 바꾸기(set-network-toggle local). 컨테이너와 연결은 끊기지 않는다. 거절되면 알림으로 */
+function NetworkScopeDialog({ tenant, net, onClose, onDone }: { tenant: string; net: NetworkView; onClose: () => void; onDone: () => void }) {
+  const m = useMutation();
+  const toast = useToast();
+  const local = isLocal(net);
+  const node = net.members[0]?.node ?? net.nodes[0];
+  const count = net.members.length || net.nodes.length;
+  const send = async () => {
+    try {
+      const o = await m.run(`${networkPath(tenant, net.name)}/toggles`, { toggle: 'local', on: !local });
+      if (o?.state === 'applied') (onDone(), onClose());
+    } catch {
+      /* m.error가 보여 준다 */
+    }
+  };
+  // 서버 수가 맞지 않아 거절되면 알림으로 보여 주고 창을 닫는다
+  const refused = m.error instanceof ApiError && m.error.code === 'toggle-not-allowed';
+  useEffect(() => {
+    if (!refused) return;
+    toast(`${net.name}은 서버가 ${count}대라 ‘이 서버에서만’으로 바꿀 수 없습니다. 먼저 ‘변경…’에서 서버를 하나만 남기세요.`, 'er');
+    onClose();
+  }, [refused]); // eslint-disable-line react-hooks/exhaustive-deps
+  return (
+    <Dialog
+      title={local ? `${net.name}${eulReul(net.name)} 다른 서버와 이을 수 있게 바꿀까요?` : `${net.name}${eulReul(net.name)} 이 서버에서만 쓰게 바꿀까요?`}
+      onClose={onClose}
+      footer={
+        m.op && m.op.state !== 'applied' ? (
+          <button className="btn primary" onClick={onClose}>
+            닫기
+          </button>
+        ) : (
+          <>
+            <button className="btn" onClick={onClose}>
+              취소
+            </button>
+            <button className="btn primary" disabled={m.busy} onClick={() => void send()}>
+              바꾸기
+            </button>
+          </>
+        )
+      }
+    >
+      <p style={{ margin: 0 }}>
+        {local ? `지금은 ${node}에서만 쓰는 망입니다. 바꾼 뒤 ‘변경…’에서 서버를 더할 수 있습니다. 바꾸는 동안 끊기는 것은 없습니다.` : `${node}에서만 쓰는 망이 됩니다. 다른 서버의 컨테이너는 붙을 수 없습니다. 바꾸는 동안 끊기는 것은 없습니다.`}
+      </p>
+      {!refused && <MutationError error={m.error} />}
+      {m.op && <OpPanel op={m.op} onChange={(o) => (m.setOp(o), o.state === 'applied' && (onDone(), onClose()))} />}
+    </Dialog>
   );
 }
 
@@ -317,7 +456,7 @@ function DesktopVolumes() {
       }
       after={
         sel && (
-          <div className="grid" id="volume-ops" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 20 }}>
+          <div className="grid-3" id="volume-ops">
             <BackupCard key={`b-${sel.key}`} tenant={tenant} v={sel} q={detail} canDeploy={canDeploy} isAdmin={isAdmin} onChanged={() => void q.refresh()} />
             <RestoreCard key={`r-${sel.key}`} tenant={tenant} v={sel} q={detail} canDeploy={canDeploy} taken={taken} onChanged={() => void q.refresh()} />
             <MoveCard key={`m-${sel.key}`} tenant={tenant} v={sel} canDeploy={canDeploy} onRefresh={() => void q.refresh()} onStart={() => setMove(sel)} />
