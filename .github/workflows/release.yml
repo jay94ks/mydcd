@@ -27,7 +27,7 @@ jobs:
       - uses: anchore/sbom-action/download-syft@v0
       - name: Build archive, notices, SBOM and checksums
         run: make dist GOARCH=${{ matrix.goarch }} VERSION=${GITHUB_REF_NAME}
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: dist-${{ matrix.goarch }}
           path: |
