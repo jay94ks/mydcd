@@ -19,9 +19,9 @@ func TestStatelessRelocationUsesOriginalClosureBeforeNewOwnerGeneration(t *testi
 	if len(service.Volumes) != 0 {
 		t.Fatal("stateless fixture unexpectedly uses a Volume")
 	}
-	service.MyDC.Node = "node-b"
+	service.Sfc.Node = "node-b"
 	for alias, attachment := range service.Networks {
-		gateway := mustAddr(input.Networks[alias].MyDC.Pools["node-b"].Gateway)
+		gateway := mustAddr(input.Networks[alias].Sfc.Pools["node-b"].Gateway)
 		attachment.IPv4 = gateway.Next().Next().String()
 		service.Networks[alias] = attachment
 	}

@@ -8,10 +8,10 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/secrets"
-	"github.com/jay94ks/mydcd/internal/workload/volumes"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/secrets"
+	"github.com/jay94ks/seafield/internal/workload/volumes"
 )
 
 type AppVolumeMaterial struct {
@@ -44,7 +44,7 @@ func (p Policy) AppVolumeMaterial(s state.State, source deployment.ObjectRef) (A
 		return AppVolumeMaterial{}, ErrCatalog
 	}
 	var declaration deployment.ComposeVolume
-	if canonical(goal.Config, &declaration) != nil || declaration.MyDC.Node != goal.Node || declaration.MyDC.Retain == nil || !*declaration.MyDC.Retain || declaration.MyDC.Quota != "observe" {
+	if canonical(goal.Config, &declaration) != nil || declaration.Sfc.Node != goal.Node || declaration.Sfc.Retain == nil || !*declaration.Sfc.Retain || declaration.Sfc.Quota != "observe" {
 		return AppVolumeMaterial{}, ErrCatalog
 	}
 	v, err := p.Volumes(s)
@@ -55,17 +55,17 @@ func (p Policy) AppVolumeMaterial(s state.State, source deployment.ObjectRef) (A
 		return AppVolumeMaterial{}, ErrCatalog
 	}
 	if original, exists := v.Native(goal.Tenant, goal.App, id); exists {
-		if original.Verify() != nil || original.Spec.Scope.Cluster != p.Cluster || original.Spec.Node != goal.Node || original.Spec.NodeKey != goal.Owner || declaration.MyDC.UID != 0 && declaration.MyDC.UID != original.Spec.UID || declaration.MyDC.GID != 0 && declaration.MyDC.GID != original.Spec.GID {
+		if original.Verify() != nil || original.Spec.Scope.Cluster != p.Cluster || original.Spec.Node != goal.Node || original.Spec.NodeKey != goal.Owner || declaration.Sfc.UID != 0 && declaration.Sfc.UID != original.Spec.UID || declaration.Sfc.GID != 0 && declaration.Sfc.GID != original.Spec.GID {
 			return AppVolumeMaterial{}, ErrCatalog
 		}
-		if declaration.MyDC.Mode != "" {
-			mode, err := strconv.ParseUint(declaration.MyDC.Mode, 8, 32)
+		if declaration.Sfc.Mode != "" {
+			mode, err := strconv.ParseUint(declaration.Sfc.Mode, 8, 32)
 			if err != nil || uint32(mode) != original.Spec.Mode {
 				return AppVolumeMaterial{}, ErrCatalog
 			}
 		}
 		e := v.entries[goal.Tenant+"/"+goal.App+"/"+id]
-		if uint64(declaration.MyDC.Capacity) > e.CapacityBytes {
+		if uint64(declaration.Sfc.Capacity) > e.CapacityBytes {
 			return AppVolumeMaterial{}, ErrCatalog
 		}
 		return AppVolumeMaterial{original.Spec, original.Generation, e.CapacityBytes}, nil
@@ -79,18 +79,18 @@ func (p Policy) AppVolumeMaterial(s state.State, source deployment.ObjectRef) (A
 	if declaration.External {
 		return AppVolumeMaterial{}, ErrCatalog
 	}
-	mode, err := strconv.ParseUint(declaration.MyDC.Mode, 8, 32)
+	mode, err := strconv.ParseUint(declaration.Sfc.Mode, 8, 32)
 	if err != nil {
 		return AppVolumeMaterial{}, ErrCatalog
 	}
-	spec := volumes.NativeSpec{Schema: 1, Scope: volumes.Scope{Cluster: p.Cluster, Tenant: goal.Tenant, App: goal.App, ID: id, Generation: source.Generation}, Node: goal.Node, NodeKey: goal.Owner, Materialization: "initial", UID: declaration.MyDC.UID, GID: declaration.MyDC.GID, Mode: uint32(mode), Retain: true}
+	spec := volumes.NativeSpec{Schema: 1, Scope: volumes.Scope{Cluster: p.Cluster, Tenant: goal.Tenant, App: goal.App, ID: id, Generation: source.Generation}, Node: goal.Node, NodeKey: goal.Owner, Materialization: "initial", UID: declaration.Sfc.UID, GID: declaration.Sfc.GID, Mode: uint32(mode), Retain: true}
 	if spec.Validate() != nil {
 		return AppVolumeMaterial{}, ErrCatalog
 	}
-	if !v.admitOriginal(goal.Tenant, goal.Node, goal.Owner, uint64(declaration.MyDC.Capacity)) {
+	if !v.admitOriginal(goal.Tenant, goal.Node, goal.Owner, uint64(declaration.Sfc.Capacity)) {
 		return AppVolumeMaterial{}, ErrCatalog
 	}
-	return AppVolumeMaterial{spec, source.Generation, uint64(declaration.MyDC.Capacity)}, nil
+	return AppVolumeMaterial{spec, source.Generation, uint64(declaration.Sfc.Capacity)}, nil
 }
 
 func (p Policy) reduceAppVolumeReady(s state.State, r AppProgress, a Apps, entry appEntry, e deployment.Execution) (map[string][]byte, state.Code) {

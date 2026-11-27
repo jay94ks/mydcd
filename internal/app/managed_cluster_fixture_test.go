@@ -12,14 +12,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/cluster/membership"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/config"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/userauth"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/membership"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/config"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/userauth"
 )
 
 // managedVoters is an initialized managed cluster whose first node ran
@@ -37,12 +37,21 @@ type managedVoters struct {
 	client  userauth.Client
 	session access.Session
 	mu      sync.RWMutex
-	known   map[mydcp.Identity]mydcp.Peer
+	known   map[sfcp.Identity]sfcp.Peer
+	// nodeConfig makes a new node's configuration.
+	nodeConfig func(id string) config.Node
 }
 
 func newManagedVoters(t *testing.T, ctx context.Context, root string, admin *identity.Identity, count int) *managedVoters {
 	t.Helper()
-	m := &managedVoters{t: t, ctx: ctx, admin: admin, known: map[mydcp.Identity]mydcp.Peer{}}
+	return newManagedMembers(t, ctx, root, admin, count, count)
+}
+
+// newManagedMembers is newManagedVoters whose nodes after the first voters
+// stay non-voters.
+func newManagedMembers(t *testing.T, ctx context.Context, root string, admin *identity.Identity, count, voters int) *managedVoters {
+	t.Helper()
+	m := &managedVoters{t: t, ctx: ctx, admin: admin, known: map[sfcp.Identity]sfcp.Peer{}}
 	t.Cleanup(func() {
 		for _, n := range m.Nodes {
 			if n != nil {
@@ -82,8 +91,8 @@ func newManagedVoters(t *testing.T, ctx context.Context, root string, admin *ide
 	if err != nil {
 		t.Fatal(err)
 	}
-	m.client = userauth.Client{Self: self, Cluster: m.Cluster, Peers: []mydcp.Peer{m.Peer(0)}}
-	m.client.Mesh, err = mydcp.NewTransport(self, m.Cluster, m.lookup)
+	m.client = userauth.Client{Self: self, Cluster: m.Cluster, Peers: []sfcp.Peer{m.Peer(0)}}
+	m.client.Mesh, err = sfcp.NewTransport(self, m.Cluster, m.lookup)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,51 +105,66 @@ func newManagedVoters(t *testing.T, ctx context.Context, root string, admin *ide
 	if m.session, err = m.client.Login(ctx, entry, "admin", admin.Private); err != nil {
 		t.Fatal("admin login", err)
 	}
+	m.nodeConfig = nodeConfig
 	for i := 1; i < count; i++ {
-		id := fmt.Sprintf("node-%d", i)
-		cfg := nodeConfig(id)
-		key, err := identity.Create(cfg.Node.IdentityDir)
-		if err != nil {
-			t.Fatal(err)
-		}
-		clear(key.Private)
-		target := config.Peer{ID: id, Key: key.Actor(), Endpoint: cfg.Node.Listen}
-		m.Change(0, "invite-"+id, "invite-node", 0, control.NodeInvitation{Peer: target, JoinID: "join-" + id})
-		var inv membership.Invitation
-		m.wait("invitation "+id, func() bool {
-			inv, err = m.client.NodeInvitation(ctx, entry, m.session, id)
-			return err == nil
-		})
-		runtime, _, err := Join(ctx, cfg, inv, m.Cluster, source.Identity.Public)
-		if err != nil {
-			t.Fatal("join", id, err)
-		}
-		m.Configs, m.Nodes = append(m.Configs, cfg), append(m.Nodes, runtime)
-		m.addPeer(target)
-		m.client.Peers = append(m.client.Peers, m.Peer(i))
-		m.wait("member ready "+id, func() bool { e, ok := m.directory(runtime).Entry(id); return ok && e.Phase == membership.Ready })
-		e, _ := m.directory(source).Entry(id)
-		m.Change(0, "promote-"+id, "promote-node", e.Revision, control.NodeSelection{ID: id})
-		m.wait("voter "+id, func() bool {
-			e, ok := m.directory(source).Entry(id)
-			return ok && e.Phase == membership.Active && e.Peer.Voter && e.Job.Pending == nil
-		})
+		m.AddMember(fmt.Sprintf("node-%d", i), i < voters)
 	}
 	for i := range m.Nodes {
-		m.Peers[i].Voter = true
+		m.Peers[i].Voter = i < voters
 	}
 	return m
+}
+
+// AddMember invites, joins and (when voter) promotes a new node id. The
+// first node is the invitation source.
+func (m *managedVoters) AddMember(id string, voter bool) *Runtime {
+	t, ctx := m.t, m.ctx
+	t.Helper()
+	source := m.Nodes[0]
+	entry := m.Peer(0)
+	cfg := m.nodeConfig(id)
+	key, err := identity.Create(cfg.Node.IdentityDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	clear(key.Private)
+	target := config.Peer{ID: id, Key: key.Actor(), Endpoint: cfg.Node.Listen}
+	m.Change(0, "invite-"+id, "invite-node", 0, control.NodeInvitation{Peer: target, JoinID: "join-" + id})
+	var inv membership.Invitation
+	m.wait("invitation "+id, func() bool {
+		inv, err = m.client.NodeInvitation(ctx, entry, m.session, id)
+		return err == nil
+	})
+	runtime, _, err := Join(ctx, cfg, inv, m.Cluster, source.Identity.Public)
+	if err != nil {
+		t.Fatal("join", id, err)
+	}
+	m.Configs, m.Nodes = append(m.Configs, cfg), append(m.Nodes, runtime)
+	m.addPeer(target)
+	m.client.Peers = append(m.client.Peers, m.Peer(len(m.Peers)-1))
+	m.wait("member ready "+id, func() bool { e, ok := m.directory(runtime).Entry(id); return ok && e.Phase == membership.Ready })
+	if !voter {
+		return runtime
+	}
+	e, _ := m.directory(source).Entry(id)
+	m.Change(0, "promote-"+id, "promote-node", e.Revision, control.NodeSelection{ID: id})
+	m.wait("voter "+id, func() bool {
+		e, ok := m.directory(source).Entry(id)
+		return ok && e.Phase == membership.Active && e.Peer.Voter && e.Job.Pending == nil
+	})
+	m.Peers[len(m.Peers)-1].Voter = true
+	return runtime
 }
 
 func (m *managedVoters) addPeer(p config.Peer) {
 	k, _ := identity.ParseKey(p.Key)
 	m.mu.Lock()
-	m.known[mydcp.Identity(k)] = mydcp.Peer{ID: p.ID, Endpoint: p.Endpoint, Policy: mydcp.Policy{Key: mydcp.Identity(k), Respond: true}}
+	m.known[sfcp.Identity(k)] = sfcp.Peer{ID: p.ID, Endpoint: p.Endpoint, Policy: sfcp.Policy{Key: sfcp.Identity(k), Respond: true}}
 	m.mu.Unlock()
 	m.Peers = append(m.Peers, p)
 }
 
-func (m *managedVoters) lookup(k mydcp.Identity) (mydcp.Peer, bool) {
+func (m *managedVoters) lookup(k sfcp.Identity) (sfcp.Peer, bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	p, ok := m.known[k]
@@ -148,9 +172,9 @@ func (m *managedVoters) lookup(k mydcp.Identity) (mydcp.Peer, bool) {
 }
 
 // Peer is node i as a client target.
-func (m *managedVoters) Peer(i int) mydcp.Peer {
+func (m *managedVoters) Peer(i int) sfcp.Peer {
 	k, _ := identity.ParseKey(m.Peers[i].Key)
-	p, _ := m.lookup(mydcp.Identity(k))
+	p, _ := m.lookup(sfcp.Identity(k))
 	return p
 }
 

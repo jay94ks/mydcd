@@ -7,7 +7,7 @@ import (
 	"encoding/json"
 	"slices"
 
-	"github.com/jay94ks/mydcd/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/reconcile"
 )
 
 func validMove(m Move, revision uint64) bool {
@@ -93,8 +93,11 @@ func (s State) validate() error {
 			return ErrVolume
 		}
 	}
+	// A writer beside other consumers exists only under a share record
+	// (single-writer readers, shared writers), which the codec cannot see;
+	// Acquire and AcquireShared enforce the writer rule.
 	for i, c := range d.Consumers {
-		if !validConsumer(c, d.Scope) || c.Owner != d.Owner || c.OwnerRevision != d.OwnerRevision || c.Lease != d.Pins.Active[i] || c.Writable && len(d.Consumers) != 1 {
+		if !validConsumer(c, d.Scope) || c.Owner != d.Owner || c.OwnerRevision != d.OwnerRevision || c.Lease != d.Pins.Active[i] {
 			return ErrVolume
 		}
 		if !slices.Contains(d.Floors, Floor{c.ID, c.Generation}) {

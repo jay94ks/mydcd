@@ -11,7 +11,7 @@ import (
 	"os"
 	"syscall"
 
-	"github.com/jay94ks/mydcd/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/reconcile"
 	"github.com/moby/moby/client"
 )
 

@@ -6,8 +6,8 @@ import (
 	"crypto/ed25519"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/deployment"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/deployment"
 )
 
 // R14 step 3: a stage report is bound to its own stage record, not to the

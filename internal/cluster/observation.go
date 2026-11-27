@@ -16,8 +16,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/observability"
-	"github.com/jay94ks/mydcd/internal/storage"
+	"github.com/jay94ks/seafield/internal/observability"
+	"github.com/jay94ks/seafield/internal/storage"
 
 	"github.com/hashicorp/raft"
 )

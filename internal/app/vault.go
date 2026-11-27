@@ -14,14 +14,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/config"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/reconcile"
-	"github.com/jay94ks/mydcd/internal/schema"
-	"github.com/jay94ks/mydcd/internal/secrets"
-	"github.com/jay94ks/mydcd/internal/userauth"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/config"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/secrets"
+	"github.com/jay94ks/seafield/internal/userauth"
 )
 
 type vaultBackend struct {
@@ -37,6 +37,11 @@ type vaultBackend struct {
 func vaultBackendKey(realm, profile string) string { return realm + "/" + profile }
 func (r *Runtime) openVaults(c config.Node) error {
 	r.vaultBackends = map[string]*vaultBackend{}
+	store, err := secrets.OpenBuiltinStore(filepath.Join(c.Node.StateDir, "vault", "builtin.db"), secrets.BuiltinStoreLimit)
+	if err != nil {
+		return err
+	}
+	r.builtinValues = store
 	if len(c.Vaults) > 64 {
 		return errors.New("managed local Vault installation required")
 	}
@@ -91,6 +96,18 @@ func (r *Runtime) writeVault(ctx context.Context, session access.Session, q user
 		return secrets.WriteObservation{}, secrets.ErrProvider
 	}
 	permit, err := schema.Decode[control.VaultWritePermit](reply.Data)
+	if err == nil && permit.Cluster == r.controlPolicy.Cluster && permit.Realm == q.Realm && permit.Record.Request.ID == q.ID && permit.Observer.Builtin() && permit.Record.Writer.Builtin() {
+		r.life.RLock()
+		defer r.life.RUnlock()
+		if r.closed || r.ctx.Err() != nil {
+			return secrets.WriteObservation{}, secrets.ErrProvider
+		}
+		ctx, cancel := context.WithCancel(ctx)
+		defer cancel()
+		stop := context.AfterFunc(r.ctx, cancel)
+		defer stop()
+		return r.builtinWrite(ctx, permit, q)
+	}
 	if err != nil || permit.Cluster != r.controlPolicy.Cluster || permit.Realm != q.Realm || permit.Record.Request.ID != q.ID || permit.Observer.Key != r.Identity.Public {
 		log.Printf("vault write %s/%s: permit does not match this request or node (decode: %v)", q.Realm, q.ID, err)
 		return secrets.WriteObservation{}, secrets.ErrProvider

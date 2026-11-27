@@ -13,20 +13,20 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/containerops"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/userauth"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/containerops"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/userauth"
 )
 
 func TestRealBoundaryManagedContainerObservation(t *testing.T) {
 	runManagedAppOwner(t, true, false, false, true, managedAppContainerObserve, true)
 }
 
-func verifyManagedContainerObservation(t *testing.T, ctx context.Context, r *Runtime, root string, user userauth.Client, peer mydcp.Peer, session access.Session, p control.Policy, read func() cluster.View, change func(string, string, uint64, any)) []*Runtime {
+func verifyManagedContainerObservation(t *testing.T, ctx context.Context, r *Runtime, root string, user userauth.Client, peer sfcp.Peer, session access.Session, p control.Policy, read func() cluster.View, change func(string, string, uint64, any)) []*Runtime {
 	t.Helper()
 	// Reopening the DB/native owner does not finish a Raft election. The test
 	// requires an available control before expecting its first quorum read.
@@ -34,7 +34,7 @@ func verifyManagedContainerObservation(t *testing.T, ctx context.Context, r *Run
 	if ready.Local || ready.RaftIndex == 0 {
 		t.Fatal("control quorum not ready after reopen")
 	}
-	query := func(label string, client userauth.Client, target mydcp.Peer) {
+	query := func(label string, client userauth.Client, target sfcp.Peer) {
 		t.Helper()
 		t.Log("container observation path", label)
 		for _, kind := range []string{"logs", "top", "stats", "inspect"} {
@@ -78,7 +78,7 @@ func verifyManagedContainerObservation(t *testing.T, ctx context.Context, r *Run
 					}
 				}
 			case "logs":
-				if !strings.Contains(string(got.Stdout), "mydc-observation-stdout") || !strings.Contains(string(got.Stderr), "mydc-observation-stderr") {
+				if !strings.Contains(string(got.Stdout), "sfc-observation-stdout") || !strings.Contains(string(got.Stderr), "sfc-observation-stderr") {
 					t.Fatal("actual Docker streams not separated")
 				}
 			case "top":
@@ -108,7 +108,7 @@ func verifyManagedContainerObservation(t *testing.T, ctx context.Context, r *Run
 		check  func(containerops.Result) bool
 	}{
 		{"stdout-only", func(q *containerops.Query) { q.Stderr = false }, func(v containerops.Result) bool {
-			return strings.Contains(string(v.Stdout), "mydc-observation-stdout") && len(v.Stderr) == 0
+			return strings.Contains(string(v.Stdout), "sfc-observation-stdout") && len(v.Stderr) == 0
 		}},
 		{"tail-timestamps", func(q *containerops.Query) { q.Tail = 1; q.Timestamps = true }, func(v containerops.Result) bool {
 			lines := strings.FieldsFunc(string(v.Stdout)+string(v.Stderr), func(r rune) bool { return r == '\n' })
@@ -154,20 +154,20 @@ func verifyManagedContainerObservation(t *testing.T, ctx context.Context, r *Run
 	}
 	local := user
 	var err error
-	local.Mesh, err = mydcp.NewTransport(user.Self, user.Cluster, func(key mydcp.Identity) (mydcp.Peer, bool) { return unixPeer, key == unixPeer.Key })
+	local.Mesh, err = sfcp.NewTransport(user.Self, user.Cluster, func(key sfcp.Identity) (sfcp.Peer, bool) { return unixPeer, key == unixPeer.Key })
 	if err != nil {
 		t.Fatal("Unix user transport", err)
 	}
 	defer local.Mesh.Close()
-	local.Peers = []mydcp.Peer{unixPeer}
+	local.Peers = []sfcp.Peer{unixPeer}
 	query("unix-owner", local, unixPeer)
 	// A real second control becomes leader while Docker stays on node-a.
 	// This exercises User relay + owner Management read + fresh quorum permits.
 	remote := prepareManagedHandoffControl(t, ctx, root, r, user, peer, session, p, read, change)
-	if os.Getenv("MYDC_TEST_RQ4_COMPACT_USER") == "1" || os.Getenv("MYDC_TEST_RQ4_TUNNEL_USER") == "1" {
+	if os.Getenv("SFC_TEST_RQ4_COMPACT_USER") == "1" || os.Getenv("SFC_TEST_RQ4_TUNNEL_USER") == "1" {
 		return verifyManualCompactUserNative(t, ctx, r, remote, root, user, peer, session, p, change)
 	}
-	remotePeer, ok := r.Mesh.Peer(mydcp.Identity(remote.Identity.Public))
+	remotePeer, ok := r.Mesh.Peer(sfcp.Identity(remote.Identity.Public))
 	if !ok {
 		t.Fatal("new installed control missing")
 	}
@@ -199,7 +199,7 @@ func verifyManagedContainerObservation(t *testing.T, ctx context.Context, r *Run
 		}
 	}()
 	query("quic-remote-owner", user, peer)
-	if os.Getenv("MYDC_TEST_RQ4_CACHE_USER") == "1" {
+	if os.Getenv("SFC_TEST_RQ4_CACHE_USER") == "1" {
 		verifyImageCacheUserNative(t, ctx, r, root, user, peer, session)
 		return []*Runtime{remote}
 	}
@@ -209,7 +209,7 @@ func verifyManagedContainerObservation(t *testing.T, ctx context.Context, r *Run
 		if kind == "inspect" {
 			args = append(args, "--max-bytes", "128")
 		}
-		out, diag, err := runManagedCLICommand(ctx, os.Getenv("MYDC_TEST_CLI"), filepath.Join(root, "cli-home"), filepath.Join(root, "cli.yaml"), args, nil)
+		out, diag, err := runManagedCLICommand(ctx, os.Getenv("SFC_TEST_CLI"), filepath.Join(root, "cli-home"), filepath.Join(root, "cli.yaml"), args, nil)
 		if err != nil {
 			t.Fatal("actual observation CLI", kind, err, string(diag))
 		}

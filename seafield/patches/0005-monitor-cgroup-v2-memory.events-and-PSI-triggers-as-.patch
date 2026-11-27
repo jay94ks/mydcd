@@ -1,0 +1,529 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: seafield <seafield@invalid>
+Date: Fri, 27 Nov 2026 08:10:33 +0000
+Subject: [PATCH 05/20] monitor: cgroup v2 memory.events and PSI triggers as
+ engine events
+
+
+diff --git a/daemon/command/daemon.go b/daemon/command/daemon.go
+index 66b6472..723bd1a 100644
+--- a/daemon/command/daemon.go
++++ b/daemon/command/daemon.go
+@@ -36,6 +36,7 @@
+ 	dopts "github.com/moby/moby/v2/daemon/pkg/opts"
+ 	"github.com/moby/moby/v2/daemon/pkg/plugin"
+ 	"github.com/moby/moby/v2/daemon/seafield/eventfeed"
++	"github.com/moby/moby/v2/daemon/seafield/monitor"
+ 	apiserver "github.com/moby/moby/v2/daemon/server"
+ 	"github.com/moby/moby/v2/daemon/server/middleware"
+ 	"github.com/moby/moby/v2/daemon/server/router"
+@@ -308,6 +309,9 @@ func (cli *daemonCLI) start(ctx context.Context) (retErr error) {
+ 	if err != nil {
+ 		return errors.Wrap(err, "failed to start daemon")
+ 	}
++	monitorCtx, stopMonitor := context.WithCancel(context.WithoutCancel(ctx))
++	defer stopMonitor()
++	monitor.Start(monitorCtx, d, feed)
+ 
+ 	d.StoreHosts(hosts)
+ 
+diff --git a/daemon/seafield/eventfeed/feed.go b/daemon/seafield/eventfeed/feed.go
+index bb19fb3..6c9dc70 100644
+--- a/daemon/seafield/eventfeed/feed.go
++++ b/daemon/seafield/eventfeed/feed.go
+@@ -95,6 +95,13 @@ func Open(root string) (*Feed, error) {
+ // engine restarted and should re-read current state once.
+ func (f *Feed) Boot() string { return f.boot }
+ 
++// Last is the number of the newest record handed to the feed (0: none).
++func (f *Feed) Last() uint64 {
++	f.mu.Lock()
++	defer f.mu.Unlock()
++	return f.next - 1
++}
++
+ // Add numbers ev and queues it for storage. It never blocks on disk.
+ func (f *Feed) Add(ev eventtypes.Message) {
+ 	f.mu.Lock()
+diff --git a/daemon/seafield/monitor/monitor_linux.go b/daemon/seafield/monitor/monitor_linux.go
+new file mode 100644
+index 0000000..bf4a4ab
+--- /dev/null
++++ b/daemon/seafield/monitor/monitor_linux.go
+@@ -0,0 +1,393 @@
++// SPDX-License-Identifier: Apache-2.0
++
++// Package monitor turns kernel cgroup v2 notifications of running containers
++// into engine events, so nobody has to poll for them.
++//
++// For every running container it watches:
++//   - memory.events, which the kernel rewrites when the high/max limit is hit
++//     or the OOM killer runs: emitted as action "seafield.memory" with the
++//     counters and the names of those that went up;
++//   - cpu.pressure, memory.pressure and io.pressure with a PSI trigger (stall
++//     of 100ms within any 1s window): emitted as "seafield.pressure" with the
++//     resource and its current averages.
++//
++// Events carry the same attributes as the engine's own container events
++// (labels, image, name), go through the events service and therefore into the
++// numbered event feed.
++package monitor
++
++import (
++	"bufio"
++	"context"
++	"errors"
++	"fmt"
++	"os"
++	"path/filepath"
++	"strings"
++	"sync"
++
++	"github.com/containerd/log"
++	eventtypes "github.com/moby/moby/api/types/events"
++	"github.com/moby/moby/v2/daemon/container"
++	"github.com/moby/moby/v2/daemon/seafield/eventfeed"
++	"golang.org/x/sys/unix"
++)
++
++// Trigger is the PSI condition: some task stalled this long (µs) in a window.
++const (
++	triggerStallUS  = 100_000
++	triggerWindowUS = 1_000_000
++)
++
++// Daemon is what the monitor needs from the engine.
++type Daemon interface {
++	List() []*container.Container
++	GetContainer(string) (*container.Container, error)
++	LogContainerEventWithAttributes(*container.Container, eventtypes.Action, map[string]string)
++}
++
++// Monitor watches the cgroups of running containers.
++type Monitor struct {
++	d       Daemon
++	feed    *eventfeed.Feed
++	cgroups string // cgroup v2 mount, normally /sys/fs/cgroup
++
++	mu      sync.Mutex
++	watches map[string]*watch
++	warned  bool
++}
++
++// Start begins watching every running container and follows the event feed
++// for containers that start or stop. It returns when ctx ends.
++func Start(ctx context.Context, d Daemon, feed *eventfeed.Feed) *Monitor {
++	m := &Monitor{d: d, feed: feed, cgroups: "/sys/fs/cgroup", watches: map[string]*watch{}}
++	after := feed.Last()
++	for _, c := range d.List() {
++		if c.State.IsRunning() {
++			m.watch(c)
++		}
++	}
++	go m.follow(ctx, after)
++	return m
++}
++
++func (m *Monitor) follow(ctx context.Context, after uint64) {
++	defer m.stopAll()
++	for {
++		recs, gap, changed, err := m.feed.Read(after, 1000)
++		if err != nil {
++			log.G(ctx).WithError(err).Warn("Seafield monitor cannot read the event feed")
++			return
++		}
++		if gap != nil {
++			// Missed starts/stops: look at what runs now.
++			m.resync()
++		}
++		for _, r := range recs {
++			after = r.Seq
++			if r.Event.Type != eventtypes.ContainerEventType {
++				continue
++			}
++			switch r.Event.Action {
++			case eventtypes.ActionStart, eventtypes.ActionUnPause:
++				if c, err := m.d.GetContainer(r.Event.Actor.ID); err == nil && c.State.IsRunning() {
++					m.watch(c)
++				}
++			case eventtypes.ActionDie, eventtypes.ActionDestroy:
++				m.unwatch(r.Event.Actor.ID)
++			}
++		}
++		if len(recs) > 0 {
++			continue
++		}
++		select {
++		case <-changed:
++		case <-ctx.Done():
++			return
++		}
++	}
++}
++
++func (m *Monitor) resync() {
++	running := map[string]*container.Container{}
++	for _, c := range m.d.List() {
++		if c.State.IsRunning() {
++			running[c.ID] = c
++		}
++	}
++	m.mu.Lock()
++	var stale []string
++	for id := range m.watches {
++		if running[id] == nil {
++			stale = append(stale, id)
++		}
++	}
++	m.mu.Unlock()
++	for _, id := range stale {
++		m.unwatch(id)
++	}
++	for _, c := range running {
++		m.watch(c)
++	}
++}
++
++func (m *Monitor) watch(c *container.Container) {
++	m.mu.Lock()
++	if _, ok := m.watches[c.ID]; ok {
++		m.mu.Unlock()
++		return
++	}
++	m.mu.Unlock()
++	dir, err := cgroupDir(m.cgroups, c.State.GetPID())
++	if err == nil {
++		var w *watch
++		if w, err = openWatch(dir, func(action eventtypes.Action, attrs map[string]string) {
++			m.d.LogContainerEventWithAttributes(c, action, attrs)
++		}); err == nil {
++			m.mu.Lock()
++			if _, ok := m.watches[c.ID]; ok {
++				m.mu.Unlock()
++				w.closeFiles()
++				_ = w.stopW.Close()
++				return
++			}
++			m.watches[c.ID] = w
++			m.mu.Unlock()
++			go w.run()
++			return
++		}
++	}
++	m.mu.Lock()
++	warn := !m.warned
++	m.warned = true
++	m.mu.Unlock()
++	if warn {
++		log.G(context.TODO()).WithError(err).WithField("container", c.ID).Warn("Seafield monitor cannot watch container cgroups (cgroup v2 required); further failures are not logged")
++	}
++}
++
++func (m *Monitor) unwatch(id string) {
++	m.mu.Lock()
++	w := m.watches[id]
++	delete(m.watches, id)
++	m.mu.Unlock()
++	if w != nil {
++		w.stop()
++	}
++}
++
++func (m *Monitor) stopAll() {
++	m.mu.Lock()
++	ws := m.watches
++	m.watches = map[string]*watch{}
++	m.mu.Unlock()
++	for _, w := range ws {
++		w.stop()
++	}
++}
++
++// cgroupDir finds the cgroup v2 directory of pid.
++func cgroupDir(root string, pid int) (string, error) {
++	if pid <= 0 {
++		return "", errors.New("container has no process")
++	}
++	f, err := os.Open(fmt.Sprintf("/proc/%d/cgroup", pid))
++	if err != nil {
++		return "", err
++	}
++	defer f.Close()
++	s := bufio.NewScanner(f)
++	for s.Scan() {
++		if p, ok := strings.CutPrefix(s.Text(), "0::"); ok {
++			dir := filepath.Join(root, filepath.Clean("/"+p))
++			if _, err := os.Stat(filepath.Join(dir, "cgroup.events")); err != nil {
++				return "", err
++			}
++			return dir, nil
++		}
++	}
++	return "", errors.New("no cgroup v2 entry")
++}
++
++// emitFunc publishes one monitor event for the watched container.
++type emitFunc func(eventtypes.Action, map[string]string)
++
++// Actions the monitor emits.
++const (
++	ActionMemory   eventtypes.Action = "seafield.memory"
++	ActionPressure eventtypes.Action = "seafield.pressure"
++)
++
++type watch struct {
++	dir    string
++	emit   emitFunc
++	inot   int      // inotify on memory.events (-1: none)
++	psi    []psiFD  // pressure triggers
++	stopR  *os.File // closed by stop
++	stopW  *os.File
++	last   map[string]uint64
++	closed sync.Once
++	done   chan struct{}
++}
++
++type psiFD struct {
++	resource string
++	f        *os.File
++}
++
++func openWatch(dir string, emit emitFunc) (*watch, error) {
++	r, w, err := os.Pipe()
++	if err != nil {
++		return nil, err
++	}
++	wt := &watch{dir: dir, emit: emit, inot: -1, stopR: r, stopW: w, done: make(chan struct{})}
++	if fd, err := unix.InotifyInit1(unix.IN_NONBLOCK | unix.IN_CLOEXEC); err == nil {
++		if _, err = unix.InotifyAddWatch(fd, filepath.Join(dir, "memory.events"), unix.IN_MODIFY); err == nil {
++			wt.inot = fd
++		} else {
++			unix.Close(fd)
++		}
++	}
++	for _, res := range []string{"cpu", "memory", "io"} {
++		f, err := os.OpenFile(filepath.Join(dir, res+".pressure"), os.O_RDWR, 0)
++		if err != nil {
++			continue
++		}
++		if _, err = fmt.Fprintf(f, "some %d %d\x00", triggerStallUS, triggerWindowUS); err != nil {
++			f.Close()
++			continue
++		}
++		wt.psi = append(wt.psi, psiFD{resource: res, f: f})
++	}
++	if wt.inot < 0 && len(wt.psi) == 0 {
++		wt.closeFiles()
++		return nil, errors.New("neither memory.events nor PSI triggers are available")
++	}
++	wt.last, _ = readFlatKeyed(filepath.Join(dir, "memory.events"))
++	return wt, nil
++}
++
++func (w *watch) run() {
++	defer close(w.done)
++	defer w.closeFiles()
++	fds := []unix.PollFd{{Fd: int32(w.stopR.Fd()), Events: unix.POLLIN}}
++	if w.inot >= 0 {
++		fds = append(fds, unix.PollFd{Fd: int32(w.inot), Events: unix.POLLIN})
++	}
++	for _, p := range w.psi {
++		fds = append(fds, unix.PollFd{Fd: int32(p.f.Fd()), Events: unix.POLLPRI})
++	}
++	buf := make([]byte, 4096)
++	for {
++		for i := range fds {
++			fds[i].Revents = 0
++		}
++		if _, err := unix.Poll(fds, -1); err != nil {
++			if errors.Is(err, unix.EINTR) {
++				continue
++			}
++			return
++		}
++		if fds[0].Revents != 0 {
++			return
++		}
++		i := 1
++		if w.inot >= 0 {
++			if fds[i].Revents&unix.POLLIN != 0 {
++				for {
++					if n, err := unix.Read(w.inot, buf); n <= 0 || err != nil {
++						break
++					}
++				}
++				w.memoryChanged()
++			}
++			i++
++		}
++		for j, p := range w.psi {
++			rev := fds[i+j].Revents
++			if rev&unix.POLLERR != 0 {
++				// the cgroup is gone
++				return
++			}
++			if rev&unix.POLLPRI != 0 {
++				w.pressure(p.resource)
++			}
++		}
++	}
++}
++
++func (w *watch) memoryChanged() {
++	now, err := readFlatKeyed(filepath.Join(w.dir, "memory.events"))
++	if err != nil {
++		return
++	}
++	var up []string
++	for _, k := range []string{"low", "high", "max", "oom", "oom_kill", "oom_group_kill"} {
++		if now[k] > w.last[k] {
++			up = append(up, k)
++		}
++	}
++	w.last = now
++	if len(up) == 0 {
++		return
++	}
++	attrs := map[string]string{"changed": strings.Join(up, ",")}
++	for k, v := range now {
++		attrs["memory."+k] = fmt.Sprint(v)
++	}
++	w.emit(ActionMemory, attrs)
++}
++
++func (w *watch) pressure(res string) {
++	b, err := os.ReadFile(filepath.Join(w.dir, res+".pressure"))
++	if err != nil {
++		return
++	}
++	attrs := map[string]string{"resource": res}
++	for _, line := range strings.Split(strings.TrimSpace(string(b)), "\n") {
++		kind, rest, _ := strings.Cut(line, " ")
++		for _, kv := range strings.Fields(rest) {
++			k, v, ok := strings.Cut(kv, "=")
++			if ok && (k == "avg10" || k == "avg60") {
++				attrs[kind+"."+k] = v
++			}
++		}
++	}
++	w.emit(ActionPressure, attrs)
++}
++
++func (w *watch) stop() {
++	w.closed.Do(func() { _ = w.stopW.Close() })
++	<-w.done
++}
++
++func (w *watch) closeFiles() {
++	if w.inot >= 0 {
++		unix.Close(w.inot)
++		w.inot = -1
++	}
++	for _, p := range w.psi {
++		p.f.Close()
++	}
++	w.psi = nil
++	_ = w.stopR.Close()
++}
++
++// readFlatKeyed parses a cgroup "key value" file.
++func readFlatKeyed(path string) (map[string]uint64, error) {
++	b, err := os.ReadFile(path)
++	if err != nil {
++		return nil, err
++	}
++	out := map[string]uint64{}
++	for _, line := range strings.Split(string(b), "\n") {
++		var (
++			k string
++			v uint64
++		)
++		if n, _ := fmt.Sscanf(line, "%s %d", &k, &v); n == 2 {
++			out[k] = v
++		}
++	}
++	return out, nil
++}
+diff --git a/daemon/seafield/monitor/monitor_linux_test.go b/daemon/seafield/monitor/monitor_linux_test.go
+new file mode 100644
+index 0000000..11b0511
+--- /dev/null
++++ b/daemon/seafield/monitor/monitor_linux_test.go
+@@ -0,0 +1,77 @@
++// SPDX-License-Identifier: Apache-2.0
++
++package monitor
++
++import (
++	"os"
++	"path/filepath"
++	"testing"
++	"time"
++
++	eventtypes "github.com/moby/moby/api/types/events"
++)
++
++type emitted struct {
++	action eventtypes.Action
++	attrs  map[string]string
++}
++
++func TestMemoryEventsBecomeEvents(t *testing.T) {
++	dir := t.TempDir()
++	path := filepath.Join(dir, "memory.events")
++	write := func(s string) {
++		if err := os.WriteFile(path, []byte(s), 0o644); err != nil {
++			t.Fatal(err)
++		}
++	}
++	write("low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\n")
++	got := make(chan emitted, 4)
++	w, err := openWatch(dir, func(a eventtypes.Action, attrs map[string]string) { got <- emitted{a, attrs} })
++	if err != nil {
++		t.Fatal(err)
++	}
++	go w.run()
++	defer w.stop()
++
++	// a rewrite that changes nothing interesting emits nothing
++	write("low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\n")
++	write("low 0\nhigh 0\nmax 2\noom 1\noom_kill 1\noom_group_kill 0\n")
++	select {
++	case e := <-got:
++		if e.action != ActionMemory || e.attrs["changed"] != "max,oom,oom_kill" || e.attrs["memory.oom_kill"] != "1" {
++			t.Fatalf("event %+v", e)
++		}
++	case <-time.After(5 * time.Second):
++		t.Fatal("no event")
++	}
++	select {
++	case e := <-got:
++		t.Fatalf("unexpected second event %+v", e)
++	case <-time.After(200 * time.Millisecond):
++	}
++}
++
++func TestStopEndsWatch(t *testing.T) {
++	dir := t.TempDir()
++	if err := os.WriteFile(filepath.Join(dir, "memory.events"), []byte("oom 0\n"), 0o644); err != nil {
++		t.Fatal(err)
++	}
++	w, err := openWatch(dir, func(eventtypes.Action, map[string]string) {})
++	if err != nil {
++		t.Fatal(err)
++	}
++	go w.run()
++	done := make(chan struct{})
++	go func() { w.stop(); close(done) }()
++	select {
++	case <-done:
++	case <-time.After(5 * time.Second):
++		t.Fatal("stop did not return")
++	}
++}
++
++func TestNothingToWatch(t *testing.T) {
++	if _, err := openWatch(t.TempDir(), nil); err == nil {
++		t.Fatal("expected an error without memory.events or PSI files")
++	}
++}

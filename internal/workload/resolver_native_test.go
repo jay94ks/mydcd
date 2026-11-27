@@ -15,21 +15,21 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/network"
-	"github.com/jay94ks/mydcd/internal/workload"
-	"github.com/jay94ks/mydcd/tests/enginefixture"
+	"github.com/jay94ks/seafield/internal/network"
+	"github.com/jay94ks/seafield/internal/workload"
+	"github.com/jay94ks/seafield/tests/enginefixture"
 	"github.com/miekg/dns"
 	"github.com/moby/moby/client"
 )
 
 func TestRealBoundaryDockerResolverSearchAndOriginalJournal(t *testing.T) {
-	owner, backend := os.Getenv("MYDC_DOCKER_TEST_OWNER"), os.Getenv("MYDC_DOCKER_TEST_BACKEND")
+	owner, backend := os.Getenv("SFC_DOCKER_TEST_OWNER"), os.Getenv("SFC_DOCKER_TEST_BACKEND")
 	if owner == "" || backend == "" || os.Geteuid() != 0 {
 		t.Skip("requires owned rollback prestate and user-prebuilt backend/test")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Second)
 	defer cancel()
-	f := enginefixture.OpenPrepared(t, ctx, owner, owner, []string{`USER 10001:10001`, `ENV MYDC_DNS_FIXTURE=1`}, backend)
+	f := enginefixture.OpenPrepared(t, ctx, owner, owner, []string{`USER 10001:10001`, `ENV SFC_DNS_FIXTURE=1`}, backend)
 	root := t.TempDir()
 	nPath, wPath := filepath.Join(root, "network.db"), filepath.Join(root, "workload.db")
 	n, err := network.OpenManager(nPath, f.Client)
@@ -42,7 +42,7 @@ func TestRealBoundaryDockerResolverSearchAndOriginalJournal(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = w.Close() }()
-	prefix := netip.MustParsePrefix(os.Getenv("MYDC_DOCKER_TEST_CIDR"))
+	prefix := netip.MustParsePrefix(os.Getenv("SFC_DOCKER_TEST_CIDR"))
 	gateway := prefix.Addr().Next()
 	bridgeKey, taskKey := "network/resolver", "workload/resolver"
 	bridge := network.BridgeSpec{Schema: 1, Network: "resolver", Owner: owner, MTU: 1280, Internal: true, Pools: []network.Pool{{ID: "resolver", Network: "resolver", Owner: owner, Prefix: prefix, Gateway: gateway, MTU: 1280}}}
@@ -57,7 +57,7 @@ func TestRealBoundaryDockerResolverSearchAndOriginalJournal(t *testing.T) {
 		t.Fatal(err)
 	}
 	// This is an upstream fixture for the real Docker resolver adapter, not
-	// MyDC's embedded DNS owner or proof of its authority/tenant admission.
+	// Seafield Cluster's embedded DNS owner or proof of its authority/tenant admission.
 	address := net.JoinHostPort(gateway.String(), "53")
 	udp, err := net.ListenPacket("udp4", address)
 	if err != nil {
@@ -74,7 +74,7 @@ func TestRealBoundaryDockerResolverSearchAndOriginalJournal(t *testing.T) {
 	handler := dns.HandlerFunc(func(w dns.ResponseWriter, q *dns.Msg) {
 		m := new(dns.Msg)
 		m.SetReply(q)
-		if len(q.Question) != 1 || q.Question[0].Name != "probe.app.mydc.test." {
+		if len(q.Question) != 1 || q.Question[0].Name != "probe.app.sfc.test." {
 			m.Rcode = dns.RcodeNameError
 		} else {
 			queries.Add(1)
@@ -117,7 +117,7 @@ func TestRealBoundaryDockerResolverSearchAndOriginalJournal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	spec := workload.ContainerSpec{Schema: 1, Node: owner, Image: f.Image, Bridge: bridgeKey, BridgeGeneration: 1, IPv4: gateway.Next(), Memory: 32 << 20, NanoCPU: 100000000, Process: &process, Resolver: &workload.Resolver{Servers: []netip.Addr{gateway}, Search: []string{"app.mydc.test"}}}
+	spec := workload.ContainerSpec{Schema: 1, Node: owner, Image: f.Image, Bridge: bridgeKey, BridgeGeneration: 1, IPv4: gateway.Next(), Memory: 32 << 20, NanoCPU: 100000000, Process: &process, Resolver: &workload.Resolver{Servers: []netip.Addr{gateway}, Search: []string{"app.sfc.test"}}}
 	if err = w.Desired(taskKey, 2, 2, &spec, 4); err != nil {
 		t.Fatal(err)
 	}

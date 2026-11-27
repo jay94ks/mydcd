@@ -1,19 +1,20 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Package enginefake is an in-memory Docker Engine API on a Unix socket for
-// tests that run real mydcd nodes without Docker (devel/refactor/16). Product
+// tests that run real sfcd nodes without Docker (devel/refactor/16). Product
 // packages never import it.
 //
 // Containers run no process: start makes them running, stop makes them
 // exited, and the test sets exit codes and log lines. With Host (root) a
 // running container still gets its own network namespace, held by a
 // sleeping process, on a real kernel bridge (host_linux.go). Volume mountpoints are
-// real directories under the engine's root so mydcd can open volume data.
+// real directories under the engine's root so sfcd can open volume data.
 // An API the fake does not know answers 501 and is recorded; Unknown lists
 // those calls so a test can fail on them.
 package enginefake
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
@@ -30,6 +31,7 @@ import (
 	"time"
 
 	dockerspec "github.com/moby/docker-image-spec/specs-go/v1"
+	"github.com/moby/moby/api/types/events"
 )
 
 // APIVersion is the Engine API version the fake reports.
@@ -51,6 +53,11 @@ type Engine struct {
 	remote     map[string]dockerspec.DockerOCIImage // pullable, by reference
 	pulls      []string
 	watchers   map[chan event]struct{}
+	// The numbered event feed sfcd reads over purpose 32 (sfcd.go).
+	boot     string
+	feed     []events.Message
+	feedWake chan struct{}
+	stopSFCD []context.CancelFunc
 	// host makes kernel bridges and container namespaces, as Docker does
 	// (needs root; see host_linux.go and UseHost). Close removes what is
 	// left. hostNetNS is the node's network namespace for the bridges.
@@ -72,7 +79,7 @@ func Start(root string) (*Engine, error) {
 	if err != nil {
 		return nil, err
 	}
-	e := &Engine{root: root, listener: l, containers: map[string]*ctr{}, images: map[string]*img{}, volumes: map[string]*vol{}, networks: map[string]*netw{}, execs: map[string]*execProcess{}, watchers: map[chan event]struct{}{}, remote: map[string]dockerspec.DockerOCIImage{}, NCPU: 4, MemTotal: 8 << 30}
+	e := &Engine{root: root, listener: l, containers: map[string]*ctr{}, images: map[string]*img{}, volumes: map[string]*vol{}, networks: map[string]*netw{}, execs: map[string]*execProcess{}, watchers: map[chan event]struct{}{}, boot: newBoot(), feedWake: make(chan struct{}), remote: map[string]dockerspec.DockerOCIImage{}, NCPU: 4, MemTotal: 8 << 30}
 	for _, n := range []string{"bridge", "host", "none"} {
 		id := newID()
 		e.networks[id] = &netw{ID: id, Name: n, Driver: map[string]string{"bridge": "bridge", "host": "host", "none": "null"}[n], Created: time.Now().UTC(), Options: map[string]string{}, Labels: map[string]string{}, Endpoints: map[string]endpoint{}}
@@ -82,7 +89,7 @@ func Start(root string) (*Engine, error) {
 	return e, nil
 }
 
-// Endpoint is the unix:// endpoint for a node's docker_socket.
+// Endpoint is the unix:// endpoint of this engine's API (config.Node EngineAPI).
 func (e *Engine) Endpoint() string { return "unix://" + e.listener.Addr().String() }
 
 // Root is the engine's data directory (reported as DockerRootDir).
@@ -100,6 +107,9 @@ func (e *Engine) Close() error {
 	for ch := range e.watchers {
 		close(ch)
 		delete(e.watchers, ch)
+	}
+	for _, stop := range e.stopSFCD {
+		stop()
 	}
 	e.mu.Unlock()
 	return e.server.Close()
@@ -185,6 +195,7 @@ func init() {
 	networkRoutes()
 	imageRoutes()
 	execRoutes()
+	handle("GET", "/enginefake/published", (*Engine).servePublished)
 }
 
 func (e *Engine) version(w http.ResponseWriter, _ *http.Request, _ []string) {
@@ -225,6 +236,7 @@ func (e *Engine) emit(kind, action, id string, attrs map[string]string) {
 	for k, v := range attrs {
 		ev.Actor.Attributes[k] = v
 	}
+	e.record(ev)
 	for ch := range e.watchers {
 		select {
 		case ch <- ev:

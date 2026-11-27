@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/cluster/lifecycle"
+	"github.com/jay94ks/seafield/internal/cluster/lifecycle"
 )
 
 var ErrQuery = errors.New("invalid container observation")
@@ -107,8 +107,12 @@ type Target struct {
 	NativeID, StartedAt                  string `json:",omitempty"`
 }
 
+// ClusterAppKeyPrefix starts a cluster app container's native key (cluster-app/NAME).
+// A cluster app is not a Task: no app or container action selects it.
+const ClusterAppKeyPrefix = "cluster-app/"
+
 func (t Target) Valid() bool {
-	return (t.Standalone == "" || lifecycle.ValidID(t.Standalone)) && t.Cluster != ([32]byte{}) && t.Owner != ([32]byte{}) && t.Binding != ([32]byte{}) && lifecycle.ValidID(t.Tenant) && lifecycle.ValidID(t.App) && lifecycle.ValidID(t.Service) && lifecycle.ValidID(t.Node) && t.Instance != "" && len(t.Instance) <= 512 && t.Generation != 0 && t.Revision >= t.Generation && len(t.NativeID) <= 256 && !strings.ContainsAny(t.NativeID, "\x00\r\n/") && len(t.StartedAt) <= 64
+	return !strings.HasPrefix(t.Instance, ClusterAppKeyPrefix) && (t.Standalone == "" || lifecycle.ValidID(t.Standalone)) && t.Cluster != ([32]byte{}) && t.Owner != ([32]byte{}) && t.Binding != ([32]byte{}) && lifecycle.ValidID(t.Tenant) && lifecycle.ValidID(t.App) && lifecycle.ValidID(t.Service) && lifecycle.ValidID(t.Node) && t.Instance != "" && len(t.Instance) <= 512 && t.Generation != 0 && t.Revision >= t.Generation && len(t.NativeID) <= 256 && !strings.ContainsAny(t.NativeID, "\x00\r\n/") && len(t.StartedAt) <= 64
 }
 func (t Target) Matches(expected Target) bool {
 	native, started := t.NativeID, t.StartedAt

@@ -14,16 +14,16 @@ import (
 	"time"
 
 	"github.com/hashicorp/raft"
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/config"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/tenancy"
-	"github.com/jay94ks/mydcd/internal/userauth"
-	"github.com/jay94ks/mydcd/internal/workload"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/config"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/tenancy"
+	"github.com/jay94ks/seafield/internal/userauth"
+	"github.com/jay94ks/seafield/internal/workload"
 )
 
 func TestRealManagedLedgerWindowPreservesResourcesPendingAndSameDB(t *testing.T) {
@@ -67,19 +67,19 @@ func TestRealManagedLedgerWindowPreservesResourcesPendingAndSameDB(t *testing.T)
 	}
 	clusterID := initialized.Installation.Root.Cluster
 	policy := control.Policy{Cluster: clusterID, BootstrapKey: adminKey.Public, TrustRoot: runtime.Identity.Public, Genesis: initialized.Installation.Genesis}
-	peer := mydcp.Peer{ID: cfg.Node.ID, Endpoint: address, Policy: mydcp.Policy{Key: mydcp.Identity(runtime.Identity.Public), Respond: true}}
+	peer := sfcp.Peer{ID: cfg.Node.ID, Endpoint: address, Policy: sfcp.Policy{Key: sfcp.Identity(runtime.Identity.Public), Respond: true}}
 	clientFor := func() *userauth.Client {
 		t.Helper()
 		self, err := identity.Ephemeral()
 		if err != nil {
 			t.Fatal(err)
 		}
-		mesh, err := mydcp.NewTransport(self, clusterID, func(k mydcp.Identity) (mydcp.Peer, bool) { return peer, k == peer.Key })
+		mesh, err := sfcp.NewTransport(self, clusterID, func(k sfcp.Identity) (sfcp.Peer, bool) { return peer, k == peer.Key })
 		if err != nil {
 			t.Fatal(err)
 		}
 		t.Cleanup(func() { _ = mesh.Close(); clear(self.Private) })
-		return &userauth.Client{Self: self, Mesh: mesh, Cluster: clusterID, Peers: []mydcp.Peer{peer}}
+		return &userauth.Client{Self: self, Mesh: mesh, Cluster: clusterID, Peers: []sfcp.Peer{peer}}
 	}
 	admin, alice := clientFor(), clientFor()
 	enrolled, err := admin.Enroll(ctx, peer, control.Enrollment{Schema: 1, RequestID: "enroll-window", User: access.User{ID: "admin", Username: "admin", Enabled: true, SystemAdmin: true, Credentials: []access.Credential{{ID: "key", Method: access.PrivateKey, PublicKey: adminKey.Public, Enabled: true}}}}, adminKey.Private)
@@ -158,7 +158,7 @@ func TestRealManagedLedgerWindowPreservesResourcesPendingAndSameDB(t *testing.T)
 	}
 	propose("tenant", "create-tenant", 0, control.TenantID{ID: "first"})
 	tenant, _ := catalog().Tenant("first")
-	propose("nodes", "set-nodes", tenant.Revision, control.NodeAssignment{Tenant: "first", Nodes: []string{cfg.Node.ID}})
+	propose("nodes", "set-nodes", tenant.Revision, control.NodeChangeTo("first", tenant.AllowedNodes, []string{cfg.Node.ID}))
 	for _, scope := range []string{"", "first"} {
 		propose("quota-"+scope, "set-node-quota", 0, tenancy.NodeLimit{Tenant: scope, Node: cfg.Node.ID, Capacity: workload.Resources{CPU: 1000, Memory: 1000}})
 	}
@@ -275,5 +275,5 @@ func TestRealManagedLedgerWindowPreservesResourcesPendingAndSameDB(t *testing.T)
 	if read().State.ModuleEpoch() != 2 || read().State.Object(control.ResourcesKey) != heldRoot {
 		t.Fatal("pending membership erased")
 	}
-	t.Log("actual MYDCP/user proof -> Raft/FSM/bbolt explicit global window; original held budget unchanged; expired result/resume/submit preserve Unknown/local Pending; exact rotation receipt, same DB/Snapshot and live membership guard")
+	t.Log("actual SFCP/user proof -> Raft/FSM/bbolt explicit global window; original held budget unchanged; expired result/resume/submit preserve Unknown/local Pending; exact rotation receipt, same DB/Snapshot and live membership guard")
 }

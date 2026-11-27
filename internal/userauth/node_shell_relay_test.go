@@ -17,15 +17,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/cluster/membership"
-	"github.com/jay94ks/mydcd/internal/config"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/schema"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/membership"
+	"github.com/jay94ks/seafield/internal/config"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/sfcp"
 )
 
-// The existing fixture supplies actual loopback MYDCP transports, SDK Raft,
+// The existing fixture supplies actual loopback SFCP transports, SDK Raft,
 // bbolt and quorum authenticationView. Two real Services handle the shell;
 // its third transport is only the fixture's existing Raft quorum member.
 // Signed readiness/SSH observations and the PTY below are explicit model
@@ -157,7 +157,7 @@ func TestNodeShellActualServicesRelayOriginalToCurrentRemoteOwner(t *testing.T) 
 	finished := make(chan error, 16)
 	for i := range services {
 		svc := services[i]
-		if err = f.meshes[i].OnManagement(mydcp.NodeShell, func(ctx context.Context, conn *mydcp.Session, stream mydcp.Stream, frame mydcp.Frame) error {
+		if err = f.meshes[i].OnManagement(sfcp.NodeShell, func(ctx context.Context, conn *sfcp.Session, stream sfcp.Stream, frame sfcp.Frame) error {
 			envelope, decodeErr := schema.Decode[Envelope](frame.Fields[0].Value)
 			if decodeErr != nil {
 				return decodeErr
@@ -182,7 +182,7 @@ func TestNodeShellActualServicesRelayOriginalToCurrentRemoteOwner(t *testing.T) 
 			}
 			c := Client{Mesh: f.meshes[source], Self: f.nodes[source], Cluster: f.policy.Cluster}
 			q := NodeShellRequest{Schema: 1, SessionID: op.RequestID, Nonce: [32]byte{71}}
-			channel, reply, e := c.nodeShellExchange(f.ctx, f.peers[1], q, f.session.ExpiresAt, 3, func(conn *mydcp.Session, body []byte) (Envelope, error) {
+			channel, reply, e := c.nodeShellExchange(f.ctx, f.peers[1], q, f.session.ExpiresAt, 3, func(conn *sfcp.Session, body []byte) (Envelope, error) {
 				challenge := [32]byte{72}
 				envelope := Envelope{Body: body, Session: &f.session, Signature: ed25519.Sign(f.user.Private, access.RequestBytes(f.session, challenge, body))}
 				relaySigner := f.nodes[source]
@@ -204,7 +204,7 @@ func TestNodeShellActualServicesRelayOriginalToCurrentRemoteOwner(t *testing.T) 
 				_ = channel.Close()
 			}
 			var failure *Error
-			if !errors.As(e, &failure) || failure.Code != "forbidden" || failure.Phase != mydcp.Completed || reply.Code != "forbidden" || calls.Load() != 0 {
+			if !errors.As(e, &failure) || failure.Code != "forbidden" || failure.Phase != sfcp.Completed || reply.Code != "forbidden" || calls.Load() != 0 {
 				t.Fatal("invalid relay acquired original shell", reply.Code, e, calls.Load())
 			}
 			observation := <-seen
@@ -234,7 +234,7 @@ func TestNodeShellActualServicesRelayOriginalToCurrentRemoteOwner(t *testing.T) 
 	if first.envelope.Relay != nil || relay == nil || relay.Node != f.nodes[0].Public || relay.Target != f.nodes[1].Public || relay.Caller != f.user.Public || relay.Challenge != first.challenge || relay.Connection != second.challenge || !ed25519.Verify(f.nodes[0].Public[:], RelayBytes(f.policy.Cluster, second.envelope), relay.Signature) {
 		t.Fatal("relay was not bound to the original ingress proof and destination connection")
 	}
-	for _, record := range []mydcp.NodeShellRecord{{Kind: "stdin", Data: []byte("private PTY input")}, {Kind: "resize", Cols: 120, Rows: 40}, {Kind: "half-close"}} {
+	for _, record := range []sfcp.NodeShellRecord{{Kind: "stdin", Data: []byte("private PTY input")}, {Kind: "resize", Cols: 120, Rows: 40}, {Kind: "half-close"}} {
 		if err = channel.Send(record); err != nil {
 			t.Fatal(err)
 		}
@@ -293,7 +293,7 @@ func TestNodeShellActualServicesRelayOriginalToCurrentRemoteOwner(t *testing.T) 
 		_ = duplicate.Close()
 	}
 	var failure *Error
-	if !errors.As(err, &failure) || failure.Code != "forbidden" || failure.Phase != mydcp.Completed || calls.Load() != 1 {
+	if !errors.As(err, &failure) || failure.Code != "forbidden" || failure.Phase != sfcp.Completed || calls.Load() != 1 {
 		t.Fatal("closed original was reopened/recreated", err, calls.Load())
 	}
 	for range 2 {

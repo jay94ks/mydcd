@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/control"
 )
 
 func TestTenantStorageStrictSelectorsAndSessionScope(t *testing.T) {
@@ -16,7 +16,7 @@ func TestTenantStorageStrictSelectorsAndSessionScope(t *testing.T) {
 	if !valid.validMethodFields() || !valid.validQuerySelectors() {
 		t.Fatal("tenant root selector rejected")
 	}
-	for _, bad := range []Request{{Method: "tenant-storage"}, {Method: "tenant-storage", Tenant: "tenant", Node: "../node"}, {Method: "tenant-storage", Tenant: "tenant", After: strings.Repeat("a", 513)}, {Method: "tenant-storage", Tenant: "tenant", App: "foreign"}, {Method: "tenant-storage", Tenant: "tenant", NodeStorage: &control.NodeStorageSelection{Node: "node-a", ID: "hdd"}}, {Method: "tenant-storage", Tenant: "tenant", Secret: []byte("private")}} {
+	for _, bad := range []Request{{Method: "tenant-storage"}, {Method: "tenant-storage", Tenant: "tenant", Node: "../node"}, {Method: "tenant-storage", Tenant: "tenant", After: strings.Repeat("a", 513)}, {Method: "tenant-storage", Tenant: "tenant", TargetUser: "foreign"}, {Method: "tenant-storage", Tenant: "tenant", NodeStorage: &control.NodeStorageSelection{Node: "node-a", ID: "hdd"}}, {Method: "tenant-storage", Tenant: "tenant", Secret: []byte("private")}} {
 		if bad.validMethodFields() && bad.validQuerySelectors() {
 			t.Fatal("mixed/invalid tenant root request accepted", bad.Method)
 		}

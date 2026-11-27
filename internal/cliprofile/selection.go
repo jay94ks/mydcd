@@ -65,7 +65,7 @@ func Select(name string, c Context, t Trust) (Selection, error) {
 		s.Pins = append(s.Pins, pin)
 	}
 	if s.Peer == "" {
-		return Selection{}, fmt.Errorf("%w: no trusted node at %s; run 'mydc context trust %s'", ErrTrust, c.Endpoint, name)
+		return Selection{}, fmt.Errorf("%w: no trusted node at %s; run 'sfcli context trust %s'", ErrTrust, c.Endpoint, name)
 	}
 	slices.SortFunc(s.Pins, func(a, b Pin) int { return strings.Compare(a.ID, b.ID) })
 	return s, nil
@@ -108,7 +108,7 @@ func (s Selection) VerifyPeer(p PeerIdentity) error {
 // trusted with the same key. A different key for a known ID is refused:
 // remove the old node first.
 func TrustNode(t Trust, p PeerIdentity, how string, at time.Time) (Trust, error) {
-	if hex.EncodeToString(p.Cluster[:]) != t.Cluster || !ValidKeyName(p.ID) || p.Key == ([32]byte{}) || how != "fingerprint" && how != "out-of-band" {
+	if hex.EncodeToString(p.Cluster[:]) != t.Cluster || !ValidKeyName(p.ID) || p.Key == ([32]byte{}) || !validHow(how) {
 		return t, ErrTrust
 	}
 	key := hex.EncodeToString(p.Key[:])

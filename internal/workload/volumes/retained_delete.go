@@ -5,7 +5,7 @@ package volumes
 import (
 	"slices"
 
-	"github.com/jay94ks/mydcd/internal/access"
+	"github.com/jay94ks/seafield/internal/access"
 )
 
 // BeginRetainedDelete names a completed move's immutable physical source.

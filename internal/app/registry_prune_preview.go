@@ -10,14 +10,14 @@ import (
 	"encoding/json"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/registry"
-	"github.com/jay94ks/mydcd/internal/registryclient"
-	"github.com/jay94ks/mydcd/internal/schema"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/registry"
+	"github.com/jay94ks/seafield/internal/registryclient"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/sfcp"
 )
 
 const registryPrunePreviewPrefix = "registry/prune-preview/"
@@ -163,11 +163,11 @@ func (r *Runtime) registryPruneOwner(ctx context.Context, read control.RegistryP
 	defer stop()
 	view, err := r.currentView(ctx)
 	if err != nil || view.Local {
-		return control.RegistryPruneView{}, mydcp.ErrAdmission
+		return control.RegistryPruneView{}, sfcp.ErrAdmission
 	}
 	current, err := r.controlPolicy.CurrentRegistryPruneRead(view.State, read, time.Now().Unix(), results)
 	if err != nil || current.Base.Change.OwnerKey() != r.Identity.Public {
-		return control.RegistryPruneView{}, mydcp.ErrAdmission
+		return control.RegistryPruneView{}, sfcp.ErrAdmission
 	}
 	if results {
 		return r.registryPruneResultsOwner(ctx, current)
@@ -198,7 +198,7 @@ func (r *Runtime) registryPruneOwner(ctx context.Context, read control.RegistryP
 			target := base.Change.External
 			work, cause := r.externalRegistryWork(ctx, target.Selection)
 			if cause != nil || work.Inputs.ReadSet != target.ReadSet {
-				return control.RegistryPruneView{}, mydcp.ErrAdmission
+				return control.RegistryPruneView{}, sfcp.ErrAdmission
 			}
 			release, cause := r.acquireExternalReader(work)
 			if cause != nil {
@@ -224,7 +224,7 @@ func (r *Runtime) registryPruneOwner(ctx context.Context, read control.RegistryP
 		}
 		latest, cause := r.currentView(ctx)
 		if cause != nil || latest.Local {
-			return control.RegistryPruneView{}, mydcp.ErrAdmission
+			return control.RegistryPruneView{}, sfcp.ErrAdmission
 		}
 		current, cause = r.controlPolicy.CurrentRegistryPruneRead(latest.State, read, time.Now().Unix(), false)
 		if cause != nil {
@@ -265,11 +265,11 @@ func (r *Runtime) registryPruneOwner(ctx context.Context, read control.RegistryP
 	}
 	latest, cause := r.currentView(ctx)
 	if cause != nil || latest.Local {
-		return out, mydcp.ErrAdmission
+		return out, sfcp.ErrAdmission
 	}
 	current, cause = r.controlPolicy.CurrentRegistryPruneRead(latest.State, read, time.Now().Unix(), false)
 	if cause != nil || !out.Valid(current, false) {
-		return control.RegistryPruneView{}, mydcp.ErrAdmission
+		return control.RegistryPruneView{}, sfcp.ErrAdmission
 	}
 	return out, nil
 }
@@ -282,7 +282,7 @@ type registryPruneOwnerRequest struct {
 func (r *Runtime) registryPrune(ctx context.Context, read control.RegistryPruneRead, results bool) (control.RegistryPruneView, error) {
 	view, err := r.currentView(ctx)
 	if err != nil || view.Local {
-		return control.RegistryPruneView{}, mydcp.ErrAdmission
+		return control.RegistryPruneView{}, sfcp.ErrAdmission
 	}
 	current, err := r.controlPolicy.CurrentRegistryPruneRead(view.State, read, time.Now().Unix(), results)
 	if err != nil {
@@ -291,18 +291,18 @@ func (r *Runtime) registryPrune(ctx context.Context, read control.RegistryPruneR
 	if current.Base.Change.OwnerKey() == r.Identity.Public {
 		return r.registryPruneOwner(ctx, current, results)
 	}
-	peer, ok := r.Mesh.Peer(mydcp.Identity(current.Base.Change.OwnerKey()))
+	peer, ok := r.Mesh.Peer(sfcp.Identity(current.Base.Change.OwnerKey()))
 	if !ok || !peer.Member {
-		return control.RegistryPruneView{}, mydcp.ErrAdmission
+		return control.RegistryPruneView{}, sfcp.ErrAdmission
 	}
 	raw, _ := json.Marshal(registryPruneOwnerRequest{current, results})
 	reply, err := cluster.CallManagement(ctx, r.Mesh, r.Identity, r.controlPolicy.Cluster, peer, cluster.ManagementRequest{Method: "registry-prune-owner", Input: raw})
 	if err != nil || reply.Code != "ok" {
-		return control.RegistryPruneView{}, mydcp.ErrAdmission
+		return control.RegistryPruneView{}, sfcp.ErrAdmission
 	}
 	out, err := schema.Decode[control.RegistryPruneView](reply.Data)
 	if err != nil || !out.Valid(current, results) {
-		return control.RegistryPruneView{}, mydcp.ErrAdmission
+		return control.RegistryPruneView{}, sfcp.ErrAdmission
 	}
 	return out, nil
 }

@@ -11,11 +11,11 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/wallet"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/wallet"
 )
 
 func migrationFixture(t *testing.T) (Client, privateRecord, []byte) {
@@ -28,7 +28,7 @@ func migrationFixture(t *testing.T) (Client, privateRecord, []byte) {
 	var pub, issuerPub [32]byte
 	copy(pub[:], key[32:])
 	copy(issuerPub[:], issuer[32:])
-	c := Client{Cluster: [32]byte{1}, Self: &identity.Identity{Public: pub}, Peers: []mydcp.Peer{{ID: "node-a", Endpoint: "127.0.0.1:7443", Policy: mydcp.Policy{Key: mydcp.Identity(issuerPub)}}}}
+	c := Client{Cluster: [32]byte{1}, Self: &identity.Identity{Public: pub}, Peers: []sfcp.Peer{{ID: "node-a", Endpoint: "127.0.0.1:7443", Policy: sfcp.Policy{Key: sfcp.Identity(issuerPub)}}}}
 	s := access.Session{Schema: 1, ID: "session-original", Cluster: c.Cluster, User: "alice", Credential: "key", AccountRevision: 1, Key: pub, Issuer: issuerPub, IssuerEpoch: 1, IssuedAt: 100, ExpiresAt: 200, Scopes: []access.Scope{{Tenant: "tenant-a", Actions: []access.Action{access.Read}}}}
 	s.Signature = ed25519.Sign(issuer, access.SessionBytes(s))
 	payload, _ := json.Marshal(control.SessionRevocation{User: s.User, Session: s.ID})

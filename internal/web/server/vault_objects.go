@@ -6,22 +6,22 @@ import (
 	"context"
 	"net/http"
 
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/secrets"
-	"github.com/jay94ks/mydcd/internal/web/mydc"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/secrets"
+	"github.com/jay94ks/seafield/internal/web/sfc"
 )
 
 // Vault object policy (UI-70): vault-acl, vault-move, vault-approval-age,
 // vault-revoke, vault-retire. The daemon finds the object in the `vault`
-// rows for its revision (Expected); mydcd decides permission and state.
+// rows for its revision (Expected); sfcd decides permission and state.
 
 // findVaultObject reads a tenant vault object by ID.
-func findVaultObject(ctx context.Context, c mydc.Conn, tenant, id string) (mydc.VaultView, error) {
+func findVaultObject(ctx context.Context, c sfc.Conn, tenant, id string) (sfc.VaultView, error) {
 	after := ""
 	for {
 		p, err := c.Vault(ctx, tenant, after)
 		if err != nil {
-			return mydc.VaultView{}, err
+			return sfc.VaultView{}, err
 		}
 		for _, v := range p.Items {
 			if v.Realm == tenant && v.ID == id {
@@ -29,7 +29,7 @@ func findVaultObject(ctx context.Context, c mydc.Conn, tenant, id string) (mydc.
 			}
 		}
 		if p.Next == "" {
-			return mydc.VaultView{}, &httpErr{http.StatusNotFound, "not-found", "no such vault object"}
+			return sfc.VaultView{}, &httpErr{http.StatusNotFound, "not-found", "no such vault object"}
 		}
 		after = p.Next
 	}
@@ -39,9 +39,9 @@ func findVaultObject(ctx context.Context, c mydc.Conn, tenant, id string) (mydc.
 // returns the action and payload; Expected is the object revision unless
 // the body gives one.
 func (s *Server) vaultStep(w http.ResponseWriter, r *http.Request, ws *webSession, opID, id string, expected uint64, body any,
-	build func(v mydc.VaultView) (string, any, error)) {
+	build func(v sfc.VaultView) (string, any, error)) {
 	tenant := r.PathValue("t")
-	s.sharedCreate(w, r, ws, opID, body, func(ctx context.Context, c mydc.Conn, _ mydc.Session) (string, any, uint64, string, error) {
+	s.sharedCreate(w, r, ws, opID, body, func(ctx context.Context, c sfc.Conn, _ sfc.Session) (string, any, uint64, string, error) {
 		if !storageIDRE.MatchString(id) {
 			return "", nil, 0, "", invalid("id: a vault object ID")
 		}
@@ -57,44 +57,68 @@ func (s *Server) vaultStep(w http.ResponseWriter, r *http.Request, ws *webSessio
 	})
 }
 
-func activeObject(v mydc.VaultView) error {
+func activeObject(v sfc.VaultView) error {
 	if v.Status != string(secrets.Active) {
 		return &httpErr{http.StatusConflict, "not-active", "the object is " + v.Status}
 	}
 	return nil
 }
 
-// PUT /t/{t}/vault/acl {opId, id, users, services, denyUsers, denyServices, expected?} → vault-acl
+// aclDelta is one side of an ACL change: names to add to, or remove from,
+// each list. A list left out does not change.
+type aclDelta struct {
+	Users        []string `json:"users"`
+	Services     []string `json:"services"`
+	DenyUsers    []string `json:"denyUsers"`
+	DenyServices []string `json:"denyServices"`
+}
+
+func (d aclDelta) acl() (secrets.ACL, int, error) {
+	n := 0
+	for _, l := range [][]string{d.Users, d.Services, d.DenyUsers, d.DenyServices} {
+		if len(l) > 256 {
+			return secrets.ACL{}, 0, invalid("acl: at most 256 names per list")
+		}
+		for _, name := range l {
+			if name == "" || len(name) > 200 {
+				return secrets.ACL{}, 0, invalid("acl: names of 1..200 characters")
+			}
+		}
+		n += len(l)
+	}
+	return secrets.ACL{Users: d.Users, Services: d.Services, DenyUsers: d.DenyUsers, DenyServices: d.DenyServices}, n, nil
+}
+
+// PATCH /t/{t}/vault/acl {opId, id, add?, remove?, expected?} → vault-acl.
+// add and remove each hold {users, services, denyUsers, denyServices}; only
+// the changed names are sent.
 func (s *Server) handleVaultACL(w http.ResponseWriter, r *http.Request, ws *webSession) {
 	var req struct {
-		OpID         string   `json:"opId"`
-		ID           string   `json:"id"`
-		Users        []string `json:"users"`
-		Services     []string `json:"services"`
-		DenyUsers    []string `json:"denyUsers"`
-		DenyServices []string `json:"denyServices"`
-		Expected     uint64   `json:"expected,omitempty"`
+		OpID     string   `json:"opId"`
+		ID       string   `json:"id"`
+		Add      aclDelta `json:"add"`
+		Remove   aclDelta `json:"remove"`
+		Expected uint64   `json:"expected,omitempty"`
 	}
 	if !readJSON(w, r, &req) {
 		return
 	}
-	s.vaultStep(w, r, ws, req.OpID, req.ID, req.Expected, req, func(v mydc.VaultView) (string, any, error) {
+	s.vaultStep(w, r, ws, req.OpID, req.ID, req.Expected, req, func(v sfc.VaultView) (string, any, error) {
 		if err := activeObject(v); err != nil {
 			return "", nil, err
 		}
-		lists := [][]string{req.Users, req.Services, req.DenyUsers, req.DenyServices}
-		for _, l := range lists {
-			if len(l) > 256 {
-				return "", nil, invalid("acl: at most 256 names per list")
-			}
-			for _, n := range l {
-				if n == "" || len(n) > 200 {
-					return "", nil, invalid("acl: names of 1..200 characters")
-				}
-			}
+		add, n, err := req.Add.acl()
+		if err != nil {
+			return "", nil, err
 		}
-		a := secrets.ACL{Users: req.Users, Services: req.Services, DenyUsers: req.DenyUsers, DenyServices: req.DenyServices}
-		return mydc.ActionVaultACL, control.VaultACL{Realm: v.Realm, ID: v.ID, ACL: a}, nil
+		remove, m, err := req.Remove.acl()
+		if err != nil {
+			return "", nil, err
+		}
+		if n+m == 0 {
+			return "", nil, invalid("acl: nothing to change")
+		}
+		return sfc.ActionVaultACL, control.VaultACL{Realm: v.Realm, ID: v.ID, Add: add, Remove: remove}, nil
 	})
 }
 
@@ -110,14 +134,14 @@ func (s *Server) handleVaultMove(w http.ResponseWriter, r *http.Request, ws *web
 	if !readJSON(w, r, &req) {
 		return
 	}
-	s.vaultStep(w, r, ws, req.OpID, req.ID, req.Expected, req, func(v mydc.VaultView) (string, any, error) {
+	s.vaultStep(w, r, ws, req.OpID, req.ID, req.Expected, req, func(v sfc.VaultView) (string, any, error) {
 		if err := activeObject(v); err != nil {
 			return "", nil, err
 		}
 		if req.Parent == "" || req.Parent == v.Parent {
 			return "", nil, invalid("parent: another group")
 		}
-		return mydc.ActionVaultMove, control.VaultMove{Realm: v.Realm, ID: v.ID, Parent: req.Parent}, nil
+		return sfc.ActionVaultMove, control.VaultMove{Realm: v.Realm, ID: v.ID, Parent: req.Parent}, nil
 	})
 }
 
@@ -132,20 +156,20 @@ func (s *Server) handleVaultApprovalAge(w http.ResponseWriter, r *http.Request, 
 	if !readJSON(w, r, &req) {
 		return
 	}
-	s.vaultStep(w, r, ws, req.OpID, req.ID, req.Expected, req, func(v mydc.VaultView) (string, any, error) {
+	s.vaultStep(w, r, ws, req.OpID, req.ID, req.Expected, req, func(v sfc.VaultView) (string, any, error) {
 		if v.Kind != "group" {
 			return "", nil, &httpErr{http.StatusConflict, "not-group", "only a group has an approval age"}
 		}
 		if req.Seconds < 0 || req.Seconds > 366*86400 {
 			return "", nil, invalid("seconds: 0 (no limit) .. 366 days")
 		}
-		return mydc.ActionVaultApprovalAge, control.VaultAge{Realm: v.Realm, ID: v.ID, Seconds: req.Seconds}, nil
+		return sfc.ActionVaultApprovalAge, control.VaultAge{Realm: v.Realm, ID: v.ID, Seconds: req.Seconds}, nil
 	})
 }
 
 // POST /t/{t}/vault/revoke | retire {opId, id, expected?} → vault-revoke /
 // vault-retire (retire: a revoking object with nothing under it and no
-// live use; mydcd checks).
+// live use; sfcd checks).
 func (s *Server) handleVaultSelection(action string) func(http.ResponseWriter, *http.Request, *webSession) {
 	return func(w http.ResponseWriter, r *http.Request, ws *webSession) {
 		var req struct {
@@ -160,8 +184,8 @@ func (s *Server) handleVaultSelection(action string) func(http.ResponseWriter, *
 			Action string
 			Req    any
 		}{action, req}
-		s.vaultStep(w, r, ws, req.OpID, req.ID, req.Expected, body, func(v mydc.VaultView) (string, any, error) {
-			if action == mydc.ActionVaultRetire && v.Status != string(secrets.Revoking) {
+		s.vaultStep(w, r, ws, req.OpID, req.ID, req.Expected, body, func(v sfc.VaultView) (string, any, error) {
+			if action == sfc.ActionVaultRetire && v.Status != string(secrets.Revoking) {
 				return "", nil, &httpErr{http.StatusConflict, "not-revoking", "revoke the object first"}
 			}
 			return action, control.VaultSelection{Realm: v.Realm, ID: v.ID}, nil

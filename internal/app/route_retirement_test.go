@@ -9,10 +9,10 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/network/services"
-	"github.com/jay94ks/mydcd/internal/tenancy"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/network/services"
+	"github.com/jay94ks/seafield/internal/tenancy"
 )
 
 // Core and DB are real. The never-started native/dependency closure is an

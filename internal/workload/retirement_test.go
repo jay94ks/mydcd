@@ -11,9 +11,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/network"
-	"github.com/jay94ks/mydcd/internal/reconcile"
-	"github.com/jay94ks/mydcd/tests/enginefixture"
+	"github.com/jay94ks/seafield/internal/network"
+	"github.com/jay94ks/seafield/internal/reconcile"
+	"github.com/jay94ks/seafield/tests/enginefixture"
 )
 
 type lostWorkloadRetirement struct {
@@ -48,7 +48,7 @@ func (d *lostWorkloadRetirement) Retire(ctx context.Context, key string, op reco
 }
 
 func TestRealBoundaryOriginalApplyRetirementAndSameIDRecovery(t *testing.T) {
-	owner := os.Getenv("MYDC_DOCKER_TEST_OWNER")
+	owner := os.Getenv("SFC_DOCKER_TEST_OWNER")
 	if owner == "" {
 		t.Skip("requires owned Docker rollback prestate")
 	}
@@ -67,7 +67,7 @@ func TestRealBoundaryOriginalApplyRetirementAndSameIDRecovery(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = w.Close() }()
-	prefix := netip.MustParsePrefix(os.Getenv("MYDC_DOCKER_TEST_CIDR"))
+	prefix := netip.MustParsePrefix(os.Getenv("SFC_DOCKER_TEST_CIDR"))
 	bridgeKey, taskKey := "network/retirement", "workload/retirement"
 	bridge := network.BridgeSpec{Schema: 1, Network: "retirement", Owner: owner, MTU: 1280, Internal: true, Pools: []network.Pool{{ID: "retirement", Network: "retirement", Owner: owner, Prefix: prefix, Gateway: prefix.Addr().Next(), MTU: 1280}}}
 	if err = n.Desired(bridgeKey, 1, 1, &bridge, 4); err != nil {

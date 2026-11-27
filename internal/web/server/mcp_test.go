@@ -16,7 +16,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/web/store"
+	"github.com/jay94ks/seafield/internal/web/store"
 )
 
 // mcpFake is a Streamable HTTP MCP server: JSON answers, tools/list page 1
@@ -177,7 +177,7 @@ func TestMCPServers(t *testing.T) {
 	}
 	full := map[string]any{"floor": "low", "perIncident": 1, "perDay": 10, "revert": map[string]any{"tool": "delete_silence"}, "signals": []string{"5xx 급증"},
 		"inputs": map[string]any{"duration": map[string]any{"kind": "max", "value": "60m"}, "matchers": map[string]any{"kind": "incident", "value": "app"},
-			"comment": map[string]any{"kind": "template", "value": "MyDC 사건 {id} 자동 묵음"}}}
+			"comment": map[string]any{"kind": "template", "value": "Seafield Cluster 사건 {id} 자동 묵음"}}}
 	irr := map[string]any{"floor": "low", "perIncident": 1, "perDay": 10, "revert": map[string]any{"irreversible": true}, "inputs": full["inputs"]}
 	if code, out := put(rev, map[string]any{"create_silence": map[string]any{"incident": "propose-auto", "auto": irr}}); code != 422 || errCode(out) != "auto-incomplete" {
 		t.Fatalf("irreversible low: %d %v", code, out)
@@ -238,7 +238,7 @@ func TestMCPServers(t *testing.T) {
 	m.mu.Unlock()
 	code, res := f.do("POST", "/api/v1/system/mcp/grafana/tools/create_silence/test", map[string]any{"incident": "inc-test1"})
 	if s := fmt.Sprint(res["steps"]); code != 200 || !strings.Contains(s, "duration 최대 60m") || !strings.Contains(s, "matchers php-shop") ||
-		!strings.Contains(s, "comment MyDC 사건 inc-test1 자동 묵음") || res["result"] != "승인 요청을 만들었을 것 · 실제 호출 안 함" {
+		!strings.Contains(s, "comment Seafield Cluster 사건 inc-test1 자동 묵음") || res["result"] != "승인 요청을 만들었을 것 · 실제 호출 안 함" {
 		t.Fatalf("test: %d %v", code, res)
 	}
 	m.mu.Lock()
@@ -265,7 +265,7 @@ func TestMCPServers(t *testing.T) {
 	if code, _ := f.do("DELETE", "/api/v1/system/mcp/grafana", map[string]any{"confirmName": "x"}); code != 422 {
 		t.Fatalf("confirm: %d", code)
 	}
-	if code, _ := f.do("DELETE", "/api/v1/system/mcp/grafana", map[string]any{"confirmName": "grafana"}); code != 204 {
+	if code, _ := f.do("DELETE", "/api/v1/system/mcp/grafana", map[string]any{"confirmName": "grafana"}); code != 200 {
 		t.Fatalf("delete: %d", code)
 	}
 	if _, err := f.srv.opt.Seal.Get(mcpTokenKey("grafana")); err == nil {

@@ -9,10 +9,10 @@ import (
 	"net/netip"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/tenancy"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/tenancy"
 )
 
 func networkChangeCandidate(t *testing.T, f *backupCoreFixture) (tenancy.Network, NetworkChangePlan) {
@@ -121,7 +121,7 @@ func TestNetworkCandidateTransactionRetainsAppAndDNSButClosesFreshGroupUse(t *te
 	if _, err = f.p.NativePermit(f.s, owner, refRequest); err == nil {
 		t.Fatal("accepted network-ref became a fresh native permission")
 	}
-	competing := tenancy.TUNDefinition{Tenant: "tenant", Name: "other-network", Members: []tenancy.TUNNode{{Node: "node-b", Pools: append([]tenancy.Subnet(nil), plan.Target.Pools...), Addresses: []netip.Prefix{netip.MustParsePrefix("10.99.250.1/32")}}}}
+	competing := tenancy.TUNDefinition{Tenant: "tenant", Name: "other-network", Members: []tenancy.TUNNode{{Node: "node-b", Pools: append([]tenancy.Subnet(nil), plan.Target.Pools...)}}}
 	managedDNSChange(t, f, "candidate-cidr-competition", "create-tun-network", r.Networks.Revision(), competing, state.ConditionFailed)
 	catalog, _ := f.p.Catalog(f.s)
 	page, _, err := r.Page(catalog, "admin", "tenant", "")
@@ -211,7 +211,7 @@ func TestNetworkMetadataCandidateCancelPreservesIntentAfterNodeGrantRemoval(t *t
 	managedDNSChange(t, f, "candidate-stale-generation", "cancel-network-change", change.Revision, bad, state.ConditionFailed)
 	catalog, _ := f.p.Catalog(f.s)
 	tenant, _ := catalog.Tenant("tenant")
-	f.apply("candidate-revoke-node", "set-nodes", tenant.Revision, NodeAssignment{Tenant: "tenant", Nodes: []string{"node-b"}}, state.Applied)
+	f.apply("candidate-revoke-node", "set-nodes", tenant.Revision, NodeChangeTo("tenant", tenant.AllowedNodes, []string{"node-b"}), state.Applied)
 	managedDNSChange(t, f, "candidate-cleanup-revoked-node", "cancel-network-change", change.Revision, cancel, state.Applied)
 	r, _ = f.p.Resources(f.s)
 	change, _ = r.Networks.Change(original.Tenant, original.ID)

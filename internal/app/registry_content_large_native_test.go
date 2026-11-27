@@ -24,9 +24,9 @@ import (
 	v1 "github.com/google/go-containerregistry/pkg/v1"
 	"github.com/google/go-containerregistry/pkg/v1/types"
 
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/registryclient"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/registryclient"
 )
 
 // This opt-in extension shares the actual native fixture's user session,
@@ -70,7 +70,7 @@ func (f *managedRegistryNative) verifyLargeRegistryContent(t *testing.T, ctx con
 		t.Fatal("actual large tar input size", err)
 	}
 	layer := v1.Hash{Algorithm: "sha256", Hex: fmt.Sprintf("%x", hash.Sum(nil))}
-	configuration, err := json.Marshal(v1.ConfigFile{Architecture: "amd64", OS: "linux", RootFS: v1.RootFS{Type: "layers", DiffIDs: []v1.Hash{layer}}, Config: v1.Config{Labels: map[string]string{"org.mydc.test.owner": fmt.Sprint(f.public["Tag"]), "org.mydc.test.purpose": "rq6-large-content"}}})
+	configuration, err := json.Marshal(v1.ConfigFile{Architecture: "amd64", OS: "linux", RootFS: v1.RootFS{Type: "layers", DiffIDs: []v1.Hash{layer}}, Config: v1.Config{Labels: map[string]string{"org.sfc.test.owner": fmt.Sprint(f.public["Tag"]), "org.sfc.test.purpose": "rq6-large-content"}}})
 	if err != nil {
 		t.Fatal(err)
 	}

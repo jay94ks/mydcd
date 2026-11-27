@@ -11,9 +11,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/mydcp"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/sfcp"
 )
 
 type finiteRPCProbe struct {
@@ -22,7 +22,7 @@ type finiteRPCProbe struct {
 }
 
 type probedFiniteStream struct {
-	mydcp.Stream
+	sfcp.Stream
 	probe               *finiteRPCProbe
 	readOnce, writeOnce sync.Once
 }
@@ -53,9 +53,9 @@ func TestFiniteUserRPCConsumesEOFBeforeReplyOrEffects(t *testing.T) {
 	}
 	defer clear(user.Private)
 	cluster := [32]byte{219}
-	peer := mydcp.Peer{ID: "server", Policy: mydcp.Policy{Key: mydcp.Identity(node.Public), Respond: true, Read: true, Member: true}}
-	server, err := mydcp.NewTransport(node, cluster, func(key mydcp.Identity) (mydcp.Peer, bool) {
-		return mydcp.Peer{ID: "user", Policy: mydcp.Policy{Key: key, UserAuth: true}}, key == mydcp.Identity(user.Public)
+	peer := sfcp.Peer{ID: "server", Policy: sfcp.Policy{Key: sfcp.Identity(node.Public), Respond: true, Read: true, Member: true}}
+	server, err := sfcp.NewTransport(node, cluster, func(key sfcp.Identity) (sfcp.Peer, bool) {
+		return sfcp.Peer{ID: "user", Policy: sfcp.Policy{Key: key, UserAuth: true}}, key == sfcp.Identity(user.Public)
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -66,9 +66,9 @@ func TestFiniteUserRPCConsumesEOFBeforeReplyOrEffects(t *testing.T) {
 	for i := range probes {
 		probes[i] = &finiteRPCProbe{reading: make(chan struct{}), writing: make(chan struct{}), done: make(chan error, 1)}
 	}
-	if err := server.OnManagement(mydcp.User, func(ctx context.Context, conn *mydcp.Session, stream mydcp.Stream, frame mydcp.Frame) error {
+	if err := server.OnManagement(sfcp.User, func(ctx context.Context, conn *sfcp.Session, stream sfcp.Stream, frame sfcp.Frame) error {
 		if frame.Request < 1 || frame.Request > 2 {
-			return mydcp.ErrFrame
+			return sfcp.ErrFrame
 		}
 		p := probes[frame.Request-1]
 		err := service.handle(ctx, conn, &probedFiniteStream{Stream: stream, probe: p}, frame)
@@ -81,7 +81,7 @@ func TestFiniteUserRPCConsumesEOFBeforeReplyOrEffects(t *testing.T) {
 		t.Fatal(err)
 	}
 	peer.Endpoint = server.Addr().String()
-	client, err := mydcp.NewTransport(user, cluster, func(key mydcp.Identity) (mydcp.Peer, bool) { return peer, key == peer.Key })
+	client, err := sfcp.NewTransport(user, cluster, func(key sfcp.Identity) (sfcp.Peer, bool) { return peer, key == peer.Key })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -101,8 +101,8 @@ func TestFiniteUserRPCConsumesEOFBeforeReplyOrEffects(t *testing.T) {
 			body, _ := json.Marshal(Request{Schema: 1, Method: "whoami", Nonce: [32]byte{1}, AppOperation: &control.AppOperationRequest{App: "unused"}})
 			raw, _ := json.Marshal(Envelope{Body: body})
 			digest := sha256.Sum256(raw)
-			frame := mydcp.Frame{Purpose: mydcp.User, Kind: 1, Request: uint64(i + 1), Fields: []mydcp.Field{{Tag: 1, Required: true, Value: raw}, {Tag: 2, Required: true, Value: digest[:]}}}
-			if err := mydcp.WriteFrame(stream, frame); err != nil {
+			frame := sfcp.Frame{Purpose: sfcp.User, Kind: 1, Request: uint64(i + 1), Fields: []sfcp.Field{{Tag: 1, Required: true, Value: raw}, {Tag: 2, Required: true, Value: digest[:]}}}
+			if err := sfcp.WriteFrame(stream, frame); err != nil {
 				t.Fatal(err)
 			}
 			p := probes[i]
@@ -127,7 +127,7 @@ func TestFiniteUserRPCConsumesEOFBeforeReplyOrEffects(t *testing.T) {
 				_ = stream.Close()
 				select {
 				case err := <-p.done:
-					if !errors.Is(err, mydcp.ErrFrame) {
+					if !errors.Is(err, sfcp.ErrFrame) {
 						t.Fatal("trailing input accepted", err)
 					}
 				case <-ctx.Done():
@@ -143,7 +143,7 @@ func TestFiniteUserRPCConsumesEOFBeforeReplyOrEffects(t *testing.T) {
 			if err := stream.Close(); err != nil {
 				t.Fatal("request FIN", err)
 			}
-			response, err := mydcp.ReadFrame(stream, 128<<10)
+			response, err := sfcp.ReadFrame(stream, 128<<10)
 			if err != nil || response.Request != frame.Request || response.Kind != 2 || len(response.Fields) != 2 {
 				t.Fatal("finite response", err)
 			}

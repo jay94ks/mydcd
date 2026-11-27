@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Package gitfixture is an owned smart-HTTPS Git server for actual source/CD
-// adapter tests. It creates real Git objects/packs; it never supplies a MyDC
+// adapter tests. It creates real Git objects/packs; it never supplies a Seafield Cluster
 // ticket, candidate, operation result, native observation or approval.
 package gitfixture
 
@@ -35,7 +35,7 @@ import (
 	"github.com/go-git/go-git/v5/plumbing/object"
 	"github.com/go-git/go-git/v5/plumbing/protocol/packp"
 	"github.com/go-git/go-git/v5/storage/memory"
-	"github.com/jay94ks/mydcd/internal/config"
+	"github.com/jay94ks/seafield/internal/config"
 )
 
 type Stats struct {
@@ -57,7 +57,7 @@ type Fixture struct {
 }
 
 // PackGate holds one actual upload-pack response. Cancellation still ends the
-// request; it never supplies bytes, a candidate or a successful MyDC result.
+// request; it never supplies bytes, a candidate or a successful Seafield Cluster result.
 type PackGate struct {
 	Entered <-chan struct{}
 	entered chan struct{}
@@ -181,7 +181,7 @@ func (f *Fixture) Commit(body []byte) string {
 
 // CommitFiles updates real Git blobs in one commit. Existing app.yaml callers
 // retain their original history; build fixtures can supply a Dockerfile and
-// context files without impersonating a fetched MyDC version or build result.
+// context files without impersonating a fetched Seafield Cluster version or build result.
 func (f *Fixture) CommitFiles(files map[string][]byte) string {
 	f.t.Helper()
 	f.mu.Lock()
@@ -213,7 +213,7 @@ func (f *Fixture) CommitFiles(files map[string][]byte) string {
 	}
 	f.serial++
 	var err error
-	f.head, err = f.work.Commit(fmt.Sprintf("fixture-%d", f.serial), &git.CommitOptions{Author: &object.Signature{Name: "fixture", Email: "fixture@mydc.test", When: time.Unix(f.serial, 0)}})
+	f.head, err = f.work.Commit(fmt.Sprintf("fixture-%d", f.serial), &git.CommitOptions{Author: &object.Signature{Name: "fixture", Email: "fixture@sfc.test", When: time.Unix(f.serial, 0)}})
 	if err != nil {
 		f.t.Fatal(err)
 	}

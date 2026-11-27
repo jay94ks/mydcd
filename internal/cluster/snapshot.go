@@ -8,8 +8,8 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"errors"
-	"github.com/jay94ks/mydcd/internal/cluster/recovery"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/cluster/recovery"
+	"github.com/jay94ks/seafield/internal/cluster/state"
 	"io"
 
 	"github.com/hashicorp/raft"
@@ -159,7 +159,11 @@ func (f *fsm) Restore(source io.ReadCloser) error {
 	}
 	// The library owns log retention and the Raft position. Restore validates the
 	// reusable state core; it does not run a second suffix/consensus algorithm.
+	// Rewrite every row the old stored state or the snapshot has.
+	f.dirty.AddAll(f.published)
+	f.dirty.AddAll(f.work)
 	f.work = verified.State()
+	f.dirty.AddAll(f.work)
 	f.position = position
 	f.term = meta.Term
 	f.configuration = configuration

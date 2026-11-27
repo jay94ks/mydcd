@@ -2,7 +2,7 @@
 
 package lifecycle
 
-import contract "github.com/jay94ks/mydcd/lifecycle/v1"
+import contract "github.com/jay94ks/seafield/lifecycle/v1"
 
 type Sample struct {
 	Checker string

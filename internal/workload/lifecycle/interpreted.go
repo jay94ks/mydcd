@@ -20,7 +20,7 @@ import (
 	"github.com/traefik/yaegi/interp"
 	"github.com/traefik/yaegi/stdlib"
 
-	contract "github.com/jay94ks/mydcd/lifecycle/v1"
+	contract "github.com/jay94ks/seafield/lifecycle/v1"
 )
 
 var ErrInterpreted = errors.New("lifecycle interpreted checker failed")
@@ -112,7 +112,7 @@ func evaluateInterpreted(ctx context.Context, source *ResolvedSource, request co
 	}
 	output := &checkerDiagnostic{out: diagnostic, remaining: source.policy.Execution.OutputBytes}
 	i := interp.New(interp.Options{GoPath: resolverGoPath, Stdin: bytes.NewReader(nil), Stdout: output, Stderr: output,
-		Args: []string{"mydc-checker"}, Env: []string{}, SourcecodeFilesystem: source.files})
+		Args: []string{"sfc-checker"}, Env: []string{}, SourcecodeFilesystem: source.files})
 	exports := sdkSymbols()
 	wrappers := map[reflect.Value][]reflect.Type{}
 	for _, pkg := range source.standard {
@@ -157,8 +157,8 @@ func evaluateInterpreted(ctx context.Context, source *ResolvedSource, request co
 		return result, ErrInterpreted
 	}
 	for _, code := range []string{
-		`import checker "mydc.local/checker"`,
-		`import bridge "mydc.internal/lifecyclebridge"`,
+		`import checker "sfc.local/checker"`,
+		`import bridge "sfc.internal/lifecyclebridge"`,
 		`bridge.Accept(checker.Check(bridge.Context(), bridge.Request(), bridge.Probe()))`,
 	} {
 		if _, evalErr := i.EvalWithContext(ctx, code); evalErr != nil {

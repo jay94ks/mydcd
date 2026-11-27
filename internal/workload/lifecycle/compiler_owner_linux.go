@@ -18,10 +18,10 @@ import (
 	"sync"
 	"syscall"
 
-	"github.com/jay94ks/mydcd/internal/engine"
-	"github.com/jay94ks/mydcd/internal/reconcile"
-	"github.com/jay94ks/mydcd/internal/schema"
-	"github.com/jay94ks/mydcd/internal/storage"
+	"github.com/jay94ks/seafield/internal/engine"
+	"github.com/jay94ks/seafield/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/storage"
 )
 
 var ErrCompilerOwner = errors.New("original lifecycle compiler job requires recovery")
@@ -322,7 +322,7 @@ func compilerJournalDigest(r compilerDisk) [32]byte {
 	// A2 settlement does not rewrite the original native-effect evidence.
 	r.State = reconcile.State{LastID: r.State.LastID}
 	raw, _ := json.Marshal(r)
-	return sha256.Sum256(append([]byte("mydc-checker-native-journal-1\x00"), raw...))
+	return sha256.Sum256(append([]byte("sfc-checker-native-journal-1\x00"), raw...))
 }
 
 func (m *CompilerOwner) Cancel(tenant, id string) error {

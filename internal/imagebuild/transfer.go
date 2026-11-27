@@ -8,8 +8,8 @@ import (
 	"encoding/json"
 	"math"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/lifecycle"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/lifecycle"
 )
 
 // PartProof survives an installed-member relay and proves the exact creator
@@ -31,13 +31,13 @@ type PartProof struct {
 func PartProofBytes(p PartProof) []byte {
 	p.Signature = nil
 	raw, _ := json.Marshal(p)
-	return append([]byte("mydc-imagebuild-part-request-1\x00"), raw...)
+	return append([]byte("sfc-imagebuild-part-request-1\x00"), raw...)
 }
 
 // Include the independent approval too: dropping or replacing a narrower
 // approval must not widen a recorded part's original credential ceiling.
 func PartSessionDigest(s access.Session) [32]byte {
-	return digestJSON("mydc-imagebuild-part-session-1", s)
+	return digestJSON("sfc-imagebuild-part-session-1", s)
 }
 
 type Transfer struct {

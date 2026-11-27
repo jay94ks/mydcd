@@ -6,19 +6,19 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/config"
-	"github.com/jay94ks/mydcd/internal/storage"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/config"
+	"github.com/jay94ks/seafield/internal/storage"
 	"os"
 	"path/filepath"
 	"testing"
 )
 
 // Product reducers on the exact original closed E8 state. Outer command/report
-// admission is injected; actual authentication/MYDCP/Raft are covered separately.
+// admission is injected; actual authentication/SFCP/Raft are covered separately.
 // Original files are opened read-only and checked unchanged after this test.
 func TestClosedOriginalRetirementReplayReachesQuiescenceWithoutExtendingMove(t *testing.T) {
-	prefix := os.Getenv("MYDC_E8_RETIREMENT_CLOSED_SOURCE_PREFIX")
+	prefix := os.Getenv("SFC_E8_RETIREMENT_CLOSED_SOURCE_PREFIX")
 	if prefix == "" {
 		t.Skip("explicit original closed E8 input")
 	}

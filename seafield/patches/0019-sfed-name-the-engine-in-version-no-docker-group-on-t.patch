@@ -1,0 +1,33 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: seafield <seafield@invalid>
+Date: Fri, 27 Nov 2026 20:39:34 +0000
+Subject: [PATCH 19/20] sfed: name the engine in --version; no docker group on
+ the socket
+
+
+diff --git a/daemon/command/cobra.go b/daemon/command/cobra.go
+index adc8ce0..ff8b4c5 100644
+--- a/daemon/command/cobra.go
++++ b/daemon/command/cobra.go
+@@ -15,7 +15,7 @@ func SetupRootCommand(rootCmd *cobra.Command) {
+ 	rootCmd.SetUsageTemplate(usageTemplate)
+ 	rootCmd.SetHelpTemplate(helpTemplate)
+ 	rootCmd.SetFlagErrorFunc(FlagErrorFunc)
+-	rootCmd.SetVersionTemplate("Docker version {{.Version}}\n")
++	rootCmd.SetVersionTemplate("Seafield engine (sfed) version {{.Version}}\n")
+ 
+ 	rootCmd.PersistentFlags().BoolP("help", "h", false, "Print usage")
+ 	rootCmd.PersistentFlags().MarkShorthandDeprecated("help", "please use --help")
+diff --git a/daemon/command/config_unix.go b/daemon/command/config_unix.go
+index c086dd5..46b9cde 100644
+--- a/daemon/command/config_unix.go
++++ b/daemon/command/config_unix.go
+@@ -17,7 +17,7 @@ func installConfigFlags(conf *config.Config, flags *pflag.FlagSet) {
+ 
+ 	// Then platform-specific install flags
+ 	flags.Var(opts.NewNamedRuntimeOpt("runtimes", &conf.Runtimes, config.StockRuntimeName), "add-runtime", "Register an additional OCI compatible runtime")
+-	flags.StringVarP(&conf.SocketGroup, "group", "G", "docker", "Group for the unix socket")
++	flags.StringVarP(&conf.SocketGroup, "group", "G", "", "Group for the unix socket (default: none; only root may connect)")
+ 	flags.StringVarP(&conf.GraphDriver, "storage-driver", "s", "", "Storage driver to use")
+ 	flags.BoolVar(&conf.EnableSelinuxSupport, "selinux-enabled", false, "Enable selinux support")
+ 	flags.Var(opts.NewNamedUlimitOpt("default-ulimits", &conf.Ulimits), "default-ulimit", "Default ulimits for containers")

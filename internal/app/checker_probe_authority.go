@@ -7,10 +7,10 @@ import (
 	"slices"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	checker "github.com/jay94ks/mydcd/internal/workload/lifecycle"
-	contract "github.com/jay94ks/mydcd/lifecycle/v1"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/deployment"
+	checker "github.com/jay94ks/seafield/internal/workload/lifecycle"
+	contract "github.com/jay94ks/seafield/lifecycle/v1"
 )
 
 // Only the already admitted run's same-node, service-scoped reads may use a

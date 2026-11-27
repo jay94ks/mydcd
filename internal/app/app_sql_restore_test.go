@@ -12,12 +12,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/engine"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/workload/volumes"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/engine"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/workload/volumes"
 	"github.com/moby/moby/client"
 	"gopkg.in/yaml.v3"
 )
@@ -61,7 +61,7 @@ func testManagedSQLBackupRestore(t *testing.T, ctx context.Context, a *Runtime, 
 							t.Log("phase", phase, "expected", m.Command.Expected, "result", m.Result, "pending", m.Journal.Pending != nil)
 						}
 					}
-					peer, known := a.Mesh.Peer(mydcp.Identity(target.Original.Step.Owner))
+					peer, known := a.Mesh.Peer(sfcp.Identity(target.Original.Step.Owner))
 					if !known || !view.State.Object(key).Present {
 						continue
 					}
@@ -79,7 +79,7 @@ func testManagedSQLBackupRestore(t *testing.T, ctx context.Context, a *Runtime, 
 			return ok && !retiring && len(apps.Bindings().Live()) == 0
 		})
 		for _, c := range docker {
-			rows, err := c.API.ContainerList(ctx, client.ContainerListOptions{All: true, Filters: client.Filters{}.Add("label", "org.mydc.owner="+c.Owner)})
+			rows, err := c.API.ContainerList(ctx, client.ContainerListOptions{All: true, Filters: client.Filters{}.Add("label", "org.sfc.owner="+c.Owner)})
 			if err != nil || len(rows.Items) != 0 {
 				t.Fatal("SQL app retained original container", err)
 			}
@@ -122,7 +122,7 @@ func testManagedSQLBackupRestore(t *testing.T, ctx context.Context, a *Runtime, 
 		if !t.Failed() {
 			return
 		}
-		peer, ok := a.Mesh.Peer(mydcp.Identity(restored.Owner.Key))
+		peer, ok := a.Mesh.Peer(sfcp.Identity(restored.Owner.Key))
 		if !ok {
 			return
 		}
@@ -196,7 +196,7 @@ func testManagedSQLBackupRestore(t *testing.T, ctx context.Context, a *Runtime, 
 		if err != nil {
 			t.Fatal(err)
 		}
-		marker, err := os.ReadFile(filepath.Join(got.Volume.Mountpoint, ".mydc-app-initialized"))
+		marker, err := os.ReadFile(filepath.Join(got.Volume.Mountpoint, ".sfc-app-initialized"))
 		if err != nil || string(marker) != "1\n" {
 			t.Fatal("original/restored SQL datadir not retained", err)
 		}

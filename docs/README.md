@@ -1,6 +1,6 @@
-# MyDC 문서
+# Seafield Cluster 문서
 
-MyDC는 특정 tenant의 앱/서비스를 `app.yaml`로 배포하고 관리하는 MVP 엔진이다. 클러스터 관리 자원은 관리 명령(`tenant`·`network`·`route`, `manage apply`)으로 구성한다.
+Sfc는 특정 tenant의 앱/서비스를 `app.yaml`로 배포하고 관리하는 MVP 엔진이다. 클러스터 관리 자원은 관리 명령(`tenant`·`network`·`route`, `manage apply`)으로 구성한다.
 
 이 디렉터리는 **사용 설명서·API/입력 명세·주요 알고리즘·메커니즘 설명**을 담는다. 개발 계획·검토/변경 기록·시험 절차·검증 결과는 루트 devel/에 둔다.
 
@@ -13,7 +13,7 @@ tenant manager가 Volume·빌드 정책에 사용할 노드 저장 root를 선�
 - [이미지 빌드 job](reference/image-build-jobs.md): 고정 입력·원 operation·상태/취소/기록 삭제·owner 정산·가린 로그/cursor·빌드 캐시 관측·노드/컨텍스트별 목록
 
 1. [Quick-start](quick.md)로 단일/3노드 클러스터 구축과 실행 중 노드 추가·제거를 진행한다. [사용 설명서](guides/README.md)에서 전체 사용 순서를 확인한다.
-2. [mydc 명령](cli/README.md)(새 체계, 옮기는 중)과 [CLI·설정](configuration/cli.md)으로 cluster 등록·login·tenant 선택과 배포 명령을 확인한다.
+2. [sfc 명령](cli/README.md)(새 체계, 옮기는 중)과 [CLI·설정](configuration/cli.md)으로 cluster 등록·login·tenant 선택과 배포 명령을 확인한다.
 3. [app.yaml과 tenant 설정](architecture/app-and-cluster-spec.md)의 책임을 구분하고 [샘플 앱](examples/README.md)을 읽는다.
 4. 로컬 API를 연결하려면 [Unix 소켓 끝점과 프로토콜](reference/unix-sockets.md)을 읽는다.
 5. 실행 중 앱의 로그·프로세스·리소스 조회와 interactive 실행은 [컨테이너 운영](reference/container-operations.md)을 따른다.
@@ -42,7 +42,7 @@ tenant manager가 Volume·빌드 정책에 사용할 노드 저장 root를 선�
 | 분류 | 읽을 내용 |
 |---|---|
 | [사용 설명서](guides/README.md) | 실행·접속·로그인·배포 순서와 설정 |
-| [API·입력 명세](reference/README.md) | Unix 끝점, MYDCP, 명령 대상, app/cluster 입력, 자원 소유권 |
+| [API·입력 명세](reference/README.md) | Unix 끝점, SFCP, 명령 대상, app/cluster 입력, 자원 소유권 |
 | [아키텍처](architecture/README.md) | 모듈과 상태·통신·관리/선언의 경계 |
 | [주요 알고리즘](algorithms/README.md) | Raft 확정, 원 요청/CAS, reconcile, 참조와 종료 |
 | [메커니즘](mechanisms/README.md) | cluster/tenant·망·앱/lifecycle·Secret/Volume·CD의 동작 |
@@ -74,3 +74,5 @@ Ingress 매핑·최근 지표·Raft 차단은 [Ingress 운영](reference/ingress
 공유 자원의 참조·삭제 차단 사용처·백업 한도·서명 망 종료와 DNS·로그인 전 데몬 판은 [관리 자원 조회](reference/resource-queries.md)를 따른다.
 
 Lifecycle 원본을 검사·업로드하고 정확한 과거 버전을 읽으려면 [원본 API](reference/lifecycle-sources.md)를 따른다.
+
+로고 파일(클러스터·엔진, SVG·PNG·favicon)은 [docs/brand](brand/README.md)에 있다.

@@ -5,7 +5,7 @@
 package lifecycle
 
 import (
-	node "github.com/jay94ks/mydcd/internal/cluster/lifecycle"
+	node "github.com/jay94ks/seafield/internal/cluster/lifecycle"
 	"strings"
 )
 

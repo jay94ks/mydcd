@@ -11,11 +11,11 @@ import (
 	"math"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/engine"
-	"github.com/jay94ks/mydcd/internal/imagesource"
-	"github.com/jay94ks/mydcd/internal/observability"
-	"github.com/jay94ks/mydcd/internal/registryclient"
-	"github.com/jay94ks/mydcd/internal/storage"
+	"github.com/jay94ks/seafield/internal/engine"
+	"github.com/jay94ks/seafield/internal/imagesource"
+	"github.com/jay94ks/seafield/internal/observability"
+	"github.com/jay94ks/seafield/internal/registryclient"
+	"github.com/jay94ks/seafield/internal/storage"
 )
 
 func (r *Runtime) registryPullAuth(auth engine.RegistryAuth, source imagesource.Source) engine.RegistryAuth {

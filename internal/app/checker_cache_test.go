@@ -5,7 +5,7 @@ package app
 import (
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/control"
 )
 
 // Simulated signed facts/current request. Exercises the production metadata

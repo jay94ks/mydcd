@@ -5,16 +5,19 @@ package userauth
 import (
 	"reflect"
 
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/cluster/lifecycle"
-	"github.com/jay94ks/mydcd/internal/registryclient"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/lifecycle"
+	"github.com/jay94ks/seafield/internal/registryclient"
 )
 
 func (r Request) initialCredentialRequest() bool {
-	return r.Method == "initial-credential-stage" || r.Method == "initial-credential-observe"
+	return r.Method == "initial-credential-stage" || r.Method == "initial-credential-observe" || r.Method == "initial-credential-profile"
 }
 
 func (r Request) validInitialCredentialFields() bool {
+	if r.Method == "initial-credential-profile" {
+		return reflect.DeepEqual(r, Request{Schema: r.Schema, Method: r.Method, Nonce: r.Nonce})
+	}
 	if !r.initialCredentialRequest() || r.InitialCredential == nil || !r.InitialCredential.Valid() ||
 		r.Method == "initial-credential-observe" && r.Secret != nil {
 		return false
@@ -107,22 +110,19 @@ func (r Request) validImageBuildFields() bool {
 }
 
 func (r Request) validMethodFields() bool {
+	if _, typed, ok := r.typedMethod(); typed || !ok {
+		return typed && ok
+	}
 	if r.State != "" && r.Method != "node-shell-sessions" {
 		return false
 	}
 	if nodeShellQuery(r.Method) {
 		return r.validNodeShellQuery()
 	}
-	if r.lifecycleEditorRequest() || r.Method == "lifecycle-source" {
+	if r.lifecycleEditorRequest() {
 		return r.validLifecycleSourceFields()
 	}
-	if r.LifecycleSource != nil {
-		return false
-	}
-	if (r.NodeForce != nil) != (r.Method == "node-force-remove-plan") {
-		return false
-	}
-	if !r.validTenantStorageFields() || !r.validCertificateFields() || !r.validIngressFields() || !r.validServiceReadFields() || !r.validStandaloneFileFields() || !r.validPublicReadFields() {
+	if !r.validTenantStorageFields() || !r.validServiceReadFields() || !r.validStandaloneFileFields() {
 		return false
 	}
 	if !r.validImageBuildFields() {
@@ -132,6 +132,9 @@ func (r Request) validMethodFields() bool {
 		return false
 	}
 	if r.Events != nil && r.Method != "events" || r.Method == "events" && (r.Events == nil || !r.Events.Valid() || r.Tenant != r.Events.Tenant) {
+		return false
+	}
+	if !r.validLoginFields() {
 		return false
 	}
 	if r.initialCredentialRequest() {
@@ -158,12 +161,6 @@ func (r Request) validMethodFields() bool {
 	if (r.AppCDField != nil) != (r.Method == "app-cd-field") || r.AppCDField != nil && (r.After != "" || r.Tenant == "" || !(control.AppCDReadRequest{App: r.AppCDField.App, Part: r.AppCDField.Part, Digest: r.AppCDField.Digest}).Valid(false)) {
 		return false
 	}
-	if (r.VolumeUsage != nil) != (r.Method == "volume-usage") || r.VolumeUsage != nil && (!r.VolumeUsage.Valid() || r.After != "" || r.Tenant == "") {
-		return false
-	}
-	if (r.VolumeSource != nil) != (r.Method == "volume-backup-source") || r.VolumeSource != nil && (!r.VolumeSource.Valid() || r.After != "" || r.Tenant == "") {
-		return false
-	}
 	if (r.VaultPlan != nil) != (r.Method == "vault-approval-plan") {
 		return false
 	}
@@ -185,8 +182,7 @@ func (r Request) validCredentialFields(envelope Envelope, kind uint8) bool {
 	if r.credentialRequest() {
 		return envelope.Session == nil && kind == 1
 	}
-	return r.AuthMethod == "" && r.Credential == "" && r.Secret == nil &&
-		(r.Ticket == nil || r.Ticket.AuthMethod == "" && r.Ticket.VerifierRef == "")
+	return r.Secret == nil
 }
 
 // execute is also called directly by in-process consumers/tests. Keep its
@@ -198,16 +194,13 @@ func (r Request) validQuerySelectors() bool {
 	if nodeShellQuery(r.Method) {
 		return r.validNodeShellQuery()
 	}
-	if r.lifecycleEditorRequest() || r.Method == "lifecycle-source" {
+	if r.lifecycleEditorRequest() {
 		return r.validLifecycleSourceFields()
 	}
-	if r.LifecycleSource != nil {
+	if !r.validTenantStorageFields() || !r.validServiceReadFields() || !r.validStandaloneFileFields() {
 		return false
 	}
-	if !r.validTenantStorageFields() || !r.validCertificateFields() || !r.validIngressFields() || !r.validServiceReadFields() || !r.validStandaloneFileFields() || !r.validPublicReadFields() {
-		return false
-	}
-	if control.PublicReadMethod(r.Method) || r.Method == "standalone-list" || r.Method == "standalone-get" || r.Method == "volume-file-plan" || r.Method == "volume-file-status" || r.Method == "tenant-storage" || r.Method == "certificates" || r.Method == "ingresses" || r.Method == "service-call" || r.Method == "cd-probe" {
+	if r.Method == "standalone-list" || r.Method == "standalone-get" || r.Method == "tenant-storage" || r.Method == "service-call" || r.Method == "cd-probe" {
 		return true
 	}
 	if r.Method == "events" {
@@ -217,12 +210,15 @@ func (r Request) validQuerySelectors() bool {
 	if r.Events != nil {
 		return false
 	}
+	if r.Method == "login-records" || r.Method == "own-sessions" || r.LoginQuery != nil {
+		return r.validLoginFields()
+	}
 	if !r.validLookupFields() {
 		return false
 	}
 	if r.After != "" {
 		switch r.Method {
-		case "image-build-cache", "image-build-logs", "build-context-content", "image-builds", "app-cd-history", "raft-status", "node-summary", "node-disks", "node-tenant-usage", "mesh-links", "app-revisions", "tasks", "image-usages", "registry-catalog", "registry-prune-preview", "registry-prune-results", "external-registry-pulls", "users", "tenant-members", "tenant-retirement", "members", "node-storage", "resources", "volumes", "volume-backups", "volume-restores", "apps", "app-uploads", "vault", "lifecycles", "registries", "external-registries":
+		case "image-build-cache", "image-build-logs", "build-context-content", "image-builds", "app-cd-history", "raft-status", "app-revisions", "image-usages", "registry-catalog", "registry-prune-preview", "registry-prune-results", "external-registry-pulls", "users", "tenant-members", "tenant-retirement", "members", "node-storage", "apps", "app-uploads", "vault", "registries", "external-registries":
 		default:
 			return false
 		}
@@ -230,19 +226,11 @@ func (r Request) validQuerySelectors() bool {
 			return false
 		}
 	}
-	if r.Method == "node-force-remove-plan" {
-		want := Request{Schema: r.Schema, Method: r.Method, Nonce: r.Nonce, NodeForce: r.NodeForce}
-		return r.NodeForce != nil && r.NodeForce.Valid() && reflect.DeepEqual(r, want)
-	}
-	if r.Method == "node-diagnostics" || r.Method == "node-remove-plan" || r.Method == "node-demote-plan" {
-		want := Request{Schema: r.Schema, Method: r.Method, Nonce: r.Nonce, Node: r.Node}
-		return lifecycle.ValidID(r.Node) && reflect.DeepEqual(r, want)
-	}
 	if r.Method == "node-invitation" {
 		if !lifecycle.ValidID(r.Node) {
 			return false
 		}
-	} else if r.Method == "node-storage" || r.Method == "tasks" || r.Method == "node-summary" || r.Method == "node-disks" || r.Method == "node-tenant-usage" || r.Method == "mesh-links" {
+	} else if r.Method == "node-storage" {
 		if r.Node != "" && !lifecycle.ValidID(r.Node) {
 			return false
 		}
@@ -250,12 +238,6 @@ func (r Request) validQuerySelectors() bool {
 		return false
 	}
 	if r.Method == "raft-status" && (r.Tenant != "" || r.Node != "") {
-		return false
-	}
-	if r.Method == "node-tenant-usage" && (r.Node == "" || r.Tenant != "") {
-		return false
-	}
-	if r.App != "" && (r.Method != "tasks" || !lifecycle.ValidID(r.App)) {
 		return false
 	}
 	if (r.Method == "my-credentials" || r.Method == "users") && r.Tenant != "" || r.Method == "tenant-members" && r.Tenant == "" {
@@ -271,21 +253,6 @@ func (r Request) validQuerySelectors() bool {
 // different method; share that rule without moving any authorization checks.
 func (r Request) validLookupFields() bool {
 	if r.State != "" && r.Method != "node-shell-sessions" {
-		return false
-	}
-	if (r.NodeDrain != nil) != (r.Method == "node-drain-plan" || r.Method == "node-drain-status") {
-		return false
-	}
-	if r.NodeDrain != nil {
-		want := Request{Schema: r.Schema, Method: r.Method, Nonce: r.Nonce, NodeDrain: r.NodeDrain}
-		valid := r.NodeDrain.Valid()
-		if r.Method == "node-drain-status" {
-			valid = r.NodeDrain.ValidStatus()
-		}
-		return valid && reflect.DeepEqual(r, want)
-	}
-
-	if (r.NodeForce != nil) != (r.Method == "node-force-remove-plan") {
 		return false
 	}
 	if !r.validImageBuildFields() {
@@ -335,9 +302,6 @@ func (r Request) validLookupFields() bool {
 	if (r.ImageCache != nil) != (r.Method == "image-cache-plan" || r.Method == "image-cache-status") || r.ImageCache != nil && (r.Tenant != "" || r.Node != "" || r.After != "" || !r.ImageCache.Valid(r.Method == "image-cache-plan")) {
 		return false
 	}
-	if (r.Tunnel != nil) != (r.Method == "tunnel-reconnect-plan" || r.Method == "tunnel-reconnect-status") || r.Tunnel != nil && (r.Tenant != "" || r.Node != "" || r.After != "" || !r.Tunnel.Valid(r.Method == "tunnel-reconnect-plan")) {
-		return false
-	}
 	if (r.ImageUsage != nil) != (r.Method == "image-usages") || r.ImageUsage != nil && (r.Tenant == "" || r.Node != "" || !r.ImageUsage.Valid()) {
 		return false
 	}
@@ -356,12 +320,6 @@ func (r Request) validLookupFields() bool {
 		return false
 	}
 	if (r.RegistryAction != nil) != (r.Method == "registry-action-plan") || r.RegistryAction != nil && (r.Tenant == "" || r.After != "" || r.Node != "" || !r.RegistryAction.Valid()) {
-		return false
-	}
-	if (r.Compact != nil) != (r.Method == "raft-compact-plan" || r.Method == "raft-compact-status") || r.Compact != nil && (r.Tenant != "" || r.After != "" || r.Node != "" || !r.Compact.Valid(r.Method == "raft-compact-plan")) {
-		return false
-	}
-	if r.App != "" && (r.Method != "tasks" || !lifecycle.ValidID(r.App)) {
 		return false
 	}
 	if (r.AppSource != nil) != (r.Method == "app-source" || r.Method == "app-revisions") || r.AppSource != nil && (r.Tenant == "" || r.Node != "" || !r.AppSource.Valid(r.Method == "app-revisions") || r.Method == "app-source" && r.After != "") {

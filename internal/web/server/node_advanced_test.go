@@ -8,7 +8,7 @@ import (
 )
 
 // Force remove of a server that stopped answering (the fake can mark one
-// unreachable; the other server actions run on real mydcd:
+// unreachable; the other server actions run on real sfcd:
 // TestRealServerNodeLifecycle).
 func TestNodeAdvancedRoutes(t *testing.T) {
 	f, fake := newFakeFixture(t)

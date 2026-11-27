@@ -8,7 +8,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/mydcp"
+	"github.com/jay94ks/seafield/internal/sfcp"
 )
 
 // NodeShellChannel serializes bounded records on one authenticated original
@@ -18,24 +18,24 @@ type NodeShellChannel struct {
 	cancel         context.CancelFunc
 	stop           func() bool
 	stopped        chan struct{}
-	conn           *mydcp.Session
-	stream         mydcp.DuplexStream
+	conn           *sfcp.Session
+	stream         sfcp.DuplexStream
 	request        uint64
 	intent         [32]byte
 	client         bool
 	sendMu         sync.Mutex
-	sent, received mydcp.NodeShellFlow
+	sent, received sfcp.NodeShellFlow
 	release        sync.Once
 	receiveStopped atomic.Bool
 }
 
-func newNodeShellChannel(ctx context.Context, conn *mydcp.Session, stream mydcp.Stream, request uint64, intent [32]byte, expires int64, client bool) (*NodeShellChannel, error) {
-	duplex, ok := stream.(mydcp.DuplexStream)
+func newNodeShellChannel(ctx context.Context, conn *sfcp.Session, stream sfcp.Stream, request uint64, intent [32]byte, expires int64, client bool) (*NodeShellChannel, error) {
+	duplex, ok := stream.(sfcp.DuplexStream)
 	if !ok || intent == ([32]byte{}) {
-		return nil, mydcp.ErrAdmission
+		return nil, sfcp.ErrAdmission
 	}
 	ctx, cancel := context.WithDeadline(ctx, time.Unix(expires, 0))
-	c := &NodeShellChannel{ctx: ctx, cancel: cancel, conn: conn, stream: duplex, request: request, intent: intent, client: client, stopped: make(chan struct{}), sent: mydcp.NodeShellFlow{}, received: mydcp.NodeShellFlow{}}
+	c := &NodeShellChannel{ctx: ctx, cancel: cancel, conn: conn, stream: duplex, request: request, intent: intent, client: client, stopped: make(chan struct{}), sent: sfcp.NodeShellFlow{}, received: sfcp.NodeShellFlow{}}
 	if err := stream.SetDeadline(time.Time{}); err != nil {
 		cancel()
 		return nil, err
@@ -45,8 +45,8 @@ func newNodeShellChannel(ctx context.Context, conn *mydcp.Session, stream mydcp.
 }
 
 func (c *NodeShellChannel) Context() context.Context { return c.ctx }
-func (c *NodeShellChannel) Receive() (mydcp.NodeShellRecord, error) {
-	var zero mydcp.NodeShellRecord
+func (c *NodeShellChannel) Receive() (sfcp.NodeShellRecord, error) {
+	var zero sfcp.NodeShellRecord
 	if c.receiveStopped.Load() {
 		return zero, context.Canceled
 	}
@@ -59,11 +59,11 @@ func (c *NodeShellChannel) Receive() (mydcp.NodeShellRecord, error) {
 	if c.receiveStopped.Load() {
 		_ = c.stream.SetReadDeadline(time.Now())
 	}
-	r, err := mydcp.ReadNodeShellRecord(c.stream, c.request, c.intent)
+	r, err := sfcp.ReadNodeShellRecord(c.stream, c.request, c.intent)
 	if err != nil {
 		return zero, err
 	}
-	if err = c.conn.Admit(mydcp.Frame{Purpose: mydcp.NodeShell, Kind: 5}, mydcp.NodeShell, false); err != nil {
+	if err = c.conn.Admit(sfcp.Frame{Purpose: sfcp.NodeShell, Kind: 5}, sfcp.NodeShell, false); err != nil {
 		return zero, err
 	}
 	next, err := c.received.Accept(r, !c.client)
@@ -73,7 +73,7 @@ func (c *NodeShellChannel) Receive() (mydcp.NodeShellRecord, error) {
 	c.received = next
 	return r, nil
 }
-func (c *NodeShellChannel) Send(r mydcp.NodeShellRecord) error {
+func (c *NodeShellChannel) Send(r sfcp.NodeShellRecord) error {
 	c.sendMu.Lock()
 	defer c.sendMu.Unlock()
 	if err := c.ctx.Err(); err != nil {
@@ -88,7 +88,7 @@ func (c *NodeShellChannel) Send(r mydcp.NodeShellRecord) error {
 		c.cancel()
 		return err
 	}
-	if err = mydcp.WriteNodeShellRecord(c.stream, c.request, c.intent, r); err != nil {
+	if err = sfcp.WriteNodeShellRecord(c.stream, c.request, c.intent, r); err != nil {
 		// A partial frame cannot be followed by a fresh frame/sequence on
 		// the same byte stream. Close this I/O lifetime; status uses its
 		// separate original-ID request and never retries this send.

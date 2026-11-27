@@ -12,16 +12,16 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/config"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/schema"
-	"github.com/jay94ks/mydcd/internal/userauth"
-	"github.com/jay94ks/mydcd/internal/workload/volumes"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/config"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/userauth"
+	"github.com/jay94ks/seafield/internal/workload/volumes"
 	"github.com/moby/moby/client"
 )
 
@@ -32,19 +32,19 @@ func TestRQ9RealDelegatedVolumeFilesCLIAndOriginalPublicationResume(t *testing.T
 // volumeFileGrantReadHook observes the original committed folder grant state
 // using independent API requesters, without opening either CLI wallet/journal.
 // granted is true immediately after grant and false immediately after revoke.
-type volumeFileGrantReadHook func(t *testing.T, ctx context.Context, admin, delegated userauth.Client, peer mydcp.Peer, adminSession, delegatedSession access.Session, granted bool)
+type volumeFileGrantReadHook func(t *testing.T, ctx context.Context, admin, delegated userauth.Client, peer sfcp.Peer, adminSession, delegatedSession access.Session, granted bool)
 
 // This hook runs after the original managed app's real retirement. Its retained
 // Volume, native manager, rollback, User/Raft and CLI wallet are the existing
 // fixture's resources. No stand-in writer or replacement Volume is registered.
-func verifyVolumeFilesUserNative(t *testing.T, ctx context.Context, owner **Runtime, cfg config.Node, root string, admin userauth.Client, peer mydcp.Peer, session access.Session, p control.Policy, read func() cluster.View, change func(string, string, uint64, any), wait func(string, func() bool), grantRead volumeFileGrantReadHook) {
+func verifyVolumeFilesUserNative(t *testing.T, ctx context.Context, owner **Runtime, cfg config.Node, root string, admin userauth.Client, peer sfcp.Peer, session access.Session, p control.Policy, read func() cluster.View, change func(string, string, uint64, any), wait func(string, func() bool), grantRead volumeFileGrantReadHook) {
 	t.Helper()
 	catalog, err := p.Catalog(read().State)
 	if err != nil {
 		t.Fatal(err)
 	}
 	tenant, _ := catalog.Tenant("tenant")
-	change("rq9-restore-file-node", "set-nodes", tenant.Revision, control.NodeAssignment{Tenant: "tenant", Nodes: []string{"node-a"}})
+	change("rq9-restore-file-node", "set-nodes", tenant.Revision, control.NodeChangeTo("tenant", tenant.AllowedNodes, []string{"node-a"}))
 	book, err := p.Volumes(read().State)
 	if err != nil {
 		t.Fatal(err)
@@ -61,7 +61,7 @@ func verifyVolumeFilesUserNative(t *testing.T, ctx context.Context, owner **Runt
 	if err != nil {
 		t.Fatal(err)
 	}
-	base := &fixedAppNativeFixture{home: filepath.Join(root, "cli-home"), profile: filepath.Join(root, "cli.yaml"), binary: os.Getenv("MYDC_TEST_CLI")}
+	base := &fixedAppNativeFixture{home: filepath.Join(root, "cli-home"), profile: filepath.Join(root, "cli.yaml"), binary: os.Getenv("SFC_TEST_CLI")}
 	adminCLI := func(want int, args ...string) map[string]json.RawMessage {
 		return base.cli(t, ctx, want, append([]string{"--tenant", "tenant"}, args...)...)
 	}
@@ -78,7 +78,7 @@ func verifyVolumeFilesUserNative(t *testing.T, ctx context.Context, owner **Runt
 		t.Fatal(err)
 	}
 	before, _ := catalog.User(bot.ID)
-	adminCLI(0, "volume", "files", "grant", "app/data", "mydc-web-backups/", bot.ID, "--id", "folder-grant")
+	adminCLI(0, "volume", "files", "grant", "app/data", "sfc-web-backups/", bot.ID, "--id", "folder-grant")
 	// Use a separate authenticated requester; never open the running CLI's
 	// wallet/journal for public reads or original-publication recovery.
 	requester, err := identity.Create(filepath.Join(root, "file-recovery-requester"))
@@ -86,7 +86,7 @@ func verifyVolumeFilesUserNative(t *testing.T, ctx context.Context, owner **Runt
 		t.Fatal(err)
 	}
 	defer clear(requester.Private)
-	transport, err := mydcp.NewTransport(requester, admin.Cluster, func(key mydcp.Identity) (mydcp.Peer, bool) { return peer, key == peer.Key })
+	transport, err := sfcp.NewTransport(requester, admin.Cluster, func(key sfcp.Identity) (sfcp.Peer, bool) { return peer, key == peer.Key })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,38 +113,38 @@ func verifyVolumeFilesUserNative(t *testing.T, ctx context.Context, owner **Runt
 	if err = os.WriteFile(input, body, 0600); err != nil {
 		t.Fatal(err)
 	}
-	call(0, "volume", "files", "put", "app/data", input, "mydc-web-backups/snapshot.bin", "--max-size", "131072", "--id", "delegated-put")
-	listed := call(0, "volume", "files", "ls", "app/data", "mydc-web-backups/", "--id", "delegated-list")
+	call(0, "volume", "files", "put", "app/data", input, "sfc-web-backups/snapshot.bin", "--max-size", "131072", "--id", "delegated-put")
+	listed := call(0, "volume", "files", "ls", "app/data", "sfc-web-backups/", "--id", "delegated-list")
 	var entries []volumes.FileEntry
-	if json.Unmarshal(listed["Entries"], &entries) != nil || len(entries) != 1 || entries[0].Path != "mydc-web-backups/snapshot.bin" {
+	if json.Unmarshal(listed["Entries"], &entries) != nil || len(entries) != 1 || entries[0].Path != "sfc-web-backups/snapshot.bin" {
 		t.Fatal("actual delegated folder page", string(listed["Entries"]))
 	}
 	output := filepath.Join(root, "file-output.bin")
-	call(0, "volume", "files", "get", "app/data", "mydc-web-backups/snapshot.bin", output, "--max-size", "131072", "--id", "delegated-get")
+	call(0, "volume", "files", "get", "app/data", "sfc-web-backups/snapshot.bin", output, "--max-size", "131072", "--id", "delegated-get")
 	got, err := os.ReadFile(output)
 	if err != nil || !bytes.Equal(got, body) {
 		t.Fatal("actual CLI digest/EOF output publication", err)
 	}
 	call(-1, "volume", "files", "put", "app/data", input, "outside/no.bin", "--max-size", "131072", "--id", "deny-prefix")
-	call(-1, "volume", "files", "put", "app/foreign", input, "mydc-web-backups/no.bin", "--max-size", "131072", "--id", "deny-volume")
-	call(2, "volume", "files", "put", "app/data", input, "mydc-web-backups/../escape", "--max-size", "131072", "--id", "deny-traversal")
+	call(-1, "volume", "files", "put", "app/foreign", input, "sfc-web-backups/no.bin", "--max-size", "131072", "--id", "deny-volume")
+	call(2, "volume", "files", "put", "app/data", input, "sfc-web-backups/../escape", "--max-size", "131072", "--id", "deny-traversal")
 	outside := filepath.Join(root, "file-outside")
 	if err = os.Mkdir(outside, 0700); err != nil {
 		t.Fatal(err)
 	}
-	link := filepath.Join(mount.Volume.Mountpoint, "mydc-web-backups", "link")
+	link := filepath.Join(mount.Volume.Mountpoint, "sfc-web-backups", "link")
 	if err = os.Symlink(outside, link); err != nil {
 		t.Fatal(err)
 	}
-	call(-1, "volume", "files", "put", "app/data", input, "mydc-web-backups/link/escape", "--max-size", "131072", "--id", "deny-symlink")
+	call(-1, "volume", "files", "put", "app/data", input, "sfc-web-backups/link/escape", "--max-size", "131072", "--id", "deny-symlink")
 	if _, err = os.Stat(filepath.Join(outside, "escape")); !os.IsNotExist(err) {
 		t.Fatal("purpose18 followed native symlink", err)
 	}
 	if err = os.Remove(link); err != nil {
 		t.Fatal(err)
 	}
-	call(0, "volume", "files", "rm", "app/data", "mydc-web-backups/snapshot.bin", "--id", "delegated-delete")
-	if _, err = os.Stat(filepath.Join(mount.Volume.Mountpoint, "mydc-web-backups", "snapshot.bin")); !os.IsNotExist(err) {
+	call(0, "volume", "files", "rm", "app/data", "sfc-web-backups/snapshot.bin", "--id", "delegated-delete")
+	if _, err = os.Stat(filepath.Join(mount.Volume.Mountpoint, "sfc-web-backups", "snapshot.bin")); !os.IsNotExist(err) {
 		t.Fatal("actual delegated delete", err)
 	}
 
@@ -156,7 +156,7 @@ func verifyVolumeFilesUserNative(t *testing.T, ctx context.Context, owner **Runt
 
 	// Only the original operation is accepted before the explicit native
 	// post-rename/pre-completion cut, using a separate private journal.
-	q := control.VolumeFileQuery{App: "app", Volume: "data", Path: "mydc-web-backups/original.bin", Method: "volume-file-put", Size: int64(len(body)), MaxBytes: 131072, Digest: sha256.Sum256(body)}
+	q := control.VolumeFileQuery{App: "app", Volume: "data", Path: "sfc-web-backups/original.bin", Method: "volume-file-put", Size: int64(len(body)), MaxBytes: 131072, Digest: sha256.Sum256(body)}
 	plan, err := delegated.VolumeFilePlan(ctx, peer, grant, "tenant", q)
 	if err != nil {
 		t.Fatal(err)
@@ -301,11 +301,11 @@ func verifyVolumeFilesUserNative(t *testing.T, ctx context.Context, owner **Runt
 		return e == nil && !held
 	})
 	call(0, "volume", "files", "rm", "app/data", job.Request.Path, "--id", "delete-recovered")
-	adminCLI(0, "volume", "files", "revoke", "app/data", "mydc-web-backups/", bot.ID, "--id", "folder-revoke")
+	adminCLI(0, "volume", "files", "revoke", "app/data", "sfc-web-backups/", bot.ID, "--id", "folder-revoke")
 	if grantRead != nil {
 		grantRead(t, ctx, admin, delegated, peer, session, grant, false)
 	}
-	call(-1, "volume", "files", "ls", "app/data", "mydc-web-backups/", "--id", "deny-revoked")
+	call(-1, "volume", "files", "ls", "app/data", "sfc-web-backups/", "--id", "deny-revoked")
 	catalog, err = p.Catalog(read().State)
 	if err != nil {
 		t.Fatal(err)

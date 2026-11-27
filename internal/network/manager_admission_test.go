@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/reconcile"
 )
 
 // Fake native facts ONLY. Actual DB and the same product Manager.borrow core;

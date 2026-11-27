@@ -8,9 +8,9 @@ import (
 	"slices"
 	"strconv"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/lifecycle"
-	"github.com/jay94ks/mydcd/internal/secrets"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/lifecycle"
+	"github.com/jay94ks/seafield/internal/secrets"
 )
 
 // Inputs resolves metadata aliases to the same D2 consumer recipe. generation
@@ -41,11 +41,11 @@ func (b Blueprint) inputMetadata(service string, requester [32]byte) (Needs, err
 			break
 		}
 	}
-	n := Needs{Use: secrets.Use{Tenant: b.d.Tenant, User: b.d.Actor, App: b.d.App, Deployment: b.d.Deployment, Service: logical, Node: s.MyDC.Node, NodeKey: owner, RequesterKey: requester}}
-	n.ResourceKeys = lifecycle.OwnIdentityTransitions(b.d.Nodes[s.MyDC.Node].ResourceKeys)
+	n := Needs{Use: secrets.Use{Tenant: b.d.Tenant, User: b.d.Actor, App: b.d.App, Deployment: b.d.Deployment, Service: logical, Node: s.Sfc.Node, NodeKey: owner, RequesterKey: requester}}
+	n.ResourceKeys = lifecycle.OwnIdentityTransitions(b.d.Nodes[s.Sfc.Node].ResourceKeys)
 	n.RegistrySources = slices.Clone(b.d.RegistrySources[logical])
-	if s.MyDC.Instance != nil {
-		instance := *s.MyDC.Instance
+	if s.Sfc.Instance != nil {
+		instance := *s.Sfc.Instance
 		n.Instance = &instance
 	}
 	if b.d.Checkers != nil {
@@ -59,7 +59,7 @@ func (b Blueprint) inputMetadata(service string, requester [32]byte) (Needs, err
 		}
 		n.Lifecycle = selection
 	}
-	for _, selector := range s.MyDC.Sources {
+	for _, selector := range s.Sfc.Sources {
 		realm := b.d.Tenant
 		id := selector.Secret
 		if selector.Group != "" {
@@ -67,7 +67,7 @@ func (b Blueprint) inputMetadata(service string, requester [32]byte) (Needs, err
 		}
 		if selector.Scope == "cluster" {
 			realm = ""
-		} else if v := b.d.Input.MyDC.Vault; v != nil {
+		} else if v := b.d.Input.Sfc.Vault; v != nil {
 			if selector.Secret != "" {
 				if o, ok := v.Tree.Secrets[id]; ok {
 					id = o.ID
@@ -82,7 +82,7 @@ func (b Blueprint) inputMetadata(service string, requester [32]byte) (Needs, err
 	}
 	for _, mount := range s.Secrets {
 		def := b.d.Input.Secrets[mount.Source]
-		if len(s.MyDC.Sources) == 0 {
+		if len(s.Sfc.Sources) == 0 {
 			if def.File == "" && !def.External {
 				return Needs{}, inputError("SECRET_SOURCES_REQUIRED", service)
 			}
@@ -98,12 +98,12 @@ func (b Blueprint) inputMetadata(service string, requester [32]byte) (Needs, err
 		uid, _ := strconv.ParseUint(mount.UID, 10, 32)
 		gid, _ := strconv.ParseUint(mount.GID, 10, 32)
 		mode, _ := strconv.ParseUint(mount.Mode, 8, 32)
-		n.Files = append(n.Files, Projection{Key: def.MyDC.Key, Target: mount.Target, UID: uint32(uid), GID: uint32(gid), Mode: uint32(mode)})
+		n.Files = append(n.Files, Projection{Key: def.Sfc.Key, Target: mount.Target, UID: uint32(uid), GID: uint32(gid), Mode: uint32(mode)})
 	}
 
-	for _, env := range s.MyDC.SecretEnv {
+	for _, env := range s.Sfc.SecretEnv {
 		def := b.d.Input.Secrets[env.Source]
-		if len(s.MyDC.Sources) == 0 {
+		if len(s.Sfc.Sources) == 0 {
 			if def.File == "" && !def.External {
 				return Needs{}, inputError("SECRET_SOURCES_REQUIRED", service)
 			}
@@ -116,7 +116,7 @@ func (b Blueprint) inputMetadata(service string, requester [32]byte) (Needs, err
 				n.Sources = append(n.Sources, source)
 			}
 		}
-		n.Files = append(n.Files, Projection{Key: def.MyDC.Key, Target: env.Name, Mode: 0400, Kind: "env"})
+		n.Files = append(n.Files, Projection{Key: def.Sfc.Key, Target: env.Name, Mode: 0400, Kind: "env"})
 	}
 	for _, mount := range s.Volumes {
 		key := b.volumeKey(mount.Source)
@@ -183,7 +183,7 @@ func DecodeBlueprint(raw []byte) (Blueprint, error) {
 		return Blueprint{}, ErrInputs
 	}
 	var d blueprintRecord
-	if json.Unmarshal(raw, &d) != nil || d.Schema != 1 || d.Cluster == ([32]byte{}) || !identifier(d.Actor) || !identifier(d.Tenant) || !identifier(d.App) || !identifier(d.Deployment) || d.Input.Name != d.App || d.Input.MyDC.Tenant != d.Tenant || d.Input.MyDC.Deployment != d.Deployment || d.Input.validate() != nil || len(d.Steps) == 0 && !d.Input.allowEmpty() || len(d.Steps) > 1024 {
+	if json.Unmarshal(raw, &d) != nil || d.Schema != 1 || d.Cluster == ([32]byte{}) || !identifier(d.Actor) || !identifier(d.Tenant) || !identifier(d.App) || !identifier(d.Deployment) || d.Input.Name != d.App || d.Input.Sfc.Tenant != d.Tenant || d.Input.Sfc.Deployment != d.Deployment || d.Input.validate() != nil || len(d.Steps) == 0 && !d.Input.allowEmpty() || len(d.Steps) > 1024 {
 		return Blueprint{}, ErrInputs
 	}
 	if d.Input.Standalone != (d.InputKind == "standalone") {
@@ -192,7 +192,7 @@ func DecodeBlueprint(raw []byte) (Blueprint, error) {
 	if d.InputKind != "" && d.InputKind != "app" && d.InputKind != "standalone" || (d.InputKind == "app" || d.InputKind == "standalone") && d.Input.validateApp(d.InputKind == "standalone") != nil {
 		return Blueprint{}, ErrInputs
 	}
-	if d.DefaultNode != "" && (!identifier(d.DefaultNode) || d.InputKind != "app" || d.Input.MyDC.Delivery == nil || !d.Input.MyDC.Delivery.Enabled) {
+	if d.DefaultNode != "" && (!identifier(d.DefaultNode) || d.InputKind != "app" || d.Input.Sfc.Delivery == nil || !d.Input.Sfc.Delivery.Enabled) {
 		return Blueprint{}, ErrInputs
 	}
 	if !validCheckerPlan(d) || !validPlanTaskMetadata(d) || !validBlueprintDocument(Blueprint{d}) {

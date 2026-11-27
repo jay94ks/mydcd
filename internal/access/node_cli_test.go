@@ -106,7 +106,7 @@ func TestNodeCLIPreservesAnIndependentAdministratorKey(t *testing.T) {
 	u, _ := c.User("admin")
 	u.Credentials = []Credential{{ID: "password", Method: Password, VerifierRef: "backend", Enabled: true}}
 	u.Revision = 0
-	if _, err = c.PutUser("admin", c.users["admin"].Revision, u); err != ErrDenied {
+	if _, err = c.replaceUser(c.users["admin"].Revision, u); err != ErrDenied {
 		t.Fatal("last independent administrator key was removed", err)
 	}
 	if c.WithNodeKeys([][32]byte{c.users["admin"].Credentials[0].PublicKey}).ValidateNodeCLI() == nil {

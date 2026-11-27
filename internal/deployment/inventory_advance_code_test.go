@@ -21,7 +21,7 @@ func TestAdvanceNamesItsRefusal(t *testing.T) {
 	}
 }
 
-// An unchanged fact is renewed over MyDCP, so its stored At ages while it
+// An unchanged fact is renewed over SFCP, so its stored At ages while it
 // stays live. Finishing long after it, with no Expired marker, must still
 // produce an execution that the inventory accepts.
 func TestFinishAcceptsALiveObservationOlderThanMaxAge(t *testing.T) {

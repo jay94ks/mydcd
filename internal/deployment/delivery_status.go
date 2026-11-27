@@ -6,7 +6,7 @@ import (
 	"bytes"
 	"encoding/json"
 
-	"github.com/jay94ks/mydcd/internal/access"
+	"github.com/jay94ks/seafield/internal/access"
 )
 
 type DeliveryStatus struct {

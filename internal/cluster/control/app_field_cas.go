@@ -8,8 +8,8 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/deployment"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/deployment"
 )
 
 // Only the intended field's authority/goal/lifetime belongs to this CAS. Fresh
@@ -103,7 +103,7 @@ func appFieldTarget(s state.State, apps Apps, entry appEntry, path []string) [32
 	if err != nil {
 		return [32]byte{}
 	}
-	return sha256.Sum256(append([]byte("mydc-app-field-target-1\x00"), raw...))
+	return sha256.Sum256(append([]byte("sfc-app-field-target-1\x00"), raw...))
 }
 
 type appFieldReplica struct {

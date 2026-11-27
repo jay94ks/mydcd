@@ -6,10 +6,10 @@ import (
 	"context"
 	"encoding/json"
 
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/schema"
-	"github.com/jay94ks/mydcd/internal/workload/volumes"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/workload/volumes"
 )
 
 func (r *Runtime) volumeUsagePermit(ctx context.Context, ready volumes.NativeReady) error {
@@ -23,14 +23,14 @@ func (r *Runtime) volumeUsagePermit(ctx context.Context, ready volumes.NativeRea
 	}
 	index, err := schema.Decode[uint64](reply.Data)
 	if err != nil || index == 0 || reply.Local || reply.RaftIndex == 0 || reply.CommandIndex < index {
-		return mydcp.ErrAdmission
+		return sfcp.ErrAdmission
 	}
 	return nil
 }
 
 func (r *Runtime) observeVolumeUsage(ctx context.Context, ready volumes.NativeReady) (volumes.Usage, error) {
 	if ready.Verify() != nil || ready.Owner.Key != r.Identity.Public || !r.volumeUsageMu.TryLock() {
-		return volumes.Usage{}, mydcp.ErrAdmission
+		return volumes.Usage{}, sfcp.ErrAdmission
 	}
 	defer r.volumeUsageMu.Unlock()
 	ctx, cancel := context.WithCancel(ctx)
@@ -43,14 +43,14 @@ func (r *Runtime) observeVolumeUsage(ctx context.Context, ready volumes.NativeRe
 	r.life.RLock()
 	if r.closed || r.nativeVolumes == nil {
 		r.life.RUnlock()
-		return volumes.Usage{}, mydcp.ErrAdmission
+		return volumes.Usage{}, sfcp.ErrAdmission
 	}
 	// Node work ceiling, not a caller-controlled disk quota. One scan at a
 	// time with finite entries/depth bounds directory memory and native work.
 	value, err := r.nativeVolumes.Usage(ctx, volumes.NativeKey(ready.Spec), volumes.UsageLimits{Entries: 100_000, Depth: 64})
 	r.life.RUnlock()
 	if err != nil || !value.Matches(ready) {
-		return volumes.Usage{}, mydcp.ErrAdmission
+		return volumes.Usage{}, sfcp.ErrAdmission
 	}
 	if err = r.volumeUsagePermit(ctx, ready); err != nil {
 		return volumes.Usage{}, err
@@ -64,7 +64,7 @@ func (r *Runtime) volumeUsage(ctx context.Context, ready volumes.NativeReady) (v
 	}
 	peer, ok := r.resourcePeer(ctx, ready.Owner.Node, ready.Owner.Key)
 	if !ok || !peer.Member || peer.ID != ready.Owner.Node {
-		return volumes.Usage{}, mydcp.ErrAdmission
+		return volumes.Usage{}, sfcp.ErrAdmission
 	}
 	body, err := json.Marshal(ready)
 	if err != nil {
@@ -76,7 +76,7 @@ func (r *Runtime) volumeUsage(ctx context.Context, ready volumes.NativeReady) (v
 	}
 	value, err := schema.Decode[volumes.Usage](reply.Data)
 	if err != nil || !value.Matches(ready) {
-		return volumes.Usage{}, mydcp.ErrAdmission
+		return volumes.Usage{}, sfcp.ErrAdmission
 	}
 	return value, nil
 }

@@ -16,7 +16,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/reconcile"
 	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
 )
@@ -51,7 +51,7 @@ func TestTunnelSpecRejectsImplicitAndConflictingRoutes(t *testing.T) {
 }
 
 func TestRealBoundaryTunnelKernelJournal(t *testing.T) {
-	host := os.Getenv("MYDC_KERNEL_HOST_NETNS")
+	host := os.Getenv("SFC_KERNEL_HOST_NETNS")
 	if host == "" {
 		t.Skip("requires the documented isolated network namespace and rollback plan")
 	}
@@ -59,7 +59,7 @@ func TestRealBoundaryTunnelKernelJournal(t *testing.T) {
 	if err != nil || host == current || os.Geteuid() != 0 {
 		t.Fatal("refusing kernel mutation outside isolated privileged namespace", host, current, err)
 	}
-	owner := os.Getenv("MYDC_KERNEL_TEST_OWNER")
+	owner := os.Getenv("SFC_KERNEL_TEST_OWNER")
 	if owner == "" {
 		t.Fatal("explicit test owner required")
 	}
@@ -154,7 +154,7 @@ func TestRealBoundaryTunnelKernelJournal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	tunnelMYDCPRoundTrip(t, ctx, lease.IO, spec)
+	tunnelSFCPRoundTrip(t, ctx, lease.IO, spec)
 	dependency, err := m.BorrowDependency(ctx, key, "ingress/original", 1)
 	if err != nil {
 		t.Fatal(err)

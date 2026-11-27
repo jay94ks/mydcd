@@ -12,9 +12,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/network/services"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/network/services"
 )
 
 // Replace only the declared, not-yet-dispatched input of the existing fixture.
@@ -256,11 +256,11 @@ func TestStandaloneManagedDNSExplicitAliasesAndCurrentPolicyRemainAuthoritative(
 				want = "debug"
 			}
 			if err != nil || len(rows) != 1 || !slices.ContainsFunc(rows[0].Config.Names, func(n services.DNSName) bool {
-				return n.Name == want+".apps.mydc.test." && n.Endpoint == task+"/lan/0" && n.Generation == ref.Generation
+				return n.Name == want+".apps.sfc.test." && n.Endpoint == task+"/lan/0" && n.Generation == ref.Generation
 			}) {
 				t.Fatal("default/explicit alias did not use exact current Task publication", err)
 			}
-			if aliases != "" && slices.ContainsFunc(rows[0].Config.Names, func(n services.DNSName) bool { return n.Name == "debug.apps.mydc.test." }) {
+			if aliases != "" && slices.ContainsFunc(rows[0].Config.Names, func(n services.DNSName) bool { return n.Name == "debug.apps.sfc.test." }) {
 				t.Fatal("default alias overrode explicit aliases")
 			}
 			sources, _ := f.p.ManagedDNS(f.s)

@@ -6,8 +6,9 @@ import (
 	"bytes"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/imagebuild"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/imagebuild"
 )
 
 // Actual accepted signatures/FSM/checkpoint; native publication is exercised
@@ -33,12 +34,7 @@ func TestOriginalBuildPublicationReadSurvivesExpiryPolicyRevocationAndCancel(t *
 				policy.Spec.Seconds++
 				f.apply("manager", "set-image-build-policy", policy.Revision, ImageBuildPolicyPut{Spec: policy.Spec}, state.Applied)
 			case "user":
-				catalog, _ := f.p.Catalog(f.s)
-				user, _ := catalog.User("manager")
-				expected := user.Revision
-				user.Revision = 0
-				user.Enabled = false
-				f.apply("admin", "put-user", expected, user, state.Applied)
+				f.changeAccount("manager", func(u *access.User) { u.Enabled = false })
 			case "cancel":
 				f.apply("manager", "cancel-image-build", 2, ImageBuildJobSelection{Tenant: "tenant", ID: plan.Spec.ID}, state.Applied)
 			}

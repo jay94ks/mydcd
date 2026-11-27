@@ -109,8 +109,8 @@ func shellQuote(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
 }
 
-func (a *Adapter) Open(ctx context.Context, cols, rows uint16, mydcUser string) (*Session, error) {
-	if cols == 0 || rows == 0 || !shellUser(mydcUser) || ctx.Err() != nil {
+func (a *Adapter) Open(ctx context.Context, cols, rows uint16, sfcUser string) (*Session, error) {
+	if cols == 0 || rows == 0 || !shellUser(sfcUser) || ctx.Err() != nil {
 		return nil, ErrSession
 	}
 	a.mu.Lock()
@@ -152,7 +152,7 @@ func (a *Adapter) Open(ctx context.Context, cols, rows uint16, mydcUser string) 
 		// SSH Setenv depends on the operator's AcceptEnv configuration and
 		// may silently fail to provide attribution. A fixed command exports a
 		// single safely quoted value before the dedicated account's shell.
-		err = channel.Start("export MYDC_USER=" + shellQuote(mydcUser) + "; exec /bin/sh -l")
+		err = channel.Start("export SFC_USER=" + shellQuote(sfcUser) + "; exec /bin/sh -l")
 	}
 	if err != nil {
 		_ = session.Close()

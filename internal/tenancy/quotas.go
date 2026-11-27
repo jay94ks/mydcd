@@ -6,12 +6,13 @@ import (
 	"bytes"
 	"crypto/ed25519"
 	"encoding/json"
+	"maps"
 	"slices"
 	"strconv"
 	"strings"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/workload"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/workload"
 )
 
 // NodeLimit is committed policy. Empty Tenant means the whole node; each
@@ -30,6 +31,40 @@ type NodeLimit struct {
 	MaxIngressRequests    int `json:",omitempty"`
 	MaxIngressConnections int `json:",omitempty"`
 	IngressBufferBytes    int `json:",omitempty"`
+	// Default: no administrator set a node-wide limit for this server, so
+	// it may use everything it has (Jay 2026-11-27): nothing sfcli counts
+	// caps its CPU or memory (RAM and swap alike). It is not stored; every
+	// server reads the same one from the membership (WithServerDefaults).
+	// An administrator's `node quota set` replaces it.
+	Default bool `json:",omitempty"`
+	// Swap is the part of Capacity.Memory that is swap, not RAM: the
+	// server lets workloads reserve RAM plus this much swap (Jay
+	// 2026-11-27: a 16G swap partition, of which sfcli uses 8G). Only
+	// node-wide limits have it.
+	Swap uint64 `json:",omitempty"`
+}
+
+// NewNodeLimit holds the values a new node-wide limit starts with for what
+// is not given: the other limits of an administrator's first set, and those
+// of a server's default limit.
+var NewNodeLimit = NodeLimit{
+	Networks: 16, MaxConsumers: 64,
+	PacketQueuePackets: 256, PacketQueueBytes: 512 << 10,
+	MaxIngressInstances: 4, MaxIngressListeners: 16, MaxIngressRequests: 64,
+	MaxIngressConnections: 256, IngressBufferBytes: 1 << 20,
+}
+
+// DefaultCapacity is a default limit's capacity: more than any server has,
+// so only the server itself bounds what runs on it. Sums of reservations
+// stay far from overflow.
+var DefaultCapacity = workload.Resources{CPU: 1 << 53, Memory: 1 << 62}
+
+// DefaultNodeLimit is the node-wide limit of a server no administrator gave
+// one: everything it has (DefaultCapacity), the rest is NewNodeLimit.
+func DefaultNodeLimit(node string, owner [32]byte) NodeLimit {
+	v := NewNodeLimit
+	v.Node, v.Owner, v.Capacity, v.Default = node, owner, DefaultCapacity, true
+	return v
 }
 
 // Packet limits bound each owned TUN; the committed Networks limit bounds
@@ -64,7 +99,7 @@ type ReservationClosure struct {
 func ReservationClosureBytes(p ReservationClosure) []byte {
 	p.Signature = nil
 	raw, _ := json.Marshal(p)
-	return append([]byte("mydc-resource-budget-closure-1\x00"), raw...)
+	return append([]byte("sfc-resource-budget-closure-1\x00"), raw...)
 }
 
 type Quotas struct {
@@ -74,6 +109,10 @@ type Quotas struct {
 	revision       uint64
 	limits         map[string]NodeLimit
 	reservations   map[string]Reservation
+	// servers are the cluster's full members and their current keys
+	// (WithServerDefaults): one with no node-wide limit has its default
+	// one. They come from the membership, never from the stored record.
+	servers map[string][32]byte
 }
 
 func NewQuotas(cluster [32]byte) (Quotas, error) {
@@ -87,10 +126,37 @@ func (q Quotas) Revision() uint64         { return q.revision }
 func (q Quotas) Cluster() [32]byte        { return q.cluster }
 func (q Quotas) Limit(tenant, node string) (NodeLimit, bool) {
 	v, ok := q.limits[quotaKey(tenant, node)]
+	if !ok && tenant == "" {
+		if owner, member := q.servers[node]; member {
+			return DefaultNodeLimit(node, owner), true
+		}
+	}
 	return v, ok
 }
+
+// WithServerDefaults gives every server in owners (node -> its current key)
+// that has no node-wide limit its default one (DefaultNodeLimit).
+func (q Quotas) WithServerDefaults(owners map[string][32]byte) Quotas {
+	q.servers = maps.Clone(owners)
+	return q
+}
 func (q Quotas) Reservation(id string) (Reservation, bool) { v, ok := q.reservations[id]; return v, ok }
+
+// Limits are the stored limits and the servers' default ones.
 func (q Quotas) Limits() []NodeLimit {
+	out := q.storedLimits()
+	for node, owner := range q.servers {
+		if _, stored := q.limits[quotaKey("", node)]; !stored {
+			out = append(out, DefaultNodeLimit(node, owner))
+		}
+	}
+	slices.SortFunc(out, func(a, b NodeLimit) int {
+		return strings.Compare(quotaKey(a.Tenant, a.Node), quotaKey(b.Tenant, b.Node))
+	})
+	return out
+}
+
+func (q Quotas) storedLimits() []NodeLimit {
 	var out []NodeLimit
 	for _, v := range q.limits {
 		out = append(out, v)
@@ -129,6 +195,7 @@ func (q Quotas) clone() (Quotas, error) {
 		return q, ErrPolicy
 	}
 	n, _ := NewQuotas(q.cluster)
+	n.servers = q.servers
 	n.revision = q.revision + 1
 	n.ownerRotations = q.OwnerRotations()
 	for key, row := range q.ownerKeys {
@@ -176,6 +243,15 @@ func (q Quotas) Set(c access.Catalog, actor string, expected uint64, v NodeLimit
 	if !c.SystemAllowed(actor) {
 		return q, access.ErrDenied
 	}
+	// An administrator's limit is never a default one.
+	v.Default = false
+	return q.set(c, expected, v, networks)
+}
+
+func (q Quotas) set(c access.Catalog, expected uint64, v NodeLimit, networks Networks) (Quotas, error) {
+	if v.Swap > v.Capacity.Memory || v.Tenant != "" && v.Swap != 0 {
+		return q, ErrPolicy
+	}
 	if networks.cluster != q.cluster || !validID(v.Node) || v.Tenant != "" && !validID(v.Tenant) || v.Owner == ([32]byte{}) || v.Revision != 0 || v.Networks > maxNetworks || v.MaxConsumers < 0 || v.MaxConsumers > 65536 || !validPacketLimit(v) || !validIngressLimit(v) {
 		return q, ErrPolicy
 	}
@@ -186,6 +262,8 @@ func (q Quotas) Set(c access.Catalog, actor string, expected uint64, v NodeLimit
 		}
 	}
 	old, exists := q.Limit(v.Tenant, v.Node)
+	// A default limit has revision 0: the first administrator limit over it
+	// says 0 ("none yet"), as for a server with none.
 	if old.Revision != expected || !exists && len(q.limits) >= 8192 {
 		return q, access.ErrConflict
 	}
@@ -378,7 +456,7 @@ func (q Quotas) Encode() ([]byte, error) {
 		}
 		for _, scope := range []string{"", v.Tenant} {
 			key := quotaKey(scope, v.Node)
-			limit, ok := q.limits[key]
+			limit, ok := q.Limit(scope, v.Node)
 			sum := totals[key]
 			if !ok || !q.SameOwner(v.Node, limit.Owner, v.Owner) || v.Need.CPU > ^uint64(0)-sum.CPU || v.Need.Memory > ^uint64(0)-sum.Memory {
 				return nil, ErrPolicy
@@ -389,7 +467,7 @@ func (q Quotas) Encode() ([]byte, error) {
 		}
 	}
 	for k, v := range q.limits {
-		if k != quotaKey(v.Tenant, v.Node) || !validID(v.Node) || v.Tenant != "" && !validID(v.Tenant) || v.Owner == ([32]byte{}) || v.Revision == 0 || v.Revision > q.revision || v.Networks > maxNetworks || v.MaxConsumers < 0 || v.MaxConsumers > 65536 || !validPacketLimit(v) || !validIngressLimit(v) {
+		if k != quotaKey(v.Tenant, v.Node) || v.Default || !validID(v.Node) || v.Tenant != "" && !validID(v.Tenant) || v.Owner == ([32]byte{}) || v.Revision == 0 || v.Revision > q.revision || v.Networks > maxNetworks || v.MaxConsumers < 0 || v.MaxConsumers > 65536 || !validPacketLimit(v) || !validIngressLimit(v) {
 			return nil, ErrPolicy
 		}
 		used := totals[k]
@@ -397,7 +475,7 @@ func (q Quotas) Encode() ([]byte, error) {
 			return nil, ErrPolicy
 		}
 	}
-	return json.Marshal(quotaSnapshot{1, q.cluster, q.revision, q.Limits(), q.Reservations(), q.OwnerRotations()})
+	return json.Marshal(quotaSnapshot{1, q.cluster, q.revision, q.storedLimits(), q.Reservations(), q.OwnerRotations()})
 }
 func DecodeQuotas(raw []byte) (Quotas, error) {
 	var s quotaSnapshot
@@ -445,7 +523,7 @@ func (q Quotas) ValidateNetworks(n Networks) error {
 	add := func(v Network) error {
 		for _, scope := range quotaScopes(v.Tenant) {
 			key := quotaKey(scope, v.Node)
-			limit, ok := q.limits[key]
+			limit, ok := q.Limit(scope, v.Node)
 			if !ok || !q.SameOwner(v.Node, limit.Owner, v.Owner) || counts[key] >= limit.Networks {
 				return ErrPolicy
 			}

@@ -9,9 +9,9 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/workload/volumes"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/workload/volumes"
 )
 
 func mapOriginalCapacity(t *testing.T, f *backupCoreFixture, bytes uint64) {
@@ -151,12 +151,12 @@ func TestVolumeOriginalBudgetIncludesUnpublishedAppGoals(t *testing.T) {
 	retained := true
 	goal := deployment.GoalCommand{Schema: 1, Cluster: f.p.Cluster, Tenant: "tenant", App: "app", Kind: "volume", Node: "node-a", Owner: [32]byte(f.node.Public().(ed25519.PublicKey))}
 	config := deployment.ComposeVolume{}
-	config.MyDC.Node = "node-a"
-	config.MyDC.Retain = &retained
-	config.MyDC.Quota = "observe"
+	config.Sfc.Node = "node-a"
+	config.Sfc.Retain = &retained
+	config.Sfc.Quota = "observe"
 	check := func(id string, bytes uint64, want state.Code) {
 		t.Helper()
-		config.MyDC.Capacity = deployment.VolumeSize(bytes)
+		config.Sfc.Capacity = deployment.VolumeSize(bytes)
 		goal.Config, _ = json.Marshal(config)
 		raw, _ := json.Marshal(goal)
 		next, result, err := state.ApplyChecked(f.s, f.s.Index()+1, state.Command{Actor: "anchor", Epoch: 1, RequestID: id, Key: key, Value: string(raw)}, f.p.Validate)
@@ -169,7 +169,7 @@ func TestVolumeOriginalBudgetIncludesUnpublishedAppGoals(t *testing.T) {
 	check("over-budget", 33, state.Invalid)
 	// Check the same ordinary projection directly with fixed Goal data. The
 	// full App claim/recipe admission has its own authority and is not bypassed.
-	config.MyDC.Capacity = 32
+	config.Sfc.Capacity = 32
 	goal.Config, _ = json.Marshal(config)
 	raw, _ := json.Marshal(goal)
 	candidate, result, err := state.ApplyChecked(f.s, f.s.Index()+1, state.Command{Actor: "anchor", Epoch: 1, RequestID: "goal-fixed-input", Key: key, Value: string(raw)}, nil)

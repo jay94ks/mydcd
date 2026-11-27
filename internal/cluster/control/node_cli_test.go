@@ -8,8 +8,8 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/state"
 )
 
 // Uses the product reducer/admission/snapshot; membership and time are modeled.
@@ -80,16 +80,13 @@ func TestNodeCLICommittedPolicyRejectsIssuerForgeryAndKeepsOriginalGrant(t *test
 
 func TestNodeCLIRejectsRegisteredNodeKeyAsUserApproval(t *testing.T) {
 	f := newNodeStorageFixture(t)
-	u, _ := f.users.User("admin")
 	nodeKey := [32]byte(f.node.Public().(ed25519.PublicKey))
-	u.Credentials = append(u.Credentials, access.Credential{ID: "installed-node-key", Method: access.PrivateKey, PublicKey: nodeKey, Enabled: true})
-	u.Revision = 0
-	f.apply("admin", "put-user", f.sessions["admin"].AccountRevision, u, state.Applied)
+	f.addKey("admin", "installed-node-key", nodeKey, nil)
 	c, err := f.p.Catalog(f.s)
 	if err != nil {
 		t.Fatal(err)
 	}
-	u, _ = c.User("admin")
+	u, _ := c.User("admin")
 	session := f.sessions["admin"]
 	session.AccountRevision = u.Revision
 	session.Signature = ed25519.Sign(f.node, access.SessionBytes(session))

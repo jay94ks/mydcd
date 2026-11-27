@@ -5,14 +5,15 @@ package userauth
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/schema"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/sfcp"
 )
 
 // Actual production framing/client/connection binding and EOF; owner snapshot,
@@ -22,19 +23,19 @@ func TestIngressActualUserWireRejectsForeignRows(t *testing.T) {
 		for _, mode := range []string{"ok", "foreign-tenant", "foreign-key", "missing-generation"} {
 			t.Run(network+"/"+mode, func(t *testing.T) {
 				_, client, session, node := journalFixture(t)
-				dir, err := os.MkdirTemp("", "mydc-ingress-wire-")
+				dir, err := os.MkdirTemp("", "sfc-ingress-wire-")
 				if err != nil {
 					t.Fatal(err)
 				}
 				defer os.RemoveAll(dir)
 				peer := client.Peers[0]
-				lookup := func(key mydcp.Identity) (mydcp.Peer, bool) {
-					if key == mydcp.Identity(client.Self.Public) {
-						return mydcp.Peer{ID: "user", Policy: mydcp.Policy{Key: key, UserAuth: true}}, true
+				lookup := func(key sfcp.Identity) (sfcp.Peer, bool) {
+					if key == sfcp.Identity(client.Self.Public) {
+						return sfcp.Peer{ID: "user", Policy: sfcp.Policy{Key: key, UserAuth: true}}, true
 					}
 					return peer, key == peer.Key
 				}
-				server, err := mydcp.NewTransport(node, client.Cluster, lookup)
+				server, err := sfcp.NewTransport(node, client.Cluster, lookup)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -50,17 +51,22 @@ func TestIngressActualUserWireRejectsForeignRows(t *testing.T) {
 					row.Generation = 0
 				}
 				page := control.IngressPage{Schema: 1, Index: 100, Epoch: 1, RootRevision: 77, BlockRevision: 3, Mappings: []control.IngressMapping{row}}
+				data, err := json.Marshal(page)
+				if err != nil {
+					t.Fatal(err)
+				}
 				binding := Service{Self: node, Mesh: server, Policy: control.Policy{Cluster: client.Cluster}}
 				done := make(chan error, 1)
-				err = server.OnManagement(mydcp.User, func(ctx context.Context, conn *mydcp.Session, stream mydcp.Stream, frame mydcp.Frame) error {
+				err = server.OnManagement(sfcp.User, func(ctx context.Context, conn *sfcp.Session, stream sfcp.Stream, frame sfcp.Frame) error {
 					serve := func() error {
 						envelope, err := schema.Decode[Envelope](frame.Fields[0].Value)
 						if err != nil {
 							return err
 						}
 						request, err := schema.Decode[Request](envelope.Body)
-						if err != nil || !request.validMethodFields() || !request.validQuerySelectors() || request.Ingress == nil || *request.Ingress != q {
-							return mydcp.ErrFrame
+						var got control.IngressQuery
+						if err != nil || !request.validMethodFields() || !request.validQuerySelectors() || request.Method != IngressesMethod.Name || strict(request.Params, &got) != nil || got != q {
+							return sfcp.ErrFrame
 						}
 						if _, err = binding.binding(conn, frame.Kind, envelope); err != nil {
 							return err
@@ -68,7 +74,7 @@ func TestIngressActualUserWireRejectsForeignRows(t *testing.T) {
 						if err = streamEOF(stream); err != nil {
 							return err
 						}
-						return binding.respond(stream, frame, sha256.Sum256(frame.Fields[0].Value), Reply{Schema: 1, Code: "ok", Ingress: &page})
+						return binding.respond(stream, frame, sha256.Sum256(frame.Fields[0].Value), Reply{Schema: 1, Code: "ok", Data: data})
 					}()
 					done <- serve
 					return serve
@@ -88,7 +94,7 @@ func TestIngressActualUserWireRejectsForeignRows(t *testing.T) {
 					}
 					peer.Endpoint = server.Addr().String()
 				}
-				mesh, err := mydcp.NewTransport(client.Self, client.Cluster, lookup)
+				mesh, err := sfcp.NewTransport(client.Self, client.Cluster, lookup)
 				if err != nil {
 					t.Fatal(err)
 				}

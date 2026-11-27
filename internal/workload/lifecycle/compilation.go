@@ -13,10 +13,10 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/jay94ks/mydcd/internal/access"
+	"github.com/jay94ks/seafield/internal/access"
 )
 
-const compileMainPath = "checker/src/github.com/jay94ks/mydcd/checkercli/main.go"
+const compileMainPath = "checker/src/github.com/jay94ks/seafield/checkercli/main.go"
 const MaxCompileInputBytes = 64 << 20
 const MaxCompileFiles = 8192
 const MaxCompileManifestBytes = 4 << 20
@@ -35,7 +35,7 @@ type CompileRecipe struct {
 
 func (r CompileRecipe) Key() [32]byte {
 	raw, _ := json.Marshal(r)
-	return sha256.Sum256(append([]byte("mydc-checker-compile-recipe-1\x00"), raw...))
+	return sha256.Sum256(append([]byte("sfc-checker-compile-recipe-1\x00"), raw...))
 }
 
 // Validate preserves historical signed recipes without substituting the live
@@ -140,8 +140,8 @@ import (
  "context"
  "net"
  "os"
- checker "mydc.local/checker"
- core "github.com/jay94ks/mydcd/internal/workload/lifecycle"
+ checker "sfc.local/checker"
+ core "github.com/jay94ks/seafield/internal/workload/lifecycle"
 )
 
 func main() {
@@ -173,7 +173,7 @@ func fileManifest(files map[string][]byte) ([]CompileFile, [32]byte) {
 		list = append(list, CompileFile{Path: p, Digest: sha256.Sum256(files[p]), Length: uint64(len(files[p]))})
 	}
 	raw, _ := json.Marshal(list)
-	return list, sha256.Sum256(append([]byte("mydc-checker-compile-tree-1\x00"), raw...))
+	return list, sha256.Sum256(append([]byte("sfc-checker-compile-tree-1\x00"), raw...))
 }
 
 func PrepareCompilation(source *ResolvedSource) (*Compilation, error) {
@@ -250,7 +250,7 @@ func validCompileItem(item CompileItem) bool {
 		return false
 	}
 	raw, _ := json.Marshal(item.Files)
-	return r.Tree == sha256.Sum256(append([]byte("mydc-checker-compile-tree-1\x00"), raw...))
+	return r.Tree == sha256.Sum256(append([]byte("sfc-checker-compile-tree-1\x00"), raw...))
 }
 
 func NewCompileBatch(job string, deadline int64, policy TenantPolicy, inputs []*Compilation) (CompileBatch, error) {

@@ -11,14 +11,14 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/jay94ks/mydcd/internal/web/mydc"
+	"github.com/jay94ks/seafield/internal/web/sfc"
 )
 
 // Moving a service to another server. A service without a node-pinned
-// volume moves by a new app version whose x-mydc.node changed (plan →
+// volume moves by a new app version whose x-sfc.node changed (plan →
 // upload → begin-app). A service with its app's node-fixed volume moves
 // with the volume move (app-plan-stream with Move → begin-volume-move, the
-// new document is the move's artifact). mydcd judges whether the move can
+// new document is the move's artifact). sfcd judges whether the move can
 // happen: the check is that version's plan, nothing the web decides itself.
 
 // relocationView: GET /t/{t}/apps/{app}/relocation-check.
@@ -34,7 +34,7 @@ type relocationView struct {
 	Steps   []string          `json:"steps"`
 }
 
-// relocationItem: one check. "plan" is mydcd's plan of the moved version;
+// relocationItem: one check. "plan" is sfcd's plan of the moved version;
 // Detail is its input error code and text when it refused.
 type relocationItem struct {
 	Name   string `json:"name"`
@@ -51,7 +51,7 @@ const (
 // relocationMount: a named volume the service mounts. Step "none" (not
 // node-pinned, or already on the target), "move" (the app's own volume:
 // it moves with the service), "not-movable" (pinned there and not the
-// app's own; mydcd moves only an app's own data stores).
+// app's own; sfcd moves only an app's own data stores).
 type relocationMount struct {
 	Name string `json:"name"`
 	Kind string `json:"kind"`
@@ -59,16 +59,16 @@ type relocationMount struct {
 	Step string `json:"step"`
 }
 
-// relocatedService reads one service of an app document: its x-mydc.node
-// (or x-mydc.nodes) and the named volumes it mounts.
+// relocatedService reads one service of an app document: its x-sfc.node
+// (or x-sfc.nodes) and the named volumes it mounts.
 func relocatedService(doc []byte, service string) (node string, replicated bool, mounts []string, err error) {
 	var d struct {
 		Services map[string]struct {
 			Volumes []yaml.Node `yaml:"volumes"`
-			XMydc   struct {
+			XSfc    struct {
 				Node  string   `yaml:"node"`
 				Nodes []string `yaml:"nodes"`
-			} `yaml:"x-mydc"`
+			} `yaml:"x-sfc"`
 		} `yaml:"services"`
 	}
 	if err := yaml.Unmarshal(doc, &d); err != nil {
@@ -96,19 +96,19 @@ func relocatedService(doc []byte, service string) (node string, replicated bool,
 			mounts = append(mounts, src)
 		}
 	}
-	return s.XMydc.Node, len(s.XMydc.Nodes) > 1, mounts, nil
+	return s.XSfc.Node, len(s.XSfc.Nodes) > 1, mounts, nil
 }
 
 var errNoService = errors.New("no such service")
 
-// setServiceNode sets services.{name}.x-mydc.node in an app document.
+// setServiceNode sets services.{name}.x-sfc.node in an app document.
 func setServiceNode(doc []byte, name, node string) ([]byte, error) {
-	return setMappingPath(doc, []string{"services", name, "x-mydc"}, "node", node)
+	return setMappingPath(doc, []string{"services", name, "x-sfc"}, "node", node)
 }
 
 // relocationCheck plans the running version with the service on node (and
-// its own fixed volumes moved along) and reports mydcd's answer.
-func relocationCheck(ctx context.Context, c mydc.Conn, tenant, app, service, node string) (relocationView, error) {
+// its own fixed volumes moved along) and reports sfcd's answer.
+func relocationCheck(ctx context.Context, c sfc.Conn, tenant, app, service, node string) (relocationView, error) {
 	out := relocationView{Tenant: tenant, App: app, Service: service, To: node, Checks: []relocationItem{}, Volumes: []relocationMount{}, Steps: []string{"app"}}
 	src, err := c.AppSource(ctx, tenant, app, 0)
 	if err != nil {
@@ -121,7 +121,7 @@ func relocationCheck(ctx context.Context, c mydc.Conn, tenant, app, service, nod
 	case err != nil:
 		return out, &httpErr{http.StatusUnprocessableEntity, "invalid", "the running app document cannot be read: " + err.Error()}
 	case replicated:
-		return out, invalid("replicated service: change x-mydc.nodes")
+		return out, invalid("replicated service: change x-sfc.nodes")
 	}
 	out.From = from
 	doc, err := setServiceNode(src.Document, service, node)
@@ -160,10 +160,10 @@ func relocationCheck(ctx context.Context, c mydc.Conn, tenant, app, service, nod
 			return out, err
 		}
 		dep := ""
-		if i := slices.IndexFunc(apps, func(a mydc.AppView) bool { return a.App == app }); i >= 0 {
+		if i := slices.IndexFunc(apps, func(a sfc.AppView) bool { return a.App == app }); i >= 0 {
 			dep = apps[i].Deployment
 		}
-		_, err = c.AppPlan(ctx, mydc.AppPlanRequest{Tenant: tenant, Document: doc, Project: app, Deployment: dep})
+		_, err = c.AppPlan(ctx, sfc.AppPlanRequest{Tenant: tenant, Document: doc, Project: app, Deployment: dep})
 		plan.OK, plan.Detail, err = planRefusal(err)
 		if err != nil {
 			return out, err
@@ -184,15 +184,15 @@ func relocationCheck(ctx context.Context, c mydc.Conn, tenant, app, service, nod
 	return out, nil
 }
 
-// planRefusal turns a plan error mydcd gave about the document (an input
+// planRefusal turns a plan error sfcd gave about the document (an input
 // code, an invalid or refused plan) into a failed check; other errors
 // (transport, login, permission) stay errors.
 func planRefusal(err error) (bool, string, error) {
 	if err == nil {
 		return true, "", nil
 	}
-	var e *mydc.Error
-	if errors.As(err, &e) && (e.InputCode != "" || e.Code == mydc.CodeInvalid) {
+	var e *sfc.Error
+	if errors.As(err, &e) && (e.InputCode != "" || e.Code == sfc.CodeInvalid) {
 		return false, e.Error(), nil
 	}
 	var he *httpErr

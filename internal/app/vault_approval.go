@@ -13,15 +13,15 @@ import (
 	"slices"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/credentials"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/reconcile"
-	"github.com/jay94ks/mydcd/internal/schema"
-	"github.com/jay94ks/mydcd/internal/secrets"
-	"github.com/jay94ks/mydcd/internal/userauth"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/credentials"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/secrets"
+	"github.com/jay94ks/seafield/internal/userauth"
 )
 
 func (r *Runtime) openVaultApprovals(root string) error {
@@ -76,8 +76,9 @@ func (r *Runtime) approveVault(ctx context.Context, session access.Session, q us
 		if len(r.vaultApprovals.Keys()) >= 4096 || len(q.Password) == 0 {
 			return secrets.Approval{}, secrets.ErrPolicy
 		}
+		builtin := permit.Binding.Reference.Profile == secrets.BuiltinProfile
 		backend := r.vaultBackends[vaultBackendKey(target.Realm, permit.Binding.Reference.Profile)]
-		if backend == nil || !backend.config.Verifiers || backend.verifier == nil {
+		if !builtin && (backend == nil || !backend.config.Verifiers || backend.verifier == nil) {
 			return secrets.Approval{}, secrets.ErrProvider
 		}
 		release, err := r.vaultApprovalBudget.Begin(ctx, session.User, source, time.Now())
@@ -85,7 +86,12 @@ func (r *Runtime) approveVault(ctx context.Context, session access.Session, q us
 			return secrets.Approval{}, secrets.ErrPolicy
 		}
 		defer release()
-		fetched, err := backend.verifier.FetchVerifier(ctx, target.Group, permit.Binding)
+		var fetched secrets.Fetched
+		if builtin {
+			fetched, err = r.openBuiltinVerifier(ctx, target.Realm, permit.Binding)
+		} else {
+			fetched, err = backend.verifier.FetchVerifier(ctx, target.Group, permit.Binding)
+		}
 		if err != nil {
 			return secrets.Approval{}, secrets.ErrProvider
 		}

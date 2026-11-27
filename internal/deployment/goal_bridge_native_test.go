@@ -13,15 +13,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/engine"
-	"github.com/jay94ks/mydcd/internal/network"
-	"github.com/jay94ks/mydcd/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/engine"
+	"github.com/jay94ks/seafield/internal/network"
+	"github.com/jay94ks/seafield/internal/reconcile"
 	"github.com/moby/moby/client"
 )
 
 func TestRealBoundaryCommittedGoalBridgeProjection(t *testing.T) {
-	tag, cidr, manifest := os.Getenv("MYDC_DOCKER_TEST_OWNER"), os.Getenv("MYDC_DOCKER_TEST_CIDR"), os.Getenv("MYDC_NATIVE_MANIFEST")
+	tag, cidr, manifest := os.Getenv("SFC_DOCKER_TEST_OWNER"), os.Getenv("SFC_DOCKER_TEST_CIDR"), os.Getenv("SFC_NATIVE_MANIFEST")
 	if tag == "" || cidr == "" || manifest == "" || os.Geteuid() != 0 {
 		t.Skip("requires user-prebuilt binary and owned Docker/host rollback prestate")
 	}
@@ -34,7 +34,7 @@ func TestRealBoundaryCommittedGoalBridgeProjection(t *testing.T) {
 	service := input.Services["db"]
 	service.CPUs, service.Memory = "0.1", "16m"
 	service.Networks = map[string]Attachment{"app": {IPv4: netip.MustParsePrefix(cidr).Addr().Next().Next().String()}}
-	service.MyDC = ServiceExtension{Node: "node-a"}
+	service.Sfc = ServiceExtension{Node: "node-a"}
 	service.Secrets = nil
 	service.Volumes = nil
 	service.Environment = nil
@@ -42,7 +42,7 @@ func TestRealBoundaryCommittedGoalBridgeProjection(t *testing.T) {
 	input.Services["db"] = service
 	input.Volumes = nil
 	input.Secrets = nil
-	input.Networks = map[string]ComposeNetwork{"app": {MyDC: NetworkExtension{MTU: 1280, Pools: map[string]PoolDeclaration{"node-a": {CIDR: cidr, Gateway: netip.MustParsePrefix(cidr).Addr().Next().String()}}}}}
+	input.Networks = map[string]ComposeNetwork{"app": {Sfc: NetworkExtension{MTU: 1280, Pools: map[string]PoolDeclaration{"node-a": {CIDR: cidr, Gateway: netip.MustParsePrefix(cidr).Addr().Next().String()}}}}}
 	plan, err := Compile(input, f.c, contextFor(t, f))
 	if err != nil {
 		t.Fatal(err)
@@ -80,7 +80,7 @@ func TestRealBoundaryCommittedGoalBridgeProjection(t *testing.T) {
 	if err = os.WriteFile(manifest, manifestBytes, 0644); err != nil {
 		t.Fatal(err)
 	}
-	filters := client.Filters{}.Add("label", "org.mydc.owner="+c.Owner)
+	filters := client.Filters{}.Add("label", "org.sfc.owner="+c.Owner)
 	path := filepath.Join(t.TempDir(), "network.db")
 	var manager *network.Manager
 	t.Cleanup(func() {

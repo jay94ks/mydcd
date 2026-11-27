@@ -6,8 +6,8 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/deployment"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/deployment"
 )
 
 // ExplainAppFinish replays the finish branch of reduceAppProgress on s and

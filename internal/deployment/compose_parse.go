@@ -17,10 +17,10 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/engine"
-	"github.com/jay94ks/mydcd/internal/network/services"
-	"github.com/jay94ks/mydcd/internal/workload"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/engine"
+	"github.com/jay94ks/seafield/internal/network/services"
+	"github.com/jay94ks/seafield/internal/workload"
 	"gopkg.in/yaml.v3"
 )
 
@@ -202,8 +202,8 @@ func validSelector(s Selector) bool {
 }
 func sortedStrings(v []string) []string { v = slices.Clone(v); slices.Sort(v); return v }
 func (c *Compose) normalize() error {
-	if c.MyDC.Schema == 0 {
-		c.MyDC.Schema = 1
+	if c.Sfc.Schema == 0 {
+		c.Sfc.Schema = 1
 	}
 	for name, s := range c.Services {
 		image, e := access.PinImage(s.Image)
@@ -262,27 +262,27 @@ func (c *Compose) normalize() error {
 			}
 			s.Secrets[i] = p
 		}
-		for i, r := range s.MyDC.Sources {
+		for i, r := range s.Sfc.Sources {
 			if r.Scope == "" {
 				r.Scope = "tenant"
 			}
-			s.MyDC.Sources[i] = r
+			s.Sfc.Sources[i] = r
 		}
 		c.Services[name] = s
 	}
 	for name, v := range c.Volumes {
-		if v.MyDC.Retain == nil {
+		if v.Sfc.Retain == nil {
 			keep := true
-			v.MyDC.Retain = &keep
+			v.Sfc.Retain = &keep
 		}
-		if v.MyDC.Driver == "" {
-			v.MyDC.Driver = "local"
+		if v.Sfc.Driver == "" {
+			v.Sfc.Driver = "local"
 		}
-		if v.MyDC.Access == "" {
-			v.MyDC.Access = "single-writer"
+		if v.Sfc.Access == "" {
+			v.Sfc.Access = "single-writer"
 		}
-		if v.MyDC.Quota == "" {
-			v.MyDC.Quota = "observe"
+		if v.Sfc.Quota == "" {
+			v.Sfc.Quota = "observe"
 		}
 		c.Volumes[name] = v
 	}
@@ -290,15 +290,15 @@ func (c *Compose) normalize() error {
 		if s.File != "" && strings.HasPrefix(s.File, "./") {
 			s.File = strings.TrimPrefix(s.File, "./")
 		}
-		if s.MyDC.Key == "" && (s.File != "" || s.External) {
-			s.MyDC.Key = name
+		if s.Sfc.Key == "" && (s.File != "" || s.External) {
+			s.Sfc.Key = name
 		}
-		if s.File == "" && !s.External && s.MyDC.Source == "" {
-			s.MyDC.Source = "service-final-keyset"
+		if s.File == "" && !s.External && s.Sfc.Source == "" {
+			s.Sfc.Source = "service-final-keyset"
 		}
 		c.Secrets[name] = s
 	}
-	if v := c.MyDC.Vault; v != nil {
+	if v := c.Sfc.Vault; v != nil {
 		normalizeEntries := func(in []Selector) []Selector {
 			for i := range in {
 				if in[i].Scope == "" {
@@ -318,7 +318,7 @@ func (c *Compose) normalize() error {
 			v.Tree.Secrets[name] = s
 		}
 	}
-	if d := c.MyDC.Delivery; d != nil {
+	if d := c.Sfc.Delivery; d != nil {
 		if d.Sync.Mode == "" {
 			d.Sync.Mode = "manual"
 		}
@@ -350,14 +350,14 @@ func (c *Compose) normalize() error {
 	return c.validate()
 }
 func (c Compose) validate() error {
-	if c.MyDC.Schema != 1 || c.Name != "" && !identifier(c.Name) || len(c.Services) == 0 && !c.allowEmpty() || len(c.Services) > 128 || len(c.Networks) > 128 || len(c.Volumes) > 128 || len(c.Secrets) > 256 || c.MyDC.Tenant != "" && !identifier(c.MyDC.Tenant) || c.MyDC.Deployment != "" && !identifier(c.MyDC.Deployment) {
+	if c.Sfc.Schema != 1 || c.Name != "" && !identifier(c.Name) || len(c.Services) == 0 && !c.allowEmpty() || len(c.Services) > 128 || len(c.Networks) > 128 || len(c.Volumes) > 128 || len(c.Secrets) > 256 || c.Sfc.Tenant != "" && !identifier(c.Sfc.Tenant) || c.Sfc.Deployment != "" && !identifier(c.Sfc.Deployment) {
 		return inputError("INVALID_APP", "document")
 	}
 	if _, _, err := c.LifecycleProgram(); err != nil {
 		return err
 	}
 	for name, s := range c.Services {
-		if s.LifecycleSources != nil || s.LifecycleProgram != nil || s.MyDC.Instance != nil {
+		if s.LifecycleSources != nil || s.LifecycleProgram != nil || s.Sfc.Instance != nil {
 			return inputError("RESERVED_TASK_METADATA", name)
 		}
 		if err := validateServicePlacement(s); err != nil {
@@ -373,7 +373,7 @@ func (c Compose) validate() error {
 		if _, err := engine.ParseStopPolicy(s.StopGracePeriod, s.StopSignal); err != nil {
 			return inputError("INVALID_STOP_POLICY", p)
 		}
-		if !identifier(name) || s.MyDC.Node != "" && !identifier(s.MyDC.Node) || s.Standalone != c.Standalone || s.ReadOnly == nil || !c.Standalone && !*s.ReadOnly || !slices.Equal(s.CapDrop, []string{"ALL"}) || !slices.Equal(s.SecurityOpt, []string{"no-new-privileges:true"}) || len(s.WorkingDir) > 1024 || s.WorkingDir != "" && !strings.HasPrefix(s.WorkingDir, "/") || s.WorkingDir != "" && (path.Clean(s.WorkingDir) != s.WorkingDir || strings.ContainsAny(s.WorkingDir, "\x00\r\n")) || !c.Standalone && (s.TTY || s.StdinOpen) || len(s.Environment) > 128 || len(s.Networks) > 16 || len(s.Volumes) > 64 || len(s.Secrets)+len(s.MyDC.SecretEnv) > 256 {
+		if !identifier(name) || s.Sfc.Node != "" && !identifier(s.Sfc.Node) || s.Standalone != c.Standalone || s.ReadOnly == nil || !c.Standalone && !*s.ReadOnly || !slices.Equal(s.CapDrop, []string{"ALL"}) || !slices.Equal(s.SecurityOpt, []string{"no-new-privileges:true"}) || len(s.WorkingDir) > 1024 || s.WorkingDir != "" && !strings.HasPrefix(s.WorkingDir, "/") || s.WorkingDir != "" && (path.Clean(s.WorkingDir) != s.WorkingDir || strings.ContainsAny(s.WorkingDir, "\x00\r\n")) || !c.Standalone && (s.TTY || s.StdinOpen) || len(s.Environment) > 128 || len(s.Networks) > 16 || len(s.Volumes) > 64 || len(s.Secrets)+len(s.Sfc.SecretEnv) > 256 {
 			return inputError("INVALID_SERVICE", p)
 		}
 		if _, e := access.PinImage(s.Image); e != nil {
@@ -480,21 +480,21 @@ func (c Compose) validate() error {
 				return inputError("INVALID_GID", p)
 			}
 			mode, e := strconv.ParseUint(m.Mode, 8, 32)
-			if e != nil || !validProjection(Projection{Key: secret.MyDC.Key, Target: m.Target, UID: uint32(uid), GID: uint32(gid), Mode: uint32(mode)}) {
+			if e != nil || !validProjection(Projection{Key: secret.Sfc.Key, Target: m.Target, UID: uint32(uid), GID: uint32(gid), Mode: uint32(mode)}) {
 				return inputError("INVALID_SECRET_MOUNT", p)
 			}
 			targets = append(targets, m.Target)
 		}
 
 		envNames := map[string]bool{}
-		for _, projection := range s.MyDC.SecretEnv {
+		for _, projection := range s.Sfc.SecretEnv {
 			if !workload.SecretEnvironmentName(projection.Name) || envNames[projection.Name] {
 				return inputError("INVALID_SECRET_ENV", p)
 			}
 			if _, exists := s.Environment[projection.Name]; exists {
 				return inputError("SECRET_ENV_CONFLICT", p)
 			}
-			if secret, exists := c.Secrets[projection.Source]; !exists || !validKey(secret.MyDC.Key) {
+			if secret, exists := c.Secrets[projection.Source]; !exists || !validKey(secret.Sfc.Key) {
 				return inputError("SECRET_BINDING_REQUIRED", p)
 			}
 			envNames[projection.Name] = true
@@ -520,7 +520,7 @@ func (c Compose) validate() error {
 				}
 			}
 		}
-		for _, r := range s.MyDC.Sources {
+		for _, r := range s.Sfc.Sources {
 			if !validSelector(r) {
 				return inputError("INVALID_SECRET_SOURCE", p)
 			}
@@ -530,10 +530,10 @@ func (c Compose) validate() error {
 				return inputError("INVALID_HEALTHCHECK", p+".healthcheck")
 			}
 		}
-		if r := s.MyDC.Readiness; r != nil && (r.Kind != "http" && r.Kind != "exec" || r.Kind == "http" && (r.Port == 0 || !strings.HasPrefix(r.Path, "/"))) {
+		if r := s.Sfc.Readiness; r != nil && (r.Kind != "http" && r.Kind != "exec" || r.Kind == "http" && (r.Port == 0 || !strings.HasPrefix(r.Path, "/"))) {
 			return inputError("INVALID_READINESS", p)
 		}
-		if r := s.MyDC.Readiness; r != nil {
+		if r := s.Sfc.Readiness; r != nil {
 			if r.Kind == "http" {
 				if _, err := r.httpProbe(); err != nil {
 					return inputError("INVALID_READINESS", p)
@@ -549,10 +549,10 @@ func (c Compose) validate() error {
 		}
 	}
 	for id, n := range c.Networks {
-		if !identifier(id) || n.Driver != "" && n.Driver != "bridge" || n.Name != "" && !identifier(n.Name) || n.External && len(n.MyDC.Pools) != 0 || n.MyDC.MTU != 0 && (n.MyDC.MTU < 1280 || n.MyDC.MTU > 65535) {
+		if !identifier(id) || n.Driver != "" && n.Driver != "bridge" || n.Name != "" && !identifier(n.Name) || n.External && len(n.Sfc.Pools) != 0 || n.Sfc.MTU != 0 && (n.Sfc.MTU < 1280 || n.Sfc.MTU > 65535) {
 			return inputError("INVALID_NETWORK", "networks."+id)
 		}
-		for node, p := range n.MyDC.Pools {
+		for node, p := range n.Sfc.Pools {
 			prefix, e := netip.ParsePrefix(p.CIDR)
 			gateway, ge := netip.ParseAddr(p.Gateway)
 			if !identifier(node) || e != nil || ge != nil || prefix != prefix.Masked() || !prefix.Contains(gateway) || gateway == prefix.Addr() {
@@ -561,18 +561,18 @@ func (c Compose) validate() error {
 		}
 	}
 	for id, v := range c.Volumes {
-		if !identifier(id) || v.Name != "" && !identifier(v.Name) || v.Driver != "" && v.Driver != "local" || v.MyDC.Driver != "local" || v.MyDC.Node != "" && !identifier(v.MyDC.Node) || v.MyDC.Access != "single-writer" || v.MyDC.Retain == nil || !*v.MyDC.Retain || v.MyDC.Quota != "observe" && v.MyDC.Quota != "hard" || v.MyDC.Capacity > 1<<40 {
+		if !identifier(id) || v.Name != "" && !identifier(v.Name) || v.Driver != "" && v.Driver != "local" || v.Sfc.Driver != "local" || v.Sfc.Node != "" && !identifier(v.Sfc.Node) || v.Sfc.Access != "single-writer" || v.Sfc.Retain == nil || !*v.Sfc.Retain || v.Sfc.Quota != "observe" && v.Sfc.Quota != "hard" || v.Sfc.Capacity > 1<<40 {
 			return inputError("INVALID_RETAINED_VOLUME", "volumes."+id)
 		}
-		if m := v.MyDC.Migration; m != nil && (m.Mode != "cold" || !m.Fence || !m.Retain) {
+		if m := v.Sfc.Migration; m != nil && (m.Mode != "cold" || !m.Fence || !m.Retain) {
 			return inputError("UNSAFE_MIGRATION", "volumes."+id)
 		}
 	}
 	for id, s := range c.Secrets {
-		if !identifier(id) || s.Name != "" && !identifier(s.Name) || s.File != "" && !relativeFile(s.File) || s.File != "" && s.MyDC.Source != "" || s.File == "" && s.MyDC.Source != "service-final-keyset" && !s.External || s.MyDC.Key != "" && !validKey(s.MyDC.Key) {
+		if !identifier(id) || s.Name != "" && !identifier(s.Name) || s.File != "" && !relativeFile(s.File) || s.File != "" && s.Sfc.Source != "" || s.File == "" && s.Sfc.Source != "service-final-keyset" && !s.External || s.Sfc.Key != "" && !validKey(s.Sfc.Key) {
 			return inputError("INVALID_SECRET_REFERENCE", "secrets."+id)
 		}
-		if s.File != "" && s.MyDC.Key == "" {
+		if s.File != "" && s.Sfc.Key == "" {
 			return inputError("SECRET_PROJECTION_KEY_REQUIRED", "secrets."+id)
 		}
 	}
@@ -582,16 +582,16 @@ func (c Compose) validate() error {
 				return inputError("INVALID_DNS_SEARCH", "services."+id)
 			}
 		}
-		if s.MyDC.Readiness != nil && s.MyDC.Readiness.Kind == "exec" && (s.Healthcheck == nil || s.Healthcheck.disabled()) {
+		if s.Sfc.Readiness != nil && s.Sfc.Readiness.Kind == "exec" && (s.Healthcheck == nil || s.Healthcheck.disabled()) {
 			return inputError("EXEC_HEALTHCHECK_REQUIRED", "services."+id)
 		}
 	}
-	if c.MyDC.Routing != nil && c.MyDC.Routing.Default != "deny" {
-		return inputError("CROSS_TENANT_DEFAULT_DENY_REQUIRED", "x-mydc.routing")
+	if c.Sfc.Routing != nil && c.Sfc.Routing.Default != "deny" {
+		return inputError("CROSS_TENANT_DEFAULT_DENY_REQUIRED", "x-sfc.routing")
 	}
-	for id, r := range c.MyDC.Registries {
+	for id, r := range c.Sfc.Registries {
 		if !identifier(id) || r.Trusted {
-			return inputError("REGISTRY_IS_NOT_AUTO_TRUSTED", "x-mydc.registries")
+			return inputError("REGISTRY_IS_NOT_AUTO_TRUSTED", "x-sfc.registries")
 		}
 	}
 	if e := c.validateExtensions(); e != nil {
@@ -604,7 +604,7 @@ func (c Compose) validate() error {
 }
 
 func (c Compose) allowEmpty() bool {
-	return c.Services != nil && len(c.Services) == 0 && c.MyDC.Delivery != nil && c.MyDC.Delivery.Sync.AllowEmpty
+	return c.Services != nil && len(c.Services) == 0 && c.Sfc.Delivery != nil && c.Sfc.Delivery.Sync.AllowEmpty
 }
 
 func domain(s string) bool {
@@ -625,20 +625,20 @@ func domain(s string) bool {
 	return true
 }
 func (c Compose) validateExtensions() error {
-	for id, h := range c.MyDC.Nodes {
+	for id, h := range c.Sfc.Nodes {
 		if !identifier(id) {
-			return inputError("INVALID_NODE_HINT", "x-mydc.nodes")
+			return inputError("INVALID_NODE_HINT", "x-sfc.nodes")
 		}
 		if a, e := netip.ParseAddr(h.Underlay); e != nil || a.IsUnspecified() || a.IsMulticast() || a.Zone() != "" {
-			return inputError("INVALID_NODE_HINT", "x-mydc.nodes")
+			return inputError("INVALID_NODE_HINT", "x-sfc.nodes")
 		}
 	}
 	for id, n := range c.Networks {
 		p := "networks." + id
-		if r := n.MyDC.RuntimeChanges; r != nil && (r.Authority != "authenticated-mydcp-raft-cas" || r.Restart || r.Strategy != "staged" || r.Deadlines != "preserve" || r.Disruptive != "explicit-transition-plan") {
+		if r := n.Sfc.RuntimeChanges; r != nil && (r.Authority != "authenticated-sfcp-raft-cas" || r.Restart || r.Strategy != "staged" || r.Deadlines != "preserve" || r.Disruptive != "explicit-transition-plan") {
 			return inputError("UNSAFE_RUNTIME_POLICY", p)
 		}
-		for node, a := range n.MyDC.TunnelAddresses {
+		for node, a := range n.Sfc.TunnelAddresses {
 			if !identifier(node) {
 				return inputError("INVALID_TUNNEL_ADDRESS", p)
 			}
@@ -646,7 +646,7 @@ func (c Compose) validateExtensions() error {
 				return inputError("INVALID_TUNNEL_ADDRESS", p)
 			}
 		}
-		for _, pool := range n.MyDC.Pools {
+		for _, pool := range n.Sfc.Pools {
 			prefix, _ := netip.ParsePrefix(pool.CIDR)
 			if a := pool.AddressPlan; a != nil {
 				docker, e := netip.ParsePrefix(a.DockerRange)
@@ -657,12 +657,12 @@ func (c Compose) validateExtensions() error {
 				}
 			}
 		}
-		if d := n.MyDC.DNS; d != nil && d.Enabled {
+		if d := n.Sfc.DNS; d != nil && d.Enabled {
 			if !domain(d.Zone) || d.TTL == 0 || d.TTL > 3600 || d.NegativeTTL == 0 || d.NegativeTTL > d.TTL || !slices.Equal(sortedStrings(d.Transports), []string{"tcp", "udp"}) || d.Limits.Cache < 0 || d.Limits.Cache > 4096 || d.Limits.Inflight < 1 || d.Limits.Inflight > 4096 || d.Limits.TCP < 1 || d.Limits.TCP > 4096 || d.Limits.Timeout < 1 || d.Limits.Timeout > 60000 {
 				return inputError("INVALID_DNS_POLICY", p)
 			}
 			if d.Reverse {
-				for _, pool := range n.MyDC.Pools {
+				for _, pool := range n.Sfc.Pools {
 					prefix, e := netip.ParsePrefix(pool.CIDR)
 					if e != nil {
 						return inputError("INVALID_DNS_REVERSE_PREFIX", p)
@@ -674,12 +674,12 @@ func (c Compose) validateExtensions() error {
 			}
 		}
 	}
-	if v := c.MyDC.Vault; v != nil {
+	if v := c.Sfc.Vault; v != nil {
 		if v.Mode != "groups" && v.Mode != "local-file" {
-			return inputError("INVALID_VAULT_MODE", "x-mydc.vault")
+			return inputError("INVALID_VAULT_MODE", "x-sfc.vault")
 		}
 		if v.Mode == "groups" && (v.Approval.Prompt != "once-per-required-group-without-valid-approval" || v.Approval.Reuse != "same-deployment-and-valid-group-scope" || !slices.Equal(v.Approval.Payload, []string{"approved_at", "fact", "target"})) {
-			return inputError("INVALID_APPROVAL_POLICY", "x-mydc.vault")
+			return inputError("INVALID_APPROVAL_POLICY", "x-sfc.vault")
 		}
 		if e := validateVaultTree(v); e != nil {
 			return e
@@ -687,25 +687,25 @@ func (c Compose) validateExtensions() error {
 		ids := map[string]bool{}
 		for name, g := range v.Tree.Groups {
 			if !identifier(name) || !identifier(g.ID) || ids[g.ID] || g.Parent != "tenant" && !identifier(g.Parent) {
-				return inputError("INVALID_GROUP", "x-mydc.vault")
+				return inputError("INVALID_GROUP", "x-sfc.vault")
 			}
 			ids[g.ID] = true
 		}
 		for name, s := range v.Tree.Secrets {
 			if !identifier(name) || !identifier(s.ID) || ids[s.ID] || s.Revision == 0 || !identifier(s.Profile) || !relativeFile(s.Object) || len(s.Keys) == 0 || len(s.Keys) > 256 {
-				return inputError("INVALID_SECRET", "x-mydc.vault")
+				return inputError("INVALID_SECRET", "x-sfc.vault")
 			}
 			ids[s.ID] = true
 			seen := map[string]bool{}
 			for _, key := range s.Keys {
 				if !validKey(key) || seen[key] {
-					return inputError("INVALID_SECRET_KEY", "x-mydc.vault")
+					return inputError("INVALID_SECRET_KEY", "x-sfc.vault")
 				}
 				seen[key] = true
 			}
 		}
 	}
-	if i := c.MyDC.Ingress; i != nil {
+	if i := c.Sfc.Ingress; i != nil {
 		if err := validateIngressDeclaration(c, *i); err != nil {
 			return err
 		}
@@ -713,38 +713,38 @@ func (c Compose) validateExtensions() error {
 		for _, l := range i.Listeners {
 			if l.Shared != "" {
 				if !identifier(l.Shared) || l.Address != "" || l.TLS || l.HTTP3 || seen["shared:"+l.Shared] {
-					return inputError("INVALID_LISTENER", "x-mydc.ingress")
+					return inputError("INVALID_LISTENER", "x-sfc.ingress")
 				}
 				seen["shared:"+l.Shared] = true
 				continue
 			}
 			if a, e := netip.ParseAddrPort(l.Address); e != nil || a.Port() == 0 || a.Addr().IsMulticast() || seen[l.Address] || l.HTTP3 && !l.TLS {
-				return inputError("INVALID_LISTENER", "x-mydc.ingress")
+				return inputError("INVALID_LISTENER", "x-sfc.ingress")
 			}
 			seen[l.Address] = true
 		}
 	}
-	if d := c.MyDC.Delivery; d != nil {
+	if d := c.Sfc.Delivery; d != nil {
 		if d.Sync.Mode != "manual" && d.Sync.Mode != "automatic" || d.Sync.Drift != "report" && d.Sync.Drift != "reconcile" || d.Runtime.Mode != "require-explicit-override" || d.Runtime.Expiry != "manual-release" || d.Poll < 1 || d.Poll > 86400 || d.Limits.Fetch < 1 || d.Limits.Fetch > 300 || d.Limits.Bytes < 1 || d.Limits.Bytes > 4<<20 || d.Limits.Queued != 1 || d.Limits.Active != 1 {
-			return inputError("INVALID_CD_POLICY", "x-mydc.delivery")
+			return inputError("INVALID_CD_POLICY", "x-sfc.delivery")
 		}
 		if d.Enabled {
 			u, e := url.Parse(d.Source.Repository)
 			if e != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || u.Opaque != "" || strings.ContainsAny(d.Source.Repository, "\x00\r\n") || d.Source.Kind != "git" || d.Source.Ref == "" || len(d.Source.Ref) > 256 || !relativeFile(d.Source.Path) || d.Source.Credential != "" && !identifier(d.Source.Credential) {
-				return inputError("INVALID_GIT_SOURCE", "x-mydc.delivery")
+				return inputError("INVALID_GIT_SOURCE", "x-sfc.delivery")
 			}
 		}
 	}
-	for id, r := range c.MyDC.Registries {
+	for id, r := range c.Sfc.Registries {
 		if r.Enabled {
 			if !identifier(r.Node) || r.Port == 0 || !domain(r.Listener.Host) || !identifier(r.Listener.Certificate) || r.Auth.Mode != "tenant-token" || r.Auth.Issuer != "builtin" || r.Auth.Anonymous || r.Auth.MaxToken == 0 || r.Auth.MaxToken > 300 {
-				return inputError("INVALID_REGISTRY", "x-mydc.registries."+id)
+				return inputError("INVALID_REGISTRY", "x-sfc.registries."+id)
 			}
 			if _, e := access.PinImage(r.Image); e != nil {
-				return inputError("PINNED_IMAGE_REQUIRED", "x-mydc.registries."+id)
+				return inputError("PINNED_IMAGE_REQUIRED", "x-sfc.registries."+id)
 			}
 			if _, e := netip.ParseAddrPort(r.Listener.Address); e != nil {
-				return inputError("INVALID_REGISTRY_LISTENER", "x-mydc.registries."+id)
+				return inputError("INVALID_REGISTRY_LISTENER", "x-sfc.registries."+id)
 			}
 		}
 	}
@@ -814,14 +814,14 @@ func validateVaultTree(v *VaultDeclaration) error {
 	entries := func(parent string, items []Selector) error {
 		for _, s := range items {
 			if !validSelector(s) || s.Scope != "tenant" {
-				return inputError("INVALID_GROUP_ENTRY", "x-mydc.vault")
+				return inputError("INVALID_GROUP_ENTRY", "x-sfc.vault")
 			}
 			k := "secret/" + s.Secret
 			if s.Group != "" {
 				k = "group/" + s.Group
 			}
 			if p, ok := parents[k]; !ok || p != parent || claimed[k] {
-				return inputError("GROUP_PARENT_OR_ORDER_CONFLICT", "x-mydc.vault")
+				return inputError("GROUP_PARENT_OR_ORDER_CONFLICT", "x-sfc.vault")
 			}
 			claimed[k] = true
 		}
@@ -836,7 +836,7 @@ func validateVaultTree(v *VaultDeclaration) error {
 		}
 	}
 	if len(claimed) != len(parents) {
-		return inputError("MISSING_GROUP_ENTRY", "x-mydc.vault")
+		return inputError("MISSING_GROUP_ENTRY", "x-sfc.vault")
 	}
 	for name, g := range v.Tree.Groups {
 		seen := map[string]bool{name: true}
@@ -844,7 +844,7 @@ func validateVaultTree(v *VaultDeclaration) error {
 		for depth := 0; parent != "tenant"; depth++ {
 			p, ok := v.Tree.Groups[parent]
 			if !ok || seen[parent] || depth >= 31 {
-				return inputError("GROUP_CYCLE_OR_DEPTH", "x-mydc.vault")
+				return inputError("GROUP_CYCLE_OR_DEPTH", "x-sfc.vault")
 			}
 			seen[parent] = true
 			parent = p.Parent

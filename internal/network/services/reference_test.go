@@ -56,7 +56,7 @@ func twoDNSOwners(t *testing.T) (dnsFixture, dnsFixture) {
 	a = publishDNS(t, a, a.cfg, 190)
 	b := a
 	var e error
-	b.m, e = NewDNSManager(a.f.a.cluster, pub(private(32)), []string{"mydc.test."}, 8, 8)
+	b.m, e = NewDNSManager(a.f.a.cluster, pub(private(32)), []string{"sfc.test."}, 8, 8)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -186,14 +186,14 @@ func TestReferencesNewInstanceUnderFenceCannotAdmitOriginalOrigin(t *testing.T) 
 			t.Fatal("new instance incorrectly rewrote frozen set")
 		}
 	}
-	m, e := NewDNSManager(d.f.a.cluster, pub(d.f.key), []string{"mydc.test."}, 8, 8)
+	m, e := NewDNSManager(d.f.a.cluster, pub(d.f.key), []string{"sfc.test."}, 8, 8)
 	if e != nil {
 		t.Fatal(e)
 	}
 	d.m = m
 	d.cfg = cfg
 	d = publishDNS(t, d, cfg, 201)
-	if _, _, e = d.m.Acquire(d.f.c, d.f.n, d.f.a, cfg.Tenant, cfg.ID, target, dnsWire("origin.app.mydc.test.", 1), d.clock(202)); e == nil {
+	if _, _, e = d.m.Acquire(d.f.c, d.f.n, d.f.a, cfg.Tenant, cfg.ID, target, dnsWire("origin.app.sfc.test.", 1), d.clock(202)); e == nil {
 		t.Fatal("new instance under fence admitted original address")
 	}
 	encode(t, d.f.a)
@@ -225,7 +225,7 @@ func TestReferencesCoverageEpochDistinguishesPreFenceAndLaterExtension(t *testin
 		t.Fatal("coverage epoch lost")
 	}
 	d = publishDNS(t, d, cfg, 201)
-	if _, _, e = d.m.Acquire(d.f.c, d.f.n, d.f.a, "first", "dns", target, dnsWire("origin.app.mydc.test.", 1), d.clock(202)); e == nil {
+	if _, _, e = d.m.Acquire(d.f.c, d.f.n, d.f.a, "first", "dns", target, dnsWire("origin.app.sfc.test.", 1), d.clock(202)); e == nil {
 		t.Fatal("coverage extension bypassed existing fence")
 	}
 	encode(t, d.f.a)
@@ -270,7 +270,7 @@ func TestReferencesFenceSurvivesLocalRecoveryAndSafeHistoryCompaction(t *testing
 	if len(d.m.fenced) != 0 {
 		t.Fatal("finished local fence not compacted")
 	}
-	raw := dnsWire("web.app.mydc.test.", 1)
+	raw := dnsWire("web.app.sfc.test.", 1)
 	if _, _, e = d.m.Acquire(d.f.c, d.f.n, stale, "first", "dns", d.origin, raw, d.clock(233)); e == nil {
 		t.Fatal("pre-compaction root revived admission")
 	}
@@ -342,7 +342,7 @@ func TestReferencesStaticOriginRetirementWaitsForQueryAndNativeClose(t *testing.
 	d := newDNSFixture(t)
 	d = publishDNS(t, d, d.cfg, 190)
 	c := dnsConsumer(t, d)
-	raw := dnsWire("web.app.mydc.test.", 1)
+	raw := dnsWire("web.app.sfc.test.", 1)
 	rootBefore := encode(t, d.f.a)
 	var h DNSQuery
 	var err error

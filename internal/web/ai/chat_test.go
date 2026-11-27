@@ -59,7 +59,7 @@ func TestChatOpenAIStream(t *testing.T) {
 	ep := Endpoints{OpenAIURL: srv.URL + "/", Retries: -1}
 	c := NewChat(OpenAI, "gpt-6", []Message{{Role: "user", Text: "전에 물었어"}, {Role: "assistant", Text: "네"}})
 	c.User("node-a 막아", "<context>now</context>")
-	req := ChatRequest{System: "fixed", Tools: testTools, CacheKey: "mydc-coordinator-v1", Stream: true}
+	req := ChatRequest{System: "fixed", Tools: testTools, CacheKey: "sfc-coordinator-v1", Stream: true}
 	var deltas []string
 	st, err := c.Next(context.Background(), ep, "k", req, func(d string) { deltas = append(deltas, d) })
 	if err != nil {
@@ -84,7 +84,7 @@ func TestChatOpenAIStream(t *testing.T) {
 		t.Fatalf("describe_tool output not sent: %s", second)
 	}
 	third, _ := json.Marshal(bodies[2]["input"])
-	if !strings.Contains(string(third), `"output":"proposal p-1"`) || bodies[2]["prompt_cache_key"] != "mydc-coordinator-v1" || bodies[2]["store"] != false {
+	if !strings.Contains(string(third), `"output":"proposal p-1"`) || bodies[2]["prompt_cache_key"] != "sfc-coordinator-v1" || bodies[2]["store"] != false {
 		t.Fatalf("third request: %s %v", third, bodies[2])
 	}
 	if inc, _ := json.Marshal(bodies[2]["include"]); !strings.Contains(string(inc), "reasoning.encrypted_content") {

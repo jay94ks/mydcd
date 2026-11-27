@@ -5,10 +5,10 @@ package userauth
 import (
 	"context"
 	"errors"
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/mydcp"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/sfcp"
 	"time"
 )
 
@@ -48,9 +48,9 @@ func (s Service) taskRestartQuery(view cluster.View, q Request, session access.S
 	out.TaskRestartStatus = status
 	return out
 }
-func (c Client) QueryTaskRestart(ctx context.Context, peer mydcp.Peer, session access.Session, tenant string, plan bool, q control.TaskRestartQuery) (Reply, error) {
+func (c Client) QueryTaskRestart(ctx context.Context, peer sfcp.Peer, session access.Session, tenant string, plan bool, q control.TaskRestartQuery) (Reply, error) {
 	if tenant == "" || !q.Valid(plan) {
-		return Reply{}, mydcp.ErrAdmission
+		return Reply{}, sfcp.ErrAdmission
 	}
 	method := "task-restart-status"
 	if plan {
@@ -63,12 +63,12 @@ func (c Client) QueryTaskRestart(ctx context.Context, peer mydcp.Peer, session a
 	if plan {
 		v := reply.TaskRestartPlan
 		if v == nil || !v.Valid() || v.Tenant != tenant || (q.Selection.Standalone == "" && v.App != q.Selection.App || q.Selection.Standalone != "" && v.Container.Standalone != q.Selection.Standalone) || v.Container.Cluster != c.Cluster || q.Selection.Service != "" && v.Container.Service != q.Selection.Service || q.Selection.Instance != "" && v.Container.Instance != q.Selection.Instance {
-			return Reply{}, mydcp.ErrFrame
+			return Reply{}, sfcp.ErrFrame
 		}
 	} else {
 		v := reply.TaskRestartStatus
 		if v == nil || v.Operation != q.Operation || !v.Plan.Valid() || v.Plan.Container.Cluster != c.Cluster || v.Plan.Tenant != tenant || (q.Selection.Standalone == "" && v.Plan.App != q.Selection.App || q.Selection.Standalone != "" && v.Plan.Container.Standalone != q.Selection.Standalone) {
-			return Reply{}, mydcp.ErrFrame
+			return Reply{}, sfcp.ErrFrame
 		}
 	}
 	return reply, nil

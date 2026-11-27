@@ -15,14 +15,14 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/ingress"
-	"github.com/jay94ks/mydcd/internal/registry"
-	"github.com/jay94ks/mydcd/internal/schema"
-	"github.com/jay94ks/mydcd/internal/tenancy"
-	"github.com/jay94ks/mydcd/internal/workload/volumes"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/ingress"
+	"github.com/jay94ks/seafield/internal/registry"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/tenancy"
+	"github.com/jay94ks/seafield/internal/workload/volumes"
 )
 
 const registryOwnerPrefix = "registry/owner/"

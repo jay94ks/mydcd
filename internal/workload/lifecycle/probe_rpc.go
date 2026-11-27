@@ -13,8 +13,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/schema"
-	contract "github.com/jay94ks/mydcd/lifecycle/v1"
+	"github.com/jay94ks/seafield/internal/schema"
+	contract "github.com/jay94ks/seafield/lifecycle/v1"
 )
 
 const MaxProbeFrameBytes = 2 << 20
@@ -43,7 +43,7 @@ func (c ProbeCall) ID() [32]byte {
 		Binding  [32]byte
 		Sequence uint64
 	}{c.Binding, c.Sequence})
-	return sha256.Sum256(append([]byte("mydc-checker-probe-call-1\x00"), raw...))
+	return sha256.Sum256(append([]byte("sfc-checker-probe-call-1\x00"), raw...))
 }
 
 func (c ProbeCall) Digest() [32]byte { raw, _ := json.Marshal(c); return sha256.Sum256(raw) }

@@ -8,9 +8,9 @@ import (
 	"crypto/sha256"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	checker "github.com/jay94ks/mydcd/internal/workload/lifecycle"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	checker "github.com/jay94ks/seafield/internal/workload/lifecycle"
 )
 
 // Uses the real identity/source reducers and restore codecs. Configuration

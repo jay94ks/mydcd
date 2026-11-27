@@ -24,17 +24,17 @@
 불명 publication은 정리 요청만으로 성공/실패로 바꾸거나 참조를 반환할 수 없다.
 이 내부 native 경계와 연속 Runtime worker·공유 closure/Secret usage 반환의 연결은 구분한다.
 
-`mydcd`의 OCI 게시 client도 기존 BuildSubject의 현재 job/repository 전용 한시 자격을
+`sfcd`의 OCI 게시 client도 기존 BuildSubject의 현재 job/repository 전용 한시 자격을
 사용한다. 인증 원문을 journal이나 공개 결과에 넣지 않고 사용 후 폐기한다. 이 client는
-프로세스의 시스템 CA 신뢰를 사용하며 registry 인증서는 `mydcd`에서도 신뢰돼야 한다.
-Docker Engine에 설치한 CA가 자동으로 `mydcd`의 신뢰로 전달되는 것은 아니다.
+프로세스의 시스템 CA 신뢰를 사용하며 registry 인증서는 `sfcd`에서도 신뢰돼야 한다.
+Docker Engine에 설치한 CA가 자동으로 `sfcd`의 신뢰로 전달되는 것은 아니다.
 
 
 원 job이 만료되거나 현재 사용자 권한을 잃어 새 registry token을 얻지 못하는 경우,
 원 builder는 authenticated member `image-build-publication-owner`로 정확한 원 출력 태그의
 공개 digest 정보만 조회한다. 조회는 현재 quorum의 설치 owner·accepted job·원 registry
 namespace에 고정하며 새 push·임의 이미지/본문/Secret 읽기를 허가하지 않는다. 입력/응답은
-[MYDCP 메시지](../../protocol/mydcp/26-cd.md#원-빌드-게시의-owner-관측)를 따른다.
+[SFCP 메시지](../../protocol/sfcp/26-cd.md#원-빌드-게시의-owner-관측)를 따른다.
 
 같은 원 registry의 미종결 running/unknown 빌드가 남으면 listener를 닫고 원 Store·Volume
 pin을 정산용으로 보존한다. 실제 process shutdown은 Store/FD를 닫되 원 pin/DB 기록은

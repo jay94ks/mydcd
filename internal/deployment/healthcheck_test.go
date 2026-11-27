@@ -64,12 +64,12 @@ func TestDisabledHealthCannotSatisfyHealthyDependencyOrExecReadiness(t *testing.
 	if _, err := c.Canonical(); err == nil {
 		t.Fatal("disabled healthcheck satisfied service_healthy")
 	}
-	db.MyDC.Readiness = &Readiness{Kind: "exec"}
+	db.Sfc.Readiness = &Readiness{Kind: "exec"}
 	c.Services["db"] = db
 	if _, err := c.Canonical(); err == nil {
 		t.Fatal("exec readiness accepted a disabled healthcheck")
 	}
-	db.MyDC.Readiness = &Readiness{Kind: "http", Path: "/ready", Port: 8080}
+	db.Sfc.Readiness = &Readiness{Kind: "http", Path: "/ready", Port: 8080}
 	c.Services["db"] = db
 	if _, err := c.Canonical(); err != nil {
 		t.Fatal("independent HTTP readiness was removed by health disable", err)

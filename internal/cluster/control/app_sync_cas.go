@@ -6,7 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 
-	"github.com/jay94ks/mydcd/internal/deployment"
+	"github.com/jay94ks/seafield/internal/deployment"
 )
 
 // AppSyncCASAllowed derives the mode from the signed payload. An absent Target
@@ -97,5 +97,5 @@ func appSyncTarget(entry appEntry) [32]byte {
 	if err != nil {
 		return [32]byte{}
 	}
-	return sha256.Sum256(append([]byte("mydc-app-sync-target-1\x00"), raw...))
+	return sha256.Sum256(append([]byte("sfc-app-sync-target-1\x00"), raw...))
 }

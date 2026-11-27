@@ -13,15 +13,15 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/ingress"
-	"github.com/jay94ks/mydcd/internal/web/mydc"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/ingress"
+	"github.com/jay94ks/seafield/internal/web/sfc"
 )
 
 // External access screens (UI-5A~5C, REQ-22,
-// docs/reference/ingress-management.md): mydcd's `ingresses` mappings,
+// docs/reference/ingress-management.md): sfcd's `ingresses` mappings,
 // recent request metrics (Part metrics/errors) and Raft blocks, shaped for
-// the browser. mydcd decides who sees and changes what; the web only reads
+// the browser. sfcd decides who sees and changes what; the web only reads
 // as the person and sends their blocks as their operations.
 
 func round2(f float64) float64 { return math.Round(f*100) / 100 }
@@ -57,7 +57,7 @@ type ingressData struct {
 	blockRevision uint64
 }
 
-func readIngress(ctx context.Context, c mydc.Conn, q control.IngressQuery, withMetrics bool) (*ingressData, error) {
+func readIngress(ctx context.Context, c sfc.Conn, q control.IngressQuery, withMetrics bool) (*ingressData, error) {
 	iv, err := ingressRead(ctx, c, q)
 	if err != nil {
 		return nil, err
@@ -127,7 +127,7 @@ func serviceOf(spec ingress.Spec, id string) *ingress.Service {
 }
 
 // balanceShape is a route's balance (app.yaml routes[].balance, else its
-// service's) as the screens show it. It is read-only: mydcd takes it only
+// service's) as the screens show it. It is read-only: sfcd takes it only
 // from app.yaml.
 func balanceShape(b *ingress.Balance) map[string]any {
 	if b == nil {
@@ -233,7 +233,7 @@ func instanceShape(m *control.IngressMapping, mt *ingress.Metrics, blocks []cont
 		}
 		gw := rt.Gateway
 		if gw == "" {
-			gw = mydc.GatewayLocal
+			gw = sfc.GatewayLocal
 		}
 		v := map[string]any{"id": rt.ID, "gateway": gw, "host": rt.Host, "prefix": rt.Prefix, "service": rt.Service, "balance": balanceShape(bal), "rps": 0.0,
 			"balanceRevision": rt.BalanceRevision}
@@ -247,7 +247,7 @@ func instanceShape(m *control.IngressMapping, mt *ingress.Metrics, blocks []cont
 		}
 		if rs != nil {
 			for _, l := range rs.Listeners {
-				if l.Gateway == gw || gw == mydc.GatewayBoth || l.Gateway == "" {
+				if l.Gateway == gw || gw == sfc.GatewayBoth || l.Gateway == "" {
 					v["port"] = listenerPort(l.Address)
 					break
 				}
@@ -323,7 +323,7 @@ func instanceShape(m *control.IngressMapping, mt *ingress.Metrics, blocks []cont
 	return iv
 }
 
-// gatewayShape: a server's shared gateway as mydcd observes it. The
+// gatewayShape: a server's shared gateway as sfcd observes it. The
 // configuration itself is the server's local modules.ingress setting.
 func gatewayShape(g control.IngressGatewaySummary, system bool) map[string]any {
 	listeners := []map[string]any{}
@@ -373,7 +373,7 @@ func gatewayShape(g control.IngressGatewaySummary, system bool) map[string]any {
 
 // tenantNodes: the per-tenant×node use and limits (a tenant query's node
 // summaries are that tenant's).
-func tenantNodes(ctx context.Context, c mydc.Conn, tenant, node string) map[string]control.IngressNodeSummary {
+func tenantNodes(ctx context.Context, c sfc.Conn, tenant, node string) map[string]control.IngressNodeSummary {
 	out := map[string]control.IngressNodeSummary{}
 	q := control.IngressQuery{Tenant: tenant, Node: node}
 	for range ingressMaxPages {
@@ -396,7 +396,7 @@ func tenantNodes(ctx context.Context, c mydc.Conn, tenant, node string) map[stri
 
 func usePair(used, limit int) []int { return []int{used, limit} }
 
-func shapeIngress(ctx context.Context, c mydc.Conn, d *ingressData, q control.IngressQuery, system bool) map[string]any {
+func shapeIngress(ctx context.Context, c sfc.Conn, d *ingressData, q control.IngressQuery, system bool) map[string]any {
 	instances := []map[string]any{}
 	nodeRPS := map[string]float64{}
 	tenantHosts := map[string][]string{}
@@ -423,7 +423,7 @@ func shapeIngress(ctx context.Context, c mydc.Conn, d *ingressData, q control.In
 			if !slices.Contains(tenantHosts[m.Tenant], rt.Host) {
 				tenantHosts[m.Tenant] = append(tenantHosts[m.Tenant], rt.Host)
 			}
-			if rt.Gateway == mydc.GatewayExternal || rt.Gateway == mydc.GatewayBoth {
+			if rt.Gateway == sfc.GatewayExternal || rt.Gateway == sfc.GatewayBoth {
 				tenantExternal[m.Tenant] = true
 			}
 		}
@@ -437,7 +437,7 @@ func shapeIngress(ctx context.Context, c mydc.Conn, d *ingressData, q control.In
 		}
 		nv := map[string]any{"node": n.Node, "module": module, "connections": n.Connections, "connectionLimit": n.MaxIngressConnections, "rps": round2(nodeRPS[n.Node])}
 		for _, g := range n.Gateways {
-			if g.Gateway == mydc.GatewayExternal || g.Gateway == mydc.GatewayLocal {
+			if g.Gateway == sfc.GatewayExternal || g.Gateway == sfc.GatewayLocal {
 				nv[g.Gateway] = gatewayShape(g, system)
 			}
 		}
@@ -472,7 +472,7 @@ func shapeIngress(ctx context.Context, c mydc.Conn, d *ingressData, q control.In
 		"summary": map[string]any{"rps": round2(totalRPS), "err5xx": share5xx(resp), "p95Ms": round2(worstP95)}}
 }
 
-func (s *Server) isSystemAdmin(ctx context.Context, c mydc.Conn) bool {
+func (s *Server) isSystemAdmin(ctx context.Context, c sfc.Conn) bool {
 	who, err := c.Whoami(ctx)
 	return err == nil && who.User.SystemAdmin
 }
@@ -487,7 +487,7 @@ func (s *Server) handleIngress(w http.ResponseWriter, r *http.Request, ws *webSe
 	ctx, cancel := s.callCtx(r)
 	defer cancel()
 	var out map[string]any
-	err := ws.do(ctx, func(ctx context.Context, c mydc.Conn) error {
+	err := ws.do(ctx, func(ctx context.Context, c sfc.Conn) error {
 		q := control.IngressQuery{Node: node, Tenant: tenant}
 		d, err := readIngress(ctx, c, q, true)
 		if err != nil {
@@ -514,7 +514,7 @@ func (s *Server) handleAppIngress(w http.ResponseWriter, r *http.Request, ws *we
 	ctx, cancel := s.callCtx(r)
 	defer cancel()
 	var out map[string]any
-	err := ws.do(ctx, func(ctx context.Context, c mydc.Conn) error {
+	err := ws.do(ctx, func(ctx context.Context, c sfc.Conn) error {
 		d, err := readIngress(ctx, c, control.IngressQuery{Tenant: tenant, App: app, Node: node}, true)
 		if err != nil {
 			return err
@@ -571,7 +571,7 @@ func (s *Server) handleAppIngress(w http.ResponseWriter, r *http.Request, ws *we
 	writeJSON(w, http.StatusOK, out)
 }
 
-// blockNodes: per server, which blocks mydcd reports applied there and the
+// blockNodes: per server, which blocks sfcd reports applied there and the
 // block book revision that server's owners have installed (the lowest of
 // its mappings; unobserved = no entry).
 type blockNodes struct {
@@ -580,7 +580,7 @@ type blockNodes struct {
 	nodes     []string
 }
 
-func readBlockNodes(ctx context.Context, c mydc.Conn, tenant string) blockNodes {
+func readBlockNodes(ctx context.Context, c sfc.Conn, tenant string) blockNodes {
 	out := blockNodes{apps: map[string]map[string]ingress.BlockApplication{}, installed: map[string]uint64{}}
 	iv, err := ingressRead(ctx, c, control.IngressQuery{Tenant: tenant})
 	if err != nil {
@@ -619,7 +619,7 @@ func readBlockNodes(ctx context.Context, c mydc.Conn, tenant string) blockNodes 
 	return out
 }
 
-// blockShape shapes a mydcd block for the screen. state: active, or
+// blockShape shapes a sfcd block for the screen. state: active, or
 // lifting while a lifted block is not yet installed on every server
 // (Runtime.BlockRevision below the page's BlockRevision, or unobserved).
 func blockShape(v control.IngressBlockView, bn blockNodes, bookRevision uint64, names map[string]string) (map[string]any, bool) {
@@ -664,7 +664,7 @@ func blockShape(v control.IngressBlockView, bn blockNodes, bookRevision uint64, 
 	}
 	if b.Gateway != "" {
 		g := b.Gateway
-		if g == mydc.GatewayBoth {
+		if g == sfc.GatewayBoth {
 			g = "all"
 		}
 		scope["gateway"] = g
@@ -733,7 +733,7 @@ func (s *Server) handleIngressBlocks(w http.ResponseWriter, r *http.Request, ws 
 	ctx, cancel := s.callCtx(r)
 	defer cancel()
 	items := []map[string]any{}
-	err := ws.do(ctx, func(ctx context.Context, c mydc.Conn) error {
+	err := ws.do(ctx, func(ctx context.Context, c sfc.Conn) error {
 		p, err := ingressPaged(ctx, c, control.IngressQuery{Part: "blocks", Tenant: tenant})
 		if err != nil {
 			return err
@@ -778,7 +778,7 @@ type ingressBlockReq struct {
 	KillConnections bool   `json:"killConnections"`
 }
 
-// blockID: mydcd takes the block ID from the caller and never reuses one;
+// blockID: sfcd takes the block ID from the caller and never reuses one;
 // one per web op.
 func blockID(opID string) string { return "web-" + strings.ReplaceAll(opID, "-", "") }
 
@@ -829,10 +829,10 @@ func (s *Server) handleCreateIngressBlock(w http.ResponseWriter, r *http.Request
 		b.ExpiresAt = uint64(now.Add(time.Duration(req.Minutes) * time.Minute).Unix())
 	}
 	switch sc.Gateway {
-	case "", mydc.GatewayExternal, mydc.GatewayLocal:
+	case "", sfc.GatewayExternal, sfc.GatewayLocal:
 		b.Gateway = sc.Gateway
 	case "all":
-		b.Gateway = mydc.GatewayBoth
+		b.Gateway = sfc.GatewayBoth
 	default:
 		writeError(w, http.StatusUnprocessableEntity, "invalid", "scope.gateway: external, local or all")
 		return
@@ -884,26 +884,26 @@ func (s *Server) handleCreateIngressBlock(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusUnprocessableEntity, "invalid", "scope.kind: route, host, task, app, source, node, tenant or gateway")
 		return
 	}
-	s.sharedCreate(w, r, ws, req.OpID, req, func(ctx context.Context, c mydc.Conn, _ mydc.Session) (string, any, uint64, string, error) {
+	s.sharedCreate(w, r, ws, req.OpID, req, func(ctx context.Context, c sfc.Conn, _ sfc.Session) (string, any, uint64, string, error) {
 		b.ID = blockID(req.OpID)
 		if needMapping {
 			if err := s.blockMapping(ctx, c, &b, sc.App, sc.Node, sc.Route, sc.Host, sc.Prefix, sc.Task); err != nil {
 				return "", nil, 0, "", err
 			}
 		}
-		// Actor and CreatedAt are mydcd's, from the signed original.
+		// Actor and CreatedAt are sfcd's, from the signed original.
 		probe := b
 		probe.Actor, probe.CreatedAt = "probe", uint64(now.Unix())
 		if !probe.Valid() {
 			return "", nil, 0, "", invalid("scope: these values do not make a block (" + sc.Kind + ")")
 		}
-		return mydc.ActionIngressBlock, control.IngressBlockChange{Block: b}, 0, "ingress/block/" + b.ID, nil
+		return sfc.ActionIngressBlock, control.IngressBlockChange{Block: b}, 0, "ingress/block/" + b.ID, nil
 	})
 }
 
 // blockMapping fills the mapping Key (and route/backend) of an instance,
 // route or backend block: one app on one server.
-func (s *Server) blockMapping(ctx context.Context, c mydc.Conn, b *ingress.Block, app, node, route, host, prefix, task string) error {
+func (s *Server) blockMapping(ctx context.Context, c sfc.Conn, b *ingress.Block, app, node, route, host, prefix, task string) error {
 	if app == "" || b.Tenant == "" {
 		return invalid("scope: tenant and app")
 	}
@@ -943,7 +943,7 @@ func (s *Server) blockMapping(ctx context.Context, c mydc.Conn, b *ingress.Block
 	return nil
 }
 
-func (s *Server) findBlock(ctx context.Context, c mydc.Conn, id string) (*control.IngressBlockView, error) {
+func (s *Server) findBlock(ctx context.Context, c sfc.Conn, id string) (*control.IngressBlockView, error) {
 	p, err := ingressPaged(ctx, c, control.IngressQuery{Part: "blocks"})
 	if err != nil {
 		return nil, err
@@ -972,7 +972,7 @@ func (s *Server) handleExtendIngressBlock(w http.ResponseWriter, r *http.Request
 		return
 	}
 	id := r.PathValue("id")
-	s.sharedCreate(w, r, ws, req.OpID, req, func(ctx context.Context, c mydc.Conn, _ mydc.Session) (string, any, uint64, string, error) {
+	s.sharedCreate(w, r, ws, req.OpID, req, func(ctx context.Context, c sfc.Conn, _ sfc.Session) (string, any, uint64, string, error) {
 		v, err := s.findBlock(ctx, c, id)
 		if err != nil {
 			return "", nil, 0, "", err
@@ -987,7 +987,7 @@ func (s *Server) handleExtendIngressBlock(w http.ResponseWriter, r *http.Request
 		if t := time.Unix(int64(v.Block.ExpiresAt), 0); t.After(from) {
 			from = t
 		}
-		return mydc.ActionIngressBlockExtend, control.IngressBlockSelection{ID: id, ExpiresAt: uint64(from.Add(time.Duration(req.Minutes) * time.Minute).Unix())}, v.Revision, "ingress/block/" + id, nil
+		return sfc.ActionIngressBlockExtend, control.IngressBlockSelection{ID: id, ExpiresAt: uint64(from.Add(time.Duration(req.Minutes) * time.Minute).Unix())}, v.Revision, "ingress/block/" + id, nil
 	})
 }
 
@@ -1001,12 +1001,12 @@ func (s *Server) handleDeleteIngressBlock(w http.ResponseWriter, r *http.Request
 		return
 	}
 	id := r.PathValue("id")
-	s.sharedCreate(w, r, ws, req.OpID, req, func(ctx context.Context, c mydc.Conn, _ mydc.Session) (string, any, uint64, string, error) {
+	s.sharedCreate(w, r, ws, req.OpID, req, func(ctx context.Context, c sfc.Conn, _ sfc.Session) (string, any, uint64, string, error) {
 		v, err := s.findBlock(ctx, c, id)
 		if err != nil {
 			return "", nil, 0, "", err
 		}
-		return mydc.ActionIngressUnblock, control.IngressBlockSelection{ID: id}, v.Revision, "ingress/block/" + id, nil
+		return sfc.ActionIngressUnblock, control.IngressBlockSelection{ID: id}, v.Revision, "ingress/block/" + id, nil
 	})
 }
 

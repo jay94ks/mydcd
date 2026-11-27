@@ -10,7 +10,7 @@ import (
 func TestStandaloneUsesOriginalServiceCompilerAndOwnStableNamespace(t *testing.T) {
 	f, input, ctx, _ := externalFixture(t)
 	input.Name = ""
-	input.MyDC.Delivery = nil
+	input.Sfc.Delivery = nil
 	for name := range input.Services {
 		if len(input.Services) > 1 {
 			delete(input.Services, name)
@@ -18,8 +18,8 @@ func TestStandaloneUsesOriginalServiceCompilerAndOwnStableNamespace(t *testing.T
 	}
 	for name, service := range input.Services {
 		service.DependsOn = nil
-		service.MyDC.Nodes = nil
-		service.MyDC.PerNode = 0
+		service.Sfc.Nodes = nil
+		service.Sfc.PerNode = 0
 		input.Services[name] = service
 	}
 	raw, err := marshalApp(input)
@@ -59,7 +59,7 @@ func TestStandaloneUsesOriginalServiceCompilerAndOwnStableNamespace(t *testing.T
 func TestStandaloneRejectsAppOrReplicaCoupling(t *testing.T) {
 	f, input, ctx, _ := externalFixture(t)
 	input.Name = ""
-	input.MyDC.Delivery = nil
+	input.Sfc.Delivery = nil
 	for name := range input.Services {
 		if len(input.Services) > 1 {
 			delete(input.Services, name)
@@ -76,8 +76,8 @@ func TestStandaloneRejectsAppOrReplicaCoupling(t *testing.T) {
 		}
 	}, func(c *Compose) {
 		for name, s := range c.Services {
-			s.MyDC.Nodes = []string{"node"}
-			s.MyDC.PerNode = 1
+			s.Sfc.Nodes = []string{"node"}
+			s.Sfc.PerNode = 1
 			c.Services[name] = s
 		}
 	}, func(c *Compose) {

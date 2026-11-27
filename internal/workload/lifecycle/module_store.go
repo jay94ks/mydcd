@@ -12,8 +12,8 @@ import (
 	"errors"
 	"slices"
 
-	"github.com/jay94ks/mydcd/internal/schema"
-	"github.com/jay94ks/mydcd/internal/storage"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/storage"
 )
 
 const moduleMetaPrefix = sourcePrefix + "modules/metadata/"
@@ -33,7 +33,7 @@ type ModuleFact struct {
 func ModuleFactBytes(f ModuleFact) []byte {
 	f.Signature = nil
 	raw, _ := json.Marshal(f)
-	return append([]byte("mydc-checker-module-fact-1\x00"), raw...)
+	return append([]byte("sfc-checker-module-fact-1\x00"), raw...)
 }
 func (f ModuleFact) Verify() error {
 	if f.Schema != 1 || f.Cluster == ([32]byte{}) || f.Owner == ([32]byte{}) || !name(f.Tenant) || !f.Module.valid() || f.Module.Length > MaxModuleBytes || f.ExpandedBytes > MaxModuleBytes-f.Module.Length || !ed25519.Verify(f.Owner[:], ModuleFactBytes(f), f.Signature) {
@@ -45,7 +45,7 @@ func (f ModuleFact) Clone() ModuleFact { f.Signature = bytes.Clone(f.Signature);
 
 func moduleObjectKey(tenant string, pin ModulePin) string {
 	raw, _ := json.Marshal(pin)
-	digest := sha256.Sum256(append([]byte("mydc-checker-module-key-1\x00"), raw...))
+	digest := sha256.Sum256(append([]byte("sfc-checker-module-key-1\x00"), raw...))
 	return tenant + "/" + hex.EncodeToString(digest[:])
 }
 

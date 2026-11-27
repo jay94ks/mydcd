@@ -7,9 +7,9 @@ import (
 	"errors"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/containerops"
-	"github.com/jay94ks/mydcd/internal/imagebuild"
-	"github.com/jay94ks/mydcd/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/containerops"
+	"github.com/jay94ks/seafield/internal/imagebuild"
+	"github.com/jay94ks/seafield/internal/reconcile"
 )
 
 // Consume the original finite daemon and SDK solve. The SDK result and native

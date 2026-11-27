@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/storage"
+	"github.com/jay94ks/seafield/internal/storage"
 )
 
 func TestPushFenceRetainsFiniteOldGrantAndRejectsNewIssueAcrossRestart(t *testing.T) {

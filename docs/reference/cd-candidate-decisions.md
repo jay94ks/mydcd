@@ -3,12 +3,12 @@
 후보 승인은 배포할 입력을 승인하는 동작이다. 기존 `cd approve`의 Secret Group 비밀번호 승인과 구분한다.
 
 ```sh
-mydc --tenant team-a cd status shop
-mydc --tenant team-a --reason '릴리스 검사 통과' --incident-id release-42 \
+sfcli --tenant team-a cd status shop
+sfcli --tenant team-a --reason '릴리스 검사 통과' --incident-id release-42 \
   cd approve-candidate shop --candidate SHA256 --request-id approve-42
-mydc --tenant team-a --reason '외부 검사 실패' \
+sfcli --tenant team-a --reason '외부 검사 실패' \
   cd reject-candidate shop --candidate SHA256 --request-id reject-42
-mydc --tenant team-a cd replan shop --request-id reconsider-42
+sfcli --tenant team-a cd replan shop --request-id reconsider-42
 ```
 
 현재 tenant의 `ManageCD`가 필요하다. credential에 동작 제한이 있으면 각각 `cd-approve`, `cd-reject`를 허용해야 한다. 이유는 선택 전역 `--reason`으로 받고 최대512자이며 원 operation에 서명한다. `--incident-id`/`--approved-by`도 기존 metadata 규칙을 따른다. 승인 표시 문자열은 권한을 만들지 않는다. 이유는 공개 작업 metadata이므로 Secret·환경 변수 값·비밀번호를 입력하지 않는다.
@@ -56,7 +56,7 @@ CD cursor 이벤트의 연결은 RQ4의 내구 이벤트 구현에서 같은 원
 
 ## 일시정지·재개와 이전 버전
 
-`mydc --tenant team-a cd pause shop --preview`와 `cd resume shop --preview`는 사용자 조회 `app-cd-toggle-plan`을 호출한다. 요청은 `{Tenant,CDToggle:{App,Action}}`이며 Action은 `pause-app-cd`/`resume-app-cd`다. `CDTogglePlan`은 Schema=1, Tenant/App/Action, 현재 Expected CD revision·RootRevision·Epoch, Paused/WouldPause, ActiveOperation, PreservesOriginal=true를 반환한다. 실제 reducer와 같은 순수 전이를 평가하며 현재 권한·동작 제한·Volume 이동/진행 충돌도 동일하게 검사한다. 미리보기는 상태를 바꾸거나 이후 성공을 예약하지 않는다.
+`sfcli --tenant team-a cd pause shop --preview`와 `cd resume shop --preview`는 사용자 조회 `app-cd-toggle-plan`을 호출한다. 요청은 `{Tenant,CDToggle:{App,Action}}`이며 Action은 `pause-app-cd`/`resume-app-cd`다. `CDTogglePlan`은 Schema=1, Tenant/App/Action, 현재 Expected CD revision·RootRevision·Epoch, Paused/WouldPause, ActiveOperation, PreservesOriginal=true를 반환한다. 실제 reducer와 같은 순수 전이를 평가하며 현재 권한·동작 제한·Volume 이동/진행 충돌도 동일하게 검사한다. 미리보기는 상태를 바꾸거나 이후 성공을 예약하지 않는다.
 
 실행은 `cd pause shop --request-id ID` / `cd resume shop --request-id ID`로 원 UserOperation을 저장하고 제출한다. 사유 옵션을 사용할 수 있으며 재호출은 원 journal/result를 사용한다. `--preview`와 request ID·expected-revision·resume-original을 혼합하지 않는다. pause는 이미 수락된 작업을 미실행으로 바꾸지 않고 원 ActiveOperation·Task·grant를 유지한다. resume도 같은 원 실행을 보존하며 명시 down의 정산이 남으면 거부한다.
 

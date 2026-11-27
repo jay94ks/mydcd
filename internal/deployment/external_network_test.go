@@ -8,9 +8,9 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/network"
-	"github.com/jay94ks/mydcd/internal/tenancy"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/network"
+	"github.com/jay94ks/seafield/internal/tenancy"
 )
 
 func externalFixture(t *testing.T) (*fixture, Compose, PlanningContext, string) {
@@ -180,7 +180,7 @@ func TestExternalNetworkAliasesCannotDoubleAllocateAddressOrMutateSourcePolicy(t
 	deny(t, e)
 	f, c, ctx, _ = externalFixture(t)
 	n := c.Networks["app"]
-	n.MyDC.RuntimeChanges = &RuntimeChanges{Authority: "authenticated-mydcp-raft-cas", Strategy: "staged", Deadlines: "preserve", Disruptive: "explicit-transition-plan"}
+	n.Sfc.RuntimeChanges = &RuntimeChanges{Authority: "authenticated-sfcp-raft-cas", Strategy: "staged", Deadlines: "preserve", Disruptive: "explicit-transition-plan"}
 	c.Networks["app"] = n
 	_, e = Compile(c, f.c, ctx)
 	deny(t, e)

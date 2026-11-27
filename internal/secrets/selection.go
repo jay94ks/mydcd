@@ -9,7 +9,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/jay94ks/mydcd/internal/access"
+	"github.com/jay94ks/seafield/internal/access"
 )
 
 type Use struct {

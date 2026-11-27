@@ -1,13 +1,13 @@
 # Ingress 조회·관측·차단
 
-Ingress의 앱 목표는 `app.yaml`과 기존 앱 작업이 소유한다. 조회·최근 요청 지표와 일시 차단은 그 목표나 컨테이너 Task를 변경하지 않는다. 실제 관측은 해당 노드의 `mydcd`가 수집하며 Unix TLS와 네트워크 MYDCP의 동일 사용자 API에서 읽는다.
+Ingress의 앱 목표는 `app.yaml`과 기존 앱 작업이 소유한다. 조회·최근 요청 지표와 일시 차단은 그 목표나 컨테이너 Task를 변경하지 않는다. 실제 관측은 해당 노드의 `sfcd`가 수집하며 Unix TLS와 네트워크 SFCP의 동일 사용자 API에서 읽는다.
 
 ## 조회
 
-명령과 옵션은 [mydc ingress](../cli/ingress.md)에 있다.
+명령과 옵션은 [sfcli ingress](../cli/ingress.md)에 있다.
 
 
-User Request는 `Method:"ingresses", Tenant, Ingress:{Node,Tenant,App,Key,Part,After,Offset}`다. `Part`는 `mappings`(기본), `metrics`, `errors`, `blocks`, `policies`다. 다른 User selector나 별도 Request.After와 혼합하지 않는다. 시스템 관리자도 현재 credential의 범위를 넘지 않으며, 그 외 사용자는 현재 Read 권한이 있는 tenant/node의 행과 집계만 받는다.
+User Request는 typed method `Method:"ingresses", Params:{Node,Tenant,App,Key,Part,After,Offset}`이고, 응답은 `Data`에 IngressPage 하나다([typed method](unix-sockets/10-user.md#typed-method)). `Part`는 `mappings`(기본), `metrics`, `errors`, `blocks`, `policies`다. 시스템 관리자도 현재 credential의 범위를 넘지 않으며, 그 외 사용자는 현재 Read 권한이 있는 tenant/node의 행과 집계만 받는다.
 
 Reply.Ingress는 `Schema:1,Index,Epoch,RootRevision,BlockRevision,Mappings,Nodes,Blocks,HostPolicies,Next`다. 매핑 목록은 정렬된 key 순서의 한 행씩 반환하고, 목록 `Next`를 `--after`로 전달한다. 한 매핑 안의 `Next`는 숫자 `--offset`이며 listener/route/backend/block 상세를 각각 최대4개씩 이어 읽는다. blocks는8행, policies는4행씩 숫자 offset으로 이어진다. 일반 User frame의 예산 안에서 처리하며 전체 응답의 JSON은112KiB 이하이다.
 
@@ -31,7 +31,7 @@ Runtime.Metrics는 메모리에 최근60초를 유지한다. instance/route/back
 
 ## Raft 차단
 
-CLI는 `mydc ingress block ID --scope ...`, `extend ID --for`, `unblock ID`다([사용법](../cli/ingress.md#차단)). 서버 메시지의 Block 예시:
+CLI는 `sfcli ingress block ID --scope ...`, `extend ID --for`, `unblock ID`다([사용법](../cli/ingress.md#차단)). 서버 메시지의 Block 예시:
 
 
 ```json
@@ -46,7 +46,7 @@ tenant/node/gateway 범위와 여러 tenant의 host 차단은 시스템 관리�
 
 blocks 조회는 원 Revision/Removed/Active/TargetMissing을 보여 준다. `--node`를 지정하거나 해당 매핑을 조회하면 실제 노드의 Applied/AppliedAt/Error/BlockedRequests를 읽는다. Applied 판정은 `gateway: both` 선언 자체가 아니라 실제 listener의 external/local 종류를 같은 요청 매칭 함수에 전달한다. 실제 노출되지 않은 게이트웨이를 적용 대상으로 합성하지 않는다. 원 노드 응답이 없으면 적용 성공을 합성하지 않는다. TargetMissing은 목표가 제거되었다는 뜻이며 해당 원 차단을 해제하지 않는다. 같은 정책은 재시작 후 Raft에서 다시 적용한다.
 
-원 작업 ID의 입력과 결과는 CLI journal에 보존한다. 결과를 모르면 `mydc op show ID`로 묻고 `mydc op resume ID`로 같은 작업만 이어 보낸다. 새 ID·새 CAS·현재 계획으로 원 요청을 대체하지 않는다. 확정 차단/해제는 공개 ingress 이벤트와 기존 관리 감사를 사용한다.
+원 작업 ID의 입력과 결과는 CLI journal에 보존한다. 결과를 모르면 `sfcli op show ID`로 묻고 `sfcli op resume ID`로 같은 작업만 이어 보낸다. 새 ID·새 CAS·현재 계획으로 원 요청을 대체하지 않는다. 확정 차단/해제는 공개 ingress 이벤트와 기존 관리 감사를 사용한다.
 
 ## 해제 적용 상태의 비교
 
@@ -62,7 +62,7 @@ blocks 조회는 원 Revision/Removed/Active/TargetMissing을 보여 준다. `--
 
 ## Tenant host 권한
 
-CLI는 `mydc ingress hosts set --tenant team [--external-allowed] [--external a,b] [--local c]`다.
+CLI는 `sfcli ingress hosts set --tenant team [--external-allowed] [--external a,b] [--local c]`다.
 
 
 서버 메시지는 `{"Tenant":"team","Policy":{"ExternalAllowed":false,"ExternalHosts":[],"LocalHosts":["*.internal.example"]}}`다. 시스템 관리자만 `set-ingress-host-policy`로 tenant의 현재 host 권한을 변경한다. 패턴 목록 각각 최대256개, 정책 JSON 최대24KiB다. 새 shared 모드에서 미설정 정책은 external 비허용·local host 없음으로 시작한다. legacy 앱의 직접 address listener에는 이 shared host grant를 요구하지 않는다.
@@ -87,7 +87,7 @@ CLI는 `mydc ingress hosts set --tenant team [--external-allowed] [--external a,
 
 ## Gateway·분배·drain 변경과 공개 이력
 
-이 설정은 `control/ingress-management`의 관리 overlay다. 앱/Task/container generation과 원 Ingress native source를 바꾸지 않는다. Unix 관리 TLS와 네트워크 MYDCP의 User 요청은 같은 현재 계정·서명·권한·Raft/record CAS·원 operation journal을 사용한다.
+이 설정은 `control/ingress-management`의 관리 overlay다. 앱/Task/container generation과 원 Ingress native source를 바꾸지 않는다. Unix 관리 TLS와 네트워크 SFCP의 User 요청은 같은 현재 계정·서명·권한·Raft/record CAS·원 operation journal을 사용한다.
 
 | CLI | 관리 action / 조회 Part | 입력·범위 |
 |---|---|---|

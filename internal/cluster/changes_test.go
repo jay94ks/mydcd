@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/storage"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/storage"
 
 	"github.com/hashicorp/raft"
 )

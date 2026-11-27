@@ -15,7 +15,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/distribution/reference"
-	"github.com/jay94ks/mydcd/internal/cluster/lifecycle"
+	"github.com/jay94ks/seafield/internal/cluster/lifecycle"
 )
 
 const MaxImages = 8
@@ -110,11 +110,11 @@ type Plan struct {
 func PlanBytes(p Plan) []byte {
 	p.Signature = nil
 	raw, _ := json.Marshal(p)
-	return append([]byte("mydc-image-cache-plan-1\x00"), raw...)
+	return append([]byte("sfc-image-cache-plan-1\x00"), raw...)
 }
 func (p Plan) Digest() [32]byte {
 	raw, _ := json.Marshal(p)
-	return sha256.Sum256(append([]byte("mydc-image-cache-target-1\x00"), raw...))
+	return sha256.Sum256(append([]byte("sfc-image-cache-target-1\x00"), raw...))
 }
 func (p Plan) Valid() bool {
 	if p.Schema != 1 || p.Cluster == ([32]byte{}) || p.Owner == ([32]byte{}) || p.Boot == ([32]byte{}) || !lifecycle.ValidID(p.Node) || p.At == 0 || p.Index == 0 || !ValidSelection(p.Selection, false) || len(p.Images) > MaxImages || p.Next != "" && (len(p.Selection) > 0 || !ValidID(p.Next)) || len(p.Selection) > 0 && len(p.Images) != len(p.Selection) {

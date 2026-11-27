@@ -5,9 +5,9 @@ package deployment
 import (
 	"encoding/json"
 
-	"github.com/jay94ks/mydcd/internal/cluster/lifecycle"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/network"
+	"github.com/jay94ks/seafield/internal/cluster/lifecycle"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/network"
 )
 
 // TaskNetworkMaterial is public frozen metadata. Current admission and native

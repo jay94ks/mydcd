@@ -7,9 +7,9 @@ import (
 	"encoding/json"
 	"slices"
 
-	"github.com/jay94ks/mydcd/internal/cluster/lifecycle"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/cluster/lifecycle"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/reconcile"
 )
 
 // RuntimeState stores the existing lifecycle core and A2 membership effects in
@@ -467,4 +467,86 @@ func removalReady(node lifecycle.Node, index uint64) bool {
 		return node.Retirement != nil && !node.Retirement.Responding && node.Retirement.ConfigurationIndex <= index
 	}
 	return node.Phase == lifecycle.Removing && node.Closure != nil && node.Closure.Closed && node.Closure.ConfigurationIndex == index
+}
+
+// RecoverConfiguration installs the configuration a signed `sfcd recover`
+// produced. Members it dropped become Retired at once (lifecycle Recover); a
+// removal job still waiting on one of them is settled as applied, because
+// the member is no longer in the actual configuration.
+func (d Directory) RecoverConfiguration(r lifecycle.Recovery, c lifecycle.Configuration) (Directory, error) {
+	if !d.writable() || d.Runtime == nil || c.Validate() != nil {
+		return d, ErrMember
+	}
+	for _, member := range c.Members {
+		e, exists := d.Entry(member.ID)
+		key, err := identity.ParseKey(e.CurrentPeer().Key)
+		if !exists || err != nil || key != member.Key {
+			return d, ErrMember
+		}
+	}
+	t, err := d.Topology()
+	if err != nil {
+		return d, err
+	}
+	if t, err = t.Recover(r, c); err != nil {
+		return d, err
+	}
+	n, err := d.keepTopology(t)
+	if err != nil {
+		return d, err
+	}
+	if err = n.settleLostRemovals(c, r.Key, d.mustConfigurationIndex()); err != nil {
+		return d, err
+	}
+	return n, n.Validate()
+}
+
+// Recovered reports whether a recovery with this request ID retired members.
+func (d Directory) Recovered(requestID string) bool {
+	t, err := d.Topology()
+	if err != nil {
+		return false
+	}
+	for _, m := range d.Entries {
+		if n, ok := t.Node(m.Peer.ID); ok && n.Recovery != nil && n.Recovery.RequestID == requestID {
+			return true
+		}
+	}
+	return false
+}
+
+// settleLostRemovals ends every removal job that still waits on a member c
+// no longer holds: the member is gone from the actual configuration, so the
+// removal took effect. A job never dispatched is recorded as dispatched by
+// source (the server that forced c) against the previous configuration.
+func (d Directory) settleLostRemovals(c lifecycle.Configuration, source [32]byte, previous uint64) error {
+	for i, op := range d.Runtime.Operations {
+		if op.Action != lifecycle.Remove && op.Action != lifecycle.ForceRemove || op.Job.Pending == nil {
+			continue
+		}
+		if _, exists := c.Member(op.Node); exists {
+			continue
+		}
+		job := op.Job
+		var err error
+		if job.Pending.Phase == reconcile.Prepared {
+			if job, err = reconcile.Dispatch(job, job.Pending.ID); err != nil {
+				return err
+			}
+			d.Runtime.Operations[i].Source, d.Runtime.Operations[i].BaseIndex = source, previous
+		}
+		if job, err = reconcile.Settle(job, job.Pending.ID, reconcile.EffectApplied); err != nil {
+			return err
+		}
+		d.Runtime.Operations[i].Job, d.Runtime.Operations[i].ObservedIndex = job, c.Index
+	}
+	return nil
+}
+
+func (d Directory) mustConfigurationIndex() uint64 {
+	t, err := d.Topology()
+	if err != nil {
+		return 0
+	}
+	return t.Configuration().Index
 }

@@ -6,8 +6,8 @@ import (
 	"context"
 	"errors"
 
-	"github.com/jay94ks/mydcd/internal/imagebuild"
-	"github.com/jay94ks/mydcd/internal/nodestorage"
+	"github.com/jay94ks/seafield/internal/imagebuild"
+	"github.com/jay94ks/seafield/internal/nodestorage"
 )
 
 // The native intent precedes Borrow. A lost acknowledgement is recovered from

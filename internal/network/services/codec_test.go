@@ -10,13 +10,13 @@ import (
 
 func TestDNSLibraryQuerySubsetAndCanonicalNames(t *testing.T) {
 	m := new(dns.Msg)
-	m.SetQuestion("DB.App.MYDC.test.", dns.TypeA)
+	m.SetQuestion("DB.App.SFC.test.", dns.TypeA)
 	raw, err := m.Pack()
 	if err != nil {
 		t.Fatal(err)
 	}
 	q, err := DecodeDNSQuery(raw, 4096)
-	if err != nil || q.Question[0].Name != "db.app.mydc.test." {
+	if err != nil || q.Question[0].Name != "db.app.sfc.test." {
 		t.Fatal(err)
 	}
 	for _, change := range []func(*dns.Msg){func(v *dns.Msg) { v.Response = true }, func(v *dns.Msg) { v.Question = append(v.Question, v.Question[0]) }, func(v *dns.Msg) { v.Question[0].Qtype = dns.TypeANY }, func(v *dns.Msg) { v.Question[0].Qtype = dns.TypeAXFR }, func(v *dns.Msg) { v.Question[0].Qclass = dns.ClassCHAOS }} {

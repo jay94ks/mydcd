@@ -7,8 +7,8 @@ import (
 	"encoding/json"
 	"math"
 
-	"github.com/jay94ks/mydcd/internal/cluster/lifecycle"
-	"github.com/jay94ks/mydcd/internal/nodestorage"
+	"github.com/jay94ks/seafield/internal/cluster/lifecycle"
+	"github.com/jay94ks/seafield/internal/nodestorage"
 )
 
 // UploadScope is immutable. A policy/root/context change cannot retarget an
@@ -36,7 +36,7 @@ func (s UploadScope) Validate() error {
 	}
 	return nil
 }
-func (s UploadScope) Hash() [32]byte { return digestJSON("mydc-imagebuild-upload-1", s) }
+func (s UploadScope) Hash() [32]byte { return digestJSON("sfc-imagebuild-upload-1", s) }
 
 // PartSize belongs to the immutable accepted scope. Omitted ChunkBytes keeps
 // the original 24 KiB offsets and hash; only explicit new uploads use 32 KiB.
@@ -88,7 +88,7 @@ type PartReceipt struct {
 func PartReceiptBytes(r PartReceipt) []byte {
 	r.Signature = nil
 	raw, _ := json.Marshal(r)
-	return append([]byte("mydc-imagebuild-part-1\x00"), raw...)
+	return append([]byte("sfc-imagebuild-part-1\x00"), raw...)
 }
 func (r PartReceipt) Valid(scope UploadScope) bool {
 	return scope.Validate() == nil && r.Schema == 1 && r.Scope == scope.Hash() && r.Length == uint32(scope.PartLength(r.Index)) && r.Length > 0 && r.Digest != ([32]byte{}) && len(r.Signature) == ed25519.SignatureSize && ed25519.Verify(scope.Root.Key[:], PartReceiptBytes(r), r.Signature)
@@ -195,7 +195,7 @@ type SealReceipt struct {
 func SealReceiptBytes(r SealReceipt) []byte {
 	r.Signature = nil
 	raw, _ := json.Marshal(r)
-	return append([]byte("mydc-imagebuild-seal-1\x00"), raw...)
+	return append([]byte("sfc-imagebuild-seal-1\x00"), raw...)
 }
 func (r SealReceipt) Valid(s UploadScope) bool {
 	return s.Validate() == nil && r.Schema == 1 && r.Scope == s.Hash() && r.ZIP == s.Digest && r.Tree != ([32]byte{}) && r.Entries > 0 && r.Entries <= MaxTreeEntries && r.ExpandedBytes >= 0 && r.ExpandedBytes <= s.ExpandedLimit && len(r.Signature) == ed25519.SignatureSize && ed25519.Verify(s.Root.Key[:], SealReceiptBytes(r), r.Signature)
@@ -217,7 +217,7 @@ func (u Upload) Consume(creator, context string, expected, now uint64, seal Seal
 }
 
 func VersionID(seal SealReceipt) [32]byte {
-	return digestJSON("mydc-imagebuild-context-version-1", struct{ Scope, ZIP, Tree [32]byte }{seal.Scope, seal.ZIP, seal.Tree})
+	return digestJSON("sfc-imagebuild-context-version-1", struct{ Scope, ZIP, Tree [32]byte }{seal.Scope, seal.ZIP, seal.Tree})
 }
 
 // Abort and Expire commit before native reclamation. Expiry never runs a clock
@@ -240,7 +240,7 @@ type ExpiryReceipt struct {
 func ExpiryReceiptBytes(r ExpiryReceipt) []byte {
 	r.Signature = nil
 	raw, _ := json.Marshal(r)
-	return append([]byte("mydc-imagebuild-expiry-1\x00"), raw...)
+	return append([]byte("sfc-imagebuild-expiry-1\x00"), raw...)
 }
 func (u Upload) Expire(expected uint64, receipt ExpiryReceipt) (Upload, error) {
 	if !receipt.Valid(u.Scope) {

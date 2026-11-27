@@ -1,6 +1,6 @@
 ## 행동 지침 (UI-BA, W2.3a)
 
-사람이 범위마다 적는 장애 대응 지침이다. 웹 bbolt `ai-guidelines`에 버전마다 남고, 범위를 지울 때 모든 버전이 지워진다. 권한은 매 요청 mydcd에 묻는다(whoami·작업 공간 역할).
+사람이 범위마다 적는 장애 대응 지침이다. 웹 bbolt `ai-guidelines`에 버전마다 남고, 범위를 지울 때 모든 버전이 지워진다. 권한은 매 요청 sfcd에 묻는다(whoami·작업 공간 역할).
 
 | scope | 경로 | 바꾸기 | 읽기 |
 |---|---|---|---|
@@ -17,7 +17,7 @@
 - `GET {scope}/versions` → `{items:[{version, updatedBy, updatedAt, summary, incidents, current}]}`(새 것부터). `incidents`는 그 버전을 쓴 사건 수.
 - `GET {scope}/versions/{v}` → 그 버전 전체(GET 모양).
 - `POST {scope}/restore {revision, version}` → 옛 내용을 새 버전으로 저장. 지금 위 범위에 맞지 않으면 422 `invalid`.
-- `DELETE {scope} {confirmName: scope 문자열}` → 204. 다르면 422 `confirm-name`.
+- `DELETE {scope} {confirmName: scope 문자열}` → 200 `{trash:{id, expiresAt}}`. 지난 버전까지 [지운 것](53-ops-trash.md)에 남아 보관 기간 동안 되살린다. 다르면 422 `confirm-name`.
 - `POST {scope}/test {incident, text?, fields?}` (바꾸기 권한) → `{current, draft?}`, 각각 `{hypothesis, candidates:[{action, label, impact(규칙 하한), note?}], mcpCalls:{}, model, tokens:{total, cachedRatio}}`. 그 사건에 규칙이 만든 후보(`built`)로 진단(A)만 다시 돌린다. 평가·실행·저장은 하지 않는다. `text`나 `fields`를 주면 이 범위를 그것으로 바꾼 draft도 돌린다(검사는 PUT과 같다). 진단이 꺼졌거나 모델이 없거나 제외한 작업 공간이면 409 `ai-unavailable`, 그 범위가 쓰지 않는 사건이면 422, 모델 실패는 502.
 - 사건에 쓰는 법(코드가 강제):
   - 사건의 범위 묶음은 클러스터 사건이면 `cluster`, 앱 사건이면 `cluster`·`tenant/{t}`·`app/{t}/{app}`이다.

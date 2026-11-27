@@ -6,23 +6,30 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/lifecycle"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/secrets"
-	"github.com/jay94ks/mydcd/internal/workload/volumes"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/lifecycle"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/secrets"
+	"github.com/jay94ks/seafield/internal/tenancy"
+	"github.com/jay94ks/seafield/internal/workload/volumes"
 )
 
 // PublicReadQuery contains logical selectors only. A Name is a resource name,
 // never a native/container ID, host path, provider path or signed capability.
 type PublicReadQuery struct{ Name, App, Node string }
 
+var publicReadMethods = []string{"volume-file-grants", "volume-backup-limits", "network-closure", "network-users", "volume-users", "route-endpoints", "bridge-endpoints", "lifecycle-uses", "vault-approvals", "vault-usages", "volume-retained-sources", "image-trust"}
+
+// PublicReadMethods lists every PublicRead method name.
+func PublicReadMethods() []string { return slices.Clone(publicReadMethods) }
+
 func PublicReadMethod(method string) bool {
-	return slices.Contains([]string{"volume-file-grants", "volume-backup-limits", "network-closure", "network-users", "volume-users", "route-endpoints", "lifecycle-uses", "vault-approvals", "vault-usages", "volume-retained-sources", "image-trust"}, method)
+	return slices.Contains(publicReadMethods, method)
 }
 func (q PublicReadQuery) Valid(method string) bool {
 	for _, id := range []string{q.Name, q.App, q.Node} {
@@ -41,7 +48,7 @@ func (q PublicReadQuery) Valid(method string) bool {
 		return q.Name != "" && q.Node == ""
 	case "vault-approvals":
 		return q.Name == "" && q.Node == ""
-	case "route-endpoints", "image-trust":
+	case "route-endpoints", "bridge-endpoints", "image-trust":
 		return q == (PublicReadQuery{})
 	}
 	return false
@@ -74,6 +81,10 @@ type PublicRetainedSource struct {
 	Move, Node, State string
 }
 type PublicRouteEndpoint struct{ Tenant, Network, Node, Pool string }
+
+// PublicBridgeEndpoint is a logical network another tenant may pick as the
+// B side of a virtual bridge (bridge-inbound on).
+type PublicBridgeEndpoint struct{ Tenant, Network string }
 type PublicImageTrustUse struct {
 	Kind, App, Deployment, Service, Standalone, Node, Reference string
 	Rules                                                       []int
@@ -86,17 +97,18 @@ type PublicFileGrant struct {
 }
 
 type PublicReadRow struct {
-	FileGrant     *PublicFileGrant      `json:",omitempty"`
-	Closure       *NetworkClosureStatus `json:",omitempty"`
-	Key           string
-	User          *PublicResourceUser     `json:",omitempty"`
-	BackupLimit   *PublicBackupLimit      `json:",omitempty"`
-	Lifecycle     *PublicLifecycleUse     `json:",omitempty"`
-	Approval      *secrets.PublicApproval `json:",omitempty"`
-	SecretUsage   *secrets.PublicUsage    `json:",omitempty"`
-	Retained      *PublicRetainedSource   `json:",omitempty"`
-	RouteEndpoint *PublicRouteEndpoint    `json:",omitempty"`
-	Image         *PublicImageTrustUse    `json:",omitempty"`
+	FileGrant      *PublicFileGrant      `json:",omitempty"`
+	Closure        *NetworkClosureStatus `json:",omitempty"`
+	Key            string
+	User           *PublicResourceUser     `json:",omitempty"`
+	BackupLimit    *PublicBackupLimit      `json:",omitempty"`
+	Lifecycle      *PublicLifecycleUse     `json:",omitempty"`
+	Approval       *secrets.PublicApproval `json:",omitempty"`
+	SecretUsage    *secrets.PublicUsage    `json:",omitempty"`
+	Retained       *PublicRetainedSource   `json:",omitempty"`
+	RouteEndpoint  *PublicRouteEndpoint    `json:",omitempty"`
+	BridgeEndpoint *PublicBridgeEndpoint   `json:",omitempty"`
+	Image          *PublicImageTrustUse    `json:",omitempty"`
 }
 type PublicReadPage struct {
 	Schema                                               uint8
@@ -110,7 +122,7 @@ type PublicReadPage struct {
 
 func publicReadRoot(method string) string {
 	switch method {
-	case "network-closure", "network-users", "route-endpoints":
+	case "network-closure", "network-users", "route-endpoints", "bridge-endpoints":
 		return ResourcesKey
 	case "volume-backup-limits", "volume-users", "volume-retained-sources":
 		return VolumesKey
@@ -150,8 +162,12 @@ func (p Policy) PublicRead(s state.State, session access.Session, at int64, meth
 	if tenant == "" {
 		action = access.ManageCluster
 	}
-	if method == "route-endpoints" {
-		if !routeEndpointReader(catalog, p, session, at) {
+	if method == "route-endpoints" || method == "bridge-endpoints" {
+		reads := access.ManageRoutes
+		if method == "bridge-endpoints" {
+			reads = access.ManageNetwork
+		}
+		if !endpointReader(catalog, p, session, at, reads) {
 			return PublicReadPage{}, access.ErrDenied
 		}
 	} else if tenant == "" {
@@ -167,7 +183,7 @@ func (p Policy) PublicRead(s state.State, session access.Session, at int64, meth
 		return PublicReadPage{}, access.ErrDenied
 	}
 	page := PublicReadPage{Schema: 1, Method: method, Tenant: tenant, Index: s.Index(), RootRevision: s.Object(publicReadRoot(method)).Revision, CatalogRevision: s.Object(CatalogKey).Revision, Rows: []PublicReadRow{}}
-	if t, ok := catalog.Tenant(tenant); ok && method != "route-endpoints" {
+	if t, ok := catalog.Tenant(tenant); ok && method != "route-endpoints" && method != "bridge-endpoints" {
 		page.TenantRevision = t.Revision
 	}
 	rows := []PublicReadRow{}
@@ -308,6 +324,33 @@ func (p Policy) PublicRead(s state.State, session access.Session, at int64, meth
 				rows = append(rows, PublicReadRow{Key: network.Logical + "/" + network.Node + "/" + pool.ID, RouteEndpoint: &r})
 			}
 		}
+	case "bridge-endpoints":
+		resources, e := p.Resources(s)
+		if e != nil {
+			return page, e
+		}
+		// Only the logical names of TUN networks that take bridges, and only
+		// while no member is changing; pools, servers and owners stay
+		// undisclosed.
+		changing := map[string]bool{}
+		takes := map[string]bool{}
+		for _, network := range resources.Networks.AllNetworks() {
+			if network.Tenant != tenant || network.Logical == "" || len(network.TunnelAddresses) == 0 {
+				continue
+			}
+			if network.Draining || network.PendingChange != 0 {
+				changing[network.Logical] = true
+			}
+			if slices.Contains(network.Toggles, tenancy.ToggleBridgeInbound) {
+				takes[network.Logical] = true
+			}
+		}
+		for _, name := range slices.Sorted(maps.Keys(takes)) {
+			if !changing[name] {
+				r := PublicBridgeEndpoint{Tenant: tenant, Network: name}
+				rows = append(rows, PublicReadRow{Key: name, BridgeEndpoint: &r})
+			}
+		}
 	case "network-users", "volume-users", "image-trust":
 		tasks, e := p.publicReadTasks(s, session, at, tenant)
 		if e != nil {
@@ -379,7 +422,7 @@ func (p Policy) PublicRead(s state.State, session access.Session, at int64, meth
 		Method, Tenant string
 		Query          PublicReadQuery
 	}{s.Index(), session.User, session.Key, session.Scopes, method, tenant, q})
-	basis := sha256.Sum256(append([]byte("mydc-public-resource-read-1\x00"), basisRaw...))
+	basis := sha256.Sum256(append([]byte("sfc-public-resource-read-1\x00"), basisRaw...))
 	offset, e := taskCursor(after, basis)
 	if e != nil {
 		return page, e
@@ -407,9 +450,12 @@ func (p Policy) PublicRead(s state.State, session access.Session, at int64, meth
 	}
 	return page, nil
 }
-func routeEndpointReader(c access.Catalog, p Policy, s access.Session, at int64) bool {
+
+// endpointReader: a session that may make routes (or bridges) in some
+// tenant reads what other tenants offer, and so does the cluster admin.
+func endpointReader(c access.Catalog, p Policy, s access.Session, at int64, action access.Action) bool {
 	for _, tenant := range c.VisibleTenants(s.User) {
-		if c.AuthorizeSession(s, p.Cluster, p.Issuer(s.Issuer), at, tenant.ID, access.ManageRoutes, "") == nil {
+		if c.AuthorizeSession(s, p.Cluster, p.Issuer(s.Issuer), at, tenant.ID, action, "") == nil {
 			return true
 		}
 	}

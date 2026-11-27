@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	checker "github.com/jay94ks/mydcd/internal/workload/lifecycle"
-	contract "github.com/jay94ks/mydcd/lifecycle/v1"
+	checker "github.com/jay94ks/seafield/internal/workload/lifecycle"
+	contract "github.com/jay94ks/seafield/lifecycle/v1"
 )
 
 func TestCheckerProbeAuthoritySeparatesLocalReadsFromEffectsAndForeignTargets(t *testing.T) {

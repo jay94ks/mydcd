@@ -5,12 +5,12 @@ package app
 import (
 	"context"
 	"fmt"
-	"github.com/jay94ks/mydcd/internal/tenancy"
+	"github.com/jay94ks/seafield/internal/tenancy"
 	"slices"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/eventlog"
-	"github.com/jay94ks/mydcd/internal/observability"
+	"github.com/jay94ks/seafield/internal/eventlog"
+	"github.com/jay94ks/seafield/internal/observability"
 )
 
 type derivedObservationEvent struct {
@@ -102,7 +102,10 @@ func networkTunnelEvents(current observability.Report, networks tenancy.Networks
 	seen := map[string]bool{}
 	var out []derivedObservationEvent
 	for _, local := range members {
-		if local.Node != current.Node || local.Owner != current.Key || local.Logical == "" || local.Draining || len(local.TunnelAddresses) == 0 {
+		// The system network has no tenant to tell: its outages are the
+		// node pair's own link facts. A tenant-scoped event naming it is
+		// invalid, and refusing it once used to drop every report after it.
+		if local.System || local.Tenant == "" || local.Node != current.Node || local.Owner != current.Key || local.Logical == "" || local.Draining || len(local.TunnelAddresses) == 0 {
 			continue
 		}
 		paired := false

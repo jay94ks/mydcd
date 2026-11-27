@@ -6,8 +6,8 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/mydcp"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/sfcp"
 )
 
 // NewCredentialAddition prepares the public, immutable input for ordinary
@@ -15,7 +15,7 @@ import (
 // clients sign access.CredentialAdditionBytes with their local WebCrypto key.
 func (c Client) NewCredentialAddition(session access.Session, id, label string, private ed25519.PrivateKey) (access.CredentialAddition, error) {
 	if c.Verify(session) != nil || len(private) != ed25519.PrivateKeySize {
-		return access.CredentialAddition{}, mydcp.ErrAdmission
+		return access.CredentialAddition{}, sfcp.ErrAdmission
 	}
 	addition := access.CredentialAddition{User: session.User, Label: label, Credential: access.CredentialKey{ID: id, Method: access.PrivateKey, PublicKey: [32]byte(private.Public().(ed25519.PublicKey))}}
 	if _, err := rand.Read(addition.Challenge[:]); err != nil {

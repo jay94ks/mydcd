@@ -7,13 +7,17 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/jay94ks/mydcd/internal/eventlog"
-	"github.com/jay94ks/mydcd/internal/ingress"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/eventlog"
+	"github.com/jay94ks/seafield/internal/ingress"
 )
 
 func (r *Runtime) ingressEvent(e ingress.Event) {
 	if r.events == nil || e.Node == "" {
 		return
+	}
+	if e.Tenant == deployment.ClusterAppTenant {
+		e.Tenant, e.App = "", "" // a cluster app route belongs to its server, not a workspace
 	}
 	scope := "node"
 	if e.Tenant != "" {

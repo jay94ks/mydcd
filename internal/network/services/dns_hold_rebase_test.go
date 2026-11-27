@@ -12,7 +12,7 @@ func TestDNSDriftRebaseRequiresSettledQueriesAndFreshFullTTL(t *testing.T) {
 	d := newDNSFixture(t)
 	d.cfg.TTL, d.cfg.NegativeTTL = 3, 1
 	d = publishDNS(t, d, d.cfg, 190)
-	d, h, _ := startDNS(t, d, "web.app.mydc.test.", dns.TypeA, 200)
+	d, h, _ := startDNS(t, d, "web.app.sfc.test.", dns.TypeA, 200)
 	cfg := ownDNSConfig(d.cfg)
 	cfg.Source++
 	cfg.Serial++

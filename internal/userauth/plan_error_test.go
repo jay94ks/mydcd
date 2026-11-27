@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/mydcp"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/sfcp"
 )
 
 func TestPlanRejectionKeepsOnlySymbolicInputCode(t *testing.T) {
@@ -23,7 +23,7 @@ func TestPlanRejectionKeepsOnlySymbolicInputCode(t *testing.T) {
 		cause := appPlanInputCause(r)
 		if validInputCode(code) {
 			var input *deployment.InputError
-			if !errors.As(cause, &input) || input.Code != code || input.Path != "" || !strings.Contains((&Error{Code: r.Code, Phase: mydcp.Completed, Cause: cause}).Error(), code) {
+			if !errors.As(cause, &input) || input.Code != code || input.Path != "" || !strings.Contains((&Error{Code: r.Code, Phase: sfcp.Completed, Cause: cause}).Error(), code) {
 				t.Fatal("safe planner code lost", cause)
 			}
 		} else if cause != nil || r.InputCode != "" {

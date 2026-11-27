@@ -9,10 +9,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/reconcile"
 )
 
 func preparedInventoryReport(t *testing.T) (*backupCoreFixture, AppProgress) {
@@ -90,14 +89,8 @@ func TestAppInventoryCASRejectsChangedCoordinatesAuthorityAndMode(t *testing.T) 
 			case "observe-mode":
 				r.Action = "observe"
 			case "current-credential":
-				catalog, _ := f.p.Catalog(f.s)
-				user, _ := catalog.User("admin")
-				expected := user.Revision
-				user.Revision = 0
-				user.Credentials[0].Enabled = false
 				key := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{77}, 32))
-				user.Credentials = append(user.Credentials, access.Credential{ID: "replacement", Method: access.PrivateKey, PublicKey: [32]byte(key.Public().(ed25519.PublicKey)), Enabled: true})
-				f.apply("revoke-original-key", "put-user", expected, user, state.Applied)
+				f.replaceOwnKey("key", "replacement", [32]byte(key.Public().(ed25519.PublicKey)), nil)
 			}
 			r.Signature = ed25519.Sign(signer, AppProgressBytes(r))
 			if mode == "signature" {

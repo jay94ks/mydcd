@@ -22,22 +22,23 @@ import (
 
 	"golang.org/x/sys/unix"
 
-	"github.com/jay94ks/mydcd/internal/app"
-	"github.com/jay94ks/mydcd/internal/cluster/membership"
-	"github.com/jay94ks/mydcd/internal/config"
+	"github.com/jay94ks/seafield/internal/app"
+	"github.com/jay94ks/seafield/internal/cluster/membership"
+	"github.com/jay94ks/seafield/internal/config"
+	"github.com/jay94ks/seafield/tests/enginefake"
 
 	"github.com/vishvananda/netlink"
 	"github.com/vishvananda/netns"
 )
 
-// A child node listens on this MyDCP port in its own namespace.
+// A child node listens on this SFCP port in its own namespace.
 const childPort = "7443"
 
 // childEnv names the spec file of a child node process; packageEnv marks
 // the test process that Main moved into its own namespace.
 const (
-	childEnv   = "MYDC_CLUSTERFIXTURE_CHILD"
-	packageEnv = "MYDC_CLUSTERFIXTURE_NAMESPACE"
+	childEnv   = "SFC_CLUSTERFIXTURE_CHILD"
+	packageEnv = "SFC_CLUSTERFIXTURE_NAMESPACE"
 )
 
 // Main runs the test package; in a child node process it runs that node
@@ -194,16 +195,21 @@ func (n *hostNet) connect(pid, i int) error {
 
 // childSpec is what a child node process needs to join.
 type childSpec struct {
-	Config     config.Node
-	Invitation membership.Invitation
-	Cluster    [32]byte
-	Source     [32]byte
+	Config config.Node
+	// EngineAPI and EngineSocket are not part of a node's config on the
+	// wire (config.Node), so the child gets them here.
+	EngineAPI, EngineSocket string
+	Invitation              membership.Invitation
+	Cluster                 [32]byte
+	Source                  [32]byte
 }
 
 // childReady is the child's one line on stdout once it serves.
 type childReady struct {
-	Key   [32]byte
-	Error string `json:",omitempty"`
+	Key [32]byte
+	// Engine is the child's engine socket for the fake engine, "" without one.
+	Engine string `json:",omitempty"`
+	Error  string `json:",omitempty"`
 }
 
 // startChild runs node i as a child process in a new network namespace:
@@ -211,7 +217,7 @@ type childReady struct {
 // bridges there before the node opens; then the node joins and serves.
 func (c *Cluster) startChild(n *Node, i int, inv membership.Invitation) {
 	c.t.Helper()
-	raw, err := json.Marshal(childSpec{Config: n.Config, Invitation: inv, Cluster: c.ID, Source: c.Nodes[0].Key})
+	raw, err := json.Marshal(childSpec{Config: n.Config, EngineAPI: n.Config.EngineAPI, EngineSocket: n.Config.EngineSocket, Invitation: inv, Cluster: c.ID, Source: c.Nodes[0].Key})
 	if err != nil {
 		c.t.Fatal(err)
 	}
@@ -260,6 +266,9 @@ func (c *Cluster) startChild(n *Node, i int, inv membership.Invitation) {
 			c.t.Fatal("child", n.ID, r.Error)
 		}
 		n.Key = r.Key
+		if r.Engine != "" {
+			n.Engine.ConnectSFCD(r.Engine)
+		}
 	case <-c.ctx.Done():
 		c.t.Fatal("child", n.ID, c.ctx.Err())
 	}
@@ -296,6 +305,8 @@ func runChild(spec string) error {
 	if err = json.Unmarshal(raw, &s); err != nil {
 		return err
 	}
+	s.Config.EngineAPI, s.Config.EngineSocket = s.EngineAPI, s.EngineSocket
+	s.Config.AnonymousImages = enginefake.SourceAt(s.EngineAPI)
 	in := bufio.NewReader(os.Stdin)
 	if _, err = in.ReadString('\n'); err != nil {
 		return err
@@ -313,7 +324,8 @@ func runChild(spec string) error {
 		_ = ready.Encode(childReady{Error: "join: " + err.Error()})
 		return err
 	}
-	if err = ready.Encode(childReady{Key: r.Identity.Public}); err != nil {
+	engine, _ := listenEngine(r, filepath.Dir(s.Config.Node.ManagementSocket))
+	if err = ready.Encode(childReady{Key: r.Identity.Public, Engine: engine}); err != nil {
 		_ = r.Close()
 		return err
 	}

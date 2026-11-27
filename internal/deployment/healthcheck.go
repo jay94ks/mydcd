@@ -6,7 +6,7 @@ import (
 	"slices"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/workload"
+	"github.com/jay94ks/seafield/internal/workload"
 	"github.com/moby/moby/api/types/container"
 )
 
@@ -15,7 +15,7 @@ func (h *Healthcheck) disabled() bool {
 }
 
 // dockerConfig is shared by admission and actual image resolution. Test
-// omission is an image inheritance request, never a new MyDC probe command.
+// omission is an image inheritance request, never a new Seafield Cluster probe command.
 func (h *Healthcheck) dockerConfig() (*container.HealthConfig, error) {
 	if h == nil {
 		return nil, nil

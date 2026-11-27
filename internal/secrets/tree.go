@@ -11,7 +11,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/jay94ks/mydcd/internal/access"
+	"github.com/jay94ks/seafield/internal/access"
 )
 
 var ErrPolicy = errors.New("secret policy or revision conflict")
@@ -71,6 +71,7 @@ type Tree struct {
 	writeEpoch   uint64
 	profiles     map[string]WriteProfile
 	writes       map[string]WriteRecord
+	builtin      map[string]BuiltinHolding
 }
 
 func (t Tree) Cluster() [32]byte { return t.cluster }
@@ -168,7 +169,7 @@ func NewTree(cluster [32]byte, tenant, root string) (Tree, error) {
 		return Tree{}, ErrPolicy
 	}
 	o := Object{ID: root, Kind: Group, Generation: 1, Revision: 1, PolicyRevision: 1, Status: Active}
-	return Tree{cluster: cluster, tenant: tenant, root: root, revision: 1, objects: map[string]Object{root: o}, writeEpoch: 1, profiles: map[string]WriteProfile{}, writes: map[string]WriteRecord{}}, nil
+	return Tree{cluster: cluster, tenant: tenant, root: root, revision: 1, objects: map[string]Object{root: o}, writeEpoch: 1, profiles: map[string]WriteProfile{}, writes: map[string]WriteRecord{}, builtin: map[string]BuiltinHolding{}}, nil
 }
 func (t Tree) Revision() uint64                { return t.revision }
 func (t Tree) Object(id string) (Object, bool) { o, ok := t.objects[id]; return ownObject(o), ok }
@@ -195,6 +196,10 @@ func (t Tree) clone() (Tree, error) {
 	n.writes = map[string]WriteRecord{}
 	for id, w := range t.writes {
 		n.writes[id] = ownWrite(w)
+	}
+	n.builtin = map[string]BuiltinHolding{}
+	for k, h := range t.builtin {
+		n.builtin[k] = h.own()
 	}
 	return n, nil
 }
@@ -239,9 +244,21 @@ func (t Tree) Create(c access.Catalog, actor string, expected uint64, o Object) 
 		return t, ErrPolicy
 	}
 	if o.Kind == Secret {
+		if o.Reference.Profile == "" {
+			if o.Reference.Profile = t.DefaultProfile(ValueWrite); o.Reference.Profile == "" {
+				return t, ErrPolicy
+			}
+		}
+		if o.Reference.Profile == BuiltinProfile && o.Reference.Object == "" {
+			o.Reference.Object = o.ID
+		}
 		o.Reference, err = referenceShape(o.Reference)
 		if err != nil {
 			return t, err
+		}
+		// A builtin value is named by its secret; no provider path is chosen.
+		if o.Reference.Profile == BuiltinProfile && o.Reference.Object != o.ID {
+			return t, ErrPolicy
 		}
 	} else if o.Reference.Profile != "" || o.Reference.Object != "" || o.Reference.Revision != 0 || len(o.Reference.Keys) != 0 {
 		return t, ErrPolicy
@@ -289,7 +306,17 @@ func (t Tree) SetACL(c access.Catalog, actor, id string, expected uint64, a ACL)
 	n.objects[id] = ownObject(o)
 	return n, nil
 }
-func (t Tree) Reorder(c access.Catalog, actor, id string, expected uint64, entries []string) (Tree, error) {
+
+// aclLists names an ACL's five lists in one fixed order.
+func aclLists(a *ACL) []*[]string {
+	return []*[]string{&a.Users, &a.Services, &a.DenyUsers, &a.DenyServices, &a.TenantGrants}
+}
+
+// ChangeACL adds and removes names in an object's ACL lists. Expected is the
+// object's revision. A name added that is already in its list, or removed
+// that is not, is a conflict: the caller saw an older ACL. An empty change,
+// or a name both added and removed in one list, is a policy error.
+func (t Tree) ChangeACL(c access.Catalog, actor, id string, expected uint64, add, remove ACL) (Tree, error) {
 	if !t.managed(c, actor) {
 		return t, access.ErrDenied
 	}
@@ -297,21 +324,77 @@ func (t Tree) Reorder(c access.Catalog, actor, id string, expected uint64, entri
 	if !ok || o.Revision != expected {
 		return t, access.ErrConflict
 	}
-	if o.Kind != Group || o.Status != Active || len(entries) != len(o.Entries) {
+	add, err := canonicalACL(add)
+	if err != nil {
 		return t, ErrPolicy
 	}
-	seen := map[string]bool{}
-	for _, id := range entries {
-		if seen[id] || !slices.Contains(o.Entries, id) {
-			return t, ErrPolicy
+	remove, err = canonicalACL(remove)
+	if err != nil {
+		return t, ErrPolicy
+	}
+	next := ownACL(o.ACL)
+	empty := true
+	for i, list := range aclLists(&next) {
+		adds, removes := *aclLists(&add)[i], *aclLists(&remove)[i]
+		for _, name := range adds {
+			if slices.Contains(removes, name) {
+				return t, ErrPolicy
+			}
 		}
-		seen[id] = true
+		for _, name := range removes {
+			j := slices.Index(*list, name)
+			if j < 0 {
+				return t, access.ErrConflict
+			}
+			*list = slices.Delete(*list, j, j+1)
+			empty = false
+		}
+		for _, name := range adds {
+			if slices.Contains(*list, name) {
+				return t, access.ErrConflict
+			}
+			*list = append(*list, name)
+			empty = false
+		}
+	}
+	if empty {
+		return t, ErrPolicy
+	}
+	return t.SetACL(c, actor, id, expected, next)
+}
+
+// Reorder moves one entry of a group right after another entry, or to the
+// front when after is empty. Expected is the group's revision. An entry that
+// is already in that place is a conflict: the caller saw an older order.
+func (t Tree) Reorder(c access.Catalog, actor, id string, expected uint64, entry, after string) (Tree, error) {
+	if !t.managed(c, actor) {
+		return t, access.ErrDenied
+	}
+	o, ok := t.objects[id]
+	if !ok || o.Revision != expected {
+		return t, access.ErrConflict
+	}
+	if o.Kind != Group || o.Status != Active || entry == "" || entry == after {
+		return t, ErrPolicy
+	}
+	from := slices.Index(o.Entries, entry)
+	if from < 0 || after != "" && !slices.Contains(o.Entries, after) {
+		return t, access.ErrConflict
+	}
+	entries := slices.Delete(slices.Clone(o.Entries), from, from+1)
+	to := 0
+	if after != "" {
+		to = slices.Index(entries, after) + 1
+	}
+	entries = slices.Insert(entries, to, entry)
+	if slices.Equal(entries, o.Entries) {
+		return t, access.ErrConflict
 	}
 	n, err := t.clone()
 	if err != nil {
 		return t, err
 	}
-	o.Entries = slices.Clone(entries)
+	o.Entries = entries
 	o.Revision = n.revision
 	n.objects[id] = ownObject(o)
 	return n, nil
@@ -500,6 +583,7 @@ type treeRecord struct {
 	WriteEpoch   uint64
 	Profiles     []WriteProfile
 	Writes       []WriteRecord
+	Builtin      []BuiltinHolding `json:",omitempty"`
 }
 
 func (t Tree) Encode() ([]byte, error) {
@@ -519,6 +603,10 @@ func (t Tree) Encode() ([]byte, error) {
 		r.Writes = append(r.Writes, ownWrite(w))
 	}
 	slices.SortFunc(r.Writes, func(a, b WriteRecord) int { return strings.Compare(a.Request.ID, b.Request.ID) })
+	for _, h := range t.builtin {
+		r.Builtin = append(r.Builtin, h.own())
+	}
+	slices.SortFunc(r.Builtin, func(a, b BuiltinHolding) int { return strings.Compare(a.key(), b.key()) })
 	return json.Marshal(r)
 }
 func DecodeTree(b []byte) (Tree, error) {
@@ -608,6 +696,15 @@ func DecodeTree(b []byte) (Tree, error) {
 				return Tree{}, ErrPolicy
 			}
 		}
+	}
+	if len(r.Builtin) > maxBuiltinHoldings {
+		return Tree{}, ErrPolicy
+	}
+	for _, h := range r.Builtin {
+		if _, dup := t.builtin[h.key()]; dup || !h.valid() {
+			return Tree{}, ErrPolicy
+		}
+		t.builtin[h.key()] = h.own()
 	}
 	canonical, err := t.Encode()
 	if err != nil || !bytes.Equal(b, canonical) {

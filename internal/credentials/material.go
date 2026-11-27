@@ -18,12 +18,16 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/secrets"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/secrets"
 )
 
 var ErrDenied = errors.New("credential authentication unavailable or denied")
+
+// ErrThrottled is ErrDenied before any check: the node's attempt budget for
+// the account or source is spent (Budget). The secret was not compared.
+var ErrThrottled = fmt.Errorf("%w: too many attempts", ErrDenied)
 
 const MaxMaterial = 32 << 10
 

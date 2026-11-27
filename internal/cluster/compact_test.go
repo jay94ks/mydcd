@@ -12,16 +12,16 @@ import (
 	"syscall"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/maintenance"
-	"github.com/jay94ks/mydcd/internal/mydcp"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/maintenance"
+	"github.com/jay94ks/seafield/internal/sfcp"
 )
 
 // This branch uses the real SDK/QUIC/Bolt fixture's installed three voters and
 // retained fourth non-voter. It is adapter evidence, not user authorization or
 // the future shared-job/CLI path. Existing fixture shutdown removes owned DBs,
 // loopback sockets and snapshot directories; retention restores in the product.
-func verifyManualCompactSDK(t *testing.T, ctx context.Context, nodes []realNode, leader int, wait func(string, func() bool), lookup func(mydcp.Identity) (mydcp.Peer, bool)) {
+func verifyManualCompactSDK(t *testing.T, ctx context.Context, nodes []realNode, leader int, wait func(string, func() bool), lookup func(sfcp.Identity) (sfcp.Peer, bool)) {
 	t.Helper()
 	lagger := &nodes[3]
 	if err := lagger.engine.Close(); err != nil {
@@ -114,7 +114,7 @@ func verifyManualCompactSDK(t *testing.T, ctx context.Context, nodes []realNode,
 	verifyCompactSnapshotFailure(t, ctx, nodes[leader].engine, failureSource.RaftIndex)
 	// The retained, lagging node resumes its original DB. It must install the SDK
 	// snapshot because its missing logs were compacted, not get a fabricated FSM.
-	lagger.mesh, err = mydcp.NewTransport(lagger.identity, lagger.options.Cluster, lookup)
+	lagger.mesh, err = sfcp.NewTransport(lagger.identity, lagger.options.Cluster, lookup)
 	if err != nil {
 		t.Fatal("reopen original non-voter transport", err)
 	}

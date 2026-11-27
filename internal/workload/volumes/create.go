@@ -6,9 +6,9 @@ import (
 	"context"
 	"errors"
 
-	"github.com/jay94ks/mydcd/internal/engine"
-	"github.com/jay94ks/mydcd/internal/reconcile"
-	"github.com/jay94ks/mydcd/internal/storage"
+	"github.com/jay94ks/seafield/internal/engine"
+	"github.com/jay94ks/seafield/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/storage"
 )
 
 // UsesClient binds the native checks and the task SDK effects to one explicit

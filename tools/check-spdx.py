@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
-"""Check that every MyDC source file carries the SPDX license header.
+"""Check that every Seafield Cluster source file carries the SPDX license header.
 
 Usage: python3 -I tools/check-spdx.py [--fix]
 Checks tracked .go/.ts/.tsx/.js/.mjs/.py/.sh files and Dockerfiles outside

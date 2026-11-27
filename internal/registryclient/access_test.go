@@ -8,6 +8,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	registrytransport "github.com/google/go-containerregistry/pkg/v1/remote/transport"
 	"io"
 	"log"
 	"net"
@@ -49,7 +50,7 @@ func TestLoginClosedLocalRegistryReportsConnectionFailureWithoutHTTP(t *testing.
 }
 
 // Actual HTTPS registry protocol and pinned SDK; in-memory registry storage,
-// not a real Docker daemon, MyDC authorization or tenant Vault success.
+// not a real Docker daemon, Seafield Cluster authorization or tenant Vault success.
 func TestPrivateRegistryTLSUsesOnlyExplicitOwnedCredentialsAndCA(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -197,6 +198,12 @@ func TestRegistryTransportRejectsForeignCredentialBodiesPlainHTTPAndMetadataOver
 
 func TestPlainHTTPRegistryIsNamed(t *testing.T) {
 	if got := ResultCode(errors.Join(errors.New("http: server gave HTTP response to HTTPS client"), &Error{Code: "AUTH_SCOPE"})); got != "PLAIN_HTTP" {
+		t.Fatal(got)
+	}
+}
+
+func TestRateLimitIsNamed(t *testing.T) {
+	if got := ResultCode(&registrytransport.Error{StatusCode: 429}); got != "RATE_LIMITED" {
 		t.Fatal(got)
 	}
 }

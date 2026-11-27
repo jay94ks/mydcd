@@ -10,13 +10,13 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/network"
-	"github.com/jay94ks/mydcd/internal/network/services"
-	"github.com/jay94ks/mydcd/internal/schema"
-	"github.com/jay94ks/mydcd/internal/tenancy"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/network"
+	"github.com/jay94ks/seafield/internal/network/services"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/tenancy"
 )
 
 func (p Policy) managedNetworkNativePermit(s state.State, caller [32]byte, request NativeRequest, view ResourceProjection, source ManagedNetworkSource) (NativePermit, error) {
@@ -155,14 +155,18 @@ func (p Policy) admitManagedNetworkPatch(s state.State, cmd state.Command, keys 
 		writes, code = p.reduceResources(s, cmd)
 	case cmd.Kind == state.ModuleReport && strings.HasPrefix(cmd.Actor, "node/"):
 		// a server's own system network step
-		writes, code = p.reduceSystemNetworkReport(s, cmd)
+		if bridgeClosedValue(cmd.Value) {
+			writes, code = p.reduceBridgeClosedReport(s, cmd)
+		} else {
+			writes, code = p.reduceSystemNetworkReport(s, cmd)
+		}
 	}
 	if code != state.Applied {
 		return false
 	}
 	expected := map[string]bool{}
 	for key := range writes {
-		if managedSourceKey(key) || key == AppsKey || strings.HasPrefix(key, AppsKey+"/part/") {
+		if managedSourceKey(key) || key == AppsKey || strings.HasPrefix(key, AppsKey+"/") {
 			expected[key] = true
 		}
 	}
@@ -271,7 +275,7 @@ func drainManagedNetworkSources(s state.State, networks tenancy.Networks, tenant
 		return nil, err
 	}
 	writes := map[string][]byte{}
-	digest := sha256.Sum256(append([]byte("mydc-managed-network-drain-1\x00"), []byte(cmd.Value)...))
+	digest := sha256.Sum256(append([]byte("sfc-managed-network-drain-1\x00"), []byte(cmd.Value)...))
 	var nonce [16]byte
 	copy(nonce[:], digest[:16])
 	if nonce == ([16]byte{}) {

@@ -3,8 +3,8 @@
 package volumes
 
 import (
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/reconcile"
 )
 
 type StartRequest struct {
@@ -20,7 +20,7 @@ type Permit struct {
 
 // PermitStart runs against a FRESH authoritative quorum read, never a node's
 // cached shared DB. The adapter must complete its linearizable barrier and
-// authenticate the response over MYDCP. The pure core cannot prove that I/O.
+// authenticate the response over SFCP. The pure core cannot prove that I/O.
 func (s State) PermitStart(c access.Catalog, actor string, r StartRequest) (Permit, error) {
 	if c.Authorize(actor, s.d.Scope.Tenant, access.ManageVolumes, s.d.Owner.Node) != nil {
 		return Permit{}, access.ErrDenied
@@ -83,7 +83,7 @@ func (g Gate) Request(c Consumer, challenge [32]byte) (Gate, StartRequest, error
 }
 
 // Accept consumes only an authenticated response to this outstanding request.
-// The transport must verify its MYDCP peer and authoritative response boundary.
+// The transport must verify its SFCP peer and authoritative response boundary.
 // It is persisted before invoking Start. It does not erase the A2 operation
 // ID; that journal still determines original-call recovery after a crash.
 func (g Gate) Accept(p Permit) (Gate, error) {

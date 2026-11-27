@@ -19,12 +19,15 @@ import (
 	oci "github.com/google/go-containerregistry/pkg/registry"
 	v1 "github.com/google/go-containerregistry/pkg/v1"
 	"github.com/google/go-containerregistry/pkg/v1/types"
-	"github.com/jay94ks/mydcd/internal/registryclient"
-	"github.com/jay94ks/mydcd/internal/schema"
-	"github.com/jay94ks/mydcd/internal/storage"
+	"github.com/jay94ks/seafield/internal/registryclient"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/storage"
 )
 
 var ErrStorage = errors.New("registry storage unavailable or inconsistent")
+
+// ErrOffset is a read offset outside the stored item.
+var ErrOffset = errors.New("registry read offset is outside the item")
 
 type Scope struct {
 	Schema           uint8

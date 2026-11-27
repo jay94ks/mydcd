@@ -4,7 +4,7 @@ RQ6 구현 중·마지막 실행 검증 전이다. 원 Git plan의 User/owner re
 
 `GitSavePlan`은 `{Schema:1,Tenant,Context,ID,Creator,Root,ContextRevision,PolicyRevision,Dockerfile,ExpandedLimit,Commit,Tree:[32],CreatedAt,ExpiresAt}`다. Commit은 확인한 소문자40자리 Git SHA-1, Tree는 같은 ZIP/tree 해석의 지문이며 ID/기한·원 context/policy/root에 고정한다. 시간은 Unix seconds, 생성 이후 최대24시간이다. 저장 재개에서 ref를 다시 따라 다른 commit으로 바꾸지 않는다.
 
-노드의 `SavedGit` 증거는 `{Schema:1,Plan,Scope,Fact,Signature}`다. Scope는 plan에서 유도한 기존 UploadScope와 실제 ZIP 길이/지문, Fact는 원 owner의 기존 SealReceipt다. Fact.Tree는 Plan.Tree와 일치해야 한다. Signature는 원 owner가 `mydc-imagebuild-saved-git-1\0`과 Signature=null인 표준 JSON을 Ed25519로 서명한 값이다. 증거는 원 파일이 보관됐다는 확인이며 사용자 관리 승인이 아니다.
+노드의 `SavedGit` 증거는 `{Schema:1,Plan,Scope,Fact,Signature}`다. Scope는 plan에서 유도한 기존 UploadScope와 실제 ZIP 길이/지문, Fact는 원 owner의 기존 SealReceipt다. Fact.Tree는 Plan.Tree와 일치해야 한다. Signature는 원 owner가 `sfc-imagebuild-saved-git-1\0`과 Signature=null인 표준 JSON을 Ed25519로 서명한 값이다. 증거는 원 파일이 보관됐다는 확인이며 사용자 관리 승인이 아니다.
 
 관리 action `publish-build-git`의 payload는 `{Tenant,Context,Saved}`이고 Expected는 Plan.ContextRevision이다. 현재 ManageRegistry·operation ceiling·원 creator 서명·현재 context/policy/root와 기한을 검사한다. 같은 FSM 변경에서 closed artifact/version/다음 번호와 원 commit을 게시한다. archive bytes와 가짜 part slot은 Raft에 넣지 않는다. ID를 다른 plan으로 재사용하지 않으며 version의 optional Commit은 원 게시 증거와 일치해야 한다. 버전 조회와 빌드 Spec의 `{commit}` 태그에는 이 보존 commit을 사용한다.
 
@@ -34,13 +34,13 @@ tenant 입력 반환의 완료를 뜻하지 않는다.
 
 User purpose8 method=`save-build-git`의 요청은 `{Tenant,ImageBuildGit:{Plan,Proof}}`다. Unix TLS/QUIC에서 같은 형식을 쓰고, 원 owner가 다르면 설치 member `image-build-git-owner`로 한 번 전달한다. 노드별 비인증 Git/파일 RPC를 만들지 않는다. 현재 tenant ManageRegistry·publish-build-git operation ceiling·creator·등록 root/owner·현재 context/policy revision과 원 plan 기한을 확인한다.
 
-Proof는 `{Schema:1,Plan:[32],At,ExpiresAt,Nonce:[32],Signature:base64}`다. 사용자 session key가 `mydc-imagebuild-git-request-1\0`과 Signature=null인 표준 JSON을 서명한다. Plan은 `mydc-imagebuild-git-save-1\0`과 원 GitSavePlan JSON의 SHA-256이며 최대120초·현재 session 만료 이내다. 짧은 proof 갱신은 같은 원 plan을 재조회하는 것이며 plan의 ID/commit/기한·권한을 바꾸지 않는다.
+Proof는 `{Schema:1,Plan:[32],At,ExpiresAt,Nonce:[32],Signature:base64}`다. 사용자 session key가 `sfc-imagebuild-git-request-1\0`과 Signature=null인 표준 JSON을 서명한다. Plan은 `sfc-imagebuild-git-save-1\0`과 원 GitSavePlan JSON의 SHA-256이며 최대120초·현재 session 만료 이내다. 짧은 proof 갱신은 같은 원 plan을 재조회하는 것이며 plan의 ID/commit/기한·권한을 바꾸지 않는다.
 
 Reply.ImageBuildGit은 `{Schema:1,Plan:[32],Code,Saved?}`다. Code=`SAVED|PENDING|SOURCE_FETCH|INVALID_CONTEXT`이며 Saved는 SAVED일 때만 앞 절의 원 owner 증거다. 외부 Git 오류 body/credential/파일 원문을 실패 응답에 넣지 않는다. fetch 전에 기록된 원 save를 조회하고 이미 준비된/부분 원본이면 network fetch/generator를 다시 실행하지 않는다. 새로운 fetch 실패는 native staging이나 root pin을 만들지 않는다. fetch 자체는 editor mutex 밖에서 수행하고 실제 파일 쓰기/인계는 draft와 같은 gate를 사용한다.
 
 ```sh
-mydc build context upload source --id publish-git-one
-mydc build context versions source
+sfcli build context upload source --id publish-git-one
+sfcli build context versions source
 ```
 
 

@@ -22,7 +22,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/containerops"
+	"github.com/jay94ks/seafield/internal/containerops"
 )
 
 func testTarget(address netip.Addr, port uint16) Target {
@@ -82,7 +82,7 @@ func TestActualServiceHTTPBoundsNoRedirectAndNoCredentialHeaders(t *testing.T) {
 		}
 		body, _ := io.ReadAll(r.Body)
 		received.Store(int64(len(body)))
-		if r.Header.Get("X-MyDC-Test") != "fixed" || r.Header.Get("Authorization") != "" {
+		if r.Header.Get("X-SFC-Test") != "fixed" || r.Header.Get("Authorization") != "" {
 			t.Error("unexpected request headers")
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -90,7 +90,7 @@ func TestActualServiceHTTPBoundsNoRedirectAndNoCredentialHeaders(t *testing.T) {
 		_, _ = w.Write([]byte("answer"))
 	}), nil)
 	_ = server
-	q := Request{App: "shop", Service: "api", Port: int(target.Port), Path: "/decide", Method: "POST", Body: bytes.Repeat([]byte("b"), MaxBody), Headers: map[string]string{"Content-Type": "application/json", "X-MyDC-Test": "fixed"}}
+	q := Request{App: "shop", Service: "api", Port: int(target.Port), Path: "/decide", Method: "POST", Body: bytes.Repeat([]byte("b"), MaxBody), Headers: map[string]string{"Content-Type": "application/json", "X-SFC-Test": "fixed"}}
 	out, err := Execute(context.Background(), q, target, nil)
 	if err != nil || !out.Valid() || out.Code != "" || out.Status != 200 || string(out.Body) != "answer" || len(out.Headers) != 1 || received.Load() != MaxBody {
 		t.Fatal(out, err)
@@ -162,7 +162,7 @@ func TestServiceRequestRejectsArbitraryHostHeaderAndMixedTLS(t *testing.T) {
 	if !q.Valid() {
 		t.Fatal("valid request")
 	}
-	for _, change := range []func(*Request){func(q *Request) { q.Path = "http://169.254.169.254/" }, func(q *Request) { q.Path = "//169.254.169.254/" }, func(q *Request) { q.Method = "GET" }, func(q *Request) { q.Headers = map[string]string{"Host": "private"} }, func(q *Request) { q.Headers = map[string]string{"Authorization": "private"} }, func(q *Request) { q.Headers = map[string]string{"X-MyDC-Test": "value\r\nHost: private"} }, func(q *Request) { q.Headers = map[string]string{"X-MyDC-A": "one", "x-mydc-a": "two"} }, func(q *Request) { q.Body = make([]byte, MaxBody+1) }, func(q *Request) { q.TimeoutMS = 30001 }, func(q *Request) { q.InsecureSkipVerify = true }} {
+	for _, change := range []func(*Request){func(q *Request) { q.Path = "http://169.254.169.254/" }, func(q *Request) { q.Path = "//169.254.169.254/" }, func(q *Request) { q.Method = "GET" }, func(q *Request) { q.Headers = map[string]string{"Host": "private"} }, func(q *Request) { q.Headers = map[string]string{"Authorization": "private"} }, func(q *Request) { q.Headers = map[string]string{"X-SFC-Test": "value\r\nHost: private"} }, func(q *Request) { q.Headers = map[string]string{"X-SFC-A": "one", "x-sfc-a": "two"} }, func(q *Request) { q.Body = make([]byte, MaxBody+1) }, func(q *Request) { q.TimeoutMS = 30001 }, func(q *Request) { q.InsecureSkipVerify = true }} {
 		bad := q
 		change(&bad)
 		if bad.Valid() {

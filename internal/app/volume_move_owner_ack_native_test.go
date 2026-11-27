@@ -15,20 +15,20 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/schema"
-	"github.com/jay94ks/mydcd/internal/userauth"
-	"github.com/jay94ks/mydcd/internal/workload/volumes"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/userauth"
+	"github.com/jay94ks/seafield/internal/workload/volumes"
 )
 
 // The existing fixture has restored and verified this actual inactive native.
 // Its non-app move has no automatic Arm/activation producer racing this one
 // owner command. Lose knowledge of the reply, not the original intent or CAS.
-func verifyMoveOwnerCommitUnobservedReply(t *testing.T, ctx context.Context, root string, client userauth.Client, authority mydcp.Peer, session access.Session, job control.VolumeMove, revision uint64, ready volumes.NativeReady) func() {
+func verifyMoveOwnerCommitUnobservedReply(t *testing.T, ctx context.Context, root string, client userauth.Client, authority sfcp.Peer, session access.Session, job control.VolumeMove, revision uint64, ready volumes.NativeReady) func() {
 	t.Helper()
 	if job.App != nil || ready.Verify() != nil || ready.Spec != job.Target || ready.Owner != job.Binding.Target {
 		t.Fatal("actual verified non-app target required for stable owner boundary")
@@ -75,7 +75,7 @@ func verifyMoveOwnerCommitUnobservedReply(t *testing.T, ctx context.Context, roo
 	defer clear(wire)
 	digest := sha256.Sum256(wire)
 	id := client.Mesh.NextRequest()
-	lifetime, err := mydcp.NewRequest(strconv.FormatUint(id, 10), digest)
+	lifetime, err := sfcp.NewRequest(strconv.FormatUint(id, 10), digest)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,8 +89,8 @@ func verifyMoveOwnerCommitUnobservedReply(t *testing.T, ctx context.Context, roo
 	if err != nil {
 		t.Fatal(err)
 	}
-	frame := mydcp.Frame{Purpose: mydcp.User, Kind: 1, Request: id, Fields: []mydcp.Field{{Tag: 1, Required: true, Value: wire}, {Tag: 2, Required: true, Value: digest[:]}}}
-	if err = mydcp.WriteFrame(stream, frame); err != nil {
+	frame := sfcp.Frame{Purpose: sfcp.User, Kind: 1, Request: id, Fields: []sfcp.Field{{Tag: 1, Required: true, Value: wire}, {Tag: 2, Required: true, Value: digest[:]}}}
+	if err = sfcp.WriteFrame(stream, frame); err != nil {
 		t.Fatal("original owner command send", err)
 	}
 	if err = stream.Close(); err != nil {
@@ -99,7 +99,7 @@ func verifyMoveOwnerCommitUnobservedReply(t *testing.T, ctx context.Context, roo
 	// Deliberately never read this stream's response. Keep the server/session
 	// alive so a local abandonment cannot masquerade as remote cancellation.
 	lifetime = lifetime.Abandon()
-	if lifetime.Phase() != mydcp.Unknown || lifetime.SafeToRetry() {
+	if lifetime.Phase() != sfcp.Unknown || lifetime.SafeToRetry() {
 		t.Fatal("sent owner request became safe to resubmit without its result")
 	}
 	var committed state.Result
@@ -158,6 +158,6 @@ func verifyMoveOwnerCommitUnobservedReply(t *testing.T, ctx context.Context, roo
 		}
 	}
 	check()
-	t.Log("actual inactive native restore/Verified -> durable original user owner command -> authenticated MYDCP send with reply deliberately unconsumed/Unknown -> original Applied result -> fresh login/Result/Resume with same actor/session/signature/ID/CAS; no automatic reissue, native Start/Arm or packet-loss claim")
+	t.Log("actual inactive native restore/Verified -> durable original user owner command -> authenticated SFCP send with reply deliberately unconsumed/Unknown -> original Applied result -> fresh login/Result/Resume with same actor/session/signature/ID/CAS; no automatic reissue, native Start/Arm or packet-loss claim")
 	return check
 }

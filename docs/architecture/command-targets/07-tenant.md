@@ -4,7 +4,7 @@
 |---|---|---|
 | `tenant delete` (`begin-tenant-retirement` → `finish-tenant-retirement`) | payload Tenant·원 Operation·tenant revision CAS. 현재 system administrator와 일반 catalog root CAS·quorum | 원 inventory는 FSM이 수집. begin은 신규 수락 차단이며 기존 자원 종료/데이터 정산은 명시 작업. finish는 owner 전체의 양성 종료 보고와 현재 잔여0 뒤 tombstone. 멈추면 `op resume`이 같은 요청을 계속 |
 | `tenant delete`의 대기·`op show` (User `tenant-retirement`) | 현재 system administrator의 명시 원격 tenant | 상태/원 target·owner·closed 수와 잔여 최대8개. 원본 inventory와 owner 서명은 FSM 보존. 같은 Index/root의 페이지만 합침. Deleted도 system scope로 조회 |
-| MYDCP `tenant-retirement-work` / `tenant-retirement-report` | 기존 인증 member lane, 원 inventory의 정확한 owner key와 동일 operation/시작 revision/digest·epoch/root | work는 원 owner의 정산 좌표. 공유 잔여0/실제 native·I/O 종료 뒤 폐기 가능한 engine-owned build cache만 원 RootManager lease 아래 회수. Volume/backup은 기존 명시 삭제 유지. report는 실제 종료 서명과 원 receipt를 확정하며 새 업무 권한을 주지 않음. [캐시 회수](../../reference/image-build-jobs/17-tenant.md) |
+| SFCP `tenant-retirement-work` / `tenant-retirement-report` | 기존 인증 member lane, 원 inventory의 정확한 owner key와 동일 operation/시작 revision/digest·epoch/root | work는 원 owner의 정산 좌표. 공유 잔여0/실제 native·I/O 종료 뒤 폐기 가능한 engine-owned build cache만 원 RootManager lease 아래 회수. Volume/backup은 기존 명시 삭제 유지. report는 실제 종료 서명과 원 receipt를 확정하며 새 업무 권한을 주지 않음. [캐시 회수](../../reference/image-build-jobs/17-tenant.md) |
 
 상세 계약은 tenant 삭제 런타임을 따른다.
 
@@ -25,6 +25,7 @@
 
 | 관리 변경 | 인증·적용대상 | 보존·실행 규칙 |
 |---|---|---|
+| `app resend APP [STEP]` (action `resume-app-step`) | 현재 계정의 tenant Deploy cleanup 권한과 그 단계의 현재 실행 권한. payload Tenant/App/Operation/Key/Command, Expected=현재 Inventory revision | 현재 배포의 RecoveryRequired 단계에 같은 Raft 명령의 한 번 재전송 허가만 저장. `app-operation`의 `Unknown`으로 단계와 Command digest를 조회. 원 ledger epoch가 보존되고 결과가 없을 때만 허가. 다시 Unknown이 되면 새 요청으로 다시 허가. 내리는 중·멈춤·정지 중인 배포는 거부 |
 | `manage apply` action `resume-app-retirement` / 같은 `manage result,resume` | 현재 계정의 tenant Deploy cleanup 권한과 원 종료 권한. payload Tenant/App/Retirement/Key/Phase/Command, Expected=현재 Inventory revision, 현재 root CAS/quorum | 원 RecoveryRequired Raft 명령의 한 번 재전송 허가만 저장. status의 `Retirement.Pending`으로 정확한 원 좌표를 조회. 같은 요청은 같은 허가/결과만 조회하며 소진 후 자동 갱신하지 않음. 원 Command/ID/기한/Unknown·native pin 보존, late result 우선 수집. app/CD/관리 명령 자동 작업 대상 아님 |
 
 예약된 망의 기존 DNS를 종료하는 새 `configure-network-dns` 변경은 `RetainReserved: true`로 원 구성원 검증을 명시할 수 있다. disabled·기존 source에만 허용하며 필드 없음/false는 기존 검증·과거 거부 의미를 유지한다. source CAS·현재 cleanup 권한·원 owner/lifetime closure는 동일하다.

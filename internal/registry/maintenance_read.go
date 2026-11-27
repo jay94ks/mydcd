@@ -6,8 +6,8 @@ import (
 	"context"
 	"errors"
 
-	"github.com/jay94ks/mydcd/internal/schema"
-	"github.com/jay94ks/mydcd/internal/storage"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/storage"
 )
 
 // Original native facts are read only from this exact healthy owner DB. A

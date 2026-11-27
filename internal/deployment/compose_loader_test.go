@@ -35,8 +35,8 @@ func TestComposeLibraryDoesNotResolveFilesEnvironmentOrUnsupportedFeatures(t *te
 		}
 	}
 	c := smallCompose(t)
-	if c.Secrets["db-password"].External || c.Secrets["db-password"].MyDC.Source != "service-final-keyset" {
-		t.Fatal("standard projection changed MyDC secret ownership")
+	if c.Secrets["db-password"].External || c.Secrets["db-password"].Sfc.Source != "service-final-keyset" {
+		t.Fatal("standard projection changed Seafield Cluster secret ownership")
 	}
 	explicit := strings.Replace(composeFixture, "  db-password:\n", "  db-password:\n    external: false\n", 1)
 	withFalse, err := ParseCompose([]byte(strings.ReplaceAll(explicit, "DIGEST", strings.Repeat("a", 64))))

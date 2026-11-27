@@ -13,8 +13,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/storage"
-	contract "github.com/jay94ks/mydcd/lifecycle/v1"
+	"github.com/jay94ks/seafield/internal/storage"
+	contract "github.com/jay94ks/seafield/lifecycle/v1"
 )
 
 // Real SourceStore DB/cache and real Yaegi; the TCP/authority adapters here

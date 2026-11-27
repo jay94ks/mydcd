@@ -15,11 +15,11 @@ func TestImageResolve(t *testing.T) {
 		len(out["platforms"].([]any)) != 2 || out["platforms"].([]any)[0].(map[string]any)["platform"] == nil || out["pinned"] == "" || out["code"] != nil {
 		t.Fatalf("mysql: %d %v", code, out)
 	}
-	code, out = res("registry.mydc.local/shop/php-shop:1.4.2")
+	code, out = res("registry.sfc.local/shop/php-shop:1.4.2")
 	if code != 200 || out["registryKind"] != "builtin" || out["source"] == nil || out["code"] != nil || out["digest"] == nil {
 		t.Fatalf("builtin: %d %v", code, out)
 	}
-	if code, out := res("registry.mydc.local/shop/php-shop:nope"); code != 200 || out["code"] != "not-found" || out["digest"] != nil {
+	if code, out := res("registry.sfc.local/shop/php-shop:nope"); code != 200 || out["code"] != "not-found" || out["digest"] != nil {
 		t.Fatalf("builtin missing tag: %d %v", code, out)
 	}
 	code, out = res("registry.example.com/shop/cron:1")

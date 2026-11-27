@@ -13,11 +13,11 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/imagebuild"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/schema"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/imagebuild"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/sfcp"
 )
 
 // CallManagement is the actual signed-envelope/frame encoder and sender. The
@@ -43,13 +43,13 @@ func TestBuildPartPermitManagementMetadataAndReadOnlyAdmission(t *testing.T) {
 			return json.RawMessage(`{"Schema":1}`), nil
 		}
 	})
-	peer, _ := f.lookup(mydcp.Identity(f.node.Public))
+	peer, _ := f.lookup(sfcp.Identity(f.node.Public))
 	request := ManagementRequest{Method: "image-build-part-permit", Latest: true, Input: input}
 	if _, err := CallManagement(f.ctx, f.cli, f.client, f.policy.Cluster, peer, request); err == nil || calls.Load() != 0 {
 		t.Fatal("non-member reached compact permit core", err)
 	}
 	f.mu.Lock()
-	member := f.peers[mydcp.Identity(f.client.Public)]
+	member := f.peers[sfcp.Identity(f.client.Public)]
 	member.Member = true
 	f.peers[member.Key] = member
 	f.mu.Unlock()

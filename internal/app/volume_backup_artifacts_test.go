@@ -19,12 +19,12 @@ import (
 	"syscall"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/engine"
-	"github.com/jay94ks/mydcd/internal/reconcile"
-	"github.com/jay94ks/mydcd/internal/workload"
-	"github.com/jay94ks/mydcd/internal/workload/volumes"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/engine"
+	"github.com/jay94ks/seafield/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/workload"
+	"github.com/jay94ks/seafield/internal/workload/volumes"
 )
 
 type backupArtifactFake struct {
@@ -82,7 +82,7 @@ func reranUnprivileged(t *testing.T) bool {
 	if err != nil {
 		t.Fatal(err)
 	}
-	dir, err := os.MkdirTemp("", "mydc-unprivileged-")
+	dir, err := os.MkdirTemp("", "sfc-unprivileged-")
 	if err != nil {
 		t.Fatal(err)
 	}

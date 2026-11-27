@@ -1,7 +1,7 @@
 ## 빌드 로그 페이지
 
 User purpose8의 요청은 다음과 같다. 공통 Session/envelope 서명·Nonce와 현재 사용자
-선택 규칙을 사용한다. Unix와 네트워크 MYDCP가 같은 형식이며 새 socket은 열지 않는다.
+선택 규칙을 사용한다. Unix와 네트워크 SFCP가 같은 형식이며 새 socket은 열지 않는다.
 
 ```text
 {Schema:1, Method:"image-build-logs", Nonce:[32], Tenant,
@@ -46,9 +46,9 @@ job당 최대8MiB를 같은 node observations DB의8KiB 조각으로 보관한�
 연결과 전체 경계 검증은 RQ6에 포함한다.
 
 ```sh
-mydc build logs build-one
-mydc build logs build-one --tail
-mydc build logs build-one -f
+sfcli build logs build-one
+sfcli build logs build-one --tail
+sfcli build logs build-one -f
 ```
 
 CLI는 페이지를 차례로 읽어 출력하고, `-f`는 빌드가 끝날 때까지 계속 읽는다. SDK `Client.ImageBuildLogs`는 MaxBytes·페이지 길이·

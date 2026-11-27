@@ -3,6 +3,7 @@
 package workload
 
 import (
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -153,5 +154,19 @@ func TestImageHealthcheckShellInheritanceDisableAndDockerOptions(t *testing.T) {
 		if ValidateHealthcheck(h) == nil {
 			t.Fatal("invalid Docker health override accepted", h)
 		}
+	}
+}
+
+// A root or named-user image says what to set, and is still an ErrProcess.
+func TestImageProcessNamesTheUserProblem(t *testing.T) {
+	id := "sha256:" + strings.Repeat("d", 64)
+	for _, user := range []string{"", "nginx", "0:0"} {
+		_, err := ResolveProcess(id, &container.Config{User: user, Cmd: []string{"/run"}}, ProcessOverrides{})
+		if !errors.Is(err, ErrProcessUser) || !errors.Is(err, ErrProcess) || !strings.Contains(err.Error(), "user:") {
+			t.Fatal(user, err)
+		}
+	}
+	if _, err := ResolveProcess(id, &container.Config{Cmd: []string{"/run"}}, ProcessOverrides{User: "10001:10001"}); err != nil {
+		t.Fatal("user override refused", err)
 	}
 }

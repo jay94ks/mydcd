@@ -1,0 +1,65 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Fri, 27 Nov 2026 09:25:45 +0000
+Subject: [PATCH 16/20] restore: start restart-policy containers that failed
+ before the sfcd session was up
+
+
+diff --git a/daemon/command/seafield_restart.go b/daemon/command/seafield_restart.go
+new file mode 100644
+index 0000000..6a3674a
+--- /dev/null
++++ b/daemon/command/seafield_restart.go
+@@ -0,0 +1,52 @@
++// SPDX-License-Identifier: Apache-2.0
++
++package command
++
++import (
++	"context"
++	"time"
++
++	"github.com/containerd/log"
++	"github.com/moby/moby/v2/daemon"
++)
++
++// sfcdWait is how long the engine waits for its sfcd session before it
++// restores containers.
++const sfcdWait = 30 * time.Second
++
++// restartBlocked starts again, with a short backoff, the containers that
++// upstream restore tried to start once and failed: a restart policy of
++// always or unless-stopped (not stopped by hand), started before, not
++// running. The usual cause is sfcd not being ready yet
++// (an sfc network join or volume mount answered not-ready); upstream
++// restore does not retry those. Called each time the sfcd session comes up.
++func restartBlocked(ctx context.Context, d *daemon.Daemon) {
++	delays := []time.Duration{0, 2 * time.Second, 5 * time.Second, 10 * time.Second, 30 * time.Second}
++	for _, wait := range delays {
++		select {
++		case <-time.After(wait):
++		case <-ctx.Done():
++			return
++		}
++		left := 0
++		for _, c := range d.List() {
++			// State methods take the container lock themselves.
++			rp := c.HostConfig.RestartPolicy
++			blocked := !c.State.IsRunning() && !c.State.IsRestarting() && !c.State.IsRemovalInProgress() && c.HasBeenStartedBefore &&
++				(rp.IsAlways() || (rp.IsUnlessStopped() && !c.HasBeenManuallyStopped))
++			id := c.ID
++			if !blocked {
++				continue
++			}
++			if err := d.ContainerStart(ctx, id, "", ""); err != nil {
++				left++
++				log.G(ctx).WithError(err).WithField("container", id).Warn("seafield: start after sfcd came up failed")
++			} else {
++				log.G(ctx).WithField("container", id).Info("seafield: started after sfcd came up")
++			}
++		}
++		if left == 0 {
++			return
++		}
++	}
++}

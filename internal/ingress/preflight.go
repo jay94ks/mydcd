@@ -9,7 +9,7 @@ import (
 	"net"
 	"net/netip"
 
-	"github.com/jay94ks/mydcd/internal/network"
+	"github.com/jay94ks/seafield/internal/network"
 )
 
 // CheckListeners observes this exact current owner, or binds the future TCP/UDP

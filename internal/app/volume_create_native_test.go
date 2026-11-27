@@ -16,21 +16,21 @@ import (
 	"time"
 
 	cerrdefs "github.com/containerd/errdefs"
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/config"
-	"github.com/jay94ks/mydcd/internal/engine"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/reconcile"
-	"github.com/jay94ks/mydcd/internal/storage"
-	"github.com/jay94ks/mydcd/internal/tenancy"
-	"github.com/jay94ks/mydcd/internal/userauth"
-	"github.com/jay94ks/mydcd/internal/workload/volumes"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/config"
+	"github.com/jay94ks/seafield/internal/engine"
+	"github.com/jay94ks/seafield/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/storage"
+	"github.com/jay94ks/seafield/internal/tenancy"
+	"github.com/jay94ks/seafield/internal/userauth"
+	"github.com/jay94ks/seafield/internal/workload/volumes"
 	"github.com/moby/moby/client"
 )
 
-func verifyVolumeCreateBoundary(t *testing.T, ctx context.Context, a *Runtime, owner **Runtime, cfg config.Node, root string, admin userauth.Client, peer mydcp.Peer, session access.Session, p control.Policy, read func() cluster.View, change func(string, string, uint64, any), scope volumes.Scope, docker *engine.Client, gate *volumeUsageGate, scenario volumeOwnerScenario) {
+func verifyVolumeCreateBoundary(t *testing.T, ctx context.Context, a *Runtime, owner **Runtime, cfg config.Node, root string, admin userauth.Client, peer sfcp.Peer, session access.Session, p control.Policy, read func() cluster.View, change func(string, string, uint64, any), scope volumes.Scope, docker *engine.Client, gate *volumeUsageGate, scenario volumeOwnerScenario) {
 	cancelDispatched := scenario == volumeOwnerCreateCancel
 	loseJournal := scenario == volumeOwnerCreateLostJournal
 	t.Helper()
@@ -87,7 +87,7 @@ func verifyVolumeCreateBoundary(t *testing.T, ctx context.Context, a *Runtime, o
 	cli := func(want int, args ...string) map[string]any {
 		t.Helper()
 		args = withTenant(selectedTenant, args)
-		cmd := nativeCLICmd(ctx, os.Getenv("MYDC_TEST_CLI"), home, profile, args...)
+		cmd := nativeCLICmd(ctx, os.Getenv("SFC_TEST_CLI"), home, profile, args...)
 		var out, diagnostic bytes.Buffer
 		cmd.Stdout, cmd.Stderr = &out, &diagnostic
 		err := cmd.Run()
@@ -189,7 +189,7 @@ func verifyVolumeCreateBoundary(t *testing.T, ctx context.Context, a *Runtime, o
 	}
 	catalog, _ := p.Catalog(read().State)
 	tenant, _ := catalog.Tenant(scope.Tenant)
-	change("revoke-create-placement", "set-nodes", tenant.Revision, control.NodeAssignment{Tenant: scope.Tenant})
+	change("revoke-create-placement", "set-nodes", tenant.Revision, control.NodeChangeTo(scope.Tenant, tenant.AllowedNodes, nil))
 	revoked := read().State.Object(control.CatalogKey).Revision
 	if cancelDispatched {
 		cli(0, "--tenant", scope.Tenant, "volume", "delete", scope.App+"/"+scope.ID, "--id", "cancel-dispatched", "--no-wait")
@@ -215,7 +215,7 @@ func verifyVolumeCreateBoundary(t *testing.T, ctx context.Context, a *Runtime, o
 	if loseJournal {
 		catalog, _ = p.Catalog(read().State)
 		tenant, _ = catalog.Tenant(scope.Tenant)
-		change("allow-missing-intent-probe", "set-nodes", tenant.Revision, control.NodeAssignment{Tenant: scope.Tenant, Nodes: []string{cfg.Node.ID}})
+		change("allow-missing-intent-probe", "set-nodes", tenant.Revision, control.NodeChangeTo(scope.Tenant, tenant.AllowedNodes, []string{cfg.Node.ID}))
 		path := filepath.Join(cfg.Node.StateDir, "workload", "volumes.db")
 		backup := path + ".original"
 		if err := os.Rename(path, backup); err != nil {
@@ -292,7 +292,7 @@ func verifyVolumeCreateBoundary(t *testing.T, ctx context.Context, a *Runtime, o
 	}
 	catalog, _ = p.Catalog(read().State)
 	tenant, _ = catalog.Tenant(scope.Tenant)
-	change("restore-create-placement", "set-nodes", tenant.Revision, control.NodeAssignment{Tenant: scope.Tenant, Nodes: []string{cfg.Node.ID}})
+	change("restore-create-placement", "set-nodes", tenant.Revision, control.NodeChangeTo(scope.Tenant, tenant.AllowedNodes, []string{cfg.Node.ID}))
 	wait("same native Apply recovered and published", func() bool { return job(scope).Phase == "Ready" })
 	after, err := (*owner).nativeVolumes.View(key)
 	if err != nil || after.State.LastID != originalID || after.State.Pending != nil || creates() != 1 || job(scope).Ready.Owner.Native != identity.Name {

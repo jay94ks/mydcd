@@ -13,7 +13,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/jay94ks/mydcd/internal/workload"
+	"github.com/jay94ks/seafield/internal/workload"
 )
 
 // This integrity record stays in the private node root. Content digests are

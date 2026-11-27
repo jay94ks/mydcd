@@ -9,8 +9,8 @@ import (
 	"slices"
 	"strconv"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/reconcile"
 )
 
 // Usage keeps the original metadata dependency set even after a move, ref
@@ -99,7 +99,7 @@ type UseGone struct {
 func UseGoneBytes(p UseGone) []byte {
 	p.Signature = nil
 	b, _ := json.Marshal(p)
-	return append([]byte("mydc-secret-use-gone-1\x00"), b...)
+	return append([]byte("sfc-secret-use-gone-1\x00"), b...)
 }
 
 // ReleaseUse atomically returns all still-held approval pins and the lifetime

@@ -16,15 +16,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/containerops"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/userauth"
-	"github.com/jay94ks/mydcd/internal/workload"
-	checker "github.com/jay94ks/mydcd/internal/workload/lifecycle"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/containerops"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/userauth"
+	"github.com/jay94ks/seafield/internal/workload"
+	checker "github.com/jay94ks/seafield/internal/workload/lifecycle"
 	dockernet "github.com/moby/moby/api/types/network"
 	"github.com/moby/moby/client"
 	"gopkg.in/yaml.v3"
@@ -93,7 +93,7 @@ func prepareManagedPublishedPortsDocument(t *testing.T, document []byte) ([]byte
 	if service.Environment == nil {
 		service.Environment = deployment.Environment{}
 	}
-	service.Environment["MYDC_PUBLISHED_PORTS_FIXTURE"] = "1"
+	service.Environment["SFC_PUBLISHED_PORTS_FIXTURE"] = "1"
 	service.Memory = "64m"
 	input.Services["web"] = service
 	raw, err := yaml.Marshal(input)
@@ -116,7 +116,7 @@ func publishedEcho(ctx context.Context, address string) error {
 	}
 	body, readErr := io.ReadAll(io.LimitReader(reply.Body, 128))
 	_ = reply.Body.Close()
-	if readErr != nil || reply.StatusCode != http.StatusOK || string(body) != "mydc-boundary /ping" {
+	if readErr != nil || reply.StatusCode != http.StatusOK || string(body) != "sfc-boundary /ping" {
 		return fmt.Errorf("published TCP response differs")
 	}
 	conn, err := (&net.Dialer{Timeout: time.Second}).DialContext(ctx, "udp4", address)
@@ -167,7 +167,7 @@ func (f *managedPublishedPorts) assertClosed(t *testing.T, ctx context.Context) 
 	closedPublishedAddress(t, ctx, f.standalone)
 }
 
-func prepareManagedPublishedPortsNative(t *testing.T, ctx context.Context, r *Runtime, root string, document []byte, user userauth.Client, peer mydcp.Peer, session access.Session, p control.Policy, read func() cluster.View, wait func(string, func() bool), ports *managedPublishedPorts) func(*Runtime) {
+func prepareManagedPublishedPortsNative(t *testing.T, ctx context.Context, r *Runtime, root string, document []byte, user userauth.Client, peer sfcp.Peer, session access.Session, p control.Policy, read func() cluster.View, wait func(string, func() bool), ports *managedPublishedPorts) func(*Runtime) {
 	t.Helper()
 	inspect := func(key, address string) string {
 		t.Helper()
@@ -217,7 +217,7 @@ func prepareManagedPublishedPortsNative(t *testing.T, ctx context.Context, r *Ru
 	var lastDiagnostic []byte
 	call := func(want int, args ...string) []byte {
 		t.Helper()
-		out, diagnostic, err := runManagedCLICommand(ctx, os.Getenv("MYDC_TEST_CLI"), filepath.Join(root, "cli-home"), filepath.Join(root, "cli.yaml"), append([]string{"--tenant", "tenant"}, args...), nil)
+		out, diagnostic, err := runManagedCLICommand(ctx, os.Getenv("SFC_TEST_CLI"), filepath.Join(root, "cli-home"), filepath.Join(root, "cli.yaml"), append([]string{"--tenant", "tenant"}, args...), nil)
 		lastDiagnostic = bytes.Clone(diagnostic)
 		code := 0
 		if err != nil {
@@ -237,7 +237,7 @@ func prepareManagedPublishedPortsNative(t *testing.T, ctx context.Context, r *Ru
 	if err != nil {
 		t.Fatal(err)
 	}
-	input.Name, input.MyDC.Deployment, input.MyDC.Ingress = name, "published-service-deploy", nil
+	input.Name, input.Sfc.Deployment, input.Sfc.Ingress = name, "published-service-deploy", nil
 	input.Volumes = nil
 	input.Secrets = nil
 	service := input.Services["web"]
@@ -246,15 +246,15 @@ func prepareManagedPublishedPortsNative(t *testing.T, ctx context.Context, r *Ru
 	// without borrowing the live app writer or creating anonymous storage.
 	service.Tmpfs = []string{"/data:size=1m,uid=10001,gid=10001,mode=0700"}
 	service.Secrets = nil
-	service.MyDC.Sources = nil
+	service.Sfc.Sources = nil
 	service.Healthcheck = nil
-	delete(service.Environment, "MYDC_VOLUME_FIXTURE")
-	delete(service.Environment, "MYDC_VOLUME_SECOND_FIXTURE")
-	delete(service.Environment, "MYDC_PROJECTION_FILE")
+	delete(service.Environment, "SFC_VOLUME_FIXTURE")
+	delete(service.Environment, "SFC_VOLUME_SECOND_FIXTURE")
+	delete(service.Environment, "SFC_PROJECTION_FILE")
 	service.Ports = publishingIntent(t, ports.standalone)
 	for alias, attachment := range service.Networks {
 		a, e := netip.ParseAddr(attachment.IPv4)
-		prefix, pe := netip.ParsePrefix(os.Getenv("MYDC_DOCKER_TEST_CIDR"))
+		prefix, pe := netip.ParsePrefix(os.Getenv("SFC_DOCKER_TEST_CIDR"))
 		if e != nil || pe != nil || !prefix.Contains(a.Next()) {
 			t.Fatal("fixture requires one adjacent standalone address")
 		}
@@ -275,7 +275,7 @@ func prepareManagedPublishedPortsNative(t *testing.T, ctx context.Context, r *Ru
 		return path
 	}
 	path := write("published-standalone.yaml", input)
-	args := []string{"standalone", "plan", name, "-f", path, "--mode", "entrypoint", "--lifetime", "fixed", "--restart", "no"}
+	args := []string{"standalone", "run", name, "-f", path, "--mode", "entrypoint", "--lifetime", "fixed", "--restart", "no", "--dry-run"}
 	call(0, args...)
 	// Change only the port intent to the still-live app's original socket. The
 	// valid positive plan proves address/quota/trust prerequisites above.
@@ -285,11 +285,11 @@ func prepareManagedPublishedPortsNative(t *testing.T, ctx context.Context, r *Ru
 	rivalService.Ports = publishingIntent(t, ports.app)
 	rival.Services["web"] = rivalService
 	conflict := write("published-conflict.yaml", rival)
-	denied := call(1, "standalone", "plan", name, "-f", conflict, "--mode", "entrypoint", "--lifetime", "fixed", "--restart", "no")
+	denied := call(1, "standalone", "run", name, "-f", conflict, "--mode", "entrypoint", "--lifetime", "fixed", "--restart", "no", "--dry-run")
 	if !bytes.Contains(denied, []byte("HOST_PORT_CONFLICT")) && !bytes.Contains(lastDiagnostic, []byte("HOST_PORT_CONFLICT")) {
 		t.Fatal("valid rival did not reach the specific deterministic host-port conflict")
 	}
-	call(0, "standalone", "up", name, "-f", path, "--mode", "entrypoint", "--lifetime", "fixed", "--restart", "no", "--operation", "published-create", "--no-input")
+	call(0, "standalone", "run", name, "-f", path, "--mode", "entrypoint", "--lifetime", "fixed", "--restart", "no", "--id", "published-create")
 	scope := deployment.StandaloneScopeName("tenant", name)
 	key := deployment.ResourceKey("task", "tenant", scope, "web")
 	running := func() containerops.Target {
@@ -323,10 +323,10 @@ func prepareManagedPublishedPortsNative(t *testing.T, ctx context.Context, r *Ru
 			return e == nil && got.Container.State != nil && got.Container.State.Running == running
 		})
 	}
-	call(0, "standalone", "stop", name, "--operation", "published-stop")
+	call(0, "standalone", "stop", name, "--id", "published-stop")
 	controlDone("published-stop", false)
 	closedPublishedAddress(t, ctx, ports.standalone)
-	call(0, "standalone", "start", name, "--operation", "published-start")
+	call(0, "standalone", "start", name, "--id", "published-start")
 	controlDone("published-start", true)
 	afterStart := running()
 	if afterStart.NativeID != original.NativeID || afterStart.StartedAt == original.StartedAt {
@@ -351,7 +351,7 @@ func prepareManagedPublishedPortsNative(t *testing.T, ctx context.Context, r *Ru
 				t.Fatal("publishing/control/recovery replaced original source")
 			}
 		}
-		call(0, "standalone", "remove", name, "--operation", "published-remove")
+		call(0, "standalone", "remove", name, "--id", "published-remove")
 		wait("published original native retirement", func() bool {
 			apps, e := p.Apps(read().State)
 			inv, ok := apps.Inventory("tenant", scope)

@@ -9,8 +9,8 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/cluster/lifecycle"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/cluster/lifecycle"
+	"github.com/jay94ks/seafield/internal/cluster/state"
 )
 
 func routeReportRotateOwner(t *testing.T, f *backupCoreFixture, keys map[[32]byte]ed25519.PrivateKey, old [32]byte, seed byte) [32]byte {

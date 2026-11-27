@@ -1,0 +1,6 @@
+{
+  "repository": "https://github.com/moby/moby",
+  "tag": "docker-v29.10.1",
+  "commit": "54cd494d0b39abfc7a958fcc876f706271f8b909",
+  "go": "1.27.0"
+}

@@ -1,0 +1,77 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Fri, 27 Nov 2026 08:56:05 +0000
+Subject: [PATCH 13/20] plugins: no v1 plugin discovery (never pick up a
+ co-installed Docker's plugins)
+
+
+diff --git a/pkg/plugins/discovery.go b/pkg/plugins/discovery.go
+index 8073d9a..97b2adb 100644
+--- a/pkg/plugins/discovery.go
++++ b/pkg/plugins/discovery.go
+@@ -34,6 +34,9 @@ func NewLocalRegistry() LocalRegistry {
+ 
+ // Scan scans all the plugin paths and returns all the names it found
+ func (l *LocalRegistry) Scan() ([]string, error) {
++	if legacyDisabled {
++		return nil, nil
++	}
+ 	var names []string
+ 	dirEntries, err := os.ReadDir(l.socketsPath)
+ 	if err != nil && !os.IsNotExist(err) {
+@@ -95,6 +98,9 @@ func (l *LocalRegistry) Scan() ([]string, error) {
+ 
+ // Plugin returns the plugin registered with the given name (or returns an error).
+ func (l *LocalRegistry) Plugin(name string) (*Plugin, error) {
++	if legacyDisabled {
++		return nil, errors.Wrapf(ErrNotFound, "seafield has no plugins (%s)", name)
++	}
+ 	socketPaths := pluginPaths(l.socketsPath, name, ".sock")
+ 	for _, p := range socketPaths {
+ 		if fi, err := os.Stat(p); err == nil && fi.Mode()&os.ModeSocket != 0 {
+diff --git a/pkg/plugins/seafield.go b/pkg/plugins/seafield.go
+new file mode 100644
+index 0000000..e120320
+--- /dev/null
++++ b/pkg/plugins/seafield.go
+@@ -0,0 +1,10 @@
++// SPDX-License-Identifier: Apache-2.0
++
++package plugins
++
++// legacyDisabled turns off v1 plugin discovery (/run/docker/plugins,
++// /etc/docker/plugins, /usr/lib/docker/plugins). Seafield has no plugins:
++// its volume, network and log needs are built in, and sharing Docker's
++// discovery directories would let a plugin meant for a Docker installed on
++// the same host attach to this engine.
++const legacyDisabled = true
+diff --git a/pkg/plugins/seafield_test.go b/pkg/plugins/seafield_test.go
+new file mode 100644
+index 0000000..1e85f00
+--- /dev/null
++++ b/pkg/plugins/seafield_test.go
+@@ -0,0 +1,24 @@
++// SPDX-License-Identifier: Apache-2.0
++
++package plugins
++
++import (
++	"errors"
++	"os"
++	"path/filepath"
++	"testing"
++)
++
++func TestLegacyDiscoveryOff(t *testing.T) {
++	dir := t.TempDir()
++	if err := os.WriteFile(filepath.Join(dir, "evil.spec"), []byte("unix:///tmp/evil.sock"), 0o644); err != nil {
++		t.Fatal(err)
++	}
++	r := LocalRegistry{socketsPath: dir, specsPaths: []string{dir}}
++	if names, err := r.Scan(); err != nil || len(names) != 0 {
++		t.Fatalf("scan found %v %v", names, err)
++	}
++	if _, err := r.Plugin("evil"); !errors.Is(err, ErrNotFound) {
++		t.Fatalf("plugin lookup: %v", err)
++	}
++}

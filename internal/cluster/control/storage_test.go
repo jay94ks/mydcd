@@ -9,12 +9,12 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/lifecycle"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/config"
-	"github.com/jay94ks/mydcd/internal/network/services"
-	"github.com/jay94ks/mydcd/internal/tenancy"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/lifecycle"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/config"
+	"github.com/jay94ks/seafield/internal/network/services"
+	"github.com/jay94ks/seafield/internal/tenancy"
 )
 
 func TestStorageWindowPinsRuntimeNodeIntentUntilOriginalClosure(t *testing.T) {
@@ -135,7 +135,7 @@ func TestStorageWindowRejectsUnsettledMembershipAndUnknownNamespaces(t *testing.
 	}
 	d, _ := p.Members(s)
 	foreign := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{98}, 32))
-	d, err = d.Invite(config.Peer{ID: "target", Key: hex.EncodeToString(foreign.Public().(ed25519.PublicKey)), Endpoint: "127.0.0.1:7444"}, "join-target")
+	d, err = d.Invite(config.Peer{ID: "target", Key: hex.EncodeToString(foreign.Public().(ed25519.PublicKey)), Endpoint: "127.0.0.1:7444"}, "join-target", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

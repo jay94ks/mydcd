@@ -7,11 +7,11 @@ import (
 	"crypto/ed25519"
 	"errors"
 	"fmt"
-	"github.com/jay94ks/mydcd/internal/deployment"
+	"github.com/jay94ks/seafield/internal/deployment"
 	"strings"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/access"
+	"github.com/jay94ks/seafield/internal/access"
 )
 
 func tokenGrantFixture() (Grant, ed25519.PrivateKey) {

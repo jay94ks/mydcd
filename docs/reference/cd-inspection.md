@@ -5,9 +5,9 @@
 Git 원문은 그대로 두고 별도 YAML의 새 서비스와 공유 자원 이름 참조만 미래 후보에 병합한다. 같은 이름의 Git 서비스나 서로 다른 별칭 정의는 충돌이며, 로컬 서비스가 Git 서비스에 시작 의존을 거는 것도 거부한다. 로컬 서비스끼리의 의존은 허용한다.
 
 ```sh
-mydc --tenant shop cd put-local website --file local.yaml --request-id local-edit-1
-mydc --tenant shop cd clear-local website --request-id local-clear-1 --local-revision 1
-mydc --tenant shop cd sync website --request-id sync-2 --operation rollout-2
+sfcli --tenant shop cd put-local website --file local.yaml --request-id local-edit-1
+sfcli --tenant shop cd clear-local website --request-id local-clear-1 --local-revision 1
+sfcli --tenant shop cd sync website --request-id sync-2 --operation rollout-2
 ```
 
 `put-local`은 추가분 전체 교체이고 `clear-local`은 추가분 전체 제거다. 두 명령 자체는 실행 중인 컨테이너를 바꾸지 않는다. clear 후 후보에서 빠진 서비스의 실제 종료에는 `sync.prune: true`가 필요하다. prune이 꺼져 있으면 기존 orphan claim/native를 보존한다. 실제 적용·종료·참조 반환은 기존 명시/정책상 CD sync가 수행한다. Git fetch/prune가 별도 추가분을 임의로 삭제하지 않는다. Git에 같은 서비스가 들어오면 기존 실행/추가분을 보존하고 새 sync를 멈춘다.
@@ -20,13 +20,13 @@ put은 기존 소유자별 app-upload를 사용한다. 서버가 완료된 원 �
 
 `manage app-source --section local-services`는 보존 실행 버전의 별도 원문을 읽는다. 후보 이력의 optional `LocalRevision`, `LocalActor`는 로컬 편집을 구분하는 공개 metadata이며 별도의 실행 성공 증명이 아니다. Git 원문·현재 수락 버전·추가분을 하나의 원문으로 덮어쓰지 않는다.
 
-CD 조회는 선택 tenant의 앱 Read 권한으로 같은 사용자 MYDCP API를 호출한다. Unix `/var/run/mydc.sock`과 네트워크 연결에서 Session·challenge 서명·현재 권한·quorum/leader forwarding을 동일하게 적용한다. UI와 CLI가 서로 다른 관리 상태나 실행 권한을 갖지 않는다. 구현 수락 근거는 HISTORY에서 관리한다.
+CD 조회는 선택 tenant의 앱 Read 권한으로 같은 사용자 SFCP API를 호출한다. Unix `/run/sfcdp.sock`과 네트워크 연결에서 Session·challenge 서명·현재 권한·quorum/leader forwarding을 동일하게 적용한다. UI와 CLI가 서로 다른 관리 상태나 실행 권한을 갖지 않는다. 구현 수락 근거는 HISTORY에서 관리한다.
 
 ```sh
-mydc --cluster production --tenant shop cd history website
-mydc --tenant shop cd history website --after '이전 응답 Next'
-mydc --tenant shop cd field website --field services/web/image
-mydc --tenant shop cd diff website
+sfcli --cluster production --tenant shop cd history website
+sfcli --tenant shop cd history website --after '이전 응답 Next'
+sfcli --tenant shop cd field website --field services/web/image
+sfcli --tenant shop cd diff website
 ```
 
 이 명령은 request ID·expected revision·resume·관리 사유를 받지 않는 조회다. source 조회·이력의 성공은 후보 실행이나 컨테이너 health 성공이 아니다.

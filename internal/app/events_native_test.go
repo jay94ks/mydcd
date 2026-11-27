@@ -9,20 +9,20 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/containerops"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/eventlog"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/userauth"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/containerops"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/eventlog"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/userauth"
 	"github.com/moby/moby/client"
 )
 
 // Reuses the owned container fixture, wallet, quorum and teardown. The only
 // additional effects are three explicit restarts of the selected original
 // native. It does not recreate the app or restart unselected containers.
-func verifyThreeRestartEventsNative(t *testing.T, ctx context.Context, r *Runtime, c userauth.Client, peer mydcp.Peer, session access.Session, target containerops.Target, run func([]string) []byte) {
+func verifyThreeRestartEventsNative(t *testing.T, ctx context.Context, r *Runtime, c userauth.Client, peer sfcp.Peer, session access.Session, target containerops.Target, run func([]string) []byte) {
 	t.Helper()
 	q := eventlog.Query{Tenant: target.Tenant, App: target.App, Kind: "task-restarted", Limit: 1}
 	for {

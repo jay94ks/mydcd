@@ -31,15 +31,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/desired"
-	"github.com/jay94ks/mydcd/internal/engine"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/ingress"
-	"github.com/jay94ks/mydcd/internal/network"
-	"github.com/jay94ks/mydcd/internal/schema"
-	"github.com/jay94ks/mydcd/internal/workload"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/desired"
+	"github.com/jay94ks/seafield/internal/engine"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/ingress"
+	"github.com/jay94ks/seafield/internal/network"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/workload"
 	"github.com/moby/moby/client"
 	"github.com/quic-go/quic-go/http3"
 	"github.com/vishvananda/netlink"
@@ -50,7 +50,7 @@ import (
 // Real HTTP clients run inside the ingress node's kernel namespace. No helper
 // handles TUN packets, implements a backend, or supplies a synthetic response.
 func TestSystemHTTPClient(t *testing.T) {
-	mode := os.Getenv("MYDC_R5_HTTP_MODE")
+	mode := os.Getenv("SFC_R5_HTTP_MODE")
 	if mode == "" {
 		t.Skip("R5 namespace client only")
 	}
@@ -58,7 +58,7 @@ func TestSystemHTTPClient(t *testing.T) {
 	defer stop()
 	ctx, cancel := context.WithTimeout(ctx, 12*time.Second)
 	defer cancel()
-	cert, e := os.ReadFile(os.Getenv("MYDC_R5_CERT"))
+	cert, e := os.ReadFile(os.Getenv("SFC_R5_CERT"))
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -91,7 +91,7 @@ func TestSystemHTTPClient(t *testing.T) {
 		if e != nil || res.StatusCode != want || res.ProtoMajor != n+1 {
 			t.Fatal(n, path, res.StatusCode, res.Proto, b, e)
 		}
-		if want == 200 && string(b) != "mydc-boundary "+path {
+		if want == 200 && string(b) != "sfc-boundary "+path {
 			t.Fatal("actual remote body", string(b))
 		}
 		if n > 0 && (res.TLS == nil || res.TLS.NegotiatedProtocol != []string{"", "h2", "h3"}[n]) {
@@ -161,7 +161,7 @@ func TestSystemHTTPClient(t *testing.T) {
 						limited.Add(1)
 						continue
 					}
-					if e != nil || res.StatusCode != 200 || res.ProtoMajor != n%3+1 || string(b) != "mydc-boundary /ping" {
+					if e != nil || res.StatusCode != 200 || res.ProtoMajor != n%3+1 || string(b) != "sfc-boundary /ping" {
 						errs <- fmt.Errorf("load %d %q %v", res.StatusCode, b, e)
 						return
 					}
@@ -202,7 +202,7 @@ func TestSystemHTTPClient(t *testing.T) {
 	}
 	defer c.Close()
 	_ = c.SetDeadline(time.Now().Add(time.Second))
-	fmt.Fprint(c, "GET /upgrade HTTP/1.1\r\nHost: app.test\r\nConnection: Upgrade\r\nUpgrade: mydc-echo\r\n\r\n")
+	fmt.Fprint(c, "GET /upgrade HTTP/1.1\r\nHost: app.test\r\nConnection: Upgrade\r\nUpgrade: sfc-echo\r\n\r\n")
 	rd := bufio.NewReader(c)
 	res, e := http.ReadResponse(rd, &http.Request{Method: "GET"})
 	if e != nil || res.StatusCode != 101 {
@@ -292,7 +292,7 @@ func (p *systemProcess) stop(t *testing.T, kill bool) {
 }
 
 func TestSystemNamespaceHolder(t *testing.T) {
-	if os.Getenv("MYDC_R5_NAMESPACE_HOLDER") != "1" {
+	if os.Getenv("SFC_R5_NAMESPACE_HOLDER") != "1" {
 		t.Skip("R5 namespace owner only")
 	}
 	if os.Geteuid() != 0 {
@@ -308,7 +308,7 @@ func TestSystemNamespaceHolder(t *testing.T) {
 }
 
 func TestRealSystemRemoteIngressFaultsAndRecovery(t *testing.T) {
-	host, bin := os.Getenv("MYDC_KERNEL_HOST_NETNS"), os.Getenv("MYDC_R5_PRODUCTS")
+	host, bin := os.Getenv("SFC_KERNEL_HOST_NETNS"), os.Getenv("SFC_R5_PRODUCTS")
 	if host == "" || bin == "" {
 		t.Skip("R5 isolated namespace/prebuilt products and rollback plan required")
 	}
@@ -375,14 +375,14 @@ func TestRealSystemRemoteIngressFaultsAndRecovery(t *testing.T) {
 				t.Error(err)
 			}
 			for _, v := range nets.Items {
-				if v.Labels["org.mydc.owner"] != "" {
+				if v.Labels["org.sfc.owner"] != "" {
 					if normal {
 						t.Error("product retained Bridge", v.ID)
 					}
 					_, _ = api.API.NetworkRemove(clean, v.ID, client.NetworkRemoveOptions{})
 				}
 			}
-			_, _ = api.API.ImageRemove(clean, "mydc-r5:local", client.ImageRemoveOptions{})
+			_, _ = api.API.ImageRemove(clean, "sfc-r5:local", client.ImageRemoveOptions{})
 			api.Close()
 			_ = i
 		}
@@ -407,7 +407,7 @@ func TestRealSystemRemoteIngressFaultsAndRecovery(t *testing.T) {
 		}
 		// Removing the owned partition table is idempotent cleanup, not a native
 		// product-success assertion. No unrelated table is addressed.
-		_ = exec.Command("nft", "delete", "table", "inet", "mydc_r5_partition").Run()
+		_ = exec.Command("nft", "delete", "table", "inet", "sfc_r5_partition").Run()
 		if lo, err := netlink.LinkByName("lo"); err == nil {
 			_ = netlink.LinkSetDown(lo)
 		}
@@ -456,7 +456,7 @@ func TestRealSystemRemoteIngressFaultsAndRecovery(t *testing.T) {
 		}
 	}
 	for i := range ns {
-		holders[i] = startSystemProcess(t, ctx, filepath.Join(root, fmt.Sprint("holder-", i, ".log")), []string{self, "-test.run=^TestSystemNamespaceHolder$", "-test.v", "-test.timeout=145s"}, []string{"MYDC_R5_NAMESPACE_HOLDER=1"}, &syscall.SysProcAttr{Cloneflags: syscall.CLONE_NEWNET | syscall.CLONE_NEWNS, Pdeathsig: syscall.SIGKILL})
+		holders[i] = startSystemProcess(t, ctx, filepath.Join(root, fmt.Sprint("holder-", i, ".log")), []string{self, "-test.run=^TestSystemNamespaceHolder$", "-test.v", "-test.timeout=145s"}, []string{"SFC_R5_NAMESPACE_HOLDER=1"}, &syscall.SysProcAttr{Cloneflags: syscall.CLONE_NEWNET | syscall.CLONE_NEWNS, Pdeathsig: syscall.SIGKILL})
 		wait("private mount propagation", func() bool {
 			b, _ := os.ReadFile(holders[i].log)
 			return bytes.Contains(b, []byte("r5-private-ns-ready"))
@@ -538,7 +538,7 @@ func TestRealSystemRemoteIngressFaultsAndRecovery(t *testing.T) {
 	for i, name := range names {
 		modules := "  network: {enabled: false}\n  workload: {enabled: false}\n  ingress: {enabled: false}\n"
 		if i < 2 {
-			mods := fmt.Sprintf("  network: {enabled: true, docker_socket: 'unix://%s'}\n  workload: {enabled: true}\n", filepath.Join(root, fmt.Sprint("engine-", i), "docker.sock"))
+			mods := "  network: {enabled: true}\n  workload: {enabled: true}\n"
 			if i == 0 {
 				mods += "  ingress: {enabled: true}\n"
 			} else {
@@ -551,9 +551,12 @@ func TestRealSystemRemoteIngressFaultsAndRecovery(t *testing.T) {
 		if e = os.WriteFile(configs[i], []byte(text), 0600); e != nil {
 			t.Fatal(e)
 		}
+		if i < 2 {
+			writeTestEngine(t, configs[i], "unix://"+filepath.Join(root, fmt.Sprint("engine-", i), "docker.sock"))
+		}
 	}
 	startDaemon := func(i int) {
-		args := []string{filepath.Join(bin, "mydcd"), "--config", configs[i], "run"}
+		args := append(append([]string{filepath.Join(bin, "sfcd"), "--config", configs[i]}, sfcdEngineFlags(configs[i])...), "run")
 		if i < 2 {
 			args = append([]string{"nsenter", "--net=" + nsPath[i], "--mount=" + mntPath[i], "--"}, args...)
 		}
@@ -568,7 +571,7 @@ func TestRealSystemRemoteIngressFaultsAndRecovery(t *testing.T) {
 		c, stop := context.WithTimeout(ctx, 4*time.Second)
 		defer stop()
 		argv := []string{"--config", clientFile, "--peer", peer, "--timeout", "3s"}
-		call := append([]string{filepath.Join(bin, "mydc")}, append(argv, args...)...)
+		call := append([]string{filepath.Join(bin, "sfc")}, append(argv, args...)...)
 		// Node-local authenticated observation remains available when its underlay
 		// deliberately cannot carry the transport's initial packet.
 		if peer == "a" || peer == "b" {
@@ -651,7 +654,7 @@ func TestRealSystemRemoteIngressFaultsAndRecovery(t *testing.T) {
 	var udp [2]*systemProcess
 	for i := range udp {
 		addresses := tuns[i].Addresses[0].Addr().String() + "," + tuns[i].Addresses[1].Addr().String()
-		udp[i] = startSystemProcess(t, ctx, filepath.Join(root, fmt.Sprintf("udp-%d.log", i)), []string{"nsenter", "--net=" + nsPath[i], "--", self, "-test.run=^TestTunnelUDPHelper$", "-test.v", "-test.timeout=145s"}, []string{"MYDC_TUN_HELPER=echo", "MYDC_TUN_ADDRESSES=" + addresses}, &syscall.SysProcAttr{Pdeathsig: syscall.SIGKILL})
+		udp[i] = startSystemProcess(t, ctx, filepath.Join(root, fmt.Sprintf("udp-%d.log", i)), []string{"nsenter", "--net=" + nsPath[i], "--", self, "-test.run=^TestTunnelUDPHelper$", "-test.v", "-test.timeout=145s"}, []string{"SFC_TUN_HELPER=echo", "SFC_TUN_ADDRESSES=" + addresses}, &syscall.SysProcAttr{Pdeathsig: syscall.SIGKILL})
 		clients = append(clients, udp[i])
 		wait("actual native UDP echo", func() bool { b, _ := os.ReadFile(udp[i].log); return bytes.Contains(b, []byte("echo ready")) })
 	}
@@ -661,7 +664,7 @@ func TestRealSystemRemoteIngressFaultsAndRecovery(t *testing.T) {
 			other := 1 - i
 			addresses := tuns[other].Addresses[0].Addr().String() + "," + tuns[other].Addresses[1].Addr().String()
 			c := exec.CommandContext(ctx, "nsenter", "--net="+nsPath[i], "--", self, "-test.run=^TestTunnelUDPHelper$", "-test.v", "-test.timeout=10s")
-			c.Env = append(os.Environ(), "MYDC_TUN_HELPER=probe", "MYDC_TUN_ADDRESSES="+addresses)
+			c.Env = append(os.Environ(), "SFC_TUN_HELPER=probe", "SFC_TUN_ADDRESSES="+addresses)
 			b, err := c.CombinedOutput()
 			if err != nil {
 				t.Fatal("native1280", err, string(b))
@@ -695,7 +698,7 @@ func TestRealSystemRemoteIngressFaultsAndRecovery(t *testing.T) {
 		t.Helper()
 		args := []string{"nsenter", "--net=" + nsPath[0], "--", self, "-test.run=^TestSystemHTTPClient$", "-test.v", "-test.timeout=15s"}
 		c := exec.CommandContext(ctx, args[0], args[1:]...)
-		c.Env = append(os.Environ(), "MYDC_R5_HTTP_MODE="+mode, "MYDC_R5_CERT="+cert)
+		c.Env = append(os.Environ(), "SFC_R5_HTTP_MODE="+mode, "SFC_R5_CERT="+cert)
 		out, err := c.CombinedOutput()
 		if err != nil {
 			t.Fatal(mode, err, string(out))
@@ -709,7 +712,7 @@ func TestRealSystemRemoteIngressFaultsAndRecovery(t *testing.T) {
 	wait("bounded load request refs returned", func() bool { o := observe("a", appKey); return o.Ingress != nil && o.Ingress.Requests == 0 })
 	probe("normal")
 	startHold := func() *systemProcess {
-		p := startSystemProcess(t, ctx, filepath.Join(root, fmt.Sprintf("holder-http-%d.log", time.Now().UnixNano())), []string{"nsenter", "--net=" + nsPath[0], "--", self, "-test.run=^TestSystemHTTPClient$", "-test.v", "-test.timeout=15s"}, []string{"MYDC_R5_HTTP_MODE=hold", "MYDC_R5_CERT=" + cert}, &syscall.SysProcAttr{Pdeathsig: syscall.SIGKILL})
+		p := startSystemProcess(t, ctx, filepath.Join(root, fmt.Sprintf("holder-http-%d.log", time.Now().UnixNano())), []string{"nsenter", "--net=" + nsPath[0], "--", self, "-test.run=^TestSystemHTTPClient$", "-test.v", "-test.timeout=15s"}, []string{"SFC_R5_HTTP_MODE=hold", "SFC_R5_CERT=" + cert}, &syscall.SysProcAttr{Pdeathsig: syscall.SIGKILL})
 		clients = append(clients, p)
 		wait("real held SSE", func() bool { b, _ := os.ReadFile(p.log); return bytes.Contains(b, []byte("r5-stream-ready")) })
 		return p
@@ -764,7 +767,7 @@ func TestRealSystemRemoteIngressFaultsAndRecovery(t *testing.T) {
 	}
 	port := 45100 + oldIndex - 2
 	file := filepath.Join(root, "partition.nft")
-	script := fmt.Sprintf("add table inet mydc_r5_partition\nadd chain inet mydc_r5_partition output { type filter hook output priority -20; policy accept; }\nadd rule inet mydc_r5_partition output udp sport %d udp dport { 45100, 45101, 45102 } drop\nadd rule inet mydc_r5_partition output udp dport %d udp sport { 45100, 45101, 45102 } drop\n", port, port)
+	script := fmt.Sprintf("add table inet sfc_r5_partition\nadd chain inet sfc_r5_partition output { type filter hook output priority -20; policy accept; }\nadd rule inet sfc_r5_partition output udp sport %d udp dport { 45100, 45101, 45102 } drop\nadd rule inet sfc_r5_partition output udp dport %d udp sport { 45100, 45101, 45102 } drop\n", port, port)
 	os.WriteFile(file, []byte(script), 0600)
 	run("nft", "-f", file)
 	majority := ""
@@ -801,7 +804,7 @@ func TestRealSystemRemoteIngressFaultsAndRecovery(t *testing.T) {
 		t.Fatal("minority accepted", r, err)
 	}
 	probe("normal")
-	run("nft", "delete", "table", "inet", "mydc_r5_partition")
+	run("nft", "delete", "table", "inet", "sfc_r5_partition")
 	wait("old control rejoined prefix", func() bool {
 		r, e := cli(old, "--local", "get", "workload/checkpoint/majority")
 		return e == nil && r.Object != nil && string(r.Object.Value) == "majority"
@@ -919,7 +922,7 @@ func systemImportBackend(t *testing.T, ctx context.Context, c *engine.Client, pa
 		t.Fatal(e)
 	}
 	w.Close()
-	stream, e := c.API.ImageImport(ctx, client.ImageImportSource{Source: &b, SourceName: "-"}, "mydc-r5:local", client.ImageImportOptions{Changes: []string{`CMD ["/backend"]`}})
+	stream, e := c.API.ImageImport(ctx, client.ImageImportSource{Source: &b, SourceName: "-"}, "sfc-r5:local", client.ImageImportOptions{Changes: []string{`CMD ["/backend"]`}})
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -935,7 +938,7 @@ func systemImportBackend(t *testing.T, ctx context.Context, c *engine.Client, pa
 			t.Fatal("image import", msg.Error, e)
 		}
 	}
-	im, e := c.API.ImageInspect(ctx, "mydc-r5:local")
+	im, e := c.API.ImageInspect(ctx, "sfc-r5:local")
 	if e != nil {
 		t.Fatal(e)
 	}

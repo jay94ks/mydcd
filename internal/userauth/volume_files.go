@@ -8,18 +8,17 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/sha256"
-	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"io"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/schema"
-	"github.com/jay94ks/mydcd/internal/workload/volumes"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/workload/volumes"
 )
 
 // Public metadata only. Bytes flow on purpose18 and never enter UserOperation.
@@ -59,7 +58,7 @@ func (s Service) volumeFileView(ctx context.Context, envelope Envelope, id strin
 
 func (s Service) volumeFileAt(view cluster.View, envelope Envelope, id string, epoch uint64, original *control.VolumeFileJob) (control.VolumeFileJob, error) {
 	if envelope.Session == nil || view.RaftIndex == 0 || epoch != 0 && view.State.ModuleEpoch() != epoch || s.Enabled != nil && !s.Enabled(view.State) || envelope.Relay != nil && envelope.Relay.ServiceCall != nil {
-		return control.VolumeFileJob{}, mydcp.ErrAdmission
+		return control.VolumeFileJob{}, sfcp.ErrAdmission
 	}
 	policy, err := s.Policy.Current(view.State)
 	if err != nil {
@@ -72,11 +71,11 @@ func (s Service) volumeFileAt(view cluster.View, envelope Envelope, id string, e
 	}
 	job, ok := book.VolumeFile(id)
 	if !ok {
-		return control.VolumeFileJob{}, mydcp.ErrAdmission
+		return control.VolumeFileJob{}, sfcp.ErrAdmission
 	}
 	catalog, err := policy.Catalog(view.State)
 	if err != nil || !s.nodeRequestAllowed(view.State, catalog, Request{Method: "submit", Operation: &job.Origin}, envelope) {
-		return control.VolumeFileJob{}, mydcp.ErrAdmission
+		return control.VolumeFileJob{}, sfcp.ErrAdmission
 	}
 	// The relay supplies connection proof, never a replacement user/session.
 	// Passing the recorded owner here also permits an ingress to select it;
@@ -90,32 +89,27 @@ func (s Service) volumeFileAt(view cluster.View, envelope Envelope, id string, e
 		return control.VolumeFileJob{}, err
 	}
 	if original != nil && (job.ID != original.ID || job.Method != original.Method || job.Request != original.Request || job.Consumer != original.Consumer || volumes.NativeBindingDigest(job.Native) != volumes.NativeBindingDigest(original.Native)) {
-		return control.VolumeFileJob{}, mydcp.ErrAdmission
+		return control.VolumeFileJob{}, sfcp.ErrAdmission
 	}
 	return job, nil
 }
 
-func writeVolumeFileReply(stream mydcp.Stream, id uint64, header [32]byte, r VolumeFileReply) error {
+func writeVolumeFileReply(stream sfcp.Stream, id uint64, header [32]byte, r VolumeFileReply) error {
 	r.Schema = 1
 	raw, err := json.Marshal(r)
 	if err != nil {
 		return err
 	}
-	return mydcp.WriteFrame(stream, mydcp.Frame{Purpose: mydcp.VolumeFile, Kind: 2, Request: id, Fields: []mydcp.Field{{Tag: 1, Required: true, Value: raw}, {Tag: 2, Required: true, Value: header[:]}}})
+	return sfcp.WriteFrame(stream, sfcp.Frame{Purpose: sfcp.VolumeFile, Kind: 2, Request: id, Fields: []sfcp.Field{{Tag: 1, Required: true, Value: raw}, {Tag: 2, Required: true, Value: header[:]}}})
 }
-func volumeFileChunk(stream mydcp.Stream, id uint64, header [32]byte, offset uint64, data []byte) error {
-	if len(data) == 0 || len(data) > 24<<10 {
-		return mydcp.ErrFrame
-	}
-	var off [8]byte
-	binary.LittleEndian.PutUint64(off[:], offset)
-	return mydcp.WriteFrame(stream, mydcp.Frame{Purpose: mydcp.VolumeFile, Kind: 4, Request: id, Fields: []mydcp.Field{{Tag: 1, Required: true, Value: off[:]}, {Tag: 2, Required: true, Value: data}, {Tag: 3, Required: true, Value: header[:]}}})
+func volumeFileChunk(stream sfcp.Stream, id uint64, header [32]byte, offset uint64, data []byte) error {
+	return sfcp.WriteChunk(stream, sfcp.VolumeFile, id, header, offset, data)
 }
 
 // The reader exposes EOF only after EXACT payload length and stream EOF. The
 // native atomic put consequently cannot publish a truncated/overlong request.
 type volumeFileReader struct {
-	stream       mydcp.Stream
+	stream       sfcp.Stream
 	id           uint64
 	header       [32]byte
 	size, offset int64
@@ -147,36 +141,40 @@ func (r *volumeFileReader) Read(p []byte) (int, error) {
 		r.done = true
 		return 0, io.EOF
 	}
-	f, err := mydcp.ReadFrame(r.stream, 128<<10)
+	f, err := sfcp.ReadFrame(r.stream, 128<<10)
 	if err != nil {
 		return 0, err
 	}
-	if f.Purpose != mydcp.VolumeFile || f.Kind != 4 || f.Request != r.id || binary.LittleEndian.Uint64(f.Fields[0].Value) != uint64(r.offset) || !bytes.Equal(f.Fields[2].Value, r.header[:]) || len(f.Fields[1].Value) == 0 || len(f.Fields[1].Value) > 24<<10 || int64(len(f.Fields[1].Value)) > r.size-r.offset {
-		return 0, mydcp.ErrFrame
+	if f.Purpose != sfcp.VolumeFile || f.Request != r.id {
+		return 0, sfcp.ErrFrame
 	}
-	if err := r.authorize(); err != nil {
-		clear(f.Fields[1].Value)
+	data, err := sfcp.Chunk(f, r.header, uint64(r.offset), uint64(r.size-r.offset))
+	if err != nil {
 		return 0, err
 	}
-	r.offset += int64(len(f.Fields[1].Value))
-	r.pending = f.Fields[1].Value
+	if err := r.authorize(); err != nil {
+		clear(data)
+		return 0, err
+	}
+	r.offset += int64(len(data))
+	r.pending = data
 	return r.Read(p)
 }
 func (q VolumeFileRequest) valid(now int64) bool {
 	return q.Schema == 1 && q.ID != "" && len(q.ID) < 64 && q.Nonce != ([32]byte{}) && q.ExpiresAt > now && q.ExpiresAt-now <= 900
 }
 
-func (s Service) handleVolumeFile(base context.Context, conn *mydcp.Session, stream mydcp.Stream, frame mydcp.Frame) error {
+func (s Service) handleVolumeFile(base context.Context, conn *sfcp.Session, stream sfcp.Stream, frame sfcp.Frame) error {
 	if frame.Kind != 1 && frame.Kind != 3 {
-		return mydcp.ErrFrame
+		return sfcp.ErrFrame
 	}
 	header := sha256.Sum256(frame.Fields[0].Value)
 	if !bytes.Equal(header[:], frame.Fields[1].Value) {
-		return mydcp.ErrFrame
+		return sfcp.ErrFrame
 	}
 	envelope, err := schema.Decode[Envelope](frame.Fields[0].Value)
 	if err != nil {
-		return mydcp.ErrFrame
+		return sfcp.ErrFrame
 	}
 	defer clear(envelope.Body)
 	q, err := schema.Decode[VolumeFileRequest](envelope.Body)
@@ -204,7 +202,7 @@ func (s Service) handleVolumeFile(base context.Context, conn *mydcp.Session, str
 		return reply("denied")
 	}
 	authorize := func() error {
-		if err := conn.Admit(frame, mydcp.VolumeFile, false); err != nil {
+		if err := conn.Admit(frame, sfcp.VolumeFile, false); err != nil {
 			return err
 		}
 		if _, err := s.binding(conn, frame.Kind, envelope); err != nil {
@@ -212,11 +210,11 @@ func (s Service) handleVolumeFile(base context.Context, conn *mydcp.Session, str
 		}
 		fresh, current, err := s.volumeFileView(ctx, envelope, q.ID, epoch, &job)
 		if err != nil || current.Native.Owner != job.Native.Owner {
-			return mydcp.ErrAdmission
+			return sfcp.ErrAdmission
 		}
 		owner, err := s.resourceOwner(fresh.State, current.Native.Owner.Node, current.Native.Owner.Key)
 		if err != nil || owner != currentOwner {
-			return mydcp.ErrAdmission
+			return sfcp.ErrAdmission
 		}
 		return nil
 	}
@@ -267,7 +265,7 @@ func (s Service) handleVolumeFile(base context.Context, conn *mydcp.Session, str
 			return err
 		}
 		if !reader.done {
-			return mydcp.ErrFrame
+			return sfcp.ErrFrame
 		}
 	}
 	// The original native runner has completed/retained its own I/O settlement
@@ -280,8 +278,8 @@ func (s Service) handleVolumeFile(base context.Context, conn *mydcp.Session, str
 	return writeVolumeFileReply(stream, frame.Request, header, r)
 }
 
-func (s Service) forwardVolumeFile(ctx context.Context, incoming *mydcp.Session, stream mydcp.Stream, frame mydcp.Frame, header [32]byte, envelope Envelope, binding userBinding, q VolumeFileRequest, job control.VolumeFileJob, currentOwner [32]byte, authorize func() error) error {
-	peer, ok := s.Mesh.Peer(mydcp.Identity(currentOwner))
+func (s Service) forwardVolumeFile(ctx context.Context, incoming *sfcp.Session, stream sfcp.Stream, frame sfcp.Frame, header [32]byte, envelope Envelope, binding userBinding, q VolumeFileRequest, job control.VolumeFileJob, currentOwner [32]byte, authorize func() error) error {
+	peer, ok := s.Mesh.Peer(sfcp.Identity(currentOwner))
 	if !ok || !peer.Member || peer.ID != job.Native.Owner.Node {
 		return writeVolumeFileReply(stream, frame.Request, header, VolumeFileReply{ID: q.ID, Code: "unavailable"})
 	}
@@ -310,7 +308,7 @@ func (s Service) forwardVolumeFile(ctx context.Context, incoming *mydcp.Session,
 		}
 		offset += uint64(len(b))
 		return len(b), nil
-	}), 3, func(conn *mydcp.Session, body []byte) (Envelope, error) {
+	}), 3, func(conn *sfcp.Session, body []byte) (Envelope, error) {
 		copy := envelope
 		copy.Relay = &Relay{Node: s.Self.Public, Target: currentOwner, Caller: binding.key, Challenge: binding.challenge, Connection: conn.PeerChallenge()}
 		copy.Relay.Signature = ed25519.Sign(s.Self.Private, RelayBytes(s.Policy.Cluster, copy))
@@ -318,7 +316,7 @@ func (s Service) forwardVolumeFile(ctx context.Context, incoming *mydcp.Session,
 	})
 	if err != nil {
 		var completed *Error
-		if !errors.As(err, &completed) || completed.Phase != mydcp.Completed {
+		if !errors.As(err, &completed) || completed.Phase != sfcp.Completed {
 			return err
 		}
 	}
@@ -332,21 +330,21 @@ type volumeFileWriterFunc func([]byte) (int, error)
 
 func (f volumeFileWriterFunc) Write(b []byte) (int, error) { return f(b) }
 
-func (c Client) VolumeFile(ctx context.Context, peer mydcp.Peer, session access.Session, job control.VolumeFileJob, source io.Reader, to io.Writer) (VolumeFileReply, error) {
+func (c Client) VolumeFile(ctx context.Context, peer sfcp.Peer, session access.Session, job control.VolumeFileJob, source io.Reader, to io.Writer) (VolumeFileReply, error) {
 	if c.Verify(session) != nil || job.Origin.Session.User != session.User {
-		return VolumeFileReply{}, mydcp.ErrAdmission
+		return VolumeFileReply{}, sfcp.ErrAdmission
 	}
 	q := VolumeFileRequest{Recover: job.Method == "volume-file-put" && source == nil, Schema: 1, ID: job.ID, ExpiresAt: min(session.ExpiresAt, time.Now().Add(15*time.Minute).Unix())}
 	if _, err := rand.Read(q.Nonce[:]); err != nil {
 		return VolumeFileReply{}, err
 	}
-	return c.volumeFileExchange(ctx, peer, q, job, source, to, 1, func(conn *mydcp.Session, body []byte) (Envelope, error) {
+	return c.volumeFileExchange(ctx, peer, q, job, source, to, 1, func(conn *sfcp.Session, body []byte) (Envelope, error) {
 		return Envelope{Session: &session, Body: body, Signature: ed25519.Sign(c.Self.Private, access.RequestBytes(session, conn.PeerChallenge(), body))}, nil
 	})
 }
-func (c Client) volumeFileExchange(base context.Context, peer mydcp.Peer, q VolumeFileRequest, job control.VolumeFileJob, source io.Reader, to io.Writer, kind uint8, envelopeFor func(*mydcp.Session, []byte) (Envelope, error)) (VolumeFileReply, error) {
+func (c Client) volumeFileExchange(base context.Context, peer sfcp.Peer, q VolumeFileRequest, job control.VolumeFileJob, source io.Reader, to io.Writer, kind uint8, envelopeFor func(*sfcp.Session, []byte) (Envelope, error)) (VolumeFileReply, error) {
 	if !q.valid(time.Now().Unix()) || q.ID != job.ID || job.Request.Scope.Cluster != c.Cluster || !job.Request.Valid(job.Method) {
-		return VolumeFileReply{}, mydcp.ErrAdmission
+		return VolumeFileReply{}, sfcp.ErrAdmission
 	}
 	ctx, cancel := context.WithDeadline(base, time.Unix(q.ExpiresAt, 0))
 	defer cancel()
@@ -370,7 +368,7 @@ func (c Client) volumeFileExchange(base context.Context, peer mydcp.Peer, q Volu
 	stop := context.AfterFunc(ctx, func() { stream.CancelRead(1); stream.CancelWrite(1) })
 	defer stop()
 	id := c.Mesh.NextRequest()
-	if err = mydcp.WriteFrame(stream, mydcp.Frame{Purpose: mydcp.VolumeFile, Kind: kind, Request: id, Fields: []mydcp.Field{{Tag: 1, Required: true, Value: raw}, {Tag: 2, Required: true, Value: header[:]}}}); err != nil {
+	if err = sfcp.WriteFrame(stream, sfcp.Frame{Purpose: sfcp.VolumeFile, Kind: kind, Request: id, Fields: []sfcp.Field{{Tag: 1, Required: true, Value: raw}, {Tag: 2, Required: true, Value: header[:]}}}); err != nil {
 		return VolumeFileReply{}, err
 	}
 	if job.Method != "volume-file-put" || q.Recover {
@@ -379,16 +377,16 @@ func (c Client) volumeFileExchange(base context.Context, peer mydcp.Peer, q Volu
 		}
 	}
 	readReply := func() (VolumeFileReply, error) {
-		f, e := mydcp.ReadFrame(stream, 128<<10)
+		f, e := sfcp.ReadFrame(stream, 128<<10)
 		if e != nil {
 			return VolumeFileReply{}, e
 		}
-		if f.Purpose != mydcp.VolumeFile || f.Kind != 2 || f.Request != id || conn.Admit(f, mydcp.VolumeFile, false) != nil || !bytes.Equal(f.Fields[1].Value, header[:]) {
-			return VolumeFileReply{}, mydcp.ErrFrame
+		if f.Purpose != sfcp.VolumeFile || f.Kind != 2 || f.Request != id || conn.Admit(f, sfcp.VolumeFile, false) != nil || !bytes.Equal(f.Fields[1].Value, header[:]) {
+			return VolumeFileReply{}, sfcp.ErrFrame
 		}
 		r, e := schema.Decode[VolumeFileReply](f.Fields[0].Value)
 		if e != nil || r.Schema != 1 || r.ID != q.ID {
-			return VolumeFileReply{}, mydcp.ErrFrame
+			return VolumeFileReply{}, sfcp.ErrFrame
 		}
 		return r, nil
 	}
@@ -403,13 +401,13 @@ func (c Client) volumeFileExchange(base context.Context, peer mydcp.Peer, q Volu
 		if err = streamEOF(stream); err != nil {
 			return r, err
 		}
-		return r, &Error{Code: r.Code, Phase: mydcp.Completed}
+		return r, &Error{Code: r.Code, Phase: sfcp.Completed}
 	}
 	if job.Method == "volume-file-put" && !q.Recover {
 		if source == nil {
-			return r, mydcp.ErrFrame
+			return r, sfcp.ErrFrame
 		}
-		buf := make([]byte, 24<<10)
+		buf := make([]byte, sfcp.ChunkSize)
 		defer clear(buf)
 		var offset int64
 		for offset < job.Request.Size {
@@ -424,7 +422,7 @@ func (c Client) volumeFileExchange(base context.Context, peer mydcp.Peer, q Volu
 		}
 		var extra [1]byte
 		if n, e := source.Read(extra[:]); n != 0 || !errors.Is(e, io.EOF) {
-			return r, mydcp.ErrFrame
+			return r, sfcp.ErrFrame
 		}
 		if err = stream.Close(); err != nil {
 			return r, err
@@ -432,35 +430,35 @@ func (c Client) volumeFileExchange(base context.Context, peer mydcp.Peer, q Volu
 	}
 	if job.Method == "volume-file-get" {
 		if to == nil {
-			return r, mydcp.ErrFrame
+			return r, sfcp.ErrFrame
 		}
 		h := sha256.New()
 		var offset int64
 		for {
-			f, e := mydcp.ReadFrame(stream, 128<<10)
+			f, e := sfcp.ReadFrame(stream, 128<<10)
 			if e != nil {
 				return r, e
 			}
-			if f.Purpose != mydcp.VolumeFile || f.Request != id || conn.Admit(f, mydcp.VolumeFile, false) != nil {
-				return r, mydcp.ErrFrame
+			if f.Purpose != sfcp.VolumeFile || f.Request != id || conn.Admit(f, sfcp.VolumeFile, false) != nil {
+				return r, sfcp.ErrFrame
 			}
 			if f.Kind == 2 {
 				if !bytes.Equal(f.Fields[1].Value, header[:]) {
-					return r, mydcp.ErrFrame
+					return r, sfcp.ErrFrame
 				}
 				r, e = schema.Decode[VolumeFileReply](f.Fields[0].Value)
 				if e != nil || r.Schema != 1 || r.ID != q.ID {
-					return r, mydcp.ErrFrame
+					return r, sfcp.ErrFrame
 				}
 				if r.Code != "ok" || r.Result == nil || r.Result.Size != offset || !bytes.Equal(r.Result.Digest[:], h.Sum(nil)) {
-					return r, mydcp.ErrFrame
+					return r, sfcp.ErrFrame
 				}
 				break
 			}
-			if f.Kind != 4 || binary.LittleEndian.Uint64(f.Fields[0].Value) != uint64(offset) || !bytes.Equal(f.Fields[2].Value, header[:]) || int64(len(f.Fields[1].Value)) > job.Request.MaxBytes-offset {
-				return r, mydcp.ErrFrame
+			data, e := sfcp.Chunk(f, header, uint64(offset), uint64(max(job.Request.MaxBytes-offset, 0)))
+			if e != nil {
+				return r, e
 			}
-			data := f.Fields[1].Value
 			_, _ = h.Write(data)
 			n, e := to.Write(data)
 			clear(data)
@@ -482,10 +480,10 @@ func (c Client) volumeFileExchange(base context.Context, peer mydcp.Peer, q Volu
 		return r, err
 	}
 	if r.Code != "ok" {
-		return r, &Error{Code: r.Code, Phase: mydcp.Completed}
+		return r, &Error{Code: r.Code, Phase: sfcp.Completed}
 	}
 	if job.Method == "volume-file-put" && (r.Result == nil || r.Result.Path != job.Request.Path || r.Result.Size != job.Request.Size || r.Result.Digest != job.Request.Digest) {
-		return r, mydcp.ErrFrame
+		return r, sfcp.ErrFrame
 	}
 	return r, nil
 }

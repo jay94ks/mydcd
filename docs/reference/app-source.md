@@ -12,7 +12,7 @@
 
 ## 요청
 
-두 method는 MYDCP User kind1이며 Unix·네트워크에서 같은 인증·payload를 사용한다. 현재 Session의 tenant Read scope와 현재 membership을 검사한 뒤 앱을 찾는다. 다른 tenant나 예상과 다른 deployment는 `denied`다.
+두 method는 SFCP User kind1이며 Unix·네트워크에서 같은 인증·payload를 사용한다. 현재 Session의 tenant Read scope와 현재 membership을 검사한 뒤 앱을 찾는다. 다른 tenant나 예상과 다른 deployment는 `denied`다.
 
 다음은 선택자를 설명하는 예시다. 실제 signed Request의 공통 Nonce·canonical 필드 순서·Envelope는 [Unix API](unix-sockets.md)를 따르며 client 코어가 구성한다.
 
@@ -60,10 +60,10 @@ CD 원문은 선택한 Git 바이트다. 로컬 추가 서비스는 Git 원문�
 ## CLI
 
 ```sh
-mydc --tenant shop manage app-revisions --app store
-mydc --tenant shop manage app-source --app store --raw > retrieved.app.yaml
-mydc --tenant shop manage app-source --app store --revision 1 --raw
-mydc --tenant shop manage app-source --app store --revision 2 --section overlays --raw
+sfcli --tenant shop manage app-revisions --app store
+sfcli --tenant shop manage app-source --app store --raw > retrieved.app.yaml
+sfcli --tenant shop manage app-source --app store --revision 1 --raw
+sfcli --tenant shop manage app-source --app store --revision 2 --section overlays --raw
 ```
 
 `--deployment ID`로 예상 배포 신원을 고정한다. 목록은 `--after CURSOR`로 잇는다. `--raw` 없이 원문을 요청하면 첫 part의 구조화된 응답을 출력한다. `--raw`는 고정한 모든 part와 전체 digest를 확인한 뒤 원 바이트만 stdout에 쓴다. 수정본의 배포는 기존 app deploy 경로를 사용하며, 원문 조회가 자동 재배포나 새 operation 발급을 하지 않는다.

@@ -7,9 +7,9 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/reconcile"
-	contract "github.com/jay94ks/mydcd/lifecycle/v1"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/reconcile"
+	contract "github.com/jay94ks/seafield/lifecycle/v1"
 )
 
 func (e Execution) validate() error {
@@ -36,7 +36,7 @@ func (e Execution) validate() error {
 			return ErrInputs
 		}
 		if s.Command == nil {
-			if s.Result != nil || s.Observation != nil && (!s.Held() || !e.validObservationForPlan(i, *s.Observation, planDigest)) || s.Noop || !bytes.Equal(goal(s.Journal), goal(reconcile.State{})) {
+			if s.Result != nil || s.Replay != nil || s.Observation != nil && (!s.Held() || !e.validObservationForPlan(i, *s.Observation, planDigest)) || s.Noop || !bytes.Equal(goal(s.Journal), goal(reconcile.State{})) {
 				return ErrInputs
 			}
 			continue
@@ -80,6 +80,13 @@ func (e Execution) validate() error {
 				}
 			}
 		}
+		if r := s.Replay; r != nil {
+			j := s.Journal
+			if s.Noop || r.Request == "" || len(r.Request) > 512 || r.Revision < j.Desired.Revision || r.Revision > d.Revision ||
+				s.Result == nil && (j.Pending == nil || !r.Dispatched && j.Pending.Phase != reconcile.RecoveryRequired || r.Dispatched && j.Pending.Phase != reconcile.Dispatched && j.Pending.Phase != reconcile.RecoveryRequired) {
+				return ErrInputs
+			}
+		}
 		if s.Observation != nil && !e.validObservationForPlan(i, *s.Observation, planDigest) {
 			return ErrInputs
 		}
@@ -115,7 +122,7 @@ func (e Execution) validate() error {
 			}
 			o := d.CompletionWitness[witnessIndex]
 			witnessIndex++
-			// No age bound: an unchanged fact is renewed over MyDCP, not in
+			// No age bound: an unchanged fact is renewed over SFCP, not in
 			// Raft, so its stored At ages while it stays live. Liveness is the
 			// leader's Expired marker, which satisfies already requires unset.
 			if !e.validObservationForPlan(i, o, planDigest) || o.At > d.CompletedAt || o.Expired {

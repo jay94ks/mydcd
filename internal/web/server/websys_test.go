@@ -15,9 +15,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/web/mydc"
-	"github.com/jay94ks/mydcd/internal/web/seal"
-	"github.com/jay94ks/mydcd/internal/web/store"
+	"github.com/jay94ks/seafield/internal/web/seal"
+	"github.com/jay94ks/seafield/internal/web/sfc"
+	"github.com/jay94ks/seafield/internal/web/store"
 )
 
 func TestWebSettingsAdminOnlyAndAudited(t *testing.T) {
@@ -86,7 +86,7 @@ func TestSessionIdleAndCap(t *testing.T) {
 	// automatic refreshes do not count as activity
 	ws.seen.Store(time.Now().Add(-9 * time.Minute).UnixNano())
 	req, _ := http.NewRequest("GET", f.http.URL+"/api/v1/auth/session", nil)
-	req.Header.Set("X-MyDC-Background", "1")
+	req.Header.Set("X-SFC-Background", "1")
 	if resp, err := f.hc.Do(req); err != nil || resp.StatusCode != 200 {
 		t.Fatalf("background refresh: %v %v", resp, err)
 	} else {
@@ -125,7 +125,7 @@ func TestBackupAndStagedRestore(t *testing.T) {
 
 	post := func(body []byte) int {
 		req, _ := http.NewRequest("POST", f.http.URL+"/api/v1/system/restore", bytes.NewReader(body))
-		req.Header.Set("X-MyDC-Web", "1")
+		req.Header.Set("X-SFC-Web", "1")
 		resp, err := f.hc.Do(req)
 		if err != nil {
 			t.Fatal(err)
@@ -195,7 +195,7 @@ func TestNotificationsFromOps(t *testing.T) {
 	_, out := f.do("GET", "/api/v1/auth/session", nil)
 	uid := out["user"].(map[string]any)["id"].(string)
 	fake.LoseNextReply("submit", true)
-	body := map[string]any{"opId": opA, "action": mydc.ActionCreateTenant, "principal": uid, "expected": 0,
+	body := map[string]any{"opId": opA, "action": sfc.ActionCreateTenant, "principal": uid, "expected": 0,
 		"payload": map[string]any{"ID": "lab"}, "rootRevision": fake.RootRevision()}
 	if code, _ := f.do("POST", "/api/v1/ops", body); code != 202 {
 		t.Fatal("expected unknown")
@@ -308,7 +308,7 @@ func TestWebSettingsInfoAndSeal(t *testing.T) {
 		t.Fatalf("new defaults: %v", st)
 	}
 	info := out["info"].(map[string]any)
-	mv, _ := info["mydcdVersion"].(map[string]any)
+	mv, _ := info["sfcdVersion"].(map[string]any)
 	if info["dbPath"] != "/data/web.db" || info["connected"] != true || mv == nil || mv["version"] != "1" || mv["protocol"] != "1" || mv["buildTime"] != "2026-11-15T08:00:00Z" {
 		t.Fatalf("info: %v", info)
 	}

@@ -2,9 +2,9 @@
 
 package lifecycle
 
-import contract "github.com/jay94ks/mydcd/lifecycle/v1"
+import contract "github.com/jay94ks/seafield/lifecycle/v1"
 
-// ContainerAction is chosen by MyDC from a check result and the current
+// ContainerAction is chosen by Seafield Cluster from a check result and the current
 // Docker state. Scripts return observations; they do not receive this control
 // interface or a Docker socket.
 type ContainerAction string

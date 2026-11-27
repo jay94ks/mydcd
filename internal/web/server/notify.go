@@ -9,11 +9,11 @@ import (
 	"slices"
 	"strconv"
 
-	"github.com/jay94ks/mydcd/internal/web/store"
+	"github.com/jay94ks/seafield/internal/web/store"
 )
 
 // Notifications (UI-C0) are per-user copies of events. The event's
-// authority stays with mydcd or the web feature that raised it; deleting a
+// authority stays with sfcd or the web feature that raised it; deleting a
 // notification changes nothing else.
 
 // Notification kinds.
@@ -26,9 +26,10 @@ const (
 	NotifyIncidentApproval = "incident-approval"   // an incident action waits for approval
 	NotifyWebhookOff       = "webhook-off"         // a webhook turned off after failures
 	NotifyMCPToolsChanged  = "mcp-tools-changed"   // an MCP server's tool catalog changed
+	NotifyVPSDNS           = "vps-dns"             // DNS taken out for a stopped VPS server, or not put back
 )
 
-var notifyKinds = []string{NotifyOpFailed, NotifyOpUnknown, NotifyDeployDone, NotifyMoveStarted, NotifyCertificate, NotifyWebBackup, NotifyIncidentApproval, NotifyWebhookOff, NotifyMCPToolsChanged}
+var notifyKinds = []string{NotifyOpFailed, NotifyOpUnknown, NotifyDeployDone, NotifyMoveStarted, NotifyCertificate, NotifyWebBackup, NotifyIncidentApproval, NotifyWebhookOff, NotifyMCPToolsChanged, NotifyVPSDNS}
 
 // notify stores n for its user unless the user muted its kind or
 // workspace.

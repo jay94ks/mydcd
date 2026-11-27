@@ -5,8 +5,8 @@
 `container-observe`의 `Container.Kind="inspect"`는 현재 tenant `Read` 권한으로 원 Task의 실제 Docker 설정을 조회한다. CLI는 다음과 같다.
 
 ```sh
-mydc --tenant team-a app inspect shop web
-mydc --tenant team-a app inspect shop web --instance workload/task/team-a/shop/web --history 5
+sfcli --tenant team-a app inspect shop web
+sfcli --tenant team-a app inspect shop web --instance workload/task/team-a/shop/web --history 5
 ```
 
 출력은 JSON이다. `--history`는 기본20·1–100이며, 기록 자체의 보관 개수보다 많은 항목을 만들어 내지 않는다. `--max-bytes`는 frame별 기본24576·최대24576이다. CLI는 분할된 상세를 자동 수집해 하나의 JSON으로 출력한다. log 옵션·수동 cursor·follow/watch·배포 옵션과 혼합할 수 없다. 전체 상세를 일부 생략한 성공으로 바꾸지 않는다.

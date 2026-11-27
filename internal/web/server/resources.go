@@ -14,20 +14,21 @@ import (
 	"slices"
 	"strconv"
 
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/network/services"
-	"github.com/jay94ks/mydcd/internal/secrets"
-	"github.com/jay94ks/mydcd/internal/tenancy"
-	"github.com/jay94ks/mydcd/internal/web/mydc"
-	"github.com/jay94ks/mydcd/internal/web/store"
-	"github.com/jay94ks/mydcd/internal/workload/volumes"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/network"
+	"github.com/jay94ks/seafield/internal/network/services"
+	"github.com/jay94ks/seafield/internal/secrets"
+	"github.com/jay94ks/seafield/internal/tenancy"
+	"github.com/jay94ks/seafield/internal/web/sfc"
+	"github.com/jay94ks/seafield/internal/web/store"
+	"github.com/jay94ks/seafield/internal/workload/volumes"
 )
 
 // Creating shared tenant resources (UI-50, UI-60/61, the Vault screen). The
-// browser sends plain fields; the daemon builds the real mydcd payload,
+// browser sends plain fields; the daemon builds the real sfcd payload,
 // checks it with the product's own input decoder (control.InputChange) and
 // sends it as one original operation of the caller: sign → store → send.
-// Authority is mydcd's (TM(Network) / TM(Volumes) / Vault manage).
+// Authority is sfcd's (TM(Network) / TM(Volumes) / Vault manage).
 //
 // The opId makes a create idempotent. The stored op keeps the digest of the
 // browser body, so the same opId with the same body returns that op even
@@ -36,7 +37,7 @@ import (
 // sharedCreate is the common path. build runs on the caller's connection
 // and returns the action, the payload, Expected and the op target.
 func (s *Server) sharedCreate(w http.ResponseWriter, r *http.Request, ws *webSession, opID string, body any,
-	build func(ctx context.Context, c mydc.Conn, sess mydc.Session) (action string, payload any, expected uint64, target string, err error)) {
+	build func(ctx context.Context, c sfc.Conn, sess sfc.Session) (action string, payload any, expected uint64, target string, err error)) {
 	s.sharedCreateHold(w, r, ws, opID, body, build, nil)
 }
 
@@ -51,12 +52,21 @@ type rootedPayload struct {
 // holdFunc decides, for a signed original not yet sent, whether to keep it
 // in web bbolt instead of sending it now (it then fills o's job fields and
 // state); false sends it as usual.
-type holdFunc func(ctx context.Context, c mydc.Conn, o *store.Op, op mydc.SignedOp) (bool, error)
+type holdFunc func(ctx context.Context, c sfc.Conn, o *store.Op, op sfc.SignedOp) (bool, error)
 
 // sharedCreateHold is sharedCreate with a hold step between signing and
 // sending (build-secret approvals).
 func (s *Server) sharedCreateHold(w http.ResponseWriter, r *http.Request, ws *webSession, opID string, body any,
-	build func(ctx context.Context, c mydc.Conn, sess mydc.Session) (action string, payload any, expected uint64, target string, err error), hold holdFunc) {
+	build func(ctx context.Context, c sfc.Conn, sess sfc.Session) (action string, payload any, expected uint64, target string, err error), hold holdFunc) {
+	s.sharedCreateWith(w, r, ws, opID, body, build, hold, nil)
+}
+
+// sharedCreateWith is sharedCreateHold whose reply for a change sent by
+// THIS request (not a replayed opId) also carries extra(o)'s fields
+// (an invitation's one-time link).
+func (s *Server) sharedCreateWith(w http.ResponseWriter, r *http.Request, ws *webSession, opID string, body any,
+	build func(ctx context.Context, c sfc.Conn, sess sfc.Session) (action string, payload any, expected uint64, target string, err error), hold holdFunc,
+	extra func(o *store.Op) map[string]any) {
 	tenant := r.PathValue("t")
 	if !uuidRE.MatchString(opID) {
 		writeError(w, http.StatusBadRequest, "bad-request", "opId must be a lowercase UUID v4")
@@ -89,10 +99,11 @@ func (s *Server) sharedCreateHold(w http.ResponseWriter, r *http.Request, ws *we
 	ctx, cancel := s.callCtx(r)
 	defer cancel()
 	var o *store.Op
-	err = ws.do(ctx, func(ctx context.Context, c mydc.Conn) error {
+	var replayed bool
+	err = ws.do(ctx, func(ctx context.Context, c sfc.Conn) error {
 		sess, ok := c.Session()
 		if !ok {
-			return &mydc.Error{Code: mydc.CodeNotLoggedIn, Method: "session"}
+			return &sfc.Error{Code: sfc.CodeNotLoggedIn, Method: "session"}
 		}
 		action, payload, expected, target, err := build(ctx, c, sess)
 		if err != nil {
@@ -102,8 +113,15 @@ func (s *Server) sharedCreateHold(w http.ResponseWriter, r *http.Request, ws *we
 		if rp, ok := payload.(rootedPayload); ok {
 			payload, planRoot = rp.payload, rp.root
 		}
+		var revertOf, restores string
+		if rp, ok := payload.(opPayload); ok {
+			payload, revertOf, restores = rp.payload, rp.revertOf, rp.restores
+			if rp.tenant != "" {
+				tenant = rp.tenant
+			}
+		}
 		p, _ := json.Marshal(payload)
-		ch := mydc.Change{Schema: 1, Action: action, Principal: ws.user.ID, Expected: expected, Payload: p}
+		ch := sfc.Change{Schema: 1, Action: action, Principal: ws.user.ID, Expected: expected, Payload: p}
 		if !mockAction(action) {
 			doc, _ := json.Marshal(control.ChangeDocument{Schema: 1, Action: action, Expected: expected, Payload: p})
 			if ch, err = control.InputChange(doc, ws.user.ID); err != nil {
@@ -114,12 +132,13 @@ func (s *Server) sharedCreateHold(w http.ResponseWriter, r *http.Request, ws *we
 		if err != nil {
 			return err
 		}
-		o = &store.Op{ID: opID, User: ws.user.ID, Username: ws.user.Username, Action: action, Tenant: tenant, Target: target, Digest: dg, Reason: reason}
+		o = &store.Op{ID: opID, User: ws.user.ID, Username: ws.user.Username, Action: action, Tenant: tenant, Target: target, Digest: dg, Reason: reason, RevertOf: revertOf, Restores: restores}
 		root := who.RootFor(action)
 		if planRoot != 0 {
 			root = planRoot
 		}
 		var existing *store.Op
+		replayed = false
 		if hold == nil {
 			existing, err = s.sendStored(ctx, c, o, ch, root)
 		} else {
@@ -132,33 +151,40 @@ func (s *Server) sharedCreateHold(w http.ResponseWriter, r *http.Request, ws *we
 			if existing.Digest != dg {
 				return &httpErr{http.StatusConflict, "op-conflict", "this opId was already used for a different change"}
 			}
-			o = existing
+			o, replayed = existing, true
 		}
 		return nil
 	})
 	if err == nil {
 		s.log.Info("create", "user", ws.user.Username, "action", o.Action, "tenant", tenant, "target", o.Target, "op", o.ID, "state", o.State)
-		writeJSON(w, opStatus(o), map[string]any{"op": viewOp(o)})
+		out := map[string]any{"op": viewOp(o)}
+		if extra != nil && !replayed {
+			for k, v := range extra(o) {
+				out[k] = v
+			}
+		}
+		writeJSON(w, opStatus(o), out)
 		return
 	}
 	s.writeOpOutcome(w, ws, nil, 0, err)
 }
 
 // mockAction reports an action the product input decoder
-// (control.InputChange) cannot check, so mydcd's result decides: one mydcd
-// does not have yet (REQ mock), or one mydcd takes only through its own
+// (control.InputChange) cannot check, so sfcd's result decides: one sfcd
+// does not have yet (REQ mock), or one sfcd takes only through its own
 // typed command (the certificate store's delete/disable, built here as
 // control.CertificateSelection).
 func mockAction(action string) bool {
 	switch action {
-	case mydc.ActionDeleteCertificate, mydc.ActionDisableCertificate:
+	case sfc.ActionDeleteCertificate, sfc.ActionDisableCertificate:
 		return true
-	case mydc.ActionSetAccountScope, mydc.ActionCordonNode, mydc.ActionUncordonNode, mydc.ActionPruneNodeImages,
-		mydc.ActionDrainNode, mydc.ActionDemoteNode, mydc.ActionRotateNodeIdentity, mydc.ActionForceRemoveNode,
-		mydc.ActionIngressBlock, mydc.ActionIngressUnblock, mydc.ActionIngressBlockExtend,
-		mydc.ActionSetNodeGateways, mydc.ActionSetIngressBalance, mydc.ActionDrainIngress, mydc.ActionUndrainIngress,
-		mydc.ActionRaftCompact,
-		mydc.ActionSetNodeShellPolicy, mydc.ActionSetNodeShellNode, mydc.ActionSetNodeShellGrant, mydc.ActionCloseNodeShell:
+	case sfc.ActionSetAccountScope, sfc.ActionCordonNode, sfc.ActionUncordonNode, sfc.ActionPruneNodeImages,
+		sfc.ActionDrainNode, sfc.ActionDemoteNode, sfc.ActionRotateNodeIdentity, sfc.ActionForceRemoveNode,
+		sfc.ActionIngressBlock, sfc.ActionIngressUnblock, sfc.ActionIngressBlockExtend,
+		sfc.ActionSetNodeGateways, sfc.ActionSetIngressBalance, sfc.ActionDrainIngress, sfc.ActionUndrainIngress,
+		sfc.ActionRaftCompact,
+		sfc.ActionPutVPSAccount, sfc.ActionRemoveVPSAccount, sfc.ActionCreateVPSNode, sfc.ActionStopVPSNode, sfc.ActionStartVPSNode, sfc.ActionDeleteVPSNode, sfc.ActionSetVPSNodeCap,
+		sfc.ActionSetNodeShellPolicy, sfc.ActionSetNodeShellNode, sfc.ActionSetNodeShellGrant, sfc.ActionCloseNodeShell:
 		return true
 	}
 	return false
@@ -167,10 +193,10 @@ func mockAction(action string) bool {
 func invalid(msg string) error { return &httpErr{http.StatusUnprocessableEntity, "invalid", msg} }
 
 // systemRange: a workspace network may not use the system network's range.
-// mydcd refuses it too (result reason system-range-overlap), also for a
+// sfcd refuses it too (result reason system-range-overlap), also for a
 // range an administrator changed; this checks the default range.
 func systemRange(field string) error {
-	return &httpErr{http.StatusUnprocessableEntity, "system-range", field + ": " + tenancy.DefaultSystemRange.String() + " is the system network (mydc-system)"}
+	return &httpErr{http.StatusUnprocessableEntity, "system-range", field + ": " + network.SystemRange.String() + " is the system network (sfc-system)"}
 }
 
 func validName(s string) bool { return certNameRE.MatchString(s) }
@@ -182,7 +208,7 @@ func netPool(cidr, gateway string, mtu int) (tenancy.Subnet, error) {
 	if err != nil || !prefix.Addr().Is4() || prefix != prefix.Masked() || prefix.Bits() > 29 {
 		return tenancy.Subnet{}, invalid("cidr: an IPv4 network such as 10.40.0.0/24 (at most /29)")
 	}
-	if prefix.Overlaps(tenancy.DefaultSystemRange) {
+	if prefix.Overlaps(network.SystemRange) {
 		return tenancy.Subnet{}, systemRange("cidr")
 	}
 	gw := prefix.Addr().Next()
@@ -196,28 +222,26 @@ func netPool(cidr, gateway string, mtu int) (tenancy.Subnet, error) {
 
 // POST /t/{t}/networks: a network (Expected is Networks.Revision).
 //
-//	{opId, kind:"tun", name, members:[{node, cidr, gateway?, tunnel?}], tunnelCidr?, mtu?, toggles?}
+//	{opId, kind:"tun", name, members:[{node, cidr, gateway?}], mtu?, toggles?}
 //	  → create-tun-network: one network on one or more servers (a
-//	    one-server network is one member; toggles.local keeps it there). Each server has its
-//	    own pool and a tunnel host address outside every pool, given as
-//	    members[].tunnel or handed out in order from tunnelCidr.
+//	    one-server network is one member; toggles.local keeps it there). Each
+//	    server has its own pool; its tunnel address is the server's own
+//	    address, which sfcd fills in.
 func (s *Server) handleCreateNetwork(w http.ResponseWriter, r *http.Request, ws *webSession) {
 	type member struct {
 		Node    string `json:"node"`
 		CIDR    string `json:"cidr"`
 		Gateway string `json:"gateway,omitempty"`
-		Tunnel  string `json:"tunnel,omitempty"`
 	}
 	var req struct {
-		OpID       string   `json:"opId"`
-		Kind       string   `json:"kind,omitempty"`
-		Name       string   `json:"name"`
-		Node       string   `json:"node,omitempty"`
-		CIDR       string   `json:"cidr,omitempty"`
-		Gateway    string   `json:"gateway,omitempty"`
-		MTU        int      `json:"mtu,omitempty"`
-		Members    []member `json:"members,omitempty"`
-		TunnelCIDR string   `json:"tunnelCidr,omitempty"`
+		OpID    string   `json:"opId"`
+		Kind    string   `json:"kind,omitempty"`
+		Name    string   `json:"name"`
+		Node    string   `json:"node,omitempty"`
+		CIDR    string   `json:"cidr,omitempty"`
+		Gateway string   `json:"gateway,omitempty"`
+		MTU     int      `json:"mtu,omitempty"`
+		Members []member `json:"members,omitempty"`
 		// Toggles: tun network toggles to turn on or off, by name
 		// (tenancy.NetworkToggles; "local": kept on one server).
 		Toggles map[string]bool `json:"toggles,omitempty"`
@@ -226,7 +250,7 @@ func (s *Server) handleCreateNetwork(w http.ResponseWriter, r *http.Request, ws 
 		return
 	}
 	tenant := r.PathValue("t")
-	s.sharedCreate(w, r, ws, req.OpID, req, func(ctx context.Context, c mydc.Conn, _ mydc.Session) (string, any, uint64, string, error) {
+	s.sharedCreate(w, r, ws, req.OpID, req, func(ctx context.Context, c sfc.Conn, _ sfc.Session) (string, any, uint64, string, error) {
 		if !validName(req.Name) {
 			return "", nil, 0, "", invalid("name: lowercase letters, digits and '-'")
 		}
@@ -241,12 +265,12 @@ func (s *Server) handleCreateNetwork(w http.ResponseWriter, r *http.Request, ws 
 		var payload any
 		switch req.Kind {
 		case "tun":
-			d, err := tunDefinition(tenant, req.Name, mtu, req.TunnelCIDR, func(yield func(node, cidr, gateway, tunnel string) error) error {
+			d, err := tunDefinition(tenant, req.Name, mtu, func(yield func(node, cidr, gateway string) error) error {
 				if req.Node != "" || req.CIDR != "" || len(req.Members) == 0 || len(req.Members) > 32 {
 					return invalid("a tun network has 1..32 members and no top-level node or cidr")
 				}
 				for _, m := range req.Members {
-					if err := yield(m.Node, m.CIDR, m.Gateway, m.Tunnel); err != nil {
+					if err := yield(m.Node, m.CIDR, m.Gateway); err != nil {
 						return err
 					}
 				}
@@ -269,11 +293,11 @@ func (s *Server) handleCreateNetwork(w http.ResponseWriter, r *http.Request, ws 
 					return "", nil, 0, "", invalid(fmt.Sprintf("toggles: one of %v", tenancy.NetworkToggles()))
 				}
 			}
-			action, payload = mydc.ActionCreateTUNNetwork, d
+			action, payload = sfc.ActionCreateTUNNetwork, d
 		default:
 			return "", nil, 0, "", invalid(`kind: "tun" (a network on one server is a tun network with one member; toggles.local keeps it there)`)
 		}
-		p, err := c.Resources(ctx, tenant, "")
+		p, err := screenResources(ctx, c, tenant, "")
 		if err != nil {
 			return "", nil, 0, "", err
 		}
@@ -281,21 +305,13 @@ func (s *Server) handleCreateNetwork(w http.ResponseWriter, r *http.Request, ws 
 	})
 }
 
-// tunDefinition builds create-tun-network's payload. Owners are left for
-// mydcd to fill from each server; the gateway mode is mydcd's default.
-func tunDefinition(tenant, name string, mtu int, tunnelCIDR string, members func(yield func(node, cidr, gateway, tunnel string) error) error) (tenancy.TUNDefinition, error) {
+// tunDefinition builds create-tun-network's payload. Owners and tunnel
+// addresses (each server's own) are left for sfcd to fill; the gateway
+// mode is sfcd's default.
+func tunDefinition(tenant, name string, mtu int, members func(yield func(node, cidr, gateway string) error) error) (tenancy.TUNDefinition, error) {
 	d := tenancy.TUNDefinition{Tenant: tenant, Name: name}
-	var tunnels netip.Prefix
-	if tunnelCIDR != "" {
-		var err error
-		if tunnels, err = netip.ParsePrefix(tunnelCIDR); err != nil || !tunnels.Addr().Is4() || tunnels != tunnels.Masked() || tunnels.Bits() > 30 {
-			return d, invalid("tunnelCidr: an IPv4 network such as 10.255.40.0/24 (at most /30)")
-		}
-	}
-	next := tunnels.Addr()
 	seen := map[string]bool{}
-	var used []netip.Addr
-	err := members(func(node, cidr, gateway, tunnel string) error {
+	err := members(func(node, cidr, gateway string) error {
 		if !validName(node) || seen[node] {
 			return invalid("members[].node: distinct server names (lowercase letters, digits and '-')")
 		}
@@ -304,39 +320,16 @@ func tunDefinition(tenant, name string, mtu int, tunnelCIDR string, members func
 		if err != nil {
 			return err
 		}
-		var addr netip.Addr
-		switch {
-		case tunnel != "":
-			if addr, err = netip.ParseAddr(tunnel); err != nil || !addr.Is4() || addr.IsUnspecified() || addr.IsLoopback() || addr.IsMulticast() || addr.IsLinkLocalUnicast() {
-				return invalid("members[].tunnel: an IPv4 host address such as 10.255.40.1")
-			}
-		case tunnelCIDR != "":
-			next = next.Next()
-			last := netipLast(tunnels)
-			if !tunnels.Contains(next) || next == last {
-				return invalid("tunnelCidr has too few addresses for the members")
-			}
-			addr = next
-		default:
-			return invalid("each member needs a tunnel address: members[].tunnel or tunnelCidr")
-		}
-		if tenancy.DefaultSystemRange.Contains(addr) {
-			return systemRange("members[].tunnel")
-		}
-		if slices.Contains(used, addr) {
-			return invalid("tunnel addresses must differ")
-		}
-		used = append(used, addr)
-		d.Members = append(d.Members, tenancy.TUNNode{Node: node, Pools: []tenancy.Subnet{pool}, Addresses: []netip.Prefix{netip.PrefixFrom(addr, 32)}})
+		d.Members = append(d.Members, tenancy.TUNNode{Node: node, Pools: []tenancy.Subnet{pool}})
 		return nil
 	})
 	if err != nil {
 		return d, err
 	}
 	for i, a := range d.Members {
-		for j, b := range d.Members {
-			if b.Pools[0].Prefix.Contains(a.Addresses[0].Addr()) || i < j && a.Pools[0].Prefix.Overlaps(b.Pools[0].Prefix) {
-				return d, invalid("member pools must not overlap each other or any tunnel address")
+		for _, b := range d.Members[i+1:] {
+			if a.Pools[0].Prefix.Overlaps(b.Pools[0].Prefix) {
+				return d, invalid("member pools must not overlap each other")
 			}
 		}
 	}
@@ -353,7 +346,7 @@ func netipLast(p netip.Prefix) netip.Addr {
 
 // POST /t/{t}/networks/{name}/dns {opId, zone, upstreams?, ttl?, negativeTtl?,
 // reverse?, enabled?, expected?}: configure-network-dns, a full policy
-// replacement. mydcd runs managed DNS only on tun networks. expected is the
+// replacement. sfcd runs managed DNS only on tun networks. expected is the
 // row's DNS.Revision (0 the first time). Limits are fixed web defaults.
 func (s *Server) handleNetworkDNS(w http.ResponseWriter, r *http.Request, ws *webSession) {
 	var req struct {
@@ -370,7 +363,7 @@ func (s *Server) handleNetworkDNS(w http.ResponseWriter, r *http.Request, ws *we
 		return
 	}
 	tenant, name := r.PathValue("t"), r.PathValue("name")
-	s.sharedCreate(w, r, ws, req.OpID, req, func(ctx context.Context, c mydc.Conn, _ mydc.Session) (string, any, uint64, string, error) {
+	s.sharedCreate(w, r, ws, req.OpID, req, func(ctx context.Context, c sfc.Conn, _ sfc.Session) (string, any, uint64, string, error) {
 		if !validName(name) {
 			return "", nil, 0, "", invalid("network name")
 		}
@@ -380,7 +373,7 @@ func (s *Server) handleNetworkDNS(w http.ResponseWriter, r *http.Request, ws *we
 		}
 		// start from the current policy, so fields the request leaves out
 		// (and the ones the screen never sets) stay as they are
-		p := services.ManagedDNSPolicy{TTL: 30, NegativeTTL: 5, Transports: []string{"udp", "tcp"}, Upstreams: []netip.AddrPort{},
+		p := services.ManagedDNSPolicy{TTL: services.DefaultDNSTTL, NegativeTTL: services.DefaultDNSNegativeTTL, Transports: []string{"udp", "tcp"}, Upstreams: []netip.AddrPort{},
 			MaxQueries: 64, MaxCacheEntries: 512, MaxResponseBytes: 4096, MaxConnections: 64, RequestTimeoutMS: 5000}
 		n, _, err := findNetwork(ctx, c, tenant, name)
 		if err != nil {
@@ -388,6 +381,16 @@ func (s *Server) handleNetworkDNS(w http.ResponseWriter, r *http.Request, ws *we
 		}
 		if n.DNS != nil && n.DNS.Policy.Transports != nil {
 			p = n.DNS.Policy
+		}
+		// names added by hand move with the zone
+		if old, err := services.Domain(p.Zone); err == nil && old != zone && len(p.Records) > 0 {
+			clientZone := ""
+			if p.ClientZone != "" {
+				clientZone, _ = services.Domain(p.ClientZone)
+			}
+			if p.Records, err = services.MoveDNSRecords(p.Records, old, zone, clientZone); err != nil {
+				return "", nil, 0, "", invalid("zone: the names added by hand do not fit the new zone")
+			}
 		}
 		p.Zone, p.Enabled = zone, req.Enabled == nil || *req.Enabled
 		if req.Reverse != nil {
@@ -423,7 +426,7 @@ func (s *Server) handleNetworkDNS(w http.ResponseWriter, r *http.Request, ws *we
 			}
 		}
 		d := services.ManagedDNSDefinition{Schema: 1, Tenant: tenant, Network: name, Policy: p}
-		return mydc.ActionConfigureNetworkDNS, d, req.Expected, name, nil
+		return sfc.ActionConfigureNetworkDNS, d, req.Expected, name, nil
 	})
 }
 
@@ -453,7 +456,7 @@ func (s *Server) handleCreateVolume(w http.ResponseWriter, r *http.Request, ws *
 		return
 	}
 	tenant := r.PathValue("t")
-	s.sharedCreate(w, r, ws, req.OpID, req, func(ctx context.Context, c mydc.Conn, sess mydc.Session) (string, any, uint64, string, error) {
+	s.sharedCreate(w, r, ws, req.OpID, req, func(ctx context.Context, c sfc.Conn, sess sfc.Session) (string, any, uint64, string, error) {
 		if !validName(req.Name) || !validName(req.Node) {
 			return "", nil, 0, "", invalid("name and node: lowercase letters, digits and '-'")
 		}
@@ -479,19 +482,19 @@ func (s *Server) handleCreateVolume(w http.ResponseWriter, r *http.Request, ws *
 			}
 			scope.App = req.App
 			q := control.VolumeCreate{Scope: scope, Node: req.Node, UID: req.UID, GID: req.GID, Mode: mode, QuotaMode: "observe", CapacityBytes: req.CapacityBytes}
-			return mydc.ActionBeginVolumeCreate, q, 0, req.Name, nil
+			return sfc.ActionBeginVolumeCreate, q, 0, req.Name, nil
 		case "fixed":
 			if !validName(req.Storage) || req.Path == "" {
 				return "", nil, 0, "", invalid("storage and path are required")
 			}
 			// The root generation pins the approved storage root. Only a
 			// system admin can read node-storage today (REQUEST.md REQ-30);
-			// others pass rootGeneration and mydcd checks it exactly.
+			// others pass rootGeneration and sfcd checks it exactly.
 			gen := req.RootGeneration
 			root, err := findStorageRoot(ctx, c, req.Node, req.Storage)
 			switch {
 			case err == nil && root != nil:
-				if root.Draining || !slices.Contains(root.Definition.Tenants, tenant) {
+				if root.Draining || !root.Definition.Allows(tenant) {
 					return "", nil, 0, "", invalid("storage root " + req.Storage + " on " + req.Node + " is not approved for this workspace")
 				}
 				if gen != 0 && gen != root.Generation {
@@ -500,7 +503,7 @@ func (s *Server) handleCreateVolume(w http.ResponseWriter, r *http.Request, ws *
 				gen = root.Generation
 			case err == nil:
 				return "", nil, 0, "", invalid("no storage root " + req.Storage + " on " + req.Node)
-			case errors.Is(err, mydc.ErrDenied):
+			case errors.Is(err, sfc.ErrDenied):
 				if gen == 0 {
 					return "", nil, 0, "", &httpErr{http.StatusUnprocessableEntity, "storage-root-unknown", "only a system administrator can read storage roots; pass rootGeneration"}
 				}
@@ -508,7 +511,7 @@ func (s *Server) handleCreateVolume(w http.ResponseWriter, r *http.Request, ws *
 				return "", nil, 0, "", err
 			}
 			q := control.VolumeFixedRegister{Scope: scope, Node: req.Node, Storage: req.Storage, Path: req.Path, RootGeneration: gen, QuotaMode: "observe", CapacityBytes: req.CapacityBytes}
-			return mydc.ActionRegisterFixedVolume, q, 0, req.Name, nil
+			return sfc.ActionRegisterFixedVolume, q, 0, req.Name, nil
 		}
 		return "", nil, 0, "", invalid(`kind: "managed" or "fixed"`)
 	})
@@ -536,7 +539,7 @@ func (s *Server) handleCreateVault(w http.ResponseWriter, r *http.Request, ws *w
 	if req.Realm == "" {
 		req.Realm = tenant
 	}
-	s.sharedCreate(w, r, ws, req.OpID, req, func(ctx context.Context, c mydc.Conn, _ mydc.Session) (string, any, uint64, string, error) {
+	s.sharedCreate(w, r, ws, req.OpID, req, func(ctx context.Context, c sfc.Conn, _ sfc.Session) (string, any, uint64, string, error) {
 		if req.Realm != tenant {
 			return "", nil, 0, "", invalid("realm must be this workspace")
 		}
@@ -561,12 +564,12 @@ func (s *Server) handleCreateVault(w http.ResponseWriter, r *http.Request, ws *w
 		if err != nil {
 			return "", nil, 0, "", err
 		}
-		return mydc.ActionVaultCreate, control.VaultObject{Realm: req.Realm, Object: o}, p.Collection, req.Parent + "/" + req.ID, nil
+		return sfc.ActionVaultCreate, control.VaultObject{Realm: req.Realm, Object: o}, p.Collection, req.Parent + "/" + req.ID, nil
 	})
 }
 
 // findStorageRoot returns the storage root id on node (nil when none).
-func findStorageRoot(ctx context.Context, c mydc.Conn, node, id string) (*mydc.StorageRoot, error) {
+func findStorageRoot(ctx context.Context, c sfc.Conn, node, id string) (*sfc.StorageRoot, error) {
 	after := ""
 	for {
 		p, err := c.NodeStorage(ctx, node, after)

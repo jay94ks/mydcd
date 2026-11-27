@@ -7,7 +7,7 @@ import (
 	"crypto/ed25519"
 	"errors"
 
-	"github.com/jay94ks/mydcd/internal/network/services"
+	"github.com/jay94ks/seafield/internal/network/services"
 )
 
 // Caller holds routeMu after the outside-lock reader stop/join. A previously

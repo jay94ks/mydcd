@@ -10,16 +10,16 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/tenancy"
-	"github.com/jay94ks/mydcd/internal/userauth"
-	"github.com/jay94ks/mydcd/internal/workload"
-	"github.com/jay94ks/mydcd/internal/workload/volumes"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/tenancy"
+	"github.com/jay94ks/seafield/internal/userauth"
+	"github.com/jay94ks/seafield/internal/workload"
+	"github.com/jay94ks/seafield/internal/workload/volumes"
 	"github.com/moby/moby/client"
 )
 
@@ -28,7 +28,7 @@ import (
 func TestE7TenantRetirementNativeVolumeOwnerAndOtherTenant(t *testing.T) {
 	runManagedAppOwner(t, true, true, false, true, managedAppTenantRetirement, true, false, true)
 }
-func verifyManagedTenantRetirement(t *testing.T, ctx context.Context, r *Runtime, root string, user userauth.Client, peer mydcp.Peer, session access.Session, p control.Policy, read func() cluster.View, change func(string, string, uint64, any)) map[string]any {
+func verifyManagedTenantRetirement(t *testing.T, ctx context.Context, r *Runtime, root string, user userauth.Client, peer sfcp.Peer, session access.Session, p control.Policy, read func() cluster.View, change func(string, string, uint64, any)) map[string]any {
 	t.Helper()
 	wait := func(label string, done func() bool) {
 		t.Helper()
@@ -50,7 +50,7 @@ func verifyManagedTenantRetirement(t *testing.T, ctx context.Context, r *Runtime
 		t.Fatal(err)
 	}
 	tenant, _ := catalog.Tenant("retirement")
-	change("retirement-node", "set-nodes", tenant.Revision, control.NodeAssignment{Tenant: "retirement", Nodes: []string{"node-a"}})
+	change("retirement-node", "set-nodes", tenant.Revision, control.NodeChangeTo("retirement", tenant.AllowedNodes, []string{"node-a"}))
 	change("retirement-quota", "set-node-quota", 0, tenancy.NodeLimit{Tenant: "retirement", Node: "node-a", Capacity: workload.Resources{CPU: 100000000, Memory: 16 << 20}, MaxConsumers: 8})
 	scope := volumes.Scope{Cluster: user.Cluster, Tenant: "retirement", App: "data", ID: "retained", Generation: 1}
 	// Register rollback before the first native Volume effect. It only resumes

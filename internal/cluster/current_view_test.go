@@ -12,11 +12,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/config"
-	"github.com/jay94ks/mydcd/internal/mydcp"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/config"
+	"github.com/jay94ks/seafield/internal/sfcp"
 
 	"github.com/hashicorp/raft"
 )
@@ -32,11 +32,11 @@ func configureCurrentViewSDK(options *Options, nodes []realNode) {
 	options.ModuleID, options.Validate, options.Reduce, options.AdmitModule = policy.ID(), policy.ValidateManaged, policy.Reduce, policy.AdmitModule
 }
 
-// Reuses the existing three-voter/nonvoter SDK/bbolt/authenticated MYDCP
+// Reuses the existing three-voter/nonvoter SDK/bbolt/authenticated SFCP
 // fixture. Image/native effects are deliberately absent: current authority
 // and exact target checks are the product control core, and ioCalls counts
 // only entry into the declared finite effect boundary.
-func verifyCurrentViewSDK(t *testing.T, ctx context.Context, nodes []realNode, leader int, wait func(string, func() bool), lookup func(mydcp.Identity) (mydcp.Peer, bool)) {
+func verifyCurrentViewSDK(t *testing.T, ctx context.Context, nodes []realNode, leader int, wait func(string, func() bool), lookup func(sfcp.Identity) (sfcp.Peer, bool)) {
 	t.Helper()
 	if leader == 0 {
 		if err := nodes[0].engine.TransferLeadership(ctx, nodes[1].options.ID, nodes[1].address); err != nil {
@@ -105,7 +105,7 @@ func verifyCurrentViewSDK(t *testing.T, ctx context.Context, nodes []realNode, l
 	}
 	catalog, _ = p.Catalog(view.State)
 	tenant, _ := catalog.Tenant("tenant")
-	change("set-trust", tenant.Revision, control.TrustAssignment{Tenant: "tenant", Rules: []access.TrustRule{{Registry: "registry.example.test", Repository: "team/app"}}})
+	change("set-trust", tenant.Revision, control.TrustChange{Tenant: "tenant", Add: []access.TrustRule{{Registry: "registry.example.test", Repository: "team/app"}}})
 	view, err = CurrentView(ctx, owner.engine, owner.mesh, owner.identity, p.Cluster)
 	if err != nil || view.Local || owner.engine.IsLeader() {
 		t.Fatal("authenticated current prefix did not reach follower owner", err)
@@ -115,7 +115,7 @@ func verifyCurrentViewSDK(t *testing.T, ctx context.Context, nodes []realNode, l
 		t.Fatal("exact original owner read", read.Target, err)
 	}
 	// A barrier without another management command advances the Raft floor.
-	peer, ok := lookup(mydcp.Identity(nodes[leader].identity.Public))
+	peer, ok := lookup(sfcp.Identity(nodes[leader].identity.Public))
 	if !ok {
 		t.Fatal("fixture leader peer missing")
 	}
@@ -158,7 +158,7 @@ func verifyCurrentViewSDK(t *testing.T, ctx context.Context, nodes []realNode, l
 	// A resolver ID cannot rename the authenticated peer that produced the
 	// status receipt. The original target remains pinned to that one reply.
 	resolve := owner.engine.resolve
-	owner.engine.resolve = func(id raft.ServerID, address raft.ServerAddress) (mydcp.Peer, bool) {
+	owner.engine.resolve = func(id raft.ServerID, address raft.ServerAddress) (sfcp.Peer, bool) {
 		peer, ok := resolve(id, address)
 		peer.ID = "different-peer"
 		return peer, ok

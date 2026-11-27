@@ -4,141 +4,128 @@ package server
 
 import (
 	"context"
-	"encoding/hex"
 	"net/http"
-	"strings"
 
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/web/mydc"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/web/sfc"
 )
 
-// Log clearing (UI-3C '로그 정리…', `mydc compose logs clear`): mydcd plans
-// which containers are recreated (the target and the ones that depend on
-// it), refuses log drivers other than local/json-file, and runs the signed
-// clear-app-logs. The web shows the plan, sends the change with the plan's
-// Target and InventoryRevision as the CLI does, and reads the status. The
-// clear's operation is "logs-clear-<opId>".
+// Log clearing (UI-3C '로그 정리…', devel/proposals/seafield-log-clear.md):
+// each server keeps container logs in its own sfcd log store. A clear asks
+// every member server to clear its store for the selection; containers are
+// not touched. It is a direct request, not a signed change: no opId, no op
+// in bbolt, and sending it again is the same request (a server that was
+// down clears then). Each server checks the tenant's Deploy permission
+// itself.
 
-type logClearTargetView struct {
-	Key        string `json:"key"`
+type logsSelection struct {
+	App        string `json:"app,omitempty"`
+	Standalone string `json:"standalone,omitempty"`
 	Service    string `json:"service,omitempty"`
-	Instance   string `json:"instance,omitempty"`
-	Kind       string `json:"kind"`
+	Key        string `json:"key,omitempty"` // one task key (workload/task/...)
+}
+
+func (q logsSelection) sfc() (sfc.LogsClear, bool) {
+	ok := (q.App == "") != (q.Standalone == "") && (q.Standalone == "" || q.Service == "" && q.Key == "")
+	return sfc.LogsClear{App: q.App, Standalone: q.Standalone, Service: q.Service, Key: q.Key}, ok
+}
+
+type logsClearNodeView struct {
 	Node       string `json:"node"`
-	NativeID   string `json:"nativeID,omitempty"`
-	StartedAt  string `json:"startedAt,omitempty"`
-	LogDriver  string `json:"logDriver,omitempty"`
-	Generation uint64 `json:"generation"`
-	Retained   bool   `json:"retained,omitempty"`
-	Reason     string `json:"reason,omitempty"` // target / depends-on (plan only)
+	Code       string `json:"code"` // ok, denied, unreachable, unavailable
+	Containers int    `json:"containers"`
+	Removed    int    `json:"removed"`
 }
 
-// viewTargets maps impact rows; the service comes from the task key
-// (workload/task/<tenant>/<app>/<service>[/<instance>]).
-func viewTargets(in []control.AppLogClearImpact, tenant, app, targetNative string) []logClearTargetView {
-	out := []logClearTargetView{}
-	for _, im := range in {
-		v := logClearTargetView{Key: im.Key, Kind: im.Kind, Node: im.Node, NativeID: im.NativeID, StartedAt: im.StartedAt, LogDriver: im.LogDriver, Generation: im.Generation, Retained: im.Retained}
-		if rest, ok := strings.CutPrefix(im.Key, "workload/task/"+tenant+"/"+app+"/"); ok {
-			v.Service, v.Instance, _ = strings.Cut(rest, "/")
+type logsClearView struct {
+	Nodes   []logsClearNodeView `json:"nodes"`
+	Cleared int                 `json:"cleared"` // servers that answered ok
+	Total   int                 `json:"total"`
+}
+
+func viewLogsClear(r control.LogsClearReply) logsClearView {
+	v := logsClearView{Nodes: []logsClearNodeView{}, Total: len(r.Nodes)}
+	for _, n := range r.Nodes {
+		v.Nodes = append(v.Nodes, logsClearNodeView{Node: n.Node, Code: n.Code, Containers: n.Containers, Removed: n.Removed})
+		if n.Code == "ok" {
+			v.Cleared++
 		}
-		if targetNative != "" {
-			v.Reason = "depends-on"
-			if im.NativeID == targetNative {
-				v.Reason = "target"
-			}
-		}
-		out = append(out, v)
 	}
-	return out
+	return v
 }
 
-type logClearPlanView struct {
-	Clearable         bool                 `json:"clearable"`
-	Driver            string               `json:"driver,omitempty"`
-	Reason            string               `json:"reason,omitempty"` // unsupported-log-driver
-	Service           string               `json:"service"`
-	Instance          string               `json:"instance,omitempty"`
-	Node              string               `json:"node,omitempty"`
-	Target            string               `json:"target,omitempty"`
-	InventoryRevision uint64               `json:"inventoryRevision,omitempty"`
-	Targets           []logClearTargetView `json:"targets"`
-}
-
-// GET /t/{t}/apps/{app}/logs-clear/plan?service=&instance= → {clearable,
-// driver, reason?, service, instance?, node?, target?, inventoryRevision?,
-// targets:[{key, service, instance?, kind, node, nativeID, startedAt,
-// logDriver, generation, retained?, reason(target/depends-on)}]}. When the
-// container does not log to local/json-file: clearable false, reason
-// unsupported-log-driver, no targets. Needs the tenant's Deploy permission
-// (mydcd decides).
-func (s *Server) handleLogClearPlan(w http.ResponseWriter, r *http.Request, ws *webSession) {
-	q := r.URL.Query()
-	tenant, sel := r.PathValue("t"), mydc.ContainerSelection{App: r.PathValue("app"), Service: q.Get("service"), Instance: q.Get("instance")}
-	if sel.Service == "" {
-		writeError(w, http.StatusBadRequest, "bad-request", "service is required")
-		return
-	}
-	read(s, w, r, ws, func(ctx context.Context, c mydc.Conn) (logClearPlanView, error) {
-		p, err := c.AppLogClearPlan(ctx, tenant, sel)
-		v := logClearPlanView{Driver: p.LogDriver, Service: sel.Service, Instance: sel.Instance, Targets: []logClearTargetView{}}
-		if pl := p.Plan; pl != nil {
-			v.Clearable, v.Node, v.Target, v.InventoryRevision = true, pl.Container.Node, hex.EncodeToString(pl.Target[:]), pl.InventoryRevision
-			v.Targets = viewTargets(pl.Impact, tenant, sel.App, pl.Container.NativeID)
-		} else {
-			v.Reason = p.Code
-		}
-		return v, err
-	})
-}
-
-// POST /t/{t}/apps/{app}/logs-clear {opId, service, instance?, target} →
-// clear-app-logs with operation "logs-clear-<opId>". target is the plan's
-// target the person agreed to; a plan that moved on is 409 plan-changed
-// (read the plan again), a driver that cannot be cleared 409
-// unsupported-log-driver. Expected = the plan's inventoryRevision.
-func (s *Server) handleClearAppLogs(w http.ResponseWriter, r *http.Request, ws *webSession) {
-	var req struct {
-		OpID     string `json:"opId"`
-		Service  string `json:"service"`
-		Instance string `json:"instance,omitempty"`
-		Target   string `json:"target"`
-	}
+// POST /t/{t}/logs/clear {app|standalone, service?, key?} → {nodes:[{node,
+// code, containers, removed}], cleared, total}. A server that is not "ok"
+// kept its logs; the screen offers the same request again.
+func (s *Server) handleClearLogs(w http.ResponseWriter, r *http.Request, ws *webSession) {
+	var req logsSelection
 	if !readJSON(w, r, &req) {
 		return
 	}
-	tenant, app := r.PathValue("t"), r.PathValue("app")
-	s.sharedCreate(w, r, ws, req.OpID, req, func(ctx context.Context, c mydc.Conn, _ mydc.Session) (string, any, uint64, string, error) {
-		if req.Service == "" || len(req.Target) != 64 {
-			return "", nil, 0, "", invalid("service and target (the plan's target) are required")
-		}
-		p, err := c.AppLogClearPlan(ctx, tenant, mydc.ContainerSelection{App: app, Service: req.Service, Instance: req.Instance})
-		if err != nil {
-			return "", nil, 0, "", err
-		}
-		if p.Plan == nil {
-			return "", nil, 0, "", &httpErr{http.StatusConflict, p.Code, "the container's log driver (" + p.LogDriver + ") is not local or json-file"}
-		}
-		if hex.EncodeToString(p.Plan.Target[:]) != req.Target {
-			return "", nil, 0, "", &httpErr{http.StatusConflict, "plan-changed", "the containers to recreate changed; read the plan again"}
-		}
-		q := control.AppLogClear{Tenant: tenant, App: app, Operation: "logs-clear-" + req.OpID, Target: p.Plan.Target, Recreate: true}
-		q.Selection.Service, q.Selection.Instance = req.Service, req.Instance
-		return mydc.ActionClearAppLogs, q, p.Plan.InventoryRevision, "app/" + app, nil
+	q, ok := req.sfc()
+	if !ok {
+		writeError(w, http.StatusBadRequest, "bad-request", "one of app or standalone is required (service and key only with app)")
+		return
+	}
+	tenant := r.PathValue("t")
+	ctx, cancel := s.callCtx(r)
+	defer cancel()
+	var out control.LogsClearReply
+	err := ws.do(ctx, func(ctx context.Context, c sfc.Conn) error {
+		var err error
+		out, err = c.ClearLogs(ctx, tenant, q)
+		return err
 	})
+	if err != nil {
+		s.writeBackendError(w, ws, err)
+		return
+	}
+	v := viewLogsClear(out)
+	s.log.Info("logs cleared", "user", ws.user.Username, "tenant", tenant, "app", q.App, "standalone", q.Standalone, "service", q.Service, "cleared", v.Cleared, "total", v.Total)
+	writeJSON(w, http.StatusOK, v)
 }
 
-// GET /t/{t}/apps/{app}/logs-clear/{opId} → {operation, phase
-// (Retiring/Removed/Recreating/Succeeded), target, oldContainers,
-// newContainers}. 404 until mydcd has the clear.
-func (s *Server) handleLogClearStatus(w http.ResponseWriter, r *http.Request, ws *webSession) {
-	tenant, app := r.PathValue("t"), r.PathValue("app")
-	read(s, w, r, ws, func(ctx context.Context, c mydc.Conn) (map[string]any, error) {
-		st, err := c.AppLogClearStatus(ctx, tenant, app, "logs-clear-"+r.PathValue("op"))
+type storedLogView struct {
+	Container string `json:"container"`
+	Name      string `json:"name"`
+	Service   string `json:"service,omitempty"`
+	Key       string `json:"key,omitempty"`
+	Lines     uint64 `json:"lines"`
+	Size      int64  `json:"size"`
+}
+
+type storedLogsNodeView struct {
+	Node string          `json:"node"`
+	Code string          `json:"code"`
+	Logs []storedLogView `json:"logs"`
+}
+
+// GET /t/{t}/logs/stored?app=|standalone=&service=&key=&node= →
+// {nodes:[{node, code, logs:[{container, name, service, key, lines,
+// size}]}]}: what each server's log store keeps for the selection,
+// including containers that are gone. Lines of a gone container are not
+// served (secret values are hidden when read, from the live container).
+func (s *Server) handleStoredLogs(w http.ResponseWriter, r *http.Request, ws *webSession) {
+	qv := r.URL.Query()
+	q, ok := logsSelection{App: qv.Get("app"), Standalone: qv.Get("standalone"), Service: qv.Get("service"), Key: qv.Get("key")}.sfc()
+	if !ok {
+		writeError(w, http.StatusBadRequest, "bad-request", "one of app or standalone is required (service and key only with app)")
+		return
+	}
+	tenant, node := r.PathValue("t"), qv.Get("node")
+	read(s, w, r, ws, func(ctx context.Context, c sfc.Conn) (map[string]any, error) {
+		out, err := c.StoredLogs(ctx, tenant, q, node)
 		if err != nil {
 			return nil, err
 		}
-		return map[string]any{"operation": st.Operation, "phase": st.Status, "target": hex.EncodeToString(st.Target[:]),
-			"oldContainers": viewTargets(st.OldContainers, tenant, app, ""), "newContainers": viewTargets(st.NewContainers, tenant, app, "")}, nil
+		nodes := []storedLogsNodeView{}
+		for _, n := range out.Nodes {
+			v := storedLogsNodeView{Node: n.Node, Code: n.Code, Logs: []storedLogView{}}
+			for _, l := range n.Logs {
+				v.Logs = append(v.Logs, storedLogView{Container: l.Container, Name: l.Name, Service: l.Service, Key: l.Key, Lines: l.Lines, Size: l.Size})
+			}
+			nodes = append(nodes, v)
+		}
+		return map[string]any{"nodes": nodes}, nil
 	})
 }

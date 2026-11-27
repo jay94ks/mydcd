@@ -15,7 +15,7 @@ import (
 
 func testTree(got *[]string, rest *[]string, follow *bool, tenant *string) *Command {
 	return &Command{
-		Name:  "mydc",
+		Name:  "sfcli",
 		Flags: func(fs *flag.FlagSet) { fs.StringVar(tenant, "tenant", "", "work in this tenant") },
 		Sub: []*Command{{
 			Name:  "app",
@@ -71,8 +71,8 @@ func TestExecuteErrorsAndHelp(t *testing.T) {
 		{[]string{"nope"}, 2, `unknown command "nope"`},
 		{[]string{"app"}, 2, "Commands:"},
 		{[]string{"app", "logs", "--bogus"}, 2, "flag provided but not defined"},
-		{[]string{"app", "fail"}, 1, "mydc: boom"},
-		{[]string{"app", "usage"}, 2, "mydc app usage: needs APP"},
+		{[]string{"app", "fail"}, 1, "sfcli: boom"},
+		{[]string{"app", "usage"}, 2, "sfcli app usage: needs APP"},
 		{[]string{"app", "exit"}, 4, ""},
 	} {
 		code, _, stderr := run(t, root, tc.args...)
@@ -81,7 +81,7 @@ func TestExecuteErrorsAndHelp(t *testing.T) {
 		}
 	}
 	code, out, _ := run(t, root, "app", "logs", "--help")
-	for _, want := range []string{"Usage: mydc app logs APP [SERVICE] [options]", "Show logs", "Options:", "-f", "keep following", "Global options:", "--tenant string"} {
+	for _, want := range []string{"Usage: sfcli app logs APP [SERVICE] [options]", "Show logs", "Options:", "-f", "keep following", "Global options:", "--tenant string"} {
 		if code != 0 || !strings.Contains(out, want) {
 			t.Errorf("help misses %q:\n%s", want, out)
 		}
@@ -245,7 +245,7 @@ func TestOpCommand(t *testing.T) {
 		Resume: func(*Context, Op) (State, string, error) { resumed++; return Done, "backup done", nil },
 	}}
 	open := func() (*Ops, error) { return OpenOps(dir) }
-	root := &Command{Name: "mydc", Flags: func(fs *flag.FlagSet) { fs.Var(&format, "o", "output") }, Sub: []*Command{OpCommand(open, &format, kinds)}}
+	root := &Command{Name: "sfcli", Flags: func(fs *flag.FlagSet) { fs.Var(&format, "o", "output") }, Sub: []*Command{OpCommand(open, &format, kinds)}}
 	x, _ := open()
 	_ = x.Add(Op{ID: "bk01", Kind: "volume-backup", Context: "prod", Summary: "volume backup create shop/db"})
 	_ = x.Add(Op{ID: "old1", Kind: "retired-kind", Context: "prod", Summary: "x"})

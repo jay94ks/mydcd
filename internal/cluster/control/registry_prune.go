@@ -9,9 +9,9 @@ import (
 	"math"
 	"slices"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/registryclient"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/registryclient"
 )
 
 const RegistryPruneAction = "prune-registry-images"
@@ -33,11 +33,11 @@ type RegistryPruneFact struct {
 func RegistryPruneFactBytes(f RegistryPruneFact) []byte {
 	f.Signature = nil
 	raw, _ := json.Marshal(f)
-	return append([]byte("mydc-registry-prune-fact-1\x00"), raw...)
+	return append([]byte("sfc-registry-prune-fact-1\x00"), raw...)
 }
 func PruneConditionsDigest(c registryclient.PruneConditions) [32]byte {
 	raw, _ := json.Marshal(c)
-	return sha256.Sum256(append([]byte("mydc-registry-prune-conditions-1\x00"), raw...))
+	return sha256.Sum256(append([]byte("sfc-registry-prune-conditions-1\x00"), raw...))
 }
 func (q RegistryMaintenanceChange) PruneBase() RegistryMaintenanceChange {
 	q.Operation = ""
@@ -141,7 +141,7 @@ func RegistryPrunePublicDigest(items []RegistryPruneRow, retained []registryclie
 		Items    []RegistryPruneRow
 		Retained []registryclient.PruneRetained
 	}{items, retained})
-	return sha256.Sum256(append([]byte("mydc-registry-prune-public-1\x00"), raw...))
+	return sha256.Sum256(append([]byte("sfc-registry-prune-public-1\x00"), raw...))
 }
 func RegistryPrunePreviewPublicDigest(preview registryclient.PrunePreview) [32]byte {
 	items := []RegistryPruneRow{}
@@ -316,7 +316,7 @@ func RegistryPruneResultRoot(target [32]byte, next uint32, result *RegistryMaint
 		Next   uint32
 		Result *RegistryMaintenanceResult
 	}{target, next, result})
-	return sha256.Sum256(append([]byte("mydc-registry-prune-results-1\x00"), raw...))
+	return sha256.Sum256(append([]byte("sfc-registry-prune-results-1\x00"), raw...))
 }
 
 func PruneResultSuccess(code string) bool { return code == "OK" || code == "ALREADY_ABSENT" }

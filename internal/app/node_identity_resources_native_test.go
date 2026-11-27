@@ -13,18 +13,18 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/bootstrap"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/config"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/desired"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/userauth"
-	"github.com/jay94ks/mydcd/internal/workload"
-	volumeapi "github.com/jay94ks/mydcd/internal/workload/volumes"
-	"github.com/jay94ks/mydcd/tests/vaultfixture"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/bootstrap"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/config"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/desired"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/userauth"
+	"github.com/jay94ks/seafield/internal/workload"
+	volumeapi "github.com/jay94ks/seafield/internal/workload/volumes"
+	"github.com/jay94ks/seafield/tests/vaultfixture"
 	"github.com/moby/moby/client"
 )
 
@@ -40,7 +40,7 @@ func TestRQ12RetainedIdentityResourcesReachFinalClosure(t *testing.T) {
 
 // This uses the existing owned native fixture and prebuilt CLI. It never
 // manufactures a Task closure, Volume fence, provider approval or native ID.
-func verifyManagedIdentityResources(t *testing.T, ctx context.Context, runtime **Runtime, cfg config.Node, root string, user *userauth.Client, peer *mydcp.Peer, session *access.Session, admin ed25519.PrivateKey, policy control.Policy, read func() cluster.View, wait func(string, func() bool), vault *vaultfixture.Vault, manifest map[string]any, saveManifest func(), groups []string, compiled ...bool) {
+func verifyManagedIdentityResources(t *testing.T, ctx context.Context, runtime **Runtime, cfg config.Node, root string, user *userauth.Client, peer *sfcp.Peer, session *access.Session, admin ed25519.PrivateKey, policy control.Policy, read func() cluster.View, wait func(string, func() bool), vault *vaultfixture.Vault, manifest map[string]any, saveManifest func(), groups []string, compiled ...bool) {
 	t.Helper()
 	// Capture every original native owner's first error before the enclosing
 	// fixture closes its runtimes. Root-only errors can hide a retained
@@ -98,7 +98,7 @@ func verifyManagedIdentityResources(t *testing.T, ctx context.Context, runtime *
 	profile := filepath.Join(root, "cli.yaml")
 	call := func(extra []*os.File, args ...string) []byte {
 		t.Helper()
-		out, diagnostic, err := runManagedCLICommand(ctx, os.Getenv("MYDC_TEST_CLI"), filepath.Join(root, "cli-home"), profile, args, extra)
+		out, diagnostic, err := runManagedCLICommand(ctx, os.Getenv("SFC_TEST_CLI"), filepath.Join(root, "cli-home"), profile, args, extra)
 		if err != nil {
 			t.Fatal("identity resource CLI", args, err, string(diagnostic), string(out))
 		}
@@ -139,7 +139,7 @@ func verifyManagedIdentityResources(t *testing.T, ctx context.Context, runtime *
 		t.Fatal("open current identity and original native namespaces", err)
 	}
 	*runtime = restored
-	if restored.Identity.Public != newKey || restored.Mesh.LocalKey() != mydcp.Identity(newKey) || restored.installation.record.Root.OriginalKey() != originalKey {
+	if restored.Identity.Public != newKey || restored.Mesh.LocalKey() != sfcp.Identity(newKey) || restored.installation.record.Root.OriginalKey() != originalKey {
 		t.Fatal("new Root/TLS/runtime identity after actual reopen")
 	}
 	// Registered after the fixture's cleanup: stop future-owner producers first
@@ -176,8 +176,8 @@ func verifyManagedIdentityResources(t *testing.T, ctx context.Context, runtime *
 		t.Fatal("resume original installation after identity replacement", err)
 	}
 	oldSession := *session
-	peer.Key = mydcp.Identity(newKey)
-	user.Peers = []mydcp.Peer{*peer}
+	peer.Key = sfcp.Identity(newKey)
+	user.Peers = []sfcp.Peer{*peer}
 	*session, err = user.Login(ctx, *peer, "admin", admin)
 	if err != nil {
 		t.Fatal("new current issuer login", err)
@@ -190,7 +190,7 @@ func verifyManagedIdentityResources(t *testing.T, ctx context.Context, runtime *
 	if _, err := user.MemberPage(ctx, *peer, oldSession, ""); err == nil {
 		t.Fatal("old issuer session remained current")
 	}
-	if _, admitted := restored.Mesh.Peer(mydcp.Identity(originalKey)); admitted {
+	if _, admitted := restored.Mesh.Peer(sfcp.Identity(originalKey)); admitted {
 		t.Fatal("historic node key became a current TLS fallback")
 	}
 	if !closureOnly {
@@ -350,7 +350,7 @@ func verifyManagedIdentityResources(t *testing.T, ctx context.Context, runtime *
 		return err == nil && found && !retiring && len(a.Bindings().Live()) == 0
 	})
 	for _, owner := range restored.physicalOwners() {
-		rows, err := owner.docker.API.ContainerList(ctx, client.ContainerListOptions{All: true, Filters: client.Filters{}.Add("label", "org.mydc.owner="+owner.owner)})
+		rows, err := owner.docker.API.ContainerList(ctx, client.ContainerListOptions{All: true, Filters: client.Filters{}.Add("label", "org.sfc.owner="+owner.owner)})
 		if err != nil || len(rows.Items) != 0 {
 			t.Fatal("original native container remains after down", err)
 		}

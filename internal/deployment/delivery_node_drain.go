@@ -4,7 +4,7 @@ package deployment
 
 import (
 	"crypto/sha256"
-	"github.com/jay94ks/mydcd/internal/access"
+	"github.com/jay94ks/seafield/internal/access"
 )
 
 // StartRelocated keeps the same CD principal, source policy, field ownership

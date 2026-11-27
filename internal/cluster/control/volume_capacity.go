@@ -6,9 +6,9 @@ import (
 	"encoding/json"
 	"strings"
 
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/workload/volumes"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/workload/volumes"
 )
 
 // OriginalVolumeLimit is an admission reservation. It is never a filesystem
@@ -98,26 +98,26 @@ func (v Volumes) originalHolds(s state.State) (map[string]volumeStorageHold, err
 			return nil, ErrCatalog
 		}
 		var q deployment.ComposeVolume
-		if canonical(g.Config, &q) != nil || uint64(q.MyDC.Capacity) > 1<<40 {
+		if canonical(g.Config, &q) != nil || uint64(q.Sfc.Capacity) > 1<<40 {
 			return nil, ErrCatalog
 		}
 		if e, exists := v.entries[logical]; exists {
 			// A retained Goal is not a second physical volume, even after explicit Gone.
 			if e.Native.Spec.Node != g.Node || e.Native.Spec.NodeKey != g.Owner {
-				if !v.originalGoalRetainedByMove(e.State.Scope(), g, uint64(q.MyDC.Capacity)) {
+				if !v.originalGoalRetainedByMove(e.State.Scope(), g, uint64(q.Sfc.Capacity)) {
 					return nil, ErrCatalog
 				}
 				continue
 			}
-			if uint64(q.MyDC.Capacity) > e.CapacityBytes {
+			if uint64(q.Sfc.Capacity) > e.CapacityBytes {
 				return nil, ErrCatalog
 			}
 			continue
 		}
-		if !v.admitOriginal(g.Tenant, g.Node, g.Owner, uint64(q.MyDC.Capacity)) {
+		if !v.admitOriginal(g.Tenant, g.Node, g.Owner, uint64(q.Sfc.Capacity)) {
 			return nil, ErrCatalog
 		}
-		if add(volumes.Scope{Tenant: g.Tenant, App: g.App, ID: id}, g.Node, g.Owner, uint64(q.MyDC.Capacity)) != nil {
+		if add(volumes.Scope{Tenant: g.Tenant, App: g.App, ID: id}, g.Node, g.Owner, uint64(q.Sfc.Capacity)) != nil {
 			return nil, ErrCatalog
 		}
 	}
@@ -224,6 +224,18 @@ func (p Policy) reduceVolumeCapacity(s state.State, v Volumes, op UserOperation)
 	e, ok := v.entries[volumeKey(q.Scope)]
 	if !ok || e.State.Scope() != q.Scope || e.State.Revision() != op.Change.Expected || e.State.DeleteRevision() != 0 || VolumeNativeDigest(e.Native) != q.Native || q.Bytes <= e.CapacityBytes {
 		return nil, state.ConditionFailed
+	}
+	if fixed := e.Native.Fixed; fixed != nil {
+		// A fixed volume's growth also counts against its root's limit.
+		roots, err := p.NodeStorage(s)
+		if err != nil {
+			return nil, state.Invalid
+		}
+		ref := fixed.Root.Root
+		root, ok := roots.Root(ref.Node, ref.ID)
+		if !ok || root.Reference(p.Cluster) != ref || !rootAdmits(root, v, ref, q.Bytes-e.CapacityBytes) {
+			return nil, state.ConditionFailed
+		}
 	}
 	// This maps/reserves bytes only. It neither adopts data nor changes the
 	// native spec, signed identity, generation, journal, consumer or writer.

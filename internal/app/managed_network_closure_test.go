@@ -9,19 +9,19 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/tenancy"
-	"github.com/jay94ks/mydcd/internal/userauth"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/tenancy"
+	"github.com/jay94ks/seafield/internal/userauth"
 )
 
 // Extends the existing owned single-node Engine/Bridge/CLI fixture at its final
 // native boundary. It inherits that fixture's baseline, finite context and
 // independent rollback. This is not a multiple-member/global closure test.
-func verifyManagedNetworkClosureObservation(t *testing.T, ctx context.Context, r *Runtime, p control.Policy, read func() cluster.View, change func(string, string, uint64, any), wait func(string, func() bool), key string, user userauth.Client, peer mydcp.Peer, session access.Session, root string) {
+func verifyManagedNetworkClosureObservation(t *testing.T, ctx context.Context, r *Runtime, p control.Policy, read func() cluster.View, change func(string, string, uint64, any), wait func(string, func() bool), key string, user userauth.Client, peer sfcp.Peer, session access.Session, root string) {
 	t.Helper()
 	v := read()
 	projection, err := p.ProjectResources(v.State)
@@ -39,7 +39,7 @@ func verifyManagedNetworkClosureObservation(t *testing.T, ctx context.Context, r
 		t.Fatal("closure preflight current tenant/node", err)
 	}
 	if !slices.Contains(tenant.AllowedNodes, source.Network.Node) {
-		change("restore-closure-node", "set-nodes", tenant.Revision, control.NodeAssignment{Tenant: tenant.ID, Nodes: append(slices.Clone(tenant.AllowedNodes), source.Network.Node)})
+		change("restore-closure-node", "set-nodes", tenant.Revision, control.NodeChangeTo(tenant.ID, tenant.AllowedNodes, append(slices.Clone(tenant.AllowedNodes), source.Network.Node)))
 		v = read()
 		projection, err = p.ProjectResources(v.State)
 		if err != nil {
@@ -110,7 +110,7 @@ func verifyManagedNetworkClosureObservation(t *testing.T, ctx context.Context, r
 	if len(page.Rows) != 1 || page.Rows[0].Closure == nil || page.Rows[0].Closure.State != "closed" || page.Rows[0].Closure.Closure == nil || !ownerTarget.VerifyClosure(p.Cluster, *page.Rows[0].Closure.Closure) {
 		t.Fatal("real user session did not receive exact owner closure", page)
 	}
-	// 'mydc network update' reads the same User closure; the old raw CLI
+	// 'sfcli network update' reads the same User closure; the old raw CLI
 	// read is gone.
 	proof = *page.Rows[0].Closure.Closure // Existing real fence consumes the exact User result.
 	if proof.Generation == observed.Generation && proof.Revision == observed.Revision {

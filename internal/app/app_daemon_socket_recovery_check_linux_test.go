@@ -15,7 +15,7 @@ import (
 )
 
 func TestE4OwnedDaemonSocketChild(t *testing.T) {
-	path := os.Getenv("MYDC_E4_OWNED_SOCKET_CHILD")
+	path := os.Getenv("SFC_E4_OWNED_SOCKET_CHILD")
 	if path == "" {
 		t.Skip("owned child only")
 	}
@@ -40,7 +40,7 @@ func TestE4ExplicitKilledDaemonSocketRecovery(t *testing.T) {
 			root := t.TempDir()
 			path := filepath.Join(root, "node.sock")
 			cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestE4OwnedDaemonSocketChild$", "-test.v")
-			cmd.Env = append(os.Environ(), "MYDC_E4_OWNED_SOCKET_CHILD="+path)
+			cmd.Env = append(os.Environ(), "SFC_E4_OWNED_SOCKET_CHILD="+path)
 			stdin, err := cmd.StdinPipe()
 			if err != nil {
 				t.Fatal(err)

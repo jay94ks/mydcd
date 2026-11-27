@@ -6,11 +6,11 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/lifecycle"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/workload/volumes"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/lifecycle"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/workload/volumes"
 )
 
 // AppMovePlanRequest selects a read-only proposal. It cannot change ownership.
@@ -146,7 +146,7 @@ func (p Policy) AppMovePlanArtifact(s state.State, session access.Session, at in
 			ctx.DefaultNode = begin.DefaultNode
 		}
 	}
-	node := decl.MyDC.Node
+	node := decl.Sfc.Node
 	if node == "" {
 		node = r.Node
 	}
@@ -194,7 +194,7 @@ func (p Policy) AppMovePlanArtifact(s state.State, session access.Session, at in
 	if _, used := inventory.Operation(r.Move.ID); used {
 		return nil, access.ErrConflict
 	}
-	capacity := uint64(decl.MyDC.Capacity)
+	capacity := uint64(decl.Sfc.Capacity)
 	if capacity == 0 {
 		capacity = v.entries[volumeKey(ready.Spec.Scope)].CapacityBytes
 	}

@@ -6,8 +6,8 @@ import (
 	"reflect"
 	"slices"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/imagesource"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/imagesource"
 )
 
 // CheckRegistrySources reuses the same selection core for a frozen preparation.

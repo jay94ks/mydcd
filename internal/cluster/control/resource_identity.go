@@ -2,7 +2,7 @@
 
 package control
 
-import "github.com/jay94ks/mydcd/internal/cluster/state"
+import "github.com/jay94ks/seafield/internal/cluster/state"
 
 // ownsResource authenticates the current node while retaining an immutable
 // resource owner. Callers must first resolve the exact original resource or

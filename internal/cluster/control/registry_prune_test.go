@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/registryclient"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/registryclient"
 )
 
 func signedPruneFixture(t *testing.T, f *nodeStorageFixture, id string, external bool, conditions registryclient.PruneConditions, count uint32) RegistryMaintenancePlan {

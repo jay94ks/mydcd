@@ -13,18 +13,18 @@ import (
 	"regexp"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/web/mydc"
-	"github.com/jay94ks/mydcd/internal/web/seal"
-	"github.com/jay94ks/mydcd/internal/web/store"
+	"github.com/jay94ks/seafield/internal/web/seal"
+	"github.com/jay94ks/seafield/internal/web/sfc"
+	"github.com/jay94ks/seafield/internal/web/store"
 )
 
 // The web's automation account. Scheduled work has no person
-// to sign it, so the web logs in to an ordinary mydcd account with a key
+// to sign it, so the web logs in to an ordinary sfcd account with a key
 // pair it made itself. The private key (an Ed25519 seed) is the sealed file
 // automationKey and never leaves the daemon; bbolt holds the account name
 // and the public key. Registering the public key on the account (put-user),
 // its action scope (set-account-scope), key-only and memberships are the
-// administrator's own signed ops: mydcd decides what the account may do,
+// administrator's own signed ops: sfcd decides what the account may do,
 // and the web gives it no authority of its own.
 
 const (
@@ -33,7 +33,7 @@ const (
 	// set up.
 	ErrAutomationMissing = "automation-account-missing"
 	// ErrAutomationLogin is the run error when the account could not log in
-	// (key not registered, revoked, scope, mydcd down).
+	// (key not registered, revoked, scope, sfcd down).
 	ErrAutomationLogin = "automation-login-failed"
 )
 
@@ -89,7 +89,7 @@ func (s *Server) handleGetAutomation(w http.ResponseWriter, r *http.Request, ws 
 // account and make its key pair. A new key is made the first time, when the
 // name changes, or with rotate; otherwise the key stays. The answer carries
 // the public key to register on the account with put-user. A replaced key
-// stays registered in mydcd until the administrator removes it.
+// stays registered in sfcd until the administrator removes it.
 func (s *Server) handlePutAutomation(w http.ResponseWriter, r *http.Request, ws *webSession) {
 	var req struct {
 		Username string `json:"username"`
@@ -144,7 +144,7 @@ func (s *Server) handlePutAutomation(w http.ResponseWriter, r *http.Request, ws 
 
 // DELETE /system/automation (system admin): forget the account and remove
 // the sealed key → 204. Scheduled work stops; the public key stays
-// registered in mydcd until the administrator removes it there.
+// registered in sfcd until the administrator removes it there.
 func (s *Server) handleDeleteAutomation(w http.ResponseWriter, r *http.Request, ws *webSession) {
 	if !s.requireAdmin(w, r, ws) {
 		return
@@ -192,9 +192,9 @@ func (s *Server) handleCheckAutomation(w http.ResponseWriter, r *http.Request, w
 var errAutomationMissing = errors.New(ErrAutomationMissing)
 
 // automationErrorCode is the short code shown for a failed login: the
-// mydcd code when there is one (denied, unauthenticated, …).
+// sfcd code when there is one (denied, unauthenticated, …).
 func automationErrorCode(err error) string {
-	var me *mydc.Error
+	var me *sfc.Error
 	switch {
 	case errors.Is(err, errAutomationMissing):
 		return ErrAutomationMissing
@@ -207,7 +207,7 @@ func automationErrorCode(err error) string {
 }
 
 // automationLogin opens a new connection and logs in as the automation
-// account with its sealed key (mydcd's key login: challenge, then the
+// account with its sealed key (sfcd's key login: challenge, then the
 // signed proof). The session is not a browser login: it has no cookie and
 // the caller closes ws.conn when done. reason says what it is for and is
 // kept with lastCheck.
@@ -266,8 +266,8 @@ func (s *Server) automationLoginOnce(ctx context.Context) (*webSession, error) {
 		conn.Close()
 		return nil, err
 	}
-	proof := mydc.NewKeyProof(t)
-	proof.Signature = ed25519.Sign(priv, mydc.KeyProofSigningBytes(proof))
+	proof := sfc.NewKeyProof(t)
+	proof.Signature = ed25519.Sign(priv, sfc.KeyProofSigningBytes(proof))
 	sess, err := conn.Login(ctx, t, proof)
 	if err != nil {
 		conn.Close()

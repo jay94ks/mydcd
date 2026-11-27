@@ -6,7 +6,7 @@ import (
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
-	"github.com/jay94ks/mydcd/internal/eventlog"
+	"github.com/jay94ks/seafield/internal/eventlog"
 	"io"
 	"testing"
 	"time"
@@ -44,7 +44,7 @@ func TestNodeDiagnosticsArchiveUsesAllowlistedLogsAndBoundedPrivateFiles(t *test
 		files++
 	}
 	if files != 3 {
-		t.Fatal("missing config/status/mydcd event logs", files)
+		t.Fatal("missing config/status/sfcd event logs", files)
 	}
 	changed := bundle
 	changed.Data = bytes.Clone(bundle.Data)

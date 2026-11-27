@@ -8,7 +8,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/cluster/state"
 )
 
 func TestIngressGoalBindsOriginalTaskNetworkAndRemoteLifetime(t *testing.T) {
@@ -18,7 +18,7 @@ func TestIngressGoalBindsOriginalTaskNetworkAndRemoteLifetime(t *testing.T) {
 	i.Backend.Service = "web"
 	i.Backend.Port = 8080
 	i.Backend.HealthPath = "/readyz"
-	c.MyDC.Ingress = i
+	c.Sfc.Ingress = i
 	b, err := Compile(c, f.c, contextFor(t, f))
 	if err != nil {
 		t.Fatal(err)
@@ -76,7 +76,7 @@ func TestIngressGoalBindsOriginalTaskNetworkAndRemoteLifetime(t *testing.T) {
 	if _, err := ResolveIngress(b.d.Cluster, key, o, bad); err == nil {
 		t.Fatal("stale task network source accepted")
 	}
-	c.MyDC.Ingress.Runtime = IngressRuntime{}
+	c.Sfc.Ingress.Runtime = IngressRuntime{}
 	if _, err := Compile(c, f.c, contextFor(t, f)); err == nil {
 		t.Fatal("empty runtime demand was granted")
 	}
@@ -85,7 +85,7 @@ func TestIngressGoalBindsOriginalTaskNetworkAndRemoteLifetime(t *testing.T) {
 func TestMultipleIngressRoutesConsumeFixedSingletonAndFollowedReplicas(t *testing.T) {
 	f, c, ctx := replicaFixture(t)
 	i := &IngressDeclaration{Node: "node-a", Listeners: []ListenerDeclaration{{Shared: "https"}}, Runtime: IngressRuntime{MaxRequests: 2, MaxConnections: 8, MaxHeaderBytes: 4096, MaxBodyBytes: 1 << 20, BufferBytes: 128 << 10, RequestTimeoutMS: 30000, DialTimeoutMS: 1000, ResponseHeaderTimeoutMS: 2000, HealthIntervalMS: 100}, Routes: []IngressRouteDeclaration{{ID: "web", Host: "app.test", Prefix: "/", Service: "web", Network: "app", Port: 8080, HealthPath: "/readyz"}, {ID: "db", Host: "app.test", Prefix: "/db", Service: "db", Network: "app", Port: 3306, HealthPath: "/"}}}
-	c.MyDC.Ingress = i
+	c.Sfc.Ingress = i
 	b, err := CompileApp(c, f.c, ctx)
 	if err != nil {
 		t.Fatal(err)

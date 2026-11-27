@@ -8,9 +8,9 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/network/services"
-	"github.com/jay94ks/mydcd/internal/tenancy"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/network/services"
+	"github.com/jay94ks/seafield/internal/tenancy"
 )
 
 // These are committed FSM/core facts. No native grant or adapter exists for
@@ -44,7 +44,7 @@ func TestRouteCatalogRevocationIsAtomicAndUnpreparedOwnersCloseWithoutNativeGran
 	tenant, _ := catalog.Tenant(proposal.Source.Tenant)
 	sources := f.s.Objects(tenancy.ManagedNetworkSourcePrefix)
 	beforeApps := f.s.Object(AppsKey)
-	f.apply("route-revoke-node", "set-nodes", tenant.Revision, NodeAssignment{Tenant: proposal.Source.Tenant, Nodes: []string{"node-b"}}, state.Applied)
+	f.apply("route-revoke-node", "set-nodes", tenant.Revision, NodeChangeTo(proposal.Source.Tenant, tenant.AllowedNodes, []string{"node-b"}), state.Applied)
 	if f.s.Object(CatalogKey).Revision != f.s.Object(ResourcesKey).Revision || f.s.Object(AppsKey) != beforeApps {
 		t.Fatal("catalog and route revocation were split or original Authority was rewritten")
 	}
@@ -67,7 +67,7 @@ func TestRouteCatalogRevocationIsAtomicAndUnpreparedOwnersCloseWithoutNativeGran
 	}
 	// Restoring a grant is not a new approval and cannot reopen Revoking.
 	tenant, _ = catalog.Tenant(proposal.Source.Tenant)
-	f.apply("route-restore-node", "set-nodes", tenant.Revision, NodeAssignment{Tenant: proposal.Source.Tenant, Nodes: []string{"node-a", "node-b"}}, state.Applied)
+	f.apply("route-restore-node", "set-nodes", tenant.Revision, NodeChangeTo(proposal.Source.Tenant, tenant.AllowedNodes, []string{"node-a", "node-b"}), state.Applied)
 	for i, original := range refs {
 		projection, err = f.p.ProjectResources(f.s)
 		if err != nil {
@@ -151,7 +151,7 @@ func TestRouteNeverDispatchedClaimCannotEraseAnOriginalNativeGrant(t *testing.T)
 	// The patch admission runs the real reducer, so the change must carry the
 	// tenant's current revision.
 	tenant, _ := catalog.Tenant("tenant")
-	change, _ := ChangeBytes("set-nodes", "admin", tenant.Revision, NodeAssignment{Tenant: "tenant", Nodes: []string{"node-b"}})
+	change, _ := ChangeBytes("set-nodes", "admin", tenant.Revision, NodeChangeTo("tenant", tenant.AllowedNodes, []string{"node-b"}))
 	var parsed Change
 	_ = json.Unmarshal(change, &parsed)
 	operation := UserOperation{Schema: 1, Session: f.session, At: 2, Epoch: f.s.ModuleEpoch(), RequestID: "patch-scope-only", RootRevision: f.s.Object(CatalogKey).Revision, Change: parsed}

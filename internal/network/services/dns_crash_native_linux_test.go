@@ -15,12 +15,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/engine"
-	"github.com/jay94ks/mydcd/internal/network"
-	"github.com/jay94ks/mydcd/internal/storage"
-	"github.com/jay94ks/mydcd/internal/tenancy"
-	"github.com/jay94ks/mydcd/internal/workload"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/engine"
+	"github.com/jay94ks/seafield/internal/network"
+	"github.com/jay94ks/seafield/internal/storage"
+	"github.com/jay94ks/seafield/internal/tenancy"
+	"github.com/jay94ks/seafield/internal/workload"
 )
 
 type dnsCrashNativeInput struct {
@@ -36,7 +36,7 @@ type dnsCrashNativeInput struct {
 }
 
 func TestRealBoundaryDNSCrashOwnedChild(t *testing.T) {
-	path := os.Getenv("MYDC_DNS_CRASH_NATIVE_INPUT")
+	path := os.Getenv("SFC_DNS_CRASH_NATIVE_INPUT")
 	if path == "" {
 		t.Skip("owned child only")
 	}
@@ -153,7 +153,7 @@ func crashNativeDNSOwner(t *testing.T, ctx context.Context, root, path string, n
 		}
 	}()
 	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestRealBoundaryDNSCrashOwnedChild$", "-test.v")
-	cmd.Env = append(os.Environ(), "MYDC_DNS_CRASH_NATIVE_INPUT="+file)
+	cmd.Env = append(os.Environ(), "SFC_DNS_CRASH_NATIVE_INPUT="+file)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		t.Fatal(err)

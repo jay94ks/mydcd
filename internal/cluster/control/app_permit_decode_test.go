@@ -9,9 +9,9 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/deployment"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/deployment"
 )
 
 func permitDecodeFixture(t *testing.T) (*backupCoreFixture, [32]byte, AppBindingRequest) {
@@ -101,7 +101,7 @@ func TestPermitAppsDecodeRetainsCurrentChecksAndOwnedViews(t *testing.T) {
 	expected := u.Revision
 	u.Revision = 0
 	u.Username = "renamed-admin"
-	c, err = c.PutUser("admin", expected, u)
+	c, err = c.PutUser("admin", expected, accountFields(u))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -126,7 +126,7 @@ func TestPermitAppsDecodeVerifiesActualCheckpointAndPolicy(t *testing.T) {
 		t.Fatal(err)
 	}
 	cached := permitAppsDecoded.Load()
-	key := partKey(AppsKey, 0)
+	key := storedPart(t, f.s, AppsKey)
 	part := f.s.Object(key)
 	damaged := permitDecodeWrites(t, f.s, key, map[string][]byte{key: []byte(part.Value + " ")})
 	if _, err := f.p.AppBindingPermit(damaged, owner, q); err == nil {

@@ -3,9 +3,9 @@
 package control
 
 import (
-	"github.com/jay94ks/mydcd/internal/cluster/lifecycle"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/eventlog"
+	"github.com/jay94ks/seafield/internal/cluster/lifecycle"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/eventlog"
 )
 
 // NodeShellEvents is called before ProjectEvents' Applied-only guard so an

@@ -23,14 +23,14 @@ import (
 	"time"
 
 	cerrdefs "github.com/containerd/errdefs"
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/engine"
-	"github.com/jay94ks/mydcd/internal/network"
-	"github.com/jay94ks/mydcd/internal/network/services"
-	"github.com/jay94ks/mydcd/internal/reconcile"
-	"github.com/jay94ks/mydcd/internal/tenancy"
-	"github.com/jay94ks/mydcd/internal/workload"
-	"github.com/jay94ks/mydcd/tests/enginefixture"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/engine"
+	"github.com/jay94ks/seafield/internal/network"
+	"github.com/jay94ks/seafield/internal/network/services"
+	"github.com/jay94ks/seafield/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/tenancy"
+	"github.com/jay94ks/seafield/internal/workload"
+	"github.com/jay94ks/seafield/tests/enginefixture"
 	"github.com/miekg/dns"
 	"github.com/moby/moby/client"
 	"golang.org/x/sys/unix"
@@ -89,7 +89,7 @@ type kernelDNSImageAdmission struct {
 // facts. The host must reset immediately after ready while its query is live.
 func planKernelDNS(t *testing.T, guest string, catalog access.Catalog, networks tenancy.Networks, authority services.Authority, source services.Source) (kernelDNSPlan, services.Authority, *net.UDPConn) {
 	t.Helper()
-	backend := os.Getenv("MYDC_DOCKER_TEST_BACKEND")
+	backend := os.Getenv("SFC_DOCKER_TEST_BACKEND")
 	if !filepath.IsAbs(backend) {
 		t.Fatal("physical DNS fixture requires its explicit prebuilt static backend")
 	}
@@ -110,7 +110,7 @@ func planKernelDNS(t *testing.T, guest string, catalog access.Catalog, networks 
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg := services.DNSConfig{Tenant: source.Tenant, ID: "kernel-dns", Network: source.Network, Pool: source.Pool, Source: 1, Serial: 1, Enabled: true, Zone: "kernel.mydc.test.", TTL: 5, NegativeTTL: 3, QuerySeconds: 30, MaxQueries: 4, MaxCacheEntries: 2, MaxResponseBytes: 4096,
+	cfg := services.DNSConfig{Tenant: source.Tenant, ID: "kernel-dns", Network: source.Network, Pool: source.Pool, Source: 1, Serial: 1, Enabled: true, Zone: "kernel.sfc.test.", TTL: 5, NegativeTTL: 3, QuerySeconds: 30, MaxQueries: 4, MaxCacheEntries: 2, MaxResponseBytes: 4096,
 		Names: []services.DNSName{{Name: "probe", Endpoint: allocation.Endpoint, Generation: allocation.Generation}}, Upstreams: []netip.AddrPort{upstream.LocalAddr().(*net.UDPAddr).AddrPort()}}
 	authority, ref, err := authority.GrantDNSInstance(catalog, networks, "admin", 0, cfg)
 	if err != nil {
@@ -150,7 +150,7 @@ func newKernelDNS(t *testing.T, root string, input kernelRouteInput, c *engine.C
 }
 
 func (s *kernelDNSRuntime) openOwner() error {
-	options := services.DNSOwnerOptions{Cluster: s.policy.Networks.Cluster(), Key: s.key, Network: s.n, Workload: s.w, Roots: []string{"mydc.test."}, MaxViews: 16, MaxQueries: 8, MaxConnections: 4, IdleTimeout: time.Second,
+	options := services.DNSOwnerOptions{Cluster: s.policy.Networks.Cluster(), Key: s.key, Network: s.n, Workload: s.w, Roots: []string{"sfc.test."}, MaxViews: 16, MaxQueries: 8, MaxConnections: 4, IdleTimeout: time.Second,
 		Current: func(_ context.Context, tenant, id string) (services.DNSOwnerPolicy, error) {
 			s.mu.Lock()
 			defer s.mu.Unlock()
@@ -181,17 +181,17 @@ func (s *kernelDNSRuntime) configure(cfg services.DNSConfig) error {
 
 func (s *kernelDNSRuntime) prepare(t *testing.T, ctx context.Context, upstream *net.UDPConn) kernelDNSReady {
 	t.Helper()
-	backend := os.Getenv("MYDC_DOCKER_TEST_BACKEND")
+	backend := os.Getenv("SFC_DOCKER_TEST_BACKEND")
 	if kernelFileDigest(t, backend) != s.plan.BackendDigest {
 		t.Fatal("prepared backend changed after immutable input")
 	}
-	imageRef := "mydc-boundary/" + s.plan.Tag + ":local"
+	imageRef := "sfc-boundary/" + s.plan.Tag + ":local"
 	if _, err := s.c.API.ImageInspect(ctx, imageRef); !cerrdefs.IsNotFound(err) {
 		t.Fatal("refuse existing kernel DNS image", err)
 	}
 	writeKernelRouteJSON(t, filepath.Join(s.root, "dns-image-admitted.json"), kernelDNSImageAdmission{Schema: 1, Tag: s.plan.Tag, BackendDigest: s.plan.BackendDigest})
 	s.imageAdmitted = true
-	native := enginefixture.ImportPrepared(t, ctx, s.c, s.plan.Tag, backend, []string{`USER 10001:10001`, `ENV MYDC_DNS_FIXTURE=1`})
+	native := enginefixture.ImportPrepared(t, ctx, s.c, s.plan.Tag, backend, []string{`USER 10001:10001`, `ENV SFC_DNS_FIXTURE=1`})
 	image, err := s.c.Image(ctx, native.Image, false)
 	if err != nil {
 		t.Fatal(err)
@@ -201,7 +201,7 @@ func (s *kernelDNSRuntime) prepare(t *testing.T, ctx context.Context, upstream *
 		t.Fatal(err)
 	}
 	s.client = kernelDNSClient{Schema: 1, Image: native.Image, ImageRef: native.ImageRef, Spec: workload.ContainerSpec{Schema: 1, Node: s.c.Owner, Image: native.Image, Bridge: s.policy.Bridge, BridgeGeneration: s.policy.BridgeGeneration, IPv4: s.plan.Allocation.Address, Memory: 32 << 20, NanoCPU: 100000000, Process: &process,
-		Resolver: &workload.Resolver{Servers: []netip.Addr{s.plan.Gateway}, Search: []string{"kernel.mydc.test"}}, Readiness: &workload.HTTPReadiness{Path: "/ping", Port: 8080}}}
+		Resolver: &workload.Resolver{Servers: []netip.Addr{s.plan.Gateway}, Search: []string{"kernel.sfc.test"}}, Readiness: &workload.HTTPReadiness{Path: "/ping", Port: 8080}}}
 	s.w, err = workload.OpenManager(filepath.Join(s.root, "dns-workload.db"), s.c, s.n)
 	if err != nil {
 		t.Fatal(err)
@@ -333,7 +333,7 @@ func (s *kernelDNSRuntime) resume(t *testing.T, ctx context.Context, saved kerne
 		t.Fatal(err)
 	}
 	image, err := s.c.API.ImageInspect(ctx, s.client.ImageRef)
-	if err != nil || image.ID != s.client.Image || image.Config == nil || image.Config.Labels["org.mydc.test.owner"] != s.plan.Tag {
+	if err != nil || image.ID != s.client.Image || image.Config == nil || image.Config.Labels["org.sfc.test.owner"] != s.plan.Tag {
 		t.Fatal("original DNS fixture image changed across boot", err)
 	}
 	s.w, err = workload.OpenManager(filepath.Join(s.root, "dns-workload.db"), s.c, s.n)
@@ -434,7 +434,7 @@ func (s *kernelDNSRuntime) exchange(ctx context.Context, protocol string, wire [
 func (s *kernelDNSRuntime) query(t *testing.T, ctx context.Context, protocol string) {
 	t.Helper()
 	q := new(dns.Msg)
-	q.SetQuestion("probe.kernel.mydc.test.", dns.TypeA)
+	q.SetQuestion("probe.kernel.sfc.test.", dns.TypeA)
 	wire, err := q.Pack()
 	if err != nil {
 		t.Fatal(err)
@@ -522,10 +522,10 @@ func (s *kernelDNSRuntime) finish(ctx context.Context) error {
 		s.done = true
 		return nil
 	}
-	imageRef := "mydc-boundary/" + s.plan.Tag + ":local"
+	imageRef := "sfc-boundary/" + s.plan.Tag + ":local"
 	image, err := s.c.API.ImageInspect(ctx, imageRef)
 	if err == nil {
-		if image.Config == nil || image.Config.Labels["org.mydc.test.owner"] != s.plan.Tag || s.client.Image != "" && image.ID != s.client.Image {
+		if image.Config == nil || image.Config.Labels["org.sfc.test.owner"] != s.plan.Tag || s.client.Image != "" && image.ID != s.client.Image {
 			return engine.ErrOwnership
 		}
 		if _, err := s.c.API.ImageRemove(ctx, imageRef, client.ImageRemoveOptions{}); err != nil {

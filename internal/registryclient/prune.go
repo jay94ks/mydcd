@@ -104,7 +104,7 @@ func (in PruneInventory) canonical() (PruneInventory, error) {
 	if in.Schema != 1 || len(in.Images) > MaxCatalogueNames || len(in.Edges) > MaxCatalogueNames || len(in.Blobs) > 65536 || len(in.Protected) > MaxCatalogueNames {
 		return in, &Error{Code: "INVALID_IMAGE"}
 	}
-	_, host, _, err := Normalize(in.Authority + "/mydc-prune:check")
+	_, host, _, err := Normalize(in.Authority + "/sfc-prune:check")
 	if err != nil || host != in.Authority {
 		return in, &Error{Code: "INVALID_SOURCE"}
 	}
@@ -192,7 +192,7 @@ func PruneAliasDigest(tags []string) string {
 	canonical := append([]string{}, tags...)
 	slices.Sort(canonical)
 	raw, _ := json.Marshal(canonical)
-	sum := sha256.Sum256(append([]byte("mydc-registry-prune-aliases-1\x00"), raw...))
+	sum := sha256.Sum256(append([]byte("sfc-registry-prune-aliases-1\x00"), raw...))
 	return hex.EncodeToString(sum[:])
 }
 
@@ -238,14 +238,14 @@ type PrunePreview struct {
 
 func (p PrunePreview) Digest() [32]byte {
 	raw, _ := json.Marshal(p)
-	return sha256.Sum256(append([]byte("mydc-registry-prune-preview-1\x00"), raw...))
+	return sha256.Sum256(append([]byte("sfc-registry-prune-preview-1\x00"), raw...))
 }
 
 // ItemID separates per-item native receipts within a single original job.
 // It does not allocate a new user operation or resolve an unknown side effect.
 func (i PruneItem) ItemID() string {
 	raw, _ := json.Marshal(i)
-	sum := sha256.Sum256(append([]byte("mydc-registry-prune-item-1\x00"), raw...))
+	sum := sha256.Sum256(append([]byte("sfc-registry-prune-item-1\x00"), raw...))
 	return hex.EncodeToString(sum[:])
 }
 
@@ -264,7 +264,7 @@ func BuildPrunePreview(in PruneInventory, c PruneConditions) (PrunePreview, erro
 	var owned PruneConditions
 	_ = json.Unmarshal(raw, &owned)
 	raw, _ = json.Marshal(in)
-	p := PrunePreview{Schema: 1, Authority: in.Authority, Conditions: owned, Inventory: sha256.Sum256(append([]byte("mydc-registry-prune-inventory-1\x00"), raw...)), Live: in.Live, UntaggedComplete: in.UntaggedComplete, EstimateKnown: !in.Live && in.UntaggedComplete && in.PhysicalComplete}
+	p := PrunePreview{Schema: 1, Authority: in.Authority, Conditions: owned, Inventory: sha256.Sum256(append([]byte("sfc-registry-prune-inventory-1\x00"), raw...)), Live: in.Live, UntaggedComplete: in.UntaggedComplete, EstimateKnown: !in.Live && in.UntaggedComplete && in.PhysicalComplete}
 	protected := map[string]string{}
 	for _, row := range in.Protected {
 		protected[pruneImageKey(row.Repository, row.Digest)] = row.Code
@@ -517,7 +517,7 @@ func (p PrunePreview) Valid() bool {
 	if p.Schema != 1 || !p.Conditions.Valid() || p.Inventory == ([32]byte{}) || p.ImageBytes < 0 || p.EstimatedReclaimedBytes < 0 || !p.EstimateKnown && p.EstimatedReclaimedBytes != 0 || (p.Live || !p.UntaggedComplete) && p.EstimateKnown || len(p.Items) > MaxCatalogueNames || len(p.Items)+len(p.Retained) > 2*MaxCatalogueNames {
 		return false
 	}
-	_, host, _, err := Normalize(p.Authority + "/mydc-prune:check")
+	_, host, _, err := Normalize(p.Authority + "/sfc-prune:check")
 	if err != nil || host != p.Authority {
 		return false
 	}

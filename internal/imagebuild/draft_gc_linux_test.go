@@ -11,7 +11,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/reconcile"
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -34,7 +34,7 @@ func TestDraftCollectionRemovesOnlyUnusedBodiesAndKeepsOriginalEditResults(t *te
 	if n, err := store.CollectUnused(context.Background(), 16); err != nil || n != 1 {
 		t.Fatal("unused original not collected", n, err)
 	}
-	name := filepath.Join(store.scope.Root.Path, ".mydc-imagebuild", string(store.key), string(draftBlobKey(edit.File.Digest)))
+	name := filepath.Join(store.scope.Root.Path, ".sfc-imagebuild", string(store.key), string(draftBlobKey(edit.File.Digest)))
 	if _, err := os.Stat(name); !errors.Is(err, os.ErrNotExist) {
 		t.Fatal("body retained", err)
 	}
@@ -186,7 +186,7 @@ func TestDraftCollectionReopensOriginalUnlinkIntentAfterCommitLoss(t *testing.T)
 	if n, err := store.CollectUnused(ctx, 16); !errors.Is(err, errDraftGCCommit) || n != 0 {
 		t.Fatal("completion failure hidden", n, err)
 	}
-	name := filepath.Join(store.scope.Root.Path, ".mydc-imagebuild", string(store.key), string(draftBlobKey(edit.File.Digest)))
+	name := filepath.Join(store.scope.Root.Path, ".sfc-imagebuild", string(store.key), string(draftBlobKey(edit.File.Digest)))
 	if _, err := os.Stat(name); !errors.Is(err, os.ErrNotExist) {
 		t.Fatal("failure was not after actual unlink", err)
 	}
@@ -229,7 +229,7 @@ func TestDraftCollectionRejectsMissingOrReplacedOriginalBeforeIntent(t *testing.
 	for _, replace := range []bool{false, true} {
 		t.Run(map[bool]string{false: "missing", true: "replaced"}[replace], func(t *testing.T) {
 			store, spool, edit, _ := unusedDraftFile(t)
-			name := filepath.Join(store.scope.Root.Path, ".mydc-imagebuild", string(store.key), string(draftBlobKey(edit.File.Digest)))
+			name := filepath.Join(store.scope.Root.Path, ".sfc-imagebuild", string(store.key), string(draftBlobKey(edit.File.Digest)))
 			if err := os.Rename(name, name+"-original"); err != nil {
 				t.Fatal(err)
 			}
@@ -303,7 +303,7 @@ func TestDraftCollectionReclaimsSupersededPartialEditsWithoutChangingOriginalInt
 			if n, err := store.CollectUnused(ctx, 16); err != nil || n != 1 {
 				t.Fatal("superseded original partial not collected", n, err)
 			}
-			name := filepath.Join(store.scope.Root.Path, ".mydc-imagebuild", string(store.key), string(draftBlobKey(edit.File.Digest)))
+			name := filepath.Join(store.scope.Root.Path, ".sfc-imagebuild", string(store.key), string(draftBlobKey(edit.File.Digest)))
 			if _, err := os.Stat(name); !errors.Is(err, os.ErrNotExist) {
 				t.Fatal("partial body remains", err)
 			}
@@ -450,7 +450,7 @@ func TestDraftPartialCollectionRequiresRecordedOriginalInode(t *testing.T) {
 			if _, err := store.Edit(ctx, DraftEdit{ID: "advance", Kind: "mkdir", Path: "other", Expected: 1}, nil); err != nil {
 				t.Fatal(err)
 			}
-			name := filepath.Join(store.scope.Root.Path, ".mydc-imagebuild", string(store.key), string(draftBlobKey(edit.File.Digest)))
+			name := filepath.Join(store.scope.Root.Path, ".sfc-imagebuild", string(store.key), string(draftBlobKey(edit.File.Digest)))
 			if err := os.Rename(name, name+"-original"); err != nil {
 				t.Fatal(err)
 			}

@@ -3,8 +3,8 @@
 package imagebuild
 
 import (
-	"github.com/jay94ks/mydcd/internal/cluster/lifecycle"
-	"github.com/jay94ks/mydcd/internal/engine"
+	"github.com/jay94ks/seafield/internal/cluster/lifecycle"
+	"github.com/jay94ks/seafield/internal/engine"
 )
 
 // NativeCacheRetirementGrant comes from the existing committed tenant

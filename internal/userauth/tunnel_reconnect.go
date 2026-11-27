@@ -7,68 +7,84 @@ import (
 	"errors"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/mydcp"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/sfcp"
 )
 
-func (s Service) tunnelQuery(ctx context.Context, view cluster.View, request Request, session access.Session) Reply {
-	var err error
-	out := Reply{Schema: 1, Code: "unavailable"}
-	if request.Method == "tunnel-reconnect-plan" {
-		if s.NodeObservations == nil {
-			return out
-		}
-		reports, e := s.NodeObservations(ctx, view)
-		if e != nil {
-			return out
-		}
-		plan, e := s.Policy.PlanTunnelReconnect(view.State, session, time.Now().Unix(), *request.Tunnel, reports)
-		err = e
-		if err == nil {
-			out.Code, out.TunnelPlan = "ok", &plan
-		}
-	} else {
-		status, e := s.Policy.TunnelStatus(view.State, session, time.Now().Unix(), *request.Tunnel)
-		err = e
-		if err == nil {
-			out.Code, out.TunnelStatus = "ok", &status
-		}
-	}
-	if errors.Is(err, access.ErrDenied) || errors.Is(err, access.ErrInvalid) {
-		out.Code = "denied"
-	}
-	if errors.Is(err, access.ErrConflict) {
-		out.Code = "conflict"
-	}
-	return out
+// TunnelPlanQuery names one down server-to-server link to reconnect.
+type TunnelPlanQuery struct{ Node, Peer string }
+
+func (q TunnelPlanQuery) Valid() bool {
+	return control.TunnelQuery{Node: q.Node, Peer: q.Peer}.Valid(true)
 }
-func (c Client) QueryTunnelReconnect(ctx context.Context, peer mydcp.Peer, session access.Session, plan bool, q control.TunnelQuery) (Reply, error) {
-	if !q.Valid(plan) {
-		return Reply{}, mydcp.ErrAdmission
+
+// TunnelStatusQuery names one recorded reconnect operation.
+type TunnelStatusQuery struct{ Operation string }
+
+func (q TunnelStatusQuery) Valid() bool {
+	return control.TunnelQuery{Operation: q.Operation}.Valid(false)
+}
+
+func tunnelRefusal(err error) string {
+	switch {
+	case errors.Is(err, access.ErrDenied) || errors.Is(err, access.ErrInvalid):
+		return "denied"
+	case errors.Is(err, access.ErrConflict):
+		return "conflict"
 	}
-	method := "tunnel-reconnect-status"
-	if plan {
-		method = "tunnel-reconnect-plan"
-	}
-	reply, err := c.query(ctx, peer, session, Request{Method: method, Tunnel: &q})
+	return "unavailable"
+}
+
+var (
+	// TunnelReconnectPlanMethod plans the reconnect of a link the servers'
+	// signed observations report down (system administrator).
+	TunnelReconnectPlanMethod = define(Method[TunnelPlanQuery, control.TunnelPlan]{Name: "tunnel-reconnect-plan"}, false, func(ctx context.Context, s Service, view cluster.View, session access.Session, q TunnelPlanQuery) (control.TunnelPlan, string) {
+		if s.NodeObservations == nil {
+			return control.TunnelPlan{}, "unavailable"
+		}
+		reports, err := s.NodeObservations(ctx, view)
+		if err != nil {
+			return control.TunnelPlan{}, "unavailable"
+		}
+		plan, err := s.Policy.PlanTunnelReconnect(view.State, session, time.Now().Unix(), control.TunnelQuery{Node: q.Node, Peer: q.Peer}, reports)
+		if err != nil {
+			return control.TunnelPlan{}, tunnelRefusal(err)
+		}
+		return plan, "ok"
+	})
+	// TunnelReconnectStatusMethod reads one reconnect operation.
+	TunnelReconnectStatusMethod = define(Method[TunnelStatusQuery, control.TunnelStatus]{Name: "tunnel-reconnect-status"}, false, func(_ context.Context, s Service, view cluster.View, session access.Session, q TunnelStatusQuery) (control.TunnelStatus, string) {
+		status, err := s.Policy.TunnelStatus(view.State, session, time.Now().Unix(), control.TunnelQuery{Operation: q.Operation})
+		if err != nil {
+			return control.TunnelStatus{}, tunnelRefusal(err)
+		}
+		return status, "ok"
+	})
+)
+
+func (c Client) TunnelReconnectPlan(ctx context.Context, peer sfcp.Peer, session access.Session, node, link string) (control.TunnelPlan, error) {
+	p, err := call(ctx, c, peer, session, TunnelReconnectPlanMethod, TunnelPlanQuery{Node: node, Peer: link})
 	if err != nil {
-		return reply, err
+		return control.TunnelPlan{}, err
 	}
-	if plan {
-		p := reply.TunnelPlan
-		if p == nil || !p.Valid() || p.Cluster != c.Cluster || p.Node != q.Node || p.Peer != q.Peer {
-			return Reply{}, mydcp.ErrFrame
-		}
-	} else {
-		r := reply.TunnelStatus
-		if r == nil || r.Schema != 1 || r.Operation != q.Operation || !r.Plan.Valid() || r.Plan.Cluster != c.Cluster || r.Revision == 0 || r.User == "" {
-			return Reply{}, mydcp.ErrFrame
-		}
-		if r.State != "queued" && r.State != "running" && r.State != "done" && r.State != "failed" || (r.State == "done" || r.State == "failed") != (r.Result != nil) || r.Result != nil && (!r.Result.Valid(r.Plan) || (r.State == "failed") != (r.Result.State == "failed")) {
-			return Reply{}, mydcp.ErrFrame
-		}
+	if !p.Valid() || p.Cluster != c.Cluster || p.Node != node || p.Peer != link {
+		return control.TunnelPlan{}, sfcp.ErrFrame
 	}
-	return reply, nil
+	return p, nil
+}
+
+func (c Client) TunnelReconnectStatus(ctx context.Context, peer sfcp.Peer, session access.Session, operation string) (control.TunnelStatus, error) {
+	r, err := call(ctx, c, peer, session, TunnelReconnectStatusMethod, TunnelStatusQuery{Operation: operation})
+	if err != nil {
+		return control.TunnelStatus{}, err
+	}
+	if r.Schema != 1 || r.Operation != operation || !r.Plan.Valid() || r.Plan.Cluster != c.Cluster || r.Revision == 0 || r.User == "" {
+		return control.TunnelStatus{}, sfcp.ErrFrame
+	}
+	if r.State != "queued" && r.State != "running" && r.State != "done" && r.State != "failed" || (r.State == "done" || r.State == "failed") != (r.Result != nil) || r.Result != nil && (!r.Result.Valid(r.Plan) || (r.State == "failed") != (r.Result.State == "failed")) {
+		return control.TunnelStatus{}, sfcp.ErrFrame
+	}
+	return r, nil
 }

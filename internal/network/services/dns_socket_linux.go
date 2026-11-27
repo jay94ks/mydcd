@@ -13,7 +13,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/network"
+	"github.com/jay94ks/seafield/internal/network"
 )
 
 // A group owns both protocols of one exact Settings preparation. Binding does

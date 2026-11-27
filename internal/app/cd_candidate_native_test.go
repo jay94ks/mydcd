@@ -15,15 +15,15 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/eventlog"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/userauth"
-	"github.com/jay94ks/mydcd/tests/gitfixture"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/eventlog"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/userauth"
+	"github.com/jay94ks/seafield/tests/gitfixture"
 	"github.com/moby/moby/client"
 	"testing"
 )
@@ -73,14 +73,14 @@ func cdNativeRetirementGraph(i deployment.Inventory, retirement deployment.Retir
 
 // Shares the ordinary app fixture and the existing decision assertions. SQL,
 // cross-node TUN and generic field override regressions are separate evidence.
-func verifyManagedCDDecisions(t *testing.T, ctx context.Context, r *Runtime, root string, user userauth.Client, peer mydcp.Peer, session access.Session, p control.Policy, read func() cluster.View, change func(string, string, uint64, any), wait func(string, func() bool), source *gitfixture.Fixture, original []byte, first string) []*Runtime {
+func verifyManagedCDDecisions(t *testing.T, ctx context.Context, r *Runtime, root string, user userauth.Client, peer sfcp.Peer, session access.Session, p control.Policy, read func() cluster.View, change func(string, string, uint64, any), wait func(string, func() bool), source *gitfixture.Fixture, original []byte, first string) []*Runtime {
 	t.Helper()
 	remote := prepareManagedHandoffControl(t, ctx, root, r, user, peer, session, p, read, change)
 	owners := [2]*Runtime{r, remote}
 	key := deployment.ResourceKey("task", "tenant", "app", "web")
 	cli := func(args ...string) []byte {
 		t.Helper()
-		out, diagnostic, err := runManagedCLICommand(ctx, os.Getenv("MYDC_TEST_CLI"), filepath.Join(root, "cli-home"), filepath.Join(root, "cli.yaml"), args, nil)
+		out, diagnostic, err := runManagedCLICommand(ctx, os.Getenv("SFC_TEST_CLI"), filepath.Join(root, "cli-home"), filepath.Join(root, "cli.yaml"), args, nil)
 		if err != nil {
 			var receipt struct {
 				Result    *state.Result
@@ -132,7 +132,7 @@ func verifyManagedCDDecisions(t *testing.T, ctx context.Context, r *Runtime, roo
 // Runs as a bounded branch of the existing two-owner fixture, sharing its real
 // HTTPS/credential/CLI/DB/Docker setup and rollback. It does not repeat the
 // unrelated R1 handoff/field-override/source-isolation sequence.
-func verifyCDCandidateDecisionNative(t *testing.T, ctx context.Context, owners *[2]*Runtime, source *gitfixture.Fixture, original []byte, policy deployment.DeliveryDeclaration, key string, cli func(...string) []byte, wait func(string, func() bool), delivery func() (control.Apps, deployment.Delivery), candidate func(string) bool, running func(string, string) bool, root string, admin userauth.Client, peer mydcp.Peer, change func(string, string, uint64, any), names ...string) map[string]any {
+func verifyCDCandidateDecisionNative(t *testing.T, ctx context.Context, owners *[2]*Runtime, source *gitfixture.Fixture, original []byte, policy deployment.DeliveryDeclaration, key string, cli func(...string) []byte, wait func(string, func() bool), delivery func() (control.Apps, deployment.Delivery), candidate func(string) bool, running func(string, string) bool, root string, admin userauth.Client, peer sfcp.Peer, change func(string, string, uint64, any), names ...string) map[string]any {
 	t.Helper()
 	appName, serviceName := "next", "endpoint"
 	if len(names) == 2 {
@@ -150,7 +150,7 @@ func verifyCDCandidateDecisionNative(t *testing.T, ctx context.Context, owners *
 		t.Helper()
 		for attempt := 1; ; attempt++ {
 			id := fmt.Sprintf("rq4-cd-%s-%d", verb, attempt)
-			out, diagnostic, err := runManagedCLICommand(ctx, os.Getenv("MYDC_TEST_CLI"), filepath.Join(root, "cli-home"), filepath.Join(root, "cli.yaml"), []string{"cd", verb, appName, "--tenant", "tenant", "--id", id}, nil)
+			out, diagnostic, err := runManagedCLICommand(ctx, os.Getenv("SFC_TEST_CLI"), filepath.Join(root, "cli-home"), filepath.Join(root, "cli.yaml"), []string{"cd", verb, appName, "--tenant", "tenant", "--id", id}, nil)
 			if err == nil {
 				return id
 			}
@@ -375,7 +375,7 @@ func verifyCDCandidateDecisionNative(t *testing.T, ctx context.Context, owners *
 	return map[string]any{"rejected_and_approved_commit": second, "cli_approved_commit": third, "same_source_refetch": true, "retained_native_while_rejected": held.NativeID, "approved_native": after.NativeID, "original_replay_without_new_start": true, "restricted_gate_user": gate.ID, "scope": "actual HTTPS Git, two owners, restricted user login/decisions/replay/down denial, CLI replan/status, ordinary app inventory and Docker"}
 }
 
-func composeCDNativeView(ctx context.Context, c userauth.Client, peer mydcp.Peer, session access.Session, appName string) (control.AppView, bool, error) {
+func composeCDNativeView(ctx context.Context, c userauth.Client, peer sfcp.Peer, session access.Session, appName string) (control.AppView, bool, error) {
 	after := ""
 	for {
 		reply, err := c.AppPage(ctx, peer, session, "tenant", after)

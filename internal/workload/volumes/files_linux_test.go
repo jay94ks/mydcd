@@ -23,7 +23,7 @@ func TestVolumeFileAtomicPublicationAndDelegatedPathBoundary(t *testing.T) {
 	ctx := context.Background()
 	body := []byte("bounded backup content")
 	digest := sha256.Sum256(body)
-	for _, name := range []string{"../escape", "/absolute", "mydc-web-backups/../foreign", "mydc-web-backups\\file", "mydc-web-backups/.mydc-file-private", "mydc-web-backups//file"} {
+	for _, name := range []string{"../escape", "/absolute", "sfc-web-backups/../foreign", "sfc-web-backups\\file", "sfc-web-backups/.sfc-file-private", "sfc-web-backups//file"} {
 		if _, err = PutFile(ctx, root, name, "original", bytes.NewReader(body), int64(len(body)), digest, false); err == nil {
 			t.Fatalf("unsafe path %q accepted", name)
 		}
@@ -35,7 +35,7 @@ func TestVolumeFileAtomicPublicationAndDelegatedPathBoundary(t *testing.T) {
 	if _, err = PutFile(ctx, root, "symlink/escape", "symlink", bytes.NewReader(body), int64(len(body)), digest, false); err == nil {
 		t.Fatal("followed symlink parent")
 	}
-	name := "mydc-web-backups/one.bin"
+	name := "sfc-web-backups/one.bin"
 	var publication FilePublication
 	got, err := PutFileWithPublication(ctx, root, name, "original", bytes.NewReader(body), int64(len(body)), digest, false, func(p FilePublication) error {
 		publication = p
@@ -59,7 +59,7 @@ func TestVolumeFileAtomicPublicationAndDelegatedPathBoundary(t *testing.T) {
 	if err != nil || !bytes.Equal(read, body) || metadata.Size != int64(len(body)) {
 		t.Fatal("get", metadata, err)
 	}
-	rows, next, err := ListFiles(ctx, root, "mydc-web-backups/", "")
+	rows, next, err := ListFiles(ctx, root, "sfc-web-backups/", "")
 	if err != nil || next != "" || len(rows) != 1 || rows[0].Path != name {
 		t.Fatal("list", rows, next, err)
 	}
@@ -81,8 +81,8 @@ func TestVolumeFileEOFAndOriginalInodeAreRequiredForUnknownPutRecovery(t *testin
 	ctx := context.Background()
 	body := []byte("same bytes do not prove the original rename")
 	digest := sha256.Sum256(body)
-	name := "mydc-web-backups/backup.bin"
-	if err = root.Mkdir("mydc-web-backups", 0700); err != nil {
+	name := "sfc-web-backups/backup.bin"
+	if err = root.Mkdir("sfc-web-backups", 0700); err != nil {
 		t.Fatal(err)
 	}
 	if err = os.WriteFile(filepath.Join(base, name), body, 0600); err != nil {

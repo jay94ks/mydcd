@@ -100,7 +100,7 @@ func TestSpoolDurableReopenAndBeginNeedNoUpdate(t *testing.T) {
 	if err := reopened.Begin(ctx, other); !errors.Is(err, ErrStorage) {
 		t.Fatal("new header bypassed transaction failure", err)
 	}
-	if _, err := os.Stat(filepath.Join(root.Name(), ".mydc-imagebuild", scopeName(other)+".zip")); !errors.Is(err, os.ErrNotExist) {
+	if _, err := os.Stat(filepath.Join(root.Name(), ".sfc-imagebuild", scopeName(other)+".zip")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatal("failed new header created native file", err)
 	}
 	if err := db.View(func(tx *bolt.Tx) error {
@@ -132,7 +132,7 @@ func TestSpoolMissingIdentityStillRequiresDurableUpdate(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	entries, err := os.ReadDir(filepath.Join(root.Name(), ".mydc-imagebuild"))
+	entries, err := os.ReadDir(filepath.Join(root.Name(), ".sfc-imagebuild"))
 	if err != nil || len(entries) != 0 {
 		t.Fatal("failed identity created an artifact", entries, err)
 	}
@@ -153,7 +153,7 @@ func TestSpoolReopenRejectsChangedIdentityAndOriginalInodeWithoutWrites(t *testi
 	})
 	t.Run("directory", func(t *testing.T) {
 		_, scope, root, db := openTestSpool(t, []byte("archive"))
-		path := filepath.Join(root.Name(), ".mydc-imagebuild")
+		path := filepath.Join(root.Name(), ".sfc-imagebuild")
 		if err := os.Rename(path, path+".original"); err != nil {
 			t.Fatal(err)
 		}
@@ -170,7 +170,7 @@ func TestSpoolReopenRejectsChangedIdentityAndOriginalInodeWithoutWrites(t *testi
 		if err := spool.Begin(context.Background(), scope); err != nil {
 			t.Fatal(err)
 		}
-		path := filepath.Join(root.Name(), ".mydc-imagebuild", scopeName(scope)+".zip")
+		path := filepath.Join(root.Name(), ".sfc-imagebuild", scopeName(scope)+".zip")
 		if err := os.Rename(path, path+".original"); err != nil {
 			t.Fatal(err)
 		}

@@ -9,10 +9,10 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/cluster/membership"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/config"
-	"github.com/jay94ks/mydcd/internal/workload/volumes"
+	"github.com/jay94ks/seafield/internal/cluster/membership"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/config"
+	"github.com/jay94ks/seafield/internal/workload/volumes"
 )
 
 func moveCore(t *testing.T) (*backupCoreFixture, VolumeMoveBegin) {
@@ -24,7 +24,7 @@ func moveCore(t *testing.T) (*backupCoreFixture, VolumeMoveBegin) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	d, err = d.Invite(peer, "join-b")
+	d, err = d.Invite(peer, "join-b", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -58,7 +58,7 @@ func moveCore(t *testing.T) (*backupCoreFixture, VolumeMoveBegin) {
 		t.Fatal(err)
 	}
 	tenant, _ := c.Tenant("tenant")
-	f.apply("placement", "set-nodes", tenant.Revision, NodeAssignment{Tenant: "tenant", Nodes: []string{"node-a", "node-b"}}, state.Applied)
+	f.apply("placement", "set-nodes", tenant.Revision, NodeChangeTo("tenant", tenant.AllowedNodes, []string{"node-a", "node-b"}), state.Applied)
 	for _, node := range []string{"node-a", "node-b"} {
 		for _, tenant := range []string{"", "tenant"} {
 			f.apply("limit-"+tenant+node, "set-volume-backup-limit", 0, VolumeBackupLimit{Tenant: tenant, Node: node, Bytes: 65536, Count: 1, StagingBytes: 65536, StagingCount: 1, Original: &OriginalVolumeLimit{Bytes: 65536, Count: 2}}, map[string]state.Code{"node-a": state.ConditionFailed, "node-b": state.Applied}[node])
@@ -198,7 +198,7 @@ func TestVolumeMoveRevokedPlacementAllowsOnlyOriginalCleanup(t *testing.T) {
 		t.Fatal(err)
 	}
 	tenant, _ := c.Tenant("tenant")
-	f.apply("revoke-target", "set-nodes", tenant.Revision, NodeAssignment{Tenant: "tenant", Nodes: []string{"node-a"}}, state.Applied)
+	f.apply("revoke-target", "set-nodes", tenant.Revision, NodeChangeTo("tenant", tenant.AllowedNodes, []string{"node-a"}), state.Applied)
 	if _, err = f.p.VolumeMovePermit(f.s, j.Binding.Source.Key, VolumeMovePermitRequest{Selection: j.Selection(), Kind: "read"}, 2); err == nil {
 		t.Fatal("revoked target still authorizes copy")
 	}

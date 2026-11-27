@@ -6,8 +6,8 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/workload/volumes"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/workload/volumes"
 )
 
 func TestVolumeMovePreviewUsesCurrentSourceWithoutExecutionAuthority(t *testing.T) {
@@ -27,11 +27,11 @@ func TestVolumeMovePreviewUsesCurrentSourceWithoutExecutionAuthority(t *testing.
 	owner, revision := v.Owner()
 	move := VolumeMovePlacement{Scope: v.Scope(), Source: owner, SourceOwnerRevision: revision, Target: volumes.Owner{Node: "node-a", Key: public(f.na), Native: "target-native"}}
 	db := input.Services["db"]
-	db.MyDC.Node = "node-a"
+	db.Sfc.Node = "node-a"
 	db.Networks["app"] = Attachment{IPv4: "10.240.10.20"}
 	input.Services["db"] = db
 	volume := input.Volumes["mysql-data"]
-	volume.MyDC.Node = "node-a"
+	volume.Sfc.Node = "node-a"
 	input.Volumes["mysql-data"] = volume
 	before, _ := v.Encode()
 	preview, err := CompileVolumeMove(input, f.c, ctx, move)

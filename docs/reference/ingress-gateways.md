@@ -1,6 +1,6 @@
 # 공유 HTTP 게이트웨이와 backend 분배
 
-Ingress는 외부 HTTP/1.1·HTTP/2와 HTTPS 위 HTTP/3를 처리한다. 관리 연결의 MYDCP와 구분한다. 노드의 공유 수신 주소는 `mydcd`가 소유하고 앱은 그 이름을 참조한다. 별도 프록시 컨테이너나 앱별 프록시 프로세스를 요구하지 않는다.
+Ingress는 외부 HTTP/1.1·HTTP/2와 HTTPS 위 HTTP/3를 처리한다. 관리 연결의 SFCP와 구분한다. 노드의 공유 수신 주소는 `sfcd`가 소유하고 앱은 그 이름을 참조한다. 별도 프록시 컨테이너나 앱별 프록시 프로세스를 요구하지 않는다.
 
 ## 노드 설정과 앱 선언
 
@@ -35,7 +35,7 @@ gateways:
 앱의 예시는 다음과 같다. `services`의 일반 컨테이너 선언과 이름 기반 네트워크 참조는 기존 app.yaml 계약을 따른다.
 
 ```yaml
-x-mydc:
+x-sfc:
   ingress:
     node: node-a
     listeners:
@@ -72,7 +72,7 @@ x-mydc:
 
 ## 인증서 자동화 경로
 
-평문 HTTP 요청의 경로가 `/.well-known/acme-challenge/`로 시작하고 호스트가 등록된 도메인(`mydc domain`) 안에 있으며 이 ingress가 그 호스트를 맡으면, 앱 규칙보다 먼저 클러스터의 ACME 응답기([`mydc domain acme-responder`](../cli/domain.md#acme-http-01-응답기))로 HTTP/1.1로 넘긴다. Host 헤더와 경로는 바꾸지 않는다. GET·HEAD만 넘기고 다른 메서드와 응답기가 없을 때는 404다. 응답은 4KiB까지, 응답 헤더는 5초, 전체는 10초 안에 끝나야 한다. 연결할 수 없으면 502다. TLS(HTTPS·HTTP/3) 요청과 등록되지 않은 호스트의 요청은 앱 규칙을 그대로 따른다. 관측의 route는 `acme-challenge`다. 앱 경로를 고르지 않으므로 긴급 차단은 경로가 필요 없는 범위(서버·게이트웨이·작업 공간·인스턴스·호스트·출발지)만 맞춰 보고 맞으면 차단 응답을 준다. route·backend 범위 차단은 이 경로에 닿지 않는다. 요청 헤더 크기 제한(`MaxHeaderBytes`)도 앱 요청과 같이 적용한다.
+평문 HTTP 요청의 경로가 `/.well-known/acme-challenge/`로 시작하고 호스트가 등록된 도메인(`sfcli domain`) 안에 있으며 이 ingress가 그 호스트를 맡으면, 앱 규칙보다 먼저 클러스터의 ACME 응답기([`sfcli domain acme-responder`](../cli/domain.md#acme-http-01-응답기))로 HTTP/1.1로 넘긴다. Host 헤더와 경로는 바꾸지 않는다. GET·HEAD만 넘기고 다른 메서드와 응답기가 없을 때는 404다. 응답은 4KiB까지, 응답 헤더는 5초, 전체는 10초 안에 끝나야 한다. 연결할 수 없으면 502다. TLS(HTTPS·HTTP/3) 요청과 등록되지 않은 호스트의 요청은 앱 규칙을 그대로 따른다. 관측의 route는 `acme-challenge`다. 앱 경로를 고르지 않으므로 긴급 차단은 경로가 필요 없는 범위(서버·게이트웨이·작업 공간·인스턴스·호스트·출발지)만 맞춰 보고 맞으면 차단 응답을 준다. route·backend 범위 차단은 이 경로에 닿지 않는다. 요청 헤더 크기 제한(`MaxHeaderBytes`)도 앱 요청과 같이 적용한다.
 
 앱의 규칙이 이 경로나 그 아래(`/.well-known/acme-challenge`, `/.well-known/acme-challenge/x`)를 쓰면 배포는 거절하지 않고 `app diff`·`app deploy`가 "등록된 도메인 호스트의 평문 HTTP에서는 무시된다"는 경고를 낸다(`AppDiff.IgnoredAutomationRoutes`). `/`, `/.well-known` 같은 상위 규칙은 경고 없이 받고, 자동화 경로만 응답기로 간다.
 

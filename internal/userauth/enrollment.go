@@ -7,22 +7,22 @@ import (
 	"crypto/ed25519"
 	"errors"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/mydcp"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/sfcp"
 )
 
 func EnrollmentBytes(cluster, key, challenge [32]byte, body []byte) []byte {
-	b := append([]byte("mydc-admin-enrollment-1\x00"), cluster[:]...)
+	b := append([]byte("sfc-admin-enrollment-1\x00"), cluster[:]...)
 	b = append(b, key[:]...)
 	b = append(b, challenge[:]...)
 	return append(b, body...)
 }
 
-func (c Client) Enroll(ctx context.Context, target mydcp.Peer, intent control.Enrollment, private ed25519.PrivateKey) (Reply, error) {
+func (c Client) Enroll(ctx context.Context, target sfcp.Peer, intent control.Enrollment, private ed25519.PrivateKey) (Reply, error) {
 	if c.Self == nil || len(private) != ed25519.PrivateKeySize {
-		return Reply{}, mydcp.ErrAdmission
+		return Reply{}, sfcp.ErrAdmission
 	}
 	var anchor [32]byte
 	copy(anchor[:], private.Public().(ed25519.PublicKey))
@@ -33,7 +33,7 @@ func (c Client) Enroll(ctx context.Context, target mydcp.Peer, intent control.En
 	if err != nil {
 		return Reply{}, err
 	}
-	reply, _, err := c.exchange(ctx, target, func(conn *mydcp.Session) (Envelope, error) {
+	reply, _, err := c.exchange(ctx, target, func(conn *sfcp.Session) (Envelope, error) {
 		return Envelope{Body: body, Signature: ed25519.Sign(private, EnrollmentBytes(c.Cluster, c.Self.Public, conn.PeerChallenge(), body))}, nil
 	}, true)
 	return reply, err
@@ -41,7 +41,7 @@ func (c Client) Enroll(ctx context.Context, target mydcp.Peer, intent control.En
 
 func (s Service) enroll(ctx context.Context, view cluster.View, c access.Catalog, binding userBinding, r Request, envelope Envelope) Reply {
 	reply := Reply{Schema: 1, Code: "denied"}
-	if r.Enrollment == nil || envelope.Session != nil || envelope.Relay != nil || r.Operation != nil || r.Username != "" || r.Tenant != "" || r.After != "" || r.Node != "" || r.Proof != nil || r.Ticket != nil || r.UserKey != s.Policy.BootstrapKey || !ed25519.Verify(ed25519.PublicKey(s.Policy.BootstrapKey[:]), EnrollmentBytes(s.Policy.Cluster, binding.key, binding.challenge, envelope.Body), envelope.Signature) {
+	if r.Enrollment == nil || envelope.Session != nil || envelope.Relay != nil || r.Operation != nil || r.Tenant != "" || r.After != "" || r.Node != "" || r.UserKey != s.Policy.BootstrapKey || !ed25519.Verify(ed25519.PublicKey(s.Policy.BootstrapKey[:]), EnrollmentBytes(s.Policy.Cluster, binding.key, binding.challenge, envelope.Body), envelope.Signature) {
 		return reply
 	}
 	command, err := r.Enrollment.Command(s.Policy.BootstrapKey)

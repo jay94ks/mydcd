@@ -114,9 +114,20 @@ func NormalizeIsolation(s IsolationSpec) (IsolationSpec, error) {
 			return s, ErrPolicy
 		}
 	}
-	s.Tunnels = slices.CompactFunc(s.Tunnels, func(a, b IsolationTunnel) bool {
-		return a.Tenant == b.Tenant && a.Device == b.Device && slices.Equal(a.Prefixes, b.Prefixes)
-	})
+	// A TUN device's name comes from its key and generation, not its route
+	// set: while a route change is applied in place, its old and new route
+	// sets name the same device. Both stay allowed until the change settles.
+	merged := s.Tunnels[:0]
+	for _, t := range s.Tunnels {
+		if n := len(merged); n > 0 && merged[n-1].Device == t.Device && merged[n-1].Tenant == t.Tenant {
+			union := append(slices.Clone(merged[n-1].Prefixes), t.Prefixes...)
+			slices.SortFunc(union, func(a, b netip.Prefix) int { return strings.Compare(a.String(), b.String()) })
+			merged[n-1].Prefixes = slices.Compact(union)
+			continue
+		}
+		merged = append(merged, t)
+	}
+	s.Tunnels = merged
 	for i, t := range s.Tunnels {
 		if i > 0 && s.Tunnels[i-1].Device == t.Device || slices.ContainsFunc(s.Routes, func(r IsolationRoute) bool { return r.Device == t.Device }) {
 			return s, ErrPolicy
@@ -187,8 +198,8 @@ func DecodeIsolation(raw string) (IsolationSpec, error) {
 }
 
 func isolationTable(owner string) string {
-	h := sha256.Sum256([]byte("mydc-isolation-1\x00" + owner))
-	return "mydc_i_" + hex.EncodeToString(h[:16])
+	h := sha256.Sum256([]byte("sfc-isolation-1\x00" + owner))
+	return "sfc_i_" + hex.EncodeToString(h[:16])
 }
 
 func IsolationExists(owner string) (bool, error) {
@@ -213,7 +224,7 @@ func isolationRules(s IsolationSpec) tunnelFirewall {
 	f := tunnelFirewall{table: table, rules: map[string][]*nftables.Rule{}}
 	raw, _ := json.Marshal(s)
 	hash := sha256.Sum256(raw)
-	alias := []byte("mydc-isolation-1:" + hex.EncodeToString(hash[:]))
+	alias := []byte("sfc-isolation-1:" + hex.EncodeToString(hash[:]))
 	accept := nftables.ChainPolicyAccept
 	priority := nftables.ChainPriority(-10)
 	input := &nftables.Chain{Name: "input", Table: table, Type: nftables.ChainTypeFilter, Hooknum: nftables.ChainHookInput, Priority: &priority, Policy: &accept}

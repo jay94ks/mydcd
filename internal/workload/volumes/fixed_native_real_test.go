@@ -14,13 +14,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/nodestorage"
-	"github.com/jay94ks/mydcd/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/nodestorage"
+	"github.com/jay94ks/seafield/internal/reconcile"
 	"golang.org/x/sys/unix"
 )
 
 func TestNativeFixedVolumeOriginalBindJournalPinsAndDataRetained(t *testing.T) {
-	imageRoot, tag, hostNS := os.Getenv("MYDC_STORAGE_TEST_ROOT"), os.Getenv("MYDC_STORAGE_TEST_OWNER"), os.Getenv("MYDC_STORAGE_HOST_MOUNT_NS")
+	imageRoot, tag, hostNS := os.Getenv("SFC_STORAGE_TEST_ROOT"), os.Getenv("SFC_STORAGE_TEST_OWNER"), os.Getenv("SFC_STORAGE_HOST_MOUNT_NS")
 	if imageRoot == "" || tag == "" || hostNS == "" {
 		t.Skip("requires S1 owned ext4/private namespace and Docker rollback fixture")
 	}
@@ -28,7 +28,7 @@ func TestNativeFixedVolumeOriginalBindJournalPinsAndDataRetained(t *testing.T) {
 	if err != nil || ns == hostNS || os.Geteuid() != 0 {
 		t.Fatal("private privileged mount namespace required", err)
 	}
-	marker, err := os.ReadFile(filepath.Join(imageRoot, ".mydc-storage-test-owner"))
+	marker, err := os.ReadFile(filepath.Join(imageRoot, ".sfc-storage-test-owner"))
 	if err != nil || string(marker) != tag {
 		t.Fatal("exact owned image marker required", err)
 	}
@@ -56,7 +56,7 @@ func TestNativeFixedVolumeOriginalBindJournalPinsAndDataRetained(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	definition := nodestorage.Definition{Node: "node-a", Key: public(f.a), ID: "disk", Path: imageRoot, Tenants: []string{"tenant"}, MaxVolumes: 2}
+	definition := nodestorage.Definition{Node: "node-a", Key: public(f.a), ID: "disk", Path: imageRoot, Tenants: []string{"tenant"}}
 	book, err = book.Add(f.c, "admin", 0, definition)
 	if err != nil {
 		t.Fatal(err)
@@ -280,7 +280,7 @@ func TestNativeFixedVolumeOriginalBindJournalPinsAndDataRetained(t *testing.T) {
 	if proof, err := roots.Closed(root); err != nil || proof.Verify() != nil {
 		t.Fatal("root final closure", err)
 	}
-	t.Log("actual owned ext4 source/checkpoint/private bind, same DB original fact, held native consumer/FD write, Drain and pin gates, non-lazy unregister/root return, exact original inode/mode/UID/data retained; no container bind/MYDCP/Raft or cross-boot success claim")
+	t.Log("actual owned ext4 source/checkpoint/private bind, same DB original fact, held native consumer/FD write, Drain and pin gates, non-lazy unregister/root return, exact original inode/mode/UID/data retained; no container bind/SFCP/Raft or cross-boot success claim")
 }
 
 type fixedNamespaceProbe struct {
@@ -305,7 +305,7 @@ func checkFixedNamespaceChild(t *testing.T, projection string, ready NativeReady
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, executable, "-test.v", "-test.run=^TestNativeFixedNamespaceChild$")
-	cmd.Env = append(os.Environ(), "MYDC_FIXED_NAMESPACE_PROBE="+path)
+	cmd.Env = append(os.Environ(), "SFC_FIXED_NAMESPACE_PROBE="+path)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Cloneflags: syscall.CLONE_NEWNS}
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("same-boot actual namespace fence: %v %s", err, out)
@@ -317,7 +317,7 @@ func checkFixedNamespaceChild(t *testing.T, projection string, ready NativeReady
 // Called only by the owned privileged parent; it never modifies the original
 // projection/journal or treats an inherited mount in a new namespace as Gone.
 func TestNativeFixedNamespaceChild(t *testing.T) {
-	path := os.Getenv("MYDC_FIXED_NAMESPACE_PROBE")
+	path := os.Getenv("SFC_FIXED_NAMESPACE_PROBE")
 	if path == "" {
 		t.Skip("requires owned fixed native parent")
 	}

@@ -21,7 +21,7 @@ import (
 
 // BindSource is an adapter-local, held original directory, never app input.
 // The caller retains its native A3 pin and these descriptors through the SDK
-// effect. Merely finding an existing path in mydcd's namespace is insufficient.
+// effect. Merely finding an existing path in sfcd's namespace is insufficient.
 type BindSource struct {
 	Path        string
 	DirectoryFD int

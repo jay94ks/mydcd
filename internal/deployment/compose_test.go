@@ -5,14 +5,15 @@ package deployment
 import (
 	"bytes"
 	"encoding/json"
+	"net/netip"
 	"os"
 	"slices"
 	"strings"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/secrets"
-	"github.com/jay94ks/mydcd/internal/tenancy"
-	"github.com/jay94ks/mydcd/internal/workload"
+	"github.com/jay94ks/seafield/internal/secrets"
+	"github.com/jay94ks/seafield/internal/tenancy"
+	"github.com/jay94ks/seafield/internal/workload"
 )
 
 const composeFixture = `
@@ -27,7 +28,7 @@ services:
     secrets: [db-password]
     depends_on: {db: {condition: service_healthy}}
     networks: {app: {ipv4_address: 10.240.10.10}}
-    x-mydc:
+    x-sfc:
       node: node-a
       secrets_from: [defaults, group/common, overrides]
       ready: {http: /readyz, port: 8080}
@@ -40,12 +41,12 @@ services:
     volumes: [mysql-data:/var/lib/mysql]
     healthcheck: {test: [CMD, probe], interval: 5s, timeout: 3s, retries: 12, start_period: 60s}
     networks: {app: {ipv4_address: 10.240.20.10}}
-    x-mydc:
+    x-sfc:
       node: node-b
       secrets_from: [defaults, group/common, group/db-admin]
 networks:
   app:
-    x-mydc:
+    x-sfc:
       mtu: 1280
       pools:
         node-a: {cidr: 10.240.10.0/24, gateway: 10.240.10.1}
@@ -53,10 +54,10 @@ networks:
       tunnel_addresses: {node-a: 10.240.30.1/32, node-b: 10.240.30.2/32}
 volumes:
   mysql-data:
-    x-mydc: {node: node-b}
+    x-sfc: {node: node-b}
 secrets:
   db-password:
-    x-mydc: {key: DB_PASSWORD}
+    x-sfc: {key: DB_PASSWORD}
 `
 
 func smallCompose(t *testing.T) Compose {
@@ -73,6 +74,7 @@ func contextFor(t *testing.T, f *fixture) PlanningContext {
 	if e != nil {
 		t.Fatal(e)
 	}
+	networks = networks.WithServers(map[string]netip.Addr{"node-a": netip.MustParseAddr("10.254.240.1"), "node-b": netip.MustParseAddr("10.254.240.2")})
 	return PlanningContext{Cluster: f.cluster, Actor: "alice", Tenant: "tenant", Project: "php-mysql", Deployment: "deploy", Nodes: map[string]PlanningNode{
 		"node-a": {Key: public(f.na), Generation: 3, Revision: 10, Underlay: "192.0.2.11", Voter: true, Capacity: workload.Resources{CPU: 4e9, Memory: 4 << 30}, DefaultCPU: 500000000, DefaultMemory: 128 << 20},
 		"node-b": {Key: public(f.nb), Generation: 7, Revision: 18, Underlay: "192.0.2.12", Voter: true, Capacity: workload.Resources{CPU: 4e9, Memory: 4 << 30}, DefaultCPU: 500000000, DefaultMemory: 128 << 20},
@@ -131,7 +133,7 @@ func TestComposeRejectsUnknownAliasesDuplicateKeysAndHiddenInputs(t *testing.T) 
 	base := "name: app\nservices:\n  web:\n    image: docker.io/library/php@sha256:" + strings.Repeat("a", 64) + "\n"
 	cases := []string{
 		base + "    build: .\n", base + "    privileged: true\n", base + "    command: echo hello\n", base + "    environment: [INHERIT_ME]\n", base + "    environment: {X: true}\n", base + "    volumes: [/etc:/data]\n", base + "    ports: ['65536:80']\n", base + "    command: ['$HOST_SECRET']\n", base + "    depends_on: {missing: {condition: service_started}}\n",
-		base + "x-mydc: {schema: 0}\n", base + "x-mydc: {schema: 2}\n", base + "version: '3.8'\n", base + "---\nname: other\n", base + "name: duplicate\n", base + "x-mydc: {password: hidden-private-marker}\n",
+		base + "x-sfc: {schema: 0}\n", base + "x-sfc: {schema: 2}\n", base + "version: '3.8'\n", base + "---\nname: other\n", base + "name: duplicate\n", base + "x-sfc: {password: hidden-private-marker}\n",
 		"name: app\nservices:\n  web: &w {image: 'docker.io/library/php@sha256:" + strings.Repeat("a", 64) + "'}\n  other: *w\n",
 		base + "    depends_on: {web: {condition: service_started}}\n",
 	}
@@ -154,11 +156,11 @@ func TestComposeFullSingleFileRetainsAllDeclarationsAndScopeOrder(t *testing.T) 
 	if e != nil {
 		t.Fatal(e)
 	}
-	if c.MyDC.Vault == nil || c.MyDC.Delivery == nil || !c.MyDC.Delivery.Enabled || !c.MyDC.Registries["private"].Enabled || !c.Networks["app"].MyDC.DNS.Enabled {
+	if c.Sfc.Vault == nil || c.Sfc.Delivery == nil || !c.Sfc.Delivery.Enabled || !c.Sfc.Registries["private"].Enabled || !c.Networks["app"].Sfc.DNS.Enabled {
 		t.Fatal("declared feature lost")
 	}
 	web := c.Services["web"]
-	if len(web.MyDC.Sources) != 3 || web.MyDC.Sources[1].Group != "common" || web.MyDC.Sources[2].Secret != "web-runtime-overrides" || !bytes.Contains(raw, []byte("service-final-keyset")) {
+	if len(web.Sfc.Sources) != 3 || web.Sfc.Sources[1].Group != "common" || web.Sfc.Sources[2].Secret != "web-runtime-overrides" || !bytes.Contains(raw, []byte("service-final-keyset")) {
 		t.Fatal("ordered sources or references lost")
 	}
 	f := makeFixture(t)
@@ -204,18 +206,18 @@ func TestComposeFullSingleFileRetainsAllDeclarationsAndScopeOrder(t *testing.T) 
 func TestComposeRejectsUnsafePoliciesAndVaultCycles(t *testing.T) {
 	c := frozenCompose(t)
 	for _, change := range []func(*Compose){
-		func(c *Compose) { c.MyDC.Delivery.Source.Repository = "https://user:private@example.invalid/repo.git" },
-		func(c *Compose) { c.MyDC.Delivery.Source.Path = "../outside" },
-		func(c *Compose) { n := c.Networks["app"]; n.MyDC.RuntimeChanges.Restart = true; c.Networks["app"] = n },
+		func(c *Compose) { c.Sfc.Delivery.Source.Repository = "https://user:private@example.invalid/repo.git" },
+		func(c *Compose) { c.Sfc.Delivery.Source.Path = "../outside" },
+		func(c *Compose) { n := c.Networks["app"]; n.Sfc.RuntimeChanges.Restart = true; c.Networks["app"] = n },
 		func(c *Compose) {
-			r := c.MyDC.Registries["private"]
+			r := c.Sfc.Registries["private"]
 			r.Trusted = true
-			c.MyDC.Registries["private"] = r
+			c.Sfc.Registries["private"] = r
 		},
 		func(c *Compose) {
-			g := c.MyDC.Vault.Tree.Groups["common"]
+			g := c.Sfc.Vault.Tree.Groups["common"]
 			g.Parent = "missing"
-			c.MyDC.Vault.Tree.Groups["common"] = g
+			c.Sfc.Vault.Tree.Groups["common"] = g
 		},
 	} {
 		raw, _ := json.Marshal(c)
@@ -340,7 +342,7 @@ func TestBlueprintRejectsCIDRAddressAndWriterConflicts(t *testing.T) {
 	for _, change := range []func(*Compose){
 		func(c *Compose) {
 			web := c.Services["web"]
-			web.MyDC.Node = "node-b"
+			web.Sfc.Node = "node-b"
 			web.Networks["app"] = Attachment{IPv4: "10.240.20.10"}
 			c.Services["web"] = web
 		},
@@ -351,13 +353,13 @@ func TestBlueprintRejectsCIDRAddressAndWriterConflicts(t *testing.T) {
 		},
 		func(c *Compose) {
 			web := c.Services["web"]
-			web.MyDC.Node = "node-b"
+			web.Sfc.Node = "node-b"
 			web.Networks["app"] = Attachment{IPv4: "10.240.20.11"}
 			web.Volumes = Mounts{{Type: "volume", Source: "mysql-data", Target: "/data"}}
 			c.Services["web"] = web
 		},
-		func(c *Compose) { v := c.Volumes["mysql-data"]; v.MyDC.Node = "node-a"; c.Volumes["mysql-data"] = v },
-		func(c *Compose) { v := c.Volumes["mysql-data"]; v.MyDC.Quota = "hard"; c.Volumes["mysql-data"] = v },
+		func(c *Compose) { v := c.Volumes["mysql-data"]; v.Sfc.Node = "node-a"; c.Volumes["mysql-data"] = v },
+		func(c *Compose) { v := c.Volumes["mysql-data"]; v.Sfc.Quota = "hard"; c.Volumes["mysql-data"] = v },
 	} {
 		raw, _ := json.Marshal(base)
 		var c Compose

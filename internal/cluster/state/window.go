@@ -67,7 +67,7 @@ func applyModuleWindow(before, candidate State, index uint64, c Command, validat
 	if p, ok := before.principals[c.Actor]; ok && (p.Rights != 0 || p.Epoch != c.Epoch) {
 		return candidate, denied, nil
 	}
-	if old, ok := before.requests[requestKey{c.Actor, c.RequestID}]; ok {
+	if old, ok := before.request(requestKey{c.Actor, c.RequestID}); ok {
 		if old.digest != Digest(c) {
 			return candidate, Result{Code: RequestConflict, Index: index}, nil
 		}
@@ -86,14 +86,15 @@ func applyModuleWindow(before, candidate State, index uint64, c Command, validat
 			retired[actor] = true
 		}
 	}
-	for key := range next.requests {
-		if retired[key.actor] {
-			delete(next.requests, key)
+	for actor := range retired {
+		var requests, reports []requestKey
+		next.actorRequests(actor, func(k requestKey, _ receipt) bool { requests = append(requests, k); return true })
+		next.actorReports(actor, func(k requestKey, _ reportReceipt) bool { reports = append(reports, k); return true })
+		for _, k := range requests {
+			next.dropRequest(k)
 		}
-	}
-	for key := range next.reportReceipts {
-		if retired[key.actor] {
-			delete(next.reportReceipts, key)
+		for _, k := range reports {
+			next.dropReport(k)
 		}
 	}
 	for key := range next.reportFloors {
@@ -112,12 +113,7 @@ func applyModuleWindow(before, candidate State, index uint64, c Command, validat
 
 func retainWindowFailure(before, candidate State, index uint64, c Command, result Result) (State, Result, error) {
 	p, known := before.principals[c.Actor]
-	count := 0
-	for key := range before.requests {
-		if key.actor == c.Actor {
-			count++
-		}
-	}
+	count := before.requestCount(c.Actor)
 	if count >= LedgerLimit || !known && len(before.principals) >= ModuleActorLimit {
 		return candidate, Result{Code: LedgerFull, Index: index}, nil
 	}
@@ -125,6 +121,6 @@ func retainWindowFailure(before, candidate State, index uint64, c Command, resul
 		p = principal{Epoch: c.Epoch, Revision: index}
 	}
 	candidate.principals[c.Actor] = p
-	candidate.requests[requestKey{c.Actor, c.RequestID}] = receipt{Digest(c), result}
+	candidate.putRequest(requestKey{c.Actor, c.RequestID}, receipt{Digest(c), result})
 	return candidate, result, nil
 }

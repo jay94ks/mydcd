@@ -7,14 +7,14 @@ import (
 	"crypto/ed25519"
 	"encoding/json"
 	"fmt"
-	"github.com/jay94ks/mydcd/internal/certstore"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/ingress"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/schema"
+	"github.com/jay94ks/seafield/internal/certstore"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/ingress"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/sfcp"
 	"slices"
 	"time"
 )
@@ -35,6 +35,9 @@ func (r *Runtime) applyIngressBlocks(ctx context.Context, v cluster.View) error 
 		if err = r.ingress.SetTenantPolicy(tenant.ID, book.HostPolicy(tenant.ID)); err != nil {
 			return err
 		}
+	}
+	if err = r.ingress.SetTenantPolicy(deployment.ClusterAppTenant, book.ClusterAppHostPolicy()); err != nil {
+		return err
 	}
 	certificates, err := r.controlPolicy.Certificates(v.State)
 	if err != nil {
@@ -66,7 +69,7 @@ func (r *Runtime) applyIngressBlocks(ctx context.Context, v cluster.View) error 
 func (r *Runtime) observeIngressOwner(ctx context.Context, read control.IngressRead) (control.IngressPage, error) {
 	view, err := r.currentView(ctx)
 	if err != nil || view.Local {
-		return control.IngressPage{}, mydcp.ErrAdmission
+		return control.IngressPage{}, sfcp.ErrAdmission
 	}
 	page, err := r.controlPolicy.IngressPage(view.State, read.Session, time.Now().Unix(), read.Query)
 	if err != nil {
@@ -75,13 +78,15 @@ func (r *Runtime) observeIngressOwner(ctx context.Context, read control.IngressR
 	r.life.RLock()
 	defer r.life.RUnlock()
 	if r.closed {
-		return page, mydcp.ErrAdmission
+		return page, sfcp.ErrAdmission
 	}
 	if read.Query.Part == "gateways" {
 		if !page.System || len(page.NodeGateways) != 1 || read.Query.Node != r.Engine().ObservedNodeID() {
-			return page, mydcp.ErrAdmission
+			return page, sfcp.ErrAdmission
 		}
 		gateway := &page.NodeGateways[0]
+		// The form picks from these; a failed read only leaves the list out.
+		gateway.LocalAddresses, _ = ingress.LocalAddresses()
 		if r.ingress == nil {
 			gateway.Error = "MODULE_DISABLED"
 			return page, nil
@@ -108,7 +113,7 @@ func (r *Runtime) observeIngressOwner(ctx context.Context, read control.IngressR
 	if read.SummaryQuery != nil {
 		summaryQuery = *read.SummaryQuery
 		if !summaryQuery.Valid() || summaryQuery.Node != r.Engine().ObservedNodeID() || summaryQuery.Tenant != read.Query.Tenant || summaryQuery.App != read.Query.App {
-			return page, mydcp.ErrAdmission
+			return page, sfcp.ErrAdmission
 		}
 	}
 	summaryQuery.Node = r.Engine().ObservedNodeID()
@@ -233,7 +238,7 @@ func (r *Runtime) observeIngressOwner(ctx context.Context, read control.IngressR
 	for at := range page.Mappings {
 		row := &page.Mappings[at]
 		if row.Owner != r.Identity.Public || row.Node != r.Engine().ObservedNodeID() {
-			return control.IngressPage{}, mydcp.ErrAdmission
+			return control.IngressPage{}, sfcp.ErrAdmission
 		}
 		if r.ingress == nil {
 			row.Error = "MODULE_DISABLED"
@@ -270,11 +275,11 @@ func (r *Runtime) observeIngressOwner(ctx context.Context, read control.IngressR
 	}
 	latest, err := r.currentView(ctx)
 	if err != nil || latest.Local {
-		return control.IngressPage{}, mydcp.ErrAdmission
+		return control.IngressPage{}, sfcp.ErrAdmission
 	}
 	current, err := r.controlPolicy.IngressPage(latest.State, read.Session, time.Now().Unix(), read.Query)
 	if err != nil || !page.SameSelection(current) {
-		return control.IngressPage{}, mydcp.ErrAdmission
+		return control.IngressPage{}, sfcp.ErrAdmission
 	}
 	raw, _ := json.Marshal(page)
 	if len(raw) > 112<<10 {
@@ -285,13 +290,13 @@ func (r *Runtime) observeIngressOwner(ctx context.Context, read control.IngressR
 func (r *Runtime) readIngresses(ctx context.Context, read control.IngressRead) (control.IngressPage, error) {
 	view, err := r.currentView(ctx)
 	if err != nil || view.Local {
-		return control.IngressPage{}, mydcp.ErrAdmission
+		return control.IngressPage{}, sfcp.ErrAdmission
 	}
 	page, err := r.controlPolicy.IngressPage(view.State, read.Session, time.Now().Unix(), read.Query)
 	if err != nil {
 		return page, err
 	}
-	if read.Query.Part == "history" {
+	if read.Query.Part == "history" || read.Query.Part == "cluster-app-routes" {
 		return page, nil
 	}
 	if len(page.Mappings) == 0 && read.Query.Node != "" && len(page.Nodes) == 1 {
@@ -300,7 +305,7 @@ func (r *Runtime) readIngresses(ctx context.Context, read control.IngressRead) (
 		if owner == r.Identity.Public {
 			actual, err = r.observeIngressOwner(ctx, read)
 		} else {
-			peer, known := r.Mesh.Peer(mydcp.Identity(owner))
+			peer, known := r.Mesh.Peer(sfcp.Identity(owner))
 			if !known {
 				return page, nil
 			}
@@ -315,7 +320,7 @@ func (r *Runtime) readIngresses(ctx context.Context, read control.IngressRead) (
 			return page, nil
 		}
 		if actual.RootRevision != page.RootRevision {
-			return control.IngressPage{}, mydcp.ErrAdmission
+			return control.IngressPage{}, sfcp.ErrAdmission
 		}
 		if read.Query.Part == "blocks" {
 			page.Blocks = actual.Blocks
@@ -334,7 +339,7 @@ func (r *Runtime) readIngresses(ctx context.Context, read control.IngressRead) (
 		if row.Owner == r.Identity.Public {
 			actual, err = r.observeIngressOwner(ctx, query)
 		} else {
-			peer, known := r.Mesh.Peer(mydcp.Identity(row.Owner))
+			peer, known := r.Mesh.Peer(sfcp.Identity(row.Owner))
 			if !known {
 				row.Error = "NODE_UNREACHABLE"
 				continue
@@ -352,7 +357,7 @@ func (r *Runtime) readIngresses(ctx context.Context, read control.IngressRead) (
 			continue
 		}
 		if len(actual.Mappings) != 1 || actual.Mappings[0].Key != row.Key || actual.Mappings[0].Owner != row.Owner || actual.Mappings[0].Generation != row.Generation || actual.Mappings[0].Revision != row.Revision || actual.RootRevision != page.RootRevision {
-			return control.IngressPage{}, mydcp.ErrAdmission
+			return control.IngressPage{}, sfcp.ErrAdmission
 		}
 		observed := actual.Mappings[0]
 		*row = observed
@@ -375,14 +380,14 @@ func (r *Runtime) readIngresses(ctx context.Context, read control.IngressRead) (
 		return control.IngressPage{}, err
 	}
 	if latest.Local {
-		return control.IngressPage{}, mydcp.ErrAdmission
+		return control.IngressPage{}, sfcp.ErrAdmission
 	}
 	current, err := r.controlPolicy.IngressPage(latest.State, read.Session, time.Now().Unix(), read.Query)
 	if err != nil {
 		return control.IngressPage{}, err
 	}
 	if !page.SameSelection(current) {
-		return control.IngressPage{}, mydcp.ErrAdmission
+		return control.IngressPage{}, sfcp.ErrAdmission
 	}
 	for i := range page.Mappings {
 		if page.Mappings[i].Error == "NODE_UNREACHABLE" || page.Mappings[i].Error == "OBSERVATION_UNAVAILABLE" {
@@ -469,15 +474,15 @@ func pageIngressMapping(row *control.IngressMapping, q control.IngressQuery) {
 func (r *Runtime) ingressReadModule(ctx context.Context, key string, input []byte) ([]byte, error) {
 	caller, err := identity.ParseKey(key)
 	if err != nil {
-		return nil, mydcp.ErrAdmission
+		return nil, sfcp.ErrAdmission
 	}
-	peer, known := r.Mesh.Peer(mydcp.Identity(caller))
+	peer, known := r.Mesh.Peer(sfcp.Identity(caller))
 	if !known || !peer.Member {
-		return nil, mydcp.ErrAdmission
+		return nil, sfcp.ErrAdmission
 	}
 	read, err := schema.Decode[control.IngressRead](input)
 	if err != nil || read.Query.Node != r.Engine().ObservedNodeID() {
-		return nil, mydcp.ErrAdmission
+		return nil, sfcp.ErrAdmission
 	}
 	page, err := r.observeIngressOwner(ctx, read)
 	if err != nil {

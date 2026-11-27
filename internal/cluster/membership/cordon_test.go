@@ -7,7 +7,7 @@ import (
 	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/hex"
-	"github.com/jay94ks/mydcd/internal/config"
+	"github.com/jay94ks/seafield/internal/config"
 	"testing"
 )
 

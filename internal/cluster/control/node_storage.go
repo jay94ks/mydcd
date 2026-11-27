@@ -4,12 +4,13 @@ package control
 
 import (
 	"bytes"
+	"slices"
 	"strings"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/nodestorage"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/nodestorage"
 )
 
 // NodeStorageKey is physical storage policy, separate from StorageKey's
@@ -17,15 +18,24 @@ import (
 const NodeStorageKey = "control/node-storage"
 
 type NodeStorageSelection struct{ Node, ID string }
+
+// NodeStoragePolicy changes which tenants may use a root and, when set,
+// whether every tenant may use it and its capacity limit in bytes (0 = no
+// limit) (set-node-storage-policy). Expected is the root's revision.
 type NodeStoragePolicy struct {
-	Node, ID   string
-	Tenants    []string
-	MaxVolumes int
+	Node, ID      string
+	AddTenants    []string `json:",omitempty"`
+	RemoveTenants []string `json:",omitempty"`
+	AllTenants    *bool    `json:",omitempty"`
+	CapacityBytes *uint64  `json:",omitempty"`
 }
 
 type NodeStorageWork struct {
 	Root                       nodestorage.Root
 	Epoch, RootRevision, Index uint64
+	// Unregistered: the node asked for its default root, which it has never
+	// registered (Root is then empty). It may send a "default" report.
+	Unregistered bool `json:",omitempty"`
 }
 
 func (p Policy) NodeStoragePage(s state.State, users access.Catalog, actor, node, after string) ([]nodestorage.Root, string, error) {
@@ -57,6 +67,14 @@ func (p Policy) NodeStoragePermit(s state.State, caller [32]byte, q NodeStorageS
 		return NodeStorageWork{}, err
 	}
 	r, ok := roots.Root(q.Node, q.ID)
+	if !ok && q.ID == nodestorage.DefaultRootID {
+		// The default root is the only one a node registers itself. Answer
+		// whether it may still do so; a removed default stays removed.
+		if active, err := p.workNodeOwner(s, q.Node); err != nil || active != caller {
+			return NodeStorageWork{}, access.ErrDenied
+		}
+		return NodeStorageWork{Epoch: s.ModuleEpoch(), RootRevision: s.Object(NodeStorageKey).Revision, Index: s.Index(), Unregistered: !roots.Registered(q.Node, q.ID)}, nil
+	}
 	current, err := p.nodeOwner(s, q.Node)
 	if !ok || err != nil || current != caller || !p.ownsResource(s, caller, r.Definition.Key) {
 		return NodeStorageWork{}, access.ErrDenied
@@ -154,6 +172,46 @@ func registeredOnRoot(v Volumes, ref nodestorage.Reference) int {
 	return count
 }
 
+// reservedOnRoot sums the reservations of the fixed volumes on a root, counted
+// the same way as registeredOnRoot. Volumes without a size reserve nothing.
+func reservedOnRoot(v Volumes, ref nodestorage.Reference) (uint64, error) {
+	var total uint64
+	for _, entry := range v.entries {
+		if entry.Native.Fixed != nil && entry.Native.Fixed.Root.Root == ref && !entry.State.Deleted() {
+			total += entry.CapacityBytes
+		}
+	}
+	for _, job := range v.creations {
+		if job.Fixed != nil && creationPending(job.Phase) && job.Fixed.Root.Root == ref {
+			bytes, err := creationBytes(job)
+			if err != nil {
+				return 0, err
+			}
+			total += bytes
+		}
+	}
+	return total, nil
+}
+
+// rootAdmits reports whether a root with a capacity limit can take extra
+// reserved bytes. On registration and growth a limited root takes only sized
+// volumes; unsized volumes registered before a limit was set stay valid and
+// reserve nothing (rootHolds checks only the sum).
+func rootAdmits(root nodestorage.Root, v Volumes, ref nodestorage.Reference, extra uint64) bool {
+	limit := root.Definition.CapacityBytes
+	if limit == 0 {
+		return true
+	}
+	held, err := reservedOnRoot(v, ref)
+	return err == nil && extra != 0 && extra <= limit && held <= limit-extra
+}
+
+// rootHolds reports whether the reservations already on a root fit its limit.
+func rootHolds(root nodestorage.Root, v Volumes, ref nodestorage.Reference) bool {
+	held, err := reservedOnRoot(v, ref)
+	return err == nil && (root.Definition.CapacityBytes == 0 || held <= root.Definition.CapacityBytes)
+}
+
 func (p Policy) canUseFixedVolume(s state.State, users access.Catalog, actor string, entry registeredVolume) error {
 	if !entry.State.Fixed() {
 		return nil
@@ -192,7 +250,7 @@ func (p Policy) validateFixedVolumes(roots nodestorage.Catalog, v Volumes) error
 		fixed := entry.Native.Fixed
 		ref := fixed.Root.Root
 		root, ok := roots.Root(ref.Node, ref.ID)
-		if !ok || root.Reference(p.Cluster) != ref || root.Attestation == nil || root.Closed != nil || !bytes.Equal(nodestorage.RootFactBytes(*root.Attestation), nodestorage.RootFactBytes(fixed.Root)) || registeredOnRoot(v, ref) > root.Definition.MaxVolumes {
+		if !ok || root.Reference(p.Cluster) != ref || root.Attestation == nil || root.Closed != nil || !bytes.Equal(nodestorage.RootFactBytes(*root.Attestation), nodestorage.RootFactBytes(fixed.Root)) || !rootHolds(root, v, ref) {
 			return ErrCatalog
 		}
 		// A revoked tenant ACL stops new use, but must not erase old data,
@@ -212,7 +270,7 @@ func (p Policy) validateFixedVolumes(roots nodestorage.Catalog, v Volumes) error
 		fixed := job.Fixed
 		ref := fixed.Root.Root
 		root, ok := roots.Root(ref.Node, ref.ID)
-		if !ok || root.Reference(p.Cluster) != ref || root.Attestation == nil || root.Closed != nil || !bytes.Equal(nodestorage.RootFactBytes(*root.Attestation), nodestorage.RootFactBytes(fixed.Root)) || registeredOnRoot(v, ref) > root.Definition.MaxVolumes {
+		if !ok || root.Reference(p.Cluster) != ref || root.Attestation == nil || root.Closed != nil || !bytes.Equal(nodestorage.RootFactBytes(*root.Attestation), nodestorage.RootFactBytes(fixed.Root)) || !rootHolds(root, v, ref) {
 			return ErrCatalog
 		}
 		for _, other := range selections {
@@ -284,11 +342,24 @@ func (p Policy) reduceNodeStorage(s state.State, cmd state.Command) (map[string]
 		if canonical(op.Change.Payload, &q) != nil {
 			return nil, state.Invalid
 		}
+		policy := nodestorage.Policy{Add: q.AddTenants, Remove: q.RemoveTenants, AllTenants: q.AllTenants, Capacity: q.CapacityBytes}
+		if policy.Empty() {
+			return nil, state.Invalid
+		}
+		for _, t := range q.AddTenants {
+			if slices.Contains(q.RemoveTenants, t) {
+				return nil, state.Invalid
+			}
+		}
 		root, ok := roots.Root(q.Node, q.ID)
 		if !ok {
 			return nil, state.ConditionFailed
 		}
-		roots, err = roots.SetPolicy(c, op.Session.User, q.Node, q.ID, op.Change.Expected, q.Tenants, q.MaxVolumes, registeredOnRoot(v, root.Reference(p.Cluster)))
+		reserved, e := reservedOnRoot(v, root.Reference(p.Cluster))
+		if e != nil {
+			return nil, state.Invalid
+		}
+		roots, err = roots.ChangePolicy(c, op.Session.User, q.Node, q.ID, op.Change.Expected, policy, reserved)
 	case "drain-node-storage", "remove-node-storage":
 		var q NodeStorageSelection
 		if canonical(op.Change.Payload, &q) != nil {
@@ -315,3 +386,6 @@ func (p Policy) reduceNodeStorage(s state.State, cmd state.Command) (map[string]
 	}
 	return p.nodeStorageCheckpoint(s, roots)
 }
+
+// nodeStorageBook is the NodeStorageKey book (books.go).
+var nodeStorageBook = Book{Key: NodeStorageKey, Reduce: byKind(map[state.CommandKind]reducer{state.Module: Policy.reduceNodeStorage, state.ModuleReport: Policy.reduceNodeStorage})}

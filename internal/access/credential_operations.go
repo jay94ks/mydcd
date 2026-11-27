@@ -73,19 +73,27 @@ func (c Catalog) OperationAllowed(session Session, operation string) error {
 	return ErrDenied
 }
 
-// AccountScope is the set-account-scope payload: the account's action
-// ceiling (empty = none) and whether it may log in with private keys only
-// (User.AutomationOnly). Expected is the account revision.
+// AccountScope is the set-account-scope payload: a change to the account's
+// action ceiling and key-only flag (User.Operations, User.AutomationOnly).
+// Expected is the account revision.
+//
+//   - Add and Remove change the ceiling's actions. Adding an action the
+//     ceiling has, or removing one it lacks, is a conflict (the caller saw
+//     an older account). Adding to an account with no ceiling starts one.
+//   - Unlimited lifts the ceiling; it goes with no Add or Remove.
+//     Removing the last action is refused: lifting is Unlimited.
+//   - KeyOnly, when set, turns key-only login on or off; it must change.
 type AccountScope struct {
-	User       string
-	Operations []string `json:",omitempty"`
-	KeyOnly    bool     `json:",omitempty"`
+	User        string
+	Add, Remove []string `json:",omitempty"`
+	Unlimited   bool     `json:",omitempty"`
+	KeyOnly     *bool    `json:",omitempty"`
 }
 
-// SetAccountScope replaces only the account's ceiling and key-only flag. It
-// goes through the same full-account boundary as PutUser, so a key-only
-// account with an enabled password or token, or a ceiling on a system
-// administrator, is refused, and every earlier session of the account ends.
+// SetAccountScope applies an AccountScope change. It goes through the same
+// full-account boundary as PutUser, so a key-only account with an enabled
+// password or token, or a ceiling on a system administrator, is refused, and
+// every earlier session of the account ends.
 func (c Catalog) SetAccountScope(actor string, expected uint64, q AccountScope) (Catalog, error) {
 	if !c.SystemAllowed(actor) {
 		return c, ErrDenied
@@ -94,11 +102,54 @@ func (c Catalog) SetAccountScope(actor string, expected uint64, q AccountScope) 
 	if !ok {
 		return c, ErrInvalid
 	}
-	u.Operations = nil
-	if len(q.Operations) > 0 {
-		u.Operations = slices.Clone(q.Operations)
+	if u.Revision != expected {
+		return c, ErrConflict
 	}
-	u.AutomationOnly = q.KeyOnly
+	if len(q.Add) == 0 && len(q.Remove) == 0 && !q.Unlimited && q.KeyOnly == nil || q.Unlimited && (len(q.Add) > 0 || len(q.Remove) > 0) || !ValidCredentialOperations(nilIfNone(q.Add)) || !ValidCredentialOperations(nilIfNone(q.Remove)) {
+		return c, ErrInvalid
+	}
+	for _, op := range q.Add {
+		if slices.Contains(q.Remove, op) {
+			return c, ErrInvalid
+		}
+	}
+	operations := slices.Clone(u.Operations)
+	if q.Unlimited {
+		if operations == nil {
+			return c, ErrConflict
+		}
+		operations = nil
+	}
+	for _, op := range q.Remove {
+		i := slices.Index(operations, op)
+		if i < 0 {
+			return c, ErrConflict
+		}
+		operations = slices.Delete(operations, i, i+1)
+	}
+	for _, op := range q.Add {
+		if slices.Contains(u.Operations, op) {
+			return c, ErrConflict
+		}
+		operations = append(operations, op)
+	}
+	if !q.Unlimited && len(operations) == 0 && u.Operations != nil {
+		return c, ErrInvalid
+	}
+	if q.KeyOnly != nil {
+		if *q.KeyOnly == u.AutomationOnly {
+			return c, ErrConflict
+		}
+		u.AutomationOnly = *q.KeyOnly
+	}
+	u.Operations = operations
 	u.Revision = 0
 	return c.replaceUser(expected, u)
+}
+
+func nilIfNone(s []string) []string {
+	if len(s) == 0 {
+		return nil
+	}
+	return s
 }

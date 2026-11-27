@@ -10,9 +10,9 @@ import (
 	"testing"
 
 	"github.com/hashicorp/raft"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/membership"
-	"github.com/jay94ks/mydcd/internal/config"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/membership"
+	"github.com/jay94ks/seafield/internal/config"
 )
 
 // These are supplied configuration counterexamples, not SDK/quorum evidence.

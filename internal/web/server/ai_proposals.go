@@ -13,17 +13,12 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/jay94ks/mydcd/internal/web/store"
+	"github.com/jay94ks/seafield/internal/web/store"
 )
 
 // Coordinator proposals: a change tool call becomes a card. Approving it
 // sends the tool's screen route on the person's session with their opId,
 // exactly as the screen's own button would; nothing else can send it.
-
-var aiArgLabels = map[string]string{
-	"t": "작업 공간", "app": "앱", "node": "서버", "name": "이름", "id": "ID", "service": "서비스", "instance": "인스턴스",
-	"plan": "계획", "reason": "사유", "target": "대상", "leaveBlocked": "못 옮기는 작업은 남겨 둠",
-}
 
 func aiPreview(a *aiArgs) []store.AIPreviewRow {
 	masked := maskArgs(a.raw)
@@ -34,7 +29,7 @@ func aiPreview(a *aiArgs) []store.AIPreviewRow {
 	sort.Strings(keys)
 	out := []store.AIPreviewRow{}
 	for _, k := range keys {
-		label := aiArgLabels[k]
+		label := aiArgInfos[k].Label
 		if label == "" {
 			label = k
 		}
@@ -68,16 +63,20 @@ func fillProposal(p *store.AIProposal, d aiToolDef, a *aiArgs, input json.RawMes
 	p.Tool, p.Action, p.Tenant, p.Target = d.Name, d.Action, a.tenant, a.fill(d.Target)
 	p.Title, p.Method, p.Path, p.Body = a.fill(d.Title), d.Method, a.path, body
 	p.Args, _ = json.Marshal(maskPayload(a.raw))
-	p.Preview, p.Impact, p.Revert, p.Irreversible = aiPreview(a), d.Impact, d.Revert, d.Irreversible
+	w := webActions[d.Action]
+	p.Preview, p.Impact, p.Revert, p.Irreversible = aiPreview(a), w.Impact, w.Revert, !w.Reversible
 	p.ConfirmName = ""
-	if d.Confirm != "" {
-		p.ConfirmName, _ = a.raw[d.Confirm].(string)
+	if w.Confirm != "" {
+		p.ConfirmName, _ = a.raw[w.Confirm].(string)
 	}
 	p.BasisHash = aiBasisHash(d.Name, d.Method, a.path, body)
 }
 
 // newProposal stores a pending proposal; earlier proposals of the same
 // turn come first (after).
+// errAIHighImpact: the AI never proposes a high-impact change (R19 3.5).
+var errAIHighImpact = errors.New("high impact: a person does this on the screen, not through a proposal")
+
 func (s *Server) newProposal(ws *webSession, conv string, d aiToolDef, a *aiArgs, input json.RawMessage, earlier []string) (*store.AIProposal, error) {
 	now := s.now()
 	p := &store.AIProposal{ID: "p-" + randomID(10), User: ws.user.ID, Conversation: conv, Index: len(earlier) + 1, Total: len(earlier) + 1,
@@ -86,6 +85,9 @@ func (s *Server) newProposal(ws *webSession, conv string, d aiToolDef, a *aiArgs
 		p.After = earlier[n-1]
 	}
 	fillProposal(p, d, a, input)
+	if !aiAllows(p.Impact) {
+		return nil, errAIHighImpact
+	}
 	return p, s.opt.Store.PutAIProposal(p)
 }
 
@@ -211,27 +213,23 @@ func (s *Server) handleAIApprove(w http.ResponseWriter, r *http.Request, ws *web
 	}
 	if p.After != "" && !repeat {
 		prev, err := s.opt.Store.GetAIProposal(ws.user.ID, p.After)
-		ready := err == nil && prev.State == store.ProposalApproved
-		if ready && prev.MCP != nil {
-			ready = prev.Reason == ""
-		} else if ready {
-			o, err := s.opt.Store.GetOp(ws.user.ID, prev.Op)
-			ready = err == nil && o.State == store.OpApplied
-		}
+		ready := err == nil && prev.State == store.ProposalApproved && s.proposalKind(prev).done(ws, prev)
 		if !ready {
 			writeError(w, http.StatusConflict, "waiting", "approve the earlier step first and wait until it is applied: "+p.After)
 			return
 		}
 	}
-	if p.MCP != nil {
-		s.approveMCP(w, r, ws, p, req.OpID, repeat)
-		return
-	}
+	s.proposalKind(p).approve(w, r, ws, p, req.OpID, repeat)
+}
+
+// approveScreen sends a screen tool's route on the person's session with
+// their opId, as the screen's own button would.
+func (s *Server) approveScreen(w http.ResponseWriter, r *http.Request, ws *webSession, p *store.AIProposal, opID string, repeat bool) {
 	body := map[string]any{}
 	if len(p.Body) > 0 {
 		_ = json.Unmarshal(p.Body, &body)
 	}
-	body["opId"] = req.OpID
+	body["opId"] = opID
 	raw, _ := json.Marshal(body)
 	status, out := s.dispatch(r.Context(), ws, p.Method, p.Path, nil, raw)
 	var res struct {
@@ -261,15 +259,15 @@ func (s *Server) handleAIApprove(w http.ResponseWriter, r *http.Request, ws *web
 	if !repeat {
 		now := s.now()
 		_, err := s.opt.Store.UpdateAIProposal(ws.user.ID, p.ID, func(p *store.AIProposal) error {
-			p.State, p.Op, p.DecidedBy, p.DecidedAt = store.ProposalApproved, req.OpID, ws.user.Username, now
+			p.State, p.Op, p.DecidedBy, p.DecidedAt = store.ProposalApproved, opID, ws.user.Username, now
 			return nil
 		})
 		if err != nil {
 			s.log.Error("ai proposal", "err", err)
 		}
 		s.aiAudit(ws, store.AIAudit{Kind: "proposal-approved", Role: roleCoordinator, Proposal: p.ID, Decision: "approved"})
-		s.aiNote(ws, p.Conversation, fmt.Sprintf("%s (%s) approved by the person; operation %s is %s (read it with ops_get)", p.ID, p.Title, req.OpID, res.Op.State))
-		s.log.Info("ai proposal approved", "user", ws.user.Username, "proposal", p.ID, "action", p.Action, "op", req.OpID)
+		s.aiNote(ws, p.Conversation, fmt.Sprintf("%s (%s) approved by the person; operation %s is %s (read it with ops_get)", p.ID, p.Title, opID, res.Op.State))
+		s.log.Info("ai proposal approved", "user", ws.user.Username, "proposal", p.ID, "action", p.Action, "op", opID)
 	}
 	writeJSON(w, status, map[string]any{"op": res.Op})
 }
@@ -322,16 +320,18 @@ func (s *Server) handleAIEditProposal(w http.ResponseWriter, r *http.Request, ws
 	if p == nil || !s.pendingOr(w, p) {
 		return
 	}
-	if p.MCP != nil {
-		s.editMCPProposal(w, r, ws, p, req.Payload)
-		return
-	}
+	s.proposalKind(p).edit(w, r, ws, p, req.Payload)
+}
+
+// editScreenProposal checks an in-card edit of a screen tool's proposal
+// against the tool's schema and stores it.
+func (s *Server) editScreenProposal(w http.ResponseWriter, r *http.Request, ws *webSession, p *store.AIProposal, payload json.RawMessage) {
 	d, ok := aiToolByName(p.Tool)
 	if !ok {
 		writeError(w, http.StatusConflict, "proposal-invalid", "the tool of this proposal is gone")
 		return
 	}
-	a, err := d.check(req.Payload)
+	a, err := d.check(payload)
 	if err != nil {
 		writeError(w, http.StatusUnprocessableEntity, "invalid", err.Error())
 		return
@@ -350,7 +350,7 @@ func (s *Server) handleAIEditProposal(w http.ResponseWriter, r *http.Request, ws
 		}
 	}
 	np, err := s.opt.Store.UpdateAIProposal(ws.user.ID, p.ID, func(p *store.AIProposal) error {
-		fillProposal(p, d, a, req.Payload)
+		fillProposal(p, d, a, payload)
 		p.Edited = true
 		return nil
 	})

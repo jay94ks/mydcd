@@ -5,7 +5,7 @@ package lifecycle
 import (
 	"testing"
 
-	contract "github.com/jay94ks/mydcd/lifecycle/v1"
+	contract "github.com/jay94ks/seafield/lifecycle/v1"
 )
 
 func TestActionPolicyDistinguishesUnknownAndActualContainerState(t *testing.T) {

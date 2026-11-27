@@ -14,14 +14,14 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/imagebuild"
-	"github.com/jay94ks/mydcd/internal/nodestorage"
-	"github.com/jay94ks/mydcd/internal/userauth"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/imagebuild"
+	"github.com/jay94ks/seafield/internal/nodestorage"
+	"github.com/jay94ks/seafield/internal/userauth"
 )
 
 // The existing RQ6 CLI/Runtime/Raft fixture owns the wallet, registered ext4

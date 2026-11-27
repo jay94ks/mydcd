@@ -6,7 +6,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/cluster/state"
 )
 
 func TestValidateStageNamesTheRefusingInvariant(t *testing.T) {

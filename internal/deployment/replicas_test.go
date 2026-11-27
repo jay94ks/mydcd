@@ -9,21 +9,21 @@ import (
 	"maps"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/network/services"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/network/services"
 )
 
 func replicaFixture(t *testing.T) (*fixture, Compose, PlanningContext) {
 	t.Helper()
 	f, c, ctx := managedNetworkFixture(t)
 	web := c.Services["web"]
-	web.MyDC.Node, web.MyDC.Nodes, web.MyDC.PerNode = "", []string{"node-a", "node-b"}, 1
+	web.Sfc.Node, web.Sfc.Nodes, web.Sfc.PerNode = "", []string{"node-a", "node-b"}, 1
 	attachment := web.Networks["app"]
 	attachment.IPv4, attachment.IPv6 = "", ""
 	web.Networks["app"] = attachment
 	c.Services["web"] = web
 	ctx.Features["managed-dns"] = true
-	source := services.ManagedDNSSource{Schema: 1, Cluster: f.cluster, Principal: "alice", Definition: services.ManagedDNSDefinition{Schema: 1, Tenant: "tenant", Network: "shared-services", Policy: services.ManagedDNSPolicy{Enabled: true, Zone: "apps.mydc.test."}}}
+	source := services.ManagedDNSSource{Schema: 1, Cluster: f.cluster, Principal: "alice", Definition: services.ManagedDNSDefinition{Schema: 1, Tenant: "tenant", Network: "shared-services", Policy: services.ManagedDNSPolicy{Enabled: true, Zone: "apps.sfc.test."}}}
 	raw, _ := json.Marshal(source)
 	ctx.Current[services.ManagedDNSKey("tenant", "shared-services")] = state.Object{Present: true, Generation: 41, Revision: 43, Value: string(raw)}
 	return f, c, ctx
@@ -55,7 +55,7 @@ func TestReplicaPlanFreezesIndependentTasksInputsAndCapacity(t *testing.T) {
 			}
 		}
 		service, logical, err := b.TaskInput(id)
-		if err != nil || logical != "web" || service.MyDC.Node != node || service.MyDC.Instance == nil || len(service.MyDC.Nodes) != 0 || len(service.DNS) != 1 || len(service.DNSSearch) != 2 || service.DNSSearch[0] != "php-mysql.apps.mydc.test." {
+		if err != nil || logical != "web" || service.Sfc.Node != node || service.Sfc.Instance == nil || len(service.Sfc.Nodes) != 0 || len(service.DNS) != 1 || len(service.DNSSearch) != 2 || service.DNSSearch[0] != "php-mysql.apps.sfc.test." {
 			t.Fatal("logical declaration confused with native recipe", service, err)
 		}
 		addresses = append(addresses, service.Networks["app"].IPv4)
@@ -100,8 +100,8 @@ func TestReplicaPlacementRejectsWriterStaticAddressAndUnmanagedDNS(t *testing.T)
 	for _, mutate := range []func(*Compose){
 		func(c *Compose) {
 			s := c.Services["db"]
-			s.MyDC.Node = ""
-			s.MyDC.Nodes = []string{"node-a", "node-b"}
+			s.Sfc.Node = ""
+			s.Sfc.Nodes = []string{"node-a", "node-b"}
 			c.Services["db"] = s
 		},
 		func(c *Compose) {
@@ -111,13 +111,13 @@ func TestReplicaPlacementRejectsWriterStaticAddressAndUnmanagedDNS(t *testing.T)
 			s.Networks["app"] = a
 			c.Services["web"] = s
 		},
-		func(c *Compose) { s := c.Services["web"]; s.MyDC.Node = "node-a"; c.Services["web"] = s },
+		func(c *Compose) { s := c.Services["web"]; s.Sfc.Node = "node-a"; c.Services["web"] = s },
 		func(c *Compose) {
 			s := c.Services["web"]
-			s.MyDC.Nodes = []string{"node-a", "node-a"}
+			s.Sfc.Nodes = []string{"node-a", "node-a"}
 			c.Services["web"] = s
 		},
-		func(c *Compose) { s := c.Services["web"]; s.MyDC.PerNode = 65; c.Services["web"] = s },
+		func(c *Compose) { s := c.Services["web"]; s.Sfc.PerNode = 65; c.Services["web"] = s },
 	} {
 		raw, _ := json.Marshal(c)
 		var changed Compose
@@ -138,7 +138,7 @@ func TestReplicaIngressUsesEveryExactBackendAndNetworkDependency(t *testing.T) {
 	f, c, ctx := replicaFixture(t)
 	i := &IngressDeclaration{Node: "node-a", Host: "app.test", Listeners: []ListenerDeclaration{{Address: "192.0.2.11:8080"}}, Runtime: IngressRuntime{MaxRequests: 2, MaxConnections: 8, MaxHeaderBytes: 4096, MaxBodyBytes: 1 << 20, BufferBytes: 128 << 10, RequestTimeoutMS: 30000, DialTimeoutMS: 1000, ResponseHeaderTimeoutMS: 2000, HealthIntervalMS: 100}}
 	i.Backend.Service, i.Backend.Port, i.Backend.HealthPath = "web", 8080, "/readyz"
-	c.MyDC.Ingress = i
+	c.Sfc.Ingress = i
 	b, err := CompileApp(c, f.c, ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -205,17 +205,17 @@ func TestReplicaIngressUsesEveryExactBackendAndNetworkDependency(t *testing.T) {
 
 func TestTaskInstanceIdentityAndProjectionCannotBeForged(t *testing.T) {
 	for _, instance := range []TaskInstance{{Service: "web", Node: "node-a"}, {Service: "web", Node: "node-a", Ordinal: 1}, {Service: "web", Node: "node-b", Ordinal: 128}} {
-		service := ComposeService{MyDC: ServiceExtension{Node: instance.Node}}
+		service := ComposeService{Sfc: ServiceExtension{Node: instance.Node}}
 		if instance.Ordinal != 0 {
 			copy := instance
-			service.MyDC.Instance = &copy
+			service.Sfc.Instance = &copy
 		}
 		key := ResourceKey("task", "tenant", "sample", instance.ResourceID())
 		actual, err := TaskInstanceForKey("tenant", "sample", key, service)
 		if err != nil || actual != instance {
 			t.Fatal("valid identity refused", instance, err)
 		}
-		service.MyDC.Node = "other"
+		service.Sfc.Node = "other"
 		if _, err := TaskInstanceForKey("tenant", "sample", key, service); err == nil && instance.Ordinal != 0 {
 			t.Fatal("replica metadata allowed owner-node substitution")
 		}
@@ -231,7 +231,7 @@ func TestTaskInstanceIdentityAndProjectionCannotBeForged(t *testing.T) {
 func TestReplicaReadOnlyFixedVolumeIsStillRejected(t *testing.T) {
 	f, c, ctx, _ := fixedAppFixture(t)
 	service := c.Services["db"]
-	service.MyDC.Node, service.MyDC.Nodes, service.MyDC.PerNode = "", []string{"node-b"}, 2
+	service.Sfc.Node, service.Sfc.Nodes, service.Sfc.PerNode = "", []string{"node-b"}, 2
 	for index := range service.Volumes {
 		service.Volumes[index].ReadOnly = true
 	}
@@ -249,7 +249,7 @@ func TestReplicaReadOnlyFixedVolumeIsStillRejected(t *testing.T) {
 func TestReplicaOrdinalsOnOneNodeKeepSeparateOwnedNeeds(t *testing.T) {
 	f, c, ctx := replicaFixture(t)
 	web := c.Services["web"]
-	web.MyDC.Nodes, web.MyDC.PerNode = []string{"node-a"}, 2
+	web.Sfc.Nodes, web.Sfc.PerNode = []string{"node-a"}, 2
 	c.Services["web"] = web
 	b, err := CompileApp(c, f.c, ctx)
 	if err != nil {

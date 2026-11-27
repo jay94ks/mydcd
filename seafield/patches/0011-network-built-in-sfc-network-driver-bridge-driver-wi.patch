@@ -1,0 +1,535 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Fri, 27 Nov 2026 08:41:17 +0000
+Subject: [PATCH 11/20] network: built-in sfc network driver, bridge driver
+ with synchronous sfcd hooks
+
+
+diff --git a/daemon/command/daemon.go b/daemon/command/daemon.go
+index 15d0b09..3687049 100644
+--- a/daemon/command/daemon.go
++++ b/daemon/command/daemon.go
+@@ -33,12 +33,14 @@
+ 	"github.com/moby/moby/v2/daemon/internal/containerd/server/supervisor"
+ 	"github.com/moby/moby/v2/daemon/internal/otelutil"
+ 	"github.com/moby/moby/v2/daemon/internal/rootless"
++	"github.com/moby/moby/v2/daemon/libnetwork/drivers/bridge"
+ 	"github.com/moby/moby/v2/daemon/listeners"
+ 	dopts "github.com/moby/moby/v2/daemon/pkg/opts"
+ 	"github.com/moby/moby/v2/daemon/pkg/plugin"
+ 	"github.com/moby/moby/v2/daemon/seafield/eventfeed"
+ 	"github.com/moby/moby/v2/daemon/seafield/logqueue"
+ 	"github.com/moby/moby/v2/daemon/seafield/monitor"
++	"github.com/moby/moby/v2/daemon/seafield/netdrv"
+ 	"github.com/moby/moby/v2/daemon/seafield/peer"
+ 	"github.com/moby/moby/v2/daemon/seafield/sfcd"
+ 	"github.com/moby/moby/v2/daemon/seafield/volumedrv"
+@@ -311,18 +313,28 @@ func (cli *daemonCLI) start(ctx context.Context) (retErr error) {
+ 	eventfeed.Attach(feed)
+ 	defer feed.Close()
+ 	logqueue.Root = cli.Config.Root
+-	var logEvents atomic.Pointer[daemon.Daemon]
++	var upDaemon atomic.Pointer[daemon.Daemon]
+ 	logqueue.Notify = func(id string, seq uint64) {
+ 		// Before the daemon is up (restore) the event is dropped: sfcd
+ 		// pulls every queue once after it sees a new engine boot.
+-		if d := logEvents.Load(); d != nil {
++		if d := upDaemon.Load(); d != nil {
+ 			if c, err := d.GetContainer(id); err == nil {
+ 				d.LogContainerEventWithAttributes(c, logqueue.ActionLogs, map[string]string{"seq": strconv.FormatUint(seq, 10)})
+ 			}
+ 		}
+ 	}
+ 	volumedrv.Root = filepath.Join(cli.Config.ExecRoot, "volumes")
+-	volumeservice.ExtraDrivers = append(volumeservice.ExtraDrivers, volumedrv.New(sfcd.New(sfcd.Socket(), peer.Allowed())))
++	sfcdClient := sfcd.New(sfcd.Socket(), peer.Allowed())
++	volumeservice.ExtraDrivers = append(volumeservice.ExtraDrivers, volumedrv.New(sfcdClient))
++	bridge.Wrappers = append(bridge.Wrappers, netdrv.Wrap(sfcdClient))
++	netdrv.ContainerInfo = func(id string) (string, map[string]string) {
++		if d := upDaemon.Load(); d != nil {
++			if c, err := d.GetContainer(id); err == nil && c.Config != nil {
++				return strings.TrimPrefix(c.Name, "/"), c.Config.Labels
++			}
++		}
++		return "", nil
++	}
+ 
+ 	d, err := daemon.NewDaemon(ctx, cli.Config, pluginStore, cli.authzMiddleware, cli.containerdDialer)
+ 	if err != nil {
+@@ -331,7 +343,7 @@ func (cli *daemonCLI) start(ctx context.Context) (retErr error) {
+ 	monitorCtx, stopMonitor := context.WithCancel(context.WithoutCancel(ctx))
+ 	defer stopMonitor()
+ 	monitor.Start(monitorCtx, d, feed)
+-	logEvents.Store(d)
++	upDaemon.Store(d)
+ 
+ 	d.StoreHosts(hosts)
+ 
+diff --git a/daemon/libnetwork/driverapi/seafield_container.go b/daemon/libnetwork/driverapi/seafield_container.go
+new file mode 100644
+index 0000000..de3564e
+--- /dev/null
++++ b/daemon/libnetwork/driverapi/seafield_container.go
+@@ -0,0 +1,18 @@
++// SPDX-License-Identifier: Apache-2.0
++
++package driverapi
++
++import "context"
++
++type containerKey struct{}
++
++// WithContainer records the container a Join is for (Seafield driver "sfc").
++func WithContainer(ctx context.Context, id string) context.Context {
++	return context.WithValue(ctx, containerKey{}, id)
++}
++
++// ContainerFrom returns the id set by WithContainer, or "".
++func ContainerFrom(ctx context.Context) string {
++	id, _ := ctx.Value(containerKey{}).(string)
++	return id
++}
+diff --git a/daemon/libnetwork/drivers/bridge/bridge_linux.go b/daemon/libnetwork/drivers/bridge/bridge_linux.go
+index a336456..0daf913 100644
+--- a/daemon/libnetwork/drivers/bridge/bridge_linux.go
++++ b/daemon/libnetwork/drivers/bridge/bridge_linux.go
+@@ -132,6 +132,7 @@ type bridgeEndpoint struct {
+ 	id              string
+ 	nid             string
+ 	srcName         string
++	hostName        string // Seafield: host side veth, reported to sfcd
+ 	addr            *net.IPNet
+ 	addrv6          *net.IPNet
+ 	macAddress      net.HardwareAddr
+@@ -244,10 +245,17 @@ func Register(r driverapi.Registerer, store *datastore.Store, pms *drvregistry.P
+ 	}); err != nil {
+ 		return err
+ 	}
+-	return r.RegisterDriver(NetworkType, d, driverapi.Capability{
++	c := driverapi.Capability{
+ 		DataScope:         scope.Local,
+ 		ConnectivityScope: scope.Local,
+-	})
++	}
++	for _, w := range Wrappers {
++		name, wd := w(d)
++		if err := r.RegisterDriver(name, wd, c); err != nil {
++			return err
++		}
++	}
++	return r.RegisterDriver(NetworkType, d, c)
+ }
+ 
+ // The behaviour of previous implementations of bridge subnet prefix assignment
+@@ -1201,6 +1209,7 @@ func (d *driver) CreateEndpoint(ctx context.Context, nid, eid string, ifInfo dri
+ 
+ 	// Store the sandbox side pipe interface parameters
+ 	endpoint.srcName = containerIfName
++	endpoint.hostName = hostIfName
+ 	endpoint.macAddress = ifInfo.MacAddress()
+ 	endpoint.addr = ifInfo.Address()
+ 	endpoint.addrv6 = ifInfo.AddressIPv6()
+diff --git a/daemon/libnetwork/drivers/bridge/seafield.go b/daemon/libnetwork/drivers/bridge/seafield.go
+new file mode 100644
+index 0000000..1367a24
+--- /dev/null
++++ b/daemon/libnetwork/drivers/bridge/seafield.go
+@@ -0,0 +1,31 @@
++// SPDX-License-Identifier: Apache-2.0
++
++package bridge
++
++import (
++	"errors"
++
++	"github.com/moby/moby/v2/daemon/libnetwork/driverapi"
++)
++
++// Wrappers register more network types served by this same bridge driver
++// instance (Seafield: driver "sfc" calls sfcd around each step). One
++// instance keeps one store and one set of networks for both types.
++var Wrappers []func(driverapi.Driver) (string, driverapi.Driver)
++
++// HostVeth returns the host side veth of endpoint eid.
++func HostVeth(drv driverapi.Driver, nid, eid string) (string, error) {
++	d, ok := drv.(*driver)
++	if !ok {
++		return "", errors.New("not the bridge driver")
++	}
++	n, err := d.getNetwork(nid)
++	if err != nil {
++		return "", err
++	}
++	ep, err := n.getEndpoint(eid)
++	if err != nil || ep == nil {
++		return "", errors.Join(err, errors.New("endpoint not found"))
++	}
++	return ep.hostName, nil
++}
+diff --git a/daemon/libnetwork/endpoint.go b/daemon/libnetwork/endpoint.go
+index 4e0d497..168bae5 100644
+--- a/daemon/libnetwork/endpoint.go
++++ b/daemon/libnetwork/endpoint.go
+@@ -517,7 +517,7 @@ func (ep *Endpoint) sbJoin(ctx context.Context, sb *Sandbox, options ...Endpoint
+ 
+ 	// Tell the driver about the new endpoint. The driver populates ep.joinInfo using
+ 	// the Endpoint's JoinInfo interface.
+-	if err := d.Join(ctx, nid, epid, sb.Key(), ep, ep.generic, sb.Labels()); err != nil {
++	if err := d.Join(driverapi.WithContainer(ctx, sb.ContainerID()), nid, epid, sb.Key(), ep, ep.generic, sb.Labels()); err != nil {
+ 		return err
+ 	}
+ 	defer func() {
+diff --git a/daemon/seafield/netdrv/driver_linux.go b/daemon/seafield/netdrv/driver_linux.go
+new file mode 100644
+index 0000000..e7a8cf1
+--- /dev/null
++++ b/daemon/seafield/netdrv/driver_linux.go
+@@ -0,0 +1,348 @@
++// SPDX-License-Identifier: Apache-2.0
++
++// Package netdrv is the built-in network driver "sfc": the upstream bridge
++// driver (veth, bridge, IPAM) with a synchronous call to sfcd around each
++// step, so the TUN, routing and nftables of an sfc network are in place
++// before the next step runs. The engine adds no masquerade or iptables rules
++// for these networks; sfcd's nft owns forwarding and NAT. Request and answer
++// shapes: seafield/docs/sfcd-socket.md in the Seafield repository.
++package netdrv
++
++import (
++	"context"
++	"crypto/rand"
++	"encoding/hex"
++	"errors"
++	"fmt"
++	"net"
++	"net/http"
++	"net/url"
++	"regexp"
++	"strconv"
++	"sync"
++	"time"
++
++	"github.com/moby/moby/v2/daemon/libnetwork/driverapi"
++	"github.com/moby/moby/v2/daemon/libnetwork/drivers/bridge"
++	"github.com/moby/moby/v2/daemon/libnetwork/netlabel"
++	"github.com/moby/moby/v2/daemon/libnetwork/types"
++	"github.com/moby/moby/v2/daemon/seafield/sfcd"
++	"github.com/moby/moby/v2/errdefs"
++	"github.com/vishvananda/netlink"
++)
++
++// Name is the driver name.
++const Name = "sfc"
++
++const callTimeout = 2 * time.Minute
++
++// ContainerInfo returns a container's name (without the leading "/") and
++// labels for Join (set by the daemon once it is up). Nil or an unknown
++// container gives an empty name and no labels.
++var ContainerInfo func(id string) (name string, labels map[string]string)
++
++// inner is what the bridge driver implements; embedding it keeps every
++// optional capability libnetwork looks for (external connectivity, ports).
++type inner interface {
++	driverapi.Driver
++	driverapi.ExtConner
++	driverapi.PortManager
++	driverapi.IPv6Releaser
++	driverapi.GwAllocChecker
++}
++
++// Driver wraps the bridge driver instance.
++type Driver struct {
++	inner
++	c    *sfcd.Client
++	boot string
++
++	mu   sync.Mutex
++	nets map[string]netInfo // nid
++	eps  map[string]epInfo  // eid
++}
++
++type netInfo struct {
++	Name   string
++	Labels map[string]string
++}
++
++type epInfo struct {
++	addrs     []string
++	mac       string
++	hostVeth  string
++	container string
++	joined    bool // sfcd was told; Leave tells it once
++}
++
++// Wrap returns the bridge.Wrappers entry registering "sfc".
++func Wrap(c *sfcd.Client) func(driverapi.Driver) (string, driverapi.Driver) {
++	return func(d driverapi.Driver) (string, driverapi.Driver) {
++		in, ok := d.(inner)
++		if !ok {
++			panic("seafield: bridge driver lost a capability the sfc driver forwards")
++		}
++		b := make([]byte, 8)
++		_, _ = rand.Read(b)
++		return Name, &Driver{inner: in, c: c, boot: hex.EncodeToString(b), nets: map[string]netInfo{}, eps: map[string]epInfo{}}
++	}
++}
++
++func (d *Driver) Type() string { return Name }
++
++func (d *Driver) call(method, path string, body map[string]any, out any) error {
++	ctx, cancel := context.WithTimeout(context.Background(), callTimeout)
++	defer cancel()
++	body["boot_id"] = d.boot
++	err := d.c.Do(ctx, method, path, body, out)
++	if e, ok := err.(*sfcd.Error); ok {
++		switch {
++		case e.Status == http.StatusNotFound:
++			return errdefs.NotFound(e)
++		case e.Status == http.StatusConflict:
++			return errdefs.Conflict(e)
++		case e.Status == http.StatusForbidden:
++			return errdefs.Forbidden(e)
++		case e.Status/100 == 4:
++			return errdefs.InvalidParameter(e)
++		}
++		return errdefs.Unavailable(e)
++	}
++	return err
++}
++
++var bridgeName = regexp.MustCompile(`^[a-z][a-z0-9-]{1,14}$`)
++
++func ipam(data []driverapi.IPAMData) []map[string]string {
++	out := make([]map[string]string, 0, len(data))
++	for _, d := range data {
++		m := map[string]string{}
++		if d.Pool != nil {
++			m["subnet"] = d.Pool.String()
++		}
++		if d.Gateway != nil {
++			m["gateway"] = d.Gateway.String()
++		}
++		out = append(out, m)
++	}
++	return out
++}
++
++func (d *Driver) CreateNetwork(ctx context.Context, nid string, options map[string]any, nInfo driverapi.NetworkInfo, v4, v6 []driverapi.IPAMData) error {
++	var ni netInfo
++	if n, ok := nInfo.(interface {
++		Name() string
++		Labels() map[string]string
++	}); ok {
++		ni = netInfo{Name: n.Name(), Labels: n.Labels()}
++	}
++	gen := map[string]string{}
++	switch g := options[netlabel.GenericData].(type) {
++	case nil:
++	case map[string]string:
++		for k, v := range g {
++			gen[k] = v
++		}
++	default:
++		return errdefs.InvalidParameter(fmt.Errorf("sfc network options of type %T", g))
++	}
++	var ans struct {
++		Bridge string `json:"bridge"`
++		MTU    int    `json:"mtu"`
++	}
++	path := "/networks/" + url.PathEscape(nid)
++	if err := d.call(http.MethodPost, path+"/create", map[string]any{
++		"op_id": "create:" + nid, "name": ni.Name, "labels": ni.Labels, "options": gen, "ipam": ipam(append(v4, v6...)),
++	}, &ans); err != nil {
++		return err
++	}
++	undo := func() {
++		_ = d.call(http.MethodPost, path+"/delete", map[string]any{"op_id": "delete:" + nid, "name": ni.Name, "labels": ni.Labels}, nil)
++	}
++	if !bridgeName.MatchString(ans.Bridge) || ans.MTU < 1280 || ans.MTU > 65535 {
++		undo()
++		return errdefs.System(fmt.Errorf("sfcd answered bridge %q mtu %d", ans.Bridge, ans.MTU))
++	}
++	if _, err := netlink.LinkByName(ans.Bridge); err == nil {
++		undo()
++		return errdefs.Conflict(fmt.Errorf("a device named %s already exists; the sfc driver never adopts one", ans.Bridge))
++	}
++	gen[bridge.BridgeName] = ans.Bridge
++	gen[netlabel.DriverMTU] = strconv.Itoa(ans.MTU)
++	gen[bridge.EnableIPMasquerade] = "false"
++	opts := make(map[string]any, len(options))
++	for k, v := range options {
++		opts[k] = v
++	}
++	opts[netlabel.GenericData] = gen
++	if err := d.inner.CreateNetwork(ctx, nid, opts, nInfo, v4, v6); err != nil {
++		undo()
++		return err
++	}
++	d.mu.Lock()
++	d.nets[nid] = ni
++	d.mu.Unlock()
++	return d.call(http.MethodPost, path+"/created", map[string]any{"op_id": "created:" + nid, "name": ni.Name, "labels": ni.Labels, "bridge": ans.Bridge, "mtu": linkMTU(ans.Bridge), "gateway": linkAddrs(ans.Bridge)}, nil)
++}
++
++func linkMTU(name string) int {
++	l, err := netlink.LinkByName(name)
++	if err != nil {
++		return 0
++	}
++	return l.Attrs().MTU
++}
++
++func linkAddrs(name string) []string {
++	l, err := netlink.LinkByName(name)
++	if err != nil {
++		return nil
++	}
++	as, err := netlink.AddrList(l, netlink.FAMILY_ALL)
++	if err != nil {
++		return nil
++	}
++	var out []string
++	for _, a := range as {
++		if a.IP.IsLinkLocalUnicast() {
++			continue
++		}
++		out = append(out, a.IPNet.String())
++	}
++	return out
++}
++
++func (d *Driver) DeleteNetwork(nid string) error {
++	if err := d.inner.DeleteNetwork(nid); err != nil {
++		return err
++	}
++	d.mu.Lock()
++	ni := d.nets[nid]
++	delete(d.nets, nid)
++	d.mu.Unlock()
++	// after the bridge is gone: sfcd removes isolation last
++	return d.call(http.MethodPost, "/networks/"+url.PathEscape(nid)+"/delete", map[string]any{"op_id": "delete:" + nid, "name": ni.Name, "labels": ni.Labels}, nil)
++}
++
++func (d *Driver) CreateEndpoint(ctx context.Context, nid, eid string, ifInfo driverapi.InterfaceInfo, opts map[string]any) error {
++	if err := d.inner.CreateEndpoint(ctx, nid, eid, ifInfo, opts); err != nil {
++		return err
++	}
++	var e epInfo
++	for _, a := range []*net.IPNet{ifInfo.Address(), ifInfo.AddressIPv6()} {
++		if a != nil {
++			e.addrs = append(e.addrs, a.String())
++		}
++	}
++	if m := ifInfo.MacAddress(); m != nil {
++		e.mac = m.String()
++	}
++	e.hostVeth, _ = bridge.HostVeth(d.inner, nid, eid)
++	d.mu.Lock()
++	d.eps[eid] = e
++	d.mu.Unlock()
++	return nil
++}
++
++func (d *Driver) DeleteEndpoint(nid, eid string) error {
++	err := d.inner.DeleteEndpoint(nid, eid)
++	d.mu.Lock()
++	delete(d.eps, eid)
++	d.mu.Unlock()
++	return err
++}
++
++type joinAnswer struct {
++	Allow  bool `json:"allow"`
++	MTU    int  `json:"mtu"`
++	Routes []struct {
++		Destination string `json:"destination"`
++		NextHop     string `json:"next_hop,omitempty"`
++	} `json:"routes"`
++	Sysctls map[string]string `json:"sysctls"`
++}
++
++func (d *Driver) Join(ctx context.Context, nid, eid string, sboxKey string, jinfo driverapi.JoinInfo, epOpts, sbOpts map[string]any) error {
++	cid := driverapi.ContainerFrom(ctx)
++	if cid == "" {
++		return errdefs.Forbidden(errors.New("sfc networks join only containers"))
++	}
++	var name string
++	var labels map[string]string
++	if f := ContainerInfo; f != nil {
++		name, labels = f(cid)
++	}
++	d.mu.Lock()
++	e := d.eps[eid]
++	e.container = cid
++	d.eps[eid] = e
++	d.mu.Unlock()
++	path := "/networks/" + url.PathEscape(nid)
++	var ans joinAnswer
++	if err := d.call(http.MethodPost, path+"/join", map[string]any{
++		"op_id": "join:" + eid, "endpoint": eid, "container_id": cid, "container_name": name, "container_labels": labels,
++		"addresses": e.addrs, "mac": e.mac, "sandbox_key": sboxKey, "host_veth": e.hostVeth,
++	}, &ans); err != nil {
++		return err
++	}
++	d.mu.Lock()
++	e = d.eps[eid]
++	e.joined = true
++	d.eps[eid] = e
++	d.mu.Unlock()
++	leave := func() { _ = d.leave(nid, eid) }
++	if !ans.Allow {
++		leave()
++		return errdefs.Forbidden(errors.New("sfcd refused this container on the network"))
++	}
++	if len(ans.Sysctls) > 0 {
++		leave()
++		return errdefs.NotImplemented(errors.New("sfcd asked for sandbox sysctls, which this engine does not apply yet"))
++	}
++	if err := d.inner.Join(ctx, nid, eid, sboxKey, jinfo, epOpts, sbOpts); err != nil {
++		leave()
++		return err
++	}
++	for _, r := range ans.Routes {
++		_, dst, err := net.ParseCIDR(r.Destination)
++		if err != nil {
++			leave()
++			return errdefs.System(fmt.Errorf("sfcd route %q: %w", r.Destination, err))
++		}
++		typ, hop := types.CONNECTED, net.IP(nil)
++		if r.NextHop != "" {
++			if hop = net.ParseIP(r.NextHop); hop == nil {
++				leave()
++				return errdefs.System(fmt.Errorf("sfcd route next hop %q", r.NextHop))
++			}
++			typ = types.NEXTHOP
++		}
++		if err := jinfo.AddStaticRoute(dst, typ, hop); err != nil {
++			leave()
++			return err
++		}
++	}
++	return nil
++}
++
++func (d *Driver) Leave(nid, eid string) error {
++	if err := d.inner.Leave(nid, eid); err != nil {
++		return err
++	}
++	return d.leave(nid, eid)
++}
++
++func (d *Driver) leave(nid, eid string) error {
++	d.mu.Lock()
++	e, ok := d.eps[eid]
++	if ok && !e.joined {
++		d.mu.Unlock()
++		return nil
++	}
++	e.joined = false
++	if ok {
++		d.eps[eid] = e
++	}
++	d.mu.Unlock()
++	return d.call(http.MethodPost, "/networks/"+url.PathEscape(nid)+"/leave", map[string]any{"op_id": "leave:" + eid, "endpoint": eid, "container_id": e.container, "addresses": e.addrs}, nil)
++}

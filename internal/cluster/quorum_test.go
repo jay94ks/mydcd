@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/mydcp"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/sfcp"
 
 	"github.com/hashicorp/raft"
 )
@@ -21,16 +21,16 @@ func TestRealBoundaryEvenVoterQuorumAndNonvoter(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	nodes := make([]realNode, 5)
-	peers := map[mydcp.Identity]mydcp.Peer{}
-	byID := map[string]mydcp.Peer{}
+	peers := map[sfcp.Identity]sfcp.Peer{}
+	byID := map[string]sfcp.Peer{}
 	var mu sync.RWMutex
-	lookup := func(k mydcp.Identity) (mydcp.Peer, bool) {
+	lookup := func(k sfcp.Identity) (sfcp.Peer, bool) {
 		mu.RLock()
 		defer mu.RUnlock()
 		p, ok := peers[k]
 		return p, ok
 	}
-	resolve := func(id raft.ServerID, a raft.ServerAddress) (mydcp.Peer, bool) {
+	resolve := func(id raft.ServerID, a raft.ServerAddress) (sfcp.Peer, bool) {
 		mu.RLock()
 		defer mu.RUnlock()
 		p, ok := byID[string(id)]
@@ -54,13 +54,13 @@ func TestRealBoundaryEvenVoterQuorumAndNonvoter(t *testing.T) {
 			t.Fatal(e)
 		}
 		n.root = t.TempDir()
-		key := mydcp.Identity(n.identity.Public)
-		p := mydcp.Peer{ID: fmt.Sprint(i), Policy: mydcp.Policy{Key: key, Member: true, Respond: true, Snapshot: true}}
+		key := sfcp.Identity(n.identity.Public)
+		p := sfcp.Peer{ID: fmt.Sprint(i), Policy: sfcp.Policy{Key: key, Member: true, Respond: true, Snapshot: true}}
 		mu.Lock()
 		peers[key] = p
 		byID[p.ID] = p
 		mu.Unlock()
-		n.mesh, e = mydcp.NewTransport(n.identity, [32]byte{5}, lookup)
+		n.mesh, e = sfcp.NewTransport(n.identity, [32]byte{5}, lookup)
 		if e != nil {
 			t.Fatal(e)
 		}

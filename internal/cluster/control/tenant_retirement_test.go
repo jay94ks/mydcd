@@ -7,9 +7,9 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/workload/volumes"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/workload/volumes"
 )
 
 func tenantFixtureState(t *testing.T, f *backupCoreFixture) access.Tenant {
@@ -44,7 +44,7 @@ func TestTenantRetirementKeepsRetainedDataAndRequiresOriginalOwnerClosure(t *tes
 	f.apply("other-tenant", "create-tenant", 0, TenantID{ID: "other"}, state.Applied)
 	catalog, _ := f.p.Catalog(f.s)
 	other, _ := catalog.Tenant("other")
-	f.apply("other-node", "set-nodes", other.Revision, NodeAssignment{Tenant: "other", Nodes: []string{"node-a"}}, state.Applied)
+	f.apply("other-node", "set-nodes", other.Revision, NodeChangeTo("other", other.AllowedNodes, []string{"node-a"}), state.Applied)
 	foreign := volumes.Scope{Cluster: f.p.Cluster, Tenant: "other", App: "app", ID: "data", Generation: 1}
 	f.apply("other-volume", "create-volume", 0, volumeFact(t, foreign, "node-a", f.node), state.Applied)
 	selection := TenantRetirementSelection{Tenant: "tenant", Operation: "tenant-delete"}

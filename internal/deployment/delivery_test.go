@@ -15,8 +15,8 @@ import (
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing/object"
 	"github.com/go-git/go-git/v5/storage/memory"
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/state"
 	"gopkg.in/yaml.v3"
 )
 
@@ -34,11 +34,11 @@ func deliveryBody(t *testing.T, mode string) []byte {
 	t.Helper()
 	c := smallCompose(t)
 	c.Networks = map[string]ComposeNetwork{"app": {External: true, Name: "shared-services"}}
-	c.MyDC.Delivery = &DeliveryDeclaration{}
-	p := c.MyDC.Delivery
+	c.Sfc.Delivery = &DeliveryDeclaration{}
+	p := c.Sfc.Delivery
 	p.Enabled = true
 	p.Source.Kind = "git"
-	p.Source.Repository = "https://git.mydc.test/tenant/app.git"
+	p.Source.Repository = "https://git.sfc.test/tenant/app.git"
 	p.Source.Ref = "refs/heads/main"
 	p.Source.Path = "app.yaml"
 	p.Source.Credential = "git-read"
@@ -83,7 +83,7 @@ func newDeliveryFixturePolicy(t *testing.T, mode, drift string) *deliveryFixture
 	if err != nil {
 		t.Fatal(err)
 	}
-	input.MyDC.Delivery.Sync.Drift = drift
+	input.Sfc.Delivery.Sync.Drift = drift
 	body, err = yaml.Marshal(input)
 	if err != nil {
 		t.Fatal(err)
@@ -139,7 +139,7 @@ func (f *deliveryFixture) commit(body []byte) string {
 		f.f.t.Fatal(err)
 	}
 	f.commits++
-	h, err := w.Commit("source", &git.CommitOptions{Author: &object.Signature{Name: "fixture", Email: "fixture@mydc.test", When: time.Unix(f.commits, 0)}})
+	h, err := w.Commit("source", &git.CommitOptions{Author: &object.Signature{Name: "fixture", Email: "fixture@sfc.test", When: time.Unix(f.commits, 0)}})
 	if err != nil {
 		f.f.t.Fatal(err)
 	}
@@ -331,7 +331,7 @@ func TestDeliveryPermissionRevocationAndStaleCASCannotStartOrFetch(t *testing.T)
 }
 func TestDeliverySourceCannotGrantDifferentTenantPolicyOrCredential(t *testing.T) {
 	f := newDeliveryFixture(t, "automatic")
-	for _, change := range []func(*Compose){func(c *Compose) { c.MyDC.Delivery.Source.Credential = "wider" }, func(c *Compose) { c.MyDC.Delivery.Sync.Prune = true }} {
+	for _, change := range []func(*Compose){func(c *Compose) { c.Sfc.Delivery.Source.Credential = "wider" }, func(c *Compose) { c.Sfc.Delivery.Sync.Prune = true }} {
 		c, err := ParseCompose(f.body)
 		if err != nil {
 			t.Fatal(err)
@@ -445,11 +445,11 @@ func TestDeliveryBlankNetworkCatalogAndLocalFileDefaultsRemainValid(t *testing.T
 		c.Services[name] = service
 	}
 	web := c.Services["web"]
-	web.CPUs, web.Memory, web.MyDC.Node = "", "", ""
+	web.CPUs, web.Memory, web.Sfc.Node = "", "", ""
 	c.Services["web"] = web
 	ctx.DefaultNode = "node-a"
 	volume := c.Volumes["mysql-data"]
-	volume.MyDC.Node = ""
+	volume.Sfc.Node = ""
 	c.Volumes["mysql-data"] = volume
 	body, err := yaml.Marshal(c)
 	if err != nil {
@@ -463,7 +463,7 @@ func TestDeliveryBlankNetworkCatalogAndLocalFileDefaultsRemainValid(t *testing.T
 	f, c, ctx, _ = externalFixture(t)
 	ctx.DefaultNode = "node-a"
 	web = c.Services["web"]
-	web.CPUs, web.Memory, web.MyDC.Node = "", "", ""
+	web.CPUs, web.Memory, web.Sfc.Node = "", "", ""
 	c.Services["web"] = web
 	body, err = yaml.Marshal(c)
 	if err != nil {
@@ -478,7 +478,7 @@ func TestDeliveryBlankNetworkCatalogAndLocalFileDefaultsRemainValid(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	if restored.d.NetworkFloor != ctx.Networks.Revision() || restored.d.Policy.Enabled || restored.d.Policy.Sync.Mode != "manual" || restored.d.Candidate.Plan.Input.Services["web"].MyDC.Node != "node-a" {
+	if restored.d.NetworkFloor != ctx.Networks.Revision() || restored.d.Policy.Enabled || restored.d.Policy.Sync.Mode != "manual" || restored.d.Candidate.Plan.Input.Services["web"].Sfc.Node != "node-a" {
 		t.Fatal("blank catalog/local delivery defaults changed")
 	}
 	if _, _, err = restored.Fetch(restored.Revision(), f.c, ctx); err == nil {
@@ -516,7 +516,7 @@ func TestDeliveryExplicitSourceChangeFencesOldFetchApprovalAndKeepsOriginal(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	c.MyDC.Delivery = &updated
+	c.Sfc.Delivery = &updated
 	body, _ := yaml.Marshal(c)
 	commit := f.receive(body)
 	if f.d.d.Candidate.Artifact.Commit != commit || f.d.d.Candidate.PolicyRevision != 2 || f.d.d.Running.Candidate.PolicyRevision != 1 {
@@ -525,7 +525,7 @@ func TestDeliveryExplicitSourceChangeFencesOldFetchApprovalAndKeepsOriginal(t *t
 }
 func TestDeliveryMalformedPolicyAndForeignNetworkCatalogAreRejected(t *testing.T) {
 	f := newDeliveryFixture(t, "automatic")
-	for _, change := range []func(*DeliveryDeclaration){func(p *DeliveryDeclaration) { p.Source.Repository = "https://name:password@git.mydc.test/app" }, func(p *DeliveryDeclaration) { p.Limits.Active = 2 }, func(p *DeliveryDeclaration) { p.Source.Path = "../app.yaml" }} {
+	for _, change := range []func(*DeliveryDeclaration){func(p *DeliveryDeclaration) { p.Source.Repository = "https://name:password@git.sfc.test/app" }, func(p *DeliveryDeclaration) { p.Limits.Active = 2 }, func(p *DeliveryDeclaration) { p.Source.Path = "../app.yaml" }} {
 		policy := f.d.d.Policy
 		change(&policy)
 		if _, err := f.d.Configure(f.d.Revision(), f.d.d.PolicyRevision, f.f.c, f.ctx, "alice", policy); err == nil {
@@ -661,7 +661,7 @@ func TestDeliveryLocalFileUpdatesUseSameInventoryAndCannotReplaceGitSource(t *te
 	if err != nil {
 		t.Fatal(err)
 	}
-	input.MyDC.Delivery = nil
+	input.Sfc.Delivery = nil
 	body, err := yaml.Marshal(input)
 	if err != nil {
 		t.Fatal(err)
@@ -675,11 +675,11 @@ func TestDeliveryLocalFileUpdatesUseSameInventoryAndCannotReplaceGitSource(t *te
 	if f.d.d.Candidate.Artifact.Digest == original || f.d.d.Running.Candidate.Artifact.Digest != original || f.d.d.Inventory.Active.Operation != "first" || f.d.d.Approval != nil {
 		t.Fatal("local file replacement overwrote original or reused approval")
 	}
-	input.MyDC.Delivery = &DeliveryDeclaration{}
+	input.Sfc.Delivery = &DeliveryDeclaration{}
 	if input.normalize() != nil {
 		t.Fatal("local defaults")
 	}
-	input.MyDC.Delivery.Sync.Prune = true
+	input.Sfc.Delivery.Sync.Prune = true
 	body, err = yaml.Marshal(input)
 	if err != nil {
 		t.Fatal(err)

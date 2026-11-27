@@ -11,6 +11,24 @@ import (
 const ManageCluster Action = "cluster"
 const MaxSessionSeconds int64 = 3600
 
+// MaxClockSkewSeconds is how far ahead of this machine's clock a time signed
+// on another machine (a session's issue time, a request's time) may be.
+// Ordinary NTP drift, or an unsynced admin PC or WSL, is a few seconds; a
+// signed time from the future beyond this is still refused.
+const MaxClockSkewSeconds = 10
+
+// Recent reports whether a signed time at (seconds) from another machine is
+// at most maxAge old and at most MaxClockSkewSeconds ahead of now. A time
+// ahead of now has age 0: it never wraps an unsigned now-at.
+func Recent[T ~int64 | ~uint64](at, now, maxAge T) bool {
+	return at <= now+MaxClockSkewSeconds && (at >= now || now-at <= maxAge)
+}
+
+// RecentMillis is Recent for times in milliseconds.
+func RecentMillis[T ~int64 | ~uint64](at, now, maxAge T) bool {
+	return at <= now+MaxClockSkewSeconds*1000 && (at >= now || now-at <= maxAge)
+}
+
 type Revocation struct {
 	User, Session             string
 	AccountRevision, Revision uint64
@@ -58,7 +76,7 @@ type KeyProof struct {
 func KeyProofBytes(p KeyProof) []byte {
 	p.Signature = nil
 	b, _ := json.Marshal(p)
-	return append([]byte("mydc-user-key-proof-1\x00"), b...)
+	return append([]byte("sfc-user-key-proof-1\x00"), b...)
 }
 
 // VerifyKeyProof consumes a fresh challenge supplied by the connection owner.
@@ -108,7 +126,7 @@ func SessionBytes(s Session) []byte {
 	// old schema-1 issuer signatures byte-for-byte unchanged.
 	s.Approval = nil
 	b, _ := json.Marshal(s)
-	return append([]byte("mydc-user-session-1\x00"), b...)
+	return append([]byte("sfc-user-session-1\x00"), b...)
 }
 func allowedScopeAction(a Action) bool {
 	switch a {
@@ -169,7 +187,7 @@ func (c Catalog) verifySession(s Session, cluster [32]byte, issuer Issuer, now i
 	if _, revoked := c.revocations[memberKey(s.User, s.ID)]; revoked && !logoutReceipt {
 		return ErrDenied
 	}
-	if !ok || !u.Enabled || u.Revision != s.AccountRevision || s.Schema != 1 || !identifier(s.ID) || s.Cluster != cluster || cluster == ([32]byte{}) || s.Key == ([32]byte{}) || !issuer.Enabled || issuer.Key == ([32]byte{}) || s.Issuer != issuer.Key || issuer.Epoch == 0 || s.IssuerEpoch != issuer.Epoch || now < 0 || s.IssuedAt < 0 || s.IssuedAt > now || s.ExpiresAt <= now || s.ExpiresAt <= s.IssuedAt || s.ExpiresAt-s.IssuedAt > MaxSessionSeconds || !validScopes(s.Scopes) || !ed25519.Verify(ed25519.PublicKey(issuer.Key[:]), SessionBytes(s), s.Signature) {
+	if !ok || !u.Enabled || u.Revision != s.AccountRevision || s.Schema != 1 || !identifier(s.ID) || s.Cluster != cluster || cluster == ([32]byte{}) || s.Key == ([32]byte{}) || !issuer.Enabled || issuer.Key == ([32]byte{}) || s.Issuer != issuer.Key || issuer.Epoch == 0 || s.IssuerEpoch != issuer.Epoch || now < 0 || s.IssuedAt < 0 || s.IssuedAt > now+MaxClockSkewSeconds || s.ExpiresAt <= now || s.ExpiresAt <= s.IssuedAt || s.ExpiresAt-s.IssuedAt > MaxSessionSeconds || !validScopes(s.Scopes) || !ed25519.Verify(ed25519.PublicKey(issuer.Key[:]), SessionBytes(s), s.Signature) {
 		return ErrDenied
 	}
 	for _, v := range u.Credentials {
@@ -259,7 +277,7 @@ func (c Catalog) authorizeScope(s Session, tenant string, action Action, node st
 	return c.Authorize(s.User, tenant, action, node)
 }
 func RequestBytes(session Session, challenge [32]byte, body []byte) []byte {
-	b := append([]byte("mydc-user-request-1\x00"), session.Cluster[:]...)
+	b := append([]byte("sfc-user-request-1\x00"), session.Cluster[:]...)
 	b = binary.LittleEndian.AppendUint64(b, uint64(len(session.ID)))
 	b = append(b, session.ID...)
 	b = append(b, challenge[:]...)
@@ -274,4 +292,21 @@ func VerifyRequest(session Session, challenge [32]byte, body, signature []byte) 
 		return ErrDenied
 	}
 	return nil
+}
+
+// SessionLive reports whether a session known only by its login record (its
+// user, ID, credential and account revision) may still be in use: not
+// revoked, the account enabled at that revision, the credential enabled. It
+// sees no signature, so it lists sessions; it never authorizes one.
+func (c Catalog) SessionLive(user, id, credential string, accountRevision uint64) bool {
+	u, ok := c.users[user]
+	if _, revoked := c.revocations[memberKey(user, id)]; revoked || !ok || !u.Enabled || u.Revision != accountRevision {
+		return false
+	}
+	for _, v := range u.Credentials {
+		if v.ID == credential && v.Enabled {
+			return true
+		}
+	}
+	return false
 }

@@ -15,12 +15,12 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/lifecycle"
-	"github.com/jay94ks/mydcd/internal/secrets"
-	"github.com/jay94ks/mydcd/internal/workload"
-	checker "github.com/jay94ks/mydcd/internal/workload/lifecycle"
-	"github.com/jay94ks/mydcd/internal/workload/volumes"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/lifecycle"
+	"github.com/jay94ks/seafield/internal/secrets"
+	"github.com/jay94ks/seafield/internal/workload"
+	checker "github.com/jay94ks/seafield/internal/workload/lifecycle"
+	"github.com/jay94ks/seafield/internal/workload/volumes"
 )
 
 var ErrInputs = errors.New("application input scope, approval, ownership or projection conflict")
@@ -210,7 +210,7 @@ func validInputMetadata(n Needs) bool {
 	for i, v := range n.Volumes {
 		parts := strings.Split(v.Key, "/")
 		ref, fixed := n.FixedVolumes[v.Key]
-		if len(parts) != 3 || parts[0] != u.Tenant || !identifier(parts[2]) || !fixed && parts[1] != u.App || fixed && (parts[1] != "@tenant" || !ref.Valid() || ref.Scope.Key() != v.Key || ref.Scope.Tenant != u.Tenant || ref.Owner.Node != u.Node || !n.resourceIdentity(ref.Scope.Cluster, ref.Owner.Key)) {
+		if len(parts) != 3 || parts[0] != u.Tenant || !identifier(parts[2]) || !fixed && parts[1] != u.App || fixed && (parts[1] != "@tenant" || !ref.Valid() || ref.Scope.Key() != v.Key || ref.Scope.Tenant != u.Tenant || (ref.Share == "" || ref.Owner.Node == u.Node) && (ref.Owner.Node != u.Node || !n.resourceIdentity(ref.Scope.Cluster, ref.Owner.Key))) {
 			return false
 		}
 		for _, old := range n.Volumes[:i] {
@@ -256,7 +256,7 @@ func approvalRealmUses(n Needs) map[string]secrets.Use {
 }
 
 func registryInputNeeds(n Needs) Needs {
-	hash := sha256.Sum256(append([]byte("mydc-registry-input-consumer-1\x00"), []byte(n.Consumer)...))
+	hash := sha256.Sum256(append([]byte("sfc-registry-input-consumer-1\x00"), []byte(n.Consumer)...))
 	n.Consumer = "registry-" + hex.EncodeToString(hash[:24])
 	n.Sources = slices.Clone(n.RegistrySources)
 	n.RegistrySources = nil
@@ -371,7 +371,12 @@ func Missing(cluster [32]byte, c access.Catalog, trees map[string]secrets.Tree, 
 // Reserve returns the entire candidate or no candidate. Publishing only some
 // returned registries would violate its transaction contract. It reads no values
 // and never releases an original unknown effect to make a reservation succeed.
-func reserve(cluster [32]byte, c access.Catalog, trees map[string]secrets.Tree, a secrets.Approvals, v map[string]volumes.State, needs []Needs, now int64) (Reservation, error) {
+// ShareMode returns the share mode (volumes.ShareSingleWriter or
+// volumes.ShareShared) recorded for exactly this Volume scope, generation
+// included, or "" when the Volume is used only on its owner.
+type ShareMode func(volumes.Scope) string
+
+func reserve(cluster [32]byte, c access.Catalog, trees map[string]secrets.Tree, a secrets.Approvals, v map[string]volumes.State, needs []Needs, now int64, shares ShareMode) (Reservation, error) {
 	if a.Cluster() != cluster || now < 0 {
 		return Reservation{}, ErrInputs
 	}
@@ -406,10 +411,32 @@ func reserve(cluster [32]byte, c access.Catalog, trees map[string]secrets.Tree, 
 				return Reservation{}, ErrInputs
 			}
 			owner, _ := s.Owner()
-			if owner.Node != n.Use.Node || !n.resourceIdentity(cluster, owner.Key) {
+			mode := ""
+			if shares != nil {
+				mode = shares(s.Scope())
+			}
+			local := owner.Node == n.Use.Node
+			ref, fixed := n.FixedVolumes[wanted.Key]
+			if fixed && ref.Share == "" || !fixed {
+				mode = "" // only a share planned into the fixed reference applies
+			}
+			if local && !n.resourceIdentity(cluster, owner.Key) || !local && (mode == "" || !n.resourceIdentity(cluster, n.Use.NodeKey)) {
 				return Reservation{}, ErrInputs
 			}
-			next, pin, e := s.Acquire(c, n.Use.User, s.Revision(), n.Consumer, n.Generation, wanted.Writable)
+			var next volumes.State
+			var pin volumes.Consumer
+			var e error
+			if mode == "" {
+				next, pin, e = s.Acquire(c, n.Use.User, s.Revision(), n.Consumer, n.Generation, wanted.Writable)
+			} else {
+				// A shared Volume: the task may run on another server and
+				// reaches the data on owner over VolumeFS.
+				runner := owner
+				if !local {
+					runner = volumes.Owner{Node: n.Use.Node, Key: n.Use.NodeKey}
+				}
+				next, pin, e = s.AcquireShared(c, n.Use.User, s.Revision(), n.Consumer, n.Generation, wanted.Writable, mode, runner)
+			}
 			if e != nil || next.CheckActivation(pin) != nil {
 				return Reservation{}, ErrInputs
 			}
@@ -419,6 +446,16 @@ func reserve(cluster [32]byte, c access.Catalog, trees map[string]secrets.Tree, 
 		q.Bindings = append(q.Bindings, b)
 	}
 	return q, nil
+}
+
+// pinRunsHere: a pin's task runs on the binding's node, either as a consumer
+// on the Volume's owner or as a remote consumer whose runner is this node.
+func pinRunsHere(d bindingRecord, c volumes.Consumer) bool {
+	if !c.Remote() {
+		return c.RunnerKey == "" && c.Owner.Node == d.Needs.Use.Node && d.Needs.resourceIdentity(d.Cluster, c.Owner.Key)
+	}
+	key, ok := c.GoneKey()
+	return ok && c.Runner == d.Needs.Use.Node && key == d.Needs.Use.NodeKey && d.Needs.resourceIdentity(d.Cluster, key)
 }
 
 func validBinding(b Binding) bool {
@@ -442,7 +479,7 @@ func validBinding(b Binding) bool {
 		}
 	}
 	for i, p := range d.Pins {
-		if p.Key != d.Needs.Volumes[i].Key || VolumeKey(p.Scope) != p.Key || p.Scope.Cluster != d.Cluster || p.Scope.Generation == 0 || p.Consumer.ID != d.Needs.Consumer || p.Consumer.Generation != d.Needs.Generation || p.Consumer.Writable != d.Needs.Volumes[i].Writable || p.Consumer.Owner.Node != d.Needs.Use.Node || !d.Needs.resourceIdentity(d.Cluster, p.Consumer.Owner.Key) || p.Consumer.Lease.Token == 0 || p.Consumer.Lease.Generation != p.Scope.Generation || p.Consumer.OwnerRevision == 0 {
+		if p.Key != d.Needs.Volumes[i].Key || VolumeKey(p.Scope) != p.Key || p.Scope.Cluster != d.Cluster || p.Scope.Generation == 0 || p.Consumer.ID != d.Needs.Consumer || p.Consumer.Generation != d.Needs.Generation || p.Consumer.Writable != d.Needs.Volumes[i].Writable || !pinRunsHere(d, p.Consumer) || p.Consumer.Lease.Token == 0 || p.Consumer.Lease.Generation != p.Scope.Generation || p.Consumer.OwnerRevision == 0 {
 			return false
 		}
 		if ref, fixed := d.Needs.FixedVolumes[p.Key]; fixed && (ref.Scope != p.Scope || ref.Owner != p.Consumer.Owner || ref.Scope.Cluster != d.Cluster) || !fixed && p.Scope.TenantManaged() {

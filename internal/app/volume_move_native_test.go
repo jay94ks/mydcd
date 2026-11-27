@@ -11,17 +11,17 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/reconcile"
-	"github.com/jay94ks/mydcd/internal/userauth"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/userauth"
 	"github.com/moby/moby/client"
 
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/config"
-	"github.com/jay94ks/mydcd/internal/engine"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/workload/volumes"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/config"
+	"github.com/jay94ks/seafield/internal/engine"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/workload/volumes"
 )
 
 func TestRealBoundaryAutomaticMoveSourceQuorumAndNative(t *testing.T) {
@@ -32,7 +32,7 @@ func TestRealBoundaryMoveOwnerCASAfterNativeRestore(t *testing.T) {
 	runRealVolumeOwnerBoundary(t, true, true, false, volumeOwnerMoveCommit)
 }
 
-func verifyAutomaticMoveSource(t *testing.T, ctx context.Context, a *Runtime, owner **Runtime, cfg config.Node, root string, p control.Policy, read func() cluster.View, change func(string, string, uint64, any), ready volumes.NativeReady, source control.VolumeBackupSource, docker *engine.Client, cli func(...string), commitOwner bool, admin userauth.Client, authority mydcp.Peer, session access.Session) {
+func verifyAutomaticMoveSource(t *testing.T, ctx context.Context, a *Runtime, owner **Runtime, cfg config.Node, root string, p control.Policy, read func() cluster.View, change func(string, string, uint64, any), ready volumes.NativeReady, source control.VolumeBackupSource, docker *engine.Client, cli func(...string), commitOwner bool, admin userauth.Client, authority sfcp.Peer, session access.Session) {
 	t.Helper()
 	registry := func() control.Volumes {
 		t.Helper()
@@ -47,7 +47,7 @@ func verifyAutomaticMoveSource(t *testing.T, ctx context.Context, a *Runtime, ow
 		t.Fatal(err)
 	}
 	tenant, _ := c.Tenant(ready.Spec.Scope.Tenant)
-	change("move-nodes", "set-nodes", tenant.Revision, control.NodeAssignment{Tenant: tenant.ID, Nodes: []string{"node-a", "node-b"}})
+	change("move-nodes", "set-nodes", tenant.Revision, control.NodeChangeTo(tenant.ID, tenant.AllowedNodes, []string{"node-a", "node-b"}))
 	core, _ := registry().Volume(ready.Spec.Scope)
 	change("move-source-capacity", "set-volume-capacity", core.Revision(), control.VolumeCapacity{Scope: ready.Spec.Scope, Native: control.VolumeNativeDigest(ready), Bytes: 128 << 10})
 	for _, node := range []string{"node-a", "node-b"} {
@@ -250,7 +250,7 @@ func verifyAutomaticMoveSource(t *testing.T, ctx context.Context, a *Runtime, ow
 	if e != nil {
 		t.Fatal(e)
 	}
-	targetFilter := client.Filters{}.Add("label", "org.mydc.owner="+targetDocker.Owner)
+	targetFilter := client.Filters{}.Add("label", "org.sfc.owner="+targetDocker.Owner)
 	prior, e := targetDocker.API.VolumeList(ctx, client.VolumeListOptions{Filters: targetFilter})
 	if e != nil || len(prior.Items) != 0 {
 		t.Fatal("target native prestate", e)
@@ -525,7 +525,7 @@ func verifyAutomaticMoveSource(t *testing.T, ctx context.Context, a *Runtime, ow
 	}
 	cli("manage", "result", "--request-id", "native-move")
 	cleanupMoveSourceFixture(t, ctx, owner, cfg, ready, docker)
-	t.Log("actual CLI/Raft/normal source native fence+A2 artifact/Manifest -> same source DB/key -> target current quorum and authenticated MYDCP -> real receiver file sync failure/no offset ACK -> same receiver DB/A2/inode resume/full archive verification/durable completion -> original CLI cancel/source reader+both artifact stores cleanup; actual native target restore/completion loss/same DB and native ID recovery/CopyProof Verified/source reader return -> real target native Remove, both signed cancellation facts/Cancelled and shared transfer reservation return; source fence retained/new owner revision, no source app restart/owner CAS/writable target/SQL claim")
+	t.Log("actual CLI/Raft/normal source native fence+A2 artifact/Manifest -> same source DB/key -> target current quorum and authenticated SFCP -> real receiver file sync failure/no offset ACK -> same receiver DB/A2/inode resume/full archive verification/durable completion -> original CLI cancel/source reader+both artifact stores cleanup; actual native target restore/completion loss/same DB and native ID recovery/CopyProof Verified/source reader return -> real target native Remove, both signed cancellation facts/Cancelled and shared transfer reservation return; source fence retained/new owner revision, no source app restart/owner CAS/writable target/SQL claim")
 }
 
 // The wrapper loses only the completion observation AFTER the actual product

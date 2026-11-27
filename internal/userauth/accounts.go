@@ -8,11 +8,11 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/jay94ks/mydcd/internal/cliprofile"
+	"github.com/jay94ks/seafield/internal/cliprofile"
 )
 
 var (
-	ErrLoginRequired = errors.New("no saved login for the selected account; use mydc login")
+	ErrLoginRequired = errors.New("no saved login for the selected account; use sfcli login")
 	ErrUserRequired  = errors.New("multiple saved accounts; select one with --user USER")
 )
 

@@ -9,12 +9,12 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/engine"
-	"github.com/jay94ks/mydcd/internal/network"
-	"github.com/jay94ks/mydcd/internal/tenancy"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/engine"
+	"github.com/jay94ks/seafield/internal/network"
+	"github.com/jay94ks/seafield/internal/tenancy"
 )
 
 type tunnelBudget struct {
@@ -48,6 +48,7 @@ func managedTunnelViews(cluster [32]byte, s state.State, p control.ResourceProje
 	views := map[string]tunnelView{}
 	objects := s.Objects("")
 	endpoints := map[string][]network.Endpoint{}
+	hosts := p.Resources.Networks.ClusterAppHosts()
 	add := func(name, key, owner string, pub [32]byte, a netip.Addr) {
 		endpoints[name] = append(endpoints[name], network.Endpoint{Owner: pub, Network: network.NetworkID(cluster, name), ID: network.EndpointID(cluster, name, owner, key, s.Object(key).Generation, a), Address: a})
 	}
@@ -91,6 +92,14 @@ func managedTunnelViews(cluster [32]byte, s state.State, p control.ResourceProje
 				for _, pool := range bridge.Bridge.Pools {
 					view.Topology.Pools = append(view.Topology.Pools, network.RoutePool{Network: t.Network, Owner: bridge.Bridge.Owner, Prefix: pool.Prefix})
 					add(t.Network, bridgeKey, bridge.Bridge.Owner, bridge.Network.Owner, pool.Gateway)
+				}
+				if bridge.Network.System {
+					// the cluster apps this member runs: their cluster-wide
+					// addresses are its, like its pool (tenancy ClusterAppHosts)
+					for _, a := range hosts[bridge.Network.Node] {
+						view.Topology.Pools = append(view.Topology.Pools, network.RoutePool{Network: t.Network, Owner: bridge.Bridge.Owner, Prefix: netip.PrefixFrom(a, 32)})
+						add(t.Network, bridgeKey, bridge.Bridge.Owner, bridge.Network.Owner, a)
+					}
 				}
 			}
 		}

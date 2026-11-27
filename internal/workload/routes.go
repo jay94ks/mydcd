@@ -3,7 +3,7 @@
 package workload
 
 import (
-	"github.com/jay94ks/mydcd/internal/network"
+	"github.com/jay94ks/seafield/internal/network"
 	"net/netip"
 )
 

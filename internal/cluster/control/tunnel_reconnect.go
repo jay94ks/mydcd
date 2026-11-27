@@ -5,13 +5,14 @@ package control
 import (
 	"crypto/sha256"
 	"encoding/json"
+	"github.com/jay94ks/seafield/internal/eventlog"
 	"unicode/utf8"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/lifecycle"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/observability"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/lifecycle"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/observability"
 )
 
 const TunnelReconnectKey = "control/tunnel-reconnects"
@@ -36,7 +37,7 @@ type TunnelPlan struct {
 func tunnelTarget(plan TunnelPlan) [32]byte {
 	plan.Target = [32]byte{}
 	raw, _ := json.Marshal(plan)
-	return sha256.Sum256(append([]byte("mydc-tunnel-plan-1\x00"), raw...))
+	return sha256.Sum256(append([]byte("sfc-tunnel-plan-1\x00"), raw...))
 }
 func (p TunnelPlan) Valid() bool {
 	r := p.Observation
@@ -271,4 +272,42 @@ func (p Policy) reduceTunnelReconnect(s state.State, cmd state.Command) (map[str
 
 func tunnelObservationFresh(observed uint64, at int64) bool {
 	return at > 0 && uint64(at) <= (^uint64(0)-999)/1000 && observability.Fresh(observed, uint64(at)*1000+999)
+}
+
+// tunnelReconnectBook is the TunnelReconnectKey Raft book (see book.go).
+var tunnelReconnectBook = Book{
+	Key:       TunnelReconnectKey,
+	Actions:   []string{"reconnect-tunnel"},
+	Reduce:    Policy.reduceTunnelReconnect,
+	Authorize: authorizeCluster,
+	AdmitReport: func(p Policy, s state.State, cmd state.Command) error {
+		_, err := p.tunnelReport(s, cmd)
+		return err
+	},
+	Events: tunnelReconnectEvents,
+}
+
+func tunnelReconnectEvents(p Policy, before, after state.State, emit eventEmitter) error {
+	old, err := p.TunnelReconnections(before)
+	if err != nil {
+		return err
+	}
+	next, err := p.TunnelReconnections(after)
+	if err != nil {
+		return err
+	}
+	for _, row := range next.Records {
+		previous, _ := old.Record(row.Operation)
+		if row.Result == nil || previous.Result != nil {
+			continue
+		}
+		kind := "tunnel-reconnected"
+		if row.Result.State == "failed" {
+			kind = "tunnel-down"
+		}
+		d := eventlog.Detail{Operation: row.Operation, State: row.Result.State, Code: row.Result.Code}
+		eventReason(&d, row.Origin)
+		emit(kind, "node", eventlog.Target{Node: row.Plan.Node, PairID: row.Plan.PairID}, d)
+	}
+	return nil
 }

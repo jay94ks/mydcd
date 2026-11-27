@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/web/dns"
-	"github.com/jay94ks/mydcd/internal/web/mydc"
-	"github.com/jay94ks/mydcd/internal/web/seal"
+	"github.com/jay94ks/seafield/internal/web/dns"
+	"github.com/jay94ks/seafield/internal/web/seal"
+	"github.com/jay94ks/seafield/internal/web/sfc"
 )
 
 func dnsFixture(t *testing.T) (*fixture, *dns.FakeWorld, *seal.Box) {
@@ -62,9 +62,6 @@ func TestDNSProvidersAndDomains(t *testing.T) {
 	}
 	if code, _ := f.do("POST", "/api/v1/dns/domains", map[string]any{"domain": "example.com", "provider": id}); code != 409 {
 		t.Fatal("domain added twice")
-	}
-	if code, _ := f.do("DELETE", "/api/v1/dns/providers/"+id, nil); code != 409 {
-		t.Fatal("provider in use deleted")
 	}
 	// the check fails after a bad token replacement and keeps the old token
 	if code, _ := f.do("PUT", "/api/v1/dns/providers/"+id+"/token", map[string]any{"token": "fake-expired"}); code != 502 {
@@ -188,7 +185,7 @@ func TestDNSAdminOutsideAndValidation(t *testing.T) {
 	for _, it := range out["items"].([]any) {
 		m := it.(map[string]any)
 		if m["outside"] != true || m["managed"] != nil {
-			t.Fatalf("outside record shown as MyDC's: %v", m)
+			t.Fatalf("outside record shown as Seafield Cluster's: %v", m)
 		}
 	}
 	// provider validation: a CNAME next to an A record
@@ -223,7 +220,7 @@ func TestDNSAdminOutsideAndValidation(t *testing.T) {
 func TestDNSViewerCannotChange(t *testing.T) {
 	f, _, _ := dnsFixture(t)
 	addExampleDomain(t, f)
-	priv := mydc.FixtureKey("bob")
+	priv := sfc.FixtureKey("bob")
 	if code, out := keyLogin(f, "bob", priv); code != 200 {
 		t.Fatalf("bob login: %d %v", code, out)
 	}

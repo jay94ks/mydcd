@@ -13,11 +13,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/workload"
-	"github.com/jay94ks/mydcd/tests/vaultfixture"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/workload"
+	"github.com/jay94ks/seafield/tests/vaultfixture"
 	"github.com/moby/moby/client"
 	"gopkg.in/yaml.v3"
 )
@@ -31,7 +31,7 @@ func verifySecondAppLifecycle(t *testing.T, ctx context.Context, r *Runtime, roo
 	vault.UnsealOriginal()
 	catalog, _ := p.Catalog(read().State)
 	tenant, _ := catalog.Tenant("tenant")
-	change("second-lifecycle-node", "set-nodes", tenant.Revision, control.NodeAssignment{Tenant: "tenant", Nodes: []string{"node-a"}})
+	change("second-lifecycle-node", "set-nodes", tenant.Revision, control.NodeChangeTo("tenant", tenant.AllowedNodes, []string{"node-a"}))
 	file, profile := filepath.Join(root, "compose.yaml"), filepath.Join(root, "cli.yaml")
 	input, err := deployment.ParseApp(original)
 	if err != nil {
@@ -67,7 +67,7 @@ func verifySecondAppLifecycle(t *testing.T, ctx context.Context, r *Runtime, roo
 	}
 	cli := func(args ...string) {
 		t.Helper()
-		out, diagnostic, err := runManagedCLICommand(ctx, os.Getenv("MYDC_TEST_CLI"), filepath.Join(root, "cli-home"), profile, args, nil)
+		out, diagnostic, err := runManagedCLICommand(ctx, os.Getenv("SFC_TEST_CLI"), filepath.Join(root, "cli-home"), profile, args, nil)
 		if err != nil {
 			t.Fatal("second lifecycle CLI", args, err, string(diagnostic), string(out))
 		}

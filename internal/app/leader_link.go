@@ -5,7 +5,7 @@ package app
 import (
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/mydcp"
+	"github.com/jay94ks/seafield/internal/sfcp"
 )
 
 // leaderLink is this node's view of its connection to the current leader.
@@ -17,7 +17,7 @@ type leaderLink struct {
 	ID    string
 	Term  uint64
 	Self  bool      // this node is the leader
-	Since time.Time // unbroken MYDCP connection to the leader since (not Self)
+	Since time.Time // unbroken SFCP connection to the leader since (not Self)
 }
 
 func (r *Runtime) leaderLink() (leaderLink, bool) {
@@ -57,6 +57,6 @@ func (r *Runtime) ownerLinkedSince(owner [32]byte, at time.Time) bool {
 	if r.Mesh == nil {
 		return false
 	}
-	since, ok := r.Mesh.ConnectedSince(mydcp.Identity(owner))
+	since, ok := r.Mesh.ConnectedSince(sfcp.Identity(owner))
 	return ok && !since.After(at)
 }

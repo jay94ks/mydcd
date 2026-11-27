@@ -2,7 +2,7 @@
 
 package services
 
-import "github.com/jay94ks/mydcd/internal/network"
+import "github.com/jay94ks/seafield/internal/network"
 
 func (t RouteTuple) Transport() network.TransportPacket {
 	return network.TransportPacket{Source: t.Source.Address, Destination: t.Destination.Address, SourcePort: t.SourcePort, DestinationPort: t.DestinationPort, Protocol: t.Protocol}

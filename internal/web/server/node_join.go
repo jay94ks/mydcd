@@ -7,22 +7,22 @@ import (
 	"encoding/hex"
 	"net/http"
 
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/cluster/lifecycle"
-	"github.com/jay94ks/mydcd/internal/config"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/web/mydc"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/lifecycle"
+	"github.com/jay94ks/seafield/internal/config"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/web/sfc"
 )
 
-// Adding a server (UI-13 '서버 추가', system administrator), as `mydc node
-// add`, `mydc node invitation` and `mydc node promote`. mydcd keeps the
+// Adding a server (UI-13 '서버 추가', system administrator), as `sfcli node
+// add`, `sfcli node invitation` and `sfcli node promote`. sfcd keeps the
 // membership directory, signs the invitation and decides; the web keeps
 // nothing (the invitation is fetched again on every download).
 
 // POST /nodes {opId, id, endpoint, publicKey, joinId} → invite-node
 // (Expected 0). id and joinId: lowercase letters, digits and -, starting
 // with a letter (joinId not "genesis"); endpoint: canonical host:port;
-// publicKey: the 64-hex Ed25519 key `mydc identity create` printed on the
+// publicKey: the 64-hex Ed25519 key `sfcli identity create` printed on the
 // new server. 409 exists when the ID, key, endpoint or join ID is taken.
 func (s *Server) handleInviteNode(w http.ResponseWriter, r *http.Request, ws *webSession) {
 	var req struct {
@@ -35,7 +35,7 @@ func (s *Server) handleInviteNode(w http.ResponseWriter, r *http.Request, ws *we
 	if !readJSON(w, r, &req) {
 		return
 	}
-	s.sharedCreate(w, r, ws, req.OpID, req, func(ctx context.Context, c mydc.Conn, _ mydc.Session) (string, any, uint64, string, error) {
+	s.sharedCreate(w, r, ws, req.OpID, req, func(ctx context.Context, c sfc.Conn, _ sfc.Session) (string, any, uint64, string, error) {
 		key, err := identity.ParseKey(req.PublicKey)
 		switch {
 		case !lifecycle.ValidID(req.ID):
@@ -48,7 +48,7 @@ func (s *Server) handleInviteNode(w http.ResponseWriter, r *http.Request, ws *we
 			return "", nil, 0, "", invalid("joinId: lowercase letters, digits and -, starting with a letter, not genesis")
 		}
 		taken := false
-		if err := eachMember(ctx, c, func(m memberView, _ mydc.MembersPage) bool {
+		if err := eachMember(ctx, c, func(m memberView, _ sfc.MembersPage) bool {
 			taken = m.ID == req.ID || m.Key == req.PublicKey || m.Endpoint == req.Endpoint || m.JoinID == req.JoinID
 			return !taken
 		}); err != nil {
@@ -57,13 +57,13 @@ func (s *Server) handleInviteNode(w http.ResponseWriter, r *http.Request, ws *we
 		if taken {
 			return "", nil, 0, "", &httpErr{http.StatusConflict, "exists", "a server with this ID, key, endpoint or join ID is already in the cluster"}
 		}
-		return mydc.ActionInviteNode, mydc.NodeInvite{Peer: config.Peer{ID: req.ID, Key: req.PublicKey, Endpoint: req.Endpoint}, JoinID: req.JoinID}, 0, "node/" + req.ID, nil
+		return sfc.ActionInviteNode, sfc.NodeInvite{Peer: config.Peer{ID: req.ID, Key: req.PublicKey, Endpoint: req.Endpoint}, JoinID: req.JoinID}, 0, "node/" + req.ID, nil
 	})
 }
 
-// GET /nodes/{node}/invitation → the signed invitation file for `mydcd
-// join` (application/json attachment mydc-invitation-{node}.json). Only an
-// invited, learner or ready server has one (403 otherwise, from mydcd).
+// GET /nodes/{node}/invitation → the signed invitation file for `sfcd
+// join` (application/json attachment sfc-invitation-{node}.json). Only an
+// invited, learner or ready server has one (403 otherwise, from sfcd).
 func (s *Server) handleNodeInvitation(w http.ResponseWriter, r *http.Request, ws *webSession) {
 	node := r.PathValue("node")
 	if !lifecycle.ValidID(node) {
@@ -73,7 +73,7 @@ func (s *Server) handleNodeInvitation(w http.ResponseWriter, r *http.Request, ws
 	ctx, cancel := s.callCtx(r)
 	defer cancel()
 	var raw []byte
-	err := ws.do(ctx, func(ctx context.Context, c mydc.Conn) error {
+	err := ws.do(ctx, func(ctx context.Context, c sfc.Conn) error {
 		inv, err := c.NodeInvitation(ctx, node)
 		if err != nil {
 			return err
@@ -92,7 +92,7 @@ func (s *Server) handleNodeInvitation(w http.ResponseWriter, r *http.Request, ws
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Content-Disposition", `attachment; filename="mydc-invitation-`+node+`.json"`)
+	w.Header().Set("Content-Disposition", `attachment; filename="sfc-invitation-`+node+`.json"`)
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(raw)
@@ -101,7 +101,7 @@ func (s *Server) handleNodeInvitation(w http.ResponseWriter, r *http.Request, ws
 // GET /nodes/{node}/invitation/summary → {node, cluster, joinId,
 // approvalRevision, source:{id, key, endpoint}, target:{id, key,
 // endpoint}}: the values the wizard shows next to the file and puts in the
-// `mydcd join --cluster … --source-public-key …` command. The source key
+// `sfcd join --cluster … --source-public-key …` command. The source key
 // is to be checked against a separately trusted node key.
 func (s *Server) handleNodeInvitationSummary(w http.ResponseWriter, r *http.Request, ws *webSession) {
 	node := r.PathValue("node")
@@ -110,7 +110,7 @@ func (s *Server) handleNodeInvitationSummary(w http.ResponseWriter, r *http.Requ
 		Key      string `json:"key"`
 		Endpoint string `json:"endpoint"`
 	}
-	read(s, w, r, ws, func(ctx context.Context, c mydc.Conn) (map[string]any, error) {
+	read(s, w, r, ws, func(ctx context.Context, c sfc.Conn) (map[string]any, error) {
 		inv, err := c.NodeInvitation(ctx, node)
 		if err != nil {
 			return nil, err
@@ -138,7 +138,7 @@ func (s *Server) handlePromoteNode(w http.ResponseWriter, r *http.Request, ws *w
 		return
 	}
 	node := r.PathValue("node")
-	s.sharedCreate(w, r, ws, req.OpID, req, func(ctx context.Context, c mydc.Conn, _ mydc.Session) (string, any, uint64, string, error) {
+	s.sharedCreate(w, r, ws, req.OpID, req, func(ctx context.Context, c sfc.Conn, _ sfc.Session) (string, any, uint64, string, error) {
 		m, err := findMember(ctx, c, node)
 		if err != nil {
 			return "", nil, 0, "", err
@@ -146,9 +146,9 @@ func (s *Server) handlePromoteNode(w http.ResponseWriter, r *http.Request, ws *w
 		if m == nil {
 			return "", nil, 0, "", &httpErr{http.StatusNotFound, "not-found", "no such server"}
 		}
-		if req.Expected == 0 && m.Join != mydc.JoinReady {
+		if req.Expected == 0 && m.Join != sfc.JoinReady {
 			return "", nil, 0, "", &httpErr{http.StatusConflict, "not-ready", "the server has not finished joining (join: " + m.Join + ")"}
 		}
-		return mydc.ActionPromoteNode, control.NodeSelection{ID: node}, expectedOr(req.Expected, m.JoinRevision), "node/" + node, nil
+		return sfc.ActionPromoteNode, control.NodeSelection{ID: node}, expectedOr(req.Expected, m.JoinRevision), "node/" + node, nil
 	})
 }

@@ -11,7 +11,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/containerops"
+	"github.com/jay94ks/seafield/internal/containerops"
 	"github.com/moby/moby/api/pkg/stdcopy"
 	"github.com/moby/moby/api/types/container"
 )

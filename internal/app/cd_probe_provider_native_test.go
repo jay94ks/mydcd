@@ -9,21 +9,21 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/userauth"
-	"github.com/jay94ks/mydcd/tests/gitfixture"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/userauth"
+	"github.com/jay94ks/seafield/tests/gitfixture"
 )
 
 // Consume the existing handoff runtime before its ordinary voter promotion.
 // Only this learner has rq8-provider-read; the original leader has git-read.
 // Neither a leader relay nor a fallback to another installed profile can satisfy
 // both positive and negative controls. The original app/CD/native state stays put.
-func verifyManagedNonVoterCDProbe(t *testing.T, ctx context.Context, leader, provider *Runtime, original userauth.Client, ingress mydcp.Peer, p control.Policy, read func() cluster.View, change func(string, string, uint64, any), source *gitfixture.Fixture, query deployment.GitProbeRequest, commit string, size int64, fingerprint func() [32]byte) {
+func verifyManagedNonVoterCDProbe(t *testing.T, ctx context.Context, leader, provider *Runtime, original userauth.Client, ingress sfcp.Peer, p control.Policy, read func() cluster.View, change func(string, string, uint64, any), source *gitfixture.Fixture, query deployment.GitProbeRequest, commit string, size int64, fingerprint func() [32]byte) {
 	t.Helper()
 	view, err := provider.currentView(ctx)
 	if err != nil || view.Local || provider.Engine().IsLeader() {
@@ -33,7 +33,7 @@ func verifyManagedNonVoterCDProbe(t *testing.T, ctx context.Context, leader, pro
 	if err != nil {
 		t.Fatal(err)
 	}
-	peer, ok := leader.Mesh.Peer(mydcp.Identity(provider.Identity.Public))
+	peer, ok := leader.Mesh.Peer(sfcp.Identity(provider.Identity.Public))
 	entry, found := members.Entry(peer.ID)
 	if !ok || !found || entry.Peer.Key != provider.Identity.Actor() || entry.Peer.Voter || !members.WorkKey(provider.Identity.Public) {
 		t.Fatal("existing Git provider is not the installed working non-voter")
@@ -44,7 +44,7 @@ func verifyManagedNonVoterCDProbe(t *testing.T, ctx context.Context, leader, pro
 	if _, ok := provider.gitCredentials["tenant/git-read"]; ok {
 		t.Fatal("leader-only profile was also installed on the non-voter")
 	}
-	mesh, err := mydcp.NewTransport(original.Self, original.Cluster, func(key mydcp.Identity) (mydcp.Peer, bool) {
+	mesh, err := sfcp.NewTransport(original.Self, original.Cluster, func(key sfcp.Identity) (sfcp.Peer, bool) {
 		if key == ingress.Key {
 			return ingress, true
 		}
@@ -55,7 +55,7 @@ func verifyManagedNonVoterCDProbe(t *testing.T, ctx context.Context, leader, pro
 	}
 	defer mesh.Close()
 	client := original
-	client.Mesh, client.Peers = mesh, []mydcp.Peer{ingress, peer}
+	client.Mesh, client.Peers = mesh, []sfcp.Peer{ingress, peer}
 	create := func(id string, operations []string) access.Session {
 		t.Helper()
 		key, err := identity.Ephemeral()
@@ -93,7 +93,7 @@ func verifyManagedNonVoterCDProbe(t *testing.T, ctx context.Context, leader, pro
 		}
 		unchanged()
 	}
-	noProfile := func(target mydcp.Peer, q deployment.GitProbeRequest) {
+	noProfile := func(target sfcp.Peer, q deployment.GitProbeRequest) {
 		t.Helper()
 		before := source.Stats()
 		result, err := client.ProbeCD(ctx, target, operator, "tenant", q)
@@ -107,7 +107,7 @@ func verifyManagedNonVoterCDProbe(t *testing.T, ctx context.Context, leader, pro
 		before := source.Stats()
 		result, err := client.ProbeCD(ctx, peer, session, tenant, query)
 		var refusal *userauth.Error
-		if !errors.As(err, &refusal) || refusal.Code != "denied" || refusal.Phase != mydcp.Completed || result.Commit != "" || result.Size != 0 || !reflect.DeepEqual(before, source.Stats()) {
+		if !errors.As(err, &refusal) || refusal.Code != "denied" || refusal.Phase != sfcp.Completed || result.Commit != "" || result.Size != 0 || !reflect.DeepEqual(before, source.Stats()) {
 			t.Fatal("current non-voter probe authority refusal reached Git or returned data", result, err)
 		}
 		unchanged()
@@ -123,7 +123,7 @@ func verifyManagedNonVoterCDProbe(t *testing.T, ctx context.Context, leader, pro
 		t.Fatal("provider assignment negative control missing")
 	}
 	denied(operator, "tenant")
-	change("rq8-provider-assignment", "set-nodes", tenant.Revision, control.NodeAssignment{Tenant: "tenant", Nodes: append(slices.Clone(tenant.AllowedNodes), peer.ID)})
+	change("rq8-provider-assignment", "set-nodes", tenant.Revision, control.NodeChange{Tenant: "tenant", Add: []string{peer.ID}})
 	positive()
 	noProfile(ingress, query) // Leader cannot consume the non-voter's profile.
 	wrong := query
@@ -176,7 +176,7 @@ func verifyManagedNonVoterCDProbe(t *testing.T, ctx context.Context, leader, pro
 	select {
 	case got := <-completed:
 		var refusal *userauth.Error
-		if !errors.As(got.err, &refusal) || refusal.Code != "denied" || refusal.Phase != mydcp.Completed || got.result.Commit != "" || got.result.Size != 0 {
+		if !errors.As(got.err, &refusal) || refusal.Code != "denied" || refusal.Phase != sfcp.Completed || got.result.Commit != "" || got.result.Size != 0 {
 			t.Fatal("non-voter post-I/O probe disclosed data after current membership withdrawal", got.result, got.err)
 		}
 	case <-ctx.Done():

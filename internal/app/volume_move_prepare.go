@@ -9,9 +9,9 @@ import (
 	"log"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/workload/volumes"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/workload/volumes"
 )
 
 func (r *Runtime) prepareMoveTarget(ctx context.Context, job control.VolumeMove) (failure error) {
@@ -39,7 +39,7 @@ func (r *Runtime) prepareMoveTarget(ctx context.Context, job control.VolumeMove)
 	r.volumeMoveTargetMu.Lock()
 	defer r.volumeMoveTargetMu.Unlock()
 	if r.nativeVolumes == nil || r.backupArtifacts == nil || r.volumeRestores == nil {
-		return fmt.Errorf("target runtime managers unavailable: %w", mydcp.ErrAdmission)
+		return fmt.Errorf("target runtime managers unavailable: %w", sfcp.ErrAdmission)
 	}
 	stage = "prepare-authorization"
 	permit, err := r.volumeMovePermit(ctx, job, "prepare")
@@ -75,7 +75,7 @@ func (r *Runtime) prepareMoveTarget(ctx context.Context, job control.VolumeMove)
 	}
 	check := func(ctx context.Context, got volumes.NativeReady, c volumes.Consumer) error {
 		if got.Spec != job.Target || got.Owner != job.Binding.Target || got.Generation != 1 || c != job.StagingConsumer() {
-			return mydcp.ErrAdmission
+			return sfcp.ErrAdmission
 		}
 		_, err := r.volumeMovePermit(ctx, job, "prepare")
 		return err

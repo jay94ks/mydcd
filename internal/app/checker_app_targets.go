@@ -9,13 +9,13 @@ import (
 	"slices"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/schema"
-	"github.com/jay94ks/mydcd/internal/workload"
-	checker "github.com/jay94ks/mydcd/internal/workload/lifecycle"
-	contract "github.com/jay94ks/mydcd/lifecycle/v1"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/workload"
+	checker "github.com/jay94ks/seafield/internal/workload/lifecycle"
+	contract "github.com/jay94ks/seafield/lifecycle/v1"
 )
 
 func appCheckServices(p checker.TaskProgram, check checker.ResolvedCheck) []string {
@@ -194,7 +194,7 @@ func (r *Runtime) appProbeDependency(ctx context.Context, b deployment.Binding, 
 
 // liveTargetObservation accepts a peer task's stored observation as a checker
 // target. Liveness is the reducer's Expired mark, not the stored At: an
-// unchanged task keeps its last fact time while renewals go over MyDCP.
+// unchanged task keeps its last fact time while renewals go over SFCP.
 func liveTargetObservation(observed *deployment.Observation, owner [32]byte, generation, revision, now uint64) bool {
 	return observed != nil && !observed.Released && observed.Owner == owner && observed.Generation == generation && observed.Revision == revision && observed.OwnerBoot != "" && observed.Live(now)
 }

@@ -9,13 +9,14 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/eventlog"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/schema"
-	"github.com/jay94ks/mydcd/internal/storage"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/eventbus"
+	"github.com/jay94ks/seafield/internal/eventlog"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/storage"
 )
 
 func (r *Runtime) readEvents(ctx context.Context, view cluster.View, session access.Session, q eventlog.Query) (eventlog.Page, error) {
@@ -25,7 +26,7 @@ func (r *Runtime) readEvents(ctx context.Context, view cluster.View, session acc
 		return eventlog.Page{}, eventlog.ErrUnavailable
 	}
 	r.mu.RLock()
-	events, collectErr := r.events, errors.Join(r.eventError, r.dockerEventError)
+	events, collectErr := r.events, r.eventError
 	r.mu.RUnlock()
 	allowed, err := r.controlPolicy.EventAccess(view.State, session, time.Now().Unix(), q)
 	if err != nil {
@@ -43,19 +44,19 @@ func (r *Runtime) eventReceipt(caller string, input []byte, v cluster.View) (jso
 	r.life.RLock()
 	defer r.life.RUnlock()
 	if r.closed {
-		return nil, mydcp.ErrAdmission
+		return nil, sfcp.ErrAdmission
 	}
 	key, err := identity.ParseKey(caller)
 	if err != nil || r.events == nil {
-		return nil, mydcp.ErrAdmission
+		return nil, sfcp.ErrAdmission
 	}
 	q, err := schema.Decode[eventlog.ReceiptQuery](input)
 	if err != nil || q.Key != key {
-		return nil, mydcp.ErrAdmission
+		return nil, sfcp.ErrAdmission
 	}
 	d, err := r.controlPolicy.Members(v.State)
 	if err != nil || !d.MemberKey(key) {
-		return nil, mydcp.ErrAdmission
+		return nil, sfcp.ErrAdmission
 	}
 	receipt, err := r.events.Receipt(q)
 	if err != nil {
@@ -63,13 +64,13 @@ func (r *Runtime) eventReceipt(caller string, input []byte, v cluster.View) (jso
 	}
 	return json.Marshal(receipt)
 }
-func (r *Runtime) storeEventBatch(ctx context.Context, caller mydcp.Identity, raw []byte) error {
+func (r *Runtime) storeEventBatch(ctx context.Context, caller sfcp.Identity, raw []byte) error {
 	if r.events == nil || len(raw) > 32<<10 {
-		return mydcp.ErrAdmission
+		return sfcp.ErrAdmission
 	}
 	b, err := schema.Decode[eventlog.Batch](raw)
 	if err != nil || !b.Valid() || b.Key != [32]byte(caller) || b.Cluster != r.controlPolicy.Cluster {
-		return mydcp.ErrAdmission
+		return sfcp.ErrAdmission
 	}
 	v, err := r.Engine().Read(ctx, false)
 	if err != nil {
@@ -82,9 +83,22 @@ func (r *Runtime) storeEventBatch(ctx context.Context, caller mydcp.Identity, ra
 	entry, ok := d.Entry(b.Node)
 	key, keyErr := identity.ParseKey(entry.CurrentPeer().Key)
 	if !ok || keyErr != nil || key != b.Key || !d.MemberKey(key) {
-		return mydcp.ErrAdmission
+		return sfcp.ErrAdmission
 	}
-	return r.events.Receive(b, uint64(time.Now().UnixMilli()))
+	if err := r.events.Receive(b, uint64(time.Now().UnixMilli())); err != nil {
+		return err
+	}
+	// One notice per tenant/app the batch touches, so each reader's filter
+	// sees the records it may read.
+	seen := map[[2]string]bool{}
+	for _, rec := range b.Records {
+		k := [2]string{rec.Event.Target.Tenant, rec.Event.Target.App}
+		if !seen[k] {
+			seen[k] = true
+			r.bus.Publish(eventbus.Event{Topic: eventbus.TopicReport, Kind: eventbus.KindDiagnostic, Node: b.Node, Tenant: k[0], App: k[1], Changed: true})
+		}
+	}
+	return nil
 }
 
 type eventProjectionCursor struct {
@@ -146,7 +160,7 @@ func (r *Runtime) collectCommittedEvents() error {
 // replicateEventPeer sends peer this node's records it does not hold yet and
 // returns the newest own sequence the peer now holds: the receipt it gave,
 // advanced by every batch it accepted in this call (the last one included).
-func (r *Runtime) replicateEventPeer(ctx context.Context, peer mydcp.Peer) (uint64, error) {
+func (r *Runtime) replicateEventPeer(ctx context.Context, peer sfcp.Peer) (uint64, error) {
 	q := r.events.Source()
 	raw, _ := json.Marshal(q)
 	reply, err := cluster.CallManagement(ctx, r.Mesh, r.Identity, r.controlPolicy.Cluster, peer, cluster.ManagementRequest{Method: "event-receipt", Input: raw})
@@ -155,7 +169,7 @@ func (r *Runtime) replicateEventPeer(ctx context.Context, peer mydcp.Peer) (uint
 	}
 	receipt, err := schema.Decode[eventlog.Receipt](reply.Data)
 	if err != nil || receipt.Schema != 1 || receipt.Query != q {
-		return 0, mydcp.ErrFrame
+		return 0, sfcp.ErrFrame
 	}
 	for range 4 {
 		batch, err := r.events.Export(receipt.Last, uint64(time.Now().UnixMilli()))
@@ -174,7 +188,7 @@ func (r *Runtime) replicateEventPeer(ctx context.Context, peer mydcp.Peer) (uint
 		if err != nil {
 			return 0, err
 		}
-		if err = conn.Report(ctx, raw); err != nil {
+		if err = conn.Report(ctx, sfcp.KindEventBatch, raw); err != nil {
 			return 0, err
 		}
 		if len(batch.Records) == 0 {
@@ -226,7 +240,7 @@ func (r *Runtime) managedEventLoop() {
 					if keyErr != nil || key == r.Identity.Public || !members.MemberKey(key) {
 						continue
 					}
-					peer, ok := r.Mesh.Peer(mydcp.Identity(key))
+					peer, ok := r.Mesh.Peer(sfcp.Identity(key))
 					if !ok {
 						continue
 					}

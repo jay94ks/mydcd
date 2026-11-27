@@ -11,9 +11,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/web/mydc"
-	"github.com/jay94ks/mydcd/internal/web/store"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/web/sfc"
+	"github.com/jay94ks/seafield/internal/web/store"
 )
 
 func TestWebhookIngress(t *testing.T) {
@@ -21,7 +21,7 @@ func TestWebhookIngress(t *testing.T) {
 	hs := newHookServer(t, f)
 	ctx := context.Background()
 	fakeLogin(t, f, "admin")
-	makeAutomation(t, f, "mydc-autofix", "a1b2c3d4-0000-4000-8000-0000000000a5", true, true)
+	makeAutomation(t, f, "sfc-autofix", "a1b2c3d4-0000-4000-8000-0000000000a5", true, true)
 	if code, out := f.do("POST", "/api/v1/webhooks", map[string]any{"name": "ops", "kind": "external", "url": hs.URL + "/ops", "role": "notify"}); code != 201 {
 		t.Fatalf("webhook: %d %v", code, out)
 	}
@@ -59,7 +59,7 @@ func TestWebhookIngress(t *testing.T) {
 		defer hs.mu.Unlock()
 		var ev []string
 		for _, r := range hs.got {
-			ev = append(ev, r.Header.Get("X-MyDC-Event"))
+			ev = append(ev, r.Header.Get("X-SFC-Event"))
 		}
 		sort.Strings(ev) // sent in the background, in any order
 		return strings.Join(ev, ",")
@@ -70,18 +70,18 @@ func TestWebhookIngress(t *testing.T) {
 	}
 	round() // start reading (incident response is off; the links keep the watcher on)
 
-	fake.AddIngressEvent(mydc.EventIngressListenerDown, "node-a", "", "", mydc.IngressEvent{Gateway: mydc.GatewayExternal, Listener: "l-443"})
-	fake.AddIngressEvent(mydc.EventIngressListenerDown, "node-a", "", "", mydc.IngressEvent{Gateway: mydc.GatewayLocal, Listener: "l-local"})
+	fake.AddIngressEvent(sfc.EventIngressListenerDown, "node-a", "", "", sfc.IngressEvent{Gateway: sfc.GatewayExternal, Listener: "l-443"})
+	fake.AddIngressEvent(sfc.EventIngressListenerDown, "node-a", "", "", sfc.IngressEvent{Gateway: sfc.GatewayLocal, Listener: "l-local"})
 	// 1% is under the link's 2%; 5% waits 3 minutes. The web makes these
 	// samples itself from the route's recent metrics (routeSamples).
 	rate := func(v float64) {
 		f.srv.ingressEvent(webEvent{Time: clock.Load(), Kind: webRouteMetric, Scope: "app", Tenant: "shop", App: "php-shop", Node: "node-a", Target: "shop/php-shop/r1",
-			Ingress: &webIngressEvent{Gateway: mydc.GatewayExternal, RouteID: "r1", Host: "shop.example.com", Prefix: "/", Metric: metric5xx, Value: v}})
+			Ingress: &webIngressEvent{Gateway: sfc.GatewayExternal, RouteID: "r1", Host: "shop.example.com", Prefix: "/", Metric: metric5xx, Value: v}})
 	}
 	rate(0.01)
 	rate(0.05)
 	// Another route than the link's.
-	fake.AddIngressEvent(mydc.EventIngressBackendsEmpty, "node-a", "shop", "php-shop", mydc.IngressEvent{Gateway: mydc.GatewayExternal, RouteID: "r1"})
+	fake.AddIngressEvent(sfc.EventIngressBackendsEmpty, "node-a", "shop", "php-shop", sfc.IngressEvent{Gateway: sfc.GatewayExternal, RouteID: "r1"})
 	round()
 	if s := sent(); s != "ingress.down" {
 		t.Fatalf("first round: %q", s)
@@ -100,7 +100,7 @@ func TestWebhookIngress(t *testing.T) {
 	}
 	rate(0.05)
 	rate(0.001)
-	fake.AddIngressEvent(mydc.EventIngressListenerUp, "node-a", "", "", mydc.IngressEvent{Gateway: mydc.GatewayExternal, Listener: "l-443"})
+	fake.AddIngressEvent(sfc.EventIngressListenerUp, "node-a", "", "", sfc.IngressEvent{Gateway: sfc.GatewayExternal, Listener: "l-443"})
 	round()
 	if s := sent(); s != "ingress.down,ingress.down.recovered,ingress.error-rate,ingress.error-rate.recovered" {
 		t.Fatalf("recoveries: %q", s)
@@ -116,7 +116,7 @@ func TestWebhookIngress(t *testing.T) {
 		t.Fatalf("dropped notice: %q", s)
 	}
 	// A task's health check has no route: the route link takes it.
-	fake.AddEvent(mydc.FixtureEvent{Time: clock.Load(), Scope: "app", Tenant: "shop", App: "php-shop", Kind: "probe-failed", Target: "shop/php-shop/web.1"})
+	fake.AddEvent(sfc.FixtureEvent{Time: clock.Load(), Scope: "app", Tenant: "shop", App: "php-shop", Kind: "probe-failed", Target: "shop/php-shop/web.1"})
 	round()
 	if s := sent(); strings.Count(s, ",") != 4 || !strings.Contains(s, "ingress.probe-failed") {
 		t.Fatalf("probe-failed: %q", s)
@@ -126,7 +126,7 @@ func TestWebhookIngress(t *testing.T) {
 		t.Fatalf("group link: %d %v", code, out)
 	}
 	for i := 0; i < 2; i++ {
-		fake.AddEvent(mydc.FixtureEvent{Time: clock.Load(), Scope: "cluster", Kind: "ingress-blocked", Target: "blk-1"})
+		fake.AddEvent(sfc.FixtureEvent{Time: clock.Load(), Scope: "cluster", Kind: "ingress-blocked", Target: "blk-1"})
 		round()
 	}
 	if s := sent(); strings.Count(s, "ingress.blocked") != 1 {
@@ -160,7 +160,7 @@ func TestWebhookIngressPolled(t *testing.T) {
 	hs := newHookServer(t, f)
 	ctx := context.Background()
 	fakeLogin(t, f, "admin")
-	makeAutomation(t, f, "mydc-autofix", "a1b2c3d4-0000-4000-8000-0000000000a6", true, true)
+	makeAutomation(t, f, "sfc-autofix", "a1b2c3d4-0000-4000-8000-0000000000a6", true, true)
 	if code, out := f.do("POST", "/api/v1/webhooks", map[string]any{"name": "ops", "kind": "external", "url": hs.URL + "/ops", "role": "notify"}); code != 201 {
 		t.Fatalf("webhook: %d %v", code, out)
 	}
@@ -175,7 +175,7 @@ func TestWebhookIngressPolled(t *testing.T) {
 	}
 	hs.mu.Lock()
 	defer hs.mu.Unlock()
-	if len(hs.got) != 1 || hs.got[0].Header.Get("X-MyDC-Event") != "ingress.certificate-expiring" {
+	if len(hs.got) != 1 || hs.got[0].Header.Get("X-SFC-Event") != "ingress.certificate-expiring" {
 		t.Fatalf("sent %d", len(hs.got))
 	}
 	var p map[string]any
@@ -186,21 +186,21 @@ func TestWebhookIngressPolled(t *testing.T) {
 }
 
 // error-rate and latency come from the routes' recent metrics, which the
-// web reads itself (mydcd makes no event of them).
+// web reads itself (sfcd makes no event of them).
 func TestWebhookIngressRouteMetrics(t *testing.T) {
 	f, fake, _ := incidentFixture(t)
 	hs := newHookServer(t, f)
 	ctx := context.Background()
 	fakeLogin(t, f, "admin")
-	makeAutomation(t, f, "mydc-autofix", "a1b2c3d4-0000-4000-8000-0000000000a7", true, true)
+	makeAutomation(t, f, "sfc-autofix", "a1b2c3d4-0000-4000-8000-0000000000a7", true, true)
 
 	var iv *ingressView
-	if err := withAdminConn(t, fake, func(c mydc.Conn) (err error) { iv, err = ingressRead(ctx, c, control.IngressQuery{}); return }); err != nil {
+	if err := withAdminConn(t, fake, func(c sfc.Conn) (err error) { iv, err = ingressRead(ctx, c, control.IngressQuery{}); return }); err != nil {
 		t.Fatal(err)
 	}
 	link := &store.WebhookLink{Point: "ingress", Scope: store.WebhookLinkScope{Tenant: "shop", App: "php-shop"}, Events: []string{"error-rate"}}
 	var samples []webEvent
-	_ = withAdminConn(t, fake, func(c mydc.Conn) error {
+	_ = withAdminConn(t, fake, func(c sfc.Conn) error {
 		samples = f.srv.routeSamples(ctx, c, iv, []*store.WebhookLink{link}, time.Now())
 		return nil
 	})
@@ -233,7 +233,7 @@ func TestWebhookIngressRouteMetrics(t *testing.T) {
 	}
 	hs.mu.Lock()
 	defer hs.mu.Unlock()
-	if len(hs.got) == 0 || hs.got[0].Header.Get("X-MyDC-Event") != "ingress.error-rate" {
+	if len(hs.got) == 0 || hs.got[0].Header.Get("X-SFC-Event") != "ingress.error-rate" {
 		t.Fatalf("sent %d", len(hs.got))
 	}
 	var p map[string]any

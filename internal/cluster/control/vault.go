@@ -8,10 +8,10 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/reconcile"
-	"github.com/jay94ks/mydcd/internal/secrets"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/secrets"
 )
 
 const VaultKey = "control/vault"
@@ -23,13 +23,19 @@ type VaultObject struct {
 	Object secrets.Object
 }
 type VaultSelection struct{ Realm, ID string }
+
+// VaultACL adds and removes names in an object's ACL lists (vault-acl).
+// Expected is the object's revision; lists left empty do not change.
 type VaultACL struct {
-	Realm, ID string
-	ACL       secrets.ACL
+	Realm, ID   string
+	Add, Remove secrets.ACL
 }
+
+// VaultOrder moves one entry of a group right after another, or to the front
+// when After is empty (vault-reorder). Expected is the group's revision.
 type VaultOrder struct {
-	Realm, ID string
-	Entries   []string
+	Realm, ID, Entry string
+	After            string `json:",omitempty"`
 }
 type VaultMove struct{ Realm, ID, Parent string }
 type VaultAge struct {
@@ -133,7 +139,8 @@ func (p Policy) vaultCheckpoint(s state.State, v Vault) (map[string][]byte, stat
 	}
 	slices.Sort(realms)
 	for _, realm := range realms {
-		raw, err := v.Trees[realm].Encode()
+		// Every vault write drops builtin holdings nothing can read now.
+		raw, err := v.Trees[realm].PruneBuiltin(v.Approvals).Encode()
 		if err != nil {
 			return nil, state.Invalid
 		}
@@ -373,11 +380,11 @@ func (p Policy) reduceVault(s state.State, cmd state.Command) (map[string][]byte
 		case "vault-acl":
 			var x VaultACL
 			_ = canonical(change.Payload, &x)
-			tree, err = tree.SetACL(c, change.Principal, x.ID, change.Expected, x.ACL)
+			tree, err = tree.ChangeACL(c, change.Principal, x.ID, change.Expected, x.Add, x.Remove)
 		case "vault-reorder":
 			var x VaultOrder
 			_ = canonical(change.Payload, &x)
-			tree, err = tree.Reorder(c, change.Principal, x.ID, change.Expected, x.Entries)
+			tree, err = tree.Reorder(c, change.Principal, x.ID, change.Expected, x.Entry, x.After)
 		case "vault-move":
 			var x VaultMove
 			_ = canonical(change.Payload, &x)
@@ -403,9 +410,15 @@ func (p Policy) reduceVault(s state.State, cmd state.Command) (map[string][]byte
 			var x VaultWrite
 			_ = canonical(change.Payload, &x)
 			profile, found := tree.WriteProfile(x.Request.Profile)
-			member, memberErr := p.workNodeOwner(s, profile.Node)
-			if !found || memberErr != nil || member != profile.Key {
+			if !found {
 				return nil, state.Forbidden
+			}
+			// The builtin profile names no node: a voter writes it later.
+			if !profile.Builtin() {
+				member, memberErr := p.workNodeOwner(s, profile.Node)
+				if memberErr != nil || member != profile.Key {
+					return nil, state.Forbidden
+				}
 			}
 			tree, err = tree.PrepareWrite(c, change.Principal, change.Expected, x.Request)
 		case "vault-dispatch-write", "vault-publish-write", "vault-abandon-write", "vault-rotate-writes":
@@ -414,9 +427,14 @@ func (p Policy) reduceVault(s state.State, cmd state.Command) (map[string][]byte
 			switch change.Action {
 			case "vault-dispatch-write":
 				write, found := tree.Write(x.ID)
-				member, memberErr := p.workNodeOwner(s, write.Writer.Node)
-				if !found || memberErr != nil || member != write.Writer.Key {
+				if !found {
 					return nil, state.Forbidden
+				}
+				if !write.Writer.Builtin() {
+					member, memberErr := p.workNodeOwner(s, write.Writer.Node)
+					if memberErr != nil || member != write.Writer.Key {
+						return nil, state.Forbidden
+					}
 				}
 				tree, err = tree.DispatchWrite(c, change.Principal, x.ID, x.Epoch, change.Expected)
 			case "vault-publish-write":
@@ -431,6 +449,9 @@ func (p Policy) reduceVault(s state.State, cmd state.Command) (map[string][]byte
 			_ = canonical(change.Payload, &x)
 			if change.Expected != tree.Revision() {
 				return nil, state.ConditionFailed
+			}
+			if write, found := tree.Write(x.Observation.Request.ID); found && write.Writer.Builtin() && !p.builtinHolders(s, x.Observation) {
+				return nil, state.Forbidden
 			}
 			tree, err = tree.ObserveWrite(x.Observation)
 		case "vault-revoke":
@@ -537,4 +558,38 @@ func (v Vault) Page(c access.Catalog, actor, realm, after string) ([]VaultView, 
 		}
 	}
 	return out, "", nil
+}
+
+// builtinHolders admits a builtin write observation: its reporter is a
+// current voter and, when Applied, a majority of the current voters signed
+// that they hold the sealed value. Signatures are the tree's check.
+func (p Policy) builtinHolders(s state.State, o secrets.WriteObservation) bool {
+	members, err := p.Members(s)
+	if err != nil || !members.VoterKey(o.Reporter) {
+		return false
+	}
+	if o.Outcome != reconcile.EffectApplied {
+		return true
+	}
+	voters := members.SessionIssuers()
+	held := 0
+	for _, h := range o.Holders {
+		if !members.VoterKey(h.Voter) {
+			return false
+		}
+		held++
+	}
+	return held*2 > len(voters)
+}
+
+// vaultBook is the VaultKey book (books.go).
+var vaultBook = Book{Key: VaultKey, Reduce: byKind(map[state.CommandKind]reducer{state.ModuleReport: Policy.reduceVaultHolder, state.Module: reduceVaultModule})}
+
+// reduceVaultModule sends a node's Module command (an approval) and a user's
+// (a vault change) to their reducers.
+func reduceVaultModule(p Policy, s state.State, cmd state.Command) (map[string][]byte, state.Code) {
+	if nodeActor(cmd) {
+		return p.reduceVaultApproval(s, cmd)
+	}
+	return p.reduceVault(s, cmd)
 }

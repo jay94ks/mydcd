@@ -113,7 +113,7 @@ type vaultMetadata struct {
 	Encoding string `json:"encoding"`
 }
 
-const vaultReceiptKey = "_mydc_receipt"
+const vaultReceiptKey = "_sfc_receipt"
 
 func writeReceipt(r WriteRecord) string {
 	raw, _ := json.Marshal(struct {

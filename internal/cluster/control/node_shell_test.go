@@ -9,8 +9,8 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/state"
 )
 
 func nodeShellCore(t *testing.T) *backupCoreFixture {
@@ -152,7 +152,7 @@ func TestNodeShellCoreDefaultOffExactNodeGrantAndCurrentCredential(t *testing.T)
 	_, _, _ = nodeShellApply(t, f, alice, aliceKey, "alice-b", "open-node-shell", 0, NodeShellOpen{Node: "node-b", Cols: 80, Rows: 24}, 2, state.Applied)
 	b, _ := f.p.NodeShells(f.s)
 	row, ok := b.Record("alice-b")
-	if !ok || row.Session.State != "queued" || row.Session.OpenedAt != 0 || row.Session.Account != "mydc-shell" || row.Session.Sudo {
+	if !ok || row.Session.State != "queued" || row.Session.OpenedAt != 0 || row.Session.Account != "sfc-shell" || row.Session.Sudo {
 		t.Fatal("intent pretended SSH was opened")
 	}
 	if _, err := f.p.NodeShellPermit(f.s, [32]byte(keyB.Public().(ed25519.PublicKey)), "alice-b", 2); err != nil {
@@ -251,10 +251,7 @@ func TestNodeShellCorePolicyGrantAndCredentialRevocationCloseOriginalWithoutInve
 			case "credential":
 				c, _ := f.p.Catalog(f.s)
 				account, _ := c.User("alice")
-				expected := account.Revision
-				account.Revision = 0
-				account.Credentials[0].Operations = []string{"close-node-shell"}
-				nodeShellApply(t, f, f.session, f.admin, "revoke-shell-credential", "put-user", expected, account, 4, state.Applied)
+				nodeShellApply(t, f, f.session, f.admin, "revoke-shell-credential", "set-account-scope", account.Revision, access.AccountScope{User: "alice", Add: []string{"close-node-shell"}}, 4, state.Applied)
 			}
 			b, err := f.p.NodeShells(f.s)
 			row, _ := b.Record("revoked-shell")
@@ -363,9 +360,8 @@ func TestNodeShellCoreRejectsForgedSnapshotAndRawRevocation(t *testing.T) {
 	c, _ := f.p.Catalog(f.s)
 	account, _ := c.User("alice")
 	expected := account.Revision
-	account.Revision = 0
-	account.Credentials[0].Operations = []string{"close-node-shell"}
-	raw, err := ChangeBytes("put-user", "admin", expected, account)
+	scope := access.AccountScope{User: "alice", Add: []string{"close-node-shell"}}
+	raw, err := ChangeBytes("set-account-scope", "admin", expected, scope)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -377,7 +373,7 @@ func TestNodeShellCoreRejectsForgedSnapshotAndRawRevocation(t *testing.T) {
 	if code != state.ConditionFailed || len(writes) != 0 {
 		t.Fatal("unsigned catalog change invented close actor", code)
 	}
-	nodeShellApply(t, f, f.session, f.admin, "signed-revoke-shell", "put-user", expected, account, 4, state.Applied)
+	nodeShellApply(t, f, f.session, f.admin, "signed-revoke-shell", "set-account-scope", expected, scope, 4, state.Applied)
 	nodeShellOwnerReport(t, f, f.node, NodeShellReport{Node: "node-a", Kind: "closed", SessionID: "snapshot-shell", At: 5, LastActivity: 3, Reason: "policy"}, state.Applied)
 	base, err := f.p.NodeShells(f.s)
 	if err != nil {

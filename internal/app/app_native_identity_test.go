@@ -12,12 +12,12 @@ import (
 	"time"
 
 	cerrdefs "github.com/containerd/errdefs"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/engine"
-	"github.com/jay94ks/mydcd/internal/reconcile"
-	"github.com/jay94ks/mydcd/internal/workload"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/engine"
+	"github.com/jay94ks/seafield/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/workload"
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/client"
 )
@@ -84,7 +84,7 @@ func verifyManagedNativeIdentityFaults(t *testing.T, ctx context.Context, r *Run
 		defer stop()
 		if foreignID != "" {
 			x, err := r.docker.API.ContainerInspect(clean, foreignID, client.ContainerInspectOptions{})
-			if err != nil || strings.TrimPrefix(x.Container.Name, "/") != id.Name || x.Container.Config == nil || x.Container.Config.Labels["org.mydc.owner"] != r.owner || x.Container.Config.Labels["org.mydc.spec"] != "foreign-fixture" || x.Container.State.Running {
+			if err != nil || strings.TrimPrefix(x.Container.Name, "/") != id.Name || x.Container.Config == nil || x.Container.Config.Labels["org.sfc.owner"] != r.owner || x.Container.Config.Labels["org.sfc.spec"] != "foreign-fixture" || x.Container.State.Running {
 				t.Error("foreign fixture rollback identity", err)
 				return
 			}
@@ -161,7 +161,7 @@ func verifyManagedNativeIdentityFaults(t *testing.T, ctx context.Context, r *Run
 	}
 	unchanged("missing")
 	labels := maps.Clone(id.Labels)
-	labels["org.mydc.spec"] = "foreign-fixture"
+	labels["org.sfc.spec"] = "foreign-fixture"
 	foreign, err := r.docker.API.ContainerCreate(ctx, client.ContainerCreateOptions{Name: id.Name, Config: &container.Config{Image: spec.Process.ImageID, Labels: labels, Cmd: []string{"/backend"}}, HostConfig: &container.HostConfig{NetworkMode: "none", ReadonlyRootfs: true, Tmpfs: map[string]string{"/data": "size=4096"}}})
 	if err != nil {
 		t.Fatal("owned foreign fixture Create", err)
@@ -172,7 +172,7 @@ func verifyManagedNativeIdentityFaults(t *testing.T, ctx context.Context, r *Run
 	}
 	unchanged("foreign")
 	x, err := r.docker.API.ContainerInspect(ctx, foreignID, client.ContainerInspectOptions{})
-	if err != nil || x.Container.State.Running || x.Container.Config.Labels["org.mydc.spec"] != "foreign-fixture" {
+	if err != nil || x.Container.State.Running || x.Container.Config.Labels["org.sfc.spec"] != "foreign-fixture" {
 		t.Fatal("product changed/started foreign fixture", err)
 	}
 	for _, m := range x.Container.Mounts {

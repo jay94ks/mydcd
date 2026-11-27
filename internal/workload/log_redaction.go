@@ -5,8 +5,8 @@ package workload
 import (
 	"context"
 
-	"github.com/jay94ks/mydcd/internal/containerops"
-	"github.com/jay94ks/mydcd/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/containerops"
+	"github.com/jay94ks/seafield/internal/reconcile"
 )
 
 // logRedactionValues uses the same original native consumer pin as Status;

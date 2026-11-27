@@ -9,8 +9,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/imagebuild"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/imagebuild"
 )
 
 func imageBuildGitWatchFixture(t *testing.T) (*nodeStorageFixture, imagebuild.ContextSpec) {
@@ -144,12 +145,7 @@ func TestGitObservationStopsOnAccountRevocationOrAutomaticDefinitionChange(t *te
 			original := gitObservationTestReport(t, f, spec, 3)
 			switch change {
 			case "account":
-				users, _ := f.p.Catalog(f.s)
-				u, _ := users.User("manager")
-				expected := u.Revision
-				u.Revision = 0
-				u.Enabled = false
-				f.apply("admin", "put-user", expected, u, state.Applied)
+				f.changeAccount("manager", func(u *access.User) { u.Enabled = false })
 			case "automatic", "definition":
 				spec = spec.Own()
 				if change == "automatic" {
@@ -210,11 +206,7 @@ func TestGitObservationHistoricalFactSurvivesLowerPolicyAndRevocation(t *testing
 	policy, _ := book.Policy(spec.Tenant)
 	policy.Spec.WorkspaceBytes = 1
 	f.apply("manager", "set-image-build-policy", policy.Revision, ImageBuildPolicyPut{Spec: policy.Spec}, state.Applied)
-	users, _ := f.p.Catalog(f.s)
-	u, _ := users.User("manager")
-	expected := u.Revision
-	u.Revision, u.Enabled = 0, false
-	f.apply("admin", "put-user", expected, u, state.Applied)
+	f.changeAccount("manager", func(u *access.User) { u.Enabled = false })
 	encoded, err := state.Encode(f.s)
 	if err != nil {
 		t.Fatal(err)

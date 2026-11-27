@@ -5,7 +5,7 @@ package tenancy
 import (
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/workload"
+	"github.com/jay94ks/seafield/internal/workload"
 )
 
 func TestReplicaReservationsUseExactNodeAndCanonicalOrdinalWithinSharedQuota(t *testing.T) {

@@ -9,9 +9,9 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/config"
-	"github.com/jay94ks/mydcd/internal/secrets"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/config"
+	"github.com/jay94ks/seafield/internal/secrets"
 )
 
 func TestImageBuildGroupApprovalReusesOriginalJournalAndRejectsForeignScope(t *testing.T) {

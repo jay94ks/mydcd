@@ -92,7 +92,7 @@ func CatalogueRange(authority, repository string, basis [32]byte, names []string
 	if basis == ([32]byte{}) || len(names) > MaxCatalogueNames {
 		return page, nil, &Error{Code: "METADATA_BUDGET"}
 	}
-	_, host, _, err := Normalize(authority + "/mydc-catalogue:check")
+	_, host, _, err := Normalize(authority + "/sfc-catalogue:check")
 	if err != nil || host != authority {
 		return page, nil, &Error{Code: "INVALID_SOURCE"}
 	}
@@ -130,7 +130,7 @@ func CatalogueRange(authority, repository string, basis [32]byte, names []string
 	if err != nil {
 		return page, nil, &Error{Code: "INVALID_IMAGE"}
 	}
-	page.Root = sha256.Sum256(append([]byte("mydc-registry-catalogue-1\x00"), raw...))
+	page.Root = sha256.Sum256(append([]byte("sfc-registry-catalogue-1\x00"), raw...))
 	root, last, err := CatalogueCursor(after)
 	if err != nil {
 		return page, nil, err
@@ -154,7 +154,7 @@ func CatalogueRange(authority, repository string, basis [32]byte, names []string
 	return page, selected, nil
 }
 func (p CataloguePage) Valid(authority, repository, after string) bool {
-	_, host, _, err := Normalize(authority + "/mydc-catalogue:check")
+	_, host, _, err := Normalize(authority + "/sfc-catalogue:check")
 	if err != nil || host != authority || repository != "" && !ValidRepository(repository) {
 		return false
 	}

@@ -9,11 +9,11 @@ import (
 	"log"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/network/services"
-	"github.com/jay94ks/mydcd/internal/schema"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/network/services"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/sfcp"
 )
 
 // Bounded diagnostics only; neither pointer participates in authorization or
@@ -42,12 +42,12 @@ func (r *Runtime) callRouteFlow(ctx context.Context, peer services.ReferenceCons
 	var response json.RawMessage
 	member, known := r.resourcePeerForKey(ctx, peer.Local.Owner)
 	if !known || !member.Member {
-		return routeFlowReply{}, mydcp.ErrAdmission
+		return routeFlowReply{}, sfcp.ErrAdmission
 	}
 	if [32]byte(member.Key) == r.commandIdentity().Public {
 		owner, local := r.nativeOwner(peer.Local.Owner)
 		if !local {
-			return routeFlowReply{}, mydcp.ErrAdmission
+			return routeFlowReply{}, sfcp.ErrAdmission
 		}
 		response, err = owner.observeRouteFlow(ctx, r.commandIdentity().Public, raw)
 	} else {
@@ -60,19 +60,19 @@ func (r *Runtime) callRouteFlow(ctx context.Context, peer services.ReferenceCons
 	}
 	reply, err := schema.Decode[routeFlowReply](response)
 	if err != nil || reply.Schema != 1 {
-		return routeFlowReply{}, mydcp.ErrAdmission
+		return routeFlowReply{}, sfcp.ErrAdmission
 	}
 	need := reply.Native.Reference
 	if request.Close != nil {
 		if reply.Closed == nil || reply.Flow != nil {
-			return routeFlowReply{}, mydcp.ErrAdmission
+			return routeFlowReply{}, sfcp.ErrAdmission
 		}
 		need = reply.Closed.Reference
 	} else if reply.Closed != nil {
-		return routeFlowReply{}, mydcp.ErrAdmission
+		return routeFlowReply{}, sfcp.ErrAdmission
 	}
 	if need.Consumer != peer.ID || need.Generation != peer.Generation || need.Lifetime != peer.Lifetime || need.Owner != peer.Local.Owner {
-		return routeFlowReply{}, mydcp.ErrAdmission
+		return routeFlowReply{}, sfcp.ErrAdmission
 	}
 	return reply, nil
 }
@@ -121,7 +121,7 @@ func (r *Runtime) admitRoutePacket(ctx context.Context, reference [32]byte, pack
 	work, err := r.controlPolicy.RouteWork(view.State, r.commandIdentity().Public, control.RouteWorkRequest{Reference: reference})
 	peerWire, wireErr := r.tunnelWireKey(view.State, work.Peer.Local.Owner)
 	if err != nil || wireErr != nil || work.Peer.Route == nil {
-		return mydcp.ErrAdmission
+		return sfcp.ErrAdmission
 	}
 	// Expired read views of existing flows can be refreshed on either side;
 	// only a source SYN/UDP packet may proceed to a NEW bilateral admission.
@@ -183,7 +183,7 @@ func (r *Runtime) admitRoutePacket(ctx context.Context, reference [32]byte, pack
 			return nil
 		}
 		if !sourceSide {
-			return mydcp.ErrAdmission
+			return sfcp.ErrAdmission
 		}
 		phase("peer-native")
 		peer, err = r.callRouteFlow(ctx, work.Peer, routeFlowRequest{Schema: 1, Reference: work.Peer.ID})
@@ -236,7 +236,7 @@ func (r *Runtime) admitRoutePacket(ctx context.Context, reference [32]byte, pack
 	phase("source-publish-gate")
 	r.publishRouteGate(view, projection, current, core, until)
 	if !gate.Allows(r.Identity.Public, packet) {
-		return mydcp.ErrAdmission
+		return sfcp.ErrAdmission
 	}
 	return nil
 }
@@ -264,7 +264,7 @@ func (r *Runtime) prepareRouteFlow(ctx context.Context, authority routeAdmission
 	}
 	current, err := core.AppliedProof(catalog, projection.Resources.Networks, *projection.NetworkAuthority)
 	if err != nil || current.Boot != local.Boot || current.Reference != local.Reference || peer.Reference.Consumer != work.Peer.ID {
-		return flow, receipt, mydcp.ErrAdmission
+		return flow, receipt, sfcp.ErrAdmission
 	}
 	now := services.Clock{Boot: core.Boot(), Wall: time.Now().Unix(), Certain: true}
 	flow, err = core.ExistingPacket(catalog, projection.Resources.Networks, *projection.NetworkAuthority, peer.Boot, r.Identity.Public, packet, now)

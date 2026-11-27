@@ -22,24 +22,24 @@ import (
 	"time"
 
 	"github.com/hashicorp/raft"
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/bootstrap"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/cluster/membership"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/config"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/engine"
-	"github.com/jay94ks/mydcd/internal/eventlog"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/network"
-	"github.com/jay94ks/mydcd/internal/tenancy"
-	"github.com/jay94ks/mydcd/internal/userauth"
-	"github.com/jay94ks/mydcd/internal/workload"
-	"github.com/jay94ks/mydcd/tests/gitfixture"
-	"github.com/jay94ks/mydcd/tests/vaultfixture"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/bootstrap"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/membership"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/config"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/engine"
+	"github.com/jay94ks/seafield/internal/eventlog"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/network"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/tenancy"
+	"github.com/jay94ks/seafield/internal/userauth"
+	"github.com/jay94ks/seafield/internal/workload"
+	"github.com/jay94ks/seafield/tests/gitfixture"
+	"github.com/jay94ks/seafield/tests/vaultfixture"
 	"github.com/moby/moby/client"
 	"github.com/vishvananda/netlink"
 	"gopkg.in/yaml.v3"
@@ -48,11 +48,11 @@ import (
 // Only real kernel UDP sockets are used. This fixture never reads TUN or
 // forwards packets; the two product packet planes must carry the IP traffic.
 func TestManagedTunnelUDPHelper(t *testing.T) {
-	mode := os.Getenv("MYDC_MANAGED_UDP")
+	mode := os.Getenv("SFC_MANAGED_UDP")
 	if mode == "" {
 		t.Skip("owned native fixture only")
 	}
-	addresses := strings.Split(os.Getenv("MYDC_MANAGED_UDP_ADDRESSES"), ",")
+	addresses := strings.Split(os.Getenv("SFC_MANAGED_UDP_ADDRESSES"), ",")
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM)
 	defer stop()
 	var sockets []*net.UDPConn
@@ -113,16 +113,16 @@ func TestManagedTunnelUDPHelper(t *testing.T) {
 }
 
 func TestManagedTunnelCleanupHelper(t *testing.T) {
-	path := os.Getenv("MYDC_MANAGED_TUN_CLEANUP")
+	path := os.Getenv("SFC_MANAGED_TUN_CLEANUP")
 	if path == "" {
 		t.Skip("owned namespace cleanup only")
 	}
-	host := os.Getenv("MYDC_KERNEL_HOST_NETNS")
+	host := os.Getenv("SFC_KERNEL_HOST_NETNS")
 	current, namespaceErr := os.Readlink("/proc/self/ns/net")
 	if host == "" || namespaceErr != nil || current == host || os.Geteuid() != 0 {
 		t.Fatal("refuse native cleanup outside the explicitly owned non-host namespace", namespaceErr)
 	}
-	cfg, e := config.LoadNode(path)
+	cfg, e := loadTestNode(path)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -138,15 +138,11 @@ func TestManagedTunnelCleanupHelper(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	owner := engine.Owner(record.Root.Cluster, self.Public)
-	var local config.NetworkLocal
-	if e = cfg.Modules["network"].Decode(&local); e != nil {
-		t.Fatal(e)
-	}
 	root := filepath.Dir(path)
-	if !filepath.IsAbs(root) || !strings.HasPrefix(local.DockerSocket, "unix://"+filepath.Join(root, "engine-")) || !strings.HasPrefix(cfg.Node.StateDir, root+string(os.PathSeparator)) {
+	if !filepath.IsAbs(root) || !strings.HasPrefix(cfg.EngineAPI, "unix://"+filepath.Join(root, "engine-")) || !strings.HasPrefix(cfg.Node.StateDir, root+string(os.PathSeparator)) {
 		t.Fatal("refuse native rollback outside original private fixture root/Engine")
 	}
-	docker, e := engine.Open(ctx, local.DockerSocket, owner)
+	docker, e := engine.Open(ctx, cfg.EngineAPI, owner)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -156,14 +152,14 @@ func TestManagedTunnelCleanupHelper(t *testing.T) {
 		t.Fatal(e)
 	}
 	defer bridges.Close()
-	dependentsStopped := os.Getenv("MYDC_TEST_OWNED_DEPENDENTS_STOPPED") == "1"
+	dependentsStopped := os.Getenv("SFC_TEST_OWNED_DEPENDENTS_STOPPED") == "1"
 	if dependentsStopped {
-		rows, err := docker.API.ContainerList(ctx, client.ContainerListOptions{All: true, Filters: client.Filters{}.Add("label", "org.mydc.owner="+owner)})
+		rows, err := docker.API.ContainerList(ctx, client.ContainerListOptions{All: true, Filters: client.Filters{}.Add("label", "org.sfc.owner="+owner)})
 		if err != nil || len(rows.Items) != 0 {
 			t.Fatal("refuse original app borrow return while owned native Tasks remain", err)
 		}
 	}
-	if !cleanupManagedRouteNative(t, ctx, cfg, owner, self.Public, bridges, dependentsStopped, os.Getenv("MYDC_TEST_EXPECT_GONE") == "1") {
+	if !cleanupManagedRouteNative(t, ctx, cfg, owner, self.Public, bridges, dependentsStopped, os.Getenv("SFC_TEST_EXPECT_GONE") == "1") {
 		t.Fatal("route/isolation rollback incomplete; original Bridge dependencies preserved")
 	}
 	tunnels, e := network.OpenTunnelManager(filepath.Join(cfg.Node.StateDir, "network/tunnel.db"), owner)
@@ -184,7 +180,7 @@ func TestManagedTunnelCleanupHelper(t *testing.T) {
 		if !held {
 			continue
 		}
-		if os.Getenv("MYDC_TEST_EXPECT_GONE") == "1" {
+		if os.Getenv("SFC_TEST_EXPECT_GONE") == "1" {
 			t.Error("product left native TUN journal", key)
 		}
 		resource := row.State.Applied
@@ -244,7 +240,7 @@ func TestManagedTunnelCleanupHelper(t *testing.T) {
 		if row.State.Pending == nil && !row.State.Applied.Present && !row.State.Desired.Present && len(row.Consumers) == 0 {
 			continue
 		}
-		if os.Getenv("MYDC_TEST_EXPECT_GONE") == "1" {
+		if os.Getenv("SFC_TEST_EXPECT_GONE") == "1" {
 			t.Error("product left Bridge journal", key)
 		}
 		resource := row.State.Applied
@@ -282,7 +278,7 @@ func TestManagedTunnelCleanupHelper(t *testing.T) {
 			t.Error("cleanup Bridge not Gone", e)
 		}
 	}
-	rows, e := docker.API.NetworkList(ctx, client.NetworkListOptions{Filters: client.Filters{}.Add("label", "org.mydc.owner="+owner)})
+	rows, e := docker.API.NetworkList(ctx, client.NetworkListOptions{Filters: client.Filters{}.Add("label", "org.sfc.owner="+owner)})
 	if e != nil || len(rows.Items) != 0 {
 		t.Error("owned Bridge cleanup incomplete", e)
 	}
@@ -346,7 +342,7 @@ func testManagedTwoNodeFixture(t *testing.T, sqlMode bool, options ...managedTwo
 	withRestore := option.restoreSQL
 	containerMode := sqlMode || option.crossTenantRoute || option.managedDNSRuntime || option.replicaTopology || option.nodeDrain
 	firewallMode := option.crossTenantRoute || option.managedDNSRuntime || option.replicaTopology || option.nodeDrain
-	host, tag, products, manifest := os.Getenv("MYDC_KERNEL_HOST_NETNS"), os.Getenv("MYDC_KERNEL_TEST_OWNER"), os.Getenv("MYDC_TUNNEL_PRODUCTS"), os.Getenv("MYDC_NATIVE_MANIFEST")
+	host, tag, products, manifest := os.Getenv("SFC_KERNEL_HOST_NETNS"), os.Getenv("SFC_KERNEL_TEST_OWNER"), os.Getenv("SFC_TUNNEL_PRODUCTS"), os.Getenv("SFC_NATIVE_MANIFEST")
 	current, e := os.Readlink("/proc/self/ns/net")
 	if host == "" || tag == "" || products == "" || manifest == "" || os.Geteuid() != 0 {
 		t.Skip("user-prebuilt products and owned namespace/host rollback required")
@@ -397,7 +393,7 @@ func testManagedTwoNodeFixture(t *testing.T, sqlMode bool, options ...managedTwo
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), budget)
 	defer cancel()
-	root, e := os.MkdirTemp("", "mydc-managed-tunnels-state-")
+	root, e := os.MkdirTemp("", "sfc-managed-tunnels-state-")
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -491,7 +487,7 @@ func testManagedTwoNodeFixture(t *testing.T, sqlMode bool, options ...managedTwo
 			if path == "" {
 				continue
 			}
-			cfg, e := config.LoadNode(path)
+			cfg, e := loadTestNode(path)
 			if e != nil {
 				t.Error(e)
 				clean = false
@@ -505,14 +501,14 @@ func testManagedTwoNodeFixture(t *testing.T, sqlMode bool, options ...managedTwo
 				expected = "1"
 			}
 			if containerMode {
-				cleanupVariable, cleanupTest := "MYDC_SQL_CLEANUP", "TestManagedSQLCleanupHelper"
+				cleanupVariable, cleanupTest := "SFC_SQL_CLEANUP", "TestManagedSQLCleanupHelper"
 				if option.crossTenantRoute {
-					cleanupVariable, cleanupTest = "MYDC_ROUTE_CLEANUP", "TestManagedRouteAppCleanupHelper"
+					cleanupVariable, cleanupTest = "SFC_ROUTE_CLEANUP", "TestManagedRouteAppCleanupHelper"
 				}
 				if option.managedDNSRuntime {
-					cleanupVariable, cleanupTest = "MYDC_DNS_CLEANUP", "TestManagedDNSAppCleanupHelper"
+					cleanupVariable, cleanupTest = "SFC_DNS_CLEANUP", "TestManagedDNSAppCleanupHelper"
 				}
-				b, e := run(n, []string{cleanupVariable + "=" + path, "MYDC_TEST_EXPECT_GONE=" + expected}, self, "-test.run=^"+cleanupTest+"$", "-test.v")
+				b, e := run(n, []string{cleanupVariable + "=" + path, "SFC_TEST_EXPECT_GONE=" + expected}, self, "-test.run=^"+cleanupTest+"$", "-test.v")
 				if e != nil {
 					t.Error("original SQL cleanup", n, e, string(b))
 					clean = false
@@ -527,9 +523,9 @@ func testManagedTwoNodeFixture(t *testing.T, sqlMode bool, options ...managedTwo
 			if sqlMode || option.replicaTopology || option.nodeDrain {
 				networkExpected = "0"
 			} // app down returns managed borrows; fixture removes management natives
-			cleanupEnv := []string{"MYDC_MANAGED_TUN_CLEANUP=" + path, "MYDC_TEST_EXPECT_GONE=" + networkExpected}
+			cleanupEnv := []string{"SFC_MANAGED_TUN_CLEANUP=" + path, "SFC_TEST_EXPECT_GONE=" + networkExpected}
 			if cleanupStopped[n] || !containerMode && ownersStopped {
-				cleanupEnv = append(cleanupEnv, "MYDC_TEST_OWNED_DEPENDENTS_STOPPED=1")
+				cleanupEnv = append(cleanupEnv, "SFC_TEST_OWNED_DEPENDENTS_STOPPED=1")
 			}
 			b, e := run(n, cleanupEnv, self, "-test.run=^TestManagedTunnelCleanupHelper$", "-test.v")
 			if e != nil {
@@ -609,7 +605,7 @@ func testManagedTwoNodeFixture(t *testing.T, sqlMode bool, options ...managedTwo
 		}
 	})
 	// Cleanup is registered before the first namespace/veth or native effect.
-	holder = startSystemProcess(t, ctx, filepath.Join(root, "holder.log"), []string{self, "-test.run=^TestSystemNamespaceHolder$", "-test.v"}, []string{"MYDC_R5_NAMESPACE_HOLDER=1"}, &syscall.SysProcAttr{Cloneflags: syscall.CLONE_NEWNET | syscall.CLONE_NEWNS, Pdeathsig: syscall.SIGKILL})
+	holder = startSystemProcess(t, ctx, filepath.Join(root, "holder.log"), []string{self, "-test.run=^TestSystemNamespaceHolder$", "-test.v"}, []string{"SFC_R5_NAMESPACE_HOLDER=1"}, &syscall.SysProcAttr{Cloneflags: syscall.CLONE_NEWNET | syscall.CLONE_NEWNS, Pdeathsig: syscall.SIGKILL})
 	for {
 		b, _ := os.ReadFile(holder.log)
 		if bytes.Contains(b, []byte("r5-private-ns-ready")) {
@@ -747,7 +743,7 @@ func testManagedTwoNodeFixture(t *testing.T, sqlMode bool, options ...managedTwo
 		if firewallMode {
 			// Docker initializes its persistent, empty POSTROUTING hook on
 			// the first bridge, rather than at daemon startup. Establish that
-			// Engine baseline before comparing MyDC's resource lifecycle.
+			// Engine baseline before comparing Seafield Cluster's resource lifecycle.
 			name := tag + "-driver-baseline"
 			id := ""
 			t.Cleanup(func() {
@@ -757,7 +753,7 @@ func testManagedTwoNodeFixture(t *testing.T, sqlMode bool, options ...managedTwo
 					}
 				}
 			})
-			args := []string{"docker", "--host", "unix://" + sockets[n], "network", "create", "--driver", "bridge", "--subnet", "198.19.85.240/28", "--label", "org.mydc.test-owner=" + tag}
+			args := []string{"docker", "--host", "unix://" + sockets[n], "network", "create", "--driver", "bridge", "--subnet", "198.19.85.240/28", "--label", "org.sfc.test-owner=" + tag}
 			if option.managedDNSRuntime {
 				args = append(args, "--ipv6", "--subnet", "fd42:6d79:ffff::/64")
 			}
@@ -786,7 +782,8 @@ func testManagedTwoNodeFixture(t *testing.T, sqlMode bool, options ...managedTwo
 	defer clear(admin.Private)
 	for n, id := range []string{"node-a", "node-b"} {
 		configs[n] = filepath.Join(root, id+".yaml")
-		text := fmt.Sprintf("version: 1\nnode:\n id: %s\n listen: '192.0.2.%d:44101'\n state_dir: %q\n identity_dir: %q\nmodules:\n network: {enabled: true, docker_socket: 'unix://%s'}\n workload: {enabled: false}\n ingress: {enabled: false}\n", id, n+1, filepath.Join(root, fmt.Sprintf("state-%d", n)), filepath.Join(root, fmt.Sprintf("key-%d", n)), sockets[n])
+		text := fmt.Sprintf("version: 1\nnode:\n id: %s\n listen: '192.0.2.%d:44101'\n state_dir: %q\n identity_dir: %q\nmodules:\n network: {enabled: true}\n workload: {enabled: false}\n ingress: {enabled: false}\n", id, n+1, filepath.Join(root, fmt.Sprintf("state-%d", n)), filepath.Join(root, fmt.Sprintf("key-%d", n)))
+		writeTestEngine(t, configs[n], "unix://"+sockets[n])
 		text = strings.Replace(text, "\nmodules:", "\n management_socket: "+fmt.Sprintf("%q", filepath.Join(root, id+".sock"))+"\nmodules:", 1)
 		if containerMode {
 			text = strings.Replace(text, "workload: {enabled: false}", "workload: {enabled: true}", 1)
@@ -801,7 +798,7 @@ func testManagedTwoNodeFixture(t *testing.T, sqlMode bool, options ...managedTwo
 			t.Fatal(e)
 		}
 	}
-	cfg, e := config.LoadNode(configs[0])
+	cfg, e := loadTestNode(configs[0])
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -823,7 +820,7 @@ func testManagedTwoNodeFixture(t *testing.T, sqlMode bool, options ...managedTwo
 		gitSource = gitfixture.OpenAt(t, "192.0.2.1:0")
 		credential := gitSource.Credential(root, "tenant", "git-read")
 		cfg.GitCredentials = []config.GitCredential{credential}
-		remoteConfig, err := config.LoadNode(configs[1])
+		remoteConfig, err := loadTestNode(configs[1])
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -857,7 +854,7 @@ func testManagedTwoNodeFixture(t *testing.T, sqlMode bool, options ...managedTwo
 		if err = os.WriteFile(configs[1], raw, 0600); err != nil {
 			t.Fatal(err)
 		}
-		if _, err = config.LoadNode(configs[1]); err != nil {
+		if _, err = loadTestNode(configs[1]); err != nil {
 			t.Fatal("prepared Git node config", err)
 		}
 	}
@@ -879,13 +876,13 @@ func testManagedTwoNodeFixture(t *testing.T, sqlMode bool, options ...managedTwo
 		t.Fatal(e)
 	}
 	defer clear(proof.Private)
-	source := mydcp.Peer{ID: "node-a", Endpoint: "192.0.2.1:44101", Policy: mydcp.Policy{Key: mydcp.Identity(a.Identity.Public), Respond: true}}
-	mesh, e := mydcp.NewTransport(proof, clusterID, func(k mydcp.Identity) (mydcp.Peer, bool) { return source, k == source.Key })
+	source := sfcp.Peer{ID: "node-a", Endpoint: "192.0.2.1:44101", Policy: sfcp.Policy{Key: sfcp.Identity(a.Identity.Public), Respond: true}}
+	mesh, e := sfcp.NewTransport(proof, clusterID, func(k sfcp.Identity) (sfcp.Peer, bool) { return source, k == source.Key })
 	if e != nil {
 		t.Fatal(e)
 	}
 	defer mesh.Close()
-	user := userauth.Client{Cluster: clusterID, Self: proof, Mesh: mesh, Peers: []mydcp.Peer{source}}
+	user := userauth.Client{Cluster: clusterID, Self: proof, Mesh: mesh, Peers: []sfcp.Peer{source}}
 	reply, e := user.Enroll(ctx, source, control.Enrollment{Schema: 1, RequestID: "native-admin", User: access.User{ID: "admin", Username: "admin", Enabled: true, SystemAdmin: true, Credentials: []access.Credential{{ID: "key", Method: access.PrivateKey, PublicKey: admin.Public, Enabled: true}}}}, admin.Private)
 	if e != nil || reply.Result == nil || reply.Result.Code != state.Applied {
 		t.Fatal("actual enrollment", e)
@@ -995,7 +992,7 @@ func testManagedTwoNodeFixture(t *testing.T, sqlMode bool, options ...managedTwo
 	invFile := filepath.Join(root, "invitation.json")
 	raw, _ := json.Marshal(inv)
 	_ = os.WriteFile(invFile, raw, 0600)
-	if b, e := run(1, nil, filepath.Join(products, "mydcd"), "--config", configs[1], "join", "--cluster", hex.EncodeToString(clusterID[:]), "--source-public-key", a.Identity.Actor(), "--invitation", invFile); e != nil {
+	if b, e := run(1, nil, append(append([]string{filepath.Join(products, "sfcd"), "--config", configs[1]}, sfcdEngineFlags(configs[1])...), "join", "--cluster", hex.EncodeToString(clusterID[:]), "--source-public-key", a.Identity.Actor(), "--invitation", invFile)...); e != nil {
 		t.Fatal("actual join", e, string(b))
 	}
 	startB := func() {
@@ -1008,7 +1005,7 @@ func testManagedTwoNodeFixture(t *testing.T, sqlMode bool, options ...managedTwo
 		if containerMode {
 			prefix = append(prefix, "--mount="+mntPath)
 		}
-		daemon = exec.Command("nsenter", append(prefix, "--", filepath.Join(products, "mydcd"), "--config", configs[1], "run")...)
+		daemon = exec.Command("nsenter", append(append(append(prefix, "--", filepath.Join(products, "sfcd"), "--config", configs[1]), sfcdEngineFlags(configs[1])...), "run")...)
 		daemon.SysProcAttr = &syscall.SysProcAttr{Pdeathsig: syscall.SIGKILL}
 		daemon.Stdout, daemon.Stderr = log, log
 		if e = daemon.Start(); e != nil {
@@ -1025,7 +1022,7 @@ func testManagedTwoNodeFixture(t *testing.T, sqlMode bool, options ...managedTwo
 			t.Fatal("original node-b daemon handle required")
 		}
 		owned := daemon
-		bConfig, err := config.LoadNode(configs[1])
+		bConfig, err := loadTestNode(configs[1])
 		if err != nil {
 			t.Fatal("original daemon socket configuration", err)
 		}
@@ -1123,7 +1120,7 @@ func testManagedTwoNodeFixture(t *testing.T, sqlMode bool, options ...managedTwo
 	}
 	catalog, _ := policy.Catalog(read().State)
 	tenant, _ := catalog.Tenant("tenant")
-	change("nodes", "set-nodes", tenant.Revision, control.NodeAssignment{Tenant: "tenant", Nodes: []string{"node-a", "node-b"}})
+	change("nodes", "set-nodes", tenant.Revision, control.NodeChangeTo("tenant", tenant.AllowedNodes, []string{"node-a", "node-b"}))
 	for _, node := range []string{"node-a", "node-b"} {
 		for _, scope := range []string{"", "tenant"} {
 			limit := tenancy.NodeLimit{Tenant: scope, Node: node, Capacity: workload.Resources{CPU: 2e9, Memory: 256 << 20}, Networks: 4, MaxConsumers: 8, PacketQueuePackets: 32, PacketQueueBytes: 128 << 10}
@@ -1132,7 +1129,7 @@ func testManagedTwoNodeFixture(t *testing.T, sqlMode bool, options ...managedTwo
 			}
 			if sqlMode {
 				// Normal 128KiB SQL bodies need roughly 107 MTU1280 packets.
-				// Explicit node quota includes MYDCP framing/ACK headroom;
+				// Explicit node quota includes SFCP framing/ACK headroom;
 				// the smaller queue's overload evidence remains separate.
 				limit.PacketQueuePackets = 128
 				limit.PacketQueueBytes = 256 << 10
@@ -1210,7 +1207,7 @@ func testManagedTwoNodeFixture(t *testing.T, sqlMode bool, options ...managedTwo
 	for n, alias := range []string{"alpha", "beta"} {
 		for j, node := range []string{"node-a", "node-b"} {
 			octet := (n*2 + j) * 16
-			doc += fmt.Sprintf(" %s%d:\n  image: docker.io/library/php@sha256:%s\n  cpus: 0.1\n  mem_limit: 16m\n  networks: {%s: {ipv4_address: 198.19.80.%d}}\n  x-mydc: {node: %s}\n", alias, j, strings.Repeat("a", 64), alias, octet+2, node)
+			doc += fmt.Sprintf(" %s%d:\n  image: docker.io/library/php@sha256:%s\n  cpus: 0.1\n  mem_limit: 16m\n  networks: {%s: {ipv4_address: 198.19.80.%d}}\n  x-sfc: {node: %s}\n", alias, j, strings.Repeat("a", 64), alias, octet+2, node)
 		}
 	}
 	doc += "networks:\n"
@@ -1220,13 +1217,13 @@ func testManagedTwoNodeFixture(t *testing.T, sqlMode bool, options ...managedTwo
 			doc += fmt.Sprintf(" %s: {external: true, name: %s}\n", alias, alias)
 			management += fmt.Sprintf(" - id: %s\n   action: create-tun-network\n   expected: %d\n   payload:\n    Tenant: tenant\n    Name: %s\n    Members:\n     - Node: node-a\n       Pools: [{ID: pool, Prefix: 198.19.80.%d/28, Gateway: 198.19.80.%d, MTU: 1280}]\n       Addresses: [198.19.81.%d/32]\n     - Node: node-b\n       Pools: [{ID: pool, Prefix: 198.19.80.%d/28, Gateway: 198.19.80.%d, MTU: 1280}]\n       Addresses: [198.19.81.%d/32]\n", alias, n, alias, n*32, n*32+1, n*2+1, n*32+16, n*32+17, n*2+2)
 		} else {
-			doc += fmt.Sprintf(" %s:\n  x-mydc:\n   mtu: 1280\n   pools:\n    node-a: {cidr: 198.19.80.%d/28, gateway: 198.19.80.%d}\n    node-b: {cidr: 198.19.80.%d/28, gateway: 198.19.80.%d}\n   tunnel_addresses: {node-a: 198.19.81.%d/32, node-b: 198.19.81.%d/32}\n", alias, n*32, n*32+1, n*32+16, n*32+17, n*2+1, n*2+2)
+			doc += fmt.Sprintf(" %s:\n  x-sfc:\n   mtu: 1280\n   pools:\n    node-a: {cidr: 198.19.80.%d/28, gateway: 198.19.80.%d}\n    node-b: {cidr: 198.19.80.%d/28, gateway: 198.19.80.%d}\n   tunnel_addresses: {node-a: 198.19.81.%d/32, node-b: 198.19.81.%d/32}\n", alias, n*32, n*32+1, n*32+16, n*32+17, n*2+1, n*2+2)
 		}
 	}
 	_ = os.WriteFile(file, []byte(doc), 0600)
 	cli := func(args ...string) []byte {
 		t.Helper()
-		b, diagnostic, e := runManagedCLICommand(ctx, filepath.Join(products, "mydc"), home, profile, args, nil)
+		b, diagnostic, e := runManagedCLICommand(ctx, filepath.Join(products, "sfc"), home, profile, args, nil)
 		if e != nil {
 			t.Fatal("prebuilt CLI", args, e, string(diagnostic), string(b))
 		}
@@ -1281,7 +1278,7 @@ func testManagedTwoNodeFixture(t *testing.T, sqlMode bool, options ...managedTwo
 	observeB := func(key string) (ModuleObservation, error) {
 		current, known := a.resourcePeerForKey(ctx, bKey.Public)
 		if !known {
-			return ModuleObservation{}, mydcp.ErrAdmission
+			return ModuleObservation{}, sfcp.ErrAdmission
 		}
 		reply, e := cluster.CallManagement(ctx, a.Mesh, a.commandIdentity(), clusterID, current, cluster.ManagementRequest{Method: "observe", Key: key, Latest: false})
 		var v ModuleObservation
@@ -1312,7 +1309,7 @@ func testManagedTwoNodeFixture(t *testing.T, sqlMode bool, options ...managedTwo
 			if n == 1 {
 				cmd = exec.Command("nsenter", "--net="+nsPath, "--", self, "-test.run=^TestManagedTunnelUDPHelper$")
 			}
-			cmd.Env = append(os.Environ(), "MYDC_MANAGED_UDP=echo", "MYDC_MANAGED_UDP_ADDRESSES="+addresses)
+			cmd.Env = append(os.Environ(), "SFC_MANAGED_UDP=echo", "SFC_MANAGED_UDP_ADDRESSES="+addresses)
 			cmd.Stdout, cmd.Stderr = log, log
 			if e = cmd.Start(); e != nil {
 				t.Fatal(e)
@@ -1331,10 +1328,10 @@ func testManagedTwoNodeFixture(t *testing.T, sqlMode bool, options ...managedTwo
 	probe := func() {
 		t.Helper()
 		for n, addresses := range []string{"198.19.81.2,198.19.81.4", "198.19.81.1,198.19.81.3"} {
-			b, e := run(n, []string{"MYDC_MANAGED_UDP=probe", "MYDC_MANAGED_UDP_ADDRESSES=" + addresses}, self, "-test.run=^TestManagedTunnelUDPHelper$", "-test.v")
+			b, e := run(n, []string{"SFC_MANAGED_UDP=probe", "SFC_MANAGED_UDP_ADDRESSES=" + addresses}, self, "-test.run=^TestManagedTunnelUDPHelper$", "-test.v")
 			if e != nil {
 				delivered, dropped := a.Mesh.PacketCounts()
-				t.Log("local MYDCP packets delivered/dropped", delivered, dropped)
+				t.Log("local SFCP packets delivered/dropped", delivered, dropped)
 				for node := 0; node < 2; node++ {
 					for _, args := range [][]string{{"ip", "-j", "-s", "link"}, {"ip", "-j", "route", "show", "table", "all"}, {"cat", "/proc/net/snmp"}} {
 						out, err := run(node, nil, args...)

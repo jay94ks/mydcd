@@ -10,8 +10,8 @@ import (
 	"reflect"
 	"sync"
 
-	"github.com/jay94ks/mydcd/internal/engine"
-	"github.com/jay94ks/mydcd/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/engine"
+	"github.com/jay94ks/seafield/internal/reconcile"
 	bolt "go.etcd.io/bbolt"
 )
 

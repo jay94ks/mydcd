@@ -12,12 +12,12 @@ import (
 	"log"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/imagecache"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/schema"
-	"github.com/jay94ks/mydcd/internal/storage"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/imagecache"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/storage"
 
 	cerrdefs "github.com/containerd/errdefs"
 )
@@ -76,7 +76,7 @@ func (r *Runtime) cacheWork(ctx context.Context, operation string) (control.Imag
 	}
 	work, err := schema.Decode[control.ImageCacheWork](reply.Data)
 	if err != nil || work.Schema != 1 || work.Cluster != r.controlPolicy.Cluster || work.Owner != r.Identity.Public || work.Operation != operation || !work.Plan.DeleteReady() || work.Plan.Owner != work.Owner || work.Index == 0 || reply.Local || reply.RaftIndex == 0 || reply.CommandIndex < work.Index || len(work.References) != len(work.Plan.Images) || len(work.Parts) > len(work.Plan.Images) {
-		return work, mydcp.ErrAdmission
+		return work, sfcp.ErrAdmission
 	}
 	if _, err = r.Engine().ReadAtLeast(ctx, work.Index); err != nil {
 		return work, err
@@ -94,8 +94,6 @@ func (r *Runtime) cacheReport(ctx context.Context, work control.ImageCacheWork, 
 	return err
 }
 func (r *Runtime) runImageCache(operation string) {
-	defer r.wg.Done()
-	defer func() { r.mu.Lock(); r.imageCacheBusy = false; r.mu.Unlock() }()
 	r.imageUseMu.Lock()
 	defer r.imageUseMu.Unlock()
 	ctx := r.ctx
@@ -146,7 +144,7 @@ func (r *Runtime) runImageCache(operation string) {
 						return 0, e
 					}
 					if !fresh.Allowed || fresh.State != "running" || len(fresh.Parts) != i || fresh.Plan.Digest() != work.Plan.Digest() {
-						return 0, mydcp.ErrAdmission
+						return 0, sfcp.ErrAdmission
 					}
 					private, err := r.privateImageReferences(current.ID)
 					if err != nil {
@@ -203,13 +201,7 @@ func (r *Runtime) advanceImageCache(ctx context.Context) {
 		if row.Plan.Owner != r.Identity.Public || row.State != "queued" && row.State != "running" {
 			continue
 		}
-		r.mu.Lock()
-		if !r.imageCacheBusy && ctx.Err() == nil {
-			r.imageCacheBusy = true
-			r.wg.Add(1)
-			go r.runImageCache(row.Operation)
-		}
-		r.mu.Unlock()
+		r.startJob(&r.imageCacheJob, row.Operation, r.runImageCache)
 		return
 	}
 }

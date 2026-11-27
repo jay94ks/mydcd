@@ -6,17 +6,17 @@ import (
 	"context"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/eventlog"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/userauth"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/eventlog"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/userauth"
 )
 
 func TestRQ4RaftEventUsesActualSDKTermAndNode(t *testing.T) {
 	testRealManagedJoin(t, false, "raft-events")
 }
 
-func verifyRaftEventIdentity(t *testing.T, ctx context.Context, r *Runtime, c userauth.Client, admin access.Session, peer mydcp.Peer, wait func(string, func() bool)) {
+func verifyRaftEventIdentity(t *testing.T, ctx context.Context, r *Runtime, c userauth.Client, admin access.Session, peer sfcp.Peer, wait func(string, func() bool)) {
 	t.Helper()
 	wait("actual SDK candidate event identity", func() bool {
 		page, err := c.EventsPage(ctx, peer, admin, eventlog.Query{Kind: "quorum-degraded", Limit: 100})

@@ -20,7 +20,7 @@ import (
 
 	oci "github.com/google/go-containerregistry/pkg/registry"
 	v1 "github.com/google/go-containerregistry/pkg/v1"
-	"github.com/jay94ks/mydcd/internal/storage"
+	"github.com/jay94ks/seafield/internal/storage"
 )
 
 type blobFixture struct {

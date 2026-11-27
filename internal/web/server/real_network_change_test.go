@@ -7,10 +7,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/control"
 )
 
-// A network change through the web on real mydcd: a TUN network's member
+// A network change through the web on real sfcd: a TUN network's member
 // is planned, drained, fenced with node-0's closure and committed to a new
 // pool, and the network is retired with no members.
 func TestRealServerNetworkChange(t *testing.T) {
@@ -46,7 +46,7 @@ func TestRealServerNetworkChange(t *testing.T) {
 	}
 	member := func(st map[string]any) map[string]any { return st["members"].([]any)[0].(map[string]any) }
 
-	step("", map[string]any{"kind": "tun", "name": "mesh", "tunnelCidr": "10.255.40.0/24", "members": []map[string]any{{"node": "node-0", "cidr": "10.50.1.0/24"}}})
+	step("", map[string]any{"kind": "tun", "name": "mesh", "members": []map[string]any{{"node": "node-0", "cidr": "10.50.1.0/24"}}})
 	if st := status("mesh"); st["kind"] != "tun" || member(st)["phase"] != "none" || st["next"] != "" {
 		t.Fatalf("initial: %v", st)
 	}

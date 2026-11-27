@@ -13,8 +13,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/web/ai"
-	"github.com/jay94ks/mydcd/internal/web/store"
+	"github.com/jay94ks/seafield/internal/web/ai"
+	"github.com/jay94ks/seafield/internal/web/store"
 )
 
 // MCP tools in the coordinator (W2.3a): a tool marked coordinator on a
@@ -39,7 +39,7 @@ type aiMCPTool struct {
 	tool   *store.MCPTool
 }
 
-// mcpUser: the person may use tool t of m (access from mydcd this turn).
+// mcpUser: the person may use tool t of m (access from sfcd this turn).
 func mcpUser(acc incidentAccess, m *store.MCPServer, t *store.MCPTool) bool {
 	if !m.Enabled {
 		return false
@@ -53,6 +53,21 @@ func mcpUser(acc incidentAccess, m *store.MCPServer, t *store.MCPTool) bool {
 		}
 	}
 	return false
+}
+
+// mcpImpact is the grade of an MCP tool: read tools are low, a floor the
+// administrator set wins, otherwise notify tools are low and the rest
+// medium. High ones never reach the AI (aiAllows).
+func mcpImpact(t *store.MCPTool) string {
+	switch {
+	case t.Kind == "read":
+		return impactLow
+	case t.Auto != nil && t.Auto.Floor != "":
+		return t.Auto.Floor
+	case t.Kind == "notify":
+		return impactLow
+	}
+	return impactMedium
 }
 
 // coordinatorMCP: the MCP tools this person may use now, by model name.
@@ -69,7 +84,7 @@ func (s *Server) coordinatorMCP(ctx context.Context, ws *webSession) map[string]
 	for _, m := range all {
 		for _, t := range m.Tools {
 			name := aiMCPName(m.Name, t.Name)
-			if t.Coordinator && len(name) <= 64 && mcpUser(acc, m, t) {
+			if t.Coordinator && len(name) <= 64 && mcpUser(acc, m, t) && aiAllows(mcpImpact(t)) {
 				out[name] = aiMCPTool{m, t}
 			}
 		}
@@ -205,10 +220,7 @@ func fillMCPProposal(p *store.AIProposal, m *store.MCPServer, t *store.MCPTool, 
 	p.Args, _ = json.Marshal(maskPayload(args))
 	p.Preview = aiPreview(&aiArgs{raw: args})
 	p.MCP = &store.AIProposalMCP{Server: m.Name, Tool: t.Name}
-	p.Impact, p.Irreversible, p.ConfirmName = impactMedium, false, ""
-	if t.Kind == "notify" {
-		p.Impact = impactLow
-	}
+	p.Impact, p.Irreversible, p.ConfirmName = mcpImpact(t), false, ""
 	switch {
 	case t.Auto != nil && t.Auto.Revert.Tool != "":
 		p.Revert = "되돌리기: " + mcpShown(m.Name, t.Auto.Revert.Tool)

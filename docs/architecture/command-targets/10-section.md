@@ -1,9 +1,9 @@
 ## 이미지 본문 조회
 
-| CLI | MYDCP | 대상·권한 | 효과·종료 |
+| CLI | SFCP | 대상·권한 | 효과·종료 |
 |---|---|---|---|
 | `image pull-content IMAGE@DIGEST --kind manifest\|config\|layer [--digest D] [-O FILE]` | ImageContent 목적16 | 선택 tenant Read 또는 ManageRegistry. 고정 manifest의 descriptor·원 Store/승인 source | 원 Session proof·현재 trust/run/read-set을 유지하는 읽기. 실제 owner one-hop relay·전체 길이/지문·최종 ok/EOF. 관리 action/request-id·자격 발급 없음 |
-| 내부 FROM 본문 읽기(kind5) | ImageContent16·member QUIC | 원 수락 job의 builder → 원 source owner. signed begin의 고정 root와 현재 원 reader/권한 | [Root/Path 본문](../../reference/image-content.md#수락된-빌드의-from-본문). 같은 body verifier/원 참조 유지. 원 frozen source별 BuildKit OCIStores에서 소비. 사용자 CLI 명령·Unix 요청은 추가하지 않음 |
+| 내부 FROM 본문 읽기(kind16) | ImageContent16·member QUIC | 원 수락 job의 builder → 원 source owner. signed begin의 고정 root와 현재 원 reader/권한 | [Root/Path 본문](../../reference/image-content.md#수락된-빌드의-from-본문). 같은 body verifier/원 참조 유지. 원 frozen source별 BuildKit OCIStores에서 소비. 사용자 CLI 명령·Unix 요청은 추가하지 않음 |
 
 일반 User8 method와 구분한다. [명령·메시지·소비자 확정](../../reference/image-content.md)을 따른다.
 

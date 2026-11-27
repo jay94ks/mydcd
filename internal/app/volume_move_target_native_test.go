@@ -13,21 +13,21 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/config"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/engine"
-	"github.com/jay94ks/mydcd/internal/network"
-	"github.com/jay94ks/mydcd/internal/tenancy"
-	"github.com/jay94ks/mydcd/internal/workload/volumes"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/config"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/engine"
+	"github.com/jay94ks/seafield/internal/network"
+	"github.com/jay94ks/seafield/internal/tenancy"
+	"github.com/jay94ks/seafield/internal/workload/volumes"
 	"github.com/moby/moby/client"
 )
 
 func cleanupMoveTargetRuntime(t *testing.T, ctx context.Context, docker *engine.Client, root string, cluster, key [32]byte) {
 	t.Helper()
-	cfg, err := config.LoadNode(filepath.Join(root, "provider-node.yaml"))
+	cfg, err := loadTestNode(filepath.Join(root, "provider-node.yaml"))
 	if err != nil {
 		t.Error(err)
 		return
@@ -46,7 +46,7 @@ func cleanupOwnedRuntimeSources(t *testing.T, ctx context.Context, docker *engin
 	}
 	defer networks.Close()
 	cleanupManagedTaskVolumes(t, ctx, docker, cfg, networks, map[string]any{"Cluster": cluster, "NodeKey": key, "KeepImages": true})
-	remaining, err := docker.API.ContainerList(ctx, client.ContainerListOptions{All: true, Filters: client.Filters{}.Add("label", "org.mydc.owner="+docker.Owner)})
+	remaining, err := docker.API.ContainerList(ctx, client.ContainerListOptions{All: true, Filters: client.Filters{}.Add("label", "org.sfc.owner="+docker.Owner)})
 	if err != nil || len(remaining.Items) != 0 {
 		t.Error("owned target Task remains; retaining original Bridge pins", err)
 		return
@@ -246,7 +246,7 @@ func verifyMoveTargetActive(t *testing.T, ctx context.Context, source, target *R
 	}
 	body, err := io.ReadAll(io.LimitReader(response.Body, 128))
 	closeErr := response.Body.Close()
-	if err != nil || closeErr != nil || response.StatusCode != http.StatusOK || string(body) != "mydc-boundary /ping" {
+	if err != nil || closeErr != nil || response.StatusCode != http.StatusOK || string(body) != "sfc-boundary /ping" {
 		t.Fatal("actual target response", response.StatusCode, err, closeErr)
 	}
 	ready, ok := v.Native(job.Binding.Scope.Tenant, job.Binding.Scope.App, job.Binding.Scope.ID)
@@ -374,7 +374,7 @@ func verifyAutomaticMoveTarget(t *testing.T, ctx context.Context, source, target
 	if scenario == managedAppCDVolumeMove {
 		// Exercise the same durable user intent and target-scoped down CAS as
 		// ordinary CLI use, including the currently revoked input approval.
-		_, diagnostic, err := runManagedCLICommand(ctx, os.Getenv("MYDC_TEST_CLI"), filepath.Join(root, "cli-home"), filepath.Join(root, "cli.yaml"), []string{"compose", "down", "--tenant", job.Binding.Scope.Tenant, "-p", job.Binding.Scope.App, "--operation", "stop-moved-app"}, nil)
+		_, diagnostic, err := runManagedCLICommand(ctx, os.Getenv("SFC_TEST_CLI"), filepath.Join(root, "cli-home"), filepath.Join(root, "cli.yaml"), []string{"compose", "down", "--tenant", job.Binding.Scope.Tenant, "-p", job.Binding.Scope.App, "--operation", "stop-moved-app"}, nil)
 		if err != nil {
 			t.Fatal("CD target CLI down preserves original intent", err, string(diagnostic))
 		}
@@ -398,7 +398,7 @@ func verifyAutomaticMoveTarget(t *testing.T, ctx context.Context, source, target
 		return !active && !retiring && len(a.Bindings().Live()) == 0 && len(volume.Consumers()) == 0
 	})
 	scope := job.Binding.Scope
-	users, diagnostic, err := runManagedCLICommand(ctx, os.Getenv("MYDC_TEST_CLI"), filepath.Join(root, "cli-home"), filepath.Join(root, "cli.yaml"), []string{"--tenant", scope.Tenant, "volume", "users", scope.App + "/" + scope.ID}, nil)
+	users, diagnostic, err := runManagedCLICommand(ctx, os.Getenv("SFC_TEST_CLI"), filepath.Join(root, "cli-home"), filepath.Join(root, "cli.yaml"), []string{"--tenant", scope.Tenant, "volume", "users", scope.App + "/" + scope.ID}, nil)
 	var rows []any
 	if err != nil || json.Unmarshal(users, &rows) != nil || len(rows) != 0 {
 		t.Fatal("retired moved app retained public Volume users", err, string(diagnostic), string(users))

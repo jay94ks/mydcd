@@ -2,31 +2,42 @@
 
 아래 표는 현재 Unix User handler가 처리하는 **45개 전체 Method 목록**이다. 별도 URL/path는 없으며 모두 User kind1의 `Envelope.Body.Method`로 구별한다. `S`는 현재 Session과 연결 서명이 필요하다는 뜻이다. S 외에도 현재 계정·tenant 권한·정책·quorum 검사가 적용된다. 응답 열은 Reply의 주요 필드다.
 
+### typed method
+
+typed method는 요청과 응답이 그 method만의 타입 하나로 정해진 method다. 지금은 `certificates`, `vps`, `node-disk`, `node-summary`, `node-disks`, `node-tenant-usage`, `mesh-links`, `node-drain-plan`, `node-drain-status`, `node-diagnostics`, `node-force-remove-plan`, `node-remove-plan`, `node-demote-plan`, `tasks`, `raft-compact-plan`, `raft-compact-status`, `whoami`, `tenants`, `select-tenant`, `volumes`, `volume-backups`, `volume-restores`, `volume-usage`, `volume-backup-source`, `volume-file-plan`, `volume-file-status`, `lifecycles`, `lifecycle-source`, `ingresses`, `tunnel-reconnect-plan`, `tunnel-reconnect-status`, `resources`, `network-dns-names`와 공개 조회 12개(`volume-file-grants`, `volume-backup-limits`, `network-closure`, `network-users`, `volume-users`, `route-endpoints`, `bridge-endpoints`, `lifecycle-uses`, `vault-approvals`, `vault-usages`, `volume-retained-sources`, `image-trust`, [형식](28-section.md#관리-자원사용처-공개-조회)), 세션 없는 `server-version`, `challenge`, `login`, `credential-challenge`, `credential-login`이고, R09 순서대로 나머지 method도 옮긴다.
+
+- Request는 `Schema`, `Method`, `Nonce`, `Params`만 가진다. 다른 필드가 있거나 `Params`가 없으면 `denied`다.
+- `Params`는 그 method의 요청 타입으로 엄격하게 푼다. 모르는 필드가 있거나, 풀어서 다시 인코딩한 바이트가 원래 바이트와 다르면 `denied`다(빈 요청은 정확히 `{}`).
+- 성공 Reply는 `Schema`, `Code:"ok"`, `Data`만 가진다. `Data`는 그 method의 응답 타입이다. 실패 Reply는 `Code`와, 있으면 기호 코드 `InputCode`(대문자·숫자·`_`, 64바이트 이하)만 가진다.
+- Session과 연결 서명(S)이 필요하다.
+
 ### 최초 등록·로그인·계정
 
 | Method | 인증·입력 | 응답·의미 |
 |---|---|---|
 | `enroll-admin` | bootstrap anchor 서명; UserKey, Enrollment | Result, Found: 빈 catalog에 최초 system admin을 명시 등록 |
-| `challenge` | 세션 없음; Username, UserKey | Ticket: 등록 개인키 로그인 도전 |
-| `login` | 세션 없음; Ticket, Proof | Session: 같은 연결에 묶인 개인키 proof 검증 |
-| `credential-challenge` | 세션 없음; Username, AuthMethod=`password` 또는 `token`, 선택 Credential | Ticket: 보호 backend 자격 선택 |
-| `credential-login` | TLS client key 서명; Ticket, Secret | Session: 비밀번호/토큰 검증. AuthMethod/Username/Credential은 이 단계에서 생략 |
+| `challenge` | 세션 없음; typed `Params:{Username,UserKey}` | `Data`=Ticket: 등록 개인키 로그인 도전 |
+| `login` | 세션 없음; typed `Params:{Ticket,Proof,LoginClient?}` | `Data`=Session: 같은 연결에 묶인 개인키 proof 검증. 이 노드가 세션을 발급하지 않으면 봉투째 leader로 넘긴다 |
+| `credential-challenge` | 세션 없음; typed `Params:{Username,AuthMethod=password 또는 token,Credential?}` | `Data`=Ticket: 보호 backend 자격 선택 |
+| `credential-login` | TLS client key 서명; typed `Params:{Ticket,Secret,LoginClient?}` | `Data`=Session: 비밀번호/토큰 검증. AuthMethod/Username/Credential은 Ticket 안에만 있다. Params는 처리 뒤 지운다 |
 | `users` | S; 선택 After, Tenant/Node/TargetUser 없음 | Users, UsersNext, UsersRevision, RootRevision. 현재 system-admin + 서명 ManageCluster. 공개 credential만 반환하고 VerifierRef 필드 없음 |
 | `tenant-members` | S; Tenant 필수, 선택 After, Node/TargetUser 없음 | TenantMembers, TenantAllowedNodes, TenantMembersNext, TenantRevision, TenantMembersRevision, RootRevision. 대상 tenant의 현재 ManageMembers + 서명 scope 필수 |
 | `my-credentials` | S; Tenant/After/Node/TargetUser 없음 | SelfCredentials: 현재 로그인 계정의 공개 credential과 Revision. verifier 참조 없음 |
-| `tasks` | S; 선택 Tenant/App/Node/After | Tasks, TasksNext, TasksRootRevision. 현재 Read·tenant/허용 node로 먼저 거른 Task·관측 페이지. [행 형식·한도](../task-observability.md) |
-| `node-summary` | S; 선택 Tenant/Node/After | NodeSummary:{Nodes,Next,RootRevision,CanAcceptChanges}. tenant Read의 허용 node·자기 사용량 또는 명시 system-admin 전체 현황 |
-| `node-disks` | S; 선택 Tenant/Node/After | NodeDisks:{Disks,Next,RootRevision}. 전체 system-admin, tenant ManageVolumes의 허용 root만 먼저 골라 파일시스템별 합산 |
-| `node-tenant-usage` | S; Node 필수, 선택 After, Tenant 금지 | NodeTenantUsage:{Usage,Next,RootRevision}. system-admin의 노드별 tenant 사용량8행 |
-| `mesh-links` | S; 선택 Tenant/Node/After | MeshLinks:{Links,Next,RootRevision}. 전체 관리자 양쪽 지표, tenant Read는 허용 node 쌍 상태 요약 |
+| `lifecycles` | S; typed `Params:{Tenant,After?}` | `Data:{Items,Next,Revision,RootRevision}`. tenant ManageServices의 lifecycle 정책·script 버전 페이지 |
+| `lifecycle-source` | S; typed `Params:{Tenant,Source:{Name,Revision,Offset}}` | `Data:` 24KiB source page. [형식](../lifecycle-sources.md) |
+| `tasks` | S; typed `Params:{Node,Tenant,App,Standalone?,After?}` | `Data:{Tasks,Next,RootRevision}`. 현재 Read·tenant/허용 node로 먼저 거른 Task·관측 페이지. [행 형식·한도](../task-observability.md) |
+| `node-summary` | S; typed `Params:{Tenant?,Node?,After?}` | `Data:{Nodes,Next,RootRevision,CanAcceptChanges}`. tenant Read의 허용 node·자기 사용량 또는 명시 system-admin 전체 현황 |
+| `node-disks` | S; typed `Params:{Tenant?,Node?,After?}` | `Data:{Disks,Next,RootRevision}`. 전체 system-admin, tenant ManageVolumes의 허용 root만 먼저 골라 파일시스템별 합산 |
+| `node-tenant-usage` | S; typed `Params:{Node,After?}` | `Data:{Usage,Next,RootRevision}`. system-admin의 노드별 tenant 사용량8행 |
+| `mesh-links` | S; typed `Params:{Tenant?,Node?,After?}` | `Data:{Links,Next,RootRevision}`. 전체 관리자 양쪽 지표, tenant Read는 허용 node 쌍 상태 요약 |
 | `raft-status` | S; 선택 After, Tenant/Node 금지 | RaftStatus: system-admin의 로컬 SDK/내구 FSM·복제 ACK·snapshot/선거/ledger 진단. 리더 전달·quorum 대기 없이 마지막 적용 정책으로 인증 |
 | `app-source` | S; Tenant·AppSource 필수, After/Node/TargetUser 없음 | AppSource:{Section,Version,RootRevision,Part,Data,Pending?}. 24KiB source/local-services/overlays/pending-local part(pending-local은 Pending이 문서를 고정), 고정 버전·Section별 digest와 현재 tenant Read |
 | `app-revisions` | S; Tenant·AppSource{App,Deployment?} 필수, 선택 After | AppRevisions, AppRevisionsNext, AppRevisionsRootRevision. 원문 버전16행/64KiB, 현재 권한과 root 고정 cursor |
 | `user-credentials` | S; TargetUser, Tenant/After/Node 없음 | CredentialUser: system-admin/ManageCluster 전용 전체 공개 User record·계정 Revision. private-key 원문·password/token 값은 없음 |
 | `node-cli-policy` | S; Tenant/After/Node 없음 | NodeCLI: system-admin/ManageCluster 전용 `{Revision:uint64,disable_node_cli_operation:bool}`. 미변경은 revision0/false |
-| `whoami` | S | User, 각 root revision, LedgerRootRevision 등 현재 계정/관리 기준 |
-| `tenants` | S | Tenants: 현재 접근 가능한 tenant |
-| `select-tenant` | S; Tenant | Tenant: 현재 접근 검사. 서버에 연결별 기본 tenant를 생성하지 않음 |
+| `whoami` | S; Params `{}` | Data `{User,ModuleEpoch,Roots}`. Roots는 CommandKey(`control/catalog` 등)별 현재 root revision이다 |
+| `tenants` | S; Params `{}` | Data `{User,Tenants}`: 현재 접근 가능한 tenant |
+| `select-tenant` | S; Params `{Tenant}` | Data `{User,Tenant,Revision,AllowedNodes}`: 현재 접근 검사. 서버에 연결별 기본 tenant를 생성하지 않음 |
 
 관측 행/단위·quota와 실제 사용량·stale/unknown·반환 한도·단절 시 인증은 [노드 관측 API](../node-observations.md)를 따른다. 일반 관측 페이지는8행, Raft node 페이지는32행이다.
 
@@ -49,7 +60,8 @@ node 추가/삭제, tenant·망·Volume·Vault 정책 변경 같은 쓰기는 �
 | `node-storage` | 선택 Node, After; Tenant 없음 | NodeStorage, NodeStorageNext, NodeStorageRootRevision, NodeStorageRevision |
 | `node-storage-space` | NodeStorage; Tenant/After 없음 | NodeStorageSpace, NodeStorageObservedIndex |
 | `tenant-retirement` | Tenant, 선택 After | TenantRetirement: tenant 종료·owner 정산 상태 |
-| `resources` | 선택 Tenant, After | Resources, ResourcesNext, ResourcesRootRevision, ResourceRevision, ResourcesViewIndex, NetworkRevision, QuotaRevision |
+| `resources` | typed `Params:{Tenant?,After?}` | `Data:{RootRevision,Index,Revision,NetworkRevision,QuotaRevision,Items,Next?}`. 빈 Tenant는 ManageCluster, 아니면 tenant Read. 8행 페이지 |
+| `network-dns-names` | typed `Params:{Tenant,Network}` | `Data:{Managed,Revision,Zone,Names,Records}`. 그 tenant 망의 DNS 이름. tenant Read |
 | `legacy-resource-closure` | LegacySource | LegacyTarget, LegacyRetirement: 정확한 기존 참조의 종료 근거 |
 
 ### 앱·CD
@@ -74,11 +86,13 @@ node 추가/삭제, tenant·망·Volume·Vault 정책 변경 같은 쓰기는 �
 
 | Method | S 이외의 입력 | 응답 |
 |---|---|---|
-| `volumes` | 선택 Tenant, After | Volumes, VolumesNext, VolumesRootRevision, VolumeRevision |
-| `volume-restores` | 선택 Tenant, After | VolumeRestores, VolumeRestoresNext |
-| `volume-backups` | 선택 Tenant, After | VolumeBackups, VolumeBackupsNext |
-| `volume-usage` | Tenant, VolumeUsage | VolumeUsage, VolumeUsageIndex |
-| `volume-backup-source` | Tenant, VolumeSource | VolumeSource, VolumeSourceIndex |
+| `volumes` | typed `Params:{Tenant?,After?}` | `Data:{Items,Next?,Revision,RootRevision,ModuleEpoch}`. Tenant Read, Tenant 생략 시 ManageCluster. RootRevision은 Volumes root, Revision은 volumes book |
+| `volume-restores` | typed `Params:{Tenant?,After?}` | `Data:{Items,Next?,Revision,RootRevision,ModuleEpoch}`. 권한은 `volumes`와 같다 |
+| `volume-backups` | typed `Params:{Tenant?,After?}` | `Data:{Items,Next?,Revision,RootRevision,ModuleEpoch}`. 권한은 `volumes`와 같다 |
+| `volume-usage` | typed `Params:{Tenant,Volume:{App,ID}}` | `Data:{Usage,Index,RootRevision}`. 소유 노드의 측정값, Index는 다시 확인한 commit index |
+| `volume-backup-source` | typed `Params:{Tenant,Volume:{App,ID}}` | `Data:{Source,VolumeRevision,ModuleEpoch,RootRevision,Index}`. begin-volume-backup이 VolumeRevision·ModuleEpoch를 쓴다 |
+| `volume-file-plan` | typed `Params:{Tenant,File:VolumeFileQuery}` | `Data:VolumeFilePlan`. [파일 작업](../volume-files.md) |
+| `volume-file-status` | typed `Params:{Tenant,ID}` | `Data:VolumeFileView` |
 | `vault` | 선택 Tenant, After | Vault, VaultNext, VaultRootRevision, VaultRevision, VaultTreeRevision, VaultWriteEpoch, VaultApprovalRevision: 공개 metadata |
 | `vault-approval-plan` | Tenant, VaultPlan | VaultPlan: Secret Group 승인 대상 계획 part |
 | `vault-write-plan` | Tenant와 VaultWritePlan.Realm 일치, VaultWritePlan | VaultWritePlan: 보호 원문 없이 provider/원 write 계획 |
@@ -87,7 +101,6 @@ node 추가/삭제, tenant·망·Volume·Vault 정책 변경 같은 쓰기는 �
 
 | Method | S 이외의 입력 | 응답 |
 |---|---|---|
-| `lifecycles` | Tenant, 선택 After | Lifecycles, LifecyclesNext, LifecycleRootRevision, LifecycleRevision |
 | `checker-source-stage` | Tenant, CheckerSource, 선택 CheckerUpload; 후속 kind4 | continue 뒤 CheckerSource 서명 사실 |
 | `checker-source-recover` | 같은 source 선택, 원 CheckerUpload가 있으면 보존 | CheckerSource: 원 저장 사실 조회, source 원문 재전송 없음 |
 | `checker-module-stage` | Tenant, CheckerSource, CheckerModule, 선택 CheckerUpload; 후속 kind4 | continue 뒤 CheckerModule 서명 사실 |

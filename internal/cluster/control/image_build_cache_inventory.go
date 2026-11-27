@@ -9,10 +9,10 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/imagebuild"
-	"github.com/jay94ks/mydcd/internal/registryclient"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/imagebuild"
+	"github.com/jay94ks/seafield/internal/registryclient"
 )
 
 const ImageBuildCacheInventoryRows = 4
@@ -93,7 +93,7 @@ func (p Policy) imageBuildCacheInventoryPage(s state.State, c access.Catalog, b 
 		Epoch   uint64
 		Rows    []ImageBuildCacheInventoryRow
 	}{p.Cluster, tenant, q, s.ModuleEpoch(), rows})
-	root := sha256.Sum256(append([]byte("mydc-imagebuild-cache-inventory-1\x00"), raw...))
+	root := sha256.Sum256(append([]byte("sfc-imagebuild-cache-inventory-1\x00"), raw...))
 	prior, key, err := registryclient.CatalogueCursor(after)
 	if err != nil {
 		return ImageBuildPage{}, access.ErrInvalid

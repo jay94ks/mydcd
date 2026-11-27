@@ -8,7 +8,7 @@ import (
 	"net/netip"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/engine"
+	"github.com/jay94ks/seafield/internal/engine"
 	dockernet "github.com/moby/moby/api/types/network"
 )
 
@@ -21,13 +21,13 @@ func TestBridgeIPAMDockerRangeIsExactSDKInputAndReadback(t *testing.T) {
 	if _, err := DecodeBridge(string(raw)); err != nil {
 		t.Fatal(err)
 	}
-	id := engine.Identity{Name: "mydc-bridge-0123456789ab", Labels: map[string]string{"owner": "test"}}
+	id := engine.Identity{Name: "sfc-bridge-0123456789ab", Labels: map[string]string{"owner": "test"}}
 	o := bridgeOptions(s, id)
 	c := o.IPAM.Config[0]
 	if c.IPRange != p.IPAM.Dynamic || len(c.AuxAddress) != 0 {
 		t.Fatal("SDK request lost/renamed reservations", c)
 	}
-	n := dockernet.Inspect{Network: dockernet.Network{ID: "original", Name: id.Name, Labels: maps.Clone(id.Labels), Driver: "bridge", Scope: "local", EnableIPv4: true, Options: maps.Clone(o.Options), IPAM: *o.IPAM}}
+	n := dockernet.Inspect{Network: dockernet.Network{ID: "original", Name: id.Name, Labels: maps.Clone(id.Labels), Driver: EngineDriver, Scope: "local", EnableIPv4: true, Options: maps.Clone(o.Options), IPAM: *o.IPAM}}
 	if !matchBridge(n, s, id) {
 		t.Fatal("original reservation readback rejected")
 	}

@@ -8,8 +8,8 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/cluster/lifecycle"
-	"github.com/jay94ks/mydcd/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/cluster/lifecycle"
+	"github.com/jay94ks/seafield/internal/reconcile"
 )
 
 func TestVotingDemotionKeepsInstalledIdentityAndOriginalUnknown(t *testing.T) {
@@ -108,7 +108,7 @@ func TestSharedNodePlanLastVoterReservationsAndMissingConfiguration(t *testing.T
 func TestInstalledThreeVoterRemovalPlanHasTwoVotersAndZeroFaultTolerance(t *testing.T) {
 	d, ak, _ := runtimeMembers(t)
 	c, ck := testPeer("c", 23, false)
-	n, err := d.Invite(c, "join-c")
+	n, err := d.Invite(c, "join-c", nil)
 	d = checked(t, n, err)
 	d = dispatch(t, d, "c", ak, 14)
 	d = observe(t, d, "c", 15, c)

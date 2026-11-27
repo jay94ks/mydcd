@@ -7,7 +7,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	contract "github.com/jay94ks/mydcd/lifecycle/v1"
+	contract "github.com/jay94ks/seafield/lifecycle/v1"
 )
 
 func controlObservation(t *testing.T, status contract.Status) Observation {

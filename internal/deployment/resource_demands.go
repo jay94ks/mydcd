@@ -9,8 +9,8 @@ import (
 	"slices"
 	"strconv"
 
-	"github.com/jay94ks/mydcd/internal/tenancy"
-	"github.com/jay94ks/mydcd/internal/workload"
+	"github.com/jay94ks/seafield/internal/tenancy"
+	"github.com/jay94ks/seafield/internal/workload"
 )
 
 // ResourceDemand is desired capacity/address space, never an applied Goal,
@@ -98,7 +98,7 @@ func (b Blueprint) ResourceDemands() ([]ResourceDemand, error) {
 		}
 		if s.Kind == "task" {
 			var service ComposeService
-			if json.Unmarshal(s.Goal, &service) != nil || service.MyDC.Node != s.Node {
+			if json.Unmarshal(s.Goal, &service) != nil || service.Sfc.Node != s.Node {
 				return nil, ErrInputs
 			}
 			d.Ports = slices.Clone(service.Ports)

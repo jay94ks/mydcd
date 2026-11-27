@@ -7,8 +7,8 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/workload/volumes"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/workload/volumes"
 )
 
 func TestVolumeMoveManifestBindsArchiveAndRetainsOriginalReader(t *testing.T) {
@@ -57,7 +57,7 @@ func TestVolumeMoveManifestBindsArchiveAndRetainsOriginalReader(t *testing.T) {
 		t.Fatal(err)
 	}
 	tenant, _ := catalog.Tenant("tenant")
-	f.apply("revoke-target", "set-nodes", tenant.Revision, NodeAssignment{Tenant: "tenant", Nodes: []string{"node-a"}}, state.Applied)
+	f.apply("revoke-target", "set-nodes", tenant.Revision, NodeChangeTo("tenant", tenant.AllowedNodes, []string{"node-a"}), state.Applied)
 	if _, err := f.p.VolumeMovePermit(f.s, j.Binding.Target.Key, receive, 2); err == nil {
 		t.Fatal("receiver bypassed current placement")
 	}

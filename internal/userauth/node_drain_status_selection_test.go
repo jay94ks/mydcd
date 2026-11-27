@@ -5,57 +5,59 @@ package userauth
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/schema"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/sfcp"
 )
 
 func TestNodeDrainStatusOptionalOperationRequestKeepsSelectorBoundaries(t *testing.T) {
-	for _, operation := range []string{"", "original"} {
-		r := Request{Method: "node-drain-status", NodeDrain: &control.NodeDrainQuery{Node: "node-a", Operation: operation}}
-		if !r.validMethodFields() || !r.validQuerySelectors() || !r.validLookupFields() {
-			t.Fatal("valid status selector rejected", operation)
+	drain := func(method, params string) Request {
+		return Request{Schema: 1, Method: method, Params: json.RawMessage(params)}
+	}
+	for _, r := range []Request{drain("node-drain-status", `{"Node":"node-a","Operation":""}`), drain("node-drain-status", `{"Node":"node-a","Operation":"original"}`), drain("node-drain-plan", `{"Node":"node-a","Operation":"original"}`)} {
+		if !r.validMethodFields() {
+			t.Fatal("valid drain selector rejected", string(r.Params))
 		}
 		for _, edit := range []func(*Request){
 			func(r *Request) { r.Tenant = "tenant" },
-			func(r *Request) { r.App = "app" },
 			func(r *Request) { r.Node = "node-b" },
 			func(r *Request) { r.After = "cursor" },
-			func(r *Request) { r.Method = "whoami" },
 			func(r *Request) { r.State = "open" },
 		} {
 			bad := r
 			edit(&bad)
-			if bad.validMethodFields() || bad.validQuerySelectors() || bad.validLookupFields() {
-				t.Fatal("foreign status selector accepted", bad.Method)
+			if bad.validMethodFields() {
+				t.Fatal("foreign drain selector accepted", bad.Method)
 			}
 		}
 	}
 	for _, r := range []Request{
-		{Method: "node-drain-plan", NodeDrain: &control.NodeDrainQuery{Node: "node-a"}},
-		{Method: "node-drain-status", NodeDrain: &control.NodeDrainQuery{}},
-		{Method: "node-drain-status", NodeDrain: &control.NodeDrainQuery{Node: "../node"}},
-		{Method: "node-drain-status", NodeDrain: &control.NodeDrainQuery{Node: "node-a", Operation: "../original"}},
+		drain("node-drain-plan", `{"Node":"node-a","Operation":""}`),
+		drain("node-drain-status", `{"Node":"","Operation":""}`),
+		drain("node-drain-status", `{"Node":"../node","Operation":""}`),
+		drain("node-drain-status", `{"Node":"node-a","Operation":"../original"}`),
+		drain("node-drain-status", `{"Node":"node-a"}`),
 	} {
-		if r.validMethodFields() || r.validQuerySelectors() || r.validLookupFields() {
-			t.Fatal("missing plan original or malformed status selector accepted", r.Method)
+		if r.validMethodFields() {
+			t.Fatal("missing plan original or malformed status selector accepted", r.Method, string(r.Params))
 		}
 	}
-	for _, method := range []string{"whoami", "members", "unknown", "node-shell-policy", "node-drain-status", "login"} {
+	for _, method := range []string{"whoami", "members", "unknown", "node-shell-policy", "login"} {
 		r := Request{Method: method, State: "closed"}
 		if r.validMethodFields() || r.validQuerySelectors() || r.validLookupFields() {
 			t.Fatal("shell-only State field leaked to a foreign method", method)
 		}
 	}
 	_, client, session, _ := journalFixture(t)
-	if _, err := client.NodeDrainStatus(context.Background(), client.Peers[0], session, control.NodeDrainQuery{Node: "node-a"}); !errors.Is(err, mydcp.ErrAdmission) {
+	if _, err := client.NodeDrainStatus(context.Background(), client.Peers[0], session, control.NodeDrainQuery{Node: "node-a"}); !errors.Is(err, sfcp.ErrAdmission) {
 		t.Fatal("omitted status operation did not reach common transport admission", err)
 	}
 	if _, err := client.NodeDrainPlan(context.Background(), client.Peers[0], session, control.NodeDrainQuery{Node: "node-a"}); !errors.Is(err, access.ErrInvalid) {
@@ -71,13 +73,13 @@ func TestNodeDrainStatusActualSDKAcceptsOnlyResolvedOriginalSelectors(t *testing
 		t.Run(network, func(t *testing.T) {
 			_, client, session, node := journalFixture(t)
 			peer := client.Peers[0]
-			lookup := func(key mydcp.Identity) (mydcp.Peer, bool) {
-				if key == mydcp.Identity(client.Self.Public) {
-					return mydcp.Peer{ID: "user", Policy: mydcp.Policy{Key: key, UserAuth: true}}, true
+			lookup := func(key sfcp.Identity) (sfcp.Peer, bool) {
+				if key == sfcp.Identity(client.Self.Public) {
+					return sfcp.Peer{ID: "user", Policy: sfcp.Policy{Key: key, UserAuth: true}}, true
 				}
 				return peer, key == peer.Key
 			}
-			server, err := mydcp.NewTransport(node, client.Cluster, lookup)
+			server, err := sfcp.NewTransport(node, client.Cluster, lookup)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -89,7 +91,7 @@ func TestNodeDrainStatusActualSDKAcceptsOnlyResolvedOriginalSelectors(t *testing
 			replies := make(chan input, 1)
 			done := make(chan error, 1)
 			binding := Service{Self: node, Mesh: server, Policy: control.Policy{Cluster: client.Cluster}}
-			if err = server.OnManagement(mydcp.User, func(ctx context.Context, conn *mydcp.Session, stream mydcp.Stream, frame mydcp.Frame) error {
+			if err = server.OnManagement(sfcp.User, func(ctx context.Context, conn *sfcp.Session, stream sfcp.Stream, frame sfcp.Frame) error {
 				serve := func() error {
 					expected := <-replies
 					envelope, err := schema.Decode[Envelope](frame.Fields[0].Value)
@@ -97,8 +99,9 @@ func TestNodeDrainStatusActualSDKAcceptsOnlyResolvedOriginalSelectors(t *testing
 						return err
 					}
 					r, err := schema.Decode[Request](envelope.Body)
-					if err != nil || r.Method != "node-drain-status" || !r.validMethodFields() || !r.validQuerySelectors() || r.NodeDrain == nil || *r.NodeDrain != expected.query {
-						return mydcp.ErrAdmission
+					var q NodeDrainStatusQuery
+					if err != nil || r.Method != "node-drain-status" || !r.validMethodFields() || strict(r.Params, &q) != nil || control.NodeDrainQuery(q) != expected.query {
+						return sfcp.ErrAdmission
 					}
 					if _, err = binding.binding(conn, frame.Kind, envelope); err != nil {
 						return err
@@ -106,7 +109,11 @@ func TestNodeDrainStatusActualSDKAcceptsOnlyResolvedOriginalSelectors(t *testing
 					if err = streamEOF(stream); err != nil {
 						return err
 					}
-					return binding.respond(stream, frame, sha256.Sum256(frame.Fields[0].Value), Reply{Schema: 1, Code: "ok", NodeDrainStatus: &expected.status})
+					data, err := json.Marshal(expected.status)
+					if err != nil {
+						return err
+					}
+					return binding.respond(stream, frame, sha256.Sum256(frame.Fields[0].Value), Reply{Schema: 1, Code: "ok", Data: data})
 				}()
 				done <- serve
 				return serve
@@ -114,7 +121,7 @@ func TestNodeDrainStatusActualSDKAcceptsOnlyResolvedOriginalSelectors(t *testing
 				t.Fatal(err)
 			}
 			if network == "unix" {
-				root, err := os.MkdirTemp("", "mydc-drain-")
+				root, err := os.MkdirTemp("", "sfc-drain-")
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -130,7 +137,7 @@ func TestNodeDrainStatusActualSDKAcceptsOnlyResolvedOriginalSelectors(t *testing
 				}
 				peer.Endpoint = server.Addr().String()
 			}
-			mesh, err := mydcp.NewTransport(client.Self, client.Cluster, lookup)
+			mesh, err := sfcp.NewTransport(client.Self, client.Cluster, lookup)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -152,7 +159,7 @@ func TestNodeDrainStatusActualSDKAcceptsOnlyResolvedOriginalSelectors(t *testing
 				q := control.NodeDrainQuery{Node: "node-a", Operation: tc.requested}
 				replies <- input{query: q, status: control.NodeDrainStatus{Schema: 1, Node: tc.node, Operation: tc.actual, State: "Draining", Jobs: []control.NodeDrainJobStatus{}}}
 				status, err := client.NodeDrainStatus(ctx, peer, session, q)
-				if (err == nil) != tc.valid || tc.valid && status.Operation != tc.actual || !tc.valid && !errors.Is(err, mydcp.ErrAdmission) {
+				if (err == nil) != tc.valid || tc.valid && status.Operation != tc.actual || !tc.valid && !errors.Is(err, sfcp.ErrAdmission) {
 					t.Fatal("typed SDK response selector", tc.name, status.Operation, err)
 				}
 				select {

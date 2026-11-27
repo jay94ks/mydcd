@@ -6,9 +6,9 @@ import (
 	"bytes"
 	"crypto/ed25519"
 	"errors"
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/tenancy"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/tenancy"
 	"net/netip"
 	"testing"
 )
@@ -113,5 +113,30 @@ func TestNetworkDNSPolicyProjectionOwnsEveryPolicyFieldAndExactSourceCAS(t *test
 	again, _, err := f.p.NetworkDNSView(f.s, member)
 	if err != nil || len(definition.Policy.Upstreams) > 0 && again.Policy.Upstreams[0] != definition.Policy.Upstreams[0] {
 		t.Fatal("returned policy mutated source", err)
+	}
+}
+
+// bridge-endpoints names only the logical networks that take bridges, and
+// a session that cannot manage networks anywhere reads nothing.
+func TestBridgeEndpointsNameOnlyNetworksTakingBridges(t *testing.T) {
+	f, _, definition := managedDNSProjectionFixture(t)
+	read := func(session access.Session) (PublicReadPage, error) {
+		t.Helper()
+		return f.p.PublicRead(f.s, session, 2, "bridge-endpoints", definition.Tenant, PublicReadQuery{}, "")
+	}
+	if page, err := read(f.session); err != nil || len(page.Rows) != 0 || page.TenantRevision != 0 {
+		t.Fatal("network without bridge-inbound listed", page, err)
+	}
+	r, _ := f.p.Resources(f.s)
+	managedDNSChange(t, f, "inbound-on", "set-network-toggle", r.Networks.Revision(), NetworkToggleSet{Tenant: definition.Tenant, Name: definition.Network, Toggle: tenancy.ToggleBridgeInbound, On: true}, state.Applied)
+	page, err := read(f.session)
+	if err != nil || len(page.Rows) != 1 || page.Rows[0].BridgeEndpoint == nil || *page.Rows[0].BridgeEndpoint != (PublicBridgeEndpoint{Tenant: definition.Tenant, Network: definition.Network}) || page.Rows[0].Key != definition.Network {
+		t.Fatal("bridge-inbound network not listed once by its logical name", page, err)
+	}
+	reader := f.session
+	reader.Scopes = []access.Scope{{Tenant: "foreign", Actions: []access.Action{access.Read}}}
+	reader.Signature = ed25519.Sign(f.node, access.SessionBytes(reader))
+	if _, err := read(reader); !errors.Is(err, access.ErrDenied) {
+		t.Fatal("session without network management read bridge endpoints", err)
 	}
 }

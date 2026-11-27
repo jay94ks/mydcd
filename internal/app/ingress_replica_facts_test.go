@@ -6,8 +6,8 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/ingress"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/ingress"
 )
 
 func TestIngressReplicaFactsExcludeFixedAndForeignRuntimeBackends(t *testing.T) {

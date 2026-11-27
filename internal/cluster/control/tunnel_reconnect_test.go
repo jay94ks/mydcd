@@ -9,11 +9,11 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/membership"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/config"
-	"github.com/jay94ks/mydcd/internal/observability"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/membership"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/config"
+	"github.com/jay94ks/seafield/internal/observability"
 )
 
 func tunnelCoreFixture(t *testing.T) (*backupCoreFixture, TunnelPlan) {
@@ -25,7 +25,7 @@ func tunnelCoreFixture(t *testing.T) (*backupCoreFixture, TunnelPlan) {
 		t.Fatal(err)
 	}
 	peer := config.Peer{ID: "node-b", Key: hex.EncodeToString(b.Public().(ed25519.PublicKey)), Endpoint: "127.0.0.1:8002"}
-	d, err = d.Invite(peer, "tunnel-join-b")
+	d, err = d.Invite(peer, "tunnel-join-b", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -152,15 +152,8 @@ func TestTunnelReconnectRevocationCancelsOnlyUnsentAndPlanRequiresFreshAuthentic
 		t.Fatal("mixed ms/sec freshness boundary")
 	}
 	managedDNSChange(t, f, "revoke-original", "reconnect-tunnel", 0, TunnelChange{Operation: "revoked-link", Plan: plan}, state.Applied)
-	c, err := f.p.Catalog(f.s)
-	if err != nil {
-		t.Fatal(err)
-	}
-	u, _ := c.User("admin")
-	u.Credentials[0].Operations = []string{"cordon-node"}
-	revision := u.Revision
-	u.Revision = 0
-	f.apply("restrict-origin-key", "put-user", revision, u, state.Applied)
+	restricted := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{163}, ed25519.SeedSize))
+	f.replaceOwnKey("key", "restricted", [32]byte(restricted.Public().(ed25519.PublicKey)), []string{"cordon-node"})
 	work, err := f.p.TunnelWork(f.s, plan.Owner, TunnelWorkRequest{Operation: "revoked-link"})
 	if err != nil || work.Allowed {
 		t.Fatal("revoked original permitted Dial", err)

@@ -6,7 +6,7 @@ import (
 	"context"
 	"errors"
 
-	"github.com/jay94ks/mydcd/internal/nodestorage"
+	"github.com/jay94ks/seafield/internal/nodestorage"
 )
 
 // Usage reuses the bounded live scanner. It grants neither a writer nor a

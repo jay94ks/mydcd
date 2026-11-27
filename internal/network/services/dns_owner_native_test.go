@@ -18,11 +18,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/network"
-	"github.com/jay94ks/mydcd/internal/reconcile"
-	"github.com/jay94ks/mydcd/internal/tenancy"
-	"github.com/jay94ks/mydcd/internal/workload"
-	"github.com/jay94ks/mydcd/tests/enginefixture"
+	"github.com/jay94ks/seafield/internal/network"
+	"github.com/jay94ks/seafield/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/tenancy"
+	"github.com/jay94ks/seafield/internal/workload"
+	"github.com/jay94ks/seafield/tests/enginefixture"
 	"github.com/miekg/dns"
 	"github.com/moby/moby/client"
 )
@@ -75,13 +75,13 @@ func testRealDNSOwnerNative(t *testing.T, protocol bool, dependentReadiness ...b
 	crash := len(dependentReadiness) >= 4 && dependentReadiness[3]
 	rebind := len(dependentReadiness) >= 5 && dependentReadiness[4]
 	singleNetworkRead := len(dependentReadiness) >= 6 && dependentReadiness[5]
-	owner, backend := os.Getenv("MYDC_DOCKER_TEST_OWNER"), os.Getenv("MYDC_DOCKER_TEST_BACKEND")
+	owner, backend := os.Getenv("SFC_DOCKER_TEST_OWNER"), os.Getenv("SFC_DOCKER_TEST_BACKEND")
 	if owner == "" || backend == "" || os.Geteuid() != 0 {
 		t.Skip("requires owned rollback prestate and user-prebuilt backend/test")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Second)
 	defer cancel()
-	native := enginefixture.OpenPrepared(t, ctx, owner, owner, []string{`USER 10001:10001`, `ENV MYDC_DNS_FIXTURE=1`}, backend)
+	native := enginefixture.OpenPrepared(t, ctx, owner, owner, []string{`USER 10001:10001`, `ENV SFC_DNS_FIXTURE=1`}, backend)
 	var networkReads atomic.Int64
 	if singleNetworkRead {
 		originalAPI := native.Client.API
@@ -100,7 +100,7 @@ func testRealDNSOwnerNative(t *testing.T, protocol bool, dependentReadiness ...b
 		t.Cleanup(func() { _ = originalAPI.Close(); transport.CloseIdleConnections() })
 	}
 
-	root, err := os.MkdirTemp("", "mydc-dns-owner-")
+	root, err := os.MkdirTemp("", "sfc-dns-owner-")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -131,7 +131,7 @@ func testRealDNSOwnerNative(t *testing.T, protocol bool, dependentReadiness ...b
 			_ = w.Close()
 		}
 	}()
-	prefix := netip.MustParsePrefix(os.Getenv("MYDC_DOCKER_TEST_CIDR"))
+	prefix := netip.MustParsePrefix(os.Getenv("SFC_DOCKER_TEST_CIDR"))
 	gateway := prefix.Addr().Next()
 	bridgeKey, taskKey := "network/owner-dns", "workload/task/first/demo/web"
 	bridge := network.BridgeSpec{Schema: 1, Network: "lan", Owner: owner, MTU: 1280, Internal: true, Pools: []network.Pool{{ID: "lan/pool", Network: "lan", Owner: owner, Prefix: prefix, Gateway: gateway, MTU: 1280}}}
@@ -168,7 +168,7 @@ func testRealDNSOwnerNative(t *testing.T, protocol bool, dependentReadiness ...b
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg := DNSConfig{Tenant: "first", ID: "dns", Network: "lan", Pool: "pool", Source: 1, Serial: 1, Enabled: true, Zone: "app.mydc.test.", TTL: 1, NegativeTTL: 1, QuerySeconds: 2, MaxQueries: 4, MaxCacheEntries: 2, MaxResponseBytes: 4096, Names: []DNSName{{"probe", allocation.Endpoint, allocation.Generation}}}
+	cfg := DNSConfig{Tenant: "first", ID: "dns", Network: "lan", Pool: "pool", Source: 1, Serial: 1, Enabled: true, Zone: "app.sfc.test.", TTL: 1, NegativeTTL: 1, QuerySeconds: 2, MaxQueries: 4, MaxCacheEntries: 2, MaxResponseBytes: 4096, Names: []DNSName{{"probe", allocation.Endpoint, allocation.Generation}}}
 	var upstream *dnsProtocolUpstream
 	if protocol {
 		upstream = openDNSProtocolUpstream(t, ctx)
@@ -192,7 +192,7 @@ func testRealDNSOwnerNative(t *testing.T, protocol bool, dependentReadiness ...b
 	var policyMu sync.Mutex
 	var deny atomic.Bool
 	deny.Store(true)
-	options := DNSOwnerOptions{Cluster: networks.Cluster(), Key: f.key, Network: n, Workload: w, Roots: []string{"mydc.test."}, MaxViews: 16, MaxQueries: 8, MaxConnections: 4, IdleTimeout: time.Second,
+	options := DNSOwnerOptions{Cluster: networks.Cluster(), Key: f.key, Network: n, Workload: w, Roots: []string{"sfc.test."}, MaxViews: 16, MaxQueries: 8, MaxConnections: 4, IdleTimeout: time.Second,
 		Current: func(_ context.Context, tenant, id string) (DNSOwnerPolicy, error) {
 			policyMu.Lock()
 			defer policyMu.Unlock()
@@ -282,7 +282,7 @@ func testRealDNSOwnerNative(t *testing.T, protocol bool, dependentReadiness ...b
 	if err != nil {
 		t.Fatal(err)
 	}
-	spec := workload.ContainerSpec{Schema: 1, Node: owner, Image: native.Image, Bridge: bridgeKey, BridgeGeneration: bridgeGeneration, IPv4: allocation.Address, Memory: 32 << 20, NanoCPU: 100000000, Process: &process, Resolver: &workload.Resolver{Servers: []netip.Addr{gateway}, Search: []string{"app.mydc.test"}}}
+	spec := workload.ContainerSpec{Schema: 1, Node: owner, Image: native.Image, Bridge: bridgeKey, BridgeGeneration: bridgeGeneration, IPv4: allocation.Address, Memory: 32 << 20, NanoCPU: 100000000, Process: &process, Resolver: &workload.Resolver{Servers: []netip.Addr{gateway}, Search: []string{"app.sfc.test"}}}
 	if dependent {
 		spec.Readiness = &workload.HTTPReadiness{Path: "/resolve?name=probe", Port: 8080}
 	}
@@ -400,7 +400,7 @@ func testRealDNSOwnerNative(t *testing.T, protocol bool, dependentReadiness ...b
 		waitSettled()
 	}
 	outside := new(dns.Msg)
-	outside.SetQuestion("probe.app.mydc.test.", dns.TypeA)
+	outside.SetQuestion("probe.app.sfc.test.", dns.TypeA)
 	if response, _, e := (&dns.Client{Net: "udp4", Timeout: 150 * time.Millisecond}).ExchangeContext(ctx, outside, netip.AddrPortFrom(gateway, 53).String()); e == nil && response != nil {
 		t.Fatal("host query outside the approved endpoint received an answer")
 	}
@@ -600,7 +600,7 @@ func testRealDNSOwnerNative(t *testing.T, protocol bool, dependentReadiness ...b
 	if redeploy {
 		o, policy = verifyDNSOwnerRecreatedBridge(t, ctx, o, n, policy, bridge, bridgeKey, allocation, closed, originalNative, f.key, func(next DNSOwnerPolicy) { policyMu.Lock(); policy = next; policyMu.Unlock() })
 	}
-	if path := os.Getenv("MYDC_NATIVE_MANIFEST"); path != "" {
+	if path := os.Getenv("SFC_NATIVE_MANIFEST"); path != "" {
 		raw, _ := json.Marshal(map[string]any{"schema": 1, "udp_tcp": true, "same_db_native_id": originalNative, "original_group": group, "original_prepare_id": 1, "hot_rebinds": 0, "retired": true, "shared_reference": reference.ID, "bridge_consumers": 0})
 		if err = os.WriteFile(path, raw, 0600); err != nil {
 			t.Fatal(err)

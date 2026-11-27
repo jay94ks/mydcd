@@ -127,7 +127,7 @@ func TestSessionAcceptsFullActionVocabularyWithoutWideningScopes(t *testing.T) {
 func TestSessionExpiryIssuerAndAccountRevocation(t *testing.T) {
 	c := enrolled(t)
 	s, issuer, _ := signedSession(c, "admin", "key", []Scope{{Tenant: "*", Actions: []Action{Read}}})
-	for _, mutate := range []func(*Session){func(s *Session) { s.Key = [32]byte{} }, func(s *Session) { s.ExpiresAt = 100 }, func(s *Session) { s.IssuedAt = 101 }, func(s *Session) { s.ExpiresAt = 100 + MaxSessionSeconds + 1 }, func(s *Session) { s.AccountRevision++ }, func(s *Session) { s.IssuerEpoch++ }, func(s *Session) { s.Scopes[0].Actions = append(s.Scopes[0].Actions, Read) }} {
+	for _, mutate := range []func(*Session){func(s *Session) { s.Key = [32]byte{} }, func(s *Session) { s.ExpiresAt = 100 }, func(s *Session) { s.IssuedAt = 100 + MaxClockSkewSeconds + 1 }, func(s *Session) { s.ExpiresAt = 100 + MaxSessionSeconds + 1 }, func(s *Session) { s.AccountRevision++ }, func(s *Session) { s.IssuerEpoch++ }, func(s *Session) { s.Scopes[0].Actions = append(s.Scopes[0].Actions, Read) }} {
 		bad, _, _ := signedSession(c, "admin", "key", []Scope{{Tenant: "*", Actions: []Action{Read}}})
 		mutate(&bad)
 		bad = resign(bad)
@@ -222,7 +222,7 @@ func TestAcceptedApplicationGrantPreservesCeilingAndCurrentAuthority(t *testing.
 	disabled := u
 	disabled.Enabled = false
 	disabled.Revision = 0
-	changed, err := revoked.PutUser("admin", u.Revision, disabled)
+	changed, err := revoked.replaceUser(u.Revision, disabled)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -234,7 +234,7 @@ func TestAcceptedApplicationGrantPreservesCeilingAndCurrentAuthority(t *testing.
 	disabled.Credentials[0].Enabled = false
 	// Retain a second credential so the account keeps one authentication method.
 	disabled.Credentials = append(disabled.Credentials, Credential{ID: "other", Method: PrivateKey, PublicKey: key(22), Enabled: true})
-	changed, err = revoked.PutUser("admin", u.Revision, disabled)
+	changed, err = revoked.replaceUser(u.Revision, disabled)
 	if err != nil {
 		t.Fatal(err)
 	}

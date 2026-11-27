@@ -1,0 +1,654 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: seafield <seafield@invalid>
+Date: Fri, 27 Nov 2026 21:33:00 +0000
+Subject: [PATCH 20/20] exec: each exec in its own sub-cgroup (sfe-runc);
+ exec_die reports the tree and stdio bytes; kill the tree over purpose 38
+
+
+diff --git a/cmd/sfe-runc/main.go b/cmd/sfe-runc/main.go
+new file mode 100644
+index 0000000..55f779f
+--- /dev/null
++++ b/cmd/sfe-runc/main.go
+@@ -0,0 +1,157 @@
++//go:build linux
++
++// sfe-runc is the runtime binary the Seafield engine gives the runc shim.
++// It runs the real runc unchanged, except that every "runc exec" runs in a
++// sub-cgroup of its own (sfe-exec-<exec id>) under the container's cgroup,
++// so the engine can see when the exec's whole process tree has ended and
++// kill the whole tree (cgroup.kill), not only its first process.
++//
++// When anything about the sub-cgroup fails, the exec runs as upstream does
++// (in the container's cgroup) and the engine reports it as unsupervised.
++package main
++
++import (
++	"bufio"
++	"encoding/json"
++	"fmt"
++	"os"
++	"os/exec"
++	"path/filepath"
++	"strings"
++	"syscall"
++)
++
++// ExecCgroupPrefix names an exec's sub-cgroup; the engine uses the same name.
++const ExecCgroupPrefix = "sfe-exec-"
++
++// Global runc flags that take a value (the shim passes --root, --log,
++// --log-format; the others are here so the command is found anyway).
++var valueFlags = map[string]bool{"--root": true, "--log": true, "--log-format": true, "--criu": true, "--rootless": true}
++
++func main() {
++	real, err := realRunc()
++	if err != nil {
++		fmt.Fprintln(os.Stderr, "sfe-runc:", err)
++		os.Exit(127)
++	}
++	args := os.Args[1:]
++	if i := command(args); i >= 0 && args[i] == "exec" {
++		if sub, err := execCgroup(args[:i], args[i+1:]); err == nil {
++			args = append(append(append([]string{}, args[:i+1]...), "--cgroup", sub), args[i+1:]...)
++		} else {
++			fmt.Fprintln(os.Stderr, "sfe-runc: exec runs unsupervised:", err)
++		}
++	}
++	err = syscall.Exec(real, append([]string{"runc"}, args...), os.Environ())
++	fmt.Fprintln(os.Stderr, "sfe-runc:", err)
++	os.Exit(127)
++}
++
++// realRunc is $SFE_RUNC, else the first runc on PATH.
++func realRunc() (string, error) {
++	if p := os.Getenv("SFE_RUNC"); p != "" {
++		return p, nil
++	}
++	return exec.LookPath("runc")
++}
++
++// command is the index of the runc subcommand in args, or -1.
++func command(args []string) int {
++	for i := 0; i < len(args); i++ {
++		a := args[i]
++		if !strings.HasPrefix(a, "-") {
++			return i
++		}
++		if valueFlags[a] {
++			i++
++		}
++	}
++	return -1
++}
++
++// execCgroup creates the exec's sub-cgroup and returns its name relative to
++// the container's cgroup. The exec id is the --pid-file name the shim
++// passes (<bundle>/<exec id>.pid); the container id is the last argument.
++func execCgroup(global, rest []string) (string, error) {
++	if len(rest) == 0 {
++		return "", fmt.Errorf("no container id")
++	}
++	id := rest[len(rest)-1]
++	pidFile := ""
++	for i, a := range rest {
++		if a == "--pid-file" && i+1 < len(rest) {
++			pidFile = rest[i+1]
++		} else if v, ok := strings.CutPrefix(a, "--pid-file="); ok {
++			pidFile = v
++		}
++	}
++	execID := strings.TrimSuffix(filepath.Base(pidFile), ".pid")
++	if !validID(execID) || !validID(id) {
++		return "", fmt.Errorf("no exec id in --pid-file %q", pidFile)
++	}
++	pid, err := initPid(global, id)
++	if err != nil {
++		return "", err
++	}
++	cg, err := Unified(pid)
++	if err != nil {
++		return "", err
++	}
++	sub := ExecCgroupPrefix + execID
++	if err := os.Mkdir(filepath.Join(cg, sub), 0o755); err != nil && !os.IsExist(err) {
++		return "", err
++	}
++	return sub, nil
++}
++
++func validID(s string) bool {
++	if s == "" || len(s) > 128 {
++		return false
++	}
++	for _, r := range s {
++		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '_') {
++			return false
++		}
++	}
++	return true
++}
++
++// initPid reads the container's init process from runc's own state file
++// (<root>/<id>/state.json), without starting another process.
++func initPid(global []string, id string) (int, error) {
++	root := "/run/runc"
++	for i := 0; i < len(global); i++ {
++		if global[i] == "--root" && i+1 < len(global) {
++			root = global[i+1]
++		} else if v, ok := strings.CutPrefix(global[i], "--root="); ok {
++			root = v
++		}
++	}
++	b, err := os.ReadFile(filepath.Join(root, id, "state.json"))
++	if err != nil {
++		return 0, err
++	}
++	var st struct {
++		Pid int `json:"init_process_pid"`
++	}
++	if err := json.Unmarshal(b, &st); err != nil || st.Pid <= 0 {
++		return 0, fmt.Errorf("runc state.json: no init pid")
++	}
++	return st.Pid, nil
++}
++
++// Unified is the cgroup v2 directory of pid under /sys/fs/cgroup.
++func Unified(pid int) (string, error) {
++	f, err := os.Open(fmt.Sprintf("/proc/%d/cgroup", pid))
++	if err != nil {
++		return "", err
++	}
++	defer f.Close()
++	s := bufio.NewScanner(f)
++	for s.Scan() {
++		if p, ok := strings.CutPrefix(s.Text(), "0::"); ok {
++			return filepath.Join("/sys/fs/cgroup", filepath.Clean("/"+p)), nil
++		}
++	}
++	return "", fmt.Errorf("pid %d: no cgroup v2 path", pid)
++}
+diff --git a/cmd/sfe-runc/main_test.go b/cmd/sfe-runc/main_test.go
+new file mode 100644
+index 0000000..1b5ffd6
+--- /dev/null
++++ b/cmd/sfe-runc/main_test.go
+@@ -0,0 +1,31 @@
++//go:build linux
++
++package main
++
++import "testing"
++
++// The shim's exec command line: global flags, then exec with its own.
++func TestCommandFindsExec(t *testing.T) {
++	args := []string{"--root", "/run/sfe/runtime-runc/moby", "--log", "/x/log.json", "--log-format", "json", "--systemd-cgroup", "exec", "--process", "/tmp/p.json", "--detach", "--pid-file", "/b/abc123.pid", "ctr1"}
++	i := command(args)
++	if i != 7 || args[i] != "exec" {
++		t.Fatalf("command at %d", i)
++	}
++	if command([]string{"--debug", "--root=/r", "state", "x"}) != 2 {
++		t.Fatal("state not found")
++	}
++	if command([]string{"--version"}) != -1 {
++		t.Fatal("a flag-only call has no command")
++	}
++}
++
++func TestValidID(t *testing.T) {
++	for _, s := range []string{"", "../x", "a/b", "a.b"} {
++		if validID(s) {
++			t.Fatalf("%q accepted", s)
++		}
++	}
++	if !validID("0123abcdef") {
++		t.Fatal("hex id refused")
++	}
++}
+diff --git a/daemon/command/daemon.go b/daemon/command/daemon.go
+index 909454a..90b16b3 100644
+--- a/daemon/command/daemon.go
++++ b/daemon/command/daemon.go
+@@ -39,6 +39,7 @@
+ 	dopts "github.com/moby/moby/v2/daemon/pkg/opts"
+ 	"github.com/moby/moby/v2/daemon/pkg/plugin"
+ 	"github.com/moby/moby/v2/daemon/seafield/eventfeed"
++	"github.com/moby/moby/v2/daemon/seafield/execsup"
+ 	"github.com/moby/moby/v2/daemon/seafield/imagesrc"
+ 	"github.com/moby/moby/v2/daemon/seafield/logqueue"
+ 	"github.com/moby/moby/v2/daemon/seafield/monitor"
+@@ -354,6 +355,12 @@ func (cli *daemonCLI) start(ctx context.Context) (retErr error) {
+ 	sfcdClient.Handle(sfcd.Events, eventfeed.Serve(feed))
+ 	sfcdClient.Handle(sfcd.Log, logqueue.ServeBulk(resolve))
+ 	sfcdClient.Handle(sfcd.LogAck, logqueue.ServeAck(resolve))
++	sfcdClient.Handle(sfcd.Exec, execsup.Serve(func(id string) (execsup.Exec, bool) {
++		if d := upDaemon.Load(); d != nil {
++			return d.SeafieldExec(id)
++		}
++		return execsup.Exec{}, false
++	}))
+ 	sfcdClient.OnConnect(func() {
+ 		if d := upDaemon.Load(); d != nil {
+ 			restartBlocked(sessionCtx, d)
+diff --git a/daemon/container/exec.go b/daemon/container/exec.go
+index 3bcbd9f..0e9d940 100644
+--- a/daemon/container/exec.go
++++ b/daemon/container/exec.go
+@@ -5,6 +5,7 @@
+ 	"maps"
+ 	"runtime"
+ 	"sync"
++	"sync/atomic"
+ 
+ 	"github.com/containerd/containerd/v2/pkg/cio"
+ 	"github.com/containerd/log"
+@@ -38,6 +39,12 @@ type ExecConfig struct {
+ 	Env          []string
+ 	Process      types.Process
+ 	ConsoleSize  *[2]uint
++
++	// Seafield: SeafieldCgroup is the exec's own sub-cgroup made by
++	// sfe-runc ("" when the exec runs unsupervised); SeafieldKilled is set
++	// when sfcd killed the exec's tree (purpose 38) before it ended.
++	SeafieldCgroup string
++	SeafieldKilled atomic.Bool
+ }
+ 
+ // NewExecConfig initializes the a new exec configuration
+diff --git a/daemon/exec.go b/daemon/exec.go
+index 4cfa247..bbb210b 100644
+--- a/daemon/exec.go
++++ b/daemon/exec.go
+@@ -15,6 +15,7 @@
+ 	"github.com/moby/moby/api/types/events"
+ 	"github.com/moby/moby/v2/daemon/container"
+ 	"github.com/moby/moby/v2/daemon/internal/stream"
++	"github.com/moby/moby/v2/daemon/seafield/execsup"
+ 	"github.com/moby/moby/v2/daemon/server/backend"
+ 	"github.com/moby/moby/v2/errdefs"
+ 	"github.com/moby/moby/v2/pkg/pools"
+@@ -313,6 +314,9 @@ func (daemon *Daemon) ContainerExecStart(ctx context.Context, name string, optio
+ 		defer ec.Unlock()
+ 		return setExitCodeFromError(ec.SetExitCode, err)
+ 	}
++	// Seafield: the sub-cgroup sfe-runc ran the exec in; the exit handler
++	// waits on it for the whole tree (it takes ec's lock first).
++	ec.SeafieldCgroup = execsup.Dir(int(tsk.Pid()), ec.ID)
+ 	ec.Unlock()
+ 
+ 	select {
+diff --git a/daemon/internal/stream/streams.go b/daemon/internal/stream/streams.go
+index 928774f..89c950d 100644
+--- a/daemon/internal/stream/streams.go
++++ b/daemon/internal/stream/streams.go
+@@ -32,6 +32,24 @@ type Config struct {
+ 	dio       *cio.DirectIO
+ 	// closed is set to true when CloseStreams is called
+ 	closed atomic.Bool
++	// Seafield: bytes read from the process's stdout and stderr, whether or
++	// not anyone is attached.
++	outBytes, errBytes atomic.Int64
++}
++
++// Counts returns how many bytes the process wrote to stdout and stderr.
++func (c *Config) Counts() (stdout, stderr int64) {
++	return c.outBytes.Load(), c.errBytes.Load()
++}
++
++type countingWriter struct {
++	w io.Writer
++	n *atomic.Int64
++}
++
++func (cw countingWriter) Write(p []byte) (int, error) {
++	cw.n.Add(int64(len(p)))
++	return cw.w.Write(p)
+ }
+ 
+ // NewConfig creates a stream config and initializes
+@@ -140,10 +158,10 @@ func (c *Config) CopyToPipe(iop *cio.DirectIO) {
+ 	}
+ 
+ 	if iop.Stdout != nil {
+-		copyFunc("stdout", c.Stdout(), iop.Stdout)
++		copyFunc("stdout", countingWriter{c.Stdout(), &c.outBytes}, iop.Stdout)
+ 	}
+ 	if iop.Stderr != nil {
+-		copyFunc("stderr", c.Stderr(), iop.Stderr)
++		copyFunc("stderr", countingWriter{c.Stderr(), &c.errBytes}, iop.Stderr)
+ 	}
+ 
+ 	if stdin := c.Stdin(); stdin != nil {
+diff --git a/daemon/monitor.go b/daemon/monitor.go
+index 2d187e1..e90e581 100644
+--- a/daemon/monitor.go
++++ b/daemon/monitor.go
+@@ -17,6 +17,7 @@
+ 	libcontainerdtypes "github.com/moby/moby/v2/daemon/internal/libcontainerd/types"
+ 	"github.com/moby/moby/v2/daemon/internal/metrics"
+ 	"github.com/moby/moby/v2/daemon/internal/restartmanager"
++	"github.com/moby/moby/v2/daemon/seafield/execsup"
+ 	"github.com/moby/moby/v2/daemon/server/backend"
+ 	"github.com/pkg/errors"
+ )
+@@ -219,6 +220,8 @@ func (daemon *Daemon) ProcessEvent(id string, e libcontainerdtypes.EventType, ei
+ 		}
+ 
+ 		exitCode := 127
++		attrs := map[string]string{}
++		tree := ""
+ 		if execConfig := c.ExecCommands.Get(ei.ProcessID); execConfig != nil {
+ 			ec := int(ei.ExitCode)
+ 			execConfig.Lock()
+@@ -233,6 +236,12 @@ func (daemon *Daemon) ProcessEvent(id string, e libcontainerdtypes.EventType, ei
+ 			execConfig.ExitCode = &ec
+ 			execConfig.Running = false
+ 
++			// Seafield: give the rest of the exec's tree as long as its
++			// streams get, then report whether it has ended.
++			if execConfig.SeafieldCgroup != "" {
++				tree = execsup.Wait(execConfig.SeafieldCgroup, 2*time.Second)
++			}
++
+ 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+ 			execConfig.StreamConfig.Wait(ctx)
+ 			cancel()
+@@ -242,6 +251,15 @@ func (daemon *Daemon) ProcessEvent(id string, e libcontainerdtypes.EventType, ei
+ 			}
+ 
+ 			exitCode = ec
++			outBytes, errBytes := execConfig.StreamConfig.Counts()
++			attrs["seafield.stdout_bytes"] = strconv.FormatInt(outBytes, 10)
++			attrs["seafield.stderr_bytes"] = strconv.FormatInt(errBytes, 10)
++			if tree != "" {
++				attrs["seafield.tree"] = tree
++			}
++			if execConfig.SeafieldKilled.Load() {
++				attrs["seafield.killed"] = "1"
++			}
+ 
+ 			// If the exec failed at start in such a way that containerd
+ 			// publishes an exit event for it, we will race processing the event
+@@ -263,10 +281,9 @@ func (daemon *Daemon) ProcessEvent(id string, e libcontainerdtypes.EventType, ei
+ 				}()
+ 			}
+ 		}
+-		daemon.LogContainerEventWithAttributes(c, events.ActionExecDie, map[string]string{
+-			"execID":   ei.ProcessID,
+-			"exitCode": strconv.Itoa(exitCode),
+-		})
++		attrs["execID"] = ei.ProcessID
++		attrs["exitCode"] = strconv.Itoa(exitCode)
++		daemon.LogContainerEventWithAttributes(c, events.ActionExecDie, attrs)
+ 		return nil
+ 	case libcontainerdtypes.EventStart:
+ 		c.Lock()
+diff --git a/daemon/runtime_unix.go b/daemon/runtime_unix.go
+index 0194e02..bcb40d2 100644
+--- a/daemon/runtime_unix.go
++++ b/daemon/runtime_unix.go
+@@ -20,6 +20,7 @@
+ 	"github.com/containerd/log"
+ 	"github.com/moby/moby/v2/daemon/config"
+ 	"github.com/moby/moby/v2/daemon/internal/libcontainerd/shimopts"
++	"github.com/moby/moby/v2/daemon/seafield/execsup"
+ 	"github.com/moby/moby/v2/errdefs"
+ 	"github.com/moby/sys/atomicwriter"
+ 	"github.com/opencontainers/runtime-spec/specs-go/features"
+@@ -47,10 +48,13 @@ type runtimes struct {
+ 	configured map[string]*shimConfig
+ }
+ 
++// stockRuntimes: Seafield runs runc through sfe-runc (next to sfed), which
++// puts each exec in its own sub-cgroup (daemon/seafield/execsup).
+ func stockRuntimes() map[string]string {
++	path := execsup.RuntimePath()
+ 	return map[string]string{
+-		linuxV2RuntimeName:      defaultRuntimeName,
+-		config.StockRuntimeName: defaultRuntimeName,
++		linuxV2RuntimeName:      path,
++		config.StockRuntimeName: path,
+ 	}
+ }
+ 
+diff --git a/daemon/seafield/execsup/execsup.go b/daemon/seafield/execsup/execsup.go
+new file mode 100644
+index 0000000..03cd2e2
+--- /dev/null
++++ b/daemon/seafield/execsup/execsup.go
+@@ -0,0 +1,186 @@
++// Package execsup supervises exec process trees. sfe-runc runs every exec
++// in a sub-cgroup of the container's cgroup (sfe-exec-<exec id>); the engine
++// waits on that cgroup for the whole tree to end and can kill the whole tree
++// with cgroup.kill. Purpose 38 EngineExec carries the kill.
++package execsup
++
++import (
++	"bufio"
++	"bytes"
++	"context"
++	"encoding/json"
++	"errors"
++	"fmt"
++	"os"
++	"path/filepath"
++	"strings"
++	"sync"
++	"time"
++
++	"github.com/containerd/log"
++	"github.com/moby/moby/v2/daemon/seafield/sfcd"
++)
++
++// Prefix names an exec's sub-cgroup (the same name sfe-runc creates).
++const Prefix = "sfe-exec-"
++
++// Runc is the file name of the wrapper, installed next to sfed.
++const Runc = "sfe-runc"
++
++// Tree states reported as the exec_die attribute seafield.tree.
++const (
++	Ended   = "ended"
++	Running = "running"
++)
++
++var warnOnce sync.Once
++
++// RuntimePath is the runtime binary for the stock runc runtime: sfe-runc
++// next to the running engine, else plain "runc" (execs then run
++// unsupervised, and the engine says so once).
++func RuntimePath() string {
++	if exe, err := os.Executable(); err == nil {
++		p := filepath.Join(filepath.Dir(exe), Runc)
++		if st, err := os.Stat(p); err == nil && st.Mode().IsRegular() && st.Mode()&0o111 != 0 {
++			return p
++		}
++	}
++	warnOnce.Do(func() {
++		log.G(context.TODO()).Warnf("Seafield: %s is not next to the engine; exec process trees are not supervised", Runc)
++	})
++	return "runc"
++}
++
++// Dir is the exec's sub-cgroup directory when sfe-runc created it, else "".
++// pid is the container's init process.
++func Dir(pid int, execID string) string {
++	if pid <= 0 || execID == "" || strings.ContainsAny(execID, "/.") {
++		return ""
++	}
++	cg, err := unified(pid)
++	if err != nil {
++		return ""
++	}
++	d := filepath.Join(cg, Prefix+execID)
++	if st, err := os.Stat(d); err != nil || !st.IsDir() {
++		return ""
++	}
++	return d
++}
++
++func unified(pid int) (string, error) {
++	f, err := os.Open(fmt.Sprintf("/proc/%d/cgroup", pid))
++	if err != nil {
++		return "", err
++	}
++	defer f.Close()
++	s := bufio.NewScanner(f)
++	for s.Scan() {
++		if p, ok := strings.CutPrefix(s.Text(), "0::"); ok {
++			return filepath.Join("/sys/fs/cgroup", filepath.Clean("/"+p)), nil
++		}
++	}
++	return "", errors.New("no cgroup v2 path")
++}
++
++// Populated reports whether any process is left in dir. A cgroup that is
++// gone has none.
++func Populated(dir string) bool {
++	b, err := os.ReadFile(filepath.Join(dir, "cgroup.events"))
++	if err != nil {
++		return false
++	}
++	for _, l := range strings.Split(string(b), "\n") {
++		if v, ok := strings.CutPrefix(l, "populated "); ok {
++			return strings.TrimSpace(v) != "0"
++		}
++	}
++	return false
++}
++
++// Wait waits up to d for dir to empty and reports Ended or Running. An
++// empty sub-cgroup is removed.
++func Wait(dir string, d time.Duration) string {
++	deadline := time.Now().Add(d)
++	for Populated(dir) {
++		if time.Now().After(deadline) {
++			return Running
++		}
++		time.Sleep(20 * time.Millisecond)
++	}
++	_ = os.Remove(dir)
++	return Ended
++}
++
++// Kill kills every process left in dir (cgroup.kill) and waits for it to
++// empty. A sub-cgroup that is already gone has nothing to kill.
++func Kill(dir string) error {
++	if err := os.WriteFile(filepath.Join(dir, "cgroup.kill"), []byte("1"), 0); err != nil && !errors.Is(err, os.ErrNotExist) {
++		return err
++	}
++	if Wait(dir, 5*time.Second) != Ended {
++		return errors.New("exec processes still running after cgroup.kill")
++	}
++	return nil
++}
++
++// KillFailed is the reason of an unknown kill answer: cgroup.kill failed or
++// the tree did not end within 5 seconds.
++const KillFailed = "kill-failed"
++
++// Exec is what purpose 38 needs to know about an exec.
++type Exec struct {
++	// Dir is the exec's sub-cgroup, "" when the exec runs unsupervised.
++	Dir string
++	// Running is whether the exec's first process still runs.
++	Running bool
++	// MarkKilled records the kill for the exec_die attribute seafield.killed.
++	MarkKilled func()
++}
++
++// Lookup finds an exec by its id.
++type Lookup func(execID string) (Exec, bool)
++
++// KillQ is op "kill": kill the exec's whole process tree.
++type KillQ struct {
++	sfcd.Request
++	ExecID string
++}
++
++// KillA answers op "kill". Tree is "ended" once nothing of the exec runs.
++type KillA struct {
++	sfcd.Reply
++	Tree string `json:",omitempty"`
++}
++
++// Serve answers purpose 38. Answers: applied (the tree has ended, killed
++// now or before), not-found (no such exec), not-ready (the exec still runs
++// but has no sub-cgroup to kill it by), unknown kill-failed.
++func Serve(lookup Lookup) sfcd.Handler {
++	return func(ctx context.Context, st *sfcd.Stream, req sfcd.Request, body []byte) error {
++		var q KillQ
++		dec := json.NewDecoder(bytes.NewReader(body))
++		dec.DisallowUnknownFields()
++		if req.Op != "kill" || dec.Decode(&q) != nil || q.ExecID == "" {
++			return st.Answer(&sfcd.Reply{OpID: req.OpID, Result: sfcd.NotApplied, Reason: sfcd.Invalid})
++		}
++		e, ok := lookup(q.ExecID)
++		if !ok {
++			return st.Answer(&sfcd.Reply{OpID: req.OpID, Result: sfcd.NotApplied, Reason: sfcd.NotFound})
++		}
++		if e.Dir == "" {
++			if e.Running {
++				return st.Answer(&sfcd.Reply{OpID: req.OpID, Result: sfcd.NotApplied, Reason: sfcd.NotReady})
++			}
++			return st.Answer(&KillA{Reply: sfcd.Reply{OpID: req.OpID}, Tree: Ended})
++		}
++		if Populated(e.Dir) && e.MarkKilled != nil {
++			e.MarkKilled()
++		}
++		if err := Kill(e.Dir); err != nil {
++			log.G(ctx).WithError(err).WithField("exec", q.ExecID).Warn("Seafield: exec kill")
++			return st.Answer(&sfcd.Reply{OpID: req.OpID, Result: sfcd.Unknown, Reason: KillFailed})
++		}
++		return st.Answer(&KillA{Reply: sfcd.Reply{OpID: req.OpID}, Tree: Ended})
++	}
++}
+diff --git a/daemon/seafield/sfcd/client.go b/daemon/seafield/sfcd/client.go
+index 42fcc37..72c8c7b 100644
+--- a/daemon/seafield/sfcd/client.go
++++ b/daemon/seafield/sfcd/client.go
+@@ -39,6 +39,7 @@
+ 	Volume   wire.Purpose = 35
+ 	Network  wire.Purpose = 36
+ 	Image    wire.Purpose = 37
++	Exec     wire.Purpose = 38
+ 	KindReq  uint8        = 1
+ 	KindResp uint8        = 2
+ 	KindData uint8        = 4
+@@ -67,7 +68,7 @@
+ 
+ // Rules is the engine's frame table; sfcd keeps the same one.
+ var Rules = wire.Rules(func(p wire.Purpose, kind uint8) (wire.Rule, bool) {
+-	if p < Events || p > Image {
++	if p < Events || p > Exec {
+ 		return wire.Rule{}, false
+ 	}
+ 	switch {
+diff --git a/daemon/seafield_exec.go b/daemon/seafield_exec.go
+new file mode 100644
+index 0000000..4ad7ee9
+--- /dev/null
++++ b/daemon/seafield_exec.go
+@@ -0,0 +1,22 @@
++package daemon
++
++import "github.com/moby/moby/v2/daemon/seafield/execsup"
++
++// SeafieldExec finds an exec for purpose 38 EngineExec (kill the whole
++// process tree). The daemon keeps exited execs until they are collected.
++func (daemon *Daemon) SeafieldExec(id string) (execsup.Exec, bool) {
++	ec := daemon.execCommands.Get(id)
++	if ec == nil {
++		return execsup.Exec{}, false
++	}
++	// The exit handler holds ec's lock for up to about 4 seconds while it
++	// waits on the tree and the streams; a kill waits that long at most.
++	ec.Lock()
++	dir, running := ec.SeafieldCgroup, ec.Running
++	ec.Unlock()
++	return execsup.Exec{
++		Dir:        dir,
++		Running:    running,
++		MarkKilled: func() { ec.SeafieldKilled.Store(true) },
++	}, true
++}

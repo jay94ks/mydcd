@@ -7,18 +7,19 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/schema"
-	"github.com/jay94ks/mydcd/internal/servicecall"
-	checker "github.com/jay94ks/mydcd/internal/workload/lifecycle"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/servicecall"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	checker "github.com/jay94ks/seafield/internal/workload/lifecycle"
 )
 
 // Actual SDK, TLS/Unix/QUIC and original source framing. Authority and the
@@ -28,19 +29,19 @@ func TestLifecycleSourceActualUserWireKeepsExactBodyEOFAndPageDigest(t *testing.
 		for _, mode := range []string{"valid", "corrupt-page", "foreign-version", "stage-unknown", "stage-lost-result"} {
 			t.Run(network+"/"+mode, func(t *testing.T) {
 				_, c, session, node := journalFixture(t)
-				root, err := os.MkdirTemp("", "mydc-editor-wire-")
+				root, err := os.MkdirTemp("", "sfc-editor-wire-")
 				if err != nil {
 					t.Fatal(err)
 				}
 				defer os.RemoveAll(root)
 				peer := c.Peers[0]
-				lookup := func(key mydcp.Identity) (mydcp.Peer, bool) {
-					if key == mydcp.Identity(c.Self.Public) {
-						return mydcp.Peer{ID: "user", Policy: mydcp.Policy{Key: key, UserAuth: true}}, true
+				lookup := func(key sfcp.Identity) (sfcp.Peer, bool) {
+					if key == sfcp.Identity(c.Self.Public) {
+						return sfcp.Peer{ID: "user", Policy: sfcp.Policy{Key: key, UserAuth: true}}, true
 					}
 					return peer, key == peer.Key
 				}
-				server, err := mydcp.NewTransport(node, c.Cluster, lookup)
+				server, err := sfcp.NewTransport(node, c.Cluster, lookup)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -53,7 +54,7 @@ func TestLifecycleSourceActualUserWireKeepsExactBodyEOFAndPageDigest(t *testing.
 				} else {
 					peer.Endpoint = "unix://" + filepath.Join(root, "api.sock")
 				}
-				mesh, err := mydcp.NewTransport(c.Self, c.Cluster, lookup)
+				mesh, err := sfcp.NewTransport(c.Self, c.Cluster, lookup)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -64,7 +65,7 @@ func TestLifecycleSourceActualUserWireKeepsExactBodyEOFAndPageDigest(t *testing.
 				d := streamedSource(source)
 				upload := sha256.Sum256([]byte("original editor upload"))
 				done := make(chan error, 32)
-				err = server.OnManagement(mydcp.User, func(ctx context.Context, conn *mydcp.Session, stream mydcp.Stream, frame mydcp.Frame) error {
+				err = server.OnManagement(sfcp.User, func(ctx context.Context, conn *sfcp.Session, stream sfcp.Stream, frame sfcp.Frame) error {
 					cause := func() error {
 						envelope, err := schema.Decode[Envelope](frame.Fields[0].Value)
 						if err != nil {
@@ -72,7 +73,7 @@ func TestLifecycleSourceActualUserWireKeepsExactBodyEOFAndPageDigest(t *testing.
 						}
 						request, err := schema.Decode[Request](envelope.Body)
 						if err != nil || !request.validMethodFields() || !request.validQuerySelectors() {
-							return mydcp.ErrFrame
+							return sfcp.ErrFrame
 						}
 						if _, err = binding.binding(conn, frame.Kind, envelope); err != nil {
 							return err
@@ -89,7 +90,7 @@ func TestLifecycleSourceActualUserWireKeepsExactBodyEOFAndPageDigest(t *testing.
 							}
 							defer clear(body)
 							if !bytes.Equal(body, source) {
-								return mydcp.ErrFrame
+								return sfcp.ErrFrame
 							}
 							if mode == "stage-unknown" {
 								return binding.respond(stream, frame, digest, Reply{Schema: 1, Code: "unknown"})
@@ -102,13 +103,14 @@ func TestLifecycleSourceActualUserWireKeepsExactBodyEOFAndPageDigest(t *testing.
 							result := LifecycleStageResult{Node: "node", Owner: node.Public, Descriptor: d, Upload: upload, Source: &fact}
 							return binding.respond(stream, frame, digest, Reply{Schema: 1, Code: "ok", LifecycleStage: &result})
 						}
-						if request.Method != "lifecycle-source" || request.LifecycleSource == nil {
-							return mydcp.ErrFrame
+						var typed LifecycleSourceQuery
+						if request.Method != "lifecycle-source" || strict(request.Params, &typed) != nil {
+							return sfcp.ErrFrame
 						}
 						if err = streamEOF(stream); err != nil {
 							return err
 						}
-						q := request.LifecycleSource
+						q := typed.Source
 						page, err := checker.NewSourcePage(d.Tenant, q.Name, q.Revision, q.Offset, d, source)
 						if err != nil {
 							return err
@@ -119,7 +121,11 @@ func TestLifecycleSourceActualUserWireKeepsExactBodyEOFAndPageDigest(t *testing.
 						if mode == "foreign-version" {
 							page.Revision++
 						}
-						return binding.respond(stream, frame, digest, Reply{Schema: 1, Code: "ok", LifecycleSource: &page})
+						data, err := json.Marshal(page)
+						if err != nil {
+							return err
+						}
+						return binding.respond(stream, frame, digest, Reply{Schema: 1, Code: "ok", Data: data})
 					}()
 					done <- cause
 					return cause
@@ -137,7 +143,7 @@ func TestLifecycleSourceActualUserWireKeepsExactBodyEOFAndPageDigest(t *testing.
 				staged, err := c.StageLifecycleSource(ctx, peer, session, "node", d, upload, source)
 				if mode == "stage-unknown" || mode == "stage-lost-result" {
 					var remote *Error
-					if !errors.As(err, &remote) || remote.Phase != mydcp.Unknown || !staged.MetadataValid() || staged.Node != "node" || staged.Upload != upload || staged.Source != nil {
+					if !errors.As(err, &remote) || remote.Phase != sfcp.Unknown || !staged.MetadataValid() || staged.Node != "node" || staged.Upload != upload || staged.Source != nil {
 						t.Fatal("original upload/provider lost after unknown result", staged, err)
 					}
 					select {
@@ -186,7 +192,7 @@ func TestLifecycleSourceRequestsCannotBorrowOtherMethodSelectors(t *testing.T) {
 	if !request.validMethodFields() || !request.validQuerySelectors() {
 		t.Fatal("valid editor upload")
 	}
-	for _, change := range []func(*Request){func(r *Request) { r.After = "cursor" }, func(r *Request) { r.App = "other" }, func(r *Request) { r.LifecycleSource = &control.LifecycleSourceQuery{Name: "ready", Revision: 1} }, func(r *Request) { r.Method = "whoami" }, func(r *Request) { r.CheckerUpload = nil }, func(r *Request) { r.Tenant = "other" }} {
+	for _, change := range []func(*Request){func(r *Request) { r.After = "cursor" }, func(r *Request) { r.TargetUser = "other" }, func(r *Request) { r.Method = "whoami" }, func(r *Request) { r.CheckerUpload = nil }, func(r *Request) { r.Tenant = "other" }} {
 		copy := request
 		change(&copy)
 		if copy.validMethodFields() && copy.validQuerySelectors() {
@@ -198,46 +204,38 @@ func TestLifecycleSourceRequestsCannotBorrowOtherMethodSelectors(t *testing.T) {
 func TestRQ11SourceSelectorsKeepEarlierTypedBoundaries(t *testing.T) {
 	descriptor := streamedSource([]byte("package checker\n"))
 	upload := [32]byte{1}
-	read := control.LifecycleSourceQuery{Name: "ready", Revision: 1}
 	call := servicecall.Request{App: "shop", Service: "api", Port: 8080, Path: "/", Method: "POST"}
 	callInput := ServiceCallInput{Digest: sha256.Sum256(nil)}
 	probe := deployment.GitProbeRequest{App: "shop", Repository: "https://git.example/repo.git", Branch: "main", Path: "app.yaml"}
 	earlier := []Request{
 		{Method: "image-builds", Tenant: "tenant", ImageBuild: &control.ImageBuildQuery{Part: "contexts"}},
 		{Method: "tenant-storage", Tenant: "tenant"},
-		{Method: "certificates", Certificate: &control.CertificateQuery{}},
-		{Method: "ingresses", Tenant: "tenant", Ingress: &control.IngressQuery{Tenant: "tenant", Part: "mappings"}},
 		{Method: "service-call", Tenant: "tenant", ServiceCall: &call, ServiceInput: &callInput},
 		{Method: "cd-probe", Tenant: "tenant", CDProbe: &probe},
 		{Method: "standalone-list", Tenant: "tenant", Standalone: &control.StandaloneQuery{}},
-		{Method: "volume-file-plan", Tenant: "tenant", VolumeFile: &control.VolumeFileQuery{Volume: "backup", Path: "exports/", Method: "volume-file-list"}},
-		{Method: "volume-file-grants", Tenant: "tenant", PublicRead: &control.PublicReadQuery{}},
 	}
 	for _, request := range earlier {
 		if !request.validMethodFields() || !request.validQuerySelectors() {
 			t.Fatal("earlier typed method lost", request.Method)
 		}
-		request.LifecycleSource = &read
+		request.CheckerSource = &descriptor
+		request.CheckerUpload = &upload
 		if request.validMethodFields() || request.validQuerySelectors() {
 			t.Fatal("source selector crossed earlier method", request.Method)
 		}
 	}
 	sources := []Request{
 		{Method: "lifecycle-source-stage", Tenant: descriptor.Tenant, CheckerSource: &descriptor, CheckerUpload: &upload},
-		{Method: "lifecycle-source", Tenant: "tenant", LifecycleSource: &read},
 	}
 	for _, source := range sources {
 		if !source.validMethodFields() || !source.validQuerySelectors() {
 			t.Fatal("valid source method lost", source.Method)
 		}
 		for _, mutate := range []func(*Request){
-			func(r *Request) { r.Certificate = &control.CertificateQuery{} },
-			func(r *Request) { r.Ingress = &control.IngressQuery{Tenant: "tenant", Part: "mappings"} },
+			func(r *Request) { r.Params = json.RawMessage("{}") },
 			func(r *Request) { r.ServiceCall = &call; r.ServiceInput = &callInput },
 			func(r *Request) { r.CDProbe = &probe },
 			func(r *Request) { r.Standalone = &control.StandaloneQuery{Name: "debug"} },
-			func(r *Request) { r.VolumeFile = &control.VolumeFileQuery{ID: "original"} },
-			func(r *Request) { r.PublicRead = &control.PublicReadQuery{} },
 			func(r *Request) { r.ImageBuild = &control.ImageBuildQuery{Part: "contexts"} },
 		} {
 			bad := source
@@ -250,11 +248,11 @@ func TestRQ11SourceSelectorsKeepEarlierTypedBoundaries(t *testing.T) {
 	_, client, session, _ := journalFixture(t)
 	// No transport is installed: every finite query must still reach normal
 	// transport admission rather than the unsupported-method branch.
-	for _, request := range append(earlier, sources[1]) {
+	for _, request := range earlier {
 		if request.Method == "service-call" {
 			continue // POST retains its own original body/continue exchange.
 		}
-		if _, err := client.query(context.Background(), client.Peers[0], session, request); !errors.Is(err, mydcp.ErrAdmission) {
+		if _, err := client.query(context.Background(), client.Peers[0], session, request); !errors.Is(err, sfcp.ErrAdmission) {
 			t.Fatal("SDK finite query disconnected", request.Method, err)
 		}
 	}

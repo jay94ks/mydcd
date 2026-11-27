@@ -19,12 +19,12 @@ import (
 	"time"
 
 	"github.com/hashicorp/raft"
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/containerops"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/userauth"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/containerops"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/userauth"
 	"github.com/moby/moby/client"
 )
 
@@ -73,10 +73,10 @@ func (o *nativeSessionOutput) receive(t *testing.T, channel *userauth.ContainerC
 	}
 }
 
-func verifyManagedContainerSessions(t *testing.T, ctx context.Context, owner *Runtime, root string, user userauth.Client, peer mydcp.Peer, session access.Session, p control.Policy, read func() cluster.View, change func(string, string, uint64, any), fault *managedExecReplyFault, allCases bool) (func(*Runtime), func(), *Runtime) {
+func verifyManagedContainerSessions(t *testing.T, ctx context.Context, owner *Runtime, root string, user userauth.Client, peer sfcp.Peer, session access.Session, p control.Policy, read func() cluster.View, change func(string, string, uint64, any), fault *managedExecReplyFault, allCases bool) (func(*Runtime), func(), *Runtime) {
 	t.Helper()
 	selection := containerops.Selection{App: "app", Service: "web"}
-	newIntent := func(c userauth.Client, targetPeer mydcp.Peer, grant access.Session, id string, spec containerops.SessionSpec) containerops.SessionIntent {
+	newIntent := func(c userauth.Client, targetPeer sfcp.Peer, grant access.Session, id string, spec containerops.SessionSpec) containerops.SessionIntent {
 		t.Helper()
 		target, err := c.ResolveContainerSession(ctx, targetPeer, grant, "tenant", selection, spec)
 		if err != nil {
@@ -86,7 +86,7 @@ func verifyManagedContainerSessions(t *testing.T, ctx context.Context, owner *Ru
 		i.Signature = ed25519.Sign(c.Self.Private, containerops.SessionIntentBytes(i))
 		return i
 	}
-	open := func(c userauth.Client, targetPeer mydcp.Peer, grant access.Session, intent containerops.SessionIntent) *userauth.ContainerChannel {
+	open := func(c userauth.Client, targetPeer sfcp.Peer, grant access.Session, intent containerops.SessionIntent) *userauth.ContainerChannel {
 		t.Helper()
 		channel, err := c.OpenContainerSession(ctx, targetPeer, grant, intent, 10*time.Second)
 		if err != nil {
@@ -127,16 +127,16 @@ func verifyManagedContainerSessions(t *testing.T, ctx context.Context, owner *Ru
 			t.Fatal(err)
 		}
 		local := user
-		local.Mesh, err = mydcp.NewTransport(user.Self, user.Cluster, func(key mydcp.Identity) (mydcp.Peer, bool) { return unixPeer, key == unixPeer.Key })
+		local.Mesh, err = sfcp.NewTransport(user.Self, user.Cluster, func(key sfcp.Identity) (sfcp.Peer, bool) { return unixPeer, key == unixPeer.Key })
 		if err != nil {
 			t.Fatal(err)
 		}
 		defer local.Mesh.Close()
-		local.Peers = []mydcp.Peer{unixPeer}
+		local.Peers = []sfcp.Peer{unixPeer}
 		for _, path := range []struct {
 			name string
 			c    userauth.Client
-			peer mydcp.Peer
+			peer sfcp.Peer
 		}{{"quic", user, peer}, {"unix", local, unixPeer}} {
 			spec := execSpec("--exec-args-fixture", false, false)
 			spec.Exec.Argv = append(spec.Exec.Argv, "", "literal spaces", "-it")
@@ -292,7 +292,7 @@ func verifyManagedContainerSessions(t *testing.T, ctx context.Context, owner *Ru
 		restartWatch := open(user, peer, session, beforeRestart)
 		var firstRestartSample nativeSessionOutput
 		firstRestartSample.receive(t, restartWatch, func(r containerops.SessionRecord) bool { return r.Kind == "sample" })
-		_, diagnostic, err := runManagedCLICommand(ctx, os.Getenv("MYDC_TEST_CLI"), filepath.Join(root, "cli-home"), filepath.Join(root, "cli.yaml"), []string{"--tenant", "tenant", "compose", "logs-clear", "-p", "app", "web", "--recreate", "--operation", "stream-replacement"}, nil)
+		_, diagnostic, err := runManagedCLICommand(ctx, os.Getenv("SFC_TEST_CLI"), filepath.Join(root, "cli-home"), filepath.Join(root, "cli.yaml"), []string{"--tenant", "tenant", "compose", "logs-clear", "-p", "app", "web", "--recreate", "--operation", "stream-replacement"}, nil)
 		if err != nil {
 			t.Fatal("explicit owned app replacement", err, string(diagnostic))
 		}
@@ -355,7 +355,7 @@ func verifyManagedContainerSessions(t *testing.T, ctx context.Context, owner *Ru
 	// A second installed control receives the user stream and forwards it to
 	// the original Docker owner. Its read/permit path uses the real new leader.
 	remote := prepareManagedHandoffControl(t, ctx, root, owner, user, peer, session, p, read, change)
-	remotePeer, ok := owner.Mesh.Peer(mydcp.Identity(remote.Identity.Public))
+	remotePeer, ok := owner.Mesh.Peer(sfcp.Identity(remote.Identity.Public))
 	if !ok {
 		t.Fatal("session remote installed peer")
 	}
@@ -373,13 +373,13 @@ func verifyManagedContainerSessions(t *testing.T, ctx context.Context, owner *Ru
 		t.Fatal("session remote barrier", err)
 	}
 	routed := user
-	routed.Mesh, err = mydcp.NewTransport(user.Self, user.Cluster, func(key mydcp.Identity) (mydcp.Peer, bool) { return remotePeer, key == remotePeer.Key })
+	routed.Mesh, err = sfcp.NewTransport(user.Self, user.Cluster, func(key sfcp.Identity) (sfcp.Peer, bool) { return remotePeer, key == remotePeer.Key })
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer routed.Mesh.Close()
 	// The endpoint changes, while the original installed issuer pin remains.
-	routed.Peers = []mydcp.Peer{peer, remotePeer}
+	routed.Peers = []sfcp.Peer{peer, remotePeer}
 	routeIntent := newIntent(routed, remotePeer, session, "remote-owner-exec", execSpec("--exec-args-fixture", false, false))
 	remoteChannel := open(routed, remotePeer, session, routeIntent)
 	var remoteOutput nativeSessionOutput
@@ -513,7 +513,7 @@ func verifyManagedContainerSessions(t *testing.T, ctx context.Context, owner *Ru
 	}, remote
 }
 
-func verifyManagedSessionDenials(t *testing.T, ctx context.Context, owner *Runtime, user userauth.Client, peer mydcp.Peer, session access.Session, p control.Policy, read func() cluster.View, change func(string, string, uint64, any), makeIntent func(userauth.Client, mydcp.Peer, access.Session, string, containerops.SessionSpec) containerops.SessionIntent, start func(userauth.Client, mydcp.Peer, access.Session, containerops.SessionIntent) *userauth.ContainerChannel, spec func(string, bool, bool) containerops.SessionSpec) {
+func verifyManagedSessionDenials(t *testing.T, ctx context.Context, owner *Runtime, user userauth.Client, peer sfcp.Peer, session access.Session, p control.Policy, read func() cluster.View, change func(string, string, uint64, any), makeIntent func(userauth.Client, sfcp.Peer, access.Session, string, containerops.SessionSpec) containerops.SessionIntent, start func(userauth.Client, sfcp.Peer, access.Session, containerops.SessionIntent) *userauth.ContainerChannel, spec func(string, bool, bool) containerops.SessionSpec) {
 	t.Helper()
 	selection := containerops.Selection{App: "app", Service: "web"}
 	// Test-issued grants are signed by the actual installed active issuer.
@@ -609,7 +609,7 @@ func verifyManagedSessionCLI(t *testing.T, ctx context.Context, root string) {
 	t.Helper()
 	call := func(want int, args ...string) []byte {
 		t.Helper()
-		body, diagnostic, err := runManagedCLICommand(ctx, os.Getenv("MYDC_TEST_CLI"), filepath.Join(root, "cli-home"), filepath.Join(root, "cli.yaml"), append([]string{"--tenant", "tenant"}, args...), nil)
+		body, diagnostic, err := runManagedCLICommand(ctx, os.Getenv("SFC_TEST_CLI"), filepath.Join(root, "cli-home"), filepath.Join(root, "cli.yaml"), append([]string{"--tenant", "tenant"}, args...), nil)
 		code := 0
 		if err != nil {
 			if exited, ok := err.(interface{ ExitCode() int }); ok {
@@ -637,7 +637,7 @@ func verifyManagedSessionCLI(t *testing.T, ctx context.Context, root string) {
 	if json.Unmarshal(repeated, &before) != nil || json.Unmarshal(statusBody, &after) != nil || before.Receipt.ExecID == "" || before.Receipt.ExecID != after.Receipt.ExecID || after.Receipt.Phase != containerops.ExecFinished {
 		t.Fatal("CLI original status did not retain native", string(repeated), string(statusBody))
 	}
-	body, diagnostic, err := runManagedCLICommandInput(ctx, os.Getenv("MYDC_TEST_CLI"), filepath.Join(root, "cli-home"), filepath.Join(root, "cli.yaml"), []string{"--tenant", "tenant", "compose", "exec", "-p", "app", "--operation", "cli-input-original", "-i", "web", "--", "/backend", "--exec-io-fixture"}, nil, strings.NewReader("cli-input\nexit 23\n"))
+	body, diagnostic, err := runManagedCLICommandInput(ctx, os.Getenv("SFC_TEST_CLI"), filepath.Join(root, "cli-home"), filepath.Join(root, "cli.yaml"), []string{"--tenant", "tenant", "compose", "exec", "-p", "app", "--operation", "cli-input-original", "-i", "web", "--", "/backend", "--exec-io-fixture"}, nil, strings.NewReader("cli-input\nexit 23\n"))
 	exited, ok := err.(interface{ ExitCode() int })
 	if !ok || exited.ExitCode() != 23 || !bytes.Contains(body, []byte("OUT cli-input")) || !bytes.Contains(diagnostic, []byte("ERR cli-input")) {
 		t.Fatal("CLI actual bidirectional input/exit", err, string(body), string(diagnostic))

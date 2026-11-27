@@ -10,7 +10,7 @@ import (
 	oci "github.com/google/go-containerregistry/pkg/registry"
 	v1 "github.com/google/go-containerregistry/pkg/v1"
 	"github.com/google/go-containerregistry/pkg/v1/types"
-	"github.com/jay94ks/mydcd/internal/schema"
+	"github.com/jay94ks/seafield/internal/schema"
 )
 
 // All aliases, original bodies and repository names belong to the same sync

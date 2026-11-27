@@ -9,10 +9,10 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/imagesource"
-	"github.com/jay94ks/mydcd/internal/secrets"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/imagesource"
+	"github.com/jay94ks/seafield/internal/secrets"
 )
 
 func orderOperation(t *testing.T, f *nodeStorageFixture, id, action string, expected uint64, payload any, at int64) UserOperation {

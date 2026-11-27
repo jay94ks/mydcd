@@ -9,7 +9,7 @@ import (
 	"encoding/json"
 	"slices"
 
-	"github.com/jay94ks/mydcd/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/reconcile"
 )
 
 // RoutePacketClose proves local packet IO closure for one permanently fenced
@@ -29,7 +29,7 @@ type RoutePacketClose struct {
 func RoutePacketCloseBytes(p RoutePacketClose) []byte {
 	p.Signature = nil
 	raw, _ := json.Marshal(p)
-	return append([]byte("mydc-route-packet-close-1\x00"), raw...)
+	return append([]byte("sfc-route-packet-close-1\x00"), raw...)
 }
 
 func ownRoutePacketClose(p RoutePacketClose) RoutePacketClose {
@@ -47,7 +47,7 @@ func (m RouteRuntime) flowDigest() [32]byte {
 		flows = append(flows, m.flows[pin.Token])
 	}
 	raw, _ := json.Marshal(flows)
-	return sha256.Sum256(append([]byte("mydc-route-closed-flows-1\x00"), raw...))
+	return sha256.Sum256(append([]byte("sfc-route-closed-flows-1\x00"), raw...))
 }
 
 // PacketCloseFacts supplies only original identity/digest. The actual owner

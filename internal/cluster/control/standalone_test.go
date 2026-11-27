@@ -9,9 +9,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/containerops"
-	"github.com/jay94ks/mydcd/internal/deployment"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/containerops"
+	"github.com/jay94ks/seafield/internal/deployment"
 	"testing"
 )
 
@@ -26,7 +26,7 @@ func standaloneCoreFixture(t *testing.T, lifetime string) (*backupCoreFixture, s
 		t.Fatal(err)
 	}
 	ctx.Deployment = "deploy"
-	raw := []byte(fmt.Sprintf("services:\n  debug:\n    image: docker.io/library/php@sha256:%s\n    cpus: '0.1'\n    mem_limit: 16m\n    networks: {lan: {ipv4_address: 10.80.1.40, aliases: [debug]}}\n    dns: [10.80.1.1]\n    x-mydc: {node: node-a}\nnetworks:\n  lan: {external: true, name: services}\n", string(bytes.Repeat([]byte{'a'}, 64))))
+	raw := []byte(fmt.Sprintf("services:\n  debug:\n    image: docker.io/library/php@sha256:%s\n    cpus: '0.1'\n    mem_limit: 16m\n    networks: {lan: {ipv4_address: 10.80.1.40, aliases: [debug]}}\n    dns: [10.80.1.1]\n    x-sfc: {node: node-a}\nnetworks:\n  lan: {external: true, name: services}\n", string(bytes.Repeat([]byte{'a'}, 64))))
 	b, err := deployment.CompileStandaloneDocument(raw, "debug", catalog, ctx, "shell")
 	if err != nil {
 		t.Fatal(err)
@@ -79,10 +79,9 @@ func TestStandaloneAcceptedExpirationSurvivesUserRevisionWithoutForgedSession(t 
 	f, scope := standaloneCoreFixture(t, "temp")
 	c, _ := f.p.Catalog(f.s)
 	u, _ := c.User("admin")
-	u.Credentials[0].Label = "rotated-account"
+	u.Username = "rotated-account"
 	expected := u.Revision
-	u.Revision = 0
-	f.apply("change-user-revision", "put-user", expected, u, state.Applied)
+	f.apply("change-user-revision", "put-user", expected, accountFields(u), state.Applied)
 	q := standaloneReportCore(t, f, scope, "expire", "ttl", 3602)
 	cmd, err := q.Command()
 	if err != nil {
@@ -125,10 +124,9 @@ func TestStandaloneAcceptedCleanupAdmitsOnlyDispatchedOriginalNodeRemoval(t *tes
 	start := managedDNSTaskCoreSubmit(t, f, scope, key, true, state.Applied)
 	catalog, _ := f.p.Catalog(f.s)
 	u, _ := catalog.User("admin")
-	u.Credentials[0].Label = "rotated-account"
+	u.Username = "rotated-account"
 	expected := u.Revision
-	u.Revision = 0
-	f.apply("cleanup-revoked-user", "put-user", expected, u, state.Applied)
+	f.apply("cleanup-revoked-user", "put-user", expected, accountFields(u), state.Applied)
 	q := standaloneReportCore(t, f, scope, "expire", "ttl", 3602)
 	report, err := q.Command()
 	if err != nil {

@@ -3501,3 +3501,125 @@ func TestRaft_PreVote_ShouldRejectNonLeader(t *testing.T) {
 		t.Fatalf("expected pre-vote to not be granted, but it was granted, %+v", resp)
 	}
 }
+
+// MyDC: a non-voter's key can neither lead, raise a voter's term nor start a
+// leadership transfer; a lagging follower still takes the leader's promotion.
+func TestRaft_NonVoterCannotActAsLeader(t *testing.T) {
+	c := MakeCluster(3, t, nil)
+	defer c.Close()
+	c1 := MakeClusterNoBootstrap(1, t, nil)
+	c.Merge(c1)
+	c.FullyConnect()
+	leader := c.Leader()
+	learner := c1.rafts[0]
+	if err := leader.AddNonvoter(learner.localID, learner.localAddr, 0, time.Second).Error(); err != nil {
+		t.Fatal(err)
+	}
+	c.WaitForReplication(0)
+	follower := c.Followers()[0]
+	for follower.getLatestConfiguration().Servers == nil || !inConfiguration(follower.getLatestConfiguration(), learner.localID) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	var trans LoopbackTransport
+	for i, r := range c.rafts {
+		if r == learner {
+			trans = c.trans[i]
+		}
+	}
+	term := follower.getCurrentTerm()
+	_, leaderID := follower.LeaderWithID()
+	header := learner.getRPCHeader()
+
+	var resp AppendEntriesResponse
+	if err := trans.AppendEntries(follower.localID, follower.localAddr, &AppendEntriesRequest{RPCHeader: header, Term: term + 5, PrevLogEntry: follower.getLastIndex(), PrevLogTerm: term}, &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.Success || follower.getCurrentTerm() != term {
+		t.Fatal("non-voter appendEntries accepted", resp.Success, follower.getCurrentTerm(), term)
+	}
+	var vote RequestVoteResponse
+	if err := trans.RequestVote(follower.localID, follower.localAddr, &RequestVoteRequest{RPCHeader: header, Term: term + 5, LastLogIndex: 1 << 40, LastLogTerm: term + 5, LeadershipTransfer: true}, &vote); err != nil {
+		t.Fatal(err)
+	}
+	if vote.Granted || follower.getCurrentTerm() != term {
+		t.Fatal("non-voter raised a voter's term", vote.Granted, follower.getCurrentTerm(), term)
+	}
+	var now TimeoutNowResponse
+	if err := trans.TimeoutNow(follower.localID, follower.localAddr, &TimeoutNowRequest{RPCHeader: header}, &now); err == nil {
+		t.Fatal("non-voter started a leadership transfer")
+	}
+	var snap InstallSnapshotResponse
+	if err := trans.InstallSnapshot(follower.localID, follower.localAddr, &InstallSnapshotRequest{RPCHeader: header, SnapshotVersion: SnapshotVersionMax, Term: term + 5, LastLogIndex: 1 << 40}, &snap, bytes.NewReader(nil)); err != nil {
+		t.Fatal(err)
+	}
+	if snap.Success || follower.getCurrentTerm() != term {
+		t.Fatal("non-voter snapshot accepted")
+	}
+	if _, id := follower.LeaderWithID(); id != leaderID || follower.getState() != Follower {
+		t.Fatal("follower left its leader", id, leaderID)
+	}
+
+	// A follower that has not got the promotion yet takes it from the
+	// promoted leader's entries or snapshot.
+	latest := follower.getLatestConfiguration()
+	promoted := latest.Clone()
+	for i := range promoted.Servers {
+		if promoted.Servers[i].ID == learner.localID {
+			promoted.Servers[i].Suffrage = Voter
+		}
+	}
+	data := EncodeConfiguration(promoted)
+	if follower.refusedLeader(learner.localID, []*Log{{Type: LogConfiguration, Data: data}}, nil) || follower.refusedLeader(learner.localID, nil, data) {
+		t.Fatal("promotion refused")
+	}
+	if !follower.refusedLeader(learner.localID, []*Log{{Type: LogConfiguration, Data: []byte("bad")}}, []byte("bad")) {
+		t.Fatal("undecodable configuration gave a vote")
+	}
+	// A voter and a server this follower does not know yet still lead.
+	if follower.refusedLeader(leader.localID, nil, nil) || follower.refusedLeader("unknown", nil, nil) {
+		t.Fatal("voter or unknown server refused")
+	}
+
+	// The cluster still works, and the learner is promoted and can lead.
+	if err := leader.Apply([]byte("x"), time.Second).Error(); err != nil {
+		t.Fatal(err)
+	}
+	if err := leader.AddVoter(learner.localID, learner.localAddr, 0, time.Second).Error(); err != nil {
+		t.Fatal(err)
+	}
+	if err := leader.LeadershipTransferToServer(learner.localID, learner.localAddr).Error(); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for _, r := range c.rafts {
+		for {
+			if _, id := r.LeaderWithID(); id == learner.localID {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatal("promoted learner did not lead", r.localID)
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+}
+
+// MyDC: without a current leader a known non-voter's leader requests are
+// taken, so a follower that missed its promotion by many entries catches up.
+func TestRaft_LaggingFollowerTakesPromotedLeader(t *testing.T) {
+	r := &Raft{}
+	cfg := Configuration{Servers: []Server{{ID: "a", Suffrage: Voter}, {ID: "b", Suffrage: Nonvoter}}}
+	r.setLatestConfiguration(cfg, 2)
+	r.setCommittedConfiguration(cfg, 2)
+	if r.refusedLeader("b", nil, nil) {
+		t.Fatal("refused without a current leader")
+	}
+	r.setLeader("addr-a", "a")
+	if !r.refusedLeader("b", nil, nil) || r.refusedLeader("a", nil, nil) {
+		t.Fatal("non-voter displaced the current leader")
+	}
+	r.setLeader("addr-b", "b")
+	if r.refusedLeader("b", nil, nil) {
+		t.Fatal("refused the leader this server already follows")
+	}
+}

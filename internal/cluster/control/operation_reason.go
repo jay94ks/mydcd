@@ -3,7 +3,7 @@
 package control
 
 import (
-	"github.com/jay94ks/mydcd/internal/cluster/lifecycle"
+	"github.com/jay94ks/seafield/internal/cluster/lifecycle"
 	"strings"
 	"unicode/utf8"
 )

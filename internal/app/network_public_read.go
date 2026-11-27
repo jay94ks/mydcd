@@ -4,11 +4,11 @@ package app
 
 import (
 	"context"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/schema"
-	"github.com/jay94ks/mydcd/internal/tenancy"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/tenancy"
 )
 
 // Read the original owner through the existing authenticated observe RPC. A
@@ -20,11 +20,11 @@ func (r *Runtime) networkClosureRead(ctx context.Context, target control.Network
 	stop := context.AfterFunc(r.ctx, cancel)
 	defer stop()
 	if ctx.Err() != nil || !r.life.TryRLock() {
-		return out, mydcp.ErrAdmission
+		return out, sfcp.ErrAdmission
 	}
 	defer r.life.RUnlock()
 	if r.closed {
-		return out, mydcp.ErrAdmission
+		return out, sfcp.ErrAdmission
 	}
 	var raw []byte
 	if target.Network.Owner == r.Identity.Public {
@@ -39,16 +39,16 @@ func (r *Runtime) networkClosureRead(ctx context.Context, target control.Network
 		source, ok := projection.ManagedSources[target.Source.Key]
 		o := v.State.Object(target.Source.Key)
 		if !ok || source.Network.ID != target.Network.ID || source.Network.Tenant != target.Network.Tenant || source.Network.Owner != target.Network.Owner || o.Generation != target.Source.Generation || o.Revision != target.Source.Revision {
-			return out, mydcp.ErrAdmission
+			return out, sfcp.ErrAdmission
 		}
 		raw, err = r.observeManagedNetwork(ctx, target.Source.Key, v, projection, source)
 		if err != nil {
 			return out, err
 		}
 	} else {
-		peer, ok := r.Mesh.Peer(mydcp.Identity(target.Network.Owner))
+		peer, ok := r.Mesh.Peer(sfcp.Identity(target.Network.Owner))
 		if !ok || !peer.Member || peer.ID != target.Network.Node {
-			return out, mydcp.ErrAdmission
+			return out, sfcp.ErrAdmission
 		}
 		reply, err := cluster.CallManagement(ctx, r.Mesh, r.Identity, r.controlPolicy.Cluster, peer, cluster.ManagementRequest{Method: "observe", Key: target.Source.Key, Latest: false})
 		if err != nil {
@@ -58,7 +58,7 @@ func (r *Runtime) networkClosureRead(ctx context.Context, target control.Network
 	}
 	observation, err := schema.Decode[ModuleObservation](raw)
 	if err != nil || observation.Schema != 1 || observation.Key != target.Source.Key || observation.Generation != target.Source.Generation || observation.Revision != target.Source.Revision {
-		return out, mydcp.ErrAdmission
+		return out, sfcp.ErrAdmission
 	}
 	out.State = "pending"
 	if observation.NetworkClosure != nil {
@@ -71,7 +71,7 @@ func (r *Runtime) networkClosureRead(ctx context.Context, target control.Network
 	if len(observation.Retirement) > 0 {
 		proof, err := schema.Decode[tenancy.NetworkClosure](observation.Retirement)
 		if err != nil || !target.VerifyClosure(r.controlPolicy.Cluster, proof) {
-			return out, mydcp.ErrAdmission
+			return out, sfcp.ErrAdmission
 		}
 		out.State = "closed"
 		out.Closure = &proof

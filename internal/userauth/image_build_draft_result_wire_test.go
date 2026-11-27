@@ -12,11 +12,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/imagebuild"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/nodestorage"
-	"github.com/jay94ks/mydcd/internal/schema"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/imagebuild"
+	"github.com/jay94ks/seafield/internal/nodestorage"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/sfcp"
 )
 
 // Real Client/frame/transport binding/EOF and result-purpose proof. Native
@@ -28,30 +28,30 @@ func TestDraftResultActualUnixAndQUICKeepsOriginalProofAndRejectsRetargetedReply
 				_, client, session, node := journalFixture(t)
 				readFreeze := strings.HasPrefix(mode, "freeze-")
 				mode = strings.TrimPrefix(mode, "freeze-")
-				dir, err := os.MkdirTemp("", "mydc-draft-result-")
+				dir, err := os.MkdirTemp("", "sfc-draft-result-")
 				if err != nil {
 					t.Fatal(err)
 				}
 				defer os.RemoveAll(dir)
 				peer := client.Peers[0]
-				lookup := func(key mydcp.Identity) (mydcp.Peer, bool) {
-					if key == mydcp.Identity(client.Self.Public) {
-						return mydcp.Peer{ID: "user", Policy: mydcp.Policy{Key: key, UserAuth: true}}, true
+				lookup := func(key sfcp.Identity) (sfcp.Peer, bool) {
+					if key == sfcp.Identity(client.Self.Public) {
+						return sfcp.Peer{ID: "user", Policy: sfcp.Policy{Key: key, UserAuth: true}}, true
 					}
 					return peer, key == peer.Key
 				}
-				server, err := mydcp.NewTransport(node, client.Cluster, lookup)
+				server, err := sfcp.NewTransport(node, client.Cluster, lookup)
 				if err != nil {
 					t.Fatal(err)
 				}
 				defer server.Close()
-				scope := imagebuild.DraftScope{Schema: 1, Tenant: "tenant", Context: "editable", Root: nodestorage.Reference{Cluster: client.Cluster, Node: "node", Key: node.Public, ID: "data", Generation: 1, Path: "/srv/mydc"}, ContextRevision: 1, PolicyRevision: 1, Dockerfile: "Dockerfile", ExpandedLimit: 1 << 20}
+				scope := imagebuild.DraftScope{Schema: 1, Tenant: "tenant", Context: "editable", Root: nodestorage.Reference{Cluster: client.Cluster, Node: "node", Key: node.Public, ID: "data", Generation: 1, Path: "/srv/sfc"}, ContextRevision: 1, PolicyRevision: 1, Dockerfile: "Dockerfile", ExpandedLimit: 1 << 20}
 				edit := imagebuild.DraftEdit{ID: "original", Kind: "mkdir", Path: "source", Expected: 1}
 				now := uint64(time.Now().Unix())
 				plan := imagebuild.DraftFreezePlan{Schema: 1, Scope: scope, ID: "freeze-one", Creator: session.User, Revision: 2, Draft: [32]byte{9}, CreatedAt: now - 600, ExpiresAt: now - 1}
 				binding := Service{Self: node, Mesh: server, Policy: control.Policy{Cluster: client.Cluster}}
 				done := make(chan error, 1)
-				if err := server.OnManagement(mydcp.User, func(ctx context.Context, conn *mydcp.Session, stream mydcp.Stream, frame mydcp.Frame) error {
+				if err := server.OnManagement(sfcp.User, func(ctx context.Context, conn *sfcp.Session, stream sfcp.Stream, frame sfcp.Frame) error {
 					serve := func() error {
 						envelope, err := schema.Decode[Envelope](frame.Fields[0].Value)
 						if err != nil {
@@ -60,14 +60,14 @@ func TestDraftResultActualUnixAndQUICKeepsOriginalProofAndRejectsRetargetedReply
 						request, err := schema.Decode[Request](envelope.Body)
 						q := request.ImageBuildDraft
 						if err != nil || !request.validMethodFields() || !request.validQuerySelectors() || request.Method != "build-draft" || q == nil || q.Mutation() || q.Scope == nil || *q.Scope != scope || q.Authorize(scope, session, time.Now().Unix()) != nil {
-							return mydcp.ErrFrame
+							return sfcp.ErrFrame
 						}
 						if readFreeze {
 							if q.Kind != "freeze-result" || q.Freeze == nil || *q.Freeze != plan {
-								return mydcp.ErrFrame
+								return sfcp.ErrFrame
 							}
 						} else if q.Kind != "result" || q.Edit == nil || *q.Edit != edit {
-							return mydcp.ErrFrame
+							return sfcp.ErrFrame
 						}
 						if _, err := binding.binding(conn, frame.Kind, envelope); err != nil {
 							return err
@@ -118,7 +118,7 @@ func TestDraftResultActualUnixAndQUICKeepsOriginalProofAndRejectsRetargetedReply
 					}
 					peer.Endpoint = server.Addr().String()
 				}
-				mesh, err := mydcp.NewTransport(client.Self, client.Cluster, lookup)
+				mesh, err := sfcp.NewTransport(client.Self, client.Cluster, lookup)
 				if err != nil {
 					t.Fatal(err)
 				}

@@ -2,7 +2,7 @@
 
 package imagebuild
 
-import "github.com/jay94ks/mydcd/internal/registryclient"
+import "github.com/jay94ks/seafield/internal/registryclient"
 
 // NativePublication is the original output and ordered tag attempts in the
 // existing node journal. Started does not imply that the root PUT was sent.

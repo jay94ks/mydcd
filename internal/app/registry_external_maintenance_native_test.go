@@ -14,9 +14,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/state"
 )
 
 // Uses the existing installed Vault/private HTTPS/CLI/Raft/reader and owned
@@ -24,7 +24,7 @@ import (
 // Git, builder or large-context scenario. In-use and uncertain remote DELETE
 // recovery remain the existing control/SDK counterexamples, not claims here.
 func TestRQ6ExternalRegistryMaintenanceCLIOriginalHTTPOutcomeAndReaderReturn(t *testing.T) {
-	if os.Getenv("MYDC_TEST_RQ6_REMAINING") != "external-maintenance" {
+	if os.Getenv("SFC_TEST_RQ6_REMAINING") != "external-maintenance" {
 		t.Skip("explicit external-maintenance remaining scope required")
 	}
 	runManagedAppOwner(t, true, true, true, true, managedAppExternalRegistry, true)

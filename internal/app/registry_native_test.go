@@ -33,18 +33,18 @@ import (
 	"time"
 
 	cerrdefs "github.com/containerd/errdefs"
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/engine"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/registry"
-	"github.com/jay94ks/mydcd/internal/userauth"
-	"github.com/jay94ks/mydcd/internal/workload"
-	"github.com/jay94ks/mydcd/internal/workload/volumes"
-	"github.com/jay94ks/mydcd/tests/gitfixture"
-	"github.com/jay94ks/mydcd/tests/registryfixture"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/engine"
+	"github.com/jay94ks/seafield/internal/registry"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/userauth"
+	"github.com/jay94ks/seafield/internal/workload"
+	"github.com/jay94ks/seafield/internal/workload/volumes"
+	"github.com/jay94ks/seafield/tests/gitfixture"
+	"github.com/jay94ks/seafield/tests/registryfixture"
 	"github.com/moby/moby/api/pkg/authconfig"
 	dockerauth "github.com/moby/moby/api/types/registry"
 	"github.com/moby/moby/client"
@@ -53,10 +53,10 @@ import (
 // Owned Docker/host rollback and explicit non-insecure host IP are mandatory.
 // No compiler/daemon build, remote image download or hidden TLS bypass here.
 func TestE5ManagedRegistryCLIEngineAndAppRecovery(t *testing.T) {
-	if os.Getenv("MYDC_REGISTRY_TEST_IP") == "" {
+	if os.Getenv("SFC_REGISTRY_TEST_IP") == "" {
 		t.Skip("explicit installed non-loopback IPv4 and E5 rollback baseline required")
 	}
-	if os.Getenv("MYDC_STORAGE_TEST_ROOT") == "" || os.Getenv("MYDC_STORAGE_TEST_OWNER") == "" || os.Getenv("MYDC_STORAGE_HOST_MOUNT_NS") == "" {
+	if os.Getenv("SFC_STORAGE_TEST_ROOT") == "" || os.Getenv("SFC_STORAGE_TEST_OWNER") == "" || os.Getenv("SFC_STORAGE_HOST_MOUNT_NS") == "" {
 		t.Skip("E5 requires S1 owned ext4/private mount namespace inputs for fixed registry backing")
 	}
 	runManagedAppOwner(t, true, true, true, true, managedAppRegistry, true, false, false)
@@ -82,7 +82,7 @@ type managedRegistryNative struct {
 
 func configureManagedRegistryNative(t *testing.T, root, document string) (string, *managedRegistryNative) {
 	t.Helper()
-	ip, err := netip.ParseAddr(os.Getenv("MYDC_REGISTRY_TEST_IP"))
+	ip, err := netip.ParseAddr(os.Getenv("SFC_REGISTRY_TEST_IP"))
 	if err != nil || !ip.Is4() || ip.IsLoopback() || ip.IsUnspecified() || ip.IsMulticast() {
 		t.Fatal("explicit installed non-loopback IPv4 required", err)
 	}
@@ -316,7 +316,7 @@ func (f *managedRegistryNative) credential(t *testing.T, access string) []byte {
 		Status, Authority, Username, Repository string
 		ExpiresAt                               int64 `json:"expires_at"`
 	}
-	if json.Unmarshal(output, &metadata) != nil || metadata.Status != "credential-delivered" || metadata.Authority != f.address || metadata.Username != "admin" || metadata.Repository != "fixture" || bytes.Contains(output, []byte("mydc-registry-login-1.")) {
+	if json.Unmarshal(output, &metadata) != nil || metadata.Status != "credential-delivered" || metadata.Authority != f.address || metadata.Username != "admin" || metadata.Repository != "fixture" || bytes.Contains(output, []byte("sfc-registry-login-1.")) {
 		t.Fatal("registry CLI public credential receipt invalid")
 	}
 	if _, err = file.Seek(0, io.SeekStart); err != nil {
@@ -360,7 +360,7 @@ func (f *managedRegistryNative) tokenFor(t *testing.T, ctx context.Context, user
 
 // prepareCLI reuses the protected-descriptor account path without starting a
 // managed registry, builder, or another native application.
-func (f *managedRegistryNative) prepareCLI(t *testing.T, ctx context.Context, root string, cluster [32]byte, peer mydcp.Peer) {
+func (f *managedRegistryNative) prepareCLI(t *testing.T, ctx context.Context, root string, cluster [32]byte, peer sfcp.Peer) {
 	t.Helper()
 	home := filepath.Join(root, "registry-cli-home")
 	if err := os.Mkdir(home, 0700); err != nil {
@@ -372,7 +372,7 @@ func (f *managedRegistryNative) prepareCLI(t *testing.T, ctx context.Context, ro
 		t.Fatal(err)
 	}
 	f.runCLI = func(inputs []*os.File, args ...string) ([]byte, []byte, error) {
-		return runManagedCLICommand(ctx, os.Getenv("MYDC_TEST_CLI"), home, profile, args, inputs)
+		return runManagedCLICommand(ctx, os.Getenv("SFC_TEST_CLI"), home, profile, args, inputs)
 	}
 	f.cli = func(inputs []*os.File, args ...string) []byte {
 		t.Helper()
@@ -397,7 +397,7 @@ func (f *managedRegistryNative) prepareCLI(t *testing.T, ctx context.Context, ro
 	f.cli(nil, "login", "--username", "admin", "--method", "private-key", "--key-file", filepath.Join(root, "admin", "key.pem"))
 }
 
-func (f *managedRegistryNative) prepare(t *testing.T, ctx context.Context, owner **Runtime, root string, user userauth.Client, peer mydcp.Peer, p control.Policy, read func() cluster.View, change func(string, string, uint64, any), source *registryfixture.Fixture, public map[string]any, save func()) {
+func (f *managedRegistryNative) prepare(t *testing.T, ctx context.Context, owner **Runtime, root string, user userauth.Client, peer sfcp.Peer, p control.Policy, read func() cluster.View, change func(string, string, uint64, any), source *registryfixture.Fixture, public map[string]any, save func()) {
 	t.Helper()
 	f.public, f.save = public, save
 	public["RegistryAddress"], public["RegistryCertificate"], public["RegistrySeedReference"] = f.address, f.certFile, source.Reference
@@ -452,7 +452,7 @@ func (f *managedRegistryNative) prepare(t *testing.T, ctx context.Context, owner
 		return false
 	})
 	f.spec = registry.Specification{Schema: 1, Tenant: "tenant", ID: "private", Node: "node-a", Address: f.address, Authority: f.address, Volume: scope, Enabled: true, Metadata: registry.MetadataLimits{ManifestBytes: 1 << 20, Records: 64, TotalBytes: 8 << 20}, Blobs: registry.BlobLimits{BlobBytes: 64 << 20, TotalBytes: 128 << 20, Records: 128}, Budget: workload.Resources{CPU: 100000000, Memory: 32 << 20}, MaxRequests: 8, MaxHeaderBytes: 32 << 10, RequestTimeoutMS: 30000, TokenSeconds: 300}
-	if os.Getenv("MYDC_TEST_RQ6_LARGE_REGISTRY") == "1" {
+	if os.Getenv("SFC_TEST_RQ6_LARGE_REGISTRY") == "1" {
 		// This is an explicit initial test budget, never a retry-time increase.
 		// The actual transfer remains 100 MiB plus tar framing, not 10 GiB.
 		f.spec.Blobs.BlobBytes = 128 << 20
@@ -488,18 +488,18 @@ func (f *managedRegistryNative) prepare(t *testing.T, ctx context.Context, owner
 	if tlsErr == nil {
 		t.Fatal("untrusted CA accepted")
 	}
-	if os.Getenv("MYDC_TEST_RQ6_REMAINING") == "prune-follower" {
+	if os.Getenv("SFC_TEST_RQ6_REMAINING") == "prune-follower" {
 		// This remaining scope needs the installed owner/Volume and an empty
 		// store, without replaying accepted push/build/large-context/app paths.
 		return
 	}
-	if os.Getenv("MYDC_TEST_RQ6_REGISTRY_MAINTENANCE") == "1" && os.Getenv("MYDC_TEST_RQ6_REMAINING") != "prune-nonempty" {
+	if os.Getenv("SFC_TEST_RQ6_REGISTRY_MAINTENANCE") == "1" && os.Getenv("SFC_TEST_RQ6_REMAINING") != "prune-nonempty" {
 		f.verifyEmptyRegistryMaintenance(t, ctx, p, read)
 	}
 	secret := f.credential(t, "pull,push")
 	defer clear(secret)
 	token := f.token(t, ctx, secret, "repository:fixture:pull,push")
-	if os.Getenv("MYDC_TEST_RQ6_REMAINING") == "prune-nonempty" {
+	if os.Getenv("SFC_TEST_RQ6_REMAINING") == "prune-nonempty" {
 		grant, err := registry.ParseAccess(token, time.Now().Unix())
 		if err != nil || grant.Repository != "fixture" || !slices.Contains(grant.Actions, "push") {
 			t.Fatal("original seed push lease missing", err)
@@ -552,7 +552,7 @@ func (f *managedRegistryNative) prepare(t *testing.T, ctx context.Context, owner
 		if cerrdefs.IsNotFound(e) {
 			continue
 		}
-		if e != nil || got.Config == nil || got.Config.Labels["org.mydc.test.owner"] != public["Tag"] {
+		if e != nil || got.Config == nil || got.Config.Labels["org.sfc.test.owner"] != public["Tag"] {
 			t.Fatal("prepared image cleanup ownership", e)
 		}
 		if _, e = (*owner).docker.API.ImageRemove(ctx, ref, client.ImageRemoveOptions{}); e != nil && !cerrdefs.IsNotFound(e) {
@@ -570,19 +570,19 @@ func (f *managedRegistryNative) prepare(t *testing.T, ctx context.Context, owner
 	if slices.ContainsFunc(tenant.ImageSources, func(rule access.TrustRule) bool { return rule.Registry == f.address }) {
 		t.Fatal("registry creation implicitly added trust")
 	}
-	change("registry-explicit-trust", "set-trust", tenant.Revision, control.TrustAssignment{Tenant: "tenant", Rules: append(tenant.ImageSources, access.TrustRule{Registry: f.address, Repository: "fixture"})})
+	change("registry-explicit-trust", "set-trust", tenant.Revision, control.TrustChange{Tenant: "tenant", Add: []access.TrustRule{access.TrustRule{Registry: f.address, Repository: "fixture"}}})
 	// Only the app's source metadata changes. It will pull through the production
 	// Task adapter, not through this HTTP fixture's token or its user session.
 	source.Reference = f.reference
 	source.Registry = f.address
-	if os.Getenv("MYDC_TEST_RQ6_REMAINING") == "prune-nonempty" {
+	if os.Getenv("SFC_TEST_RQ6_REMAINING") == "prune-nonempty" {
 		f.verifyRegistryPruneNonemptyNative(t, ctx, *owner, root, p, read)
 		return
 	}
-	if os.Getenv("MYDC_TEST_RQ6_LARGE_REGISTRY") == "1" {
+	if os.Getenv("SFC_TEST_RQ6_LARGE_REGISTRY") == "1" {
 		f.verifyLargeRegistryContent(t, ctx, root, p, read)
 	}
-	if os.Getenv("MYDC_TEST_RQ6_IMAGE_BUILD") == "1" {
+	if os.Getenv("SFC_TEST_RQ6_IMAGE_BUILD") == "1" {
 		f.verifyImageBuildNative(t, ctx, owner, root, p, read, change)
 	}
 }
@@ -603,7 +603,7 @@ func (f *managedRegistryNative) checkRunning(t *testing.T, ctx context.Context, 
 		t.Fatal("private image Task binding missing")
 	}
 	got, err := r.docker.API.ImageInspect(ctx, f.reference)
-	if err != nil || got.Config == nil || got.Config.Labels["org.mydc.test.owner"] != f.public["Tag"] {
+	if err != nil || got.Config == nil || got.Config.Labels["org.sfc.test.owner"] != f.public["Tag"] {
 		t.Fatal("real Task private image pull missing", err)
 	}
 	f.public["RegistryTaskImagePullVerified"] = true
@@ -614,9 +614,8 @@ func (f *managedRegistryNative) checkRunning(t *testing.T, ctx context.Context, 
 		t.Fatal(err)
 	}
 	tenant, _ := users.Tenant("tenant")
-	rules := slices.Clone(tenant.ImageSources)
-	remaining := slices.DeleteFunc(slices.Clone(rules), func(rule access.TrustRule) bool { return rule.Registry == f.address })
-	change("registry-remove-image-trust", "set-trust", tenant.Revision, control.TrustAssignment{Tenant: "tenant", Rules: remaining})
+	rules := slices.DeleteFunc(slices.Clone(tenant.ImageSources), func(rule access.TrustRule) bool { return rule.Registry != f.address })
+	change("registry-remove-image-trust", "set-trust", tenant.Revision, control.TrustChange{Tenant: "tenant", Remove: rules})
 	if _, err = r.appRegistryImageAuth(ctx, task, binding.Digest(), f.reference); err == nil {
 		t.Fatal("cached image bypassed revoked source trust")
 	}
@@ -629,8 +628,8 @@ func (f *managedRegistryNative) checkRunning(t *testing.T, ctx context.Context, 
 		t.Fatal(err)
 	}
 	tenant, _ = users.Tenant("tenant")
-	change("registry-restore-image-trust", "set-trust", tenant.Revision, control.TrustAssignment{Tenant: "tenant", Rules: rules})
-	if os.Getenv("MYDC_TEST_RQ6_REGISTRY_MAINTENANCE") == "1" {
+	change("registry-restore-image-trust", "set-trust", tenant.Revision, control.TrustChange{Tenant: "tenant", Add: rules})
+	if os.Getenv("SFC_TEST_RQ6_REGISTRY_MAINTENANCE") == "1" {
 		f.verifyUsedRegistryMaintenance(t, ctx, p, read, change)
 	}
 	secret := f.credential(t, "pull,push")
@@ -684,13 +683,13 @@ func (f *managedRegistryNative) finish(t *testing.T, ctx context.Context, owner 
 		t.Fatal(err)
 	}
 	tenant, _ := users.Tenant("tenant")
-	change("registry-restore-owner-node", "set-nodes", tenant.Revision, control.NodeAssignment{Tenant: "tenant", Nodes: []string{"node-a"}})
+	change("registry-restore-owner-node", "set-nodes", tenant.Revision, control.NodeChangeTo("tenant", tenant.AllowedNodes, []string{"node-a"}))
 	book, err := p.Registries(read().State)
 	if err != nil {
 		t.Fatal(err)
 	}
 	entry, _ := book.Entry("tenant", "private")
-	if os.Getenv("MYDC_TEST_RQ4_REGISTRY_ACTION") == "1" {
+	if os.Getenv("SFC_TEST_RQ4_REGISTRY_ACTION") == "1" {
 		var preview control.RegistryActionPlan
 		if json.Unmarshal(f.cli(nil, "registry", "start", "private", "--tenant", "tenant", "--preview"), &preview) != nil || preview.Expected != entry.Revision || preview.Current.Spec.Volume != entry.Spec.Volume || !preview.WouldEnable {
 			t.Fatal("actual registry start preview changed target")
@@ -777,7 +776,7 @@ func (f *managedRegistryNative) finish(t *testing.T, ctx context.Context, owner 
 		t.Fatal(err)
 	}
 	entry, _ = book.Entry("tenant", "private")
-	if os.Getenv("MYDC_TEST_RQ4_REGISTRY_ACTION") == "1" {
+	if os.Getenv("SFC_TEST_RQ4_REGISTRY_ACTION") == "1" {
 		var preview control.RegistryActionPlan
 		if json.Unmarshal(f.cli(nil, "registry", "stop", "private", "--tenant", "tenant", "--preview"), &preview) != nil || preview.Expected != entry.Revision || preview.Current.Spec.Volume != entry.Spec.Volume || preview.WouldEnable {
 			t.Fatal("actual registry stop preview changed data")
@@ -829,7 +828,7 @@ func (f *managedRegistryNative) finish(t *testing.T, ctx context.Context, owner 
 	f.verifyFixedBacking(t, ctx, owner, p, read, change)
 }
 
-func (f *managedRegistryNative) verifyRevokedUser(t *testing.T, ctx context.Context, user userauth.Client, peer mydcp.Peer, p control.Policy, read func() cluster.View, change func(string, string, uint64, any)) {
+func (f *managedRegistryNative) verifyRevokedUser(t *testing.T, ctx context.Context, user userauth.Client, peer sfcp.Peer, p control.Policy, read func() cluster.View, change func(string, string, uint64, any)) {
 	t.Helper()
 	pub, key, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
@@ -846,7 +845,7 @@ func (f *managedRegistryNative) verifyRevokedUser(t *testing.T, ctx context.Cont
 		t.Fatal(err)
 	}
 
-	if _, err = user.Query(ctx, peer, session, "select-tenant", "registry-other"); err != nil {
+	if _, err = user.SelectTenant(ctx, peer, session, "registry-other"); err != nil {
 		t.Fatal("foreign tenant reader fixture isn't authenticated", err)
 	}
 	if reply, e := user.RegistryCredential(ctx, peer, session, "registry-other", userauth.RegistryCredentialRequest{ID: "private", Repository: "fixture", Actions: []string{"pull"}}); e == nil {

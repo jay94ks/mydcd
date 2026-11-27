@@ -8,8 +8,8 @@ import (
 	"encoding/json"
 	"math"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/state"
 )
 
 type TunnelReport struct {
@@ -24,7 +24,7 @@ type TunnelReport struct {
 func TunnelReportBytes(r TunnelReport) []byte {
 	r.Signature = nil
 	raw, _ := json.Marshal(r)
-	return append([]byte("mydc-tunnel-report-1\x00"), raw...)
+	return append([]byte("sfc-tunnel-report-1\x00"), raw...)
 }
 func (r TunnelReport) Command() (state.Command, error) {
 	raw, err := json.Marshal(r)

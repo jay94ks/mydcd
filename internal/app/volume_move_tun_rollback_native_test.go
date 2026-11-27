@@ -11,12 +11,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/network"
+	"github.com/jay94ks/seafield/internal/network"
 	"github.com/vishvananda/netlink"
 )
 
 func TestRealBoundaryMoveTunnelLinkDownRestoresOriginalRoutes(t *testing.T) {
-	host := os.Getenv("MYDC_KERNEL_HOST_NETNS")
+	host := os.Getenv("SFC_KERNEL_HOST_NETNS")
 	current, err := os.Readlink("/proc/self/ns/net")
 	if host == "" {
 		t.Skip("owned isolated kernel namespace and rollback required")

@@ -7,17 +7,17 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/schema"
-	"github.com/jay94ks/mydcd/internal/workload/volumes"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/workload/volumes"
 )
 
 func (r *Runtime) observeVolumeMoveRecipe(ctx context.Context, ready volumes.NativeReady) (control.VolumeMoveRecipe, error) {
 	var out control.VolumeMoveRecipe
 	if ready.Verify() != nil || ready.Owner.Key != r.Identity.Public || !r.volumeSourceMu.TryLock() {
-		return out, mydcp.ErrAdmission
+		return out, sfcp.ErrAdmission
 	}
 	defer r.volumeSourceMu.Unlock()
 	ctx, cancel := context.WithCancel(ctx)
@@ -30,14 +30,14 @@ func (r *Runtime) observeVolumeMoveRecipe(ctx context.Context, ready volumes.Nat
 	r.life.RLock()
 	if r.closed || r.activations == nil {
 		r.life.RUnlock()
-		return out, mydcp.ErrAdmission
+		return out, sfcp.ErrAdmission
 	}
 	writer, err := r.activations.PlanningWriter(ready)
 	r.life.RUnlock()
 	if err != nil {
 		return out, err
 	}
-	out = control.VolumeMoveRecipe{Schema: 1, NativeBinding: control.VolumeNativeDigest(ready), Compatibility: sha256.Sum256(append([]byte("mydc-volume-cold-recipe-1\x00"), []byte(writer.Task.Spec)...)), Consumer: writer.Consumer}
+	out = control.VolumeMoveRecipe{Schema: 1, NativeBinding: control.VolumeNativeDigest(ready), Compatibility: sha256.Sum256(append([]byte("sfc-volume-cold-recipe-1\x00"), []byte(writer.Task.Spec)...)), Consumer: writer.Consumer}
 	if err = r.volumeUsagePermit(ctx, ready); err != nil {
 		return control.VolumeMoveRecipe{}, err
 	}
@@ -49,7 +49,7 @@ func (r *Runtime) volumeMoveRecipe(ctx context.Context, ready volumes.NativeRead
 	}
 	peer, ok := r.resourcePeer(ctx, ready.Owner.Node, ready.Owner.Key)
 	if !ok || !peer.Member || peer.ID != ready.Owner.Node {
-		return control.VolumeMoveRecipe{}, mydcp.ErrAdmission
+		return control.VolumeMoveRecipe{}, sfcp.ErrAdmission
 	}
 	raw, err := json.Marshal(ready)
 	if err != nil {
@@ -61,7 +61,7 @@ func (r *Runtime) volumeMoveRecipe(ctx context.Context, ready volumes.NativeRead
 	}
 	value, err := schema.Decode[control.VolumeMoveRecipe](reply.Data)
 	if err != nil || value.Schema != 1 || value.NativeBinding != control.VolumeNativeDigest(ready) || value.Consumer.Owner != ready.Owner || !value.Consumer.Writable {
-		return control.VolumeMoveRecipe{}, mydcp.ErrAdmission
+		return control.VolumeMoveRecipe{}, sfcp.ErrAdmission
 	}
 	return value, nil
 }

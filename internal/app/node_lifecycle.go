@@ -11,13 +11,13 @@ import (
 	"strings"
 
 	"github.com/hashicorp/raft"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/cluster/lifecycle"
-	"github.com/jay94ks/mydcd/internal/cluster/membership"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/reconcile"
-	"github.com/jay94ks/mydcd/internal/schema"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/lifecycle"
+	"github.com/jay94ks/seafield/internal/cluster/membership"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/schema"
 	"github.com/moby/moby/client"
 )
 
@@ -32,7 +32,7 @@ func installedTopology(installed cluster.InstalledConfiguration, directory membe
 	for _, server := range installed.Configuration.Servers {
 		entry, exists := directory.Entry(string(server.ID))
 		key, err := identity.ParseKey(entry.CurrentPeer().Key)
-		if !exists || err != nil || entry.Peer.Endpoint != string(server.Address) || server.Suffrage != raft.Voter && server.Suffrage != raft.Nonvoter {
+		if !exists || err != nil || !entry.EndpointMatches(string(server.Address)) || server.Suffrage != raft.Voter && server.Suffrage != raft.Nonvoter {
 			return c, membership.ErrMember
 		}
 		c.Members = append(c.Members, lifecycle.Member{ID: entry.Peer.ID, Key: key, Voter: server.Suffrage == raft.Voter})
@@ -162,6 +162,11 @@ func (r *Runtime) syncMemberConfiguration(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	if r.recovery.recorded(d) {
+		if err = r.recovery.done(r.installation.config.Node.StateDir); err != nil {
+			return err
+		}
+	}
 	installed, err := r.Engine().InstalledConfiguration(ctx, false)
 	if err != nil {
 		return err
@@ -198,6 +203,13 @@ func (r *Runtime) syncMemberConfiguration(ctx context.Context) error {
 	// a stream of rejected reports. The committed reducer repeats this check.
 	updated, err := d.InstallConfiguration(c)
 	if err != nil {
+		// After `sfcd recover` the installed configuration drops voters
+		// without a removal; only the signed plan can publish it.
+		if plan, ok := r.recovery.pending(); ok && c.Index == plan.Index() {
+			if _, recoverErr := d.RecoverConfiguration(plan, c); recoverErr == nil {
+				return r.memberReport(ctx, view, control.MemberReport{Action: "recovered", Node: r.installation.record.Root.Self.ID, Expected: d.Revision, Configuration: &c, Recovery: &plan})
+			}
+		}
 		return err
 	}
 	if updated.Revision == d.Revision {

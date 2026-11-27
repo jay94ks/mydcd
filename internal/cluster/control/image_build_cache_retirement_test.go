@@ -8,9 +8,10 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/imagebuild"
-	"github.com/jay94ks/mydcd/internal/workload/volumes"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/imagebuild"
+	"github.com/jay94ks/seafield/internal/workload/volumes"
 )
 
 // Genuine user operations, signatures, FSM and restore. Native artifact,
@@ -89,10 +90,7 @@ func TestCacheDisposalRequiresOriginalTenantRetirementAndAllSharedSettlement(t *
 		t.Fatal("unrecorded source obtained cache grant")
 	}
 	catalog, _ = f.p.Catalog(f.s)
-	user, _ := catalog.User("manager")
-	revision := user.Revision
-	user.Revision, user.Enabled = 0, false
-	f.apply("admin", "put-user", revision, user, state.Applied)
+	f.changeAccount("manager", func(u *access.User) { u.Enabled = false })
 	encoded, err := state.Encode(f.s)
 	if err != nil {
 		t.Fatal(err)

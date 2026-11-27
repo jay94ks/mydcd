@@ -7,9 +7,9 @@ import (
 	"crypto/ed25519"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/deployment"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/deployment"
 )
 
 // CollectAppTaskClosure signs only an original, positively settled native
@@ -86,6 +86,21 @@ func (r *Runtime) CollectAppTaskClosure(ctx context.Context, request control.App
 		}
 	}
 	for _, pin := range b.Pins() {
+		if pin.Consumer.Remote() {
+			// A remote consumer runs here: its Gone is the runner's, after
+			// the task's container is gone and its mount released.
+			key, valid := pin.Consumer.GoneKey()
+			runner, ok := r.nativeOwner(key)
+			if !valid || !ok || r.remoteMounts == nil {
+				return deployment.Observation{}, deployment.Closure{}, deployment.ErrInputs
+			}
+			gone, err := r.remoteMounts.Gone(pin.Scope, pin.Consumer, runner.Identity.Private)
+			if err != nil {
+				return deployment.Observation{}, deployment.Closure{}, err
+			}
+			proof.Volumes = append(proof.Volumes, gone)
+			continue
+		}
 		owner, ok := r.nativeOwner(pin.Consumer.Owner.Key)
 		if !ok || owner.activations == nil {
 			return deployment.Observation{}, deployment.Closure{}, deployment.ErrInputs

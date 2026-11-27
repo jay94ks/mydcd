@@ -11,8 +11,8 @@ import (
 	"time"
 
 	cerrdefs "github.com/containerd/errdefs"
-	"github.com/jay94ks/mydcd/internal/engine"
-	"github.com/jay94ks/mydcd/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/engine"
+	"github.com/jay94ks/seafield/internal/reconcile"
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/api/types/mount"
 	"github.com/moby/moby/client"
@@ -150,7 +150,7 @@ func (s *Activations) completeVolumeMounts(got container.InspectResponse, refs [
 	for _, m := range got.Mounts {
 		matched := false
 		for i, r := range sources {
-			if r.writable == m.RW && (!r.bind && m.Type == mount.TypeVolume && m.Name == r.source || r.bind && m.Type == mount.TypeBind && m.Source == r.source && m.Propagation == mount.PropagationRPrivate) {
+			if r.writable == m.RW && m.Type == mount.TypeVolume && m.Name == r.source && (m.Driver == EngineVolumeDriver) == r.bind {
 				counts[i]++
 				matched = true
 			}

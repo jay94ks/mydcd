@@ -17,9 +17,9 @@ import (
 
 	"github.com/moby/moby/client"
 
-	"github.com/jay94ks/mydcd/internal/engine"
-	"github.com/jay94ks/mydcd/internal/storage"
-	checker "github.com/jay94ks/mydcd/internal/workload/lifecycle"
+	"github.com/jay94ks/seafield/internal/engine"
+	"github.com/jay94ks/seafield/internal/storage"
+	checker "github.com/jay94ks/seafield/internal/workload/lifecycle"
 )
 
 type checkerBuilderNoHTTP struct{ t *testing.T }
@@ -42,7 +42,7 @@ func TestCheckerBuilderMissingDispatchedJournalCannotBecomeFreshAcceptance(t *te
 		t.Fatal(err)
 	}
 	defer db.Close()
-	api, err := client.New(client.WithHost("unix:///nonexistent-mydc-compiler.sock"), client.WithAPIVersion("1.53"), client.WithHTTPClient(&http.Client{Transport: checkerBuilderNoHTTP{t}}))
+	api, err := client.New(client.WithHost("unix:///nonexistent-sfc-compiler.sock"), client.WithAPIVersion("1.53"), client.WithHTTPClient(&http.Client{Transport: checkerBuilderNoHTTP{t}}))
 	if err != nil {
 		t.Fatal(err)
 	}

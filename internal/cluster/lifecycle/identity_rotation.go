@@ -23,7 +23,7 @@ func IdentityProofBytes(p IdentityProof) []byte {
 	p.OldSignature = nil
 	p.NewSignature = nil
 	raw, _ := json.Marshal(p)
-	return append([]byte("mydc-node-identity-1\x00"), raw...)
+	return append([]byte("sfc-node-identity-1\x00"), raw...)
 }
 func (p IdentityProof) Valid() bool {
 	return p.Schema == 1 && p.Cluster != ([32]byte{}) && ValidID(p.Node) && ValidID(p.Operation) && p.Old != ([32]byte{}) && p.New != ([32]byte{}) && p.Old != p.New && p.Prepared != ([32]byte{}) && ed25519.Verify(ed25519.PublicKey(p.Old[:]), IdentityProofBytes(p), p.OldSignature) && ed25519.Verify(ed25519.PublicKey(p.New[:]), IdentityProofBytes(p), p.NewSignature)

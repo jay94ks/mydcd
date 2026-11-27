@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/mydcp"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/sfcp"
 
 	"github.com/hashicorp/raft"
 )
@@ -25,16 +25,16 @@ func TestRealBoundaryLatestReadsDoNotGrowRaftLog(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	nodes := make([]realNode, 3)
-	peers := map[mydcp.Identity]mydcp.Peer{}
-	byID := map[string]mydcp.Peer{}
+	peers := map[sfcp.Identity]sfcp.Peer{}
+	byID := map[string]sfcp.Peer{}
 	var mu sync.RWMutex
-	lookup := func(k mydcp.Identity) (mydcp.Peer, bool) {
+	lookup := func(k sfcp.Identity) (sfcp.Peer, bool) {
 		mu.RLock()
 		defer mu.RUnlock()
 		p, ok := peers[k]
 		return p, ok
 	}
-	resolve := func(id raft.ServerID, a raft.ServerAddress) (mydcp.Peer, bool) {
+	resolve := func(id raft.ServerID, a raft.ServerAddress) (sfcp.Peer, bool) {
 		mu.RLock()
 		defer mu.RUnlock()
 		p, ok := byID[string(id)]
@@ -58,15 +58,15 @@ func TestRealBoundaryLatestReadsDoNotGrowRaftLog(t *testing.T) {
 			t.Fatal(err)
 		}
 		n.root = t.TempDir()
-		key := mydcp.Identity(n.identity.Public)
-		if n.mesh, err = mydcp.NewTransport(n.identity, [32]byte{6}, lookup); err != nil {
+		key := sfcp.Identity(n.identity.Public)
+		if n.mesh, err = sfcp.NewTransport(n.identity, [32]byte{6}, lookup); err != nil {
 			t.Fatal(err)
 		}
 		if err = n.mesh.Listen("127.0.0.1:0"); err != nil {
 			t.Fatal(err)
 		}
 		n.address = n.mesh.Addr().String()
-		p := mydcp.Peer{ID: fmt.Sprint(i), Endpoint: n.address, Policy: mydcp.Policy{Key: key, Member: true, Respond: true, Snapshot: true}}
+		p := sfcp.Peer{ID: fmt.Sprint(i), Endpoint: n.address, Policy: sfcp.Policy{Key: key, Member: true, Respond: true, Snapshot: true}}
 		mu.Lock()
 		peers[key], byID[p.ID] = p, p
 		mu.Unlock()

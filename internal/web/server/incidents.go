@@ -14,12 +14,12 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/jay94ks/mydcd/internal/web/mydc"
-	"github.com/jay94ks/mydcd/internal/web/store"
+	"github.com/jay94ks/seafield/internal/web/sfc"
+	"github.com/jay94ks/seafield/internal/web/store"
 )
 
 // Incidents (W2.3, UI-B3·B4): what the watcher opened and decided. Who
-// may see an incident is asked of mydcd on each request: cluster incidents
+// may see an incident is asked of sfcd on each request: cluster incidents
 // are the system administrators', app incidents belong to whoever has a
 // role in the workspace. Approving sends the action as the approver.
 
@@ -41,10 +41,10 @@ const (
 	incidentClosed     = "closed"
 )
 
-// incidentAccess is what the caller may see, from mydcd.
+// incidentAccess is what the caller may see, from sfcd.
 type incidentAccess struct {
 	admin bool
-	roles map[string]mydc.Role
+	roles map[string]sfc.Role
 }
 
 func (s *Server) incidentAccessOf(r *http.Request, ws *webSession) (incidentAccess, error) {
@@ -54,8 +54,8 @@ func (s *Server) incidentAccessOf(r *http.Request, ws *webSession) (incidentAcce
 }
 
 func (s *Server) incidentAccessCtx(ctx context.Context, ws *webSession) (incidentAccess, error) {
-	out := incidentAccess{roles: map[string]mydc.Role{}}
-	err := ws.do(ctx, func(ctx context.Context, c mydc.Conn) error {
+	out := incidentAccess{roles: map[string]sfc.Role{}}
+	err := ws.do(ctx, func(ctx context.Context, c sfc.Conn) error {
 		who, err := c.Whoami(ctx)
 		if err != nil {
 			return err
@@ -76,7 +76,7 @@ func (a incidentAccess) can(in *store.Incident, manage bool) bool {
 		return a.admin
 	}
 	role := a.roles[in.Tenant]
-	return role != "" && (!manage || role == mydc.RoleManager)
+	return role != "" && (!manage || role == sfc.RoleManager)
 }
 
 type incidentDecisionView struct {
@@ -414,7 +414,7 @@ func (s *Server) sendOneIncidentAction(ctx context.Context, ws *webSession, in *
 	}
 	body["opId"] = opID
 	raw, _ := json.Marshal(body)
-	hdr := map[string]string{"X-MyDC-Reason": url.PathEscape(reason), "X-MyDC-Incident": url.PathEscape(in.ID)}
+	hdr := map[string]string{"X-SFC-Reason": url.PathEscape(reason), "X-SFC-Incident": url.PathEscape(in.ID)}
 	status, out := s.dispatchWith(ctx, ws, a.Method, a.Path, nil, raw, hdr)
 	var res struct {
 		Op *opView `json:"op"`

@@ -6,7 +6,7 @@ import (
 	"crypto/ed25519"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/access"
+	"github.com/jay94ks/seafield/internal/access"
 )
 
 func TestOriginalSessionIdentityIncludesIndependentUserApproval(t *testing.T) {

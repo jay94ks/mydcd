@@ -26,8 +26,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/workload"
-	"github.com/jay94ks/mydcd/internal/workload/volumes"
+	"github.com/jay94ks/seafield/internal/workload"
+	"github.com/jay94ks/seafield/internal/workload/volumes"
 )
 
 func serverFixture(t *testing.T) (Specification, tls.Certificate, *http.Client) {

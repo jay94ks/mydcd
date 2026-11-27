@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-// An unchanged fact is renewed over MyDCP and never moves the Execution;
+// An unchanged fact is renewed over SFCP and never moves the Execution;
 // only an outage (one expiry) and the owner's next fact are Raft writes.
 func TestObservationRenewalExpiryAndRevival(t *testing.T) {
 	x := runFixture(t)

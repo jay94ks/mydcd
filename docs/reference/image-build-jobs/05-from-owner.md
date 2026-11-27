@@ -7,7 +7,7 @@ job-private OCI store ID로 전환한다. 고정 digest 이외의 이미지·다
 맡긴다. FROM/COPY/mount의 이미지 읽기에 같은 경계를 쓴다.
 
 각 store는 원 frozen FROM root와 source에 고정한다. 설치 builder가
-[ImageContent kind5](../image-content.md#수락된-빌드의-from-본문)로 원 owner에서 읽으며,
+[ImageContent kind16](../image-content.md#수락된-빌드의-from-본문)로 원 owner에서 읽으며,
 local owner도 같은 body 검증 코어를 사용한다. Basic-only·repository별 reader 및
 내장 registry의 인증/TLS 검증은 해당 owner가 맡는다. password/토큰/CA를 builder의
 호스트별 credential로 합치지 않는다. cache된 본문도 현재 job/source 권한을

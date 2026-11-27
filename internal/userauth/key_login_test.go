@@ -8,9 +8,9 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/mydcp"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/sfcp"
 )
 
 // KeyLogin refuses, before any exchange, a proof that is not exactly
@@ -22,7 +22,7 @@ func TestKeyLoginRefusesForeignProofBeforeSending(t *testing.T) {
 	}
 	issuer, user, other := mustKey(t), mustKey(t), mustKey(t)
 	c := Client{Self: self, Cluster: [32]byte{7}}
-	peer := mydcp.Peer{ID: "node", Policy: mydcp.Policy{Key: mydcp.Identity(issuer.Public().(ed25519.PublicKey))}}
+	peer := sfcp.Peer{ID: "node", Policy: sfcp.Policy{Key: sfcp.Identity(issuer.Public().(ed25519.PublicKey))}}
 	ticket := Ticket{Schema: 1, Cluster: c.Cluster, User: "u1", Username: "alice", Credential: "key", AccountRevision: 1, SessionKey: self.Public, UserKey: [32]byte(user.Public().(ed25519.PublicKey)), Challenge: [32]byte{9}, Issuer: [32]byte(peer.Key), Deadline: 300}
 	sign := func(p access.KeyProof, k ed25519.PrivateKey) access.KeyProof {
 		p.Signature = ed25519.Sign(k, access.KeyProofBytes(p))
@@ -35,13 +35,13 @@ func TestKeyLoginRefusesForeignProofBeforeSending(t *testing.T) {
 		"changed field": sign(changed, user),
 		"unsigned":      c.KeyLoginProof(ticket),
 	} {
-		if _, err := c.KeyLogin(context.Background(), peer, ticket, proof); !errors.Is(err, mydcp.ErrAdmission) {
+		if _, err := c.KeyLogin(context.Background(), peer, ticket, proof); !errors.Is(err, sfcp.ErrAdmission) {
 			t.Fatal(name, err)
 		}
 	}
 	wrongPeer := peer
-	wrongPeer.Key = mydcp.Identity(other.Public().(ed25519.PublicKey))
-	if _, err := c.KeyLogin(context.Background(), wrongPeer, ticket, sign(c.KeyLoginProof(ticket), user)); !errors.Is(err, mydcp.ErrAdmission) {
+	wrongPeer.Key = sfcp.Identity(other.Public().(ed25519.PublicKey))
+	if _, err := c.KeyLogin(context.Background(), wrongPeer, ticket, sign(c.KeyLoginProof(ticket), user)); !errors.Is(err, sfcp.ErrAdmission) {
 		t.Fatal("ticket from another issuer", err)
 	}
 }

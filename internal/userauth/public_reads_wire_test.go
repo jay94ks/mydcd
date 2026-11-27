@@ -5,9 +5,10 @@ package userauth
 import (
 	"context"
 	"crypto/sha256"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/schema"
+	"encoding/json"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/sfcp"
 	"path/filepath"
 	"testing"
 	"time"
@@ -26,28 +27,32 @@ func TestPublicReadActualUnixAndQUICRejectForeignMethodAndTenantRows(t *testing.
 					method, query = "volume-backup-limits", control.PublicReadQuery{Node: "node-a"}
 				}
 				peer := client.Peers[0]
-				lookup := func(key mydcp.Identity) (mydcp.Peer, bool) {
-					if key == mydcp.Identity(client.Self.Public) {
-						return mydcp.Peer{ID: "user", Policy: mydcp.Policy{Key: key, UserAuth: true}}, true
+				lookup := func(key sfcp.Identity) (sfcp.Peer, bool) {
+					if key == sfcp.Identity(client.Self.Public) {
+						return sfcp.Peer{ID: "user", Policy: sfcp.Policy{Key: key, UserAuth: true}}, true
 					}
 					return peer, key == peer.Key
 				}
-				server, err := mydcp.NewTransport(node, client.Cluster, lookup)
+				server, err := sfcp.NewTransport(node, client.Cluster, lookup)
 				if err != nil {
 					t.Fatal(err)
 				}
 				defer server.Close()
 				binding := Service{Self: node, Mesh: server, Policy: control.Policy{Cluster: client.Cluster}}
 				done := make(chan error, 1)
-				if err := server.OnManagement(mydcp.User, func(ctx context.Context, conn *mydcp.Session, stream mydcp.Stream, frame mydcp.Frame) error {
+				if err := server.OnManagement(sfcp.User, func(ctx context.Context, conn *sfcp.Session, stream sfcp.Stream, frame sfcp.Frame) error {
 					serve := func() error {
 						envelope, err := schema.Decode[Envelope](frame.Fields[0].Value)
 						if err != nil {
 							return err
 						}
 						request, err := schema.Decode[Request](envelope.Body)
-						if err != nil || !request.validMethodFields() || request.Method != method || request.PublicRead == nil || *request.PublicRead != query {
-							return mydcp.ErrAdmission
+						rule, typed, ok := request.typedMethod()
+						if err != nil || !typed || !ok || request.Method != method {
+							return sfcp.ErrAdmission
+						}
+						if p, _ := rule.decode(request.Params); p.(PublicReadParams) != (PublicReadParams{Tenant: "tenant", Query: query}) {
+							return sfcp.ErrAdmission
 						}
 						if _, err := binding.binding(conn, frame.Kind, envelope); err != nil {
 							return err
@@ -72,7 +77,8 @@ func TestPublicReadActualUnixAndQUICRejectForeignMethodAndTenantRows(t *testing.
 							}
 						}
 						page := control.PublicReadPage{Schema: 1, Method: method, Tenant: "tenant", Rows: []control.PublicReadRow{row}, Total: 1}
-						return binding.respond(stream, frame, sha256.Sum256(frame.Fields[0].Value), Reply{Schema: 1, Code: "ok", PublicRead: &page})
+						data, _ := json.Marshal(page)
+						return binding.respond(stream, frame, sha256.Sum256(frame.Fields[0].Value), Reply{Schema: 1, Code: "ok", Data: data})
 					}()
 					done <- serve
 					return serve
@@ -91,7 +97,7 @@ func TestPublicReadActualUnixAndQUICRejectForeignMethodAndTenantRows(t *testing.
 					}
 					peer.Endpoint = server.Addr().String()
 				}
-				mesh, err := mydcp.NewTransport(client.Self, client.Cluster, lookup)
+				mesh, err := sfcp.NewTransport(client.Self, client.Cluster, lookup)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -104,7 +110,7 @@ func TestPublicReadActualUnixAndQUICRejectForeignMethodAndTenantRows(t *testing.
 					t.Fatal("untrusted page result", mode, err)
 				}
 				if err == nil && backup {
-					original := reply.PublicRead.Rows[0].BackupLimit.Original
+					original := reply.Rows[0].BackupLimit.Original
 					if mode == "backup-original" && (original == nil || original.Bytes != 131072 || original.Count != 3) || mode == "backup-no-original" && original != nil {
 						t.Fatal("wire changed optional original policy", original)
 					}

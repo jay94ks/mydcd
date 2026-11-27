@@ -48,7 +48,7 @@ func TestTaskDetailRoutes(t *testing.T) {
 		t.Fatalf("stats: %d %v", code, out)
 	}
 
-	// Relocation check: mydcd's plan, so a viewer is refused like a plan.
+	// Relocation check: sfcd's plan, so a viewer is refused like a plan.
 	if code, _ := f.do("GET", "/api/v1/t/shop/apps/php-shop/relocation-check?service=web&node=node-b", nil); code != 403 {
 		t.Fatalf("viewer relocation: %d", code)
 	}
@@ -61,7 +61,7 @@ func TestTaskDetailRoutes(t *testing.T) {
 		t.Fatalf("no node: %d", code)
 	}
 	// db with its own node-fixed mysql-data moves by a volume move; the
-	// check is mydcd's plan of that move.
+	// check is sfcd's plan of that move.
 	code, out = f.do("GET", "/api/v1/t/shop/apps/php-shop/relocation-check?service=db&node=node-a", nil)
 	if vs, _ := out["volumes"].([]any); code != 200 || fmt.Sprint(out["steps"]) != "[volume-move]" || len(vs) != 1 || vs[0].(map[string]any)["step"] != "move" {
 		t.Fatalf("db relocation: %d %v", code, out)
@@ -71,7 +71,7 @@ func TestTaskDetailRoutes(t *testing.T) {
 	}
 	bobLogin(t, f)
 
-	// Restart: managers only (mydcd decides); Expected = the app revision.
+	// Restart: managers only (sfcd decides); Expected = the app revision.
 	if code, out := f.do("POST", db+"/restart", map[string]any{"opId": op(), "service": "db", "instance": "1"}); opState(t, code, out) == "applied" {
 		t.Fatalf("viewer restart: %d %v", code, out)
 	}
@@ -91,7 +91,7 @@ func TestTaskDetailRoutes(t *testing.T) {
 }
 
 // The web's own recovery of a volume file op whose reply was lost, and the
-// same opId sent again (the file operations themselves run on real mydcd in
+// same opId sent again (the file operations themselves run on real sfcd in
 // TestRealServerVolumeFiles).
 func TestVolumeFileRoutes(t *testing.T) {
 	f, fake := newFakeFixture(t)
@@ -100,7 +100,7 @@ func TestVolumeFileRoutes(t *testing.T) {
 	raw := func(method, path string, body []byte) (int, string, http.Header) {
 		t.Helper()
 		req, _ := http.NewRequest(method, f.http.URL+path, bytes.NewReader(body))
-		req.Header.Set("X-MyDC-Web", "1")
+		req.Header.Set("X-SFC-Web", "1")
 		res, err := f.hc.Do(req)
 		if err != nil {
 			t.Fatal(err)
@@ -110,7 +110,7 @@ func TestVolumeFileRoutes(t *testing.T) {
 		return res.StatusCode, string(b), res.Header
 	}
 	base := "/api/v1/t/shop/volumes/uploads"
-	const pre = "mydc-web-backups/"
+	const pre = "sfc-web-backups/"
 	fakeLogin(t, f, "alice")
 	content := []byte("first-volume-file-content-7f3c9a1e")
 	if code, body, _ := raw("PUT", base+"/file?path="+pre+"a.db&opId="+op(), content); code != 200 || !strings.Contains(body, `"applied"`) {

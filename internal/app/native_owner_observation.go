@@ -5,13 +5,13 @@ package app
 import (
 	"strings"
 
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/cluster/membership"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/network/services"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/membership"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/network/services"
+	"github.com/jay94ks/seafield/internal/sfcp"
 )
 
 // Observation selects an exact retained source in the supplied committed view.
@@ -96,7 +96,7 @@ func managedDNSObservationIdentity(key string, object state.Object, members memb
 		return [32]byte{}, deployment.ErrInputs
 	}
 	if !members.MemberKey(current) {
-		return [32]byte{}, mydcp.ErrAdmission
+		return [32]byte{}, sfcp.ErrAdmission
 	}
 	var selected [32]byte
 	for _, candidate := range candidates {
@@ -105,7 +105,7 @@ func managedDNSObservationIdentity(key string, object state.Object, members memb
 			continue
 		}
 		if row.Managed == nil || !members.ResourceKeyForNode(row.Managed.Node, candidate.owner) {
-			return [32]byte{}, mydcp.ErrAdmission
+			return [32]byte{}, sfcp.ErrAdmission
 		}
 		if row.Source.Generation != object.Generation || row.Source.Revision != object.Revision {
 			return [32]byte{}, deployment.ErrInputs

@@ -12,8 +12,8 @@ import (
 	"path"
 	"path/filepath"
 
-	"github.com/jay94ks/mydcd/internal/engine"
-	"github.com/jay94ks/mydcd/internal/nodestorage"
+	"github.com/jay94ks/seafield/internal/engine"
+	"github.com/jay94ks/seafield/internal/nodestorage"
 	bolt "go.etcd.io/bbolt"
 	"golang.org/x/sys/unix"
 )
@@ -273,7 +273,7 @@ func (n *NativeJobs) PrepareWorkspace(ctx context.Context, spec JobSpec, rootFD 
 	if err != nil {
 		return err
 	}
-	for _, name := range []string{".mydc-imagebuild/jobs", ".mydc-imagebuild/build-cache"} {
+	for _, name := range []string{".sfc-imagebuild/jobs", ".sfc-imagebuild/build-cache"} {
 		if err := ensureNativeParent(rootFD, name); err != nil {
 			return err
 		}

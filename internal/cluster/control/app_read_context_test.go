@@ -8,9 +8,9 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/deployment"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/deployment"
 )
 
 func TestAppPlanningBorrowedRecipesReturnOwnedPrograms(t *testing.T) {
@@ -78,7 +78,7 @@ func TestAppDeliveryBorrowedPermitOwnsOutputAndRechecksAuthority(t *testing.T) {
 	u, _ := c.User("admin")
 	expected := u.Revision
 	u.Revision, u.Username = 0, "renamed-admin"
-	c, err = c.PutUser("admin", expected, u)
+	c, err = c.PutUser("admin", expected, accountFields(u))
 	if err != nil {
 		t.Fatal(err)
 	}

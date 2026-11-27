@@ -11,18 +11,18 @@ import (
 	"time"
 
 	"github.com/go-git/go-git/v5"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/imagebuild"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/schema"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/imagebuild"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/sfcp"
 )
 
 func (r *Runtime) checkImageBuildSource(ctx context.Context, read control.ImageBuildSourceRead) (control.ImageBuildSourceResult, error) {
 	view, err := r.currentView(ctx)
 	if err != nil || view.Local {
-		return control.ImageBuildSourceResult{}, mydcp.ErrAdmission
+		return control.ImageBuildSourceResult{}, sfcp.ErrAdmission
 	}
 	current, err := r.controlPolicy.CurrentImageBuildSourceRead(view.State, read, time.Now().Unix())
 	if err != nil {
@@ -31,18 +31,18 @@ func (r *Runtime) checkImageBuildSource(ctx context.Context, read control.ImageB
 	if current.Spec.Root.Key == r.Identity.Public {
 		return r.checkImageBuildSourceOwner(ctx, current)
 	}
-	peer, ok := r.Mesh.Peer(mydcp.Identity(current.Spec.Root.Key))
+	peer, ok := r.Mesh.Peer(sfcp.Identity(current.Spec.Root.Key))
 	if !ok || !peer.Member || peer.ID != current.Spec.Root.Node {
-		return control.ImageBuildSourceResult{}, mydcp.ErrAdmission
+		return control.ImageBuildSourceResult{}, sfcp.ErrAdmission
 	}
 	raw, _ := json.Marshal(current)
 	reply, err := cluster.CallManagement(ctx, r.Mesh, r.Identity, r.controlPolicy.Cluster, peer, cluster.ManagementRequest{Method: "image-build-source-owner", Input: raw})
 	if err != nil || reply.Code != "ok" {
-		return control.ImageBuildSourceResult{}, mydcp.ErrAdmission
+		return control.ImageBuildSourceResult{}, sfcp.ErrAdmission
 	}
 	out, err := schema.Decode[control.ImageBuildSourceResult](reply.Data)
 	if err != nil || !out.Valid(current) {
-		return control.ImageBuildSourceResult{}, mydcp.ErrAdmission
+		return control.ImageBuildSourceResult{}, sfcp.ErrAdmission
 	}
 	return out, nil
 }
@@ -54,11 +54,11 @@ func (r *Runtime) checkImageBuildSourceOwner(ctx context.Context, read control.I
 	current := func() (control.ImageBuildSourceRead, error) {
 		view, err := r.currentView(ctx)
 		if err != nil || view.Local {
-			return control.ImageBuildSourceRead{}, mydcp.ErrAdmission
+			return control.ImageBuildSourceRead{}, sfcp.ErrAdmission
 		}
 		now, err := r.controlPolicy.CurrentImageBuildSourceRead(view.State, read, time.Now().Unix())
 		if err != nil || now.Spec.Root.Key != r.Identity.Public {
-			return control.ImageBuildSourceRead{}, mydcp.ErrAdmission
+			return control.ImageBuildSourceRead{}, sfcp.ErrAdmission
 		}
 		return now, nil
 	}
@@ -75,7 +75,7 @@ func (r *Runtime) inspectImageBuildSourceOwner(ctx context.Context, read control
 	r.life.RLock()
 	defer r.life.RUnlock()
 	if r.closed || r.gitFetcher == nil || r.ctx.Err() != nil {
-		return control.ImageBuildSourceResult{}, mydcp.ErrAdmission
+		return control.ImageBuildSourceResult{}, sfcp.ErrAdmission
 	}
 	out := control.ImageBuildSourceResult{Schema: 1, Context: read.Spec.ID, ContextRevision: read.ContextRevision, PolicyRevision: read.PolicyRevision, Epoch: read.Epoch, Code: "SOURCE_FETCH"}
 	var access deployment.GitAccess
@@ -123,7 +123,7 @@ func (r *Runtime) inspectImageBuildSourceOwner(ctx context.Context, read control
 	} else {
 		view, cause := r.currentView(ctx)
 		if cause != nil || view.Local {
-			return control.ImageBuildSourceResult{}, mydcp.ErrAdmission
+			return control.ImageBuildSourceResult{}, sfcp.ErrAdmission
 		}
 		users, cause := r.controlPolicy.Catalog(view.State)
 		if cause != nil {

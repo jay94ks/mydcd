@@ -10,9 +10,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	checker "github.com/jay94ks/mydcd/internal/workload/lifecycle"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	checker "github.com/jay94ks/seafield/internal/workload/lifecycle"
 )
 
 func newCheckerFixture(t *testing.T) *nodeStorageFixture {
@@ -28,7 +28,7 @@ func newCheckerFixture(t *testing.T) *nodeStorageFixture {
 func checkerPolicy() checker.TenantPolicy {
 	return checker.TenantPolicy{Tenant: "tenant", Enabled: true,
 		Execution: checker.ExecutionPolicy{MaxConcurrent: 2, TimeoutMS: 5000, NanoCPU: 100_000_000, MemoryBytes: 32 << 20, MaxPIDs: 16, OutputBytes: 4096, ProbeBytes: 4096, Capabilities: []string{"file"}},
-		Resolver:  checker.ResolverPolicy{AllowPackages: []string{"context", "github.com/jay94ks/mydcd/lifecycle/v1"}, SourceCacheBytes: 1 << 20}}
+		Resolver:  checker.ResolverPolicy{AllowPackages: []string{"context", "github.com/jay94ks/seafield/lifecycle/v1"}, SourceCacheBytes: 1 << 20}}
 }
 
 func checkerFact(f *nodeStorageFixture, private ed25519.PrivateKey, source string) checker.SourceFact {

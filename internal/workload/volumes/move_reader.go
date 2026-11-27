@@ -6,14 +6,14 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 
-	"github.com/jay94ks/mydcd/internal/access"
+	"github.com/jay94ks/seafield/internal/access"
 )
 
 // The identity fits the existing consumer namespace even for a 63-byte move
 // ID. The digest binds the original scope/owner revisions and both native IDs;
 // it is an identifier, not another log or synchronization authority.
 func moveReaderID(b Binding) string {
-	digest := sha256.Sum256(signedBytes("mydc-volume-move-reader-1", b))
+	digest := sha256.Sum256(signedBytes("sfc-volume-move-reader-1", b))
 	return "m-" + hex.EncodeToString(digest[:24])
 }
 

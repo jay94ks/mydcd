@@ -10,10 +10,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/network/services"
-	"github.com/jay94ks/mydcd/internal/schema"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/network/services"
+	"github.com/jay94ks/seafield/internal/schema"
 )
 
 // Fake owner facts terminate the original native. Every mutation still passes
@@ -23,7 +23,7 @@ func TestReplacementFSMAdmitsNewGenerationAfterOriginalPositiveClosure(t *testin
 	const app = "first"
 	managedDNSTaskCoreBegin(t, f, app, "10.80.1.2", "web", func(c *deployment.Compose, _ *deployment.PlanningContext) {
 		s := c.Services["web"]
-		s.MyDC.Node, s.MyDC.Nodes, s.MyDC.PerNode = "", []string{"node-a"}, 2
+		s.Sfc.Node, s.Sfc.Nodes, s.Sfc.PerNode = "", []string{"node-a"}, 2
 		a := s.Networks["lan"]
 		a.IPv4 = ""
 		s.Networks["lan"] = a

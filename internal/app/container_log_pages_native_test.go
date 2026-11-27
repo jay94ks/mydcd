@@ -13,16 +13,16 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/containerops"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/userauth"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/containerops"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/userauth"
 )
 
 // Reuses the existing actual managed-app owner and rollback; this does not
 // construct a separate observer or bypass the user/owner permit boundaries.
-func verifyContainerLogPaging(t *testing.T, ctx context.Context, runtime *Runtime, user userauth.Client, peer mydcp.Peer, session access.Session) {
+func verifyContainerLogPaging(t *testing.T, ctx context.Context, runtime *Runtime, user userauth.Client, peer sfcp.Peer, session access.Session) {
 	t.Helper()
 	query := containerops.Query{Schema: 1, Selection: containerops.Selection{App: "app", Service: "web"}, Kind: "logs", Tail: 10000, Stdout: true, Stderr: true, MaxBytes: containerops.MaxOutput}
 	first, err := user.ObserveContainer(ctx, peer, session, "tenant", query)

@@ -10,10 +10,10 @@ import (
 	"fmt"
 	"math"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/imagebuild"
-	"github.com/jay94ks/mydcd/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/imagebuild"
+	"github.com/jay94ks/seafield/internal/reconcile"
 )
 
 const ImageBuildCacheAutomaticInterval uint64 = 300
@@ -34,10 +34,10 @@ type ImageBuildCacheAutomaticReport struct {
 func ImageBuildCacheAutomaticBytes(r ImageBuildCacheAutomaticReport) []byte {
 	r.Signature = nil
 	raw, _ := json.Marshal(r)
-	return append([]byte("mydc-imagebuild-cache-automatic-1\x00"), raw...)
+	return append([]byte("sfc-imagebuild-cache-automatic-1\x00"), raw...)
 }
 func (r ImageBuildCacheAutomaticReport) ID() string {
-	hash := sha256.Sum256([]byte(fmt.Sprintf("mydc-cache-automatic-id-1\x00%x\x00%x\x00%d", r.Cache, r.Definition, r.Sequence)))
+	hash := sha256.Sum256([]byte(fmt.Sprintf("sfc-cache-automatic-id-1\x00%x\x00%x\x00%d", r.Cache, r.Definition, r.Sequence)))
 	return "auto-cache-" + hex.EncodeToString(hash[:24])
 }
 func (r ImageBuildCacheAutomaticReport) Change() ImageBuildCachePruneChange {

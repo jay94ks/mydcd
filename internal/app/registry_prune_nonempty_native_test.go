@@ -15,25 +15,25 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/registry"
-	"github.com/jay94ks/mydcd/internal/registryclient"
-	"github.com/jay94ks/mydcd/internal/schema"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/registry"
+	"github.com/jay94ks/seafield/internal/registryclient"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/sfcp"
 )
 
 // One actual managed-registry seed push and the existing retained Volume/CLI/
 // User/Raft rollback. No app/BuildKit/large payload is replayed. This covers
 // managed nonempty prune+selected GC, not external DELETE or a 10 GiB transfer.
 func TestRQ6RegistryPruneNonemptyOriginalItemsAndGCNative(t *testing.T) {
-	if os.Getenv("MYDC_TEST_RQ6_REMAINING") != "prune-nonempty" {
+	if os.Getenv("SFC_TEST_RQ6_REMAINING") != "prune-nonempty" {
 		t.Skip("explicit prune-nonempty remaining scope required")
 	}
-	if os.Getenv("MYDC_TEST_RQ6_IMAGE_BUILD") == "1" || os.Getenv("MYDC_TEST_RQ6_LARGE_CONTEXT") == "1" || os.Getenv("MYDC_TEST_RQ6_LARGE_REGISTRY") == "1" {
+	if os.Getenv("SFC_TEST_RQ6_IMAGE_BUILD") == "1" || os.Getenv("SFC_TEST_RQ6_LARGE_CONTEXT") == "1" || os.Getenv("SFC_TEST_RQ6_LARGE_REGISTRY") == "1" {
 		t.Fatal("prune-nonempty reuses the seed push without build/large opt-ins")
 	}
-	if os.Getenv("MYDC_REGISTRY_TEST_IP") == "" || os.Getenv("MYDC_STORAGE_TEST_ROOT") == "" || os.Getenv("MYDC_STORAGE_TEST_OWNER") == "" || os.Getenv("MYDC_STORAGE_HOST_MOUNT_NS") == "" {
+	if os.Getenv("SFC_REGISTRY_TEST_IP") == "" || os.Getenv("SFC_STORAGE_TEST_ROOT") == "" || os.Getenv("SFC_STORAGE_TEST_OWNER") == "" || os.Getenv("SFC_STORAGE_HOST_MOUNT_NS") == "" {
 		t.Skip("installed registry IPv4 and owned storage/mount rollback inputs required")
 	}
 	runManagedAppOwner(t, true, true, true, true, managedAppRegistry, true, false, false)
@@ -41,7 +41,7 @@ func TestRQ6RegistryPruneNonemptyOriginalItemsAndGCNative(t *testing.T) {
 
 func (f *managedRegistryNative) verifyRegistryPruneNonemptyNative(t *testing.T, ctx context.Context, owner *Runtime, root string, p control.Policy, read func() cluster.View) {
 	t.Helper()
-	if os.Getenv("MYDC_TEST_RQ6_IMAGE_BUILD") == "1" || os.Getenv("MYDC_TEST_RQ6_LARGE_CONTEXT") == "1" || os.Getenv("MYDC_TEST_RQ6_LARGE_REGISTRY") == "1" {
+	if os.Getenv("SFC_TEST_RQ6_IMAGE_BUILD") == "1" || os.Getenv("SFC_TEST_RQ6_LARGE_CONTEXT") == "1" || os.Getenv("SFC_TEST_RQ6_LARGE_REGISTRY") == "1" {
 		t.Fatal("prune-nonempty must finish before unrelated native scopes")
 	}
 	_, digest, found := strings.Cut(f.reference, "@")
@@ -316,7 +316,7 @@ func (f *managedRegistryNative) verifyRegistryPruneNonemptyNative(t *testing.T, 
 			bad.Base.Change.Run.SpecRevision++
 		}
 		out, err := owner.registryPruneOwner(ctx, bad, true)
-		if !errors.Is(err, mydcp.ErrAdmission) || out.Schema != 0 {
+		if !errors.Is(err, sfcp.ErrAdmission) || out.Schema != 0 {
 			t.Fatal("original result accepted changed source/owner", mode, err)
 		}
 	}

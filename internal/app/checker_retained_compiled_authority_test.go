@@ -9,13 +9,13 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/cluster/lifecycle"
-	"github.com/jay94ks/mydcd/internal/cluster/membership"
-	"github.com/jay94ks/mydcd/internal/config"
-	checker "github.com/jay94ks/mydcd/internal/workload/lifecycle"
-	contract "github.com/jay94ks/mydcd/lifecycle/v1"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/lifecycle"
+	"github.com/jay94ks/seafield/internal/cluster/membership"
+	"github.com/jay94ks/seafield/internal/config"
+	checker "github.com/jay94ks/seafield/internal/workload/lifecycle"
+	contract "github.com/jay94ks/seafield/lifecycle/v1"
 )
 
 // Reuses the existing signed artifact fixture and actual immutable catalog,
@@ -42,13 +42,13 @@ func retainedCompiledAuthorityFixture(t *testing.T) (checker.Catalog, checker.Us
 		t.Fatal(err)
 	}
 	tenant, _ = users.Tenant(source.Tenant)
-	users, err = users.SetTrust("admin", source.Tenant, tenant.Revision, []access.TrustRule{{Registry: "docker.io", Repository: "library/golang"}})
+	users, err = users.ChangeTrust("admin", source.Tenant, tenant.Revision, []access.TrustRule{{Registry: "docker.io", Repository: "library/golang"}}, tenant.ImageSources)
 	if err != nil {
 		t.Fatal(err)
 	}
 	policy := checker.TenantPolicy{Tenant: source.Tenant, Enabled: true,
 		Execution: checker.ExecutionPolicy{MaxConcurrent: 1, TimeoutMS: 5000, NanoCPU: 100000000, MemoryBytes: 64 << 20, MaxPIDs: 16, OutputBytes: 4096, ProbeBytes: 4096, Capabilities: []string{"file"}},
-		Resolver:  checker.ResolverPolicy{AllowPackages: []string{"context", "github.com/jay94ks/mydcd/lifecycle/v1"}, SourceCacheBytes: 1 << 20},
+		Resolver:  checker.ResolverPolicy{AllowPackages: []string{"context", "github.com/jay94ks/seafield/lifecycle/v1"}, SourceCacheBytes: 1 << 20},
 		Build:     checker.BuildPolicy{Nodes: []string{"node-a"}, Targets: []string{"linux/amd64"}, Image: fact.Build.Recipe.Image, Toolchain: fact.Build.Recipe.Toolchain, MaxJobs: 1, NanoCPU: 100000000, MemoryBytes: 64 << 20, WorkspaceBytes: 64 << 20, ArtifactBytes: 32 << 20, TimeoutMS: 10000}, CompiledCacheBytes: 64 << 20}
 	book, err := checker.NewCatalog(source.Cluster)
 	if err != nil {

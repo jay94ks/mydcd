@@ -17,13 +17,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/containerops"
-	"github.com/jay94ks/mydcd/internal/desired"
-	"github.com/jay94ks/mydcd/internal/engine"
-	"github.com/jay94ks/mydcd/internal/network"
-	"github.com/jay94ks/mydcd/internal/reconcile"
-	"github.com/jay94ks/mydcd/internal/workload"
-	"github.com/jay94ks/mydcd/tests/enginefixture"
+	"github.com/jay94ks/seafield/internal/containerops"
+	"github.com/jay94ks/seafield/internal/desired"
+	"github.com/jay94ks/seafield/internal/engine"
+	"github.com/jay94ks/seafield/internal/network"
+	"github.com/jay94ks/seafield/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/workload"
+	"github.com/jay94ks/seafield/tests/enginefixture"
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/client"
 )
@@ -52,7 +52,7 @@ func TestRQ4RealSecretEnvironmentSpecifiedFileAndRedactedLogs(t *testing.T) {
 
 func verifyPrivateProjectionNative(t *testing.T, environment bool) {
 	t.Helper()
-	tag := os.Getenv("MYDC_DOCKER_TEST_OWNER")
+	tag := os.Getenv("SFC_DOCKER_TEST_OWNER")
 	if tag == "" {
 		t.Skip("requires owned Docker rollback prestate")
 	}
@@ -65,8 +65,8 @@ func verifyPrivateProjectionNative(t *testing.T, environment bool) {
 	var changes []func(*Needs)
 	if environment {
 		changes = append(changes, func(n *Needs) {
-			n.Files[0].Target = "/etc/mydc/app-password"
-			n.Files = append(n.Files, Projection{Key: "DB_PASSWORD", Target: "MYDC_SECRET_ENV_VALUE", Mode: 0400, Kind: "env"})
+			n.Files[0].Target = "/etc/sfc/app-password"
+			n.Files = append(n.Files, Projection{Key: "DB_PASSWORD", Target: "SFC_SECRET_ENV_VALUE", Mode: 0400, Kind: "env"})
 		})
 	}
 	f, b, stage, gate := projectionFixtureCluster(t, cluster, changes...)
@@ -76,14 +76,14 @@ func verifyPrivateProjectionNative(t *testing.T, environment bool) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	owned, err := check.API.ContainerList(ctx, client.ContainerListOptions{All: true, Filters: client.Filters{}.Add("label", "org.mydc.owner="+owner)})
+	owned, err := check.API.ContainerList(ctx, client.ContainerListOptions{All: true, Filters: client.Filters{}.Add("label", "org.sfc.owner="+owner)})
 	_ = check.Close()
 	if err != nil || len(owned.Items) != 0 {
 		t.Fatal("fresh native owner precondition", err)
 	}
 	// Register private-root cleanup before the fixture's native rollback, so
 	// LIFO cleanup removes any native mount/container before its source files.
-	root, err := os.MkdirTemp("/tmp", "mydc-projection-native-")
+	root, err := os.MkdirTemp("/tmp", "sfc-projection-native-")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,9 +92,9 @@ func verifyPrivateProjectionNative(t *testing.T, environment bool) {
 			t.Error(err)
 		}
 	})
-	backend := os.Getenv("MYDC_DOCKER_TEST_BACKEND")
+	backend := os.Getenv("SFC_DOCKER_TEST_BACKEND")
 	if environment {
-		manifest := os.Getenv("MYDC_NATIVE_MANIFEST")
+		manifest := os.Getenv("SFC_NATIVE_MANIFEST")
 		if !filepath.IsAbs(backend) || !filepath.IsAbs(manifest) {
 			t.Fatal("RQ4 requires prebuilt static backend and original ownership manifest")
 		}
@@ -102,7 +102,7 @@ func verifyPrivateProjectionNative(t *testing.T, environment bool) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		err = json.NewEncoder(file).Encode(map[string]any{"Owner": owner, "Tag": tag, "Cluster": f.cluster, "NodeKey": b.d.Needs.Use.NodeKey, "Root": root, "CIDR": os.Getenv("MYDC_DOCKER_TEST_CIDR"), "ImageRef": "mydc-boundary/" + tag + ":local"})
+		err = json.NewEncoder(file).Encode(map[string]any{"Owner": owner, "Tag": tag, "Cluster": f.cluster, "NodeKey": b.d.Needs.Use.NodeKey, "Root": root, "CIDR": os.Getenv("SFC_DOCKER_TEST_CIDR"), "ImageRef": "sfc-boundary/" + tag + ":local"})
 		if err == nil {
 			err = file.Sync()
 		}
@@ -146,7 +146,7 @@ func verifyPrivateProjectionNative(t *testing.T, environment bool) {
 		t.Fatal(err)
 	}
 	defer func() { _ = w.Close() }()
-	prefix := netip.MustParsePrefix(os.Getenv("MYDC_DOCKER_TEST_CIDR"))
+	prefix := netip.MustParsePrefix(os.Getenv("SFC_DOCKER_TEST_CIDR"))
 	bridgeKey := "network/projection"
 	bridge := network.BridgeSpec{Schema: 1, Network: "projection", Owner: owner, MTU: 1280, Internal: true, Pools: []network.Pool{{ID: "projection", Network: "projection", Owner: owner, Prefix: prefix, Gateway: prefix.Addr().Next(), MTU: 1280}}}
 	if err = n.Desired(bridgeKey, 1, 1, &bridge, 4); err != nil {
@@ -159,9 +159,9 @@ func verifyPrivateProjectionNative(t *testing.T, environment bool) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	env := map[string]string{"MYDC_PROJECTION_FILE": b.d.Needs.Files[0].Target}
+	env := map[string]string{"SFC_PROJECTION_FILE": b.d.Needs.Files[0].Target}
 	if environment {
-		env["MYDC_SECRET_LOG_FIXTURE"] = "1"
+		env["SFC_SECRET_LOG_FIXTURE"] = "1"
 	}
 	process, err := workload.ResolveImageProcess(got, workload.ProcessOverrides{User: fmt.Sprintf("%d:%d", os.Geteuid(), os.Getegid()), Environment: env, Healthcheck: &container.HealthConfig{Test: []string{"CMD", "/backend", "--projection-probe"}, Interval: time.Second, Timeout: time.Second, Retries: 2}})
 	if err != nil {
@@ -206,10 +206,10 @@ func verifyPrivateProjectionNative(t *testing.T, environment bool) {
 	}
 	if environment {
 		native, err := image.Client.API.ContainerInspect(ctx, nativeID, client.ContainerInspectOptions{})
-		if err != nil || native.Container.Config == nil || !slices.Contains(native.Container.Config.Env, "MYDC_SECRET_ENV_VALUE=private-db-value") {
+		if err != nil || native.Container.Config == nil || !slices.Contains(native.Container.Config.Env, "SFC_SECRET_ENV_VALUE=private-db-value") {
 			t.Fatal("Secret value was not supplied at native create", err)
 		}
-		if slices.Contains(process.Env, "MYDC_SECRET_ENV_VALUE=private-db-value") {
+		if slices.Contains(process.Env, "SFC_SECRET_ENV_VALUE=private-db-value") {
 			t.Fatal("runtime Secret mutated frozen image process")
 		}
 		view, err := w.View(taskKey)

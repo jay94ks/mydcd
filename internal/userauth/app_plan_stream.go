@@ -11,12 +11,12 @@ import (
 	"encoding/json"
 	"io"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	checker "github.com/jay94ks/mydcd/internal/workload/lifecycle"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	checker "github.com/jay94ks/seafield/internal/workload/lifecycle"
 )
 
 // AppPlanInput describes read-only bytes on this one authenticated stream.
@@ -40,14 +40,14 @@ func (m AppPlanInput) validSources(envelope bool) bool {
 
 // StreamAppPlan transfers a complete input and one frozen result. No candidate
 // is published until all ordered frames, the digest, and stream EOF validate.
-func (c Client) StreamAppPlan(ctx context.Context, target mydcp.Peer, session access.Session, tenant string, q control.AppPlanRequest) ([]byte, error) {
+func (c Client) StreamAppPlan(ctx context.Context, target sfcp.Peer, session access.Session, tenant string, q control.AppPlanRequest) ([]byte, error) {
 	if c.Verify(session) != nil || q.SourceEnvelope || q.Part != 0 || len(q.Document) == 0 || len(q.Document) > deployment.ArtifactMaxBytes {
-		return nil, mydcp.ErrAdmission
+		return nil, sfcp.ErrAdmission
 	}
 	document := q.Document
 	if len(q.CheckerSources) != 0 {
 		if q.PrepareSources || q.Move != nil {
-			return nil, mydcp.ErrAdmission
+			return nil, sfcp.ErrAdmission
 		}
 		var err error
 		document, err = encodeAppSourceInput(document, q.CheckerSources, c.Cluster, tenant)
@@ -62,15 +62,15 @@ func (c Client) StreamAppPlan(ctx context.Context, target mydcp.Peer, session ac
 	if err != nil {
 		return nil, err
 	}
-	raw, _, err := c.planExchange(ctx, target, document, 1, func(conn *mydcp.Session) (Envelope, error) {
+	raw, _, err := c.planExchange(ctx, target, document, 1, func(conn *sfcp.Session) (Envelope, error) {
 		return Envelope{Body: body, Session: &session, Signature: ed25519.Sign(c.Self.Private, access.RequestBytes(session, conn.PeerChallenge(), body))}, nil
 	})
 	return raw, err
 }
 
-func (c Client) planExchange(ctx context.Context, target mydcp.Peer, document []byte, kind uint8, makeEnvelope func(*mydcp.Session) (Envelope, error)) ([]byte, Reply, error) {
+func (c Client) planExchange(ctx context.Context, target sfcp.Peer, document []byte, kind uint8, makeEnvelope func(*sfcp.Session) (Envelope, error)) ([]byte, Reply, error) {
 	if c.Mesh == nil || c.Self == nil || c.Self.Public != [32]byte(c.Mesh.LocalKey()) {
-		return nil, Reply{}, mydcp.ErrAdmission
+		return nil, Reply{}, sfcp.ErrAdmission
 	}
 	conn, err := c.Mesh.Dial(ctx, target)
 	if err != nil {
@@ -94,18 +94,18 @@ func (c Client) planExchange(ctx context.Context, target mydcp.Peer, document []
 	stop := context.AfterFunc(ctx, func() { stream.CancelRead(1); stream.CancelWrite(1) })
 	defer stop()
 	id := c.Mesh.NextRequest()
-	frame := mydcp.Frame{Purpose: mydcp.User, Kind: kind, Request: id, Fields: []mydcp.Field{{Tag: 1, Required: true, Value: header}, {Tag: 2, Required: true, Value: digest[:]}}}
-	if err = mydcp.WriteFrame(stream, frame); err != nil {
+	frame := sfcp.Frame{Purpose: sfcp.User, Kind: kind, Request: id, Fields: []sfcp.Field{{Tag: 1, Required: true, Value: header}, {Tag: 2, Required: true, Value: digest[:]}}}
+	if err = sfcp.WriteFrame(stream, frame); err != nil {
 		return nil, Reply{}, err
 	}
 	readReply := func() (Reply, error) {
-		f, err := mydcp.ReadFrame(stream, 128<<10)
+		f, err := sfcp.ReadFrame(stream, 128<<10)
 		var reply Reply
 		if err != nil {
 			return reply, err
 		}
-		if f.Purpose != mydcp.User || f.Kind != 2 || f.Request != id || conn.Admit(f, mydcp.User, false) != nil || !bytes.Equal(f.Fields[1].Value, digest[:]) || strict(f.Fields[0].Value, &reply) != nil || reply.Schema != 1 {
-			return reply, mydcp.ErrFrame
+		if f.Purpose != sfcp.User || f.Kind != 2 || f.Request != id || conn.Admit(f, sfcp.User, false) != nil || !bytes.Equal(f.Fields[1].Value, digest[:]) || strict(f.Fields[0].Value, &reply) != nil || reply.Schema != 1 {
+			return reply, sfcp.ErrFrame
 		}
 		return reply, nil
 	}
@@ -114,10 +114,10 @@ func (c Client) planExchange(ctx context.Context, target mydcp.Peer, document []
 		return nil, ready, err
 	}
 	if ready.Code != "continue" {
-		return nil, ready, &Error{Code: ready.Code, Phase: mydcp.Completed}
+		return nil, ready, &Error{Code: ready.Code, Phase: sfcp.Completed}
 	}
 	if ready.AppPlan != nil {
-		return nil, ready, mydcp.ErrFrame
+		return nil, ready, sfcp.ErrFrame
 	}
 	if err = writeUserInput(stream, id, digest, document); err != nil {
 		return nil, ready, err
@@ -135,16 +135,16 @@ func (c Client) planExchange(ctx context.Context, target mydcp.Peer, document []
 			return nil, reply, err
 		}
 		if reply.Code != "ok" {
-			return nil, reply, &Error{Code: reply.Code, Phase: mydcp.Completed, Cause: appPlanInputCause(reply)}
+			return nil, reply, &Error{Code: reply.Code, Phase: sfcp.Completed, Cause: appPlanInputCause(reply)}
 		}
 		part := reply.AppPlan
 		if part == nil || part.Part != index || part.Length < 1 || part.Length > deployment.ArtifactMaxBytes || part.Digest == ([32]byte{}) || len(part.Data) != min(deployment.ArtifactPartBytes, part.Length-len(artifact)) {
-			return nil, reply, mydcp.ErrFrame
+			return nil, reply, sfcp.ErrFrame
 		}
 		if index == 0 {
 			first, length, expected = reply, part.Length, part.Digest
 		} else if part.Length != length || part.Digest != expected || reply.Node != first.Node || reply.RelayedBy != first.RelayedBy {
-			return nil, reply, mydcp.ErrFrame
+			return nil, reply, sfcp.ErrFrame
 		}
 		artifact = append(artifact, part.Data...)
 		if len(artifact) == length {
@@ -152,7 +152,7 @@ func (c Client) planExchange(ctx context.Context, target mydcp.Peer, document []
 		}
 	}
 	if sha256.Sum256(artifact) != expected || streamEOF(stream) != nil {
-		return nil, first, mydcp.ErrFrame
+		return nil, first, sfcp.ErrFrame
 	}
 	return artifact, first, nil
 }
@@ -161,8 +161,8 @@ func writeUserInput(w io.Writer, id uint64, header [32]byte, document []byte) er
 	for offset := 0; offset < len(document); offset += deployment.ArtifactPartBytes {
 		var encoded [8]byte
 		binary.LittleEndian.PutUint64(encoded[:], uint64(offset))
-		frame := mydcp.Frame{Purpose: mydcp.User, Kind: 4, Request: id, Fields: []mydcp.Field{{Tag: 1, Required: true, Value: encoded[:]}, {Tag: 2, Required: true, Value: document[offset:min(len(document), offset+deployment.ArtifactPartBytes)]}, {Tag: 3, Required: true, Value: header[:]}}}
-		if err := mydcp.WriteFrame(w, frame); err != nil {
+		frame := sfcp.Frame{Purpose: sfcp.User, Kind: 4, Request: id, Fields: []sfcp.Field{{Tag: 1, Required: true, Value: encoded[:]}, {Tag: 2, Required: true, Value: document[offset:min(len(document), offset+deployment.ArtifactPartBytes)]}, {Tag: 3, Required: true, Value: header[:]}}}
+		if err := sfcp.WriteFrame(w, frame); err != nil {
 			return err
 		}
 	}
@@ -173,31 +173,31 @@ func streamEOF(r io.Reader) error {
 	var extra [1]byte
 	n, err := r.Read(extra[:])
 	if n != 0 || err != io.EOF {
-		return mydcp.ErrFrame
+		return sfcp.ErrFrame
 	}
 	return nil
 }
 
-func readUserInput(conn *mydcp.Session, stream mydcp.Stream, id uint64, header [32]byte, length int, expected [32]byte, limit int) ([]byte, error) {
+func readUserInput(conn *sfcp.Session, stream sfcp.Stream, id uint64, header [32]byte, length int, expected [32]byte, limit int) ([]byte, error) {
 	// Each authenticated consumer supplies its own smaller bound: app 4 MiB,
 	// root source 256 KiB, module ZIP 64 MiB. Do not impose the app limit on
 	// another consumer or enlarge the app's admission because it shares frames.
 	if length < 1 || length > limit || limit < 1 || limit > max(deployment.ArtifactMaxBytes, checker.MaxModuleBytes) || expected == ([32]byte{}) {
-		return nil, mydcp.ErrBudget
+		return nil, sfcp.ErrBudget
 	}
 	document := make([]byte, length)
 	for offset := 0; offset < len(document); offset += deployment.ArtifactPartBytes {
-		f, err := mydcp.ReadFrame(stream, deployment.ArtifactPartBytes+64)
+		f, err := sfcp.ReadFrame(stream, deployment.ArtifactPartBytes+64)
 		if err != nil {
 			return nil, err
 		}
-		if f.Purpose != mydcp.User || f.Kind != 4 || f.Request != id || conn.Admit(f, mydcp.User, false) != nil || binary.LittleEndian.Uint64(f.Fields[0].Value) != uint64(offset) || !bytes.Equal(f.Fields[2].Value, header[:]) || len(f.Fields[1].Value) != min(deployment.ArtifactPartBytes, len(document)-offset) {
-			return nil, mydcp.ErrFrame
+		if f.Purpose != sfcp.User || f.Kind != 4 || f.Request != id || conn.Admit(f, sfcp.User, false) != nil || binary.LittleEndian.Uint64(f.Fields[0].Value) != uint64(offset) || !bytes.Equal(f.Fields[2].Value, header[:]) || len(f.Fields[1].Value) != min(deployment.ArtifactPartBytes, len(document)-offset) {
+			return nil, sfcp.ErrFrame
 		}
 		copy(document[offset:], f.Fields[1].Value)
 	}
 	if sha256.Sum256(document) != expected || streamEOF(stream) != nil {
-		return nil, mydcp.ErrFrame
+		return nil, sfcp.ErrFrame
 	}
 	return document, nil
 }
@@ -226,7 +226,7 @@ func (s Service) planStreamView(ctx context.Context, binding userBinding, reques
 	return s, view, s.execute(c, binding, request, envelope)
 }
 
-func (s Service) streamAppPlan(ctx context.Context, conn *mydcp.Session, stream mydcp.Stream, frame mydcp.Frame, digest [32]byte, envelope Envelope, request Request, binding userBinding) error {
+func (s Service) streamAppPlan(ctx context.Context, conn *sfcp.Session, stream sfcp.Stream, frame sfcp.Frame, digest [32]byte, envelope Envelope, request Request, binding userBinding) error {
 	if envelope.Session == nil || !request.AppInput.validSources(request.AppPlan.SourceEnvelope) || request.AppPlan.Document != nil || request.AppPlan.Part != 0 || request.AppPlan.SourceEnvelope && (len(request.AppPlan.CheckerSources) != 0 || request.AppPlan.PrepareSources || request.AppPlan.Move != nil) {
 		return s.respond(stream, frame, digest, Reply{Schema: 1, Code: "invalid"})
 	}
@@ -281,7 +281,7 @@ func (s Service) streamAppPlan(ctx context.Context, conn *mydcp.Session, stream 
 		return s.respond(stream, frame, digest, reply)
 	}
 	if len(artifact) == 0 || len(artifact) > deployment.ArtifactMaxBytes {
-		return mydcp.ErrBudget
+		return sfcp.ErrBudget
 	}
 	planDigest := sha256.Sum256(artifact)
 	for index, offset := 0, 0; offset < len(artifact); index, offset = index+1, offset+deployment.ArtifactPartBytes {
@@ -296,10 +296,10 @@ func (s Service) streamAppPlan(ctx context.Context, conn *mydcp.Session, stream 
 func (s Service) forwardAppPlan(ctx context.Context, envelope Envelope, binding userBinding, document []byte) ([]byte, Reply, error) {
 	peer, ok := s.Engine.LeaderPeer()
 	if !ok || [32]byte(peer.Key) == s.Self.Public {
-		return nil, Reply{Schema: 1, Code: "unavailable"}, mydcp.ErrAdmission
+		return nil, Reply{Schema: 1, Code: "unavailable"}, sfcp.ErrAdmission
 	}
 	c := Client{Mesh: s.Mesh, Self: s.Self, Cluster: s.Policy.Cluster}
-	artifact, reply, err := c.planExchange(ctx, peer, document, 3, func(conn *mydcp.Session) (Envelope, error) {
+	artifact, reply, err := c.planExchange(ctx, peer, document, 3, func(conn *sfcp.Session) (Envelope, error) {
 		copy := envelope
 		copy.Relay = &Relay{Node: s.Self.Public, Target: [32]byte(peer.Key), Caller: binding.key, Challenge: binding.challenge, Connection: conn.PeerChallenge()}
 		copy.Relay.Signature = ed25519.Sign(s.Self.Private, RelayBytes(s.Policy.Cluster, copy))

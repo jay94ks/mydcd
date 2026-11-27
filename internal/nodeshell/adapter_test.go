@@ -49,7 +49,7 @@ func TestNodeShellAccountPreparationOwnsOnlyItsOriginalNonRootAccount(t *testing
 		if name != "useradd" || len(args) == 0 || args[len(args)-1] != Account {
 			t.Fatal("unexpected provisioning command", name, args)
 		}
-		current = &user.User{Username: Account, Name: "MyDC node shell", Uid: "10001", Gid: "10002", HomeDir: a.config.Home}
+		current = &user.User{Username: Account, Name: "Seafield Cluster node shell", Uid: "10001", Gid: "10002", HomeDir: a.config.Home}
 		return nil
 	}
 	if err := a.prepareAccount(context.Background()); err != nil || calls != 1 {

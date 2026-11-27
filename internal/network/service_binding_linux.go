@@ -12,7 +12,7 @@ import (
 	"slices"
 	"syscall"
 
-	"github.com/jay94ks/mydcd/internal/engine"
+	"github.com/jay94ks/seafield/internal/engine"
 	"github.com/moby/moby/client"
 	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
@@ -46,7 +46,7 @@ func serviceNamespaceInfo(s os.FileInfo) ([32]byte, error) {
 	if err != nil {
 		return [32]byte{}, err
 	}
-	return sha256.Sum256([]byte(fmt.Sprintf("mydc-network-namespace-1/%s/%d/%d", boot, st.Dev, st.Ino))), nil
+	return sha256.Sum256([]byte(fmt.Sprintf("sfc-network-namespace-1/%s/%d/%d", boot, st.Dev, st.Ino))), nil
 }
 
 func (m *Manager) ServiceBinding(ctx context.Context, lease BridgeLease) (*ServiceBinding, error) {
@@ -62,7 +62,7 @@ func (m *Manager) ServiceBinding(ctx context.Context, lease BridgeLease) (*Servi
 	if err != nil {
 		return nil, err
 	}
-	name := bridgeOptions(l.Spec, id).Options["com.docker.network.bridge.name"]
+	name := bridgeDeviceName(id)
 	link, err := netlink.LinkByName(name)
 	if err != nil {
 		return nil, err

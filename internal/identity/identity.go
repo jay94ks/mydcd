@@ -126,7 +126,7 @@ func PeerKey(cs tls.ConnectionState) ([32]byte, error) {
 	return result, nil
 }
 func (i *Identity) TLS(server bool, approve func([32]byte) bool) *tls.Config {
-	c := &tls.Config{MinVersion: tls.VersionTLS13, Certificates: []tls.Certificate{i.Certificate}, NextProtos: []string{"mydcp-go-1"}, InsecureSkipVerify: true, VerifyConnection: func(cs tls.ConnectionState) error {
+	c := &tls.Config{MinVersion: tls.VersionTLS13, Certificates: []tls.Certificate{i.Certificate}, NextProtos: []string{"sfcp-go-1"}, InsecureSkipVerify: true, VerifyConnection: func(cs tls.ConnectionState) error {
 		key, err := PeerKey(cs)
 		if err != nil {
 			return err

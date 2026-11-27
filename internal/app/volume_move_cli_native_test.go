@@ -14,10 +14,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/observability"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/observability"
 	"gopkg.in/yaml.v3"
 )
 
@@ -33,7 +33,7 @@ func beginMoveThroughCLI(t *testing.T, ctx context.Context, root string, input d
 	}
 	call := func(want int, files []*os.File, args ...string) []byte {
 		t.Helper()
-		out, diagnostic, err := runManagedCLICommand(ctx, os.Getenv("MYDC_TEST_CLI"), filepath.Join(root, "cli-home"), filepath.Join(root, "cli.yaml"), args, files)
+		out, diagnostic, err := runManagedCLICommand(ctx, os.Getenv("SFC_TEST_CLI"), filepath.Join(root, "cli-home"), filepath.Join(root, "cli.yaml"), args, files)
 		code := 0
 		if err != nil {
 			if exited, ok := err.(*exec.ExitError); ok {
@@ -179,7 +179,7 @@ func deleteRetainedMoveThroughCLI(t *testing.T, ctx context.Context, root string
 	t.Helper()
 	args := []string{"--tenant", q.Scope.Tenant, "volume", "delete", q.Scope.App + "/" + q.Scope.ID, "--retained", q.ID, "--id", request, "--no-wait"}
 	for _, command := range [][]string{args, args, {"op", "show", request}} {
-		out, diagnostic, err := runManagedCLICommand(ctx, os.Getenv("MYDC_TEST_CLI"), filepath.Join(root, "cli-home"), filepath.Join(root, "cli.yaml"), command, nil)
+		out, diagnostic, err := runManagedCLICommand(ctx, os.Getenv("SFC_TEST_CLI"), filepath.Join(root, "cli-home"), filepath.Join(root, "cli.yaml"), command, nil)
 		if err != nil {
 			t.Fatal("original retained deletion CLI", command, err, string(diagnostic), string(out))
 		}

@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/credentials"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/credentials"
 )
 
 func TestInitialCredentialPrivateSelectorsNeverRelayOrCrossMethods(t *testing.T) {
@@ -34,7 +34,7 @@ func TestInitialCredentialPrivateSelectorsNeverRelayOrCrossMethods(t *testing.T)
 
 func TestInitialIntentPersistsDispatchBeforeEffectAndNeverContainsPrivateMaterial(t *testing.T) {
 	home, c, session, issuer := journalFixture(t)
-	r := credentials.InitialRequest{Schema: 1, Cluster: c.Cluster, Owner: issuer.Public, Operation: [32]byte{9}, User: "new-user", Username: "new.user", Credential: "first", Profile: "system", Method: access.Token, ExpectedUserRevision: 5, At: time.Now().Unix()}
+	r := credentials.InitialRequest{Schema: 1, Cluster: c.Cluster, Owner: issuer.Public, Operation: [32]byte{9}, User: "new-user", Username: "new.user", Credential: "first", Profile: "system", Method: access.Token, ExpectedUserRevision: 5, At: time.Now().Unix(), Seconds: 86400}
 	intent, err := StageInitialIntent(home, c, session, "issue-first", r)
 	if err != nil || intent.Dispatched {
 		t.Fatal(err)

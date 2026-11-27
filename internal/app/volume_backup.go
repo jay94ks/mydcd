@@ -12,22 +12,22 @@ import (
 	"os"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/engine"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/reconcile"
-	"github.com/jay94ks/mydcd/internal/schema"
-	"github.com/jay94ks/mydcd/internal/workload"
-	"github.com/jay94ks/mydcd/internal/workload/volumes"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/engine"
+	"github.com/jay94ks/seafield/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/workload"
+	"github.com/jay94ks/seafield/internal/workload/volumes"
 )
 
 // Compatibility pins the exact original public writer recipe, including its
 // immutable image/process and mount inputs. A restore must separately validate
 // that recipe/platform/keyring and prove database recovery before activation.
 func backupCompatibility(source volumes.ColdSource) [32]byte {
-	return sha256.Sum256(append([]byte("mydc-volume-cold-recipe-1\x00"), []byte(source.Writer.Task.Spec)...))
+	return sha256.Sum256(append([]byte("sfc-volume-cold-recipe-1\x00"), []byte(source.Writer.Task.Spec)...))
 }
 func backupSourceMatches(source volumes.ColdSource, b control.VolumeBackupBinding) bool {
 	r := source.Writer
@@ -61,7 +61,7 @@ func (d runtimeBackupBackend) Authorize(ctx context.Context, b control.VolumeBac
 	}
 	job, err := schema.Decode[control.VolumeBackup](reply.Data)
 	if err != nil || reply.Local || reply.RaftIndex == 0 || job.Binding.Digest() != b.Digest() {
-		return mydcp.ErrAdmission
+		return sfcp.ErrAdmission
 	}
 	return nil
 }
@@ -75,7 +75,7 @@ func (d runtimeBackupBackend) Source(ctx context.Context, b control.VolumeBackup
 func (d runtimeBackupBackend) Export(ctx context.Context, b control.VolumeBackupBinding, out *os.File) (volumes.ArchiveReceipt, error) {
 	return d.r.nativeVolumes.ExportCold(ctx, b.Source, b.Consumer, func(ctx context.Context, ready volumes.NativeReady, c volumes.Consumer) error {
 		if ready.Owner != b.Source.Owner || c != b.Consumer {
-			return mydcp.ErrAdmission
+			return sfcp.ErrAdmission
 		}
 		return d.Authorize(ctx, b, false)
 	}, out, b.Options())

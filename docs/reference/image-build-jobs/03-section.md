@@ -7,8 +7,8 @@ Result는 `{Code,Image,Bytes}`이며 phase와 별도로 가짜 결과를 만들�
 공개하지 않는다. 관련 namespace가 바뀌면 metadata cursor는 conflict다.
 
 ```sh
-mydc --tenant tenant-a build cancel build-one
-mydc --tenant tenant-a build delete build-one
+sfcli --tenant tenant-a build cancel build-one
+sfcli --tenant tenant-a build delete build-one
 ```
 
 `cancel-image-build {Tenant,ID}`는 해당 job Revision CAS로 Cancel을 기록한다.

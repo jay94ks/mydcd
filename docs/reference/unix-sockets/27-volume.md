@@ -1,10 +1,10 @@
 ## 단독 컨테이너·Volume 파일 스트림
 
-Unix 관리 접속도 TLS/MYDCP와 같은 원 operation·현재 인증/CAS/quorum을 사용한다. purpose15 standalone `attach`는 원 컨테이너의 I/O에 재접속하며 양방향 stdin EOF와 output EOF를 구분한다. purpose18 Volume 파일 전송은 서명된 유한 header·최대 24KiB chunks·명시 EOF를 사용한다. half-close/단절은 원 파일 effect의 미실행이나 native fence를 뜻하지 않는다. 원 staged inode publication receipt가 없는 put은 기존 동일 내용만으로 성공 처리하지 않는다. Docker Engine의 Unix HTTP attach API는 mydcd 내부 SDK 경계이며 관리 끝점의 인증 대체 경로가 아니다.
+Unix 관리 접속도 TLS/SFCP와 같은 원 operation·현재 인증/CAS/quorum을 사용한다. purpose15 standalone `attach`는 원 컨테이너의 I/O에 재접속하며 양방향 stdin EOF와 output EOF를 구분한다. purpose18 Volume 파일 전송은 서명된 유한 header·최대 24KiB chunks·명시 EOF를 사용한다. half-close/단절은 원 파일 effect의 미실행이나 native fence를 뜻하지 않는다. 원 staged inode publication receipt가 없는 put은 기존 동일 내용만으로 성공 처리하지 않는다. Docker Engine의 Unix HTTP attach API는 sfcd 내부 SDK 경계이며 관리 끝점의 인증 대체 경로가 아니다.
 
 ### 임시 단독 컨테이너 TTL 연장
 
-`standalone-extend`는 새 purpose나 별도 소켓이 아닌 기존 `User`의 `submit/result/resume` operation이다. Unix와 네트워크 MYDCP가 같은 현재 사용자·Deploy/creator 또는 관리자·Target CAS·Raft 코어를 사용한다. `Schema:1`, `Change.Action:"standalone-extend"`, `Change.Expected:현재 metadata revision`을 원 operation에 서명한다. payload 형식은 다음과 같다(`Target`은 32바이트 digest 배열).
+`standalone-extend`는 새 purpose나 별도 소켓이 아닌 기존 `User`의 `submit/result/resume` operation이다. Unix와 네트워크 SFCP가 같은 현재 사용자·Deploy/creator 또는 관리자·Target CAS·Raft 코어를 사용한다. `Schema:1`, `Change.Action:"standalone-extend"`, `Change.Expected:현재 metadata revision`을 원 operation에 서명한다. payload 형식은 다음과 같다(`Target`은 32바이트 digest 배열).
 
 ```text
 {Tenant, Name, Scope, Operation: string,

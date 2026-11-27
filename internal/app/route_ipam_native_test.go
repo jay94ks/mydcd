@@ -14,11 +14,11 @@ import (
 	"time"
 
 	cerrdefs "github.com/containerd/errdefs"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/reconcile"
-	"github.com/jay94ks/mydcd/internal/workload"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/workload"
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/client"
 )
@@ -53,8 +53,8 @@ func verifyRouteStaticAddressCollision(t *testing.T, ctx context.Context, r *Run
 	if err != nil {
 		t.Fatal(err)
 	}
-	competing.Name, competing.MyDC.Deployment = "route-ip-competitor", "route-ip-competitor"
-	planning.Project, planning.Deployment = competing.Name, competing.MyDC.Deployment
+	competing.Name, competing.Sfc.Deployment = "route-ip-competitor", "route-ip-competitor"
+	planning.Project, planning.Deployment = competing.Name, competing.Sfc.Deployment
 	_, err = deployment.CompileApp(competing, catalog, planning)
 	var conflict *deployment.InputError
 	if !errors.As(err, &conflict) || conflict.Code != "ADDRESS_CONFLICT" {

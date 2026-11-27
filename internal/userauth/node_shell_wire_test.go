@@ -11,9 +11,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/schema"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/sfcp"
 )
 
 // Actual Unix TLS and QUIC framing reuse the ordinary user challenge binding.
@@ -23,19 +23,19 @@ func TestNodeShellActualWireOriginalBindingHalfCloseResizeAndClosedActor(t *test
 	for _, network := range []string{"unix", "quic"} {
 		t.Run(network, func(t *testing.T) {
 			_, c, session, node := journalFixture(t)
-			root, err := os.MkdirTemp("", "mydc-shell-wire-")
+			root, err := os.MkdirTemp("", "sfc-shell-wire-")
 			if err != nil {
 				t.Fatal(err)
 			}
 			t.Cleanup(func() { _ = os.RemoveAll(root) })
 			peer := c.Peers[0]
-			lookup := func(key mydcp.Identity) (mydcp.Peer, bool) {
-				if key == mydcp.Identity(c.Self.Public) {
-					return mydcp.Peer{ID: "user", Policy: mydcp.Policy{Key: key, UserAuth: true}}, true
+			lookup := func(key sfcp.Identity) (sfcp.Peer, bool) {
+				if key == sfcp.Identity(c.Self.Public) {
+					return sfcp.Peer{ID: "user", Policy: sfcp.Policy{Key: key, UserAuth: true}}, true
 				}
 				return peer, key == peer.Key
 			}
-			server, err := mydcp.NewTransport(node, c.Cluster, lookup)
+			server, err := sfcp.NewTransport(node, c.Cluster, lookup)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -48,16 +48,16 @@ func TestNodeShellActualWireOriginalBindingHalfCloseResizeAndClosedActor(t *test
 				}
 				peer.Endpoint = server.Addr().String()
 			}
-			mesh, err := mydcp.NewTransport(c.Self, c.Cluster, lookup)
+			mesh, err := sfcp.NewTransport(c.Self, c.Cluster, lookup)
 			if err != nil {
 				t.Fatal(err)
 			}
 			t.Cleanup(func() { _ = mesh.Close() })
 			c.Mesh = mesh
-			c.Peers = []mydcp.Peer{peer}
+			c.Peers = []sfcp.Peer{peer}
 			finished := make(chan error, 1)
 			bindingService := Service{Mesh: server, Self: node, Policy: control.Policy{Cluster: c.Cluster}}
-			if err = server.OnManagement(mydcp.NodeShell, func(ctx context.Context, conn *mydcp.Session, stream mydcp.Stream, frame mydcp.Frame) error {
+			if err = server.OnManagement(sfcp.NodeShell, func(ctx context.Context, conn *sfcp.Session, stream sfcp.Stream, frame sfcp.Frame) error {
 				result := func() error {
 					envelope, e := schema.Decode[Envelope](frame.Fields[0].Value)
 					if e != nil {
@@ -65,12 +65,12 @@ func TestNodeShellActualWireOriginalBindingHalfCloseResizeAndClosedActor(t *test
 					}
 					q, e := schema.Decode[NodeShellRequest](envelope.Body)
 					if e != nil || !q.valid() || q.SessionID != "original-shell" {
-						return mydcp.ErrFrame
+						return sfcp.ErrFrame
 					}
 					if _, e = bindingService.binding(conn, frame.Kind, envelope); e != nil {
 						return e
 					}
-					metadata := control.NodeShellSession{SessionID: q.SessionID, User: session.User, Username: "alice", Node: "node-b", Account: "mydc-shell", State: "opened", CreatedAt: time.Now().Unix(), OpenedAt: time.Now().Unix()}
+					metadata := control.NodeShellSession{SessionID: q.SessionID, User: session.User, Username: "alice", Node: "node-b", Account: "sfc-shell", State: "opened", CreatedAt: time.Now().Unix(), OpenedAt: time.Now().Unix()}
 					if e = nodeShellResponse(stream, frame, sha256.Sum256(frame.Fields[0].Value), NodeShellReply{Code: "ready", Session: &metadata}); e != nil {
 						return e
 					}
@@ -88,10 +88,10 @@ func TestNodeShellActualWireOriginalBindingHalfCloseResizeAndClosedActor(t *test
 							return errors.New("original input/resize/half-close changed")
 						}
 					}
-					if e = channel.Send(mydcp.NodeShellRecord{Kind: "stdout", Data: []byte("output after half-close")}); e != nil {
+					if e = channel.Send(sfcp.NodeShellRecord{Kind: "stdout", Data: []byte("output after half-close")}); e != nil {
 						return e
 					}
-					return channel.Send(mydcp.NodeShellRecord{Kind: "end", End: &mydcp.NodeShellEnd{Reason: "closed", Code: 0, ClosedBy: &mydcp.NodeShellActor{User: "bob", Username: "bob"}}})
+					return channel.Send(sfcp.NodeShellRecord{Kind: "end", End: &sfcp.NodeShellEnd{Reason: "closed", Code: 0, ClosedBy: &sfcp.NodeShellActor{User: "bob", Username: "bob"}}})
 				}()
 				finished <- result
 				return result
@@ -113,7 +113,7 @@ func TestNodeShellActualWireOriginalBindingHalfCloseResizeAndClosedActor(t *test
 			if metadata.SessionID != "original-shell" || metadata.Node != "node-b" {
 				t.Fatal("ready metadata replaced original")
 			}
-			for _, r := range []mydcp.NodeShellRecord{{Kind: "stdin", Data: []byte("private input")}, {Kind: "resize", Cols: 120, Rows: 40}, {Kind: "half-close"}} {
+			for _, r := range []sfcp.NodeShellRecord{{Kind: "stdin", Data: []byte("private input")}, {Kind: "resize", Cols: 120, Rows: 40}, {Kind: "half-close"}} {
 				if err = channel.Send(r); err != nil {
 					t.Fatal(err)
 				}

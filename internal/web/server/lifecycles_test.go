@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/web/mydc"
-	checker "github.com/jay94ks/mydcd/internal/workload/lifecycle"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/web/sfc"
+	checker "github.com/jay94ks/seafield/internal/workload/lifecycle"
 )
 
 const testCheckSource = `package checker
@@ -18,7 +18,7 @@ const testCheckSource = `package checker
 import (
 	"context"
 
-	lifecycle "github.com/jay94ks/mydcd/lifecycle/v1"
+	lifecycle "github.com/jay94ks/seafield/lifecycle/v1"
 )
 
 func Check(ctx context.Context, in lifecycle.Request, probe lifecycle.Probe) (lifecycle.Result, error) {
@@ -96,7 +96,7 @@ func TestLifecycleScripts(t *testing.T) {
 	pin := map[string]any{"path": "example.com/safe", "version": "v1.0.0", "digest": fmt.Sprintf("%x", sha256.Sum256(zip)), "length": len(zip)}
 	fakeLogin(t, f, "admin")
 	step("PUT", "/api/v1/t/shop/lifecycle-policy", map[string]any{"opId": op(), "resolver": map[string]any{"sourceCacheBytes": 16 << 20, "modules": []map[string]any{
-		{"path": mydc.FixtureModulePin.Path, "version": mydc.FixtureModulePin.Version, "digest": fmt.Sprintf("%x", mydc.FixtureModulePin.Digest), "length": mydc.FixtureModulePin.Length}, pin}}}, "applied")
+		{"path": sfc.FixtureModulePin.Path, "version": sfc.FixtureModulePin.Version, "digest": fmt.Sprintf("%x", sfc.FixtureModulePin.Digest), "length": sfc.FixtureModulePin.Length}, pin}}}, "applied")
 	fakeLogin(t, f, "alice")
 	if c, out := f.do("PUT", base+"tcp-up", map[string]any{"opId": op(), "source": testCheckSource, "lock": []map[string]any{{"path": "example.com/safe", "version": "v1.0.0", "zip": zip[1:]}}}); c != 422 {
 		t.Fatalf("wrong zip: %d %v", c, out)
@@ -112,7 +112,7 @@ func TestLifecycleScripts(t *testing.T) {
 	if d["source"] != testCheckSource || d["script"].(map[string]any)["recordRevision"] != 1.0 {
 		t.Fatalf("new script: %v", d)
 	}
-	// a new version with a stale expected is rejected by mydcd
+	// a new version with a stale expected is rejected by sfcd
 	if c, out := f.do("PUT", base+"tcp-up", map[string]any{"opId": op(), "source": testCheckSource + "\n", "expected": 7}); opState(t, c, out) == "applied" {
 		t.Fatalf("stale put applied: %v", out)
 	}
@@ -159,7 +159,7 @@ func TestLifecyclePolicy(t *testing.T) {
 	o := op()
 	code, out = f.do("PUT", "/api/v1/t/payments/lifecycle-policy", map[string]any{"opId": o, "resolver": map[string]any{
 		"allowPackages": []string{"golang.org/x/text/language"}, "sourceCacheBytes": 32 << 20,
-		"modules": []map[string]any{{"path": mydc.FixtureModulePin.Path, "version": mydc.FixtureModulePin.Version, "digest": fmt.Sprintf("%x", mydc.FixtureModulePin.Digest), "length": mydc.FixtureModulePin.Length}}}})
+		"modules": []map[string]any{{"path": sfc.FixtureModulePin.Path, "version": sfc.FixtureModulePin.Version, "digest": fmt.Sprintf("%x", sfc.FixtureModulePin.Digest), "length": sfc.FixtureModulePin.Length}}}})
 	if opState(t, code, out) != "applied" {
 		t.Fatalf("set policy: %d %v", code, out)
 	}
@@ -170,7 +170,7 @@ func TestLifecyclePolicy(t *testing.T) {
 	}
 	code, out = f.do("GET", "/api/v1/t/payments/lifecycle-policy", nil)
 	pol := out["policy"].(map[string]any)
-	if code != 200 || out["configured"] != true || pol["revision"] != 1.0 || pol["resolver"].(map[string]any)["modules"].([]any)[0].(map[string]any)["digest"] != fmt.Sprintf("%x", mydc.FixtureModulePin.Digest) {
+	if code != 200 || out["configured"] != true || pol["revision"] != 1.0 || pol["resolver"].(map[string]any)["modules"].([]any)[0].(map[string]any)["digest"] != fmt.Sprintf("%x", sfc.FixtureModulePin.Digest) {
 		t.Fatalf("read back: %d %v", code, out)
 	}
 	// disable keeps the rest; Expected = policy revision

@@ -9,7 +9,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/web/mydc"
+	"github.com/jay94ks/seafield/internal/web/sfc"
 )
 
 type credentialChallengeReq struct {
@@ -39,12 +39,12 @@ func (s *Server) handleCredentialChallenge(w http.ResponseWriter, r *http.Reques
 	if !readJSON(w, r, &req) {
 		return
 	}
-	var method mydc.AuthMethod
+	var method sfc.AuthMethod
 	switch req.Method {
 	case "password":
-		method = mydc.MethodPassword
+		method = sfc.MethodPassword
 	case "token":
-		method = mydc.MethodToken
+		method = sfc.MethodToken
 	}
 	if req.Username == "" || method == "" {
 		writeError(w, http.StatusBadRequest, "bad-request", "username and method (password or token) are required")
@@ -78,7 +78,7 @@ func (s *Server) handleCredentialLogin(w http.ResponseWriter, r *http.Request) {
 	req.Secret = ""
 	defer clear(secret)
 	p := s.sessions.takePending(req.TicketID)
-	if p == nil || p.method == "key" {
+	if p == nil || p.method != "password" && p.method != "token" {
 		if p != nil {
 			p.conn.Close()
 		}
@@ -87,7 +87,7 @@ func (s *Server) handleCredentialLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := s.callCtx(r)
 	defer cancel()
-	sess, err := p.conn.CredentialLogin(ctx, p.ticket, secret)
+	sess, err := p.conn.CredentialLogin(s.loginContext(ctx, r), p.ticket, secret)
 	if err != nil {
 		p.conn.Close()
 		s.writeBackendError(w, nil, err)
@@ -128,7 +128,7 @@ func (s *Server) handleKeyChallenge(w http.ResponseWriter, r *http.Request) {
 		s.writeBackendError(w, nil, err)
 		return
 	}
-	proof := mydc.NewKeyProof(t)
+	proof := sfc.NewKeyProof(t)
 	p := &pendingLogin{method: "key", username: req.Username, ticket: t, proof: proof, conn: conn}
 	s.sessions.addPending(p)
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -136,8 +136,8 @@ func (s *Server) handleKeyChallenge(w http.ResponseWriter, r *http.Request) {
 		"ticket":   camel{t},
 		// The browser may verify ticket.signature with ticket.issuer over
 		// ticketBytes before signing proof.
-		"ticketBytes": base64.StdEncoding.EncodeToString(mydc.TicketSigningBytes(t)),
-		"proof":       base64.StdEncoding.EncodeToString(mydc.KeyProofSigningBytes(proof)),
+		"ticketBytes": base64.StdEncoding.EncodeToString(sfc.TicketSigningBytes(t)),
+		"proof":       base64.StdEncoding.EncodeToString(sfc.KeyProofSigningBytes(proof)),
 		"deadline":    rfc3339(p.deadline),
 	})
 }
@@ -179,7 +179,7 @@ func (s *Server) handleKeyLogin(w http.ResponseWriter, r *http.Request) {
 	proof.Signature = sig
 	ctx, cancel := s.callCtx(r)
 	defer cancel()
-	sess, err := p.conn.Login(ctx, p.ticket, proof)
+	sess, err := p.conn.Login(s.loginContext(ctx, r), p.ticket, proof)
 	if err != nil {
 		p.conn.Close()
 		s.writeBackendError(w, nil, err)
@@ -187,14 +187,14 @@ func (s *Server) handleKeyLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	// R02: the issued session still needs the user key's approval. The
 	// daemon keeps the session and the connection; the browser only signs.
-	a := mydc.NewSessionApproval(sess, p.ticket.UserKey)
+	a := sfc.NewSessionApproval(sess, p.ticket.UserKey)
 	next := &pendingLogin{method: "key", username: p.username, approve: true, session: sess, approval: a, conn: p.conn}
 	s.sessions.addPending(next)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"approve":       true,
 		"ticketId":      next.id,
 		"sessionDigest": hex.EncodeToString(a.Session[:]),
-		"approval":      base64.StdEncoding.EncodeToString(mydc.SessionApprovalSigningBytes(a)),
+		"approval":      base64.StdEncoding.EncodeToString(sfc.SessionApprovalSigningBytes(a)),
 		"deadline":      rfc3339(next.deadline),
 	})
 }
@@ -237,7 +237,7 @@ func (s *Server) handleKeyApprove(w http.ResponseWriter, r *http.Request) {
 	s.finishLogin(w, r, p, sess)
 }
 
-func (s *Server) finishLogin(w http.ResponseWriter, r *http.Request, p *pendingLogin, sess mydc.Session) {
+func (s *Server) finishLogin(w http.ResponseWriter, r *http.Request, p *pendingLogin, sess sfc.Session) {
 	ctx, cancel := s.callCtx(r)
 	defer cancel()
 	who, err := p.conn.Whoami(ctx)
@@ -294,9 +294,9 @@ func (s *Server) authed(h func(http.ResponseWriter, *http.Request, *webSession))
 		var ws *webSession
 		if err == nil {
 			// Automatic refreshes (polling, SSE reconnects) send
-			// X-MyDC-Background: 1 and do not count as activity for the
+			// X-SFC-Background: 1 and do not count as activity for the
 			// idle limit.
-			ws = s.sessions.lookup(c.Value, r.Header.Get("X-MyDC-Background") != "1")
+			ws = s.sessions.lookup(c.Value, r.Header.Get("X-SFC-Background") != "1")
 		}
 		if ws == nil {
 			writeError(w, http.StatusUnauthorized, "session-expired", "log in again")
@@ -307,10 +307,10 @@ func (s *Server) authed(h func(http.ResponseWriter, *http.Request, *webSession))
 }
 
 type sessionView struct {
-	User      mydc.UserView     `json:"user"`
-	Tenants   []mydc.TenantView `json:"tenants"`
-	ExpiresAt string            `json:"expiresAt"`
-	Method    string            `json:"method"`
+	User      sfc.UserView     `json:"user"`
+	Tenants   []sfc.TenantView `json:"tenants"`
+	ExpiresAt string           `json:"expiresAt"`
+	Method    string           `json:"method"`
 	// RootRevision is the root CAS revision at this read. /ops fills a zero
 	// rootRevision with the current value itself.
 	RootRevision uint64 `json:"rootRevision"`
@@ -319,9 +319,9 @@ type sessionView struct {
 func (s *Server) writeSessionView(w http.ResponseWriter, r *http.Request, ws *webSession) {
 	ctx, cancel := s.callCtx(r)
 	defer cancel()
-	var who mydc.Whoami
-	var tenants []mydc.TenantView
-	err := ws.do(ctx, func(ctx context.Context, c mydc.Conn) error {
+	var who sfc.Whoami
+	var tenants []sfc.TenantView
+	err := ws.do(ctx, func(ctx context.Context, c sfc.Conn) error {
 		var err error
 		if who, err = c.Whoami(ctx); err != nil {
 			return err

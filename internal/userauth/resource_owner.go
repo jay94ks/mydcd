@@ -3,9 +3,9 @@
 package userauth
 
 import (
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/mydcp"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/sfcp"
 )
 
 // resourceOwner resolves a retained native source to its installed physical
@@ -14,15 +14,15 @@ import (
 func (s Service) resourceOwner(view state.State, node string, original [32]byte) ([32]byte, error) {
 	members, err := s.Policy.Members(view)
 	if err != nil || !members.ResourceKeyForNode(node, original) {
-		return [32]byte{}, mydcp.ErrAdmission
+		return [32]byte{}, sfcp.ErrAdmission
 	}
 	entry, ok := members.Entry(node)
 	if !ok {
-		return [32]byte{}, mydcp.ErrAdmission
+		return [32]byte{}, sfcp.ErrAdmission
 	}
 	key, err := identity.ParseKey(entry.CurrentPeer().Key)
 	if err != nil || !members.MemberKey(key) {
-		return [32]byte{}, mydcp.ErrAdmission
+		return [32]byte{}, sfcp.ErrAdmission
 	}
 	return key, nil
 }

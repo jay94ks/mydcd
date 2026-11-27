@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
-"""Write THIRD_PARTY_NOTICES for a MyDC release to stdout.
+"""Write THIRD_PARTY_NOTICES for a Seafield Cluster release to stdout.
 
 Usage: python3 -I tools/publish/notices.py <go-licenses save dir> <package-lock.json>
 
@@ -101,8 +101,8 @@ def main():
     if len(sys.argv) != 3:
         sys.exit(__doc__)
     out = sys.stdout
-    out.write('MyDC third-party notices\n\nThis file lists the licenses and notices of third-party software included\n'
-              'in MyDC release binaries and images.\n\n')
+    out.write('Seafield Cluster third-party notices\n\nThis file lists the licenses and notices of third-party software included\n'
+              'in Seafield Cluster release binaries and images.\n\n')
     if go_modules(sys.argv[1], out) == 0:
         sys.exit('no Go license files under ' + sys.argv[1])
     missing = npm_packages(sys.argv[2], out)

@@ -6,9 +6,9 @@ import (
 	"crypto/ed25519"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/deployment"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/deployment"
 )
 
 func TestCDFieldQueryKeepsScopeAndNeverInventsAnOwnedAnchor(t *testing.T) {
@@ -29,7 +29,7 @@ func TestCDFieldQueryKeepsScopeAndNeverInventsAnOwnedAnchor(t *testing.T) {
 	if _, err := f.p.AppDeliveryField(f.s, c, "admin", "other", q); err == nil {
 		t.Fatal("tenant selected a foreign app")
 	}
-	q.Path = []string{"networks", "lan", "x-mydc", "mtu"}
+	q.Path = []string{"networks", "lan", "x-sfc", "mtu"}
 	if _, err := f.p.AppDeliveryField(f.s, c, "admin", "tenant", q); err == nil {
 		t.Fatal("management field exposed as an app field")
 	}
@@ -41,7 +41,7 @@ func TestCDOverrideRejectsUnownedTaskAndRequiresCurrentSessionCDGrant(t *testing
 	d, _ := a.Delivery("tenant", "source-app")
 	q := AppOverrideChange{Tenant: "tenant", App: "source-app", Path: []string{"services", "web", "cpus"}, Value: []byte(`"0.1"`), Refs: []deployment.ObjectRef{{Key: deployment.ResourceKey("task", "tenant", "source-app", "web"), Revision: 1, Generation: 1}}}
 	f.apply("unowned-field", "override-app", d.Revision(), q, state.ConditionFailed)
-	q.Path = []string{"networks", "lan", "x-mydc", "mtu"}
+	q.Path = []string{"networks", "lan", "x-sfc", "mtu"}
 	f.apply("management-field", "override-app", d.Revision(), q, state.Invalid)
 	q.Path = []string{"services", "web", "cpus"}
 	f.session.Scopes[0].Actions = []access.Action{access.Read, access.Deploy}

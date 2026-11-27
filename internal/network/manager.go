@@ -5,9 +5,9 @@ package network
 import (
 	"context"
 	"encoding/json"
-	"github.com/jay94ks/mydcd/internal/engine"
-	"github.com/jay94ks/mydcd/internal/reconcile"
-	"github.com/jay94ks/mydcd/internal/schema"
+	"github.com/jay94ks/seafield/internal/engine"
+	"github.com/jay94ks/seafield/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/schema"
 	"sync"
 
 	"github.com/moby/moby/client"
@@ -60,6 +60,12 @@ func openManager(path string, c *engine.Client, admit ConsumerAdmission) (*Manag
 	}
 	return &Manager{journal: j, driver: &BridgeDriver{Engine: c}, admit: admit, journals: map[string]*reconcile.Journal{"bridge": j}}, nil
 }
+
+// UseEngineHooks makes the Bridge driver register each create with h, which
+// the engine's sfc network driver asks at every step. Without it the Bridge
+// driver sends no create.
+func (m *Manager) UseEngineHooks(h *EngineHooks) { m.driver.Hooks = h }
+
 func (m *Manager) Desired(key string, revision, generation uint64, s *BridgeSpec, capacity int) error {
 	d := reconcile.Desired{Revision: revision}
 	if s == nil {
@@ -142,9 +148,6 @@ func (m *Manager) inspectNetwork(ctx context.Context, key string, resource recon
 	}
 	if !matchBridge(got.Network, s, id) {
 		return BridgeLease{}, client.NetworkInspectResult{}, engine.ErrOwnership
-	}
-	if err = inspectBridgeKernel(s, id); err != nil {
-		return BridgeLease{}, client.NetworkInspectResult{}, err
 	}
 	return BridgeLease{Key: key, NetworkID: got.Network.ID, NetworkName: got.Network.Name, Spec: s}, got, nil
 }

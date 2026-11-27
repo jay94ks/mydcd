@@ -11,18 +11,18 @@ import (
 	"regexp"
 	"slices"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/nodestorage"
-	"github.com/jay94ks/mydcd/internal/tenancy"
-	"github.com/jay94ks/mydcd/internal/web/mydc"
-	"github.com/jay94ks/mydcd/internal/workload"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/nodestorage"
+	"github.com/jay94ks/seafield/internal/tenancy"
+	"github.com/jay94ks/seafield/internal/web/sfc"
+	"github.com/jay94ks/seafield/internal/workload"
 )
 
 // Server storage roots (UI-14) and workspace server limits (UI-16). Every
-// change here is a system-administrator action of mydcd; the daemon only
+// change here is a system-administrator action of sfcd; the daemon only
 // builds the payload and, for limits, carries over the fields the screen
-// does not edit. mydcd decides.
+// does not edit. sfcd decides.
 
 // cpuUnit is workload.Resources.CPU per core (the task recipe hands
 // Capacity.CPU to Docker as NanoCPUs).
@@ -44,69 +44,85 @@ func storageTenants(ts []string) ([]string, error) {
 	return slices.Compact(out), nil
 }
 
-func validMaxVolumes(n int) error {
-	if n < 1 || n > 256 {
-		return invalid("maxVolumes: 1..256")
+func validCapacity(n uint64) error {
+	if n > nodestorage.MaxCapacityBytes {
+		return invalid("capacityBytes: 0 (no limit) or a byte count up to 2^60")
 	}
 	return nil
 }
 
-// POST /nodes/{node}/storage {opId, id, path, tenants[], maxVolumes}
-// → add-node-storage (Expected 0; mydcd fills the node key).
+// POST /nodes/{node}/storage {opId, id, path, tenants[], allTenants?, capacityBytes?}
+// → add-node-storage (Expected 0; sfcd fills the node key).
 func (s *Server) handleAddNodeStorage(w http.ResponseWriter, r *http.Request, ws *webSession) {
 	var req struct {
-		OpID       string   `json:"opId"`
-		ID         string   `json:"id"`
-		Path       string   `json:"path"`
-		Tenants    []string `json:"tenants"`
-		MaxVolumes int      `json:"maxVolumes"`
+		OpID          string   `json:"opId"`
+		ID            string   `json:"id"`
+		Path          string   `json:"path"`
+		Tenants       []string `json:"tenants"`
+		AllTenants    bool     `json:"allTenants"`
+		CapacityBytes uint64   `json:"capacityBytes"`
 	}
 	if !readJSON(w, r, &req) {
 		return
 	}
 	node := r.PathValue("node")
-	s.sharedCreate(w, r, ws, req.OpID, req, func(ctx context.Context, c mydc.Conn, _ mydc.Session) (string, any, uint64, string, error) {
+	s.sharedCreate(w, r, ws, req.OpID, req, func(ctx context.Context, c sfc.Conn, _ sfc.Session) (string, any, uint64, string, error) {
 		if !storageIDRE.MatchString(req.ID) {
 			return "", nil, 0, "", invalid("id: lowercase letters, digits and -, starting with a letter (at most 63)")
 		}
 		if nodestorage.ValidateRootPath(req.Path) != nil {
 			return "", nil, 0, "", invalid("path: an absolute, clean path other than /")
 		}
-		if err := validMaxVolumes(req.MaxVolumes); err != nil {
+		if err := validCapacity(req.CapacityBytes); err != nil {
 			return "", nil, 0, "", err
 		}
 		tenants, err := storageTenants(req.Tenants)
 		if err != nil {
 			return "", nil, 0, "", err
 		}
-		d := nodestorage.Definition{Node: node, ID: req.ID, Path: req.Path, Tenants: tenants, MaxVolumes: req.MaxVolumes}
-		return mydc.ActionAddNodeStorage, d, 0, "storage/" + node + "/" + req.ID, nil
+		if req.AllTenants && len(tenants) != 0 {
+			return "", nil, 0, "", invalid("allTenants and tenants cannot be used together")
+		}
+		d := nodestorage.Definition{Node: node, ID: req.ID, Path: req.Path, Tenants: tenants, AllTenants: req.AllTenants, CapacityBytes: req.CapacityBytes}
+		return sfc.ActionAddNodeStorage, d, 0, "storage/" + node + "/" + req.ID, nil
 	})
 }
 
-// PUT /nodes/{node}/storage/{id} {opId, tenants[], maxVolumes, expected}
-// → set-node-storage-policy (Expected is the root's revision).
+// PATCH /nodes/{node}/storage/{id} {opId, addTenants[], removeTenants[],
+// allTenants?, capacityBytes?, expected} → set-node-storage-policy. Only what
+// changes is sent; expected is the root's revision. capacityBytes 0 = no limit.
 func (s *Server) handleSetNodeStoragePolicy(w http.ResponseWriter, r *http.Request, ws *webSession) {
 	var req struct {
-		OpID       string   `json:"opId"`
-		Tenants    []string `json:"tenants"`
-		MaxVolumes int      `json:"maxVolumes"`
-		Expected   uint64   `json:"expected"`
+		OpID          string   `json:"opId"`
+		AddTenants    []string `json:"addTenants"`
+		RemoveTenants []string `json:"removeTenants"`
+		AllTenants    *bool    `json:"allTenants"`
+		CapacityBytes *uint64  `json:"capacityBytes"`
+		Expected      uint64   `json:"expected"`
 	}
 	if !readJSON(w, r, &req) {
 		return
 	}
 	node, id := r.PathValue("node"), r.PathValue("id")
-	s.sharedCreate(w, r, ws, req.OpID, req, func(ctx context.Context, c mydc.Conn, _ mydc.Session) (string, any, uint64, string, error) {
-		if err := validMaxVolumes(req.MaxVolumes); err != nil {
-			return "", nil, 0, "", err
+	s.sharedCreate(w, r, ws, req.OpID, req, func(ctx context.Context, c sfc.Conn, _ sfc.Session) (string, any, uint64, string, error) {
+		if req.CapacityBytes != nil {
+			if err := validCapacity(*req.CapacityBytes); err != nil {
+				return "", nil, 0, "", err
+			}
 		}
-		tenants, err := storageTenants(req.Tenants)
+		add, err := storageTenants(req.AddTenants)
 		if err != nil {
 			return "", nil, 0, "", err
 		}
-		q := control.NodeStoragePolicy{Node: node, ID: id, Tenants: tenants, MaxVolumes: req.MaxVolumes}
-		return mydc.ActionSetNodeStoragePolicy, q, req.Expected, "storage/" + node + "/" + id, nil
+		remove, err := storageTenants(req.RemoveTenants)
+		if err != nil {
+			return "", nil, 0, "", err
+		}
+		if len(add) == 0 && len(remove) == 0 && req.AllTenants == nil && req.CapacityBytes == nil {
+			return "", nil, 0, "", invalid("nothing to change")
+		}
+		q := control.NodeStoragePolicy{Node: node, ID: id, AddTenants: add, RemoveTenants: remove, AllTenants: req.AllTenants, CapacityBytes: req.CapacityBytes}
+		return sfc.ActionSetNodeStoragePolicy, q, req.Expected, "storage/" + node + "/" + id, nil
 	})
 }
 
@@ -129,7 +145,7 @@ func (s *Server) handleNodeStorageSelection(action string) func(http.ResponseWri
 			Action string
 			Req    any
 		}{action, req}
-		s.sharedCreate(w, r, ws, req.OpID, body, func(ctx context.Context, c mydc.Conn, _ mydc.Session) (string, any, uint64, string, error) {
+		s.sharedCreate(w, r, ws, req.OpID, body, func(ctx context.Context, c sfc.Conn, _ sfc.Session) (string, any, uint64, string, error) {
 			return action, control.NodeStorageSelection{Node: node, ID: id}, req.Expected, "storage/" + node + "/" + id, nil
 		})
 	}
@@ -161,7 +177,7 @@ func (s *Server) handleSetTenantLimit(w http.ResponseWriter, r *http.Request, ws
 		return
 	}
 	tenant, node := r.PathValue("t"), r.PathValue("node")
-	s.sharedCreate(w, r, ws, req.OpID, req, func(ctx context.Context, c mydc.Conn, _ mydc.Session) (string, any, uint64, string, error) {
+	s.sharedCreate(w, r, ws, req.OpID, req, func(ctx context.Context, c sfc.Conn, _ sfc.Session) (string, any, uint64, string, error) {
 		if math.IsNaN(req.CPUs) || req.CPUs < 0 || req.CPUs > 1e6 {
 			return "", nil, 0, "", invalid("cpus: cores, 0 or more (decimals allowed)")
 		}
@@ -200,18 +216,18 @@ func (s *Server) handleSetTenantLimit(w http.ResponseWriter, r *http.Request, ws
 		if v.PacketQueuePackets == 0 || v.PacketQueueBytes == 0 {
 			v.PacketQueuePackets, v.PacketQueueBytes = 0, 0
 		}
-		return mydc.ActionSetNodeQuota, v, req.Expected, "limit/" + node, nil
+		return sfc.ActionSetNodeQuota, v, req.Expected, "limit/" + node, nil
 	})
 }
 
 // nodeLimits reads the limits of one tenant ("" = the node-wide ones) by
 // node. A tenant page never holds the node-wide limits; reading them is
 // system-administrator only.
-func nodeLimits(ctx context.Context, c mydc.Conn, tenant string) (map[string]mydc.NodeLimit, error) {
-	out := map[string]mydc.NodeLimit{}
+func nodeLimits(ctx context.Context, c sfc.Conn, tenant string) (map[string]sfc.NodeLimit, error) {
+	out := map[string]sfc.NodeLimit{}
 	after := ""
 	for {
-		p, err := c.Resources(ctx, tenant, after)
+		p, err := screenResources(ctx, c, tenant, after)
 		if err != nil {
 			return nil, err
 		}
@@ -232,25 +248,37 @@ func nodeLimits(ctx context.Context, c mydc.Conn, tenant string) (map[string]myd
 type limitRow struct {
 	NodeCPUs        *float64 `json:"nodeCpus,omitempty"`
 	NodeMemoryBytes *uint64  `json:"nodeMemoryBytes,omitempty"`
-	mydc.NodeLimit
+	sfc.NodeLimit
 }
 
 type resourceRow struct {
 	Limit *limitRow `json:"limit,omitempty"`
-	mydc.ResourceEntry
+	// Bridge is a virtual bridge row with this tenant's state (UI-5D).
+	Bridge *bridgeRow `json:"bridge,omitempty"`
+	sfc.ResourceEntry
+}
+
+// bridgeRow: State is open, closing, waiting-me or waiting-peer for the
+// page's tenant (bridgeState).
+type bridgeRow struct {
+	State string `json:"state"`
+	sfc.Bridge
 }
 
 // resourceRows adds nodeCpus/nodeMemoryBytes to the limit rows of a tenant
 // resources page. Without the node-wide limits (not an administrator, or
-// mydcd could not answer) the rows go out as they are.
-func resourceRows(ctx context.Context, c mydc.Conn, tenant string, items []mydc.ResourceEntry) []resourceRow {
-	var global map[string]mydc.NodeLimit
-	if tenant != "" && slices.ContainsFunc(items, func(e mydc.ResourceEntry) bool { return e.Limit != nil }) {
+// sfcd could not answer) the rows go out as they are.
+func resourceRows(ctx context.Context, c sfc.Conn, tenant string, items []sfc.ResourceEntry) []resourceRow {
+	var global map[string]sfc.NodeLimit
+	if tenant != "" && slices.ContainsFunc(items, func(e sfc.ResourceEntry) bool { return e.Limit != nil }) {
 		global, _ = nodeLimits(ctx, c, "")
 	}
 	out := make([]resourceRow, 0, len(items))
 	for _, e := range items {
 		row := resourceRow{ResourceEntry: e}
+		if e.Bridge != nil {
+			row.Bridge = &bridgeRow{State: bridgeState(tenant, e.Bridge), Bridge: *e.Bridge}
+		}
 		if e.Limit != nil {
 			row.Limit = &limitRow{NodeLimit: *e.Limit}
 			if g, ok := global[e.Limit.Node]; ok {
@@ -268,26 +296,31 @@ func resourceRows(ctx context.Context, c mydc.Conn, tenant string, items []mydc.
 // then can fixed volumes be made on it; closed: after a drain the node
 // reported the root closed (Closed), remove needs it.
 type storageRow struct {
-	Node       string   `json:"node"`
-	ID         string   `json:"id"`
-	Path       string   `json:"path"`
-	Tenants    []string `json:"tenants"`
-	MaxVolumes int      `json:"maxVolumes"`
-	Generation uint64   `json:"generation"`
-	Revision   uint64   `json:"revision"`
-	Draining   bool     `json:"draining"`
-	Attested   bool     `json:"attested"`
-	Closed     bool     `json:"closed"`
-	Volumes    *int     `json:"volumes,omitempty"`
+	Node    string   `json:"node"`
+	ID      string   `json:"id"`
+	Path    string   `json:"path"`
+	Tenants []string `json:"tenants"`
+	// AllTenants: every workspace may use it (tenants is then empty).
+	AllTenants bool `json:"allTenants"`
+	// CapacityBytes: most bytes its fixed volumes may reserve; 0 = no limit.
+	CapacityBytes uint64 `json:"capacityBytes"`
+	// Default: the root the server registered for itself (id "default").
+	Default    bool   `json:"default"`
+	Generation uint64 `json:"generation"`
+	Revision   uint64 `json:"revision"`
+	Draining   bool   `json:"draining"`
+	Attested   bool   `json:"attested"`
+	Closed     bool   `json:"closed"`
+	Volumes    *int   `json:"volumes,omitempty"`
 }
 
-func newStorageRow(r mydc.StorageRoot) storageRow {
+func newStorageRow(r sfc.StorageRoot) storageRow {
 	d := r.Definition
-	return storageRow{Node: d.Node, ID: d.ID, Path: d.Path, Tenants: append([]string{}, d.Tenants...), MaxVolumes: d.MaxVolumes,
+	return storageRow{Node: d.Node, ID: d.ID, Path: d.Path, Tenants: append([]string{}, d.Tenants...), AllTenants: d.AllTenants, CapacityBytes: d.CapacityBytes, Default: d.ID == nodestorage.DefaultRootID,
 		Generation: r.Generation, Revision: r.Revision, Draining: r.Draining, Attested: r.Attestation != nil, Closed: r.Closed != nil}
 }
 
-func storageRows(ctx context.Context, c mydc.Conn, items []mydc.StorageRoot) []storageRow {
+func storageRows(ctx context.Context, c sfc.Conn, items []sfc.StorageRoot) []storageRow {
 	var counts map[string]int
 	if len(items) > 0 {
 		counts = map[string]int{}
@@ -327,13 +360,13 @@ func storageRows(ctx context.Context, c mydc.Conn, items []mydc.StorageRoot) []s
 
 // tenantStorageRow is a storage root a tenant may place fixed volumes on
 // (REQ-30 tenant-storage), with the count of the tenant's own fixed volumes
-// there when known. mydcd leaves out the path and the other tenants.
+// there when known. sfcd leaves out the path and the other tenants.
 type tenantStorageRow struct {
 	Volumes *int `json:"volumes,omitempty"`
 	control.TenantStorageRoot
 }
 
-func tenantStorageRows(ctx context.Context, c mydc.Conn, tenant string, items []control.TenantStorageRoot) []tenantStorageRow {
+func tenantStorageRows(ctx context.Context, c sfc.Conn, tenant string, items []control.TenantStorageRoot) []tenantStorageRow {
 	var counts map[string]int
 	if len(items) > 0 {
 		counts = map[string]int{}
@@ -387,7 +420,7 @@ func writeLimitOver(w http.ResponseWriter, err error) bool {
 
 // POST /ledger/rotate {opId, expected} → rotate-ledger (LedgerWindow
 // {NextEpoch: expected+1}; Expected is the current ledger epoch, GET /nodes
-// ledgerEpoch). mydcd applies it only while no work is in progress
+// ledgerEpoch). sfcd applies it only while no work is in progress
 // (storageQuiescent); otherwise, and for a stale epoch, the op fails with
 // condition-failed.
 func (s *Server) handleRotateLedger(w http.ResponseWriter, r *http.Request, ws *webSession) {
@@ -398,15 +431,15 @@ func (s *Server) handleRotateLedger(w http.ResponseWriter, r *http.Request, ws *
 	if !readJSON(w, r, &req) {
 		return
 	}
-	s.sharedCreate(w, r, ws, req.OpID, req, func(ctx context.Context, c mydc.Conn, _ mydc.Session) (string, any, uint64, string, error) {
+	s.sharedCreate(w, r, ws, req.OpID, req, func(ctx context.Context, c sfc.Conn, _ sfc.Session) (string, any, uint64, string, error) {
 		if req.Expected == 0 || req.Expected == math.MaxUint64 {
 			return "", nil, 0, "", invalid("expected: the current ledger epoch (1 or more)")
 		}
-		return mydc.ActionRotateLedger, control.LedgerWindow{NextEpoch: req.Expected + 1}, req.Expected, "ledger", nil
+		return sfc.ActionRotateLedger, control.LedgerWindow{NextEpoch: req.Expected + 1}, req.Expected, "ledger", nil
 	})
 }
 
-// retirementView is mydcd's tenant-retirement shaped for the screen: the
+// retirementView is sfcd's tenant-retirement shaped for the screen: the
 // tenant's revision (Expected of begin and finish), phase and retirement
 // operation from Status.Tenant, remaining targets as "kind/id", and ready:
 // every owner reported closed and nothing remains, so
@@ -425,14 +458,14 @@ type retirementView struct {
 	Next                                                  string   `json:"next,omitempty"`
 }
 
-func retirementOperation(v mydc.TenantRetirement) string {
+func retirementOperation(v sfc.TenantRetirement) string {
 	if v.Tenant.Retirement == nil {
 		return ""
 	}
 	return v.Tenant.Retirement.Operation
 }
 
-func newRetirementView(v mydc.TenantRetirement) retirementView {
+func newRetirementView(v sfc.TenantRetirement) retirementView {
 	out := retirementView{Tenant: v.Tenant.ID, Retiring: v.Tenant.Phase == access.TenantRetiring, Revision: v.Tenant.Revision,
 		Phase: string(v.Tenant.Phase), Operation: retirementOperation(v), Index: v.Index, RootRevision: v.RootRevision,
 		TargetCount: v.TargetCount, OwnerCount: v.OwnerCount, ClosedOwners: v.ClosedOwners, RemainingCount: v.RemainingCount,
@@ -463,9 +496,9 @@ func (s *Server) handleTenantRetire(action string) func(http.ResponseWriter, *ht
 			Action string
 			Req    any
 		}{action, req}
-		s.sharedCreate(w, r, ws, req.OpID, body, func(ctx context.Context, c mydc.Conn, _ mydc.Session) (string, any, uint64, string, error) {
+		s.sharedCreate(w, r, ws, req.OpID, body, func(ctx context.Context, c sfc.Conn, _ sfc.Session) (string, any, uint64, string, error) {
 			sel := control.TenantRetirementSelection{Tenant: tenant, Operation: "retire-" + req.OpID}
-			if action == mydc.ActionFinishTenantRetirement {
+			if action == sfc.ActionFinishTenantRetirement {
 				st, err := c.TenantRetirement(ctx, tenant, "")
 				if err != nil {
 					return "", nil, 0, "", err

@@ -9,11 +9,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/network/services"
-	"github.com/jay94ks/mydcd/internal/tenancy"
-	"github.com/jay94ks/mydcd/internal/workload"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/network/services"
+	"github.com/jay94ks/seafield/internal/tenancy"
+	"github.com/jay94ks/seafield/internal/workload"
 )
 
 // These adapter/transaction tests belong to the E4 final verification bundle.
@@ -133,9 +133,9 @@ func TestManagedDNSConfigurationUsesExactTenantCASAndRelatedSource(t *testing.T)
 	for _, scope := range []string{"", "tenant"} {
 		f.apply("dns-quota-"+scope, "set-node-quota", 0, tenancy.NodeLimit{Tenant: scope, Node: "node-a", Capacity: workload.Resources{CPU: 8, Memory: 80}, Networks: 4, MaxConsumers: 4}, state.Applied)
 	}
-	definition := tenancy.TUNDefinition{Tenant: "tenant", Name: "services", Members: []tenancy.TUNNode{{Node: "node-a", Pools: []tenancy.Subnet{{ID: "pool", Prefix: netip.MustParsePrefix("10.75.1.0/24"), Gateway: netip.MustParseAddr("10.75.1.1"), MTU: 1280}}, Addresses: []netip.Prefix{netip.MustParsePrefix("10.75.2.1/32")}}}}
+	definition := tenancy.TUNDefinition{Tenant: "tenant", Name: "services", Members: []tenancy.TUNNode{{Node: "node-a", Pools: []tenancy.Subnet{{ID: "pool", Prefix: netip.MustParsePrefix("10.75.1.0/24"), Gateway: netip.MustParseAddr("10.75.1.1"), MTU: 1280}}}}}
 	managedDNSChange(t, f, "prepare-dns-network", "create-tun-network", 0, definition, state.Applied)
-	dns := services.ManagedDNSDefinition{Schema: 1, Tenant: "tenant", Network: "services", Policy: services.ManagedDNSPolicy{Enabled: true, Zone: "apps.mydc.test.", TTL: 30, NegativeTTL: 5, Transports: []string{"udp", "tcp"}, Upstreams: []netip.AddrPort{}, MaxQueries: 8, MaxCacheEntries: 8, MaxResponseBytes: 4096, MaxConnections: 4, RequestTimeoutMS: 1000}}
+	dns := services.ManagedDNSDefinition{Schema: 1, Tenant: "tenant", Network: "services", Policy: services.ManagedDNSPolicy{Enabled: true, Zone: "apps.sfc.test.", TTL: 30, NegativeTTL: 5, Transports: []string{"udp", "tcp"}, Upstreams: []netip.AddrPort{}, MaxQueries: 8, MaxCacheEntries: 8, MaxResponseBytes: 4096, MaxConnections: 4, RequestTimeoutMS: 1000}}
 	before := f.s
 	command, result := managedDNSChange(t, f, "configure-dns", "configure-network-dns", 0, dns, state.Applied)
 	key := services.ManagedDNSKey(dns.Tenant, dns.Network)
@@ -197,7 +197,7 @@ Tenant: tenant
 Network: services
 Policy:
   Enabled: true
-  Zone: apps.mydc.test.
+  Zone: apps.sfc.test.
   TTL: 30
   NegativeTTL: 5
   Transports: [udp, tcp]

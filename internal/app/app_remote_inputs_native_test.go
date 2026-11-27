@@ -15,16 +15,16 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/config"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/userauth"
-	"github.com/jay94ks/mydcd/tests/vaultfixture"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/config"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/userauth"
+	"github.com/jay94ks/seafield/tests/vaultfixture"
 	"gopkg.in/yaml.v3"
 )
 
@@ -32,7 +32,7 @@ func TestRealBoundaryManagedRemoteAppInputs(t *testing.T) {
 	testRealManagedAppOwner(t, true, true, true, true, true, true, false, true)
 }
 
-func prepareRemoteInputProvider(t *testing.T, ctx context.Context, root string, consumer *Runtime, user userauth.Client, source mydcp.Peer, session access.Session, read func() cluster.View, change func(string, string, uint64, any), v *vaultfixture.Vault, native bool, dockerEndpoint string, configure ...func(*config.Node)) *Runtime {
+func prepareRemoteInputProvider(t *testing.T, ctx context.Context, root string, consumer *Runtime, user userauth.Client, source sfcp.Peer, session access.Session, read func() cluster.View, change func(string, string, uint64, any), v *vaultfixture.Vault, native bool, dockerEndpoint string, configure ...func(*config.Node)) *Runtime {
 	t.Helper()
 	u, err := net.ListenPacket("udp4", "127.0.0.1:0")
 	if err != nil {
@@ -43,7 +43,7 @@ func prepareRemoteInputProvider(t *testing.T, ctx context.Context, root string, 
 	path := filepath.Join(root, "provider-node.yaml")
 	doc := fmt.Sprintf("version: 1\nnode: {id: node-b, listen: %q, state_dir: %q, identity_dir: %q}\nmodules: {network: {enabled: false}, workload: {enabled: false}, ingress: {enabled: false}}\n", address, filepath.Join(root, "provider-state"), filepath.Join(root, "provider-key"))
 	if native {
-		doc = strings.Replace(doc, "network: {enabled: false}, workload: {enabled: false}", "network: {enabled: true, docker_socket: 'unix:///var/run/docker.sock'}, workload: {enabled: true}", 1)
+		doc = strings.Replace(doc, "network: {enabled: false}, workload: {enabled: false}", "network: {enabled: true}, workload: {enabled: true}", 1)
 		if dockerEndpoint != "" {
 			doc = strings.Replace(doc, "'unix:///var/run/docker.sock'", fmt.Sprintf("%q", dockerEndpoint), 1)
 		}
@@ -51,7 +51,7 @@ func prepareRemoteInputProvider(t *testing.T, ctx context.Context, root string, 
 	if err = os.WriteFile(path, []byte(doc), 0600); err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := config.LoadNode(path)
+	cfg, err := loadTestNode(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -136,9 +136,9 @@ func verifyRemoteInputBoundary(t *testing.T, ctx context.Context, consumer, prov
 	}
 	// A user transport cannot impersonate the Task owner, even with a public
 	// valid binding/read-set copied from the accepted application.
-	peer, _ := consumer.Mesh.Peer(mydcp.Identity(provider.Identity.Public))
+	peer, _ := consumer.Mesh.Peer(sfcp.Identity(provider.Identity.Public))
 	public, _ := json.Marshal(q)
-	rogue, err := mydcp.NewTransport(user.Self, user.Cluster, func(k mydcp.Identity) (mydcp.Peer, bool) { return peer, k == peer.Key })
+	rogue, err := sfcp.NewTransport(user.Self, user.Cluster, func(k sfcp.Identity) (sfcp.Peer, bool) { return peer, k == peer.Key })
 	if err != nil {
 		t.Fatal(err)
 	}

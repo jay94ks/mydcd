@@ -12,7 +12,7 @@ import (
 	"syscall"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/access"
+	"github.com/jay94ks/seafield/internal/access"
 	"github.com/moby/moby/client"
 )
 

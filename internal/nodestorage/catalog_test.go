@@ -9,7 +9,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/access"
+	"github.com/jay94ks/seafield/internal/access"
 )
 
 type rootFixture struct {
@@ -54,7 +54,7 @@ func newRootFixture(t *testing.T) rootFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return rootFixture{u, b, key, Definition{Node: "node-a", Key: public, ID: "hdd", Path: "/mnt/hdd", Tenants: []string{"first"}, MaxVolumes: 2}}
+	return rootFixture{u, b, key, Definition{Node: "node-a", Key: public, ID: "hdd", Path: "/mnt/hdd", Tenants: []string{"first"}}}
 }
 func directoryFact(seed byte) Directory {
 	return Directory{Filesystem: "ext4", FilesystemPath: fmt.Sprintf("/dir-%d", seed), UUID: [16]byte{1}, HandleType: 1, Handle: bytes.Repeat([]byte{seed}, 8), Inode: uint64(seed), DeviceMajor: 8, DeviceMinor: 1, Boot: [32]byte{4}, Namespace: [32]byte{5}, MountID: 9}
@@ -117,7 +117,7 @@ func TestStorageRootRequiresNativeFactAndExplicitTenantACL(t *testing.T) {
 		t.Fatal("implicit root tenant permission")
 	}
 	r, _ = b.Root("node-a", "hdd")
-	b, err = b.SetPolicy(f.users, "admin", "node-a", "hdd", r.Revision, nil, 2, 0)
+	b, err = b.ChangePolicy(f.users, "admin", "node-a", "hdd", r.Revision, Policy{Remove: []string{"first"}}, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -144,8 +144,9 @@ func TestStorageRootRejectsOverlapsWrongProofAndShrink(t *testing.T) {
 	if _, err := f.book.Observe(wrong, f.definition.Key); err == nil {
 		t.Fatal("old/wrong registration fact accepted")
 	}
-	if _, err := f.book.SetPolicy(f.users, "admin", "node-a", "hdd", r.Revision, []string{"first"}, 1, 2); err == nil {
-		t.Fatal("root shrank below registered/unknown references")
+	limit := uint64(1 << 30)
+	if _, err := f.book.ChangePolicy(f.users, "admin", "node-a", "hdd", r.Revision, Policy{Capacity: &limit}, 2<<30); err == nil {
+		t.Fatal("root capacity shrank below held reservations")
 	}
 	if !bytes.Equal(original, rootBytes(t, f.book)) {
 		t.Fatal("negative input mutated original")
@@ -347,5 +348,71 @@ func TestStorageSpaceAggregationRejectsMixedNodeBootKeyAndCluster(t *testing.T) 
 				t.Fatal("mixed/absent observation became capacity")
 			}
 		})
+	}
+}
+
+func TestDefaultRootAllTenantsCapacityAndStickyRemoval(t *testing.T) {
+	f := newRootFixture(t)
+	d := DefaultDefinition("node-a", f.definition.Key, "/var/lib/sfc-storage")
+	b, err := f.book.RegisterDefault(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = b.RegisterDefault(d); err == nil {
+		t.Fatal("default root registered twice")
+	}
+	r, _ := b.Root("node-a", DefaultRootID)
+	if !r.Definition.AllTenants || r.Definition.CapacityBytes != 0 || len(r.Definition.Tenants) != 0 {
+		t.Fatalf("default policy %+v", r.Definition)
+	}
+	f.book = b
+	b, err = b.Observe(signedRoot(f, r, 3), f.definition.Key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tenant := range []string{"first", "second"} {
+		if _, err = b.CanUse(f.users, "admin", tenant, "node-a", DefaultRootID, r.Generation); err != nil {
+			t.Fatal("all-tenant root refused", tenant, err)
+		}
+	}
+	r, _ = b.Root("node-a", DefaultRootID)
+	if _, err = b.ChangePolicy(f.users, "admin", "node-a", DefaultRootID, r.Revision, Policy{Add: []string{"first"}}, 0); err == nil {
+		t.Fatal("list edit accepted while every tenant is allowed")
+	}
+	off, limit := false, uint64(10<<30)
+	b, err = b.ChangePolicy(f.users, "admin", "node-a", DefaultRootID, r.Revision, Policy{AllTenants: &off, Add: []string{"first"}, Capacity: &limit}, 1<<30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, _ = b.Root("node-a", DefaultRootID)
+	if r.Definition.AllTenants || r.Definition.CapacityBytes != limit || !r.Definition.Allows("first") || r.Definition.Allows("second") {
+		t.Fatalf("changed policy %+v", r.Definition)
+	}
+	if _, err = b.CanUse(f.users, "admin", "second", "node-a", DefaultRootID, r.Generation); err == nil {
+		t.Fatal("removed tenant still admitted")
+	}
+	raw := rootBytes(t, b)
+	if decoded, err := Decode(raw); err != nil || !bytes.Equal(rootBytes(t, decoded), raw) {
+		t.Fatal("policy checkpoint did not round-trip", err)
+	}
+	b, err = b.Drain(f.users, "admin", "node-a", DefaultRootID, r.Revision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, _ = b.Root("node-a", DefaultRootID)
+	closed := RootClosed{Schema: 1, Root: r.Reference(b.cluster), NoUsers: true, NoPending: true}
+	closed.Signature = ed25519.Sign(f.key, RootClosedBytes(closed))
+	if b, err = b.ObserveClosed(closed, f.definition.Key); err != nil {
+		t.Fatal(err)
+	}
+	r, _ = b.Root("node-a", DefaultRootID)
+	if b, err = b.Remove(f.users, "admin", "node-a", DefaultRootID, r.Revision, 0); err != nil {
+		t.Fatal(err)
+	}
+	if !b.Registered("node-a", DefaultRootID) {
+		t.Fatal("removed default root forgot it was registered")
+	}
+	if _, err = b.RegisterDefault(d); err == nil {
+		t.Fatal("removed default root registered again")
 	}
 }

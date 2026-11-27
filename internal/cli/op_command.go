@@ -45,7 +45,7 @@ func OpCommand(open func() (*Ops, error), format *FormatFlag, kinds map[string]H
 		}
 		if !ok || call == nil {
 			if resume {
-				return fmt.Errorf("operation %s (%s) cannot be resumed by this version of mydc", op.ID, op.Kind)
+				return fmt.Errorf("operation %s (%s) cannot be resumed by this version of sfcli", op.ID, op.Kind)
 			}
 		} else if !(op.State.Final() && !resume) {
 			state, detail, err := call(c, op)
@@ -65,8 +65,8 @@ func OpCommand(open func() (*Ops, error), format *FormatFlag, kinds map[string]H
 		Name:  "op",
 		Short: "Check and resume changes sent from this computer",
 		Long: `Every change gets an operation ID before it is sent. If a command is
-interrupted or its reply is lost, 'mydc op show ID' asks the server what
-happened with that same ID, and 'mydc op resume ID' sends the same saved
+interrupted or its reply is lost, 'sfcli op show ID' asks the server what
+happened with that same ID, and 'sfcli op resume ID' sends the same saved
 request again. A new command is never needed to finish an old one.`,
 		Sub: []*Command{
 			{

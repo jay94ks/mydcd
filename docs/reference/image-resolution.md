@@ -3,15 +3,15 @@
 `image-resolve`는 태그를 immutable digest로 확인하고 현재 tenant의 이미지 신뢰 정책을 검사하는 읽기 API다. 이미지 배포·신뢰 출처 등록·credential 발급을 수행하지 않는다. 실제 배포는 실행 직전에 같은 신뢰 규칙과 현재 권한을 다시 검사한다.
 
 ```sh
-mydc --tenant payments image show ghcr.io/my-org/app:release
-mydc --tenant payments image resolve docker.io/library/alpine:latest
+sfcli --tenant payments image show ghcr.io/my-org/app:release
+sfcli --tenant payments image resolve docker.io/library/alpine:latest
 ```
 
 현재 tenant의 Read 또는 ManageRegistry 권한이 필요하다. CLI는 선택 cluster/tenant/user·기본 Unix 접속 규칙을 그대로 따른다. `--node`, 관리 `--request-id`, 자격 출력·Group 비밀번호 옵션은 받지 않는다. 결과 Code가 `OK`면0, 진단상 실패면3으로 종료하며 전송·정책 오류는 기존 CLI 규칙을 따른다.
 
 ## 메시지 형식
 
-기존 User envelope·Session·Nonce·서명을 사용한다. Unix와 네트워크 MYDCP의 형식은 동일하며 finite 요청의 write EOF 뒤에 응답을 읽는다.
+기존 User envelope·Session·Nonce·서명을 사용한다. Unix와 네트워크 SFCP의 형식은 동일하며 finite 요청의 write EOF 뒤에 응답을 읽는다.
 
 ```json
 {
@@ -59,4 +59,4 @@ mydc --tenant payments image resolve docker.io/library/alpine:latest
 
 조회 전후에 현재 Session·tenant 신뢰·선택 owner/run·source 세대와 원 승인 read-set을 대조한다. 노드 간 전달은 인증된 Management의 `image-resolve-owner`로 같은 원 Session·tenant·Ref·해석 대상만 넘긴다. node 전용 호출을 Unix User method로 노출하지 않는다. 내장 Store read는 기존 owner lock으로 close와 합류하고, 외부 read는 source의 세대 fence·실제 HTTP/Secret I/O 반환에 합류한다.
 
-manifest/config metadata 한도와 index의 플랫폼별 digest 검사는 [외부 registry](external-registries.md)의 같은 parser/예산을 사용한다. 공개 결과는224KiB 이내이며 MYDCP의256KiB frame 한도 안에 둔다. 이 조회는 layer 다운로드·Docker 적재·실행 성공이나 이후 mutable tag가 그대로임을 보장하지 않는다.
+manifest/config metadata 한도와 index의 플랫폼별 digest 검사는 [외부 registry](external-registries.md)의 같은 parser/예산을 사용한다. 공개 결과는224KiB 이내이며 SFCP의256KiB frame 한도 안에 둔다. 이 조회는 layer 다운로드·Docker 적재·실행 성공이나 이후 mutable tag가 그대로임을 보장하지 않는다.

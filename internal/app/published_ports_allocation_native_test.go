@@ -18,15 +18,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/containerops"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/userauth"
-	"github.com/jay94ks/mydcd/internal/workload"
-	checker "github.com/jay94ks/mydcd/internal/workload/lifecycle"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/containerops"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/userauth"
+	"github.com/jay94ks/seafield/internal/workload"
+	checker "github.com/jay94ks/seafield/internal/workload/lifecycle"
 	dockernet "github.com/moby/moby/api/types/network"
 	"github.com/moby/moby/client"
 	"gopkg.in/yaml.v3"
@@ -91,7 +91,7 @@ func prepareManagedAllocatedPortsDocument(t *testing.T, document []byte) ([]byte
 	if service.Environment == nil {
 		service.Environment = deployment.Environment{}
 	}
-	service.Environment["MYDC_PUBLISHED_PORTS_FIXTURE"] = "1"
+	service.Environment["SFC_PUBLISHED_PORTS_FIXTURE"] = "1"
 	service.Memory = "64m"
 	input.Services["web"] = service
 	return f.document(t, input), f
@@ -275,7 +275,7 @@ func allocatedPublishedEcho(ctx context.Context, c allocatedPublishedCase, addre
 		}
 		body, e := io.ReadAll(io.LimitReader(reply.Body, 128))
 		_ = reply.Body.Close()
-		if e != nil || reply.StatusCode != http.StatusOK || string(body) != "mydc-boundary /ping" {
+		if e != nil || reply.StatusCode != http.StatusOK || string(body) != "sfc-boundary /ping" {
 			return fmt.Errorf("dynamic HTTP target response changed")
 		}
 		return nil
@@ -354,7 +354,7 @@ func (f *managedAllocatedPorts) assertClosed(t *testing.T, ctx context.Context) 
 	f.closed(t, ctx, f.standalone)
 }
 
-func prepareManagedAllocatedPortsNative(t *testing.T, ctx context.Context, r *Runtime, root string, document []byte, user userauth.Client, peer mydcp.Peer, session access.Session, p control.Policy, read func() cluster.View, wait func(string, func() bool), fixture *managedAllocatedPorts) func(*Runtime) {
+func prepareManagedAllocatedPortsNative(t *testing.T, ctx context.Context, r *Runtime, root string, document []byte, user userauth.Client, peer sfcp.Peer, session access.Session, p control.Policy, read func() cluster.View, wait func(string, func() bool), fixture *managedAllocatedPorts) func(*Runtime) {
 	t.Helper()
 	appKey := deployment.ResourceKey("task", "tenant", "app", "web")
 	frozenDocuments := map[string][]byte{"app": bytes.Clone(document)}
@@ -388,7 +388,7 @@ func prepareManagedAllocatedPortsNative(t *testing.T, ctx context.Context, r *Ru
 	appBinding, appSource := binding("app", appKey)
 	call := func(args ...string) {
 		t.Helper()
-		_, _, e := runManagedCLICommand(ctx, os.Getenv("MYDC_TEST_CLI"), filepath.Join(root, "cli-home"), filepath.Join(root, "cli.yaml"), append([]string{"--tenant", "tenant"}, args...), nil)
+		_, _, e := runManagedCLICommand(ctx, os.Getenv("SFC_TEST_CLI"), filepath.Join(root, "cli-home"), filepath.Join(root, "cli.yaml"), append([]string{"--tenant", "tenant"}, args...), nil)
 		if e != nil {
 			t.Fatal("allocated standalone original CLI action failed", e)
 		}
@@ -413,7 +413,7 @@ func prepareManagedAllocatedPortsNative(t *testing.T, ctx context.Context, r *Ru
 	if e != nil {
 		t.Fatal(e)
 	}
-	input.Name, input.MyDC.Deployment, input.MyDC.Ingress = name, "allocated-service-deploy", nil
+	input.Name, input.Sfc.Deployment, input.Sfc.Ingress = name, "allocated-service-deploy", nil
 	input.Volumes = nil
 	input.Secrets = nil
 	service := input.Services["web"]
@@ -422,15 +422,15 @@ func prepareManagedAllocatedPortsNative(t *testing.T, ctx context.Context, r *Ru
 	// without borrowing the live app writer or creating anonymous storage.
 	service.Tmpfs = []string{"/data:size=1m,uid=10001,gid=10001,mode=0700"}
 	service.Secrets = nil
-	service.MyDC.Sources = nil
+	service.Sfc.Sources = nil
 	service.Healthcheck = nil
-	delete(service.Environment, "MYDC_VOLUME_FIXTURE")
-	delete(service.Environment, "MYDC_VOLUME_SECOND_FIXTURE")
-	delete(service.Environment, "MYDC_PROJECTION_FILE")
+	delete(service.Environment, "SFC_VOLUME_FIXTURE")
+	delete(service.Environment, "SFC_VOLUME_SECOND_FIXTURE")
+	delete(service.Environment, "SFC_PROJECTION_FILE")
 	service.Ports = fixture.intent(t)
 	for alias, attachment := range service.Networks {
 		a, ae := netip.ParseAddr(attachment.IPv4)
-		prefix, pe := netip.ParsePrefix(os.Getenv("MYDC_DOCKER_TEST_CIDR"))
+		prefix, pe := netip.ParsePrefix(os.Getenv("SFC_DOCKER_TEST_CIDR"))
 		if ae != nil || pe != nil || !prefix.Contains(a.Next()) {
 			t.Fatal("allocation fixture requires adjacent owned standalone address")
 		}
@@ -443,8 +443,8 @@ func prepareManagedAllocatedPortsNative(t *testing.T, ctx context.Context, r *Ru
 	if e = os.WriteFile(path, raw, 0600); e != nil {
 		t.Fatal(e)
 	}
-	call("standalone", "plan", name, "-f", path, "--mode", "entrypoint", "--lifetime", "fixed", "--restart", "no")
-	call("standalone", "up", name, "-f", path, "--mode", "entrypoint", "--lifetime", "fixed", "--restart", "no", "--operation", "allocated-create", "--no-input")
+	call("standalone", "run", name, "-f", path, "--mode", "entrypoint", "--lifetime", "fixed", "--restart", "no", "--dry-run")
+	call("standalone", "run", name, "-f", path, "--mode", "entrypoint", "--lifetime", "fixed", "--restart", "no", "--id", "allocated-create")
 	scope := deployment.StandaloneScopeName("tenant", name)
 	key := deployment.ResourceKey("task", "tenant", scope, "web")
 	frozenDocuments[scope] = bytes.Clone(raw)
@@ -482,10 +482,10 @@ func prepareManagedAllocatedPortsNative(t *testing.T, ctx context.Context, r *Ru
 			return e == nil && got.Container.State != nil && got.Container.State.Running == running
 		})
 	}
-	call("standalone", "stop", name, "--operation", "allocated-stop")
+	call("standalone", "stop", name, "--id", "allocated-stop")
 	controlDone("allocated-stop", false)
 	fixture.closed(t, ctx, standaloneOriginal)
-	call("standalone", "start", name, "--operation", "allocated-start")
+	call("standalone", "start", name, "--id", "allocated-start")
 	controlDone("allocated-start", true)
 	afterStart := currentTarget()
 	fixture.standalone = live(key)
@@ -522,7 +522,7 @@ func prepareManagedAllocatedPortsNative(t *testing.T, ctx context.Context, r *Ru
 			t.Fatal("same-DB reopen changed exact admitted standalone observation")
 		}
 		assertSources()
-		call("standalone", "remove", name, "--operation", "allocated-remove")
+		call("standalone", "remove", name, "--id", "allocated-remove")
 		wait("allocated original standalone retirement", func() bool {
 			apps, e := p.Apps(read().State)
 			inventory, ok := apps.Inventory("tenant", scope)

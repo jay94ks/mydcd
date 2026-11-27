@@ -14,8 +14,8 @@ import (
 	"encoding/json"
 	"errors"
 
-	"github.com/jay94ks/mydcd/internal/storage"
-	"github.com/jay94ks/mydcd/internal/wallet"
+	"github.com/jay94ks/seafield/internal/storage"
+	"github.com/jay94ks/seafield/internal/wallet"
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -24,7 +24,7 @@ import (
 // identity. It never enters Raft. Each certificate key is derived from it:
 //
 //	K = HKDF-SHA256(master, salt = certificate ID, info = MasterInfo)
-const MasterInfo = "mydc/certificate/v1"
+const MasterInfo = "sfc/certificate/v1"
 
 var masterBucket = []byte("certificate-master-1")
 var masterName = []byte("master")
@@ -175,7 +175,7 @@ type SealRequest struct {
 func SealRequestBytes(q SealRequest) []byte {
 	q.Proof = nil
 	raw, _ := json.Marshal(q)
-	digest := sha256.Sum256(append([]byte("mydc-certificate-seal-1\x00"), raw...))
+	digest := sha256.Sum256(append([]byte("sfc-certificate-seal-1\x00"), raw...))
 	return digest[:]
 }
 

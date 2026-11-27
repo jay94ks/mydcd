@@ -10,13 +10,13 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/lifecycle"
-	"github.com/jay94ks/mydcd/internal/cluster/membership"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/config"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/workload/volumes"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/lifecycle"
+	"github.com/jay94ks/seafield/internal/cluster/membership"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/config"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/workload/volumes"
 )
 
 // Isolation must leave an active voter for NEW user grants. Native membership
@@ -41,7 +41,7 @@ func cleanupControlIssuer(t *testing.T, f *backupCoreFixture) (ed25519.PrivateKe
 		d = next
 	}
 	peer := config.Peer{ID: "node-control", Key: hex.EncodeToString(key[:]), Endpoint: "127.0.0.1:8999"}
-	advance(d.Invite(peer, "cleanup-control"))
+	advance(d.Invite(peer, "cleanup-control", nil))
 	entry, _ := d.Entry(peer.ID)
 	advance(d.Dispatch(peer.ID, entry.Revision, entry.Job.Pending.ID, base, f.p.TrustRoot))
 	entry, _ = d.Entry(peer.ID)
@@ -267,7 +267,7 @@ func TestNodeRestoreKeepsOriginalSignedIntentAndNeedsCurrentAdminGrant(t *testin
 	userRevision := user.Revision
 	user.Revision = 0
 	user.SystemAdmin = false
-	f.apply("withdraw-original-role", "put-user", userRevision, user, state.Applied)
+	f.apply("withdraw-original-role", "put-user", userRevision, accountFields(user), state.Applied)
 	if f.p.CheckNodeEffect(f.s, "restore-a") == nil {
 		t.Fatal("withdrawn admin could activate a restored node")
 	}

@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/web/mydc"
+	"github.com/jay94ks/seafield/internal/web/sfc"
 )
 
 func storageItem(t *testing.T, f *fixture, path, id string) map[string]any {
@@ -44,7 +44,7 @@ func userPayload(t *testing.T, f *fixture, user, opID string, v any) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	op, err := mydc.DecodeOperation(o.Signed)
+	op, err := sfc.DecodeOperation(o.Signed)
 	if err != nil {
 		t.Fatal(err)
 	}

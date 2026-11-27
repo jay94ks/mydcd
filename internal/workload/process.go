@@ -4,6 +4,7 @@ package workload
 
 import (
 	"errors"
+	"fmt"
 	"maps"
 	"path"
 	"slices"
@@ -11,11 +12,15 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/engine"
+	"github.com/jay94ks/seafield/internal/engine"
 	"github.com/moby/moby/api/types/container"
 )
 
 var ErrProcess = errors.New("invalid or unsupported image execution configuration")
+
+// ErrProcessUser is the ErrProcess most images meet: containers run as a
+// non-zero numeric UID:GID, and the image's USER is empty (root) or a name.
+var ErrProcessUser = fmt.Errorf("%w: the image runs as root or a named user; set the service's user: to a non-zero UID:GID", ErrProcess)
 
 // Process is the frozen effective configuration of an immutable image. It is
 // shared metadata, never a place for fetched Secret values or host paths.
@@ -217,6 +222,9 @@ func ResolveProcess(id string, image *container.Config, overrides ProcessOverrid
 	slices.Sort(keys)
 	for _, k := range keys {
 		p.Env = append(p.Env, k+"="+values[k])
+	}
+	if !numericUser(p.User) {
+		return Process{}, ErrProcessUser
 	}
 	if err = p.Validate(); err != nil {
 		return Process{}, err

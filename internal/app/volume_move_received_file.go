@@ -8,7 +8,7 @@ import (
 	"errors"
 	"os"
 
-	"github.com/jay94ks/mydcd/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/reconcile"
 )
 
 func moveRestoreConsumer(b moveReceiveIntent) string {

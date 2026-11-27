@@ -11,7 +11,7 @@ import (
 	"testing"
 
 	"github.com/google/nftables/expr"
-	"github.com/jay94ks/mydcd/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/reconcile"
 )
 
 func managedIsolationFixture(t *testing.T) IsolationSpec {
@@ -228,5 +228,34 @@ func TestManagedIsolationAcceptsALoneTunnelWithNoRoutes(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+// A TUN's route set changes in place (a server joins the system network):
+// until the change settles its old and new route sets name the same device,
+// and both stay allowed instead of refusing the whole isolation spec.
+func TestManagedIsolationMergesOneTunnelsOldAndNewRoutes(t *testing.T) {
+	s := managedIsolationFixture(t)
+	s.Prefixes = append(s.Prefixes, TenantPrefix{Tenant: "first", Prefix: netip.MustParsePrefix("10.3.1.0/24")})
+	old := s.Tunnels[0]
+	next := IsolationTunnel{Tenant: old.Tenant, Device: old.Device, Prefixes: []netip.Prefix{netip.MustParsePrefix("10.3.0.0/24"), netip.MustParsePrefix("10.3.1.0/24")}}
+	s.Tunnels = append(s.Tunnels, next)
+	got, err := NormalizeIsolation(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Tunnels) != 1 || len(got.Tunnels[0].Prefixes) != 2 {
+		t.Fatalf("tunnels %+v", got.Tunnels)
+	}
+	raw, _ := json.Marshal(got)
+	if _, err = DecodeIsolation(string(raw)); err != nil {
+		t.Fatal(err)
+	}
+	// one device under two tenants is still refused
+	s.Tunnels[1].Tenant = "second"
+	s.Prefixes = append(s.Prefixes, TenantPrefix{Tenant: "second", Prefix: netip.MustParsePrefix("10.4.0.0/24")})
+	s.Tunnels[1].Prefixes = []netip.Prefix{netip.MustParsePrefix("10.4.0.0/24")}
+	if _, err = NormalizeIsolation(s); err == nil {
+		t.Fatal("one TUN device under two tenants accepted")
 	}
 }

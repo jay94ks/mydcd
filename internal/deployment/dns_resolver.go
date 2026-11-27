@@ -5,8 +5,8 @@ package deployment
 import (
 	"encoding/json"
 
-	"github.com/jay94ks/mydcd/internal/network/services"
-	"github.com/jay94ks/mydcd/internal/workload"
+	"github.com/jay94ks/seafield/internal/network/services"
+	"github.com/jay94ks/seafield/internal/workload"
 	"net/netip"
 	"slices"
 )
@@ -40,7 +40,7 @@ func resolveReplicaDNS(b Blueprint, ctx PlanningContext, instance TaskInstance, 
 	for _, alias := range mapKeys(service.Networks) {
 		definition := networks[alias]
 		if !definition.External {
-			if definition.MyDC.DNS == nil || !definition.MyDC.DNS.Enabled {
+			if definition.Sfc.DNS == nil || !definition.Sfc.DNS.Enabled {
 				return service, inputError("REPLICA_DNS_REQUIRED", alias)
 			}
 			continue
@@ -84,18 +84,18 @@ func resolveServiceDNS(service ComposeService, networks map[string]ComposeNetwor
 	var servers, search []string
 	for _, id := range mapKeys(service.Networks) {
 		network := networks[id]
-		if network.External || network.MyDC.DNS == nil || !network.MyDC.DNS.Enabled {
+		if network.External || network.Sfc.DNS == nil || !network.Sfc.DNS.Enabled {
 			continue
 		}
-		pool, ok := network.MyDC.Pools[service.MyDC.Node]
+		pool, ok := network.Sfc.Pools[service.Sfc.Node]
 		if !ok {
 			continue
 		}
 		if !slices.Contains(servers, pool.Gateway) {
 			servers = append(servers, pool.Gateway)
 		}
-		if !slices.Contains(search, network.MyDC.DNS.Zone) {
-			search = append(search, network.MyDC.DNS.Zone)
+		if !slices.Contains(search, network.Sfc.DNS.Zone) {
+			search = append(search, network.Sfc.DNS.Zone)
 		}
 	}
 	if service.DNS == nil {

@@ -4,90 +4,92 @@ package server
 
 import (
 	"testing"
+
+	"github.com/jay94ks/seafield/internal/web/sfc"
 )
 
-// UI-3C log clearing: plan (target and dependents), clear with the same
-// opId, status stages, refusal for a non-local log driver.
+// UI-3C log clearing: every server clears its own log store; a server that
+// is down keeps its logs until the same request is sent again; a viewer is
+// refused by each server.
 func TestLogClear(t *testing.T) {
 	f, fake := newFakeFixture(t)
-	op := opSeq("c3c0aaaa")
 	fakeLogin(t, f, "alice")
-	code, plan := f.do("GET", "/api/v1/t/shop/apps/php-shop/logs-clear/plan?service=db&instance=1", nil)
-	if code != 200 || plan["clearable"] != true || len(plan["target"].(string)) != 64 {
-		t.Fatalf("plan: %d %v", code, plan)
+	stored := func(q string) map[string]map[string]any {
+		t.Helper()
+		code, out := f.do("GET", "/api/v1/t/shop/logs/stored?"+q, nil)
+		if code != 200 {
+			t.Fatalf("stored %s: %d %v", q, code, out)
+		}
+		rows := map[string]map[string]any{}
+		for _, n := range out["nodes"].([]any) {
+			n := n.(map[string]any)
+			for _, l := range n["logs"].([]any) {
+				l := l.(map[string]any)
+				rows[l["key"].(string)] = l
+			}
+		}
+		return rows
 	}
-	reasons := map[string]int{}
-	for _, im := range plan["targets"].([]any) {
-		row := im.(map[string]any)
-		reasons[row["reason"].(string)]++
-		if row["reason"] == "target" && (row["service"] != "db" || row["instance"] != "1") {
-			t.Fatalf("target row: %v", row)
+	before := stored("app=php-shop")
+	if len(before) == 0 {
+		t.Fatal("no stored logs")
+	}
+	var lines float64
+	for _, l := range before {
+		lines += l["lines"].(float64)
+		if l["container"] == "" || l["service"] == "" {
+			t.Fatalf("row %v", l)
 		}
 	}
-	if reasons["target"] != 1 {
-		t.Fatalf("targets: %v", plan["targets"])
+	if lines == 0 {
+		t.Fatal("no lines stored")
 	}
-	body := map[string]any{"opId": op(), "service": "db", "instance": "1", "target": plan["target"]}
-	code, out := f.do("POST", "/api/v1/t/shop/apps/php-shop/logs-clear", body)
-	if opState(t, code, out) != "applied" {
+
+	fake.SetLogStoreDown("node-b", true)
+	code, out := f.do("POST", "/api/v1/t/shop/logs/clear", map[string]any{"app": "php-shop"})
+	if code != 200 || out["total"].(float64) < 2 || out["cleared"] != out["total"].(float64)-1 {
 		t.Fatalf("clear: %d %v", code, out)
 	}
-	if code, again := f.do("POST", "/api/v1/t/shop/apps/php-shop/logs-clear", body); code != 200 || again["op"].(map[string]any)["requestId"] != out["op"].(map[string]any)["requestId"] {
-		t.Fatalf("same opId: %d %v", code, again)
+	codes := map[string]string{}
+	for _, n := range out["nodes"].([]any) {
+		n := n.(map[string]any)
+		codes[n["node"].(string)] = n["code"].(string)
 	}
-	status := "/api/v1/t/shop/apps/php-shop/logs-clear/" + body["opId"].(string)
-	var seen []string
-	for i := 0; i < 4; i++ {
-		code, st := f.do("GET", status, nil)
-		if code != 200 {
-			t.Fatalf("status: %d %v", code, st)
+	if codes["node-b"] != "unreachable" || codes["node-a"] != "ok" || codes["node-d"] != "" {
+		t.Fatalf("codes %v", codes)
+	}
+	fake.SetLogStoreDown("node-b", false)
+	if code, out := f.do("POST", "/api/v1/t/shop/logs/clear", map[string]any{"app": "php-shop"}); code != 200 || out["cleared"] != out["total"] {
+		t.Fatalf("clear again: %d %v", code, out)
+	}
+	for k, l := range stored("app=php-shop") {
+		if l["lines"].(float64) != 0 {
+			t.Fatalf("%s still has lines: %v", k, l)
 		}
-		seen = append(seen, st["phase"].(string))
-		if st["phase"] == "Succeeded" && len(st["newContainers"].([]any)) == 0 {
-			t.Fatalf("no new containers: %v", st)
-		}
 	}
-	if seen[0] != "Retiring" || seen[3] != "Succeeded" {
-		t.Fatalf("stages %v", seen)
-	}
-	_, hist := f.do("GET", "/api/v1/t/shop/apps/php-shop/task/history?service=db&instance=1", nil)
-	if exits := hist["exits"].([]any); len(exits) == 0 {
-		t.Fatalf("history: %v", hist)
+	if code, out := f.do("GET", "/api/v1/t/shop/logs/stored?app=php-shop&node=node-zz", nil); code != 404 {
+		t.Fatalf("unknown node: %d %v", code, out)
 	}
 
-	// a stale target (the containers changed)
-	body["opId"] = op()
-	if code, out := f.do("POST", "/api/v1/t/shop/apps/php-shop/logs-clear", body); code != 409 || errCode(out) != "plan-changed" {
-		t.Fatalf("stale: %d %v", code, out)
+	// a bad selection
+	for _, body := range []map[string]any{{}, {"app": "php-shop", "standalone": "x"}, {"standalone": "x", "service": "web"}} {
+		if code, out := f.do("POST", "/api/v1/t/shop/logs/clear", body); code != 400 {
+			t.Fatalf("selection %v: %d %v", body, code, out)
+		}
 	}
-	fake.SetTaskLogDriver("shop", "php-shop", "web", "1", "syslog")
-	if code, p := f.do("GET", "/api/v1/t/shop/apps/php-shop/logs-clear/plan?service=web&instance=1", nil); code != 200 || p["clearable"] != false || p["reason"] != "unsupported-log-driver" || p["driver"] != "syslog" {
-		t.Fatalf("syslog plan: %d %v", code, p)
+	if code, _ := f.do("POST", "/api/v1/t/shop/apps/php-shop/logs-clear", map[string]any{}); code != 404 && code != 405 {
+		t.Fatalf("old route still answers: %d", code)
 	}
-	bobLogin(t, f)
-	if code, _ := f.do("GET", "/api/v1/t/shop/apps/php-shop/logs-clear/plan?service=db&instance=1", nil); code != 403 {
-		t.Fatalf("viewer plan: %d", code)
-	}
-}
 
-// /observe logs between since and until (Unix seconds).
-func TestObserveUntil(t *testing.T) {
-	f, _ := newFakeFixture(t)
-	fakeLogin(t, f, "alice")
-	code, all := f.do("POST", "/api/v1/t/shop/apps/php-shop/observe", map[string]any{"service": "web", "kind": "logs", "tail": 20})
-	if code != 200 || len(all["logs"].([]any)) < 4 {
-		t.Fatalf("all: %d %v", code, all)
+	// a viewer reads the list, and every server refuses the clear
+	if code, out := keyLogin(f, "bob", sfc.FixtureKey("bob")); code != 200 {
+		t.Fatalf("bob: %d %v", code, out)
 	}
-	lines := all["logs"].([]any)
-	from, to := lines[1].(map[string]any)["time"].(float64), lines[2].(map[string]any)["time"].(float64)
-	// The fake's lines are 5 s apart and dated from now: a second may pass
-	// between the two reads, so until has 2 s of slack (still short of the
-	// next line).
-	code, part := f.do("POST", "/api/v1/t/shop/apps/php-shop/observe", map[string]any{"service": "web", "kind": "logs", "tail": 20, "since": from, "until": to + 2})
-	if code != 200 || len(part["logs"].([]any)) != 2 {
-		t.Fatalf("between: %d %v", code, part)
+	if rows := stored("app=php-shop&service=web"); len(rows) == 0 {
+		t.Fatal("viewer list")
 	}
-	if code, _ := f.do("POST", "/api/v1/t/shop/apps/php-shop/observe", map[string]any{"service": "web", "kind": "logs", "since": to, "until": from}); code != 400 {
-		t.Fatalf("until before since: %d", code)
+	code, out = f.do("POST", "/api/v1/t/shop/logs/clear", map[string]any{"app": "php-shop", "service": "web"})
+	if code != 200 || out["cleared"] != 0.0 {
+		t.Fatalf("viewer clear: %d %v", code, out)
 	}
 }

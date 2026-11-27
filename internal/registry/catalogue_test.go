@@ -14,7 +14,7 @@ import (
 	oci "github.com/google/go-containerregistry/pkg/registry"
 	v1 "github.com/google/go-containerregistry/pkg/v1"
 	"github.com/google/go-containerregistry/pkg/v1/types"
-	"github.com/jay94ks/mydcd/internal/storage"
+	"github.com/jay94ks/seafield/internal/storage"
 )
 
 func catalogueManifest(t *testing.T, version string) (oci.ManifestData, string) {

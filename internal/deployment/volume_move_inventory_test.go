@@ -6,8 +6,8 @@ import (
 	"crypto/ed25519"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/workload/volumes"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/workload/volumes"
 )
 
 func completeInventoryVolumeStep(t *testing.T, x *inventoryFixture, key, native string) {
@@ -103,11 +103,11 @@ func TestInventoryMovedVolumeRequiresRetainedProofAndArmedOwner(t *testing.T) {
 	}
 	input := smallCompose(t)
 	db := input.Services["db"]
-	db.MyDC.Node = "node-a"
+	db.Sfc.Node = "node-a"
 	db.Networks["app"] = Attachment{IPv4: "10.240.10.20"}
 	input.Services["db"] = db
 	v := input.Volumes["mysql-data"]
-	v.MyDC.Node = "node-a"
+	v.Sfc.Node = "node-a"
 	input.Volumes["mysql-data"] = v
 	ctx := contextFor(t, x.f)
 	ctx.Current = x.shared.Objects("")

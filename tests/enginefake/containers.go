@@ -24,7 +24,9 @@ type ctr struct {
 	State      container.State
 	Networks   map[string]*apinetwork.EndpointSettings // by network name
 	Logs       []LogLine
-	Restarts   int
+	// logSeq numbers queued lines; logAcked is what sfcd acked (purpose 34).
+	logSeq, logAcked uint64
+	Restarts         int
 	// waiters are closed when the container stops running.
 	waiters []chan struct{}
 	// sandbox is the running container's namespace (Host).
@@ -36,6 +38,7 @@ type LogLine struct {
 	Time   time.Time
 	Stderr bool
 	Text   string
+	seq    uint64
 }
 
 func containerRoutes() {
@@ -638,7 +641,10 @@ func (e *Engine) Log(ref string, stderr bool, text string) error {
 	if c == nil {
 		return fmt.Errorf("no container %s", ref)
 	}
-	c.Logs = append(c.Logs, LogLine{Time: time.Now().UTC(), Stderr: stderr, Text: text})
+	c.logSeq++
+	c.Logs = append(c.Logs, LogLine{Time: time.Now().UTC(), Stderr: stderr, Text: text, seq: c.logSeq})
+	// As the seafield-queue log driver: a data-free "lines stored" event.
+	e.emit("container", "seafield.logs", c.ID, c.attributes())
 	return nil
 }
 

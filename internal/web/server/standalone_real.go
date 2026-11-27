@@ -16,15 +16,15 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/cluster/lifecycle"
-	"github.com/jay94ks/mydcd/internal/containerops"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/web/mydc"
-	"github.com/jay94ks/mydcd/internal/web/store"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/lifecycle"
+	"github.com/jay94ks/seafield/internal/containerops"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/web/sfc"
+	"github.com/jay94ks/seafield/internal/web/store"
 )
 
-// REQ-29 standalone containers in mydcd's shape (docs/reference/standalone.md):
+// REQ-29 standalone containers in sfcd's shape (docs/reference/standalone.md):
 //
 //   - up: app-plan-stream with AppPlanRequest.Standalone plans the one
 //     compose service; the planned artifact is uploaded under the internal
@@ -41,11 +41,11 @@ import (
 //     Expected = plan.StandaloneRevision.
 //
 // Every change signs the row's management Target read just before, so a
-// change made meanwhile is refused by mydcd, not decided here.
+// change made meanwhile is refused by sfcd, not decided here.
 
 // splitStandalone turns the web's flat definition (name, lifetime,
 // restart|ttl/grace, mode and one service's fields at the same level) into
-// mydcd's StandaloneDefinition and a compose document with that one
+// sfcd's StandaloneDefinition and a compose document with that one
 // service. ttl/grace are Go durations ("1h") or seconds.
 func splitStandalone(flat []byte) (control.StandaloneDefinition, []byte, error) {
 	var def control.StandaloneDefinition
@@ -101,15 +101,15 @@ func seconds(s string) (int64, error) {
 }
 
 // standaloneAppPlan plans the flat definition (nothing is changed).
-func standaloneAppPlan(ctx context.Context, c mydc.Conn, tenant string, flat []byte) (control.StandaloneDefinition, mydc.AppPlan, error) {
+func standaloneAppPlan(ctx context.Context, c sfc.Conn, tenant string, flat []byte) (control.StandaloneDefinition, sfc.AppPlan, error) {
 	def, doc, err := splitStandalone(flat)
 	if err != nil {
-		return def, mydc.AppPlan{}, err
+		return def, sfc.AppPlan{}, err
 	}
-	p, err := c.AppPlan(ctx, mydc.AppPlanRequest{Tenant: tenant, Document: doc, Standalone: &def})
-	var me *mydc.Error
+	p, err := c.AppPlan(ctx, sfc.AppPlanRequest{Tenant: tenant, Document: doc, Standalone: &def})
+	var me *sfc.Error
 	if errors.As(err, &me) {
-		if code := mydc.LimitInputCode(me.InputCode); code != "" {
+		if code := sfc.LimitInputCode(me.InputCode); code != "" {
 			// a count limit (temp per user / tenant / server) is its own code
 			return def, p, &httpErr{http.StatusConflict, code, "the standalone container limit is reached (" + me.InputCode + ")"}
 		}
@@ -138,15 +138,15 @@ func planDeployment(art []byte) string {
 }
 
 // standaloneRow reads the row of name; found=false when there is none.
-func standaloneRow(ctx context.Context, c mydc.Conn, tenant, name string) (mydc.StandaloneView, bool, error) {
+func standaloneRow(ctx context.Context, c sfc.Conn, tenant, name string) (sfc.StandaloneView, bool, error) {
 	v, err := c.Standalone(ctx, tenant, name)
-	if isMydcCode(err, mydc.CodeMissing) {
+	if isSfcCode(err, sfc.CodeMissing) {
 		return v, false, nil
 	}
 	return v, err == nil, err
 }
 
-// standaloneOperation: the mydcd operation ID of a web op (lifecycle.ValidID).
+// standaloneOperation: the sfcd operation ID of a web op (lifecycle.ValidID).
 func standaloneOperation(opID string) string { return "op-" + opID }
 
 // POST /t/{t}/standalone/plan {yaml}
@@ -162,7 +162,7 @@ func (s *Server) handleStandalonePlan(w http.ResponseWriter, r *http.Request, ws
 		return
 	}
 	tenant := r.PathValue("t")
-	read(s, w, r, ws, func(ctx context.Context, c mydc.Conn) (map[string]any, error) {
+	read(s, w, r, ws, func(ctx context.Context, c sfc.Conn) (map[string]any, error) {
 		def, p, err := standaloneAppPlan(ctx, c, tenant, []byte(req.YAML))
 		if err != nil {
 			return nil, err
@@ -258,7 +258,7 @@ func (s *Server) handleStandaloneUp(w http.ResponseWriter, r *http.Request, ws *
 	}
 	ctx, cancel := s.callCtx(r)
 	defer cancel()
-	err = ws.do(ctx, func(ctx context.Context, c mydc.Conn) error {
+	err = ws.do(ctx, func(ctx context.Context, c sfc.Conn) error {
 		if parent == nil {
 			var err error
 			if parent, err = s.newStandaloneUp(ctx, c, ws, tenant, &req, dg); err != nil {
@@ -281,7 +281,7 @@ func (s *Server) handleStandaloneUp(w http.ResponseWriter, r *http.Request, ws *
 
 // newStandaloneUp plans the definition, fixes the standalone-up begin
 // (Target, Expected) and stores the job and the web's origin record.
-func (s *Server) newStandaloneUp(ctx context.Context, c mydc.Conn, ws *webSession, tenant string, req *standaloneUpReq, dg string) (*store.Op, error) {
+func (s *Server) newStandaloneUp(ctx context.Context, c sfc.Conn, ws *webSession, tenant string, req *standaloneUpReq, dg string) (*store.Op, error) {
 	def, p, err := standaloneAppPlan(ctx, c, tenant, []byte(req.YAML))
 	if err != nil {
 		return nil, err
@@ -306,7 +306,7 @@ func (s *Server) newStandaloneUp(ctx context.Context, c mydc.Conn, ws *webSessio
 		}
 		target = control.AppCreateTarget(who.Session.Cluster, tenant, p.App, dep)
 	}
-	// the form's revision, when given, is what is signed: mydcd refuses a
+	// the form's revision, when given, is what is signed: sfcd refuses a
 	// stale one, not the web
 	expected = expectedOr(req.Expected, expected)
 	upload := "web-" + req.OpID
@@ -324,10 +324,10 @@ func (s *Server) newStandaloneUp(ctx context.Context, c mydc.Conn, ws *webSessio
 		return nil, err
 	}
 	now := s.now()
-	parent := &store.Op{ID: req.OpID, User: ws.user.ID, Username: ws.user.Username, Action: mydc.ActionStandaloneUp, Tenant: tenant, Target: def.Name,
+	parent := &store.Op{ID: req.OpID, User: ws.user.ID, Username: ws.user.Username, Action: sfc.ActionStandaloneUp, Tenant: tenant, Target: def.Name,
 		Digest: dg, State: store.OpRunning, SubmittedAt: now, UpdatedAt: now,
 		Deploy: &store.DeployJob{Tenant: tenant, App: p.App, Deployment: dep, UploadID: upload, Document: art, Digest: hex.EncodeToString(p.Digest[:]),
-			Parts: (len(art) + mydc.AppPartBytes - 1) / mydc.AppPartBytes, Standalone: &store.StandaloneUpJob{Name: def.Name, Begin: raw, Expected: expected}}}
+			Parts: (len(art) + sfc.AppPartBytes - 1) / sfc.AppPartBytes, Standalone: &store.StandaloneUpJob{Name: def.Name, Begin: raw, Expected: expected}}}
 	existing, err := s.opt.Store.CreateOp(parent)
 	if err != nil {
 		return nil, err
@@ -356,8 +356,8 @@ func (s *Server) handleStandaloneChange(w http.ResponseWriter, r *http.Request, 
 	tenant, name, verb := r.PathValue("t"), r.PathValue("name"), r.PathValue("verb")
 	action := "standalone-" + verb
 	switch action {
-	case mydc.ActionStandalonePin, mydc.ActionStandaloneExtend, mydc.ActionStandaloneStop, mydc.ActionStandaloneStart,
-		mydc.ActionStandaloneRestart, mydc.ActionStandaloneRemove:
+	case sfc.ActionStandalonePin, sfc.ActionStandaloneExtend, sfc.ActionStandaloneStop, sfc.ActionStandaloneStart,
+		sfc.ActionStandaloneRestart, sfc.ActionStandaloneRemove:
 	default:
 		writeError(w, http.StatusNotFound, "not-found", "no such standalone change")
 		return
@@ -365,7 +365,7 @@ func (s *Server) handleStandaloneChange(w http.ResponseWriter, r *http.Request, 
 	s.sharedCreate(w, r, ws, req.OpID, struct {
 		Verb string
 		Req  standaloneChangeReq
-	}{verb, req}, func(ctx context.Context, c mydc.Conn, _ mydc.Session) (string, any, uint64, string, error) {
+	}{verb, req}, func(ctx context.Context, c sfc.Conn, _ sfc.Session) (string, any, uint64, string, error) {
 		row, found, err := standaloneRow(ctx, c, tenant, name)
 		if err != nil {
 			return "", nil, 0, "", err
@@ -373,11 +373,11 @@ func (s *Server) handleStandaloneChange(w http.ResponseWriter, r *http.Request, 
 		if !found {
 			return "", nil, 0, "", &httpErr{http.StatusNotFound, "not-found", "no such standalone container"}
 		}
-		rev := expectedOr(req.Expected, row.Revision) // a stale one is mydcd's to refuse
+		rev := expectedOr(req.Expected, row.Revision) // a stale one is sfcd's to refuse
 		op := standaloneOperation(req.OpID)
 		display := "standalone/" + name
 		switch action {
-		case mydc.ActionStandalonePin:
+		case sfc.ActionStandalonePin:
 			if req.NewName != "" && !lifecycle.ValidID(req.NewName) {
 				return "", nil, 0, "", invalid("newName: starts with a lowercase letter; lowercase letters, digits and -, at most 63")
 			}
@@ -386,10 +386,10 @@ func (s *Server) handleStandaloneChange(w http.ResponseWriter, r *http.Request, 
 			}
 			t := row.Target
 			return action, control.StandaloneChange{Tenant: tenant, Name: name, NewName: req.NewName, Restart: req.Restart, Operation: op, Target: &t}, rev, display, nil
-		case mydc.ActionStandaloneRemove:
+		case sfc.ActionStandaloneRemove:
 			t := row.Target
 			return action, control.StandaloneChange{Tenant: tenant, Name: name, Operation: op, Target: &t}, rev, display, nil
-		case mydc.ActionStandaloneExtend:
+		case sfc.ActionStandaloneExtend:
 			if req.TTLSeconds <= 0 {
 				return "", nil, 0, "", invalid("ttlSeconds: the new time left, in seconds")
 			}

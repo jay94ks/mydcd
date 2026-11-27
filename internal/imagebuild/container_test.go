@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/engine"
+	"github.com/jay94ks/seafield/internal/engine"
 	"github.com/moby/moby/api/types/mount"
 )
 
@@ -28,11 +28,11 @@ func TestNativeBuildPlanUsesFixedRootlessFiniteSDKOptionsAndOwnedDirectories(t *
 	if !slices.Equal(h.SecurityOpt, []string{"seccomp=unconfined", "apparmor=unconfined"}) || h.MaskedPaths == nil || len(h.MaskedPaths) != 0 || h.ReadonlyPaths == nil || len(h.ReadonlyPaths) != 0 {
 		t.Fatal("rootless proc settings must use Docker's explicit path lists")
 	}
-	if c.Image != spec.Policy.BuilderImage || c.User != "1000:1000" || !slices.Equal(c.Entrypoint, []string{"/bin/sh", "-ec", nativeDeadlineCommand, "mydc-build", strconv.FormatUint(spec.CreatedAt+spec.Policy.Seconds, 10), "/usr/bin/buildctl-daemonless.sh"}) || c.Tty || c.OpenStdin || h.Privileged || h.AutoRemove || h.NetworkMode == "host" || h.PidMode != "" || h.RestartPolicy.Name != "no" || h.LogConfig.Type != "none" || !h.ReadonlyRootfs || h.Memory != spec.Policy.MemoryBytes || h.MemorySwap != spec.Policy.MemoryBytes || h.NanoCPUs != int64(spec.Policy.CPUMillis)*1_000_000 {
+	if c.Image != spec.Policy.BuilderImage || c.User != "1000:1000" || !slices.Equal(c.Entrypoint, []string{"/bin/sh", "-ec", nativeDeadlineCommand, "sfc-build", strconv.FormatUint(spec.CreatedAt+spec.Policy.Seconds, 10), "/usr/bin/buildctl-daemonless.sh"}) || c.Tty || c.OpenStdin || h.Privileged || h.AutoRemove || h.NetworkMode == "host" || h.PidMode != "" || h.RestartPolicy.Name != "no" || h.LogConfig.Type != "none" || !h.ReadonlyRootfs || h.Memory != spec.Policy.MemoryBytes || h.MemorySwap != spec.Policy.MemoryBytes || h.NanoCPUs != int64(spec.Policy.CPUMillis)*1_000_000 {
 		t.Fatal("broadened rootless SDK execution")
 	}
 	for _, m := range h.Mounts {
-		if m.Type != mount.TypeBind || !strings.HasPrefix(m.Source, spec.Scope.Root.Path+"/.mydc-imagebuild/") || m.BindOptions == nil || m.BindOptions.Propagation != mount.PropagationRPrivate || m.VolumeOptions != nil {
+		if m.Type != mount.TypeBind || !strings.HasPrefix(m.Source, spec.Scope.Root.Path+"/.sfc-imagebuild/") || m.BindOptions == nil || m.BindOptions.Propagation != mount.PropagationRPrivate || m.VolumeOptions != nil {
 			t.Fatal("unowned/path/socket mount", m)
 		}
 	}

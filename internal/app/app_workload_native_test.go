@@ -12,17 +12,17 @@ import (
 	"testing"
 
 	cerrdefs "github.com/containerd/errdefs"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/config"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/engine"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/network"
-	"github.com/jay94ks/mydcd/internal/nodestorage"
-	"github.com/jay94ks/mydcd/internal/workload"
-	"github.com/jay94ks/mydcd/internal/workload/volumes"
-	"github.com/jay94ks/mydcd/tests/vaultfixture"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/config"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/engine"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/network"
+	"github.com/jay94ks/seafield/internal/nodestorage"
+	"github.com/jay94ks/seafield/internal/workload"
+	"github.com/jay94ks/seafield/internal/workload/volumes"
+	"github.com/jay94ks/seafield/tests/vaultfixture"
 	"github.com/moby/moby/client"
 )
 
@@ -153,7 +153,7 @@ func verifyManagedTaskVolume(t *testing.T, ctx context.Context, runtime **Runtim
 	}
 	catalog, _ := policy.Catalog(read().State)
 	tenant, _ := catalog.Tenant("tenant")
-	change("revoke-task-node", "set-nodes", tenant.Revision, control.NodeAssignment{Tenant: "tenant"})
+	change("revoke-task-node", "set-nodes", tenant.Revision, control.NodeChangeTo("tenant", tenant.AllowedNodes, nil))
 	if err = r.workload.Step(ctx, taskKey); err != nil {
 		t.Fatal("revocation blocked running observation", err)
 	}
@@ -183,7 +183,7 @@ func verifyManagedTaskVolume(t *testing.T, ctx context.Context, runtime **Runtim
 	} else if vault != nil {
 		t.Log("actual Vault/Secret/Volume/Task consumption and original closure collector completed; original Remove was requested by the test; automatic retirement/CLI/two-node composition remains separate")
 	} else {
-		t.Logf("actual managed Runtime/user/MYDCP/Raft/bbolt -> immutable Task/Binding (named Volume=%t) -> nonroot/health+HTTP -> same DB/ID -> revoke retains running observation but rejects stopped Start; fixture journal rollback, not compose down or Secret/Vault/two-node success", withVolume)
+		t.Logf("actual managed Runtime/user/SFCP/Raft/bbolt -> immutable Task/Binding (named Volume=%t) -> nonroot/health+HTTP -> same DB/ID -> revoke retains running observation but rejects stopped Start; fixture journal rollback, not compose down or Secret/Vault/two-node success", withVolume)
 	}
 }
 
@@ -408,7 +408,7 @@ func cleanupManagedTaskVolumes(t *testing.T, ctx context.Context, c *engine.Clie
 		}
 		expectedImages, _ := manifest["PrivateImages"].(map[string]string)
 		expectedID := expectedImages[image]
-		labelled := got.Config != nil && got.Config.Labels["org.mydc.test.owner"] == manifest["Tag"]
+		labelled := got.Config != nil && got.Config.Labels["org.sfc.test.owner"] == manifest["Tag"]
 		privateExact := manifest["PrivateEngineVerified"] == true && expectedID != "" && got.ID == expectedID
 		if !labelled && !privateExact {
 			t.Error("fixture image ownership")

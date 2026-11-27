@@ -9,8 +9,8 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/network"
-	"github.com/jay94ks/mydcd/internal/network/services"
+	"github.com/jay94ks/seafield/internal/network"
+	"github.com/jay94ks/seafield/internal/network/services"
 )
 
 func TestRouteNativeSpecUsesOriginalBridgeIdentityAndPreservesLegacyStoredHash(t *testing.T) {

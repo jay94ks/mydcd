@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/cluster/state"
 )
 
 // Fake native owner observations run through the same real Execution,
@@ -103,7 +103,7 @@ func TestReplacementWaitsForActualNewIngressBackendEvidence(t *testing.T) {
 	x := runningReplacementFixtureWith(t, func(input *Compose) {
 		i := &IngressDeclaration{Node: "node-a", Host: "app.test", Listeners: []ListenerDeclaration{{Address: "192.0.2.11:8080"}}, Runtime: IngressRuntime{MaxRequests: 2, MaxConnections: 8, MaxHeaderBytes: 4096, MaxBodyBytes: 1 << 20, BufferBytes: 128 << 10, RequestTimeoutMS: 30000, DialTimeoutMS: 1000, ResponseHeaderTimeoutMS: 2000, HealthIntervalMS: 100}}
 		i.Backend.Service, i.Backend.Port, i.Backend.HealthPath = "web", 8080, "/readyz"
-		input.MyDC.Ingress = i
+		input.Sfc.Ingress = i
 	})
 	listener := ResourceKey("ingress", "tenant", "php-mysql", "http")
 	retirement, _ := x.a.Retirement()

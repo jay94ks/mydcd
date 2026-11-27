@@ -6,10 +6,10 @@ import (
 	"context"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/userauth"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/userauth"
 )
 
 // Reuse the real service/native/Volume/Group fixture and its rollback. These
@@ -18,7 +18,7 @@ func TestRQ10StandaloneResourceReadsAndOriginalRetirement(t *testing.T) {
 	runManagedAppOwner(t, true, true, true, true, managedAppStandaloneServiceRecreation, true, false, true)
 }
 
-func verifyNativeStandaloneResourceReads(t *testing.T, ctx context.Context, user userauth.Client, peer mydcp.Peer, session access.Session, name, task string, live bool) {
+func verifyNativeStandaloneResourceReads(t *testing.T, ctx context.Context, user userauth.Client, peer sfcp.Peer, session access.Session, name, task string, live bool) {
 	t.Helper()
 	for _, method := range []string{"network-users", "volume-users", "image-trust", "vault-usages"} {
 		q := control.PublicReadQuery{}

@@ -23,7 +23,7 @@ func TestResolverRejectsAmbiguousOrUnsafeNativeInputs(t *testing.T) {
 			t.Fatal("unsafe resolver accepted", r)
 		}
 	}
-	for _, r := range []Resolver{{}, {Servers: []netip.Addr{netip.MustParseAddr("192.0.2.53"), netip.MustParseAddr("2001:db8::53")}, Search: []string{"app.mydc.test", "."}}} {
+	for _, r := range []Resolver{{}, {Servers: []netip.Addr{netip.MustParseAddr("192.0.2.53"), netip.MustParseAddr("2001:db8::53")}, Search: []string{"app.sfc.test", "."}}} {
 		if err := r.Validate(); err != nil {
 			t.Fatal("valid resolver refused", r, err)
 		}

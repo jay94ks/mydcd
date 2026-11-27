@@ -25,7 +25,7 @@ func nativeClosed(r NativeRecord) bool {
 	return nativeEffectsClosed(r) && (r.Root == nil || r.Root.Returned)
 }
 func nativeCompletionWitness(r NativeRecord) [32]byte {
-	return digestJSON("mydc-imagebuild-native-completion-1", struct {
+	return digestJSON("sfc-imagebuild-native-completion-1", struct {
 		Job, Workspace [32]byte
 		Root           *NativeRootHold
 	}{r.Spec.Digest(), workspaceClosure(r), r.Root})

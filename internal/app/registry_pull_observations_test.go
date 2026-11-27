@@ -9,8 +9,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/observability"
-	"github.com/jay94ks/mydcd/internal/storage"
+	"github.com/jay94ks/seafield/internal/observability"
+	"github.com/jay94ks/seafield/internal/storage"
 )
 
 // Existing report-store reducer, actual bbolt persistence and signatures. This

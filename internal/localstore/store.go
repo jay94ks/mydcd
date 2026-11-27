@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// Package localstore accesses private Linux-user state under ~/.mydc. It uses
+// Package localstore accesses private Linux-user state under ~/.sfc. It uses
 // directory descriptors, rejects symlinks/hard links and foreign ownership, and
 // never chmods or adopts an existing unsafe object.
 package localstore
@@ -54,14 +54,14 @@ func Open(home string, create bool) (*Root, error) {
 		}
 	}()
 	if create {
-		if e = h.Mkdir(".mydc", 0700); e != nil && !errors.Is(e, fs.ErrExist) {
+		if e = h.Mkdir(".sfc", 0700); e != nil && !errors.Is(e, fs.ErrExist) {
 			return nil, ErrState
 		}
 		if syncRoot(h) != nil {
 			return nil, ErrState
 		}
 	}
-	info, e := h.Lstat(".mydc")
+	info, e := h.Lstat(".sfc")
 	if e != nil {
 		if errors.Is(e, fs.ErrNotExist) {
 			return nil, fs.ErrNotExist
@@ -71,7 +71,7 @@ func Open(home string, create bool) (*Root, error) {
 	if !private(info, true) {
 		return nil, ErrState
 	}
-	r, e := h.OpenRoot(".mydc")
+	r, e := h.OpenRoot(".sfc")
 	if e != nil {
 		return nil, ErrState
 	}
@@ -87,7 +87,7 @@ func (r *Root) check() error {
 	if r == nil || r.root == nil || r.home == nil {
 		return ErrState
 	}
-	info, e := r.home.Lstat(".mydc")
+	info, e := r.home.Lstat(".sfc")
 	if e != nil || !private(info, true) || !os.SameFile(info, r.identity) {
 		return ErrState
 	}

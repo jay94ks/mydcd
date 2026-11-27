@@ -14,7 +14,7 @@ import (
 )
 
 // Resolver asks one DNS server for one name and type (the propagation
-// check). The web app does this itself; mydcd is not involved.
+// check). The web app does this itself; sfcd is not involved.
 type Resolver interface {
 	// Query sends a single question to server (host:port). recurse sets RD:
 	// true for a public resolver, false for an authoritative server.

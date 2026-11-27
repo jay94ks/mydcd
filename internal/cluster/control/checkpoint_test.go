@@ -7,13 +7,17 @@ import (
 	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
+	"maps"
 	"reflect"
+	"slices"
+	"strings"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/cluster/membership"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/config"
+	"github.com/jay94ks/seafield/internal/cluster/membership"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/config"
 )
 
 func TestMemberCheckpointBoundedRowsAndStrictRestore(t *testing.T) {
@@ -32,7 +36,7 @@ func TestMemberCheckpointBoundedRowsAndStrictRestore(t *testing.T) {
 		t.Fatal(err)
 	}
 	for i := 1; i <= 80; i++ {
-		d, err = d.Invite(makePeer(fmt.Sprintf("node-%03d", i), i, false), fmt.Sprintf("join-%03d", i))
+		d, err = d.Invite(makePeer(fmt.Sprintf("node-%03d", i), i, false), fmt.Sprintf("join-%03d", i), nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -73,7 +77,9 @@ func TestMemberCheckpointBoundedRowsAndStrictRestore(t *testing.T) {
 		t.Fatal("invitations changed issuers", err)
 	}
 	// A candidate replacing only the root/one part has mixed committed ordinals.
-	partial := map[string][]byte{MembersKey: bytes.Clone(writes[MembersKey]), partKey(MembersKey, 0): bytes.Clone(writes[partKey(MembersKey, 0)])}
+	// A candidate whose root references a blob it deletes.
+	partial := maps.Clone(writes)
+	partial[recordPart(t, writes, MembersKey)] = nil
 	c.RequestID, c.Expected = "partial", result.Revision
 	bad, rejected, err := state.ApplyReduced(n, 2, c, p.Validate, func(state.State, state.Command) (map[string][]byte, state.Code) { return partial, state.Applied })
 	if err != nil || rejected.Code != state.Invalid || bad.Object(MembersKey) != n.Object(MembersKey) {
@@ -93,30 +99,138 @@ func TestMemberCheckpointBoundedRowsAndStrictRestore(t *testing.T) {
 	}
 }
 
-// A reduction that shrinks another namespace's checkpoint deletes its last
-// parts. Patch admission must take those removals, or the report is refused.
+// A reduction that shrinks another namespace's checkpoint deletes the blobs
+// it no longer uses. Patch admission must take those removals.
 func TestCheckpointPatchKeyTakesShrinkingParts(t *testing.T) {
 	p := Policy{Cluster: [32]byte{71}, TrustRoot: [32]byte{73}}
 	empty, _ := state.New("admin")
-	big, code := writeCheckpoint(empty, MembersKey, p.Cluster, p.TrustRoot, 1, bytes.Repeat([]byte{'x'}, 3*catalogPartSize))
-	if code != state.Applied || len(big) != 4 {
-		t.Fatal("three-part checkpoint", code, len(big))
+	record := func(c byte) string { return `{"V":"` + strings.Repeat(string(c), blobPartSize) + `"}` }
+	raw := []byte(`{"Rows":[` + record('a') + "," + record('b') + `],"Revision":1}`)
+	big, code := writeCheckpoint(empty, MembersKey, p.Cluster, p.TrustRoot, 1, raw)
+	if code != state.Applied || len(big) != 6 {
+		t.Fatal("two two-part blobs, skeleton and root", code, len(big))
 	}
 	c := state.Command{Kind: state.Module, Actor: "admin", Epoch: 1, RequestID: "members", Key: MembersKey, Value: "fixed-test-checkpoint"}
 	s, result, err := state.ApplyReduced(empty, 1, c, nil, func(state.State, state.Command) (map[string][]byte, state.Code) { return big, state.Applied })
 	if err != nil || result.Code != state.Applied {
 		t.Fatal("seed checkpoint", result, err)
 	}
-	small, code := writeCheckpoint(s, MembersKey, p.Cluster, p.TrustRoot, 2, []byte("{}"))
-	if code != state.Applied || small[partKey(MembersKey, 1)] != nil || small[partKey(MembersKey, 2)] != nil {
-		t.Fatal("shrunk checkpoint must remove its last parts", code)
+	if got, _, err := readCheckpoint(s, MembersKey, p.Cluster, p.TrustRoot); err != nil || !bytes.Equal(got, raw) {
+		t.Fatal("round trip", err)
 	}
-	for key := range small {
+	// Dropping one record rewrites only the skeleton and deletes its blob.
+	small, code := writeCheckpoint(s, MembersKey, p.Cluster, p.TrustRoot, 2, []byte(`{"Rows":[`+record('a')+`],"Revision":2}`))
+	removed := 0
+	for key, value := range small {
+		if value == nil {
+			removed++
+		} else if key != MembersKey && len(value) == blobPartSize {
+			t.Fatal("rewrote an unchanged record", key)
+		}
 		if !checkpointPatchKey(small, MembersKey, key) {
 			t.Fatal("refused own checkpoint key", key)
 		}
 	}
-	if checkpointPatchKey(small, MembersKey, partKey(MembersKey, 3)) || checkpointPatchKey(small, MembersKey, AppsKey) || checkpointPatchKey(map[string][]byte{MembersKey: nil}, MembersKey, MembersKey) {
+	if code != state.Applied || removed != 3 {
+		t.Fatal("shrunk checkpoint must remove the old skeleton and record", code, removed)
+	}
+	if checkpointPatchKey(small, MembersKey, MembersKey+"/absent/0") || checkpointPatchKey(small, MembersKey, AppsKey) || checkpointPatchKey(map[string][]byte{MembersKey: nil}, MembersKey, MembersKey) {
 		t.Fatal("admitted a key that is not this written checkpoint")
+	}
+}
+
+// recordPart is a blob part that writes stores for root, other than the
+// skeleton's.
+func recordPart(t testing.TB, writes map[string][]byte, root string) string {
+	var header checkpointRoot
+	if err := json.Unmarshal(writes[root], &header); err != nil {
+		t.Fatal(err)
+	}
+	skeleton, _, _ := parseBlobRef(header.Skeleton)
+	keys := slices.Sorted(maps.Keys(writes))
+	for _, key := range keys {
+		if strings.HasPrefix(key, root+"/") && writes[key] != nil && !strings.HasPrefix(key, root+"/"+skeleton+"/") {
+			return key
+		}
+	}
+	t.Fatal("no record blob written")
+	return ""
+}
+
+// storedPart is a present blob part of the checkpoint at root in s.
+func storedPart(t testing.TB, s state.State, root string) string {
+	keys := slices.Sorted(maps.Keys(s.Objects(root + "/")))
+	for _, key := range keys {
+		if s.Object(key).Present {
+			return key
+		}
+	}
+	t.Fatal("no stored part")
+	return ""
+}
+
+// A large collection is stored in content-defined groups, so inserting one
+// record rewrites its group and the skeleton, not every reference (R17 B2).
+func TestCheckpointGroupsLargeCollections(t *testing.T) {
+	p := Policy{Cluster: [32]byte{71}, TrustRoot: [32]byte{73}}
+	type record struct{ ID, Body string }
+	book := func(n int, extra bool) []byte {
+		var rows []record
+		for i := 0; i < n; i++ {
+			rows = append(rows, record{fmt.Sprintf("r-%04d", i), strings.Repeat("x", 200)})
+			if extra && i == n/2 {
+				rows = append(rows, record{"inserted", strings.Repeat("y", 200)})
+			}
+		}
+		m := map[string]record{}
+		for _, r := range rows[:300] {
+			m[r.ID] = r
+		}
+		raw, _ := json.Marshal(struct {
+			Rows   []record
+			ByID   map[string]record
+			Note   string
+			Values []int
+		}{rows, m, "n", []int{1, 2, 3}})
+		return raw
+	}
+	empty, _ := state.New("admin")
+	raw := book(1000, false)
+	writes, code := writeCheckpoint(empty, AppsKey, p.Cluster, p.TrustRoot, 1, raw)
+	c := state.Command{Kind: state.Module, Actor: "admin", Epoch: 1, RequestID: "seed", Key: AppsKey, Value: "seed"}
+	s, result, err := state.ApplyReduced(empty, 1, c, nil, func(state.State, state.Command) (map[string][]byte, state.Code) { return writes, code })
+	if err != nil || result.Code != state.Applied {
+		t.Fatal(result, err)
+	}
+	if got, _, err := readCheckpoint(s, AppsKey, p.Cluster, p.TrustRoot); err != nil || !bytes.Equal(got, raw) {
+		t.Fatal("grouped round trip", err)
+	}
+	next := book(1000, true)
+	writes, code = writeCheckpoint(s, AppsKey, p.Cluster, p.TrustRoot, 2, next)
+	written := 0
+	for _, v := range writes {
+		written += len(v)
+	}
+	if code != state.Applied || written*10 > len(next) {
+		t.Fatal("insertion rewrote too much", code, written, len(next))
+	}
+	c.RequestID, c.Expected = "insert", result.Revision
+	s, result, err = state.ApplyReduced(s, 2, c, nil, func(state.State, state.Command) (map[string][]byte, state.Code) { return writes, code })
+	if err != nil || result.Code != state.Applied {
+		t.Fatal(result, err)
+	}
+	if got, _, err := readCheckpoint(s, AppsKey, p.Cluster, p.TrustRoot); err != nil || !bytes.Equal(got, next) {
+		t.Fatal("insert round trip", err)
+	}
+	// A stray object under the root is refused.
+	c.RequestID, c.Expected = "stray", result.Revision
+	bad, _, _ := state.ApplyReduced(s, 3, c, nil, func(state.State, state.Command) (map[string][]byte, state.Code) {
+		return map[string][]byte{AppsKey: writes[AppsKey], AppsKey + "/stray/0": []byte("x")}, state.Applied
+	})
+	if bad.Object(AppsKey+"/stray/0").Revision == 0 {
+		t.Fatal("stray fixture not applied")
+	}
+	if _, _, err := readCheckpoint(bad, AppsKey, p.Cluster, p.TrustRoot); err == nil {
+		t.Fatal("stray object accepted")
 	}
 }

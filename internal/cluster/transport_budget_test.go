@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/config"
-	"github.com/jay94ks/mydcd/internal/mydcp"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/config"
+	"github.com/jay94ks/seafield/internal/sfcp"
 
 	"github.com/hashicorp/raft"
 )
@@ -57,8 +57,8 @@ func TestRaftAppendFrameBudgetIncludesConfiguration(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			_, err = mydcp.Encode(rpcFrame(1, payload))
-			t.Logf("entries=%d rpc_bytes=%d frame_body_limit=%d fits=%v", len(test.entries), len(payload), mydcp.MaxBody, err == nil)
+			_, err = sfcp.Encode(rpcFrame(sfcp.KindRequest, 1, payload))
+			t.Logf("entries=%d rpc_bytes=%d frame_body_limit=%d fits=%v", len(test.entries), len(payload), sfcp.MaxBody, err == nil)
 			if (err == nil) != test.fits {
 				t.Fatal("Raft frame bound", err, test.fits)
 			}

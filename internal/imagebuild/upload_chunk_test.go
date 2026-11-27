@@ -10,8 +10,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/nodestorage"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/nodestorage"
 )
 
 func TestUploadChunkSizePreservesLegacyJSONHashAndFixedLengths(t *testing.T) {
@@ -30,7 +30,7 @@ func TestUploadChunkSizePreservesLegacyJSONHashAndFixedLengths(t *testing.T) {
 	}{scope.Schema, scope.Cluster, scope.Tenant, scope.Context, scope.Upload, scope.Creator, scope.Root, scope.ContextRevision, scope.PolicyRevision, scope.Length, scope.Digest, scope.Dockerfile, scope.ExpandedLimit, scope.ExpiresAt}
 	oldJSON, _ := json.Marshal(legacy)
 	currentJSON, _ := json.Marshal(scope)
-	if !bytes.Equal(oldJSON, currentJSON) || scope.Hash() != digestJSON("mydc-imagebuild-upload-1", legacy) || scope.PartSize() != PartBytes || bytes.Contains(currentJSON, []byte("ChunkBytes")) {
+	if !bytes.Equal(oldJSON, currentJSON) || scope.Hash() != digestJSON("sfc-imagebuild-upload-1", legacy) || scope.PartSize() != PartBytes || bytes.Contains(currentJSON, []byte("ChunkBytes")) {
 		t.Fatal("omitted size changed original scope JSON/hash/offset")
 	}
 	var restored UploadScope

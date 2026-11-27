@@ -5,9 +5,9 @@ package control
 import (
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/network/services"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/network/services"
 )
 
 func (p Policy) managedDNSMaterial(s state.State, apps Apps, owner [32]byte, row AppDNSOwner) (services.DNSOwnerPolicy, error) {

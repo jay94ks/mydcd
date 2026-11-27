@@ -14,8 +14,8 @@ import (
 	"time"
 
 	cerrdefs "github.com/containerd/errdefs"
-	checker "github.com/jay94ks/mydcd/internal/workload/lifecycle"
-	contract "github.com/jay94ks/mydcd/lifecycle/v1"
+	checker "github.com/jay94ks/seafield/internal/workload/lifecycle"
+	contract "github.com/jay94ks/seafield/lifecycle/v1"
 	"github.com/moby/moby/api/pkg/stdcopy"
 	"github.com/moby/moby/client"
 )

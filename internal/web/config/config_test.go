@@ -10,7 +10,7 @@ import (
 func TestNeedsPinnedNode(t *testing.T) {
 	key := strings.Repeat("ab", 32)
 	env := func(m map[string]string) func(string) string { return func(k string) string { return m[k] } }
-	ok := map[string]string{"MYDC_WEB_CLUSTER": key, "MYDC_WEB_NODE": "node-a", "MYDC_WEB_NODE_KEY": key}
+	ok := map[string]string{"SFC_WEB_CLUSTER": key, "SFC_WEB_NODE": "node-a", "SFC_WEB_NODE_KEY": key}
 	c, err := Parse(nil, env(ok))
 	if err != nil || c.Node != "node-a" {
 		t.Fatalf("%+v %v", c, err)
@@ -18,7 +18,7 @@ func TestNeedsPinnedNode(t *testing.T) {
 	if k, err := c.ClusterKey(); err != nil || k[0] != 0xab {
 		t.Fatal(k, err)
 	}
-	for _, drop := range []string{"MYDC_WEB_CLUSTER", "MYDC_WEB_NODE", "MYDC_WEB_NODE_KEY"} {
+	for _, drop := range []string{"SFC_WEB_CLUSTER", "SFC_WEB_NODE", "SFC_WEB_NODE_KEY"} {
 		m := map[string]string{}
 		for k, v := range ok {
 			if k != drop {
@@ -53,9 +53,9 @@ func TestACMEAdvertiseAddress(t *testing.T) {
 
 func TestTrustedProxies(t *testing.T) {
 	key := strings.Repeat("ab", 32)
-	env := map[string]string{"MYDC_WEB_CLUSTER": key, "MYDC_WEB_NODE": "node-a", "MYDC_WEB_NODE_KEY": key, "MYDC_WEB_TRUSTED_PROXIES": "10.88.0.1, 10.89.0.0/24"}
+	env := map[string]string{"SFC_WEB_CLUSTER": key, "SFC_WEB_NODE": "node-a", "SFC_WEB_NODE_KEY": key, "SFC_WEB_TRUSTED_PROXIES": "10.88.0.1, 10.89.0.0/24"}
 	c, err := Parse(nil, func(k string) string { return env[k] })
-	if err != nil || c.Socket != "/var/run/mydc/mydc.sock" {
+	if err != nil || c.Socket != "/run/sfc/sfcdp.sock" {
 		t.Fatalf("%+v %v", c, err)
 	}
 	nets, err := c.TrustedProxyNets()

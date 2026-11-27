@@ -7,21 +7,21 @@ import (
 	"io"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/imagebuild"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/registryclient"
-	"github.com/jay94ks/mydcd/internal/userauth"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/imagebuild"
+	"github.com/jay94ks/seafield/internal/registryclient"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/userauth"
 )
 
 func (r *Runtime) currentImageBuildBaseContent(ctx context.Context, q control.ImageBuildBaseContentRead) error {
 	view, err := r.currentView(ctx)
 	if err != nil || view.Local {
-		return mydcp.ErrAdmission
+		return sfcp.ErrAdmission
 	}
 	read, err := r.controlPolicy.CurrentImageBuildBaseContent(view.State, q, time.Now().Unix())
 	if err != nil || read.Target.Owner != r.Identity.Public {
-		return mydcp.ErrAdmission
+		return sfcp.ErrAdmission
 	}
 	if run := read.Target.Managed; run != nil {
 		_, _, err = r.registryCurrent(ctx, *run)
@@ -30,7 +30,7 @@ func (r *Runtime) currentImageBuildBaseContent(ctx context.Context, q control.Im
 	if source := read.Target.External; source != nil {
 		work, err := r.externalRegistryWork(ctx, *source)
 		if err != nil || work.Inputs.ReadSet != read.Target.ExternalReadSet {
-			return mydcp.ErrAdmission
+			return sfcp.ErrAdmission
 		}
 	}
 	return nil
@@ -41,7 +41,7 @@ func (r *Runtime) currentImageBuildBaseContent(ctx context.Context, q control.Im
 func (r *Runtime) readImageBuildBaseContent(ctx context.Context, spec imagebuild.JobSpec, source imagebuild.Source, query registryclient.GraphContentQuery, to io.Writer) (registryclient.ContentInfo, error) {
 	view, err := r.currentView(ctx)
 	if err != nil || view.Local || spec.Scope.Root.Key != r.Identity.Public || spec.Cluster != r.controlPolicy.Cluster {
-		return registryclient.ContentInfo{}, mydcp.ErrAdmission
+		return registryclient.ContentInfo{}, sfcp.ErrAdmission
 	}
 	read, err := r.controlPolicy.ImageBuildBaseRead(view.State, r.Identity.Public, control.ImageBuildBaseQuery{Tenant: spec.Tenant, Job: spec.ID, Snapshot: spec.Digest(), Source: source, At: time.Now().Unix()})
 	if err != nil {
@@ -59,9 +59,9 @@ func (r *Runtime) readImageBuildBaseContent(ctx context.Context, spec imagebuild
 		}
 		info, err = userauth.ReadImageContentSource(ctx, query.Selected(), body, to)
 	} else {
-		peer, ok := r.Mesh.Peer(mydcp.Identity(read.Target.Owner))
+		peer, ok := r.Mesh.Peer(sfcp.Identity(read.Target.Owner))
 		if !ok || !peer.Member {
-			return info, mydcp.ErrAdmission
+			return info, sfcp.ErrAdmission
 		}
 		client := userauth.Client{Mesh: r.Mesh, Self: r.Identity, Cluster: spec.Cluster}
 		info, err = client.ReadImageBuildBaseContent(ctx, peer, q, to)
@@ -71,7 +71,7 @@ func (r *Runtime) readImageBuildBaseContent(ctx context.Context, spec imagebuild
 	}
 	view, err = r.currentView(ctx)
 	if err != nil || view.Local {
-		return info, mydcp.ErrAdmission
+		return info, sfcp.ErrAdmission
 	}
 	if _, err := r.controlPolicy.CurrentImageBuildBaseContent(view.State, q, time.Now().Unix()); err != nil {
 		return info, err

@@ -15,8 +15,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/jay94ks/mydcd/internal/nodestorage"
-	"github.com/jay94ks/mydcd/internal/schema"
+	"github.com/jay94ks/seafield/internal/nodestorage"
+	"github.com/jay94ks/seafield/internal/schema"
 	"golang.org/x/sys/unix"
 )
 
@@ -47,7 +47,7 @@ type fixedProjector struct {
 
 func projectionSpec(spec NativeSpec) [32]byte {
 	raw, _ := json.Marshal(spec)
-	return sha256.Sum256(append([]byte("mydc-fixed-projection-owner-1\x00"), raw...))
+	return sha256.Sum256(append([]byte("sfc-fixed-projection-owner-1\x00"), raw...))
 }
 
 func openPrivateProjection(path string, private ed25519.PrivateKey) (*fixedProjector, error) {
@@ -246,7 +246,7 @@ func (p *fixedProjector) stage(spec NativeSpec) (projectionOwner, error) {
 func projectionEpochBytes(e projectionEpoch) []byte {
 	e.Signature = nil
 	raw, _ := json.Marshal(e)
-	return append([]byte("mydc-fixed-projection-epoch-1\x00"), raw...)
+	return append([]byte("sfc-fixed-projection-epoch-1\x00"), raw...)
 }
 
 func (p *fixedProjector) readProjectionEpoch(slot *os.File) (projectionEpoch, error) {

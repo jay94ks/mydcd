@@ -7,10 +7,10 @@ import (
 	"errors"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/mydcp"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/sfcp"
 )
 
 func (s Service) registryPulls(ctx context.Context, view cluster.View, q Request, session access.Session) Reply {
@@ -41,9 +41,9 @@ func (s Service) registryPulls(ctx context.Context, view cluster.View, q Request
 	return Reply{Schema: 1, Code: "ok", Tenant: q.Tenant, RegistryPulls: &page}
 }
 
-func (c Client) RegistryPulls(ctx context.Context, peer mydcp.Peer, session access.Session, tenant, after string) (control.RegistryPullPage, error) {
+func (c Client) RegistryPulls(ctx context.Context, peer sfcp.Peer, session access.Session, tenant, after string) (control.RegistryPullPage, error) {
 	if tenant == "" || len(after) > 512 {
-		return control.RegistryPullPage{}, mydcp.ErrAdmission
+		return control.RegistryPullPage{}, sfcp.ErrAdmission
 	}
 	reply, err := c.query(ctx, peer, session, Request{Method: "external-registry-pulls", Tenant: tenant, After: after})
 	if err != nil {
@@ -52,7 +52,7 @@ func (c Client) RegistryPulls(ctx context.Context, peer mydcp.Peer, session acce
 	page := reply.RegistryPulls
 
 	if page == nil || reply.Tenant != tenant || !page.Valid(tenant, after) {
-		return control.RegistryPullPage{}, mydcp.ErrFrame
+		return control.RegistryPullPage{}, sfcp.ErrFrame
 	}
 	return *page, nil
 }

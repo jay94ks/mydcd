@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	bolt "go.etcd.io/bbolt"
@@ -85,7 +86,8 @@ func (s *Store) GetGuideVersion(scope string, v uint64) (*Guide, error) {
 
 // SaveGuide stores g as the next version of its scope when the current
 // version is expected (0 = none yet); ErrConflict otherwise.
-func (s *Store) SaveGuide(g *Guide, expected uint64) error {
+func (s *Store) SaveGuide(g *Guide, expected uint64) (err error) {
+	defer func() { s.changed(err, Change{Kind: "guide", Tenant: g.Tenant, ID: g.Scope}) }()
 	return s.db.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket(bucketGuides)
 		var cur Guide
@@ -143,7 +145,10 @@ func (s *Store) ListGuideVersions(scope string) ([]*Guide, error) {
 }
 
 // DeleteGuide deletes a scope and all its versions.
-func (s *Store) DeleteGuide(scope string) error {
+func (s *Store) DeleteGuide(scope string) (err error) {
+	defer func() {
+		s.changed(err, Change{Kind: "guide", Tenant: guideScopeTenant(scope), ID: scope, Deleted: true})
+	}()
 	return s.db.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket(bucketGuides)
 		if b.Get(guideKey(scope)) == nil {
@@ -163,4 +168,14 @@ func (s *Store) DeleteGuide(scope string) error {
 		}
 		return nil
 	})
+}
+
+// guideScopeTenant is the tenant of a guide scope (cluster, tenant/T,
+// app/T/A).
+func guideScopeTenant(scope string) string {
+	parts := strings.Split(scope, "/")
+	if len(parts) >= 2 && (parts[0] == "tenant" || parts[0] == "app") {
+		return parts[1]
+	}
+	return ""
 }

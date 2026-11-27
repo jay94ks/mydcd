@@ -14,8 +14,8 @@ import (
 	"testing"
 
 	"github.com/google/go-containerregistry/pkg/v1/types"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/registryclient"
+	"github.com/jay94ks/seafield/internal/registryclient"
+	"github.com/jay94ks/seafield/internal/sfcp"
 )
 
 type localContentBody struct {
@@ -45,7 +45,7 @@ func TestLocalSourceUsesSameCompleteBodyAndFinalAuthorityContractAsWire(t *testi
 			source := ImageContentSource{Info: info, Body: body, Authorize: func(context.Context) error {
 				calls++
 				if mode == "revoked" && calls > 1 {
-					return mydcp.ErrAdmission
+					return sfcp.ErrAdmission
 				}
 				return nil
 			}}

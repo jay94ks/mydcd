@@ -8,12 +8,12 @@ import (
 	"slices"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/imagecache"
-	"github.com/jay94ks/mydcd/internal/mydcp"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/imagecache"
+	"github.com/jay94ks/seafield/internal/sfcp"
 )
 
 func (s Service) imageCacheQuery(ctx context.Context, view cluster.View, request Request, session access.Session) Reply {
@@ -88,9 +88,9 @@ func sharedReferencesHeld(images []imagecache.Image, shared []uint64) bool {
 	return true
 }
 
-func (c Client) QueryImageCache(ctx context.Context, peer mydcp.Peer, session access.Session, plan bool, q imagecache.Query) (Reply, error) {
+func (c Client) QueryImageCache(ctx context.Context, peer sfcp.Peer, session access.Session, plan bool, q imagecache.Query) (Reply, error) {
 	if !q.Valid(plan) {
-		return Reply{}, mydcp.ErrAdmission
+		return Reply{}, sfcp.ErrAdmission
 	}
 	method := "image-cache-status"
 	if plan {
@@ -105,40 +105,40 @@ func (c Client) QueryImageCache(ctx context.Context, peer mydcp.Peer, session ac
 		ids := slices.Clone(q.Images)
 		slices.Sort(ids)
 		if p == nil || !p.Valid() || p.Cluster != c.Cluster || p.Node != q.Node || !slices.Equal(ids, p.Selection) {
-			return Reply{}, mydcp.ErrFrame
+			return Reply{}, sfcp.ErrFrame
 		}
 		for _, image := range p.Images {
 			if image.ID <= q.After {
-				return Reply{}, mydcp.ErrFrame
+				return Reply{}, sfcp.ErrFrame
 			}
 		}
 	} else {
 		r := reply.ImageCacheStatus
 		if r == nil || r.Schema != 1 || r.Operation != q.Operation || r.User == "" || r.Revision == 0 || !r.Plan.DeleteReady() || r.Plan.Cluster != c.Cluster || len(r.Parts) > len(r.Plan.Images) {
-			return Reply{}, mydcp.ErrFrame
+			return Reply{}, sfcp.ErrFrame
 		}
 		failed := false
 		for i, part := range r.Parts {
 			if !part.Valid() || part.ID != r.Plan.Images[i].ID {
-				return Reply{}, mydcp.ErrFrame
+				return Reply{}, sfcp.ErrFrame
 			}
 			failed = failed || part.State == "failed" || part.State == "skipped"
 		}
 		switch r.State {
 		case "queued":
 			if len(r.Parts) != 0 {
-				return Reply{}, mydcp.ErrFrame
+				return Reply{}, sfcp.ErrFrame
 			}
 		case "running":
 			if len(r.Parts) >= len(r.Plan.Images) {
-				return Reply{}, mydcp.ErrFrame
+				return Reply{}, sfcp.ErrFrame
 			}
 		case "done", "failed":
 			if len(r.Parts) != len(r.Plan.Images) || (r.State == "failed") != failed {
-				return Reply{}, mydcp.ErrFrame
+				return Reply{}, sfcp.ErrFrame
 			}
 		default:
-			return Reply{}, mydcp.ErrFrame
+			return Reply{}, sfcp.ErrFrame
 		}
 	}
 	return reply, nil

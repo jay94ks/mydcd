@@ -5,7 +5,7 @@ package membership
 import (
 	"bytes"
 	"encoding/json"
-	"github.com/jay94ks/mydcd/internal/identity"
+	"github.com/jay94ks/seafield/internal/identity"
 	"slices"
 )
 

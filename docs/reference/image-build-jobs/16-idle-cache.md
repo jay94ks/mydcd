@@ -1,6 +1,6 @@
 ## Idle cache의 주기 정책 정리
 
-`mydcd`는 기존 빌드 루프에서 idle cache를 순서대로 살펴보고, 현재 빌드 정책의 기간·용량
+`sfcd`는 기존 빌드 루프에서 idle cache를 순서대로 살펴보고, 현재 빌드 정책의 기간·용량
 기준으로 유한 정리 작업을 실행한다. 별도 상시 BuildKit worker를 두지 않는다. 같은 cache의
 미종결 빌드나 수동/자동 정리가 있으면 새 자동 작업을 수락하지 않는다. 원 cache가 실제
 존재하고 대여 중이 아니며 최근 관측 시도에서 최소300초가 지난 경우에만 제안한다.
@@ -18,7 +18,7 @@
 
 Definition은 현재 `set-image-build-policy` 원 UserOperation의 OperationBytes를 SHA-256한
 값이다. Signature는 Signature를 nil로 직렬화한 JSON 앞에
-`mydc-imagebuild-cache-automatic-1`과 NUL을 붙인 bytes의 Ed25519 서명이다. Command는
+`sfc-imagebuild-cache-automatic-1`과 NUL을 붙인 bytes의 Ed25519 서명이다. Command는
 ImageBuildKey의 ModuleReport·`node/<owner hex>` Actor·RootRevision Expected와 기존
 ReportRequestID를 쓴다. 새 제안은 서버 현재 시각의 최대30초 전까지 받고, 이미 수락한
 같은 보고의 결과 조회는 원 명령으로 처리한다. 시간 값은 Unix 초, `[32]`는 JSON 정수 배열이다.

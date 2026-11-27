@@ -8,8 +8,8 @@ import (
 	"encoding/json"
 	"math"
 
-	"github.com/jay94ks/mydcd/internal/cluster/lifecycle"
-	"github.com/jay94ks/mydcd/internal/nodestorage"
+	"github.com/jay94ks/seafield/internal/cluster/lifecycle"
+	"github.com/jay94ks/seafield/internal/nodestorage"
 )
 
 // GitSavePlan fixes the exact checked commit/tree. Ref discovery may happen
@@ -36,7 +36,7 @@ func (p GitSavePlan) Validate() error {
 	}
 	return nil
 }
-func (p GitSavePlan) Digest() [32]byte { return digestJSON("mydc-imagebuild-git-save-1", p) }
+func (p GitSavePlan) Digest() [32]byte { return digestJSON("sfc-imagebuild-git-save-1", p) }
 func (p GitSavePlan) ArchiveScope(length int64, digest [32]byte) UploadScope {
 	return UploadScope{Schema: 1, Cluster: p.Root.Cluster, Tenant: p.Tenant, Context: p.Context, Upload: p.ID, Creator: p.Creator, Root: p.Root, ContextRevision: p.ContextRevision, PolicyRevision: p.PolicyRevision, Length: length, Digest: digest, Dockerfile: p.Dockerfile, ExpandedLimit: p.ExpandedLimit, ExpiresAt: p.ExpiresAt}
 }
@@ -53,7 +53,7 @@ type SavedGit struct {
 func SavedGitBytes(r SavedGit) []byte {
 	r.Signature = nil
 	raw, _ := json.Marshal(r)
-	return append([]byte("mydc-imagebuild-saved-git-1\x00"), raw...)
+	return append([]byte("sfc-imagebuild-saved-git-1\x00"), raw...)
 }
 func (r SavedGit) Valid() bool {
 	return r.Schema == 1 && r.Plan.Validate() == nil && r.Scope.Validate() == nil && r.Scope == r.Plan.ArchiveScope(r.Scope.Length, r.Scope.Digest) && r.Fact.Valid(r.Scope) && r.Fact.Tree == r.Plan.Tree && len(r.Signature) == ed25519.SignatureSize && ed25519.Verify(r.Scope.Root.Key[:], SavedGitBytes(r), r.Signature)

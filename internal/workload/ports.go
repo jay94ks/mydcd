@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/jay94ks/mydcd/internal/network"
+	"github.com/jay94ks/seafield/internal/network"
 	"github.com/moby/moby/api/types/container"
 	dockernet "github.com/moby/moby/api/types/network"
 )

@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/schema"
-	"github.com/jay94ks/mydcd/internal/storage"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/storage"
 )
 
 var ErrUploadsInProgress = errors.New("registry uploads in progress")

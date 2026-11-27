@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// Package seal keeps mydc-web secrets (AI API keys, DNS provider tokens,
+// Package seal keeps sfc-web secrets (AI API keys, DNS provider tokens,
 // ACME account keys, the auto-response account key, webhook secrets) in
 // sealed files: one AES-256-GCM file per secret under <data-dir>/secrets,
 // encrypted with the seal key the container receives at start
-// (MYDC_WEB_SEAL_KEY, usually a Docker secret). Secrets never go to bbolt.
+// (SFC_WEB_SEAL_KEY, usually a Docker secret). Secrets never go to bbolt.
 //
 // Without a key, or with a key that does not open the existing files, the
 // box is unavailable: callers turn the features that need it off and show
@@ -38,7 +38,7 @@ type State string
 
 const (
 	StateReady    State = "ready"     // key present and it opens the files
-	StateNoKey    State = "no-key"    // MYDC_WEB_SEAL_KEY not given
+	StateNoKey    State = "no-key"    // SFC_WEB_SEAL_KEY not given
 	StateWrongKey State = "wrong-key" // key does not open the existing files
 	StateBroken   State = "broken"    // folder unreadable or a file damaged
 )
@@ -57,14 +57,14 @@ var (
 
 // File format (schema 1):
 //
-//	magic "mydc-web-seal\x00" | version 1 | key id (8) | nonce (12) | ciphertext
+//	magic "sfc-web-seal\x00" | version 1 | key id (8) | nonce (12) | ciphertext
 //
 // The additional data is the header plus the secret name, so a file copied
 // to another name does not open. The key id is the first 8 bytes of
-// SHA-256("mydc-web-seal-key-1\x00" || key) and tells a wrong key from a
+// SHA-256("sfc-web-seal-key-1\x00" || key) and tells a wrong key from a
 // damaged file.
 const (
-	magic     = "mydc-web-seal\x00"
+	magic     = "sfc-web-seal\x00"
 	version   = 1
 	idLen     = 8
 	headerLen = len(magic) + 1 + idLen
@@ -87,8 +87,8 @@ type Box struct {
 	aead   cipher.AEAD
 	old    map[[idLen]byte]cipher.AEAD // keys still accepted for reading (during a key change)
 	key    []byte                      // the write key, kept for Reset
-	given  [idLen]byte                 // ID of MYDC_WEB_SEAL_KEY
-	nextID [idLen]byte                 // ID of MYDC_WEB_SEAL_KEY_NEXT (zero: none)
+	given  [idLen]byte                 // ID of SFC_WEB_SEAL_KEY
+	nextID [idLen]byte                 // ID of SFC_WEB_SEAL_KEY_NEXT (zero: none)
 	mu     sync.RWMutex                // guards the key state; writes take it exclusively
 }
 
@@ -123,14 +123,14 @@ func ParseKey(s string) ([]byte, error) {
 func Open(dir string, key []byte) (*Box, error) { return OpenRekey(dir, key, nil) }
 
 // OpenRekey opens dir with key and, when next is set, seals every file
-// again with next (MYDC_WEB_SEAL_KEY_NEXT). Files already sealed with next
+// again with next (SFC_WEB_SEAL_KEY_NEXT). Files already sealed with next
 // are left as they are, so a key change cut short by a crash finishes on the
 // next start with the same two keys. After it the box writes with next, and
-// the operator replaces MYDC_WEB_SEAL_KEY with next.
+// the operator replaces SFC_WEB_SEAL_KEY with next.
 func OpenRekey(dir string, key, next []byte) (*Box, error) {
 	b := &Box{dir: dir}
 	if len(key) == 0 {
-		b.state, b.reason = StateNoKey, "MYDC_WEB_SEAL_KEY is not set"
+		b.state, b.reason = StateNoKey, "SFC_WEB_SEAL_KEY is not set"
 		return b, nil
 	}
 	cur, curID, err := newAEAD(key)
@@ -165,7 +165,7 @@ func OpenRekey(dir string, key, next []byte) (*Box, error) {
 	case err != nil:
 		var we *wrongKeyError
 		if errors.As(err, &we) {
-			b.state, b.reason = StateWrongKey, "MYDC_WEB_SEAL_KEY does not match the key the sealed files were written with"
+			b.state, b.reason = StateWrongKey, "SFC_WEB_SEAL_KEY does not match the key the sealed files were written with"
 		} else {
 			b.state, b.reason = StateBroken, err.Error()
 		}
@@ -182,7 +182,7 @@ func OpenRekey(dir string, key, next []byte) (*Box, error) {
 	return b, nil
 }
 
-const checkValue = "mydc-web-seal-check-1"
+const checkValue = "sfc-web-seal-check-1"
 
 func newAEAD(key []byte) (cipher.AEAD, [idLen]byte, error) {
 	var id [idLen]byte
@@ -197,7 +197,7 @@ func newAEAD(key []byte) (cipher.AEAD, [idLen]byte, error) {
 	if err != nil {
 		return nil, id, err
 	}
-	h := sha256.Sum256(append([]byte("mydc-web-seal-key-1\x00"), key...))
+	h := sha256.Sum256(append([]byte("sfc-web-seal-key-1\x00"), key...))
 	copy(id[:], h[:idLen])
 	return a, id, nil
 }
@@ -306,8 +306,8 @@ func (b *Box) Entries() ([]Entry, error) {
 // key), shortened to "abcd…wxyz"; they never reveal the key.
 type KeyInfo struct {
 	Dir  string
-	Key  string // MYDC_WEB_SEAL_KEY (empty without a key)
-	Next string // MYDC_WEB_SEAL_KEY_NEXT (empty without one)
+	Key  string // SFC_WEB_SEAL_KEY (empty without a key)
+	Next string // SFC_WEB_SEAL_KEY_NEXT (empty without one)
 }
 
 func fingerprint(id [idLen]byte) string {

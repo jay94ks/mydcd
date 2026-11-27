@@ -9,11 +9,11 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/secrets"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/secrets"
 )
 
-// This is the actual public response formatter, reused by the MYDCP service.
+// This is the actual public response formatter, reused by the SFCP service.
 // Large ACL rows exceed a count-only page budget before reaching eight rows.
 func TestVaultMetadataPagesUseWireByteBudgetAndStableCursor(t *testing.T) {
 	key := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{71}, 32))

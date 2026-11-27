@@ -1,6 +1,6 @@
 # 사용자·tenant 구성원 조회
 
-두 method는 [Unix 소켓 API](unix-sockets.md)의 User purpose·기존 Session/요청 서명을 사용한다. 네트워크 MYDCP에서도 같은 인증·현재 catalog·quorum 읽기를 적용한다. 웹 앱에는 별도 관리 권한이 없다.
+두 method는 [Unix 소켓 API](unix-sockets.md)의 User purpose·기존 Session/요청 서명을 사용한다. 네트워크 SFCP에서도 같은 인증·현재 catalog·quorum 읽기를 적용한다. 웹 앱에는 별도 관리 권한이 없다.
 
 ## 사용자 목록
 
@@ -21,7 +21,7 @@
 
 비활성 계정·credential도 관리 목적상 보인다. `VerifierRef` 필드·비밀번호·토큰·개인키는 반환하지 않는다. 기존 `user-credentials` 한 계정 상세와 공개 필드 이름·타입은 같으며 목록에는 backend 참조가 없다. 목록은 현재 catalog의 projection일 뿐 인증/로그인을 대신하지 않는다.
 
-`UsersRevision`은 catalog의 논리 revision, `RootRevision`은 이 응답을 만든 원 FSM catalog 객체 revision이다. `UsersNext`가 비어 있으면 마지막 페이지다. 명령은 `mydc user list`이며 모든 페이지를 합쳐 보여 준다.
+`UsersRevision`은 catalog의 논리 revision, `RootRevision`은 이 응답을 만든 원 FSM catalog 객체 revision이다. `UsersNext`가 비어 있으면 마지막 페이지다. 명령은 `sfcli user list`이며 모든 페이지를 합쳐 보여 준다.
 
 ## tenant 구성원
 
@@ -36,14 +36,14 @@ Tenant 필수, After 선택, Node·TargetUser 금지다. 해당 tenant의 현재
 | Tenant | 선택 tenant ID |
 | TenantRevision | tenant 설정 자체의 revision(set-nodes/set-trust 등의 CAS 대상) |
 | TenantMembersRevision | 현재 catalog revision. membership 변경도 증가하며 TenantRevision과 별개 |
-| RootRevision | 동일한 원 FSM catalog 객체 revision |
+| RootRevision | 동일한 원 FSM catalog 객체 revision. 사용자 변경은 이보다 크지 않은 root면 받고, CAS는 대상 기록의 revision으로 한다 |
 | TenantMembers | User ID 순 `{User,Username,Revision,Role,Enabled,AccountEnabled,Implicit,Actions}` |
 | TenantAllowedNodes | tenant 전체의 허용 node ID를 ID 순으로 나눈 이번 페이지 부분 |
 | TenantMembersNext | 구성원 또는 허용 node가 더 있으면 다음 cursor |
 
 `Revision`은 명시 membership의 CAS revision이다. 명시 membership이 없는 활성 system-admin은 `Implicit:true,Revision:0,Role:manager`로 표시한다. 비활성 명시 membership도 보이지만 Actions는 비어 있다. 계정이 비활성화되어도 Actions는 비어 있다. Actions는 계정·tenant·membership의 현재 유효 권한을 나타내며 그 사용자가 발급받은 특정 Session/token의 추가 제한은 이 표에 합성하지 않는다. 실제 요청에서는 해당 Session 제한도 검사한다. 다른 tenant의 구성원·credential 목록은 반환하지 않는다.
 
-명령은 `mydc tenant members shop`이며 모든 페이지를 합쳐 보여 준다. 직접 읽을 때는 응답에 허용 node가 이번 페이지에 없다고 전체 허용 목록이 비어 있다고 해석하지 않으며 마지막 페이지까지 합친다.
+명령은 `sfcli tenant members shop`이며 모든 페이지를 합쳐 보여 준다. 직접 읽을 때는 응답에 허용 node가 이번 페이지에 없다고 전체 허용 목록이 비어 있다고 해석하지 않으며 마지막 페이지까지 합친다.
 
 ## 페이지·충돌
 
@@ -58,11 +58,13 @@ Tenant 필수, After 선택, Node·TargetUser 금지다. 해당 tenant의 현재
 
 ## Credential의 동작 제한
 
-`Credential.Operations`는 선택 typed 관리 action 이름 목록이다. 생략하면 기존 역할·Session scope를 따르고, 지정하면 그 두 권한에 더해 목록과 교집합을 검사한다. 빈 목록·중복·와일드카드는 허용하지 않는다. 관리자 `put-user`와 `manage user add-key --operations restart-task,pause-app-cd`가 이 metadata를 등록하며, 실제 action 이름을 사용한다. read query·자신의 정확한 logout은 관리 action을 새로 승인하지 않는다. 목록에 계정/키 관리 action을 주면 그 action 자체가 새 credential과 계정 정책을 바꿀 수 있으므로 자동 대응 키에는 필요한 조치 이름만 부여한다.
+`Credential.Operations`는 선택 typed 관리 action 이름 목록이다. 생략하면 기존 역할·Session scope를 따르고, 지정하면 그 두 권한에 더해 목록과 교집합을 검사한다. 빈 목록·중복·와일드카드는 허용하지 않는다. 관리자 `add-credential`(`sfcli user key add --operations restart-task,pause-app-cd`)이 키를 더할 때 이 metadata를 정하며(나중에 바꾸지 않는다), 실제 action 이름을 사용한다. read query·자신의 정확한 logout은 관리 action을 새로 승인하지 않는다. 목록에 계정/키 관리 action을 주면 그 action 자체가 새 credential과 계정 정책을 바꿀 수 있으므로 자동 대응 키에는 필요한 조치 이름만 부여한다.
 
-password/token Session에 별도 사용자 키 승인이 붙으면 로그인 credential과 승인 credential의 Operations를 모두 검사한다. 한 계정의 더 제한된 승인 키로 넓은 credential의 권한을 복원할 수 없다. 계정 revision 변경·credential 비활성화의 기존 Session 회수는 유지한다. `AutomationOnly:true`는 enabled password/token 수단을 금지하며 private-key 인증만 허용한다. 비활성 과거 수단을 지워 이력을 만들지는 않는다. node CLI 제한을 유지하는 마지막 독립 system-admin 키는 계정 정책을 복구할 `put-user` 동작을 계속 가질 수 있어야 한다.
+password/token Session에 별도 사용자 키 승인이 붙으면 로그인 credential과 승인 credential의 Operations를 모두 검사한다. 한 계정의 더 제한된 승인 키로 넓은 credential의 권한을 복원할 수 없다. 계정 revision 변경·credential 비활성화의 기존 Session 회수는 유지한다. `AutomationOnly:true`는 enabled password/token 수단을 금지하며 private-key 인증만 허용한다. 비활성 과거 수단을 지워 이력을 만들지는 않는다. node CLI 제한을 유지하는 마지막 독립 system-admin 키는 계정 정책을 복구할 계정 관리 동작을 계속 가질 수 있어야 한다.
 
-계정 범위: `User.Operations`는 계정 전체의 action 상한이다(nil = 없음). 검사는 credential Operations와 교집합이며 역할·Session scope를 대신하지 않는다. `set-account-scope {User, Operations, KeyOnly}`(시스템 관리자, Expected = 계정 revision)가 이 상한과 `AutomationOnly`(키 전용)만 바꾸고 나머지 기록은 그대로 둔다. 계정 revision이 바뀌므로 기존 Session은 끝난다. 시스템 관리자 계정에는 상한을 둘 수 없다(설치에 쓸 수 있는 관리자를 남기기 위해). `put-user`는 전체 기록을 바꾸므로 그 payload의 Operations·AutomationOnly가 그대로 적용된다.
+계정 범위: `User.Operations`는 계정 전체의 action 상한이다(nil = 없음). 검사는 credential Operations와 교집합이며 역할·Session scope를 대신하지 않는다. `set-account-scope {User, Add?, Remove?, Unlimited?, KeyOnly?}`(시스템 관리자, Expected = 계정 revision)가 이 상한과 `AutomationOnly`(키 전용)를 변경분으로 바꾸고 나머지 기록은 그대로 둔다. `Add`·`Remove`는 상한에 넣고 뺄 action 이름이고, 상한이 없던 계정에 `Add`하면 상한이 생긴다. 마지막 이름은 `Remove`로 뺄 수 없고 `Unlimited:true`(다른 목록 없이)가 상한을 푼다. `KeyOnly`는 켜거나 끌 값이다. 이미 있는 이름을 더하거나 없는 이름을 빼거나, 이미 그 값인 KeyOnly·Unlimited는 ConditionFailed, 바꿀 것이 없거나 한 이름이 Add와 Remove에 다 있으면 Invalid다. 계정 revision이 바뀌므로 기존 Session은 끝난다. 시스템 관리자 계정에는 상한을 둘 수 없다(설치에 쓸 수 있는 관리자를 남기기 위해).
+
+`put-user`: Expected 0이면 새 계정 전체 기록을 만든다. 있는 계정에는 `{ID, Username, Enabled, SystemAdmin}`만 보내고 그 셋만 바꾼다. Credentials·Operations·AutomationOnly가 있거나 바뀌는 것이 없으면 Invalid다. 로그인 수단은 add-credential·disable-credential([클라이언트 인증](client-authentication.md)), 상한은 set-account-scope로 바꾼다.
 
 Operations는 공개 목록에 포함되고 보호 verifier 참조는 포함하지 않는다. 키당 최대64개 이름이며 User 공개 JSON 전체가96KiB를 넘는 정책은 거부한다. 이는128KiB frame 안에서 목록과 본인 credential 응답을 읽을 수 있게 하는 상한이다.
 

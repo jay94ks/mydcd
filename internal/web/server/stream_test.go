@@ -12,7 +12,7 @@ import (
 
 	"golang.org/x/net/websocket"
 
-	"github.com/jay94ks/mydcd/internal/web/mydc"
+	"github.com/jay94ks/seafield/internal/web/sfc"
 )
 
 func fakeLogin(t *testing.T, f *fixture, user string) {
@@ -136,7 +136,7 @@ func TestFakeExecTerminal(t *testing.T) {
 
 func TestFakeExecViewerDenied(t *testing.T) {
 	f, _ := newFakeFixture(t)
-	priv := mydc.FixtureKey("bob")
+	priv := sfc.FixtureKey("bob")
 	if code, out := keyLogin(f, "bob", priv); code != 200 {
 		t.Fatalf("bob login: %d %v", code, out)
 	}

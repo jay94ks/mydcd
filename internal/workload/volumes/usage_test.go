@@ -120,14 +120,14 @@ func TestNativeVolumeUsageIdentityAndDeclarationBoundary(t *testing.T) {
 		t.Fatal("usage leaked private filenames/data/path")
 	}
 	f.mu.Lock()
-	original := f.value.Labels["org.mydc.spec"]
-	f.value.Labels["org.mydc.spec"] = "foreign"
+	original := f.value.Labels["org.sfc.spec"]
+	f.value.Labels["org.sfc.spec"] = "foreign"
 	f.mu.Unlock()
 	if _, err := m.Usage(context.Background(), key, UsageLimits{Entries: 8, Depth: 2}); !errors.Is(err, ErrNativeVolume) {
 		t.Fatal("foreign native identity observed", err)
 	}
 	f.mu.Lock()
-	f.value.Labels["org.mydc.spec"] = original
+	f.value.Labels["org.sfc.spec"] = original
 	f.mu.Unlock()
 	entered, release := make(chan struct{}), make(chan struct{})
 	var once sync.Once

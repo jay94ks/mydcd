@@ -17,10 +17,10 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/jay94ks/mydcd/internal/cluster/lifecycle"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/schema"
-	"github.com/jay94ks/mydcd/internal/storage"
+	"github.com/jay94ks/seafield/internal/cluster/lifecycle"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/storage"
 )
 
 const metaKey = "diagnostic-events/meta"
@@ -44,6 +44,16 @@ type Store struct {
 	self   *identity.Identity
 	m      metadata
 	failed error
+	notify func(Record)
+}
+
+// Notify sets f to run after each record this node appends itself (Append,
+// AppendRelated), under the store lock; f must not block or call the store.
+// Records received from other nodes are announced by the receiver instead.
+func (s *Store) Notify(f func(Record)) {
+	s.mu.Lock()
+	s.notify = f
+	s.mu.Unlock()
 }
 
 func rowKey(n uint64) string      { return fmt.Sprintf("diagnostic-events/row/%020d", n) }
@@ -294,6 +304,9 @@ func (s *Store) AppendRelated(tag string, event Event, now uint64, related map[s
 	}
 	if err := s.commit(m, writes, now); err != nil {
 		return Record{}, err
+	}
+	if s.notify != nil {
+		s.notify(r)
 	}
 	return r, nil
 }

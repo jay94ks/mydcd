@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// Package cli is the command frame shared by the mydc commands: a tree of
+// Package cli is the command frame shared by the sfcli commands: a tree of
 // resource/verb commands with generated help, output formats, confirmation,
 // request IDs, revision (CAS) selection and the local operation index behind
-// `mydc op`. Design: devel/design/cli-and-formats.md.
+// `sfcli op`. Design: devel/design/cli-and-formats.md.
 //
 // The frame holds no product rules. Server rules (original operations, CAS,
-// authorization) stay in mydcd and the client packages; a command only uses
+// authorization) stay in sfcd and the client packages; a command only uses
 // this package to present them.
 package cli
 
@@ -39,7 +39,7 @@ type Context struct {
 	In    io.Reader
 	Out   io.Writer
 	Err   io.Writer
-	Path  []string // command words from the root, such as mydc app deploy
+	Path  []string // command words from the root, such as sfcli app deploy
 	Flags *flag.FlagSet
 	Rest  []string // words after a bare "--", or nil
 }
@@ -105,7 +105,7 @@ func Execute(root *Command, args []string, env Env) int {
 		env.Context = context.Background()
 	}
 	// Everything after a bare "--" is passed to the command untouched
-	// (mydc app exec shop web -- ls -l).
+	// (sfcli app exec shop web -- ls -l).
 	var passthrough []string
 	for i, a := range args {
 		if a == "--" {
@@ -148,7 +148,7 @@ func Execute(root *Command, args []string, env Env) int {
 		writeHelp(env.Err, path, fs)
 		return 2
 	}
-	// A leaf accepts options after its arguments too (mydc app logs web -f).
+	// A leaf accepts options after its arguments too (sfcli app logs web -f).
 	var positional []string
 	for len(args) > 0 {
 		positional = append(positional, args[0])

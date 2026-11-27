@@ -1,17 +1,20 @@
-# mydc network: 망
+# sfcli network: 망
 
-작업 공간의 MYDCP TUN 망 하나를 `network.yaml` 파일 하나로 만들고 바꾼다. 같은 파일을 다시 적용하면 아무것도 바뀌지 않는다. 명령은 `--tenant`나 context의 작업 공간에서 동작한다.
+작업 공간의 SFCP TUN 망 하나를 `network.yaml` 파일 하나로 만들고 바꾼다. 같은 파일을 다시 적용하면 아무것도 바뀌지 않는다. 명령은 `--tenant`나 context의 작업 공간에서 동작한다.
 
 | 명령 | 하는 일 |
 |---|---|
-| `mydc network list [--all]` | 망 목록. `--all`은 모든 작업 공간(시스템 관리자) |
-| `mydc network show NAME` | 서버별 주소, MTU, DNS, 진행 중인 변경. `state`의 `configured`는 클러스터에 망이 정해졌다는 뜻이고, 각 서버가 망을 열었는지는 아니다 |
-| `mydc network create -f network.yaml` | 망을 만들고, 파일에 `dns`가 있으면 DNS도 켠다 |
-| `mydc network update -f network.yaml [--no-wait]` | 망을 파일대로 바꾼다 |
-| `mydc network delete NAME [--no-wait]` | 쓰는 컨테이너가 없어지면 망을 지운다 |
-| `mydc network users NAME` | 망을 쓰는 앱과 컨테이너 |
-| `mydc network system show` | 서버 앱용 시스템 망: 주소 범위, 쓰는 서버, 멤버(시스템 관리자) |
-| `mydc network system set-range CIDR` | 시스템 망 주소 범위 바꾸기(클러스터 관리자, 멤버가 없을 때만) |
+| `sfcli network list [--all]` | 망 목록. `--all`은 모든 작업 공간(시스템 관리자) |
+| `sfcli network show NAME` | 서버별 주소, MTU, DNS, 진행 중인 변경. `state`의 `configured`는 클러스터에 망이 정해졌다는 뜻이고, 각 서버가 망을 열었는지는 아니다 |
+| `sfcli network create -f network.yaml` | 망을 만들고, 파일에 `dns`가 있으면 DNS도 켠다 |
+| `sfcli network update -f network.yaml [--no-wait]` | 망을 파일대로 바꾼다 |
+| `sfcli network delete NAME [--no-wait]` | 쓰는 컨테이너가 없어지면 망을 지운다 |
+| `sfcli network users NAME` | 망을 쓰는 앱과 컨테이너 |
+| `sfcli network system show` | 클러스터 앱용 시스템 망: 주소 범위, 쓰는 서버, 멤버(시스템 관리자) |
+| `sfcli network bridge list` | 내 망이 한쪽인 가상 브릿지 |
+| `sfcli network bridge create NAME --network NET --to [TENANT/]NET` | 두 망을 가상 브릿지로 잇는다 |
+| `sfcli network bridge approve OWNER/NAME` | 다른 작업 공간이 내 망으로 만든 브릿지를 승인한다 |
+| `sfcli network bridge close [OWNER/]NAME` | 브릿지를 닫는다(양쪽 누구나) |
 
 `-f -`는 표준 입력에서 읽는다.
 
@@ -28,8 +31,8 @@ members:
   node-a: {subnet: 10.240.10.0/24, dynamic: 10.240.10.0/25, tunnel: 10.240.30.1/32}
   node-b: {subnet: 10.240.20.0/24, gateway: 10.240.20.1, tunnel: 10.240.30.2}
 dns:                  # 생략하면 DNS 없음
-  zone: shop.mydc.test
-  ttl: 30s            # 생략 가능(30s). 1s~1h, 초 단위
+  zone: shop.sfc.test
+  ttl: 10s            # 생략 가능(처음 만들 때 10s). 1s~1h, 초 단위. 캐시 TTL 상한
   upstreams: [1.1.1.1, 9.9.9.9:53]   # 생략 가능. 4개까지
   reverse: false
 ```
@@ -43,18 +46,18 @@ dns:                  # 생략하면 DNS 없음
 | `members.SERVER.subnet` | 그 서버의 컨테이너 주소 대역. IPv4, /29까지 |
 | `members.SERVER.gateway` | 대역의 게이트웨이 주소. 생략하면 대역의 첫 주소 |
 | `members.SERVER.dynamic` | 자동 배정할 범위. 대역 안이어야 한다. 생략하면 따로 정하지 않는다 |
-| `members.SERVER.tunnel` | 서버 사이 터널 주소. IPv4 한 주소(`/32`는 생략 가능) |
 | `dns.zone` | 이 망의 관리 DNS가 맡을 영역 이름 |
 
-대역끼리, 대역과 다른 서버의 터널 주소는 겹치면 안 된다. 모르는 필드는 오류다. DNS의 캐시·연결 한도는 고정 기본값을 쓰고, 이미 있는 망은 지금 값을 유지한다.
+대역끼리는 겹치면 안 된다. 서버 사이 터널 주소는 적지 않는다: 서버마다 클러스터에 들어올 때 정해진 서버 주소(`10.254.240.0/20` 안)를 모든 망에서 쓴다. 모르는 필드(`tunnel` 포함)는 오류다. DNS의 캐시·연결 한도는 고정 기본값을 쓰고, 이미 있는 망은 지금 값을 유지한다.
 
 ### 망 옵션(toggles)
 
 | 이름 | 켜면 | 규칙 |
 |---|---|---|
 | `local` | 망을 서버 한 대에만 둔다(다른 서버와 잇지 않음) | 켜려면 서버가 한 대여야 한다. 켜져 있으면 서버를 더할 수 없다(파일에 서버를 더하면 `local: false`를 함께 적는다). 끄기는 언제든 된다 |
+| `bridge-inbound` | 다른 작업 공간이 이 망으로 가상 브릿지를 만들 수 있다 | 서버 수와 상관없다. 끄면 새 브릿지와 아직 승인되지 않은 브릿지의 승인을 막는다. 이미 열린 브릿지는 그대로다 |
 
-`mydc network show`의 `toggles`는 모든 옵션과 지금 값을 보여 준다.
+`sfcli network show`의 `toggles`는 모든 옵션과 지금 값을 보여 준다.
 
 ## 바꾸기
 
@@ -63,18 +66,49 @@ dns:                  # 생략하면 DNS 없음
 - 서버만 더하거나 빼고 남는 서버의 주소가 그대로면 한 서버씩 바꾼다. 더할 서버는 하나씩 붙이고(join), 뺄 서버는 새 사용을 막은 뒤(drain) 그 서버가 망을 쓰는 컨테이너가 없다고 알리면 뗀다(leave). 남는 서버의 컨테이너는 끊기지 않는다(경로만 바뀐다). 빼는 서버를 쓰는 앱만 먼저 멈춘다. 더하기를 빼기보다 먼저 한다. 빼는 중인 서버가 있으면 그 서버를 먼저 끝낸다.
 - 파일에 `mtu`가 없으면 바꾸기는 지금 MTU를 그대로 쓴다. 다만 서버 한 대에서 쓰던 1500처럼 터널에 맞지 않는 MTU는 서버가 둘 이상이 될 때 기본값(1280)으로 바뀐다. MTU가 바뀌면 아래처럼 망 전체를 바꾼다.
 - 남는 서버의 주소나 MTU가 바뀌면 망을 잠시 쓸 수 없다. 서버마다 변경을 예약하고(plan) 새 사용을 막은 뒤(drain), 그 서버가 망을 쓰는 컨테이너가 없다고 알리면 닫고(fence), 마지막에 새 망을 한 번에 적용한다(같은 서버면 commit, 서버가 바뀌면 reconfigure). 앱을 먼저 멈춘다. 명령은 무엇을 기다리는지 보여 주며 기다린다.
-- `--no-wait`은 기다릴 필요 없는 단계만 보내고 돌아온다. 멈춘 작업은 `mydc op resume ID`로 이어 간다. 파일은 끝날 때까지 `~/.mydc/network/ID.yaml`에 두고 이어 갈 때 그 파일을 쓴다. `mydc op show ID`는 다음 단계만 알려 주고 아무것도 보내지 않는다.
+- `--no-wait`은 기다릴 필요 없는 단계만 보내고 돌아온다. 멈춘 작업은 `sfcli op resume ID`로 이어 간다. 파일은 끝날 때까지 `~/.sfc/network/ID.yaml`에 두고 이어 갈 때 그 파일을 쓴다. `sfcli op show ID`는 다음 단계만 알려 주고 아무것도 보내지 않는다.
 - 단계마다 지금 상태에서 정해지는 고정 ID를 쓴다. 응답을 못 받고 다시 실행해도 같은 단계를 두 번 하지 않는다.
 
 `delete`는 DNS를 먼저 끄고, 서버를 하나씩 새 사용을 막은 뒤 쓰는 컨테이너가 없어지면 뺀다. 마지막 서버가 빠지면 망이 지워진다. 서버 배정이 철회된 망도 이렇게 지울 수 있다. 기다리기와 이어 가기는 `update`와 같다.
 
 ## 시스템 망
 
-`mydc-system`은 서버 앱(node.yaml `node_apps`)이 쓰는 망이고, 손으로 만들거나 바꾸지 않는다. mydcd가 관리한다.
+`sfc-system`은 클러스터 앱(node.yaml `cluster_apps`)이 쓰는 망이고, 손으로 만들거나 바꾸지 않는다. sfcd가 관리한다.
 
-- 어느 서버가 서버 앱을 켜면 그 서버 하나로 망을 만들고, 다른 작업 서버를 하나씩 붙인다.
-- 서버 앱을 켠 서버가 하나도 없으면 각 서버가 자기를 비우고 뗀다. 마지막 서버가 빠지면 망이 지워진다. 클러스터에서 빠진 서버는 쓰는 서버로 치지 않는다.
-- 주소는 범위(기본 `10.254.0.0/16`) 안에서 정한다. 첫 /24는 터널 주소, 그다음 /24부터 서버마다 하나씩이다. MTU는 1280이다.
-- 작업 공간 망의 서브넷과 터널 주소는 이 범위와 겹칠 수 없다. 만들기, 서버 더하기, 바꾸기 모두 mydcd가 거절하고, `create`·`update`는 보내기 전에 알려 준다.
-- 범위는 IPv4 /8부터 /22까지이고 다른 망과 겹치지 않아야 한다. 멤버가 있는 동안에는 바꿀 수 없으니, 모든 서버에서 서버 앱을 먼저 끈다.
-- 범위에 빈 주소가 없거나 다른 망이 먼저 잡았으면 서버 로그에 "no free address in its range"가 남는다. 그때는 `set-range`로 범위를 바꾼다.
+- 어느 서버가 클러스터 앱을 켜면 그 서버 하나로 망을 만들고, 다른 작업 서버를 하나씩 붙인다.
+- 같은 클러스터 앱은 클러스터에서 한 서버만 돌린다. 다른 서버가 이미 돌리고 있으면 나중에 켠 서버는 거부되고(`refused`, 이미 도는 서버를 함께 보여 줌), 그 서버의 sfcd를 다시 올릴 때까지 그대로다. 저절로 옮기지 않는다. 옮기려면 돌리던 서버의 node.yaml에서 앱을 끄고 그 서버의 sfcd를 다시 올린 뒤, 새 서버의 sfcd를 다시 올린다. 앱 주소는 클러스터 공용 주소로, 어느 서버가 돌리든 같다(sfc-web은 `10.254.0.2`). 다른 서버의 시스템 망이 이 주소를 돌리는 서버로 보내고, 그 서버가 컨테이너(그 서버 시스템 망 서브넷의 `.2`, Docker는 `.128/25`만 나눠 줌)로 넘긴다. node.yaml `cluster_apps.web.port`를 주면 돌리는 서버 주소의 그 포트로 웹에 바로 들어오고, 지우면 닫힌다.
+- 클러스터 앱을 켠 서버가 하나도 없으면 각 서버가 자기를 비우고 뗀다. 마지막 서버가 빠지면 망이 지워진다. 클러스터에서 빠진 서버는 쓰는 서버로 치지 않는다.
+- 범위는 `10.254.0.0/16`으로 고정이고 바꿀 수 없다. 나눠 쓰는 방식은 아래와 같다. MTU는 1280이다.
+
+| 대역 | 쓰임 |
+|---|---|
+| `10.254.0.0/24` | 클러스터 공용 주소(cluster app마다 하나, sfc-web은 `10.254.0.2`) |
+| `10.254.1.0/24` ~ `10.254.239.0/24` | 클러스터 앱을 쓰는 서버마다 시스템 망 서브넷 하나 |
+| `10.254.240.0/20` | 서버 주소. 서버를 클러스터에 더할 때 하나 정해지고 뺄 때 돌려받는다(4094개). 모든 TUN 망에서 그 서버의 터널 주소다 |
+
+- 작업 공간 망의 서브넷은 이 범위와 겹칠 수 없다. 만들기, 서버 더하기, 바꾸기 모두 sfcd가 거절하고, `create`·`update`는 보내기 전에 알려 준다.
+- 빈 서브넷이 없으면 서버 로그에 "no free system pool"이 남는다.
+
+## 가상 브릿지
+
+> 지금은 브릿지를 만들고 승인하고 닫는 것까지만 된다. 열린 브릿지로 패킷이 다니는 부분은 아직 만드는 중이다.
+
+가상 브릿지는 망 두 개를 통째로 잇는다. 양쪽 망의 모든 서버 컨테이너가 서로 닿고, 망에 서버가 더해지거나 빠지면 따라간다. 서버 한 대의 정한 포트만 통과시키는 작업 공간 간 연결은 [route](route.md)를 쓴다.
+
+```
+sfcli network bridge create link --network shop-net --to shop-db
+sfcli network bridge create pay --network shop-net --to payments/ledger-net --direction out --protocol tcp --ports 5432
+sfcli network bridge approve shop/pay        # payments 작업 공간에서
+sfcli network bridge close link
+```
+
+- 같은 작업 공간의 두 망은 그 작업 공간 관리자가 바로 잇는다.
+- 다른 작업 공간 망은 그 망이 `bridge-inbound`를 켜 두어야 하고, 그쪽 관리자가 `approve`하면 열린다. 그때까지 `list`의 `state`는 내 쪽에서 `waiting-peer`, 상대 쪽에서 `waiting-me`다.
+- `--direction`은 `both`(기본), `out`(이 망에서만 연결을 시작), `in`(상대 망에서만 시작)이다. 반대쪽은 그 연결의 응답만 돌아간다.
+- `--protocol tcp|udp`와 `--ports`로 좁힐 수 있다. 없으면 모든 프로토콜과 포트다.
+- 같은 두 망 사이에는 브릿지가 하나뿐이다(`bridge-exists`). 방향을 바꾸려면 닫고 다시 만든다.
+- 망이 바뀌는 중이면 만들기와 승인이 거절된다(`network-changing`). 상대 작업 공간 망이 없거나, 브릿지를 받지 않거나, 바뀌는 중이면 모두 `peer-closed`다.
+- 브릿지가 걸린 망은 마지막 서버를 뺄 수 없다(`bridge-attached`). 망을 지우기 전에 브릿지를 닫는다.
+- `close`하면 `closing`이 되고, 걸린 서버가 모두 자기 쪽을 정리했다고 보고하면 사라진다. 기다리던 브릿지는 바로 사라진다.
+- 주소가 겹치는 두 망은 잇지 않는다. 도메인 이름(관리 DNS)은 넘기지 않으며, `sfc-system`은 잇지 않는다.
+- `list`는 상대 망을 이름으로만 보여 준다. 상대 망의 주소는 보이지 않는다.

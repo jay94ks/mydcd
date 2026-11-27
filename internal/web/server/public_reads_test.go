@@ -5,8 +5,8 @@ package server
 import (
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/web/mydc"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/web/sfc"
 )
 
 func TestResourceUsersFold(t *testing.T) {
@@ -21,10 +21,10 @@ func TestResourceUsersFold(t *testing.T) {
 	if len(net) != 3 || apps != 1 || sa != 1 {
 		t.Fatalf("network fold = %+v apps %d standalones %d", net, apps, sa)
 	}
-	if !net[0].Attached || len(net[0].Selection) != 1 || net[0].Kind != mydc.NetworkUserService || !net[0].ReadOnly {
+	if !net[0].Attached || len(net[0].Selection) != 1 || net[0].Kind != sfc.NetworkUserService || !net[0].ReadOnly {
 		t.Fatalf("service entry = %+v (one endpoint seen, one task read-only)", net[0])
 	}
-	if net[1].Attached || net[1].Kind != mydc.NetworkUserStandalone {
+	if net[1].Attached || net[1].Kind != sfc.NetworkUserStandalone {
 		t.Fatalf("standalone entry = %+v", net[1])
 	}
 	if net[2].Kind != "volume-operation" || net[2].Consumer != "backup-1" || net[2].Attached {

@@ -9,7 +9,7 @@ import (
 )
 
 // Automatic issuance settings (UI-57 "자동 발급"): web-own data. The hosts
-// it watches come from mydcd's ingress mapping, read each round, and are
+// it watches come from sfcd's ingress mapping, read each round, and are
 // not kept here.
 
 var bucketACMEAuto = []byte("acme-auto")

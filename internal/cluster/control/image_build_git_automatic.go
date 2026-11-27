@@ -10,11 +10,11 @@ import (
 	"fmt"
 	"math"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/imagebuild"
-	"github.com/jay94ks/mydcd/internal/reconcile"
-	"github.com/jay94ks/mydcd/internal/secrets"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/imagebuild"
+	"github.com/jay94ks/seafield/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/secrets"
 )
 
 // The context definition is the accepted user authority. This report is the
@@ -31,14 +31,14 @@ type ImageBuildAutomaticGitReport struct {
 }
 
 func ImageBuildAutomaticGitID(definition [32]byte, policyRevision uint64, commit string) string {
-	hash := sha256.Sum256([]byte(fmt.Sprintf("mydc-imagebuild-automatic-git-id-1\x00%x\x00%d\x00%s", definition, policyRevision, commit)))
+	hash := sha256.Sum256([]byte(fmt.Sprintf("sfc-imagebuild-automatic-git-id-1\x00%x\x00%d\x00%s", definition, policyRevision, commit)))
 	return "auto-" + hex.EncodeToString(hash[:24])
 }
 
 func ImageBuildAutomaticGitReportBytes(report ImageBuildAutomaticGitReport) []byte {
 	report.Signature = nil
 	raw, _ := json.Marshal(report)
-	return append([]byte("mydc-imagebuild-automatic-git-report-1\x00"), raw...)
+	return append([]byte("sfc-imagebuild-automatic-git-report-1\x00"), raw...)
 }
 
 // The next version number belongs to the FSM allocator. Excluding just that
@@ -47,7 +47,7 @@ func ImageBuildAutomaticGitReportBytes(report ImageBuildAutomaticGitReport) []by
 func ImageBuildAutomaticGitSnapshot(spec imagebuild.JobSpec) [32]byte {
 	spec.Number = 0
 	raw, _ := json.Marshal(spec)
-	return sha256.Sum256(append([]byte("mydc-imagebuild-automatic-git-intent-1\x00"), raw...))
+	return sha256.Sum256(append([]byte("sfc-imagebuild-automatic-git-intent-1\x00"), raw...))
 }
 
 func (p Policy) ImageBuildAutomaticGitSavePlan(s state.State, caller [32]byte, tenant, id string, at int64, original *imagebuild.GitSavePlan) (imagebuild.GitSavePlan, error) {

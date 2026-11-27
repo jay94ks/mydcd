@@ -22,7 +22,7 @@ func TestRequestHTTPS(t *testing.T) {
 		{"10.88.0.1:41000", "http", false, false},
 		{"10.88.0.1:41000", "", false, false},
 		{"[::ffff:10.88.0.1]:41000", "HTTPS", false, true},
-		{"10.88.0.7:41000", "https", false, false}, // another node app on mydc-system
+		{"10.88.0.7:41000", "https", false, false}, // another cluster app on sfc-system
 		{"127.0.0.1:41000", "", true, true},
 		{"127.0.0.1:41000", "", false, false},
 	} {

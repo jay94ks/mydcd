@@ -8,10 +8,10 @@ import (
 	"io"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/imagebuild"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/imagebuild"
+	"github.com/jay94ks/seafield/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/sfcp"
 )
 
 func imageBuildWorkGrant(work control.ImageBuildJobWork) imagebuild.NativeGrant {
@@ -34,13 +34,13 @@ func (r *Runtime) stageImageBuildContext(ctx context.Context, spec imagebuild.Jo
 	r.life.RLock()
 	defer r.life.RUnlock()
 	if r.closed || r.nodeRoots == nil || r.reports == nil {
-		return mydcp.ErrAdmission
+		return sfcp.ErrAdmission
 	}
 	r.imageBuildMu.Lock()
 	defer r.imageBuildMu.Unlock()
 	work, err := r.imageBuildJobWork(ctx, spec)
 	if err != nil || !work.Allowed {
-		return mydcp.ErrAdmission
+		return sfcp.ErrAdmission
 	}
 	pin, err := r.nodeRoots.OpenRecordedPin(spec.Scope.Root, buildArtifactConsumer(spec.Scope))
 	if pin.Directory != nil {
@@ -222,7 +222,7 @@ func (r *Runtime) consumeImageBuildJob(ctx context.Context, spec imagebuild.JobS
 			}
 			view, err := r.currentView(jobctx)
 			if err != nil || view.Local {
-				return mydcp.ErrAdmission
+				return sfcp.ErrAdmission
 			}
 			sources, err := r.controlPolicy.ImageBuildBeginSources(view.State, r.Identity.Public, control.ImageBuildJobWorkQuery{Tenant: spec.Tenant, ID: spec.ID, At: time.Now().Unix()}, inputs)
 			if err != nil {

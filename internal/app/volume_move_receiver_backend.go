@@ -9,10 +9,10 @@ import (
 	"log"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/workload/volumes"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/workload/volumes"
 )
 
 type runtimeMoveReceiver struct{ r *Runtime }
@@ -27,23 +27,23 @@ func (d runtimeMoveReceiver) Authorize(ctx context.Context, b moveReceiveIntent,
 		return err
 	}
 	if !cleanup && (p.Move.Manifest == nil || p.Move.Manifest.ArchiveReceipt() != b.Manifest.ArchiveReceipt() || p.Move.Manifest.Binding != b.Manifest.Binding) {
-		return mydcp.ErrAdmission
+		return sfcp.ErrAdmission
 	}
 	return nil
 }
-func (d runtimeMoveReceiver) Transfer(ctx context.Context, b moveReceiveIntent, offset uint64, prefix [32]byte, sink mydcp.VolumeSink) error {
+func (d runtimeMoveReceiver) Transfer(ctx context.Context, b moveReceiveIntent, offset uint64, prefix [32]byte, sink sfcp.VolumeSink) error {
 	if err := d.Authorize(ctx, b, false); err != nil {
 		return err
 	}
 	peer, ok := d.r.resourcePeer(ctx, b.Job.Binding.Source.Node, b.Job.Binding.Source.Key)
 	if !ok || !peer.Member {
-		return mydcp.ErrAdmission
+		return sfcp.ErrAdmission
 	}
 	session, err := d.r.Mesh.Dial(ctx, peer)
 	if err != nil {
 		return err
 	}
-	return session.PullVolume(ctx, mydcp.VolumeTransferRequest{Schema: 1, Metadata: moveTransferMetadata(b.Job), Artifact: b.Manifest.Artifact, Bytes: b.Manifest.Bytes, Offset: offset, Prefix: prefix, ExpiresAt: b.Job.ExpiresAt}, sink)
+	return session.PullVolume(ctx, sfcp.VolumeTransferRequest{Schema: 1, Metadata: moveTransferMetadata(b.Job), Artifact: b.Manifest.Artifact, Bytes: b.Manifest.Bytes, Offset: offset, Prefix: prefix, ExpiresAt: b.Job.ExpiresAt}, sink)
 }
 
 // Receiver files are local progress of the original shared move. Receiving an

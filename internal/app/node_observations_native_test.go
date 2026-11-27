@@ -15,40 +15,40 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/config"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/engine"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/network"
-	"github.com/jay94ks/mydcd/internal/nodestorage"
-	"github.com/jay94ks/mydcd/internal/tenancy"
-	"github.com/jay94ks/mydcd/internal/userauth"
-	"github.com/jay94ks/mydcd/internal/workload"
-	"github.com/jay94ks/mydcd/tests/registryfixture"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/config"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/engine"
+	"github.com/jay94ks/seafield/internal/network"
+	"github.com/jay94ks/seafield/internal/nodestorage"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/tenancy"
+	"github.com/jay94ks/seafield/internal/userauth"
+	"github.com/jay94ks/seafield/internal/workload"
+	"github.com/jay94ks/seafield/tests/registryfixture"
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/client"
 )
 
 // Requires an explicit external rollback baseline and a prebuilt static image.
 func TestRQ3TwoNodeTwoTenantDockerTasksAndOriginalSource(t *testing.T) {
-	if os.Geteuid() != 0 || os.Getenv("MYDC_NATIVE_MANIFEST") == "" || !filepath.IsAbs(os.Getenv("MYDC_DOCKER_TEST_BACKEND")) || os.Getenv("MYDC_DOCKER_TEST_CIDR") == "" {
+	if os.Geteuid() != 0 || os.Getenv("SFC_NATIVE_MANIFEST") == "" || !filepath.IsAbs(os.Getenv("SFC_DOCKER_TEST_BACKEND")) || os.Getenv("SFC_DOCKER_TEST_CIDR") == "" {
 		t.Skip("requires owned native rollback baseline and prepared backend")
 	}
 	testRealManagedJoin(t, false, "observations-native")
 }
 
-func verifyTwoNodeNativeObservations(t *testing.T, ctx context.Context, a, b *Runtime, ac, bc config.Node, user userauth.Client, session access.Session, ap, bp mydcp.Peer, p control.Policy, change func(string, string, uint64, any), wait func(string, func() bool), root string, detailsOnly bool) {
+func verifyTwoNodeNativeObservations(t *testing.T, ctx context.Context, a, b *Runtime, ac, bc config.Node, user userauth.Client, session access.Session, ap, bp sfcp.Peer, p control.Policy, change func(string, string, uint64, any), wait func(string, func() bool), root string, detailsOnly bool) {
 	t.Helper()
 	cfgs := []config.Node{ac, bc}
 	runtimes := []*Runtime{a, b}
 	owners := []string{engine.Owner(user.Cluster, a.Identity.Public), engine.Owner(user.Cluster, b.Identity.Public)}
-	manifest := map[string]any{"Cluster": user.Cluster, "Owners": owners, "Root": root, "CIDR": os.Getenv("MYDC_DOCKER_TEST_CIDR")}
+	manifest := map[string]any{"Cluster": user.Cluster, "Owners": owners, "Root": root, "CIDR": os.Getenv("SFC_DOCKER_TEST_CIDR")}
 	save := func() {
 		t.Helper()
 		raw, _ := json.Marshal(manifest)
-		if e := os.WriteFile(os.Getenv("MYDC_NATIVE_MANIFEST"), raw, 0644); e != nil {
+		if e := os.WriteFile(os.Getenv("SFC_NATIVE_MANIFEST"), raw, 0644); e != nil {
 			t.Fatal(e)
 		}
 	}
@@ -103,10 +103,10 @@ func verifyTwoNodeNativeObservations(t *testing.T, ctx context.Context, a, b *Ru
 					}
 				}
 			}
-			if rows, e := c.API.ContainerList(clean, client.ContainerListOptions{All: true, Filters: client.Filters{}.Add("label", "org.mydc.owner="+owners[i])}); e != nil || len(rows.Items) != 0 {
+			if rows, e := c.API.ContainerList(clean, client.ContainerListOptions{All: true, Filters: client.Filters{}.Add("label", "org.sfc.owner="+owners[i])}); e != nil || len(rows.Items) != 0 {
 				t.Error("owned container remains", e)
 			}
-			if rows, e := c.API.NetworkList(clean, client.NetworkListOptions{Filters: client.Filters{}.Add("label", "org.mydc.owner="+owners[i])}); e != nil || len(rows.Items) != 0 {
+			if rows, e := c.API.NetworkList(clean, client.NetworkListOptions{Filters: client.Filters{}.Add("label", "org.sfc.owner="+owners[i])}); e != nil || len(rows.Items) != 0 {
 				t.Error("owned bridge remains", e)
 			}
 			n.Close()
@@ -124,7 +124,7 @@ func verifyTwoNodeNativeObservations(t *testing.T, ctx context.Context, a, b *Ru
 				t.Error(e)
 				return
 			}
-			if image.Config == nil || image.Config.Labels["org.mydc.test.owner"] != owners[0] {
+			if image.Config == nil || image.Config.Labels["org.sfc.test.owner"] != owners[0] {
 				t.Error("fixture image ownership mismatch")
 				return
 			}
@@ -133,7 +133,7 @@ func verifyTwoNodeNativeObservations(t *testing.T, ctx context.Context, a, b *Ru
 			}
 		}
 	})
-	registry = registryfixture.OpenPrepared(t, os.Getenv("MYDC_DOCKER_TEST_BACKEND"), container.Config{Cmd: []string{"/backend"}, User: "10001:10001", Labels: map[string]string{"org.mydc.test.owner": owners[0]}})
+	registry = registryfixture.OpenPrepared(t, os.Getenv("SFC_DOCKER_TEST_BACKEND"), container.Config{Cmd: []string{"/backend"}, User: "10001:10001", Labels: map[string]string{"org.sfc.test.owner": owners[0]}})
 	manifest["Image"] = registry.Reference
 	save()
 	read := func() control.Apps {
@@ -148,7 +148,7 @@ func verifyTwoNodeNativeObservations(t *testing.T, ctx context.Context, a, b *Ru
 		}
 		return apps
 	}
-	prefix := netip.MustParsePrefix(os.Getenv("MYDC_DOCKER_TEST_CIDR"))
+	prefix := netip.MustParsePrefix(os.Getenv("SFC_DOCKER_TEST_CIDR"))
 	documents := map[string][]byte{}
 	for i, tenant := range []string{"first", "second"} {
 		node := cfgs[i].Node.ID
@@ -159,14 +159,14 @@ func verifyTwoNodeNativeObservations(t *testing.T, ctx context.Context, a, b *Ru
 		}
 		catalog, _ := p.Catalog(view.State)
 		scope, _ := catalog.Tenant(tenant)
-		change("native-node-"+tenant, "set-nodes", scope.Revision, control.NodeAssignment{Tenant: tenant, Nodes: []string{node}})
+		change("native-node-"+tenant, "set-nodes", scope.Revision, control.NodeChangeTo(tenant, scope.AllowedNodes, []string{node}))
 		view, e = a.Engine().Read(ctx, true)
 		if e != nil {
 			t.Fatal(e)
 		}
 		catalog, _ = p.Catalog(view.State)
 		scope, _ = catalog.Tenant(tenant)
-		change("native-trust-"+tenant, "set-trust", scope.Revision, control.TrustAssignment{Tenant: tenant, Rules: append(scope.ImageSources, access.TrustRule{Registry: registry.Registry, Repository: "fixture"})})
+		change("native-trust-"+tenant, "set-trust", scope.Revision, control.TrustChange{Tenant: tenant, Add: []access.TrustRule{access.TrustRule{Registry: registry.Registry, Repository: "fixture"}}})
 		for _, namespace := range []string{"", tenant} {
 			change("native-quota-"+tenant+namespace, "set-node-quota", 0, tenancy.NodeLimit{Tenant: namespace, Node: node, Capacity: workload.Resources{CPU: 1e9, Memory: 256 << 20}, Networks: 2, MaxConsumers: 8})
 		}
@@ -181,13 +181,13 @@ func verifyTwoNodeNativeObservations(t *testing.T, ctx context.Context, a, b *Ru
 			t.Fatal(e)
 		}
 		resources, _ := p.Resources(view.State)
-		change("native-network-"+tenant, "create-tun-network", resources.Networks.Revision(), tenancy.TUNDefinition{Tenant: tenant, Name: "services", Members: []tenancy.TUNNode{{Node: node, Pools: []tenancy.Subnet{{ID: "pool", Prefix: subnet, Gateway: subnet.Addr().Next(), MTU: 1280}}, Addresses: []netip.Prefix{netip.MustParsePrefix(fmt.Sprintf("198.18.251.%d/32", i+1))}}}})
+		change("native-network-"+tenant, "create-tun-network", resources.Networks.Revision(), tenancy.TUNDefinition{Tenant: tenant, Name: "services", Members: []tenancy.TUNNode{{Node: node, Pools: []tenancy.Subnet{{ID: "pool", Prefix: subnet, Gateway: subnet.Addr().Next(), MTU: 1280}}}}})
 		directory := filepath.Join(root, "registered-"+node)
 		if e = os.Mkdir(directory, 0700); e != nil {
 			t.Fatal(e)
 		}
-		change("native-root-"+tenant, "add-node-storage", 0, nodestorage.Definition{Node: node, Key: runtimes[i].Identity.Public, ID: "data", Path: directory, Tenants: []string{tenant}, MaxVolumes: 4})
-		document := []byte(fmt.Sprintf("# exact original %s\nname: app\nservices:\n web:\n  image: %s\n  cpus: '0.1'\n  mem_limit: 64m\n  networks: {lan: {ipv4_address: %s}}\n  x-mydc: {node: %s}\nnetworks:\n lan: {external: true, name: services}\n", tenant, registry.Reference, subnet.Addr().Next().Next(), node))
+		change("native-root-"+tenant, "add-node-storage", 0, nodestorage.Definition{Node: node, Key: runtimes[i].Identity.Public, ID: "data", Path: directory, Tenants: []string{tenant}})
+		document := []byte(fmt.Sprintf("# exact original %s\nname: app\nservices:\n web:\n  image: %s\n  cpus: '0.1'\n  mem_limit: 64m\n  networks: {lan: {ipv4_address: %s}}\n  x-sfc: {node: %s}\nnetworks:\n lan: {external: true, name: services}\n", tenant, registry.Reference, subnet.Addr().Next().Next(), node))
 		if detailsOnly {
 			document = bytes.Replace(document, []byte("  cpus:"), []byte("  healthcheck: {test: [CMD, /backend, --probe], interval: 1s, timeout: 1s, retries: 2}\n  cpus:"), 1)
 		}
@@ -303,33 +303,33 @@ func verifyTwoNodeNativeObservations(t *testing.T, ctx context.Context, a, b *Ru
 			t.Fatal(e)
 		}
 		for _, raw := range rows {
-			if e = r.storeNodeObservation(mydcp.Identity(r.Identity.Public), raw); e != nil {
+			if e = r.storeNodeObservation(sfcp.Identity(r.Identity.Public), raw); e != nil {
 				t.Fatal(e)
 			}
-			if e = link.Report(ctx, raw); e != nil {
+			if e = link.Report(ctx, sfcp.KindNodeObservation, raw); e != nil {
 				t.Fatal(e)
 			}
 		}
 	}
 
-	scoped, err := user.NodeObservationPage(ctx, ap, reader, "node-summary", "first", "", "")
-	if err != nil || scoped.NodeSummary == nil || len(scoped.NodeSummary.Nodes) != 1 || scoped.NodeSummary.Nodes[0].Node != "node-a" || scoped.NodeSummary.Nodes[0].Admin != nil || scoped.NodeSummary.Nodes[0].Usage == nil || scoped.NodeSummary.Nodes[0].Usage.Containers == nil || *scoped.NodeSummary.Nodes[0].Usage.Containers != 1 {
-		t.Fatal("actual tenant native count/filter", err, scoped.NodeSummary)
+	scoped, err := user.NodeSummary(ctx, ap, reader, userauth.NodeObservationQuery{Tenant: "first"})
+	if err != nil || len(scoped.Nodes) != 1 || scoped.Nodes[0].Node != "node-a" || scoped.Nodes[0].Admin != nil || scoped.Nodes[0].Usage == nil || scoped.Nodes[0].Usage.Containers == nil || *scoped.Nodes[0].Usage.Containers != 1 {
+		t.Fatal("actual tenant native count/filter", err, scoped)
 	}
-	visible, _ := json.Marshal(scoped.NodeSummary)
+	visible, _ := json.Marshal(scoped)
 	for _, foreign := range []string{"second", "node-b", bp.Endpoint, "Version", "Role"} {
 		if bytes.Contains(visible, []byte(foreign)) {
 			t.Fatal("foreign tenant/host metadata in native summary", foreign)
 		}
 	}
 	for _, node := range []string{"node-a", "node-b"} {
-		reply, e := user.NodeObservationPage(ctx, ap, session, "node-disks", "", node, "")
-		if e != nil || reply.NodeDisks == nil {
+		reply, e := user.NodeDisks(ctx, ap, session, userauth.NodeObservationQuery{Node: node})
+		if e != nil {
 			t.Fatal(e)
 		}
 		purposes := map[string]bool{}
 		seen := map[string]bool{}
-		for _, disk := range reply.NodeDisks.Disks {
+		for _, disk := range reply.Disks {
 			if seen[disk.ID] {
 				t.Fatal("same filesystem counted twice")
 			}
@@ -347,7 +347,7 @@ func verifyTwoNodeNativeObservations(t *testing.T, ctx context.Context, a, b *Ru
 	t.Log("two actual nodes/two tenants/Docker Tasks: node/tenant/app filters, signed exited/running transitions, exact original and consecutive preserved app revisions, approved three-source filesystem deduplication")
 }
 
-func acceptNativeObservationApp(t *testing.T, ctx context.Context, user userauth.Client, peer mydcp.Peer, session access.Session, change func(string, string, uint64, any), read func() control.Apps, tenant, id string, document []byte) {
+func acceptNativeObservationApp(t *testing.T, ctx context.Context, user userauth.Client, peer sfcp.Peer, session access.Session, change func(string, string, uint64, any), read func() control.Apps, tenant, id string, document []byte) {
 	t.Helper()
 	raw, e := user.StreamAppPlan(ctx, peer, session, tenant, control.AppPlanRequest{Document: document})
 	if e != nil {

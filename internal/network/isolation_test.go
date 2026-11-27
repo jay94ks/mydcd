@@ -10,7 +10,7 @@ import (
 	"testing"
 
 	"github.com/google/nftables/expr"
-	"github.com/jay94ks/mydcd/internal/engine"
+	"github.com/jay94ks/seafield/internal/engine"
 )
 
 func isolationFixture(t *testing.T) IsolationSpec {

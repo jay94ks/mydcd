@@ -10,10 +10,10 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/imagesource"
-	"github.com/jay94ks/mydcd/internal/secrets"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/imagesource"
+	"github.com/jay94ks/seafield/internal/secrets"
 )
 
 // The source reader is a public authorization/usage record, not an app Task,
@@ -77,14 +77,14 @@ func (plan ExternalRegistryBindPlan) Valid(session access.Session, tenant string
 
 func ExternalRegistryDefinition(spec imagesource.Source) [32]byte {
 	raw, _ := json.Marshal(spec)
-	return sha256.Sum256(append([]byte("mydc-external-registry-definition-1\x00"), raw...))
+	return sha256.Sum256(append([]byte("sfc-external-registry-definition-1\x00"), raw...))
 }
 
 // ExternalRegistryScope is the stable approval namespace; Purpose separates it
 // from any app that happens to use the same public name.
 func ExternalRegistryScope(tenant, id string) string {
 	raw, _ := json.Marshal(RegistrySelection{tenant, id})
-	h := sha256.Sum256(append([]byte("mydc-external-registry-namespace-1\x00"), raw...))
+	h := sha256.Sum256(append([]byte("sfc-external-registry-namespace-1\x00"), raw...))
 	return "registry-" + hex.EncodeToString(h[:24])
 }
 func externalRegistryUses(spec imagesource.Source, origin UserOperation, node string, owner [32]byte) map[string]secrets.Use {
@@ -233,7 +233,7 @@ type ExternalRegistryReaderClosed struct {
 func ExternalRegistryReaderClosedBytes(q ExternalRegistryReaderClosed) []byte {
 	q.Signature = nil
 	raw, _ := json.Marshal(q)
-	return append([]byte("mydc-external-registry-reader-closed-1\x00"), raw...)
+	return append([]byte("sfc-external-registry-reader-closed-1\x00"), raw...)
 }
 func (q ExternalRegistryReaderClosed) Command() (state.Command, error) {
 	raw, err := json.Marshal(q)
@@ -455,7 +455,7 @@ func (p Policy) admitExternalRegistryVaultPatch(s state.State, cmd state.Command
 		}
 	}
 	for _, key := range keys {
-		if key != VaultKey && !strings.HasPrefix(key, VaultKey+"/part/") {
+		if key != VaultKey && !strings.HasPrefix(key, VaultKey+"/") {
 			return false
 		}
 	}

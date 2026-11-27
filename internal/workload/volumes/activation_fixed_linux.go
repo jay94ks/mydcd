@@ -6,8 +6,8 @@ import (
 	"context"
 	"errors"
 
-	"github.com/jay94ks/mydcd/internal/engine"
-	"github.com/jay94ks/mydcd/internal/nodestorage"
+	"github.com/jay94ks/seafield/internal/engine"
+	"github.com/jay94ks/seafield/internal/nodestorage"
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/api/types/mount"
 	"github.com/moby/moby/client"
@@ -22,51 +22,33 @@ func (s *Activations) MountSource(key string, scope Scope, owner Owner, generati
 	return s.mountSource(key, scope, owner, generation, binding)
 }
 
-// Caller holds the activation entries. Local leases and source FDs survive
-// all current-permit and SDK boundaries; failures never return the original
-// shared consumer or permit a replacement native operation.
+// Caller holds the activation entries. Fixed volumes are engine "sfc"
+// volumes: the engine never resolves a host path for them, it asks sfcd for
+// the held directory on Mount. So the SDK transport needs no bind-source
+// guard; this only proves each binding still holds its original pin and
+// that the projection is the original data before Create or Start.
 func (s *Activations) bindClient(ctx context.Context, rows []activationBatchEntry) (*client.Client, func(), error) {
-	var sources []engine.BindSource
-	var handles []*nodestorage.DirectoryHandle
-	closeHandles := func() {
-		for i := len(handles) - 1; i >= 0; i-- {
-			_ = handles[i].Close()
-		}
-	}
 	for _, row := range rows {
 		if !row.r.Scope.TenantManaged() {
 			continue
 		}
 		if row.e.store.native.fixed == nil {
-			closeHandles()
 			return nil, nil, ErrActivation
 		}
 		b := row.d.Bindings[row.i]
 		if b.Closed || b.Lease.Pin.Token == 0 {
-			closeHandles()
 			return nil, nil, ErrActivation
 		}
 		if _, _, err := row.e.store.native.MountSource(row.r.NativeKey, row.r.Scope, row.r.Consumer.Owner, row.r.NativeGeneration, row.r.NativeBinding); err != nil {
-			closeHandles()
 			return nil, nil, err
 		}
-		path, h, err := row.e.store.native.fixed.BindSource(ctx, b.Lease)
+		_, h, err := row.e.store.native.fixed.BindSource(ctx, b.Lease)
 		if err != nil {
-			closeHandles()
 			return nil, nil, err
 		}
-		handles = append(handles, h)
-		sources = append(sources, engine.BindSource{Path: path, DirectoryFD: h.FD()})
+		_ = h.Close()
 	}
-	if len(sources) == 0 {
-		return s.client.API, func() {}, nil
-	}
-	api, err := s.client.BindClient(sources)
-	if err != nil {
-		closeHandles()
-		return nil, nil, err
-	}
-	return api, func() { _ = api.Close(); closeHandles() }, nil
+	return s.client.API, func() {}, nil
 }
 
 // API source metadata is not evidence of what a separate runtime namespace
@@ -91,14 +73,14 @@ func (s *Activations) checkFixedProcess(ctx context.Context, rows []activationBa
 		if b.Closed || b.Lease.Pin.Token == 0 {
 			return ErrActivation
 		}
-		source, h, err := row.e.store.native.fixed.InspectBindSource(ctx, b.Lease)
+		_, h, err := row.e.store.native.fixed.InspectBindSource(ctx, b.Lease)
 		if err != nil {
 			return err
 		}
 		handles = append(handles, h)
 		target := ""
 		for _, m := range got.Mounts {
-			if m.Type == mount.TypeBind && m.Source == source && m.RW == row.r.Consumer.Writable {
+			if m.Type == mount.TypeVolume && m.Name == row.r.Consumer.Owner.Native && m.Driver == EngineVolumeDriver && m.RW == row.r.Consumer.Writable {
 				if target != "" {
 					return ErrActivation
 				}
@@ -146,10 +128,11 @@ func (s *Activations) CreateAll(ctx context.Context, refs []Activation, options 
 		}
 		count := 0
 		for _, m := range options.HostConfig.Mounts {
-			if !bind && m.Type == mount.TypeVolume && m.Source == source && m.ReadOnly == !row.r.Consumer.Writable && m.VolumeOptions != nil && m.VolumeOptions.NoCopy {
-				count++
+			if m.Type != mount.TypeVolume || m.Source != source || m.ReadOnly == row.r.Consumer.Writable || m.VolumeOptions == nil || !m.VolumeOptions.NoCopy || m.VolumeOptions.Subpath != "" || len(m.VolumeOptions.Labels) != 0 {
+				continue
 			}
-			if bind && m.Type == mount.TypeBind && m.Source == source && m.ReadOnly == !row.r.Consumer.Writable && m.BindOptions != nil && !m.BindOptions.CreateMountpoint && m.BindOptions.NonRecursive && m.BindOptions.Propagation == mount.PropagationRPrivate {
+			driver := m.VolumeOptions.DriverConfig
+			if !bind && driver == nil || bind && driver != nil && driver.Name == EngineVolumeDriver && len(driver.Options) == 0 {
 				count++
 			}
 		}

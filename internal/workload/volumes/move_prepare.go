@@ -17,7 +17,7 @@ type TargetPreparation struct {
 
 func TargetPreparationBytes(p TargetPreparation) []byte {
 	p.Signature = nil
-	return signedBytes("mydc-volume-target-prepare-1", p)
+	return signedBytes("sfc-volume-target-prepare-1", p)
 }
 func validPreparation(p TargetPreparation, b Binding) bool {
 	return (p.Inputs == nil && p.InputsAt == 0 || p.Inputs != nil && *p.Inputs != ([32]byte{}) && p.InputsAt > 0) && p.Binding == b && p.Target.Verify() == nil && p.Target.Owner == b.Target && p.Target.Spec.Scope == b.Scope && p.Target.Generation == 1 && p.Empty && p.NoWriters && p.SpaceChecked && p.ProtocolReady && verify(b.Target.Key, TargetPreparationBytes(p), p.Signature)

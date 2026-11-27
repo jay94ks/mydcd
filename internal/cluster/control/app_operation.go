@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/deployment"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/deployment"
 )
 
 type AppOperationRequest struct {
@@ -26,6 +26,12 @@ type AppOperationView struct {
 	// Waiting lists, for a current deploy, the steps no server has started
 	// and what each waits on. Status text only; never admission.
 	Waiting []string `json:",omitempty"`
+	// Failures lists, for a current failed deploy, the Tasks their server
+	// will never start and why. Status text only.
+	Failures []string `json:",omitempty"`
+	// Unknown lists, for a current deploy, the steps whose send is Unknown;
+	// resume-app-step resends one of them.
+	Unknown []deployment.UnknownStep `json:",omitempty"`
 }
 
 func (a Apps) Operation(c access.Catalog, actor, tenant string, q AppOperationRequest) (AppOperationView, error) {
@@ -63,6 +69,8 @@ func (a Apps) Operation(c access.Catalog, actor, tenant string, q AppOperationRe
 		out.Current = exists && active.ID == q.ID
 		if e, ok := i.Execution(); out.Current && ok {
 			out.Waiting = e.Waiting(uint64(time.Now().Unix()), 8)
+			out.Failures = e.Failures(8)
+			out.Unknown = e.UnknownSteps()
 		}
 	}
 	return out, nil

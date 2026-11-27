@@ -9,21 +9,20 @@ import (
 	"io"
 	"net/netip"
 	"reflect"
-	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/schema"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/sfcp"
 )
 
 type PacketPeer struct {
 	// WireKey is the current authenticated key for this original resource owner.
 	// Zero preserves the original unrotated owner/session contract.
 	WireKey [32]byte
-	Session *mydcp.Session
-	Path    mydcp.PathPair
+	Session *sfcp.Session
+	Path    sfcp.PathPair
 }
 type PacketPlan struct {
 	// WireKey changes transport authentication, never endpoint ownership.
@@ -42,7 +41,7 @@ type PacketPlan struct {
 
 // PacketGate only reads an already published, durably coordinated flow view.
 // It must not perform control/native IO or wait for an owner's effect lock:
-// Receive runs inside the bounded MYDCP packet handler. New-flow coordination
+// Receive runs inside the bounded SFCP packet handler. New-flow coordination
 // belongs to the surrounding route owner, before these bytes can be forwarded.
 type PacketGate interface {
 	Allows(sender [32]byte, packet []byte) bool
@@ -112,11 +111,12 @@ func (p *PacketPlane) Retarget(spec TunnelSpec, plan PacketPlan) error {
 	}
 	a, b := p.spec.Clone(), spec.Clone()
 	a.Routes, b.Routes = nil, nil
+	a.HostRoutes, b.HostRoutes = nil, nil
 	a.Lifecycle, b.Lifecycle = schema.Lifecycle{}, schema.Lifecycle{}
 	if !reflect.DeepEqual(a, b) {
 		return ErrPolicy
 	}
-	routes := slices.Clone(spec.Routes)
+	routes := spec.Overlay()
 	p.SetPlan(plan)
 	p.routes.Store(&routes)
 	return nil
@@ -144,7 +144,7 @@ func NewPacketPlane(ctx context.Context, local [32]byte, network [16]byte, spec 
 	if spec.RoutePolicy != nil {
 		p.admission = make(chan routeAdmissionCandidate, 1)
 	}
-	routes := slices.Clone(spec.Routes)
+	routes := spec.Overlay()
 	p.routes.Store(&routes)
 	p.SetPlan(plan)
 	p.wg.Add(3)
@@ -191,7 +191,7 @@ func (p *PacketPlane) PathReady() bool {
 		return p.spec.RoutePolicy != nil && plan.Relay != nil
 	}
 	for _, peer := range plan.Peers {
-		if peer.Session == nil || peer.Path.MTU() < p.spec.MTU || !peer.Session.PathCurrent(peer.Path) {
+		if !p.carries(peer, nil) {
 			return false
 		}
 	}
@@ -241,7 +241,7 @@ func (p *PacketPlane) permitted(plan *PacketPlan, sender [32]byte, localPacket b
 
 // Accepts is a read-only dispatch predicate. Receive and final native write
 // recheck the same current plan, gate and authenticated Session afterwards.
-func (p *PacketPlane) Accepts(s *mydcp.Session, f mydcp.Frame) bool {
+func (p *PacketPlane) Accepts(s *sfcp.Session, f sfcp.Frame) bool {
 	return p != nil && p.ctx != nil && p.ctx.Err() == nil && p.admitted(s, f)
 }
 
@@ -277,7 +277,7 @@ func (p *PacketPlane) read() {
 			continue
 		}
 		peer, known := plan.Peers[target.Owner]
-		if !local && (!known || peer.Session == nil || peer.Path.MTU() < p.spec.MTU || !peer.Session.PathCurrent(peer.Path)) {
+		if !local && (!known || !p.carries(peer, nil)) {
 			continue
 		}
 		identity, allowed := p.outboundIdentity(plan, target, b[:n])
@@ -408,14 +408,14 @@ func (p *PacketPlane) forwardPacket(target Endpoint, local bool, original [16]by
 		return
 	}
 	peer, known := plan.Peers[target.Owner]
-	if !known || peer.Session == nil || peer.Path.MTU() < p.spec.MTU || !peer.Session.PathCurrent(peer.Path) {
+	if !known || !p.carries(peer, nil) {
 		return
 	}
 	wire := plan.WireKey
 	if wire == ([32]byte{}) {
 		wire = p.local
 	}
-	frame := mydcp.Frame{Purpose: mydcp.Packet, Kind: kind, Fields: []mydcp.Field{{Tag: 1, Required: true, Value: wire[:]}, {Tag: 2, Required: true, Value: p.network[:]}, {Tag: 3, Required: true, Value: identity[:]}, {Tag: 4, Required: true, Value: packet}}}
+	frame := sfcp.Frame{Purpose: sfcp.Packet, Kind: kind, Fields: []sfcp.Field{{Tag: 1, Required: true, Value: wire[:]}, {Tag: 2, Required: true, Value: p.network[:]}, {Tag: 3, Required: true, Value: identity[:]}, {Tag: 4, Required: true, Value: packet}}}
 	// Drop on failure; never retry packets or fall back to a reliable stream.
 	_ = peer.Session.SendPacket(p.ctx, frame)
 }
@@ -446,14 +446,14 @@ func (p *PacketPlane) PacketBarrier(ctx context.Context) error {
 }
 
 type queuedPacket struct {
-	session *mydcp.Session
-	frame   mydcp.Frame
+	session *sfcp.Session
+	frame   sfcp.Frame
 	size    int64
 	local   bool
 }
 
-func (p *PacketPlane) admitted(s *mydcp.Session, f mydcp.Frame) bool {
-	if s == nil || f.Purpose != mydcp.Packet || len(f.Fields) < 4 || len(f.Fields[0].Value) != 32 || len(f.Fields[1].Value) != 16 || len(f.Fields[2].Value) != 16 {
+func (p *PacketPlane) admitted(s *sfcp.Session, f sfcp.Frame) bool {
+	if s == nil || f.Purpose != sfcp.Packet || len(f.Fields) < 4 || len(f.Fields[0].Value) != 32 || len(f.Fields[1].Value) != 16 || len(f.Fields[2].Value) != 16 {
 		return false
 	}
 	plan := p.plan.Load()
@@ -473,10 +473,22 @@ func (p *PacketPlane) admitted(s *mydcp.Session, f mydcp.Frame) bool {
 		expectedWire = owner
 	}
 	endpoint, valid := p.packetEndpoint(plan, owner, f)
-	return valid && known && expectedWire == wire && peer.Session == s && peer.Path.MTU() >= p.spec.MTU && peer.Session.PathCurrent(peer.Path) && [32]byte(f.Fields[0].Value) == wire && [16]byte(f.Fields[1].Value) == p.network && plan.Policy.Inbound(p.local, owner, p.network, endpoint, p.spec.MTU, f.Fields[3].Value) == nil && p.permitted(plan, owner, false, f.Fields[3].Value)
+	return valid && known && expectedWire == wire && p.carries(peer, s) && [32]byte(f.Fields[0].Value) == wire && [16]byte(f.Fields[1].Value) == p.network && plan.Policy.Inbound(p.local, owner, p.network, endpoint, p.spec.MTU, f.Fields[3].Value) == nil && p.permitted(plan, owner, false, f.Fields[3].Value)
 }
 
-func (p *PacketPlane) packetEndpoint(plan *PacketPlan, sender [32]byte, f mydcp.Frame) ([16]byte, bool) {
+// carries reports whether peer's session may carry this network's packets
+// for its owner: a session with a current path whose MTU fits the network.
+// received is the session a packet arrived on (nil when sending); it must be
+// that same session. This is the single place a transit session (0.1.1,
+// devel/design/sfcp-transit.md) will be admitted.
+func (p *PacketPlane) carries(peer PacketPeer, received *sfcp.Session) bool {
+	if peer.Session == nil || received != nil && peer.Session != received {
+		return false
+	}
+	return peer.Path.MTU() >= p.spec.MTU && peer.Session.PathCurrent(peer.Path)
+}
+
+func (p *PacketPlane) packetEndpoint(plan *PacketPlan, sender [32]byte, f sfcp.Frame) ([16]byte, bool) {
 	if p.spec.RoutePolicy == nil {
 		return [16]byte(f.Fields[2].Value), f.Kind == 1
 	}
@@ -494,7 +506,7 @@ func (p *PacketPlane) packetEndpoint(plan *PacketPlan, sender [32]byte, f mydcp.
 // Receive never blocks a QUIC handler. Queue count and payload bytes have
 // separate limits. The encoded frame retains the ordinary endpoint or bilateral
 // route flow incarnation for revalidation after a committed plan replacement.
-func (p *PacketPlane) Receive(s *mydcp.Session, f mydcp.Frame) error {
+func (p *PacketPlane) Receive(s *sfcp.Session, f sfcp.Frame) error {
 	return p.receive(s, f, false)
 }
 
@@ -503,21 +515,21 @@ func (p *PacketPlane) Receive(s *mydcp.Session, f mydcp.Frame) error {
 // turn an authenticated remote packet into local provenance.
 func (p *PacketPlane) ReceiveLocal(token [16]byte, packet []byte) error {
 	if p.spec.RoutePolicy == nil {
-		return mydcp.ErrAdmission
+		return sfcp.ErrAdmission
 	}
 	plan := p.plan.Load()
 	src, _, err := PacketAddresses(packet)
 	source, exists := plan.Policy.byAddress[src]
 	if err != nil || !exists || source.Network != p.network || source.Owner != p.local && !plan.LocalOwners[source.Owner] {
-		return mydcp.ErrAdmission
+		return sfcp.ErrAdmission
 	}
 	owner := source.Owner
-	f := mydcp.Frame{Purpose: mydcp.Packet, Kind: 2, Fields: []mydcp.Field{{Tag: 1, Required: true, Value: owner[:]}, {Tag: 2, Required: true, Value: p.network[:]}, {Tag: 3, Required: true, Value: token[:]}, {Tag: 4, Required: true, Value: packet}}}
+	f := sfcp.Frame{Purpose: sfcp.Packet, Kind: 2, Fields: []sfcp.Field{{Tag: 1, Required: true, Value: owner[:]}, {Tag: 2, Required: true, Value: p.network[:]}, {Tag: 3, Required: true, Value: token[:]}, {Tag: 4, Required: true, Value: packet}}}
 	return p.receive(nil, f, true)
 }
 
-func (p *PacketPlane) admittedLocal(f mydcp.Frame) bool {
-	if p.spec.RoutePolicy == nil || f.Purpose != mydcp.Packet || f.Kind != 2 || len(f.Fields) < 4 || len(f.Fields[0].Value) != 32 || len(f.Fields[1].Value) != 16 || len(f.Fields[2].Value) != 16 || [16]byte(f.Fields[1].Value) != p.network {
+func (p *PacketPlane) admittedLocal(f sfcp.Frame) bool {
+	if p.spec.RoutePolicy == nil || f.Purpose != sfcp.Packet || f.Kind != 2 || len(f.Fields) < 4 || len(f.Fields[0].Value) != 32 || len(f.Fields[1].Value) != 16 || len(f.Fields[2].Value) != 16 || [16]byte(f.Fields[1].Value) != p.network {
 		return false
 	}
 	plan := p.plan.Load()
@@ -535,30 +547,30 @@ func (p *PacketPlane) admittedLocal(f mydcp.Frame) bool {
 	return valid && err == nil && p.permitted(plan, owner, false, f.Fields[3].Value)
 }
 
-func (p *PacketPlane) receive(s *mydcp.Session, f mydcp.Frame, local bool) error {
+func (p *PacketPlane) receive(s *sfcp.Session, f sfcp.Frame, local bool) error {
 	p.receiving.RLock()
 	defer p.receiving.RUnlock()
 	if p.ctx.Err() != nil || local && !p.admittedLocal(f) || !local && !p.admitted(s, f) {
-		return mydcp.ErrAdmission
+		return sfcp.ErrAdmission
 	}
-	b, err := mydcp.Encode(f)
+	b, err := sfcp.Encode(f)
 	if err != nil {
 		return err
 	}
-	d, _ := mydcp.NewDecoder(mydcp.MaxBody)
+	d, _ := sfcp.NewDecoder(sfcp.MaxBody)
 	owned, _, err := d.Feed(b)
 	if err != nil || owned == nil {
-		return mydcp.ErrFrame
+		return sfcp.ErrFrame
 	}
 	if !p.reserveBytes(int64(len(b))) {
-		return mydcp.ErrBudget
+		return sfcp.ErrBudget
 	}
 	select {
 	case p.queue <- queuedPacket{s, *owned, int64(len(b)), local}:
 		return nil
 	default:
 		p.bytes.Add(-int64(len(b)))
-		return mydcp.ErrBudget
+		return sfcp.ErrBudget
 	}
 }
 func (p *PacketPlane) write() {

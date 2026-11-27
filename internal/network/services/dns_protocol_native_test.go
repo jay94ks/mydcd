@@ -225,20 +225,20 @@ func verifyDNSNativeProtocol(t *testing.T, ctx context.Context, o *DNSOwner, up 
 		return r
 	}
 	for _, kind := range []uint16{dns.TypeSOA, dns.TypeNS} {
-		check("app.mydc.test.", kind, "tcp", 0, dns.RcodeSuccess, 1, true)
+		check("app.sfc.test.", kind, "tcp", 0, dns.RcodeSuccess, 1, true)
 	}
-	check("probe.app.mydc.test.", dns.TypeA, "udp", 0, dns.RcodeSuccess, 1, false)
-	check("probe.app.mydc.test.", dns.TypeAAAA, "udp", 1232, dns.RcodeSuccess, 0, false)
+	check("probe.app.sfc.test.", dns.TypeA, "udp", 0, dns.RcodeSuccess, 1, false)
+	check("probe.app.sfc.test.", dns.TypeAAAA, "udp", 1232, dns.RcodeSuccess, 0, false)
 	reverse, e := dns.ReverseAddr(client.String())
 	if e != nil {
 		t.Fatal(e)
 	}
 	r := check(reverse, dns.TypePTR, "udp", 0, dns.RcodeSuccess, 1, false)
-	if r.message.Answer[0].(*dns.PTR).Ptr != "probe.app.mydc.test." {
+	if r.message.Answer[0].(*dns.PTR).Ptr != "probe.app.sfc.test." {
 		t.Fatal("original committed PTR", r.message)
 	}
-	check("absent.app.mydc.test.", dns.TypeA, "udp", 0, dns.RcodeNameError, 0, false)
-	before := up.count("absent.app.mydc.test.")
+	check("absent.app.sfc.test.", dns.TypeA, "udp", 0, dns.RcodeNameError, 0, false)
+	before := up.count("absent.app.sfc.test.")
 	if before != ([2]int{}) {
 		t.Fatal("private NXDOMAIN was forwarded")
 	}

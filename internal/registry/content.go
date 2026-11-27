@@ -9,7 +9,7 @@ import (
 	"sync"
 
 	v1 "github.com/google/go-containerregistry/pkg/v1"
-	"github.com/jay94ks/mydcd/internal/registryclient"
+	"github.com/jay94ks/seafield/internal/registryclient"
 )
 
 // The original Store gate/reader remains borrowed until the caller's real
@@ -24,7 +24,14 @@ func (s *Store) OpenContent(ctx context.Context, q registryclient.ContentQuery) 
 // The complete index walk and the returned body share one Store gate hold.
 // No child manifest can be selected without its original root's descriptors.
 func (s *Store) OpenGraphContent(ctx context.Context, q registryclient.GraphContentQuery) (registryclient.ContentInfo, io.ReadCloser, error) {
-	if !q.Valid() {
+	return s.OpenGraphContentAt(ctx, q, 0)
+}
+
+// OpenGraphContentAt is OpenGraphContent with the body starting offset bytes
+// in. ContentInfo still describes the whole item (digest and full size), so
+// the reader can check what it assembled from several reads.
+func (s *Store) OpenGraphContentAt(ctx context.Context, q registryclient.GraphContentQuery, offset int64) (registryclient.ContentInfo, io.ReadCloser, error) {
+	if !q.Valid() || offset < 0 {
 		return registryclient.ContentInfo{}, nil, ErrStorage
 	}
 	release, err := s.gate.acquire(ctx, false)
@@ -55,13 +62,16 @@ func (s *Store) OpenGraphContent(ctx context.Context, q registryclient.GraphCont
 	}
 	var body io.ReadCloser
 	if q.Kind == "manifest" {
-		body = io.NopCloser(bytes.NewReader(raw))
+		if offset > int64(len(raw)) {
+			return fail(ErrOffset)
+		}
+		body = io.NopCloser(bytes.NewReader(raw[offset:]))
 	} else {
 		hash, cause := v1.NewHash(info.Digest)
 		if cause != nil {
 			return fail(cause)
 		}
-		body, err = blobs.Get(ctx, repo, hash)
+		body, err = blobs.GetFrom(ctx, repo, hash, offset)
 		if err != nil {
 			return fail(err)
 		}

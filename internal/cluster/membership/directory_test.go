@@ -12,8 +12,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/config"
-	"github.com/jay94ks/mydcd/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/config"
+	"github.com/jay94ks/seafield/internal/reconcile"
 )
 
 func testPeer(id string, seed byte, voter bool) (config.Peer, ed25519.PrivateKey) {
@@ -52,7 +52,7 @@ func checked(t *testing.T, d Directory, err error) Directory {
 }
 func invite(t *testing.T, d Directory, b config.Peer) Directory {
 	t.Helper()
-	n, err := d.Invite(b, "join-b")
+	n, err := d.Invite(b, "join-b", nil)
 	return checked(t, n, err)
 }
 func dispatch(t *testing.T, d Directory, id string, key ed25519.PrivateKey, index uint64) Directory {
@@ -127,7 +127,7 @@ func TestMemberUnknownRetainsOriginalAndSerializesNativeChanges(t *testing.T) {
 	d, b, ak, _ := fixture(t)
 	d = invite(t, d, b)
 	c, _ := testPeer("c", 23, false)
-	n, err := d.Invite(c, "join-c")
+	n, err := d.Invite(c, "join-c", nil)
 	d = checked(t, n, err)
 	d = dispatch(t, d, "b", ak, 7)
 	e, _ := d.Entry("b")
@@ -160,10 +160,10 @@ func TestMemberCollisionCASAndCanonicalEndpoint(t *testing.T) {
 	d = invite(t, d, b)
 	c, _ := testPeer("c", 23, false)
 	for _, p := range []config.Peer{b, {ID: c.ID, Key: b.Key, Endpoint: c.Endpoint}, {ID: c.ID, Key: c.Key, Endpoint: b.Endpoint}, {ID: c.ID, Key: c.Key, Endpoint: "127.0.0.1:08003"}, {ID: c.ID, Key: c.Key, Endpoint: "[::ffff:127.0.0.1]:8003"}, {ID: c.ID, Key: c.Key, Endpoint: "LOCALHOST:8003"}, {ID: c.ID, Key: c.Key, Endpoint: "localhost.:8003"}, {ID: c.ID, Key: c.Key, Endpoint: strings.Repeat("a", 321) + ":8003"}} {
-		n, err := d.Invite(p, "join-c")
+		n, err := d.Invite(p, "join-c", nil)
 		assertRejected(t, d, n, err)
 	}
-	n, err := d.Invite(c, "join-b")
+	n, err := d.Invite(c, "join-b", nil)
 	assertRejected(t, d, n, err)
 	e, _ := d.Entry("b")
 	n, err = d.Dispatch("b", e.Revision-1, 1, 10, memberKey(ak))
@@ -173,7 +173,7 @@ func TestMemberCollisionCASAndCanonicalEndpoint(t *testing.T) {
 	n, err = d.Dispatch("b", e.Revision, 2, 10, memberKey(ak))
 	assertRejected(t, d, n, err)
 	d.Revision = math.MaxUint64
-	n, err = d.Invite(c, "join-c")
+	n, err = d.Invite(c, "join-c", nil)
 	assertRejected(t, d, n, err)
 }
 func TestMemberInstallationProofRejectsWrongScopeOrFloor(t *testing.T) {

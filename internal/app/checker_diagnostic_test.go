@@ -11,8 +11,8 @@ import (
 	"testing"
 
 	"github.com/hashicorp/raft"
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster"
 )
 
 func TestCheckerAuthorityDiagnosticDistinguishesUnavailableFromDenied(t *testing.T) {

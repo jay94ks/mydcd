@@ -1,16 +1,16 @@
 # 네트워크
 
-클러스터는 CIDR의 전역 유일성, tenant·노드 소유권과 주소/참조를 통제한다. 실제 컨테이너의 주소 설정과 자동 할당은 Docker IPAM/SDK를 사용한다. MyDC의 제품 범위는 CIDR·IPAM 통제이며 DHCP 서버를 제공하지 않는다.
+클러스터는 CIDR의 전역 유일성, tenant·노드 소유권과 주소/참조를 통제한다. 실제 컨테이너의 주소 설정과 자동 할당은 Docker IPAM/SDK를 사용한다. Sfc의 제품 범위는 CIDR·IPAM 통제이며 DHCP 서버를 제공하지 않는다.
 
-MYDCP TUN 망은 관리 자원이다. tenant 관리 명령이 이름 있는 논리 망과 노드별 구성을 정의하고 앱은 그 이름을 참조한다. 앱 종료는 빌린 관리 망을 삭제하지 않는다.
+SFCP TUN 망은 관리 자원이다. tenant 관리 명령이 이름 있는 논리 망과 노드별 구성을 정의하고 앱은 그 이름을 참조한다. 앱 종료는 빌린 관리 망을 삭제하지 않는다.
 
 내장 DNS는 관리된 주소/서비스와 소유 노드의 현재 상태를 사용한다. CIDR·IPAM·DNS 설정은 실행 중 관리 변경이 가능하며, 변경 후보와 기존 consumer·주소/질의/flow 참조를 구분한다. 기존 참조가 있는 망의 종료는 원 owner의 실제 정산을 기다린다.
 
-교차 tenant 경로는 승인된 source/destination 경계를 따른다. MyDC 소유 Docker 망은 SDK의 `nat-unprotected`와 MyDC의 기본 차단 책임을 결합한다. 다른 망이나 Docker daemon 전체의 방화벽 책임을 변경하지 않는다.
+교차 tenant 경로는 승인된 source/destination 경계를 따른다. Seafield Cluster 소유 Docker 망은 SDK의 `nat-unprotected`와 Sfc의 기본 차단 책임을 결합한다. 다른 망이나 Docker daemon 전체의 방화벽 책임을 변경하지 않는다.
 
-Ingress는 외부 HTTP/1.1·HTTP/2·HTTP/3 요청을 처리한다. 노드 제어·복제·터널 데이터는 MYDCP 경계 안에 유지한다. 일반 TCP/UDP 포트 노출과 ACME/Certbot 자동화는 현재 MVP 이후의 확장이다.
+Ingress는 외부 HTTP/1.1·HTTP/2·HTTP/3 요청을 처리한다. 노드 제어·복제·터널 데이터는 SFCP 경계 안에 유지한다. 일반 TCP/UDP 포트 노출과 ACME/Certbot 자동화는 현재 MVP 이후의 확장이다.
 
-[자원표](../architecture/resource-ownership.md), [MYDCP](../protocol/mydcp.md), [network.yaml](../cli/network.md)를 먼저 읽는다. 구체적인 내부 경계는 CIDR/IPAM/DNS·관리 TUN·커널 경계를 참조한다.
+[자원표](../architecture/resource-ownership.md), [SFCP](../protocol/sfcp.md), [network.yaml](../cli/network.md)를 먼저 읽는다. 구체적인 내부 경계는 CIDR/IPAM/DNS·관리 TUN·커널 경계를 참조한다.
 
 
 ## Replica DNS의 예약과 가용성

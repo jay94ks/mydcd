@@ -16,6 +16,6 @@
 
 컴파일러는 job이 있을 때만 시작하고 유한 batch 뒤 실제 종료/Wait·정리를 수행한다. 앱·컴파일러 소스는 `apps/<name>/`에 두며 운영 workspace/cache와 혼합하지 않는다.
 
-컨테이너 담당 노드의 `mydcd`가 검사 결과·현재 앱 목표·정책을 바탕으로 시작·정지·재시작을 결정한다. 스크립트의 Result는 검사 결과이며 제어 명령이 아니다. CLI를 상시 실행할 필요는 없다. 검사 pass가 컨테이너 종료나 Volume writer fence를 증명하지는 않는다.
+컨테이너 담당 노드의 `sfcd`가 검사 결과·현재 앱 목표·정책을 바탕으로 시작·정지·재시작을 결정한다. 스크립트의 Result는 검사 결과이며 제어 명령이 아니다. CLI를 상시 실행할 필요는 없다. 검사 pass가 컨테이너 종료나 Volume writer fence를 증명하지는 않는다.
 
 [입력 명세](../architecture/app-and-cluster-spec.md), [lifecycle 예시](../examples/php-mysql/lifecycle.example.app.yaml), 고정 Contract·소비 설계를 참조한다.

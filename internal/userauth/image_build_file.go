@@ -8,16 +8,16 @@ import (
 	"crypto/sha256"
 	"io"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/imagebuild"
-	"github.com/jay94ks/mydcd/internal/mydcp"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/imagebuild"
+	"github.com/jay94ks/seafield/internal/sfcp"
 )
 
 // ReadBuildContextFile consumes the existing bounded User pages. Written bytes
 // remain tentative until EOF, the original metadata and SHA-256 all agree.
-func (c Client) ReadBuildContextFile(ctx context.Context, peer mydcp.Peer, session access.Session, tenant string, q imagebuild.ContentQuery, to io.Writer) (imagebuild.Entry, error) {
+func (c Client) ReadBuildContextFile(ctx context.Context, peer sfcp.Peer, session access.Session, tenant string, q imagebuild.ContentQuery, to io.Writer) (imagebuild.Entry, error) {
 	if q.Part != "file" || !q.Valid() || q.Offset != 0 || to == nil {
-		return imagebuild.Entry{}, mydcp.ErrAdmission
+		return imagebuild.Entry{}, sfcp.ErrAdmission
 	}
 	hash := sha256.New()
 	var original imagebuild.Entry
@@ -31,12 +31,12 @@ func (c Client) ReadBuildContextFile(ctx context.Context, peer mydcp.Peer, sessi
 		}
 		file := page.Page.File
 		if file == nil || file.Offset != offset {
-			return imagebuild.Entry{}, mydcp.ErrFrame
+			return imagebuild.Entry{}, sfcp.ErrFrame
 		}
 		if after == "" {
 			original, tree = file.Entry, page.Page.Tree
 		} else if file.Entry != original || page.Page.Tree != tree {
-			return imagebuild.Entry{}, mydcp.ErrFrame
+			return imagebuild.Entry{}, sfcp.ErrFrame
 		}
 		n, err := io.MultiWriter(hash, to).Write(file.Data)
 		if err != nil {

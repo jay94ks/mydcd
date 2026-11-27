@@ -3,8 +3,8 @@
 package deployment
 
 import (
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/workload/volumes"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/workload/volumes"
 	"strings"
 )
 

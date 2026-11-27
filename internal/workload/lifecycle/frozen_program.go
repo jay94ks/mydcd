@@ -51,7 +51,7 @@ func ownResolvedProgram(in ResolvedProgram) ResolvedProgram {
 
 func (f FrozenProgram) Digest() [32]byte {
 	raw, _ := json.Marshal(f)
-	return sha256.Sum256(append([]byte("mydc-checker-program-1\x00"), raw...))
+	return sha256.Sum256(append([]byte("sfc-checker-program-1\x00"), raw...))
 }
 
 // FreezeProgram selects only the CURRENT active named versions and policy.

@@ -6,14 +6,14 @@ import (
 	"context"
 	"net/http"
 
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/web/mydc"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/web/sfc"
 )
 
-// Cluster Vault (UI-70 '클러스터 보관함', CLI `mydc secret --cluster`): the
+// Cluster Vault (UI-70 '클러스터 보관함', CLI `sfcli secret --cluster`): the
 // same tree, create, write, access, revoke and retire endpoints as a
-// workspace Vault, under /api/v1/vault with realm "" (mydcd's
-// cluster realm). mydcd admits only system administrators; the daemon does
+// workspace Vault, under /api/v1/vault with realm "" (sfcd's
+// cluster realm). sfcd admits only system administrators; the daemon does
 // not judge that itself.
 
 // clusterRealm runs a workspace Vault handler with realm "".
@@ -34,7 +34,7 @@ type clusterVaultPage struct {
 
 // GET /vault?after= → {items, next, revision, asOf, initialized, root?}
 func (s *Server) handleClusterVault(w http.ResponseWriter, r *http.Request, ws *webSession) {
-	read(s, w, r, ws, func(ctx context.Context, c mydc.Conn) (clusterVaultPage, error) {
+	read(s, w, r, ws, func(ctx context.Context, c sfc.Conn) (clusterVaultPage, error) {
 		p, err := c.Vault(ctx, "", r.URL.Query().Get("after"))
 		if err != nil {
 			return clusterVaultPage{}, err
@@ -46,7 +46,7 @@ func (s *Server) handleClusterVault(w http.ResponseWriter, r *http.Request, ws *
 			}
 		}
 		if out.Items == nil || len(p.Items) == 0 {
-			out.Items = []mydc.VaultView{}
+			out.Items = []sfc.VaultView{}
 		}
 		return out, nil
 	})
@@ -65,7 +65,7 @@ func (s *Server) handleClusterVaultInit(w http.ResponseWriter, r *http.Request, 
 	if req.Root == "" {
 		req.Root = "cluster"
 	}
-	s.sharedCreate(w, r, ws, req.OpID, req, func(ctx context.Context, c mydc.Conn, _ mydc.Session) (string, any, uint64, string, error) {
+	s.sharedCreate(w, r, ws, req.OpID, req, func(ctx context.Context, c sfc.Conn, _ sfc.Session) (string, any, uint64, string, error) {
 		if !storageIDRE.MatchString(req.Root) {
 			return "", nil, 0, "", invalid("root: lowercase letters, digits and -, starting with a letter")
 		}
@@ -76,7 +76,7 @@ func (s *Server) handleClusterVaultInit(w http.ResponseWriter, r *http.Request, 
 		if p.Collection > 0 || len(p.Items) > 0 {
 			return "", nil, 0, "", &httpErr{http.StatusConflict, "exists", "the cluster Vault already exists"}
 		}
-		return mydc.ActionVaultInit, control.VaultRealm{Realm: "", Root: req.Root}, 0, "cluster-vault", nil
+		return sfc.ActionVaultInit, control.VaultRealm{Realm: "", Root: req.Root}, 0, "cluster-vault", nil
 	})
 }
 
@@ -102,7 +102,7 @@ type vaultUsageView struct {
 // Vault) → {items:[{app, deployment, service, standalone?, node, selector,
 // secrets, live}], next, revision, asOf}: the app services that take
 // secrets from object id (REQ-44 `vault-usages`). id defaults to the realm
-// itself, which mydcd reads as the whole realm. mydcd decides who may read.
+// itself, which sfcd reads as the whole realm. sfcd decides who may read.
 func (s *Server) handleVaultUsages(w http.ResponseWriter, r *http.Request, ws *webSession) {
 	realm := r.PathValue("t")
 	id := r.URL.Query().Get("id")
@@ -113,7 +113,7 @@ func (s *Server) handleVaultUsages(w http.ResponseWriter, r *http.Request, ws *w
 		writeError(w, http.StatusBadRequest, "bad-request", "id is required for the cluster Vault")
 		return
 	}
-	read(s, w, r, ws, func(ctx context.Context, c mydc.Conn) (listPage, error) {
+	read(s, w, r, ws, func(ctx context.Context, c sfc.Conn) (listPage, error) {
 		p, err := c.PublicRead(ctx, "vault-usages", realm, control.PublicReadQuery{Name: id}, r.URL.Query().Get("after"))
 		if err != nil {
 			return listPage{}, err

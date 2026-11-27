@@ -12,10 +12,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"slices"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/identity"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/identity"
 )
 
 // InitialRequest contains PUBLIC intent only. Operation must be a stable
@@ -29,17 +30,31 @@ type InitialRequest struct {
 	Method               access.Method
 	ExpectedUserRevision uint64
 	At                   int64
+	// Seconds is a token's login lifetime from At: one hour, one day or
+	// seven days (an invitation link). A password has none.
+	Seconds int64 `json:",omitempty"`
+}
+
+// TokenSeconds are the lifetimes a single-use token may be issued with.
+var TokenSeconds = []int64{3600, 86400, 7 * 86400}
+
+// ExpiresAt is when a token stops logging in (0 for a password).
+func (r InitialRequest) ExpiresAt() int64 {
+	if r.Method != access.Token {
+		return 0
+	}
+	return r.At + r.Seconds
 }
 
 func (r InitialRequest) Valid() bool {
 	return r.Schema == 1 && r.Cluster != ([32]byte{}) && r.Owner != ([32]byte{}) && r.Operation != ([32]byte{}) &&
 		identifier(r.User) && len(r.Username) > 0 && len(r.Username) <= 63 && identifier(r.Credential) && identifier(r.Profile) &&
-		(r.Method == access.Password || r.Method == access.Token) && r.ExpectedUserRevision > 0 && r.At > 0 && r.At <= 1<<62
+		(r.Method == access.Password && r.Seconds == 0 || r.Method == access.Token && slices.Contains(TokenSeconds, r.Seconds)) && r.ExpectedUserRevision > 0 && r.At > 0 && r.At <= 1<<62
 }
 
 func (r InitialRequest) Receipt() string {
 	raw, _ := json.Marshal(r)
-	digest := sha256.Sum256(append([]byte("mydc-initial-credential-1\x00"), raw...))
+	digest := sha256.Sum256(append([]byte("sfc-initial-credential-1\x00"), raw...))
 	return hex.EncodeToString(digest[:])
 }
 
@@ -61,7 +76,7 @@ type InitialFact struct {
 
 func initialFactBytes(r InitialRequest) []byte {
 	raw, _ := json.Marshal(r)
-	return append([]byte("mydc-initial-credential-fact-1\x00"), raw...)
+	return append([]byte("sfc-initial-credential-fact-1\x00"), raw...)
 }
 
 func (f InitialFact) Verify() bool {
@@ -107,7 +122,8 @@ func initialTokenScopes() []access.Scope {
 // authorize the target and preserve public intent before calling it. On error
 // they may only ObserveInitial, not regenerate/retry a password or token.
 func (b *Backend) PrepareInitial(ctx context.Context, r InitialRequest, password []byte, source string, now time.Time) (InitialIssued, error) {
-	if b == nil || !r.Valid() || r.Profile != b.profile || r.At > now.Unix() || now.Unix()-r.At > 300 || source == "" ||
+	store, ok := b.store(r.Profile)
+	if !ok || !r.Valid() || r.At > now.Unix() || now.Unix()-r.At > 300 || source == "" ||
 		r.Method == access.Password && (len(password) == 0 || len(password) > 1024) || r.Method == access.Token && len(password) != 0 {
 		return InitialIssued{}, ErrDenied
 	}
@@ -132,7 +148,7 @@ func (b *Backend) PrepareInitial(ctx context.Context, r InitialRequest, password
 		raw := make([]byte, 32)
 		if _, err = rand.Read(raw); err == nil {
 			issued.Token = []byte(base64.RawURLEncoding.EncodeToString(raw))
-			material, err = NewOneTimeToken(r.Cluster, r.User, r.Credential, r.Reference(), issued.Token, r.At+86400, initialTokenScopes())
+			material, err = NewOneTimeToken(r.Cluster, r.User, r.Credential, r.Reference(), issued.Token, r.ExpiresAt(), initialTokenScopes())
 		}
 		clear(raw)
 	}
@@ -147,7 +163,8 @@ func (b *Backend) PrepareInitial(ctx context.Context, r InitialRequest, password
 		issued.Destroy()
 		return InitialIssued{}, ErrDenied
 	}
-	if _, err = b.vault.PutSystemCredential(ctx, ref, r.Receipt(), raw); err != nil {
+	binding := Binding{Reference: r.Reference(), User: r.User, Credential: r.Credential, Method: r.Method, At: r.At}
+	if err = store.Put(ctx, ref, r.Receipt(), raw, binding); err != nil {
 		issued.Destroy()
 		return InitialIssued{}, ErrDenied
 	}
@@ -157,27 +174,26 @@ func (b *Backend) PrepareInitial(ctx context.Context, r InitialRequest, password
 // ObserveInitial does not return private material or a previously generated
 // token, even when the original provider response was lost.
 func (b *Backend) ObserveInitial(ctx context.Context, r InitialRequest) error {
-	if b == nil || !r.Valid() || r.Profile != b.profile {
+	store, ok := b.store(r.Profile)
+	if !ok || !r.Valid() {
 		return ErrDenied
 	}
 	ref, err := Reference(r.Reference())
 	if err != nil {
 		return ErrDenied
 	}
-	fetched, err := b.vault.ReadSystemCredential(ctx, ref, r.Receipt())
+	fetched, err := store.Read(ctx, ref, r.Receipt())
 	if err != nil {
 		return ErrDenied
 	}
-	for _, data := range fetched.Values {
-		defer clear(data)
-	}
-	m, err := Restore(fetched.Values["credential"])
+	defer clear(fetched)
+	m, err := Restore(fetched)
 	if err != nil {
 		return ErrDenied
 	}
 	defer m.Destroy()
 	x := m.record
-	if x.Cluster != r.Cluster || x.User != r.User || x.Credential != r.Credential || x.Method != r.Method || x.Reference != r.Reference() || x.OneTime != (r.Method == access.Token) || r.Method == access.Token && x.ExpiresAt != r.At+86400 {
+	if x.Cluster != r.Cluster || x.User != r.User || x.Credential != r.Credential || x.Method != r.Method || x.Reference != r.Reference() || x.OneTime != (r.Method == access.Token) || r.Method == access.Token && x.ExpiresAt != r.ExpiresAt() {
 		return ErrDenied
 	}
 	return nil

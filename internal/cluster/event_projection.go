@@ -10,10 +10,10 @@ import (
 	"fmt"
 	"slices"
 
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/eventlog"
-	"github.com/jay94ks/mydcd/internal/schema"
-	"github.com/jay94ks/mydcd/internal/storage"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/eventlog"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/storage"
 )
 
 // EventProjection is a pure diagnostic projection of an actual FSM result.
@@ -74,7 +74,7 @@ func (f *fsm) projectWrites(writes map[string][]byte, index uint64) {
 		v.LostAt = index
 	} else {
 		for i, event := range f.pendingEvents {
-			digest := sha256.Sum256([]byte(fmt.Sprintf("mydc-committed-event-1/%s/%d/%d", f.cluster, index, i)))
+			digest := sha256.Sum256([]byte(fmt.Sprintf("sfc-committed-event-1/%s/%d/%d", f.cluster, index, i)))
 			event.Authority = hex.EncodeToString(digest[:])
 			if !event.Valid() || v.Next == ^uint64(0) {
 				v.LostAt = index

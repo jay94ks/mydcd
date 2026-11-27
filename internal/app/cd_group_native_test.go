@@ -12,12 +12,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/cli"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/userauth"
-	"github.com/jay94ks/mydcd/tests/gitfixture"
+	"github.com/jay94ks/seafield/internal/cli"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/tests/gitfixture"
 	"github.com/moby/moby/client"
 	"gopkg.in/yaml.v3"
 )
@@ -52,7 +51,7 @@ func verifyNativeCDGroupRevocation(t *testing.T, ctx context.Context, target *Ru
 	})
 	call := func(want int, args ...string) []byte {
 		t.Helper()
-		out, diagnostic, err := runManagedCLICommand(ctx, os.Getenv("MYDC_TEST_CLI"), filepath.Join(root, "cli-home"), filepath.Join(root, "cli.yaml"), args, nil)
+		out, diagnostic, err := runManagedCLICommand(ctx, os.Getenv("SFC_TEST_CLI"), filepath.Join(root, "cli-home"), filepath.Join(root, "cli.yaml"), args, nil)
 		code := 0
 		if err != nil {
 			if exited, ok := err.(*exec.ExitError); ok {
@@ -93,11 +92,11 @@ func verifyNativeCDGroupRevocation(t *testing.T, ctx context.Context, target *Ru
 	id := grants[0].Pins[0].ApprovalID
 	readApproval := func(revoking bool) {
 		t.Helper()
-		var page userauth.Reply
-		if raw := call(0, "--tenant", "tenant", "manage", "vault-approvals", "--app", "app"); json.Unmarshal(raw, &page) != nil || page.PublicRead == nil {
+		var page control.PublicReadPage
+		if raw := call(0, "--tenant", "tenant", "manage", "vault-approvals", "--app", "app"); json.Unmarshal(raw, &page) != nil {
 			t.Fatal("actual approval listing", string(raw))
 		}
-		for _, row := range page.PublicRead.Rows {
+		for _, row := range page.Rows {
 			if a := row.Approval; a != nil && a.ID == id {
 				if a.Revoking != revoking || a.Consumers == 0 || a.App != "app" {
 					t.Fatal("listing lost original live/revoking approval", a)

@@ -11,17 +11,17 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/config"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/secrets"
-	"github.com/jay94ks/mydcd/internal/web/store"
-	"github.com/jay94ks/mydcd/tests/clusterfixture"
-	"github.com/jay94ks/mydcd/tests/vaultfixture"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/config"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/secrets"
+	"github.com/jay94ks/seafield/internal/web/store"
+	"github.com/jay94ks/seafield/tests/clusterfixture"
+	"github.com/jay94ks/seafield/tests/vaultfixture"
 )
 
-// The web's Vault screens on mydcd with a real HashiCorp Vault behind the
+// The web's Vault screens on sfcd with a real HashiCorp Vault behind the
 // workspace realm: the cluster Vault's init and objects, a workspace
 // value write and Group password, the object policy (ACL, move, revoke,
 // retire, approval age) and who may see them.
@@ -147,8 +147,8 @@ func TestRealServerVault(t *testing.T) {
 		} `json:"data"`
 	}
 	vault.API("GET", "kv/data/shop/mysql", nil, &stored, vault.Admin)
-	// mydcd stores values base64-encoded next to its write receipt.
-	if stored.Data.Data["PASSWORD"] != base64.StdEncoding.EncodeToString([]byte(password)) || stored.Data.Data["_mydc_receipt"] == nil {
+	// sfcd stores values base64-encoded next to its write receipt.
+	if stored.Data.Data["PASSWORD"] != base64.StdEncoding.EncodeToString([]byte(password)) || stored.Data.Data["_sfc_receipt"] == nil {
 		t.Fatalf("not in Vault: %d keys", len(stored.Data.Data))
 	}
 	// the four step originals, in order
@@ -160,7 +160,7 @@ func TestRealServerVault(t *testing.T) {
 	}
 	// the same opId again returns the published job without values
 	step("POST", base+"/value", map[string]any{"opId": wo, "path": "db/mysql", "keys": []string{"PASSWORD"}})
-	// A write names the Secret's keys anew: mydcd publishes the written
+	// A write names the Secret's keys anew: sfcd publishes the written
 	// keys as the Secret's reference.
 	step("POST", base+"/value", map[string]any{"opId": op(), "path": "db/mysql", "values": map[string]string{"OTHER": "other-value"}})
 	if k := row(base, "mysql")["keys"]; fmt.Sprint(k) != "[OTHER]" {
@@ -177,7 +177,7 @@ func TestRealServerVault(t *testing.T) {
 	if code, out := f.do("POST", base+"/password", map[string]any{"opId": op(), "path": "db", "password": "two\nlines"}); code != 400 {
 		t.Fatalf("bad password: %d %v", code, out)
 	}
-	// The first password names the verifier writer profile; mydcd refuses
+	// The first password names the verifier writer profile; sfcd refuses
 	// it without one.
 	if code, out := f.do("POST", base+"/password", map[string]any{"opId": op(), "path": "db", "password": groupPass}); code != 403 {
 		t.Fatalf("no profile: %d %v", code, out)
@@ -202,14 +202,21 @@ func TestRealServerVault(t *testing.T) {
 		}
 	}
 	o := op()
-	step("PUT", base+"/acl", map[string]any{"opId": o, "id": "mysql", "users": []string{"u-alice"}})
+	step("PATCH", base+"/acl", map[string]any{"opId": o, "id": "mysql", "add": map[string]any{"users": []string{"u-alice"}}})
 	var acl control.VaultACL
 	userPayload(t, f, "u-alice", o, &acl)
-	if acl.Realm != "shop" || acl.ID != "mysql" || len(acl.ACL.Users) != 1 {
+	if acl.Realm != "shop" || acl.ID != "mysql" || len(acl.Add.Users) != 1 || len(acl.Remove.Users) != 0 {
 		t.Fatalf("acl payload: %+v", acl)
 	}
 	if a := row(base, "mysql")["acl"].(map[string]any); fmt.Sprint(a["users"]) != "[u-alice]" {
 		t.Fatalf("acl row: %v", a)
+	}
+	// only the change is sent: adding a listed name fails, an empty change is refused
+	if code, out := f.do("PATCH", base+"/acl", map[string]any{"opId": op(), "id": "mysql", "add": map[string]any{"users": []string{"u-alice"}}}); opState(t, code, out) != "failed" {
+		t.Fatalf("acl add twice: %d %v", code, out)
+	}
+	if code, out := f.do("PATCH", base+"/acl", map[string]any{"opId": op(), "id": "mysql"}); code != 422 {
+		t.Fatalf("acl empty: %d %v", code, out)
 	}
 	step("POST", base+"/move", map[string]any{"opId": op(), "id": "mysql", "parent": "shop"})
 	if r := row(base, "mysql"); r["parent"] != "shop" || r["path"] != "mysql" {
@@ -219,7 +226,7 @@ func TestRealServerVault(t *testing.T) {
 		t.Fatalf("retire early: %d %v", code, out)
 	}
 	step("POST", base+"/revoke", map[string]any{"opId": op(), "id": "mysql"})
-	if code, out := f.do("PUT", base+"/acl", map[string]any{"opId": op(), "id": "mysql", "users": []string{}}); code != 409 || errCode(out) != "not-active" {
+	if code, out := f.do("PATCH", base+"/acl", map[string]any{"opId": op(), "id": "mysql", "remove": map[string]any{"users": []string{"u-alice"}}}); code != 409 || errCode(out) != "not-active" {
 		t.Fatalf("acl revoking: %d %v", code, out)
 	}
 	step("POST", base+"/retire", map[string]any{"opId": op(), "id": "mysql"})
@@ -233,7 +240,7 @@ func TestRealServerVault(t *testing.T) {
 		t.Fatalf("age on object: %d %v", code, out)
 	}
 	step("PUT", base+"/approval-age", map[string]any{"opId": op(), "id": "db", "seconds": 60})
-	// mydcd does not say whether an object it will not show exists.
+	// sfcd does not say whether an object it will not show exists.
 	if code, out := f.do("GET", base+"/usages?id=nope", nil); code != 403 {
 		t.Fatalf("usages of unknown: %d %v", code, out)
 	}
@@ -247,13 +254,13 @@ func TestRealServerVault(t *testing.T) {
 // ("auth", under groups/realm/), with a token for both.
 func realVaultBackends(t *testing.T, v *vaultfixture.Vault, realm string) clusterfixture.Option {
 	t.Helper()
-	v.API("PUT", "sys/policies/acl/mydc-web-test", map[string]any{"policy": `path "kv/data/` + realm + `/*" { capabilities = ["create","update","read"] } path "kv/data/groups/` + realm + `/*" { capabilities = ["create","update","read"] }`}, nil, v.Admin)
+	v.API("PUT", "sys/policies/acl/sfc-web-test", map[string]any{"policy": `path "kv/data/` + realm + `/*" { capabilities = ["create","update","read"] } path "kv/data/groups/` + realm + `/*" { capabilities = ["create","update","read"] }`}, nil, v.Admin)
 	var issued struct {
 		Auth struct {
 			Token string `json:"client_token"`
 		} `json:"auth"`
 	}
-	v.API("POST", "auth/token/create", map[string]any{"policies": []string{"mydc-web-test"}, "no_default_policy": true, "ttl": "30m", "renewable": false}, &issued, v.Admin)
+	v.API("POST", "auth/token/create", map[string]any{"policies": []string{"sfc-web-test"}, "no_default_policy": true, "ttl": "30m", "renewable": false}, &issued, v.Admin)
 	token := filepath.Join(v.Root, "web-test-token")
 	if err := os.WriteFile(token, []byte(issued.Auth.Token), 0o600); err != nil {
 		t.Fatal(err)

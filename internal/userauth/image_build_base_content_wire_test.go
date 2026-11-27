@@ -13,11 +13,11 @@ import (
 	"time"
 
 	"github.com/google/go-containerregistry/pkg/v1/types"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/imagebuild"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/registryclient"
-	"github.com/jay94ks/mydcd/internal/schema"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/imagebuild"
+	"github.com/jay94ks/seafield/internal/registryclient"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/sfcp"
 )
 
 // Uses actual member QUIC and the production finite sender/receiver. Source
@@ -28,18 +28,18 @@ func TestBuildBaseContentMemberStreamDoesNotRequireOrMintAUserSession(t *testing
 			_, c, _, node := journalFixture(t)
 			owner := c.Peers[0]
 			owner.Member = true
-			lookup := func(key mydcp.Identity) (mydcp.Peer, bool) {
-				if key == mydcp.Identity(c.Self.Public) {
-					return mydcp.Peer{ID: "builder", Policy: mydcp.Policy{Key: key, Member: true, Respond: true}}, true
+			lookup := func(key sfcp.Identity) (sfcp.Peer, bool) {
+				if key == sfcp.Identity(c.Self.Public) {
+					return sfcp.Peer{ID: "builder", Policy: sfcp.Policy{Key: key, Member: true, Respond: true}}, true
 				}
 				return owner, key == owner.Key
 			}
-			server, err := mydcp.NewTransport(node, c.Cluster, lookup)
+			server, err := sfcp.NewTransport(node, c.Cluster, lookup)
 			if err != nil {
 				t.Fatal(err)
 			}
 			defer server.Close()
-			mesh, err := mydcp.NewTransport(c.Self, c.Cluster, lookup)
+			mesh, err := sfcp.NewTransport(c.Self, c.Cluster, lookup)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -60,15 +60,15 @@ func TestBuildBaseContentMemberStreamDoesNotRequireOrMintAUserSession(t *testing
 				body[0] ^= 1
 			}
 			finished := make(chan error, 1)
-			if err = server.OnManagement(mydcp.ImageContent, func(ctx context.Context, conn *mydcp.Session, stream mydcp.Stream, frame mydcp.Frame) error {
+			if err = server.OnManagement(sfcp.ImageContent, func(ctx context.Context, conn *sfcp.Session, stream sfcp.Stream, frame sfcp.Frame) error {
 				result := func() error {
 					envelope, err := schema.Decode[Envelope](frame.Fields[0].Value)
 					if err != nil || envelope.Session != nil || envelope.Relay != nil || len(envelope.Signature) != 0 {
-						return mydcp.ErrFrame
+						return sfcp.ErrFrame
 					}
 					request, err := schema.Decode[ImageBuildBaseContentRequest](envelope.Body)
-					if err != nil || !request.valid(time.Now().Unix()) || frame.Kind != 5 || request.Read.Read.Builder != [32]byte(conn.Peer().Key) || request.Read.Query.Selected() != selected || conn.Admit(frame, mydcp.ImageContent, false) != nil {
-						return mydcp.ErrAdmission
+					if err != nil || !request.valid(time.Now().Unix()) || frame.Kind != sfcp.KindImageSourceRead || request.Read.Read.Builder != [32]byte(conn.Peer().Key) || request.Read.Query.Selected() != selected || conn.Admit(frame, sfcp.ImageContent, false) != nil {
+						return sfcp.ErrAdmission
 					}
 					if err := streamEOF(stream); err != nil {
 						return err
@@ -77,7 +77,7 @@ func TestBuildBaseContentMemberStreamDoesNotRequireOrMintAUserSession(t *testing
 					source := ImageContentSource{Info: info, Body: io.NopCloser(bytes.NewReader(body)), Authorize: func(context.Context) error {
 						calls++
 						if mode == "revoked" && calls > 1 {
-							return mydcp.ErrAdmission
+							return sfcp.ErrAdmission
 						}
 						return nil
 					}}

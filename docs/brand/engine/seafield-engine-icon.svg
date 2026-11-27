@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+<style>@media (prefers-color-scheme:dark){.o{stroke:#F6DADD}}</style>
+<polygon class="o" points="16.00,2.40 27.78,9.20 27.78,22.80 16.00,29.60 4.22,22.80 4.22,9.20" fill="none" stroke="#590E1A" stroke-width="3.4" stroke-linejoin="round"/>
+<polygon points="16.00,9.40 22.24,13.00 16.00,16.60 9.76,13.00" fill="#F5554E"/>
+<polygon points="9.76,13.00 16.00,16.60 16.00,23.80 9.76,20.20" fill="#C6233A"/>
+<polygon points="16.00,16.60 22.24,13.00 22.24,20.20 16.00,23.80" fill="#8E1526"/>
+<polygon points="16.00,9.40 22.24,13.00 22.24,20.20 16.00,23.80 9.76,20.20 9.76,13.00" fill="none" stroke="#590E1A" stroke-width="1.2" stroke-linejoin="round"/>
+</svg>

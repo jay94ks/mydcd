@@ -14,7 +14,7 @@ import (
 	"io/fs"
 	"os"
 
-	"github.com/jay94ks/mydcd/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/reconcile"
 )
 
 // OpenFile borrows the retained original inode and seal; it never extracts the

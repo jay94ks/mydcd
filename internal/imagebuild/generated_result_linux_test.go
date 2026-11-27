@@ -11,7 +11,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/reconcile"
 )
 
 // Actual original ZIP/seal/file identity/DB. Current user authority and root
@@ -98,7 +98,7 @@ func TestGeneratedResultReadsMetadataWithUnavailableFilesAndDoesNotInferReclamat
 			if err := spool.Close(); err != nil {
 				t.Fatal(err)
 			}
-			path := filepath.Join(g.Artifact.Scope.Root.Path, ".mydc-imagebuild")
+			path := filepath.Join(g.Artifact.Scope.Root.Path, ".sfc-imagebuild")
 			if err := os.Rename(path, path+".offline"); err != nil {
 				t.Fatal(err)
 			}

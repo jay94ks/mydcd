@@ -163,6 +163,10 @@ type Raft struct {
 	// of the main loop.
 	latestConfiguration atomic.Value
 
+	// MyDC: a copy of the committed configuration, read off the main loop by
+	// the heartbeat fast path's sender check.
+	committedConfiguration atomic.Value
+
 	// RPC chan comes from the transport layer
 	rpcCh <-chan RPC
 

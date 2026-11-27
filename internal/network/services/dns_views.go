@@ -8,10 +8,10 @@ import (
 	"fmt"
 	"slices"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/network"
-	"github.com/jay94ks/mydcd/internal/reconcile"
-	"github.com/jay94ks/mydcd/internal/tenancy"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/network"
+	"github.com/jay94ks/seafield/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/tenancy"
 )
 
 var ErrDNSQueryCapacity = fmt.Errorf("%w: DNS query capacity exhausted", ErrProtocol)

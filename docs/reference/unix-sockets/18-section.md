@@ -4,11 +4,11 @@
 
 | 경계 | 소스 |
 |---|---|
-| 경로·listener·TLS·peer UID·소유 inode | [unix.go](../../../internal/mydcp/unix.go) |
-| record·EOF | [unix_stream.go](../../../internal/mydcp/unix_stream.go) |
-| 공통 관리 handler·목적 제한 | [management.go](../../../internal/mydcp/management.go) |
-| 인증 handshake | [authenticate.go](../../../internal/mydcp/authenticate.go) |
-| frame/TLV | [frame.go](../../../internal/mydcp/frame.go) |
+| 경로·listener·TLS·peer UID·소유 inode | [unix.go](../../../internal/sfcp/unix.go) |
+| record·EOF | [unix_stream.go](../../../internal/sfcp/unix_stream.go) |
+| 공통 관리 handler·목적 제한 | [management.go](../../../internal/sfcp/management.go) |
+| 인증 handshake | [authenticate.go](../../../internal/sfcp/authenticate.go) |
+| frame/TLV | [frame.go](../../../internal/sfcp/frame.go) |
 | 사용자 요청/응답·보호 입력 | [service.go](../../../internal/userauth/service.go), [secret.go](../../../internal/userauth/secret.go) |
-| 데몬 listener 연결 | [mydcd main](../../../cmd/mydcd/main.go) |
+| 데몬 listener 연결 | [sfcd main](../../../cmd/sfcd/main.go) |
 

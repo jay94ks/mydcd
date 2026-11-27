@@ -54,7 +54,7 @@ func TestColdArchiveRootPrecedesMySQLPunctuationNames(t *testing.T) {
 	if err := os.Mkdir(filepath.Join(name, "#innodb_redo"), 0700); err != nil {
 		t.Fatal(err)
 	}
-	for _, file := range []string{"#innodb_redo/#ib_redo1", "!before-root", ".mydc-app-initialized", "mysql.ibd"} {
+	for _, file := range []string{"#innodb_redo/#ib_redo1", "!before-root", ".sfc-app-initialized", "mysql.ibd"} {
 		if err := os.WriteFile(filepath.Join(name, file), []byte("original:"+file), 0600); err != nil {
 			t.Fatal(err)
 		}
@@ -278,7 +278,7 @@ func TestColdArchiveSourceRefusalsBudgetsAndWriteFailure(t *testing.T) {
 				t.Fatal(err)
 			}
 		case "xattr":
-			if err := unix.Setxattr(file, "user.mydc-test", []byte("metadata"), 0); err != nil {
+			if err := unix.Setxattr(file, "user.sfc-test", []byte("metadata"), 0); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -287,7 +287,7 @@ func TestColdArchiveSourceRefusalsBudgetsAndWriteFailure(t *testing.T) {
 			t.Fatal("unsupported source silently changed", kind, err)
 		}
 		if kind == "xattr" {
-			if err := unix.Removexattr(file, "user.mydc-test"); err != nil {
+			if err := unix.Removexattr(file, "user.sfc-test"); err != nil {
 				t.Fatal(err)
 			}
 		} else {

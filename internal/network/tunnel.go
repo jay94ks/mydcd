@@ -16,8 +16,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/reconcile"
-	"github.com/jay94ks/mydcd/internal/schema"
+	"github.com/jay94ks/seafield/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/schema"
 	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
 )
@@ -26,6 +26,12 @@ var ErrKernelOwnership = errors.New("TUN, route or nft ownership/readback mismat
 
 // TunnelSpec is committed input, not a set of host defaults. Addresses are
 // explicit local addresses; Routes are remote overlay prefixes through TUN.
+// HostRoutes are remote server addresses that every TUN of a server shares,
+// so they never go in the main table: they sit in this TUN's own host table,
+// which only packets from HostSources (this member's pools) look up. That
+// keeps the sfc-system TUN the owner of the main-table /32 while a tenant
+// container's reply to a remote server's Ingress still leaves through the
+// tenant TUN (tunnel_host_routes.go).
 type TunnelSpec struct {
 	Schema         uint8
 	Owner, Network string
@@ -33,6 +39,8 @@ type TunnelSpec struct {
 	RouteMetric    int
 	Addresses      []netip.Prefix
 	Routes         []netip.Prefix
+	HostRoutes     []netip.Prefix `json:",omitempty"`
+	HostSources    []netip.Prefix `json:",omitempty"`
 	Lifecycle      schema.Lifecycle
 	RoutePolicy    *PacketRoutePolicy `json:",omitempty"`
 }
@@ -43,6 +51,9 @@ func DecodeTunnel(value string) (TunnelSpec, error) {
 		return s, ErrPolicy
 	}
 	if s.RoutePolicy != nil && !s.RoutePolicy.valid(s) {
+		return s, ErrPolicy
+	}
+	if !validHostRoutes(s) {
 		return s, ErrPolicy
 	}
 	for _, list := range [][]netip.Prefix{s.Addresses, s.Routes} {
@@ -119,18 +130,19 @@ func (d *TunnelDriver) parameters(key string, op reconcile.Operation) (TunnelSpe
 	}
 	name := sha256.Sum256([]byte(fmt.Sprintf("%s\x00%s\x00%d", d.Owner, key, op.Target.Generation)))
 	full := sha256.Sum256([]byte(fmt.Sprintf("%s\x00%s\x00%d\x00%s", d.Owner, key, op.Target.Generation, stableTunnelSpec(s))))
-	return s, tunnelIdentity{fmt.Sprintf("mt%x", name[:6]), fmt.Sprintf("mydc-tun-1:%x", full), fmt.Sprintf("mydc_%x", full)}, nil
+	return s, tunnelIdentity{fmt.Sprintf("mt%x", name[:6]), fmt.Sprintf("sfc-tun-1:%x", full), fmt.Sprintf("sfc_%x", full)}, nil
 }
 
 // stableTunnelSpec is the part of a spec that names its native identity.
 // Without a route policy the remote route set is left out: a TUN network
 // member joining or leaving changes only its peers' routes and firewall
-// accept rules in place, under the same device (devel/design/node-apps.md
+// accept rules in place, under the same device (devel/design/cluster-apps.md
 // 3.1). A route policy binds its routes into the identity as before.
 func stableTunnelSpec(s TunnelSpec) string {
 	if s.RoutePolicy == nil {
 		s.Routes = nil
 	}
+	s.HostRoutes, s.HostSources = nil, nil
 	raw, _ := json.Marshal(s)
 	return string(raw)
 }
@@ -174,7 +186,7 @@ func routeState(link netlink.Link, p netip.Prefix, s TunnelSpec) (bool, error) {
 	}
 	for _, r := range routes {
 		if !sameRoute(r, want) {
-			return false, fmt.Errorf("%w: route %s wanted %s observed %s", ErrKernelOwnership, p, want.String(), r.String())
+			return false, fmt.Errorf("%w: route %s wanted %s observed %s on %s", ErrKernelOwnership, p, want.String(), r.String(), describeRouteDevice(r.LinkIndex))
 		}
 	}
 	if len(routes) > 1 {
@@ -269,6 +281,20 @@ func (d *TunnelDriver) Recover(ctx context.Context, key string, op reconcile.Ope
 	return d.run(ctx, key, op, false)
 }
 
+// Retire closes an obsolete Apply whose Desired went away (its network
+// drained) without finishing it first. An Apply that can never finish (a
+// route another TUN holds) would otherwise be recovered forever and block the
+// drain. Closure is the same owned removal and readback as Remove: a foreign
+// device, route or table is still refused, never deleted.
+func (d *TunnelDriver) Retire(ctx context.Context, key string, op reconcile.Operation, _ []byte, _ func([]byte) error) (bool, error) {
+	if op.Kind != reconcile.Apply {
+		return false, reconcile.ErrOperation
+	}
+	op.Kind = reconcile.Remove
+	outcome, err := d.run(ctx, key, op, false)
+	return err == nil && outcome == reconcile.EffectApplied, err
+}
+
 // Inspect reads an already applied TUN without attaching an FD, repairing
 // addresses/routes/firewall, or issuing link updates. Recovery remains the
 // journal owner's responsibility; an absent/partial object is never created.
@@ -342,6 +368,9 @@ func (d *TunnelDriver) run(ctx context.Context, key string, op reconcile.Operati
 				for _, p := range s.Routes {
 					found = found || sameRoute(r, routeFor(link, p, s))
 				}
+				for _, p := range s.HostRoutes {
+					found = found || sameRoute(r, hostRouteFor(link, p, s))
+				}
 				if !found {
 					return reconcile.EffectUnknown, ErrKernelOwnership
 				}
@@ -356,6 +385,9 @@ func (d *TunnelDriver) run(ctx context.Context, key string, op reconcile.Operati
 			return reconcile.EffectUnknown, err
 		}
 		if err = removeRouteSelector(s); err != nil {
+			return reconcile.EffectUnknown, err
+		}
+		if err = removeHostRules(s); err != nil {
 			return reconcile.EffectUnknown, err
 		}
 		if f, ok := d.files[key]; ok {
@@ -426,6 +458,9 @@ func (d *TunnelDriver) run(ctx context.Context, key string, op reconcile.Operati
 		if err = pruneTunnelRoutes(link, s); err != nil {
 			return reconcile.EffectUnknown, err
 		}
+		if err = ensureHostRoutes(link, s); err != nil {
+			return reconcile.EffectUnknown, err
+		}
 	} else {
 		return reconcile.EffectUnknown, reconcile.ErrOperation
 	}
@@ -441,6 +476,9 @@ func (d *TunnelDriver) inspect(s TunnelSpec, id tunnelIdentity, kind reconcile.K
 			rule, guard, selectorErr := inspectRouteSelector(s, nil)
 			if selectorErr != nil || rule || guard {
 				return reconcile.EffectUnknown, errors.Join(selectorErr, ErrKernelOwnership)
+			}
+			if rules, hostErr := hostRules(s); hostErr != nil || len(rules) != 0 {
+				return reconcile.EffectUnknown, errors.Join(hostErr, ErrKernelOwnership)
 			}
 			return reconcile.EffectApplied, nil
 		}
@@ -490,6 +528,9 @@ func (d *TunnelDriver) inspect(s TunnelSpec, id tunnelIdentity, kind reconcile.K
 		}
 	}
 	if stale, err := staleTunnelRoutes(link, s); err != nil || len(stale) != 0 {
+		return reconcile.EffectUnknown, errors.Join(err, ErrKernelOwnership)
+	}
+	if exact, err := inspectHostRoutes(link, s); err != nil || !exact {
 		return reconcile.EffectUnknown, errors.Join(err, ErrKernelOwnership)
 	}
 	present, err := inspectTunnelFirewall(s, id)

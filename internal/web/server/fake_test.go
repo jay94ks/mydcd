@@ -14,21 +14,21 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/web/mydc"
-	"github.com/jay94ks/mydcd/internal/web/store"
+	"github.com/jay94ks/seafield/internal/web/sfc"
+	"github.com/jay94ks/seafield/internal/web/store"
 )
 
-// Runs the HTTP layer against the fake adapter from internal/web/mydc. This
-// is mock evidence only, not a real mydcd result.
+// Runs the HTTP layer against the fake adapter from internal/web/sfc. This
+// is mock evidence only, not a real sfcd result.
 // strictFake: the default fixture checking each command key's own root,
-// as mydcd does.
-func strictFake() *mydc.Fake {
-	f := mydc.NewFake(mydc.DefaultFixture())
+// as sfcd does.
+func strictFake() *sfc.Fake {
+	f := sfc.NewFake(sfc.DefaultFixture())
 	f.StrictRoots(true)
 	return f
 }
 
-func newFakeFixture(t *testing.T) (*fixture, *mydc.Fake) {
+func newFakeFixture(t *testing.T) (*fixture, *sfc.Fake) {
 	t.Helper()
 	st, err := store.Open(filepath.Join(t.TempDir(), "web.db"))
 	if err != nil {
@@ -72,11 +72,11 @@ func TestFakePasswordLoginAndReads(t *testing.T) {
 		t.Fatalf("dashboard: %d", code)
 	}
 	code, out = f.do("GET", "/api/v1/me/credentials", nil)
-	if code != 200 || out["username"] != "alice" || len(out["credentials"].([]any)) == 0 || out["accountRevision"] != out["revision"] {
+	if code != 200 || out["username"] != "alice" || len(out["credentials"].([]any)) == 0 || out["accountRevision"] != out["revision"] || len(out["clusterId"].(string)) != 64 {
 		t.Fatalf("own credentials: %d %v", code, out)
 	}
 	// credential rows are camelCase like every other view (access.Credential
-	// has a MarshalJSON only for mydcd's stored bytes); keys are hex
+	// has a MarshalJSON only for sfcd's stored bytes); keys are hex
 	cred := out["credentials"].([]any)[0].(map[string]any)
 	if cred["id"] != "password" || cred["method"] != "password" || cred["enabled"] != true || cred["ID"] != nil || cred["verifierRef"] != nil {
 		t.Fatalf("own credential row: %v", cred)
@@ -100,7 +100,7 @@ func TestFakePasswordLoginAndReads(t *testing.T) {
 
 func TestFakeKeyLogin(t *testing.T) {
 	f, _ := newFakeFixture(t)
-	priv := mydc.FixtureKey("bob")
+	priv := sfc.FixtureKey("bob")
 	pub := priv.Public().(ed25519.PublicKey)
 	code, out := f.do("POST", "/api/v1/auth/key/challenge", map[string]any{"username": "bob", "publicKey": hex.EncodeToString(pub)})
 	if code != 200 {
@@ -137,7 +137,7 @@ func TestFakeLostReplySettledByResult(t *testing.T) {
 	_, out = f.do("GET", "/api/v1/auth/session", nil)
 	uid := out["user"].(map[string]any)["id"].(string)
 	fake.LoseNextReply("submit", true)
-	body := map[string]any{"opId": opA, "action": mydc.ActionCreateTenant, "principal": uid, "expected": 0,
+	body := map[string]any{"opId": opA, "action": sfc.ActionCreateTenant, "principal": uid, "expected": 0,
 		"payload": map[string]any{"ID": "lab"}, "rootRevision": fake.RootRevision()}
 	code, out := f.do("POST", "/api/v1/ops", body)
 	if code != 202 || out["op"].(map[string]any)["state"] != "unknown" {
@@ -151,7 +151,7 @@ func TestFakeLostReplySettledByResult(t *testing.T) {
 	// the journal holds one create-tenant only: no new ID was used
 	n := 0
 	for _, j := range fake.Journal() {
-		if j.Action == mydc.ActionCreateTenant {
+		if j.Action == sfc.ActionCreateTenant {
 			n++
 		}
 	}
@@ -169,7 +169,7 @@ func TestFakeDeployJob(t *testing.T) {
 	_, out = f.do("GET", "/api/v1/t/shop/apps/"+app+"/source", nil)
 	doc := out["yaml"].(string)
 	// a big document needs several parts
-	big := doc + "\n# " + strings.Repeat("x", 2*mydc.AppPartBytes) + "\n"
+	big := doc + "\n# " + strings.Repeat("x", 2*sfc.AppPartBytes) + "\n"
 
 	fake.LoseNextReply("submit", true) // first step's reply is lost
 	code, out := f.do("POST", "/api/v1/t/shop/apps/deploy", map[string]any{"opId": opA, "yaml": big})
@@ -207,7 +207,7 @@ func TestFakeDeployJob(t *testing.T) {
 	}
 }
 
-// R03: mydcd closing an idle connection is not a logout. The next request
+// R03: sfcd closing an idle connection is not a logout. The next request
 // redials and uses the same session; no keepalive is sent meanwhile.
 func TestFakeIdleDisconnectKeepsSession(t *testing.T) {
 	f, fake := newFakeFixture(t)
@@ -231,7 +231,7 @@ func TestFakeIdleDisconnectKeepsSession(t *testing.T) {
 		ws = x
 	}
 	f.srv.sessions.mu.Unlock()
-	if ws == nil || mydc.Reconnects(ws.conn) != 1 {
+	if ws == nil || sfc.Reconnects(ws.conn) != 1 {
 		t.Fatalf("reconnects: %v", ws)
 	}
 

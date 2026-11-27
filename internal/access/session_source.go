@@ -12,7 +12,7 @@ import (
 // grant. Unlike IssuedSessionDigest it identifies one complete accepted input.
 func ExactSessionDigest(s Session) [32]byte {
 	b, _ := json.Marshal(s)
-	return sha256.Sum256(append([]byte("mydc-exact-user-session-1\x00"), b...))
+	return sha256.Sum256(append([]byte("sfc-exact-user-session-1\x00"), b...))
 }
 
 // VerifyOriginalSession checks historical signature/time binding only. It is

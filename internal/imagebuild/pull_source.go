@@ -2,7 +2,7 @@
 
 package imagebuild
 
-import "github.com/jay94ks/mydcd/internal/registryclient"
+import "github.com/jay94ks/seafield/internal/registryclient"
 
 // SelectPullSource is shared by the native session and its tests. Registry
 // hosts are not credential keys: choose only a repository present in the

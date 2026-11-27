@@ -13,10 +13,11 @@ import (
 	"sync"
 
 	cerrdefs "github.com/containerd/errdefs"
-	"github.com/jay94ks/mydcd/internal/engine"
-	"github.com/jay94ks/mydcd/internal/reconcile"
-	"github.com/jay94ks/mydcd/internal/schema"
-	"github.com/jay94ks/mydcd/internal/storage"
+	"github.com/jay94ks/seafield/internal/engine"
+	"github.com/jay94ks/seafield/internal/nodestorage"
+	"github.com/jay94ks/seafield/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/storage"
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/api/types/mount"
 	"github.com/moby/moby/client"
@@ -74,6 +75,8 @@ type Activations struct {
 	authority           PermitAuthority
 	entries             map[string]*activationEntry
 	closed              bool
+	// engineSource replaces the fixed-volume source opener in tests only.
+	engineSource func(context.Context, NativeLease) (*nodestorage.DirectoryHandle, error)
 }
 
 func validActivation(r Activation, cluster, node [32]byte) bool {
@@ -284,7 +287,7 @@ func (s *Activations) container(ctx context.Context, r Activation, nativeID stri
 		return v, err
 	}
 	for _, m := range v.Mounts {
-		if !bind && m.Type == mount.TypeVolume && m.Name == source || bind && m.Type == mount.TypeBind && m.Source == source {
+		if m.Type == mount.TypeVolume && m.Name == source && (m.Driver == EngineVolumeDriver) == bind {
 			if m.RW != r.Consumer.Writable {
 				return v, engine.ErrOwnership
 			}

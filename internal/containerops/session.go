@@ -11,7 +11,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/jay94ks/mydcd/internal/cluster/lifecycle"
+	"github.com/jay94ks/seafield/internal/cluster/lifecycle"
 )
 
 var ErrSession = errors.New("invalid container session")
@@ -97,7 +97,7 @@ type SessionIntent struct {
 func SessionIntentBytes(q SessionIntent) []byte {
 	q.Signature = nil
 	raw, _ := json.Marshal(q)
-	return append([]byte("mydc-container-session-intent-1\x00"), raw...)
+	return append([]byte("sfc-container-session-intent-1\x00"), raw...)
 }
 
 func (q SessionIntent) Validate() error {
@@ -126,7 +126,7 @@ func (q SessionIntent) Verify(key [32]byte) error {
 
 func (q SessionIntent) Digest() [32]byte {
 	raw, _ := json.Marshal(q)
-	return sha256.Sum256(append([]byte("mydc-container-session-record-1\x00"), raw...))
+	return sha256.Sum256(append([]byte("sfc-container-session-record-1\x00"), raw...))
 }
 
 type ExecPhase string

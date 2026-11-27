@@ -6,9 +6,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/network/services"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/network/services"
 	"path/filepath"
 	"testing"
 )

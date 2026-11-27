@@ -87,7 +87,7 @@ func (s *Server) mcpDial(ctx context.Context, rawURL, token string) (*mcpConn, *
 		ServerInfo      mcpServerInfo `json:"serverInfo"`
 	}
 	if err := c.call(ctx, "initialize", map[string]any{"protocolVersion": mcpProtocol, "capabilities": map[string]any{},
-		"clientInfo": map[string]any{"name": "mydc-web", "version": "1"}}, &init); err != nil {
+		"clientInfo": map[string]any{"name": "sfc-web", "version": "1"}}, &init); err != nil {
 		return nil, nil, err
 	}
 	switch init.ProtocolVersion {
@@ -123,7 +123,7 @@ func (c *mcpConn) close() {
 
 func (c *mcpConn) headers(req *http.Request) {
 	req.Header.Set("Accept", "application/json, text/event-stream")
-	req.Header.Set("User-Agent", "mydc-web")
+	req.Header.Set("User-Agent", "sfc-web")
 	if c.token != "" {
 		req.Header.Set("Authorization", "Bearer "+c.token)
 	}

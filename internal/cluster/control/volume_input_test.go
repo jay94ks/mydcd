@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/workload/volumes"
+	"github.com/jay94ks/seafield/internal/workload/volumes"
 )
 
 func TestVolumeManagementInputPreservesSignedFactAndRejectsPrivateFields(t *testing.T) {

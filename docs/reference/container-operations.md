@@ -1,14 +1,14 @@
 # 컨테이너 운영 API
 
-로그·프로세스·리소스 조회는 로그인한 사용자의 현재 tenant `Read` 권한으로 처리한다. 이 경로의 대상은 MyDC가 관리하는 app/service의 실행 인스턴스이며 Docker ID나 호스트 경로로 임의 접근할 수 없다. 해당 기능의 구현·검증 상태는 루트 마일스톤/이력을 따른다.
+로그·프로세스·리소스 조회는 로그인한 사용자의 현재 tenant `Read` 권한으로 처리한다. 이 경로의 대상은 Sfc가 관리하는 app/service의 실행 인스턴스이며 Docker ID나 호스트 경로로 임의 접근할 수 없다. 해당 기능의 구현·검증 상태는 루트 마일스톤/이력을 따른다.
 
 ## 유한 조회 CLI
 
 ```sh
-mydc --context production --tenant team-a --user alice app logs shop web --tail 200
-mydc --tenant team-a app logs shop web --stdout --timestamps --since 2026-11-21T00:00:00Z
-mydc --tenant team-a app top shop web
-mydc --tenant team-a app stats shop web -o json
+sfcli --context production --tenant team-a --user alice app logs shop web --tail 200
+sfcli --tenant team-a app logs shop web --stdout --timestamps --since 2026-11-21T00:00:00Z
+sfcli --tenant team-a app top shop web
+sfcli --tenant team-a app stats shop web -o json
 ```
 
 공통 옵션은 `--instance TASK`, `--max-bytes N`, `-o json`이다. 명령은 `APP SERVICE` 두 이름을 받는다. instance는 같은 앱/서비스 안의 논리 Task key이며 후보가 여러 개면 명시해야 한다. 파일·배포 ID·placement 변경 옵션은 없다.
@@ -21,7 +21,7 @@ top은 Engine이 제공한 열 이름과 프로세스 목록을 표시한다. PI
 
 ## User 메시지
 
-기본 Unix 끝점은 `/var/run/mydc.sock`이며 네트워크 MYDCP와 같은 User 목적의 kind1 요청/ kind2 응답을 사용한다. 현재 연결 challenge에 묶인 Envelope 서명·Session, canonical JSON·요청 digest·EOF 계약은 [Unix API](unix-sockets.md)를 따른다.
+기본 Unix 끝점은 `/run/sfcdp.sock`이며 네트워크 SFCP와 같은 User 목적의 kind1 요청/ kind2 응답을 사용한다. 현재 연결 challenge에 묶인 Envelope 서명·Session, canonical JSON·요청 digest·EOF 계약은 [Unix API](unix-sockets.md)를 따른다.
 
 `Request.Method="container-observe"`, `Tenant`와 `Container`가 필수다. `After/Node`와 다른 method 전용 payload는 허용하지 않는다.
 
@@ -78,12 +78,13 @@ Stats는 SampleAt(timestamp), CPUStatus(`ok/warming-up/counter-reset/unavailable
 max-size는 go-units가 해석하는 양수 크기, max-file은 양수 정수, compress는 명시 bool 문자열이다. 정책은 앱 artifact/Task/spec digest에 포함한다. Engine이 보완한 미선언 기본 옵션은 허용하고 명시 옵션의 차이는 원 Task 성공으로 처리하지 않는다. 기존 schema1에서 생략된 logging은 nil을 유지하므로 설정 추가만으로 과거 원 입력을 바꾸지 않는다.
 
 ```sh
-mydc --tenant team-a app clear-logs shop web          # 영향을 보여 주고 확인을 묻는다
-mydc --tenant team-a app clear-logs shop web -y --id clear-001
-mydc --tenant team-a op show clear-001
+sfcli --tenant team-a app clear-logs shop web          # 확인을 묻는다
+sfcli --tenant team-a app clear-logs shop -y           # 앱 전체, 묻지 않음
 ```
 
-preview는 실제 driver와 원 Task/Binding·native ID/StartedAt/세대 및 영향을 받는 입력/종속 서비스의 범위를 반환한다. Read와 Deploy 권한·활성 owner·신선한 서명 관측을 확인한다. local/json-file만 허용하며 미관측/구형 metadata를 local로 추정하지 않는다. `app clear-logs`는 영향을 먼저 보여 주고 확인을 받은 뒤(`-y`는 확인 생략) 재생성을 요청한다. 결과는 `mydc op show ID`로 다시 본다.
+`app clear-logs`와 `standalone clear-logs`는 User Method `logs-clear`(`control.LogsClear{Tenant, Selection}`) 하나를 보낸다. 받은 서버가 모든 멤버 서버에 나눠 보내고, 각 서버가 자기 상태로 Deploy를 확인한 뒤 자기 로그 보관소에서 지운다. Raft 명령이 아니고 컨테이너를 다시 만들지 않는다. 답은 서버별 `{Node, Code, Containers, Removed}`이며, CLI는 지우지 못한 서버가 있으면 그 수를 알리고 1로 끝난다(설계).
+
+아래는 옛 재생성 경로(`app-log-clear-plan`, `clear-app-logs`)다. CLI는 더 쓰지 않고, 서버 쪽은 Seafield 로그 지우기 작업에서 지운다.
 
 실행은 표시된 컨테이너와 종속 서비스의 중단·writable layer/로컬 로그의 영구 손실에 동의한 재생성이다. Volume 데이터와 외부 보관 로그는 보존한다. 기존 Inventory의 정확한 Drain/Proof/Delete·참조 반환 뒤에만 같은 고정 앱 목표를 현재 권한/CAS로 다시 실행한다. 일반 앱에 CD를 붙이지 않으며 CD 앱은 실행 중이던 선언을 사용해 정책/override/대기 Git 후보를 보존한다. 새 후보를 몰래 배포하지 않는다.
 
@@ -105,9 +106,9 @@ Target은 원 앱 수락·선택된 native lifetime·실제 영향/고정 입력
 ## interactive exec와 원 실행 조회
 
 ```sh
-mydc --tenant team-a app exec shop web -i -t --id shell-001 -- /bin/sh
-mydc --tenant team-a app exec shop web -i --id tool-001 -- /usr/local/bin/custom-cli 'argument with spaces'
-mydc --tenant team-a app exec shop web --id tool-001 -- /usr/local/bin/custom-cli   # 같은 ID: 원 결과만 조회
+sfcli --tenant team-a app exec shop web -i -t --id shell-001 -- /bin/sh
+sfcli --tenant team-a app exec shop web -i --id tool-001 -- /usr/local/bin/custom-cli 'argument with spaces'
+sfcli --tenant team-a app exec shop web --id tool-001 -- /usr/local/bin/custom-cli   # 같은 ID: 원 결과만 조회
 ```
 
 exec는 현재 tenant Read와 Deploy가 모두 필요하다. `APP SERVICE -- argv...`를 명시하고, ID는 `--id`로 정하거나 CLI가 만든다. shell 문자열로 다시 해석하지 않으며 `--` 뒤의 빈 인자·공백·옵션처럼 생긴 인자를 그대로 전달한다. `-i`는 stdin을 연결하고 `-t`는 Docker TTY를 요청한다. `-it`처럼 붙여 쓰지 않고 `-i -t`로 쓴다. TTY+stdin이 실제 terminal이면 raw 모드·SIGWINCH resize·제어 문자 전달을 사용하고 종료/오류에서 원 terminal 상태를 복원한다. 비TTY는 stdout/stderr를 분리하고 stdin EOF 후에도 출력과 exit를 읽는다. 컨테이너에 shell이 없으면 명령이 실패하며 host shell이나 자동 설치로 대체하지 않는다. 컨테이너의 설정된 user/security를 사용하고 privileged exec override는 제공하지 않는다.
@@ -121,16 +122,16 @@ CLI는 사용자 profile에 원 ID/서명·정확한 Task/native ID/StartedAt를
 ## logs follow·top/stats watch
 
 ```sh
-mydc --tenant team-a app logs shop web --tail 200 --follow
-mydc --tenant team-a app top shop web --watch --interval 2s
-mydc --tenant team-a app stats shop web --watch --interval 2s -o json
+sfcli --tenant team-a app logs shop web --tail 200 --follow
+sfcli --tenant team-a app top shop web --watch --interval 2s
+sfcli --tenant team-a app stats shop web --watch --interval 2s -o json
 ```
 
 기존 현재 Read 권한과 app/service/instance 선택 규칙을 재사용한다. follow는 새 로그를 계속 읽으며 `--until`과 함께 사용할 수 없다. watch의 interval은 기본2초·허용1초–1분이며 단발 조회에 `--interval`만 붙이면 오류다. top/stats의 표본 요약·CPU 계산 준비/N/A·누계/counter reset은 기존 코어를 사용한다. 다른 native/시작 시각으로 자동 이동하지 않는다. 교체/종료 후 새 generation을 보려면 사용자가 별도 새 명령을 실행한다.
 
 `-o json` watch는 표본마다 Container Result JSON 한 줄(NDJSON)을 출력한다. follow JSON은 최초 실제 TTY/driver/Target Result 한 줄 뒤 stdout/stderr SessionRecord JSON을 출력하며 Data는 base64다. 일반 follow는 실제 출력 채널을 사용하고 TTY 원 로그는 합쳐진 stdout이다. 단발 Query의 `--max-bytes`는 watch 표본별 상한이며 follow 전체 누적량의 제한이 아니다. 스트림은 최대16KiB 데이터 chunk·유한 backpressure와 쓰기 기한을 적용한다. CLI의 접속 timeout은 수립 예산이고 전체 감시 시간을 제한하지 않는다. 현재 권한/원 대상·session 만료·idle/취소는 계속 적용한다.
 
-Unix와 네트워크 MYDCP은 [purpose15 메시지 명세](unix-sockets/21-purpose15.md)를 사용한다. 접속 노드와 Docker owner가 다르면 원 사용자 intent/서명을 보존한 member relay로 전달하고 owner가 현재 quorum 허가를 재검사한다. 입력/출력 본문은 Raft/결과 DB에 보관하지 않는다. 구현/검증 완료 여부는 MILESTONES/HISTORY의 근거를 따른다.
+Unix와 네트워크 SFCP은 [purpose15 메시지 명세](unix-sockets/21-purpose15.md)를 사용한다. 접속 노드와 Docker owner가 다르면 원 사용자 intent/서명을 보존한 member relay로 전달하고 owner가 현재 quorum 허가를 재검사한다. 입력/출력 본문은 Raft/결과 DB에 보관하지 않는다. 구현/검증 완료 여부는 MILESTONES/HISTORY의 근거를 따른다.
 
 ## 로그 페이지의 원 구간
 

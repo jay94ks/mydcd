@@ -18,7 +18,7 @@ import (
 )
 
 // Test inputs only: real kernel sockets inside the managed nonroot workload.
-// This executable never forwards IP packets or decides MyDC route authority.
+// This executable never forwards IP packets or decides Seafield Cluster route authority.
 func routeMode(args []string) (bool, error) {
 	if len(args) > 1 && args[1] == "--route-dns" {
 		return true, routeDNSProbe(args[2:])
@@ -55,7 +55,7 @@ func routeMode(args []string) (bool, error) {
 		if err := conn.SetDeadline(time.Now().Add(10 * time.Second)); err != nil {
 			return true, err
 		}
-		payload := []byte(fmt.Sprintf("mydc-route-%s-%d", args[2], local))
+		payload := []byte(fmt.Sprintf("sfc-route-%s-%d", args[2], local))
 		if _, err := conn.Write(payload); err != nil {
 			return true, routeSocketError(err)
 		}

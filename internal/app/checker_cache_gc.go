@@ -8,10 +8,10 @@ import (
 	"errors"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/schema"
-	checker "github.com/jay94ks/mydcd/internal/workload/lifecycle"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	checker "github.com/jay94ks/seafield/internal/workload/lifecycle"
 )
 
 var errCheckerCacheFence = errors.New("current lifecycle cache collection fence unavailable")
@@ -32,7 +32,7 @@ func (r *Runtime) checkerCacheRetention(ctx context.Context) (checker.CacheReten
 	}
 	fence, err := schema.Decode[checkerCacheFence](reply.Data)
 	if err != nil || reply.Local || fence.Schema != 1 || fence.Cluster != r.controlPolicy.Cluster || fence.Owner != r.commandIdentity().Public || fence.Index == 0 || fence.Epoch == 0 {
-		return checker.CacheRetention{}, mydcp.ErrAdmission
+		return checker.CacheRetention{}, sfcp.ErrAdmission
 	}
 	view, err := r.Engine().Read(ctx, false)
 	if err != nil {

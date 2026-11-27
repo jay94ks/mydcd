@@ -7,10 +7,10 @@ import (
 	"encoding/json"
 	"strings"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/registry"
-	"github.com/jay94ks/mydcd/internal/registryclient"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/registry"
+	"github.com/jay94ks/seafield/internal/registryclient"
 )
 
 const RegistryMaintenanceKey = "control/registry-maintenance"
@@ -72,7 +72,7 @@ func (q RegistryMaintenanceChange) Valid(cluster [32]byte, action string) bool {
 }
 func (q RegistryMaintenanceChange) DigestValue() [32]byte {
 	raw, _ := json.Marshal(q)
-	return sha256.Sum256(append([]byte("mydc-registry-maintenance-target-1\x00"), raw...))
+	return sha256.Sum256(append([]byte("sfc-registry-maintenance-target-1\x00"), raw...))
 }
 
 type RegistryMaintenancePlan struct {
@@ -469,3 +469,6 @@ func (p Policy) registryMaintenancePending(s state.State, tenant, id string, ext
 	}
 	return false, nil
 }
+
+// registryMaintenanceBook is the RegistryMaintenanceKey book (books.go).
+var registryMaintenanceBook = Book{Key: RegistryMaintenanceKey, Reduce: Policy.reduceRegistryMaintenance}

@@ -5,8 +5,8 @@ package volumes
 import (
 	"encoding/hex"
 	"encoding/json"
-	"github.com/jay94ks/mydcd/internal/cluster/lifecycle"
-	"github.com/jay94ks/mydcd/internal/engine"
+	"github.com/jay94ks/seafield/internal/cluster/lifecycle"
+	"github.com/jay94ks/seafield/internal/engine"
 	"strings"
 )
 

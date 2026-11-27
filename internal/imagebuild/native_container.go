@@ -10,9 +10,9 @@ import (
 	"slices"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/engine"
-	"github.com/jay94ks/mydcd/internal/reconcile"
-	"github.com/jay94ks/mydcd/internal/registryclient"
+	"github.com/jay94ks/seafield/internal/engine"
+	"github.com/jay94ks/seafield/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/registryclient"
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/client"
 )

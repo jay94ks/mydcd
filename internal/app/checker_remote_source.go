@@ -11,11 +11,11 @@ import (
 	"slices"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/schema"
-	checker "github.com/jay94ks/mydcd/internal/workload/lifecycle"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	checker "github.com/jay94ks/seafield/internal/workload/lifecycle"
 )
 
 var errCheckerRemotePending = errors.New("original remote checker call is not closed")
@@ -139,7 +139,7 @@ func (r *Runtime) sendCheckerRemote(ctx context.Context, b deployment.Binding, t
 		return checker.ProbeReply{}, err
 	}
 	if permit.Consumer != r.Identity.Public || permit.Provider == r.Identity.Public || !permit.Matches(q, call) || checkerProgramHash(actual) != checkerProgramHash(program) {
-		return checker.ProbeReply{}, mydcp.ErrAdmission
+		return checker.ProbeReply{}, sfcp.ErrAdmission
 	}
 	e := checkerRemoteReceipt{Schema: 1, Binding: q.Binding, Provider: permit.Provider, Payload: q.Payload, Header: q.HeaderDigest(), PolicyRevision: q.PolicyRevision, Sequence: q.Sequence, Kind: q.Kind, Service: q.Service, DeadlineUnixMilli: q.DeadlineUnixMilli, Phase: "sent"}
 	if err = save(e); err != nil {
@@ -176,7 +176,7 @@ func (r *Runtime) sendCheckerRemote(ctx context.Context, b deployment.Binding, t
 	before, after := permit, latest
 	before.Index, after.Index = 0, 0
 	if err != nil || before != after || !latest.Matches(q, call) {
-		return checker.ProbeReply{}, mydcp.ErrAdmission
+		return checker.ProbeReply{}, sfcp.ErrAdmission
 	}
 	reply, err := schema.Decode[checker.ProbeReply](result.Data)
 	if err != nil || reply.Validate(call) != nil {
@@ -187,9 +187,9 @@ func (r *Runtime) sendCheckerRemote(ctx context.Context, b deployment.Binding, t
 
 // Exactly one stream attempt. Recovery grants no new effect and retains the
 // original execution deadline in metadata; only its observation window is new.
-func (r *Runtime) callCheckerRemote(ctx context.Context, q control.CheckerProbeRequest, provider [32]byte, action string, body []byte, store func(bool, []byte) error) (mydcp.CheckerProbeResult, error) {
+func (r *Runtime) callCheckerRemote(ctx context.Context, q control.CheckerProbeRequest, provider [32]byte, action string, body []byte, store func(bool, []byte) error) (sfcp.CheckerProbeResult, error) {
 	if ctx == nil || r.Mesh == nil || r.ctx == nil || store == nil {
-		return mydcp.CheckerProbeResult{}, errCheckerRemotePending
+		return sfcp.CheckerProbeResult{}, errCheckerRemotePending
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -206,25 +206,25 @@ func (r *Runtime) callCheckerRemote(ctx context.Context, q control.CheckerProbeR
 	defer done()
 	peer, ok := r.resourcePeerForKey(ctx, provider)
 	if !ok || !peer.Member {
-		return mydcp.CheckerProbeResult{}, mydcp.ErrAdmission
+		return sfcp.CheckerProbeResult{}, sfcp.ErrAdmission
 	}
 	return r.callCheckerRemotePeer(ctx, q, peer, action, body, store)
 }
 
 // The wire adapter consumes an already selected current peer. It never changes
 // the original Query/Call; authority and retained routing stay with the caller.
-func (r *Runtime) callCheckerRemotePeer(ctx context.Context, q control.CheckerProbeRequest, peer mydcp.Peer, action string, body []byte, store func(bool, []byte) error) (mydcp.CheckerProbeResult, error) {
+func (r *Runtime) callCheckerRemotePeer(ctx context.Context, q control.CheckerProbeRequest, peer sfcp.Peer, action string, body []byte, store func(bool, []byte) error) (sfcp.CheckerProbeResult, error) {
 	if ctx == nil || r.Mesh == nil || store == nil || !peer.Member {
-		return mydcp.CheckerProbeResult{}, mydcp.ErrAdmission
+		return sfcp.CheckerProbeResult{}, sfcp.ErrAdmission
 	}
 	session, err := r.Mesh.Dial(ctx, peer)
 	if err != nil {
-		return mydcp.CheckerProbeResult{}, err
+		return sfcp.CheckerProbeResult{}, err
 	}
 	q.At = 0
 	metadata, err := json.Marshal(q)
 	if err != nil {
-		return mydcp.CheckerProbeResult{}, err
+		return sfcp.CheckerProbeResult{}, err
 	}
 	// A run must use the exact per-call deadline; a shorter caller context
 	// only cancels observation, it must not change the original wire header.
@@ -232,11 +232,11 @@ func (r *Runtime) callCheckerRemotePeer(ctx context.Context, q control.CheckerPr
 	if action == "recover" {
 		deadline, ok := ctx.Deadline()
 		if !ok {
-			return mydcp.CheckerProbeResult{}, mydcp.ErrAdmission
+			return sfcp.CheckerProbeResult{}, sfcp.ErrAdmission
 		}
 		expires = deadline.UnixMilli()
 	}
-	wire := mydcp.CheckerProbeRequest{Schema: 1, Action: action, Metadata: metadata, Digest: q.Payload, Bytes: uint32(len(body)), ExpiresAt: expires}
+	wire := sfcp.CheckerProbeRequest{Schema: 1, Action: action, Metadata: metadata, Digest: q.Payload, Bytes: uint32(len(body)), ExpiresAt: expires}
 	return session.CallCheckerProbe(ctx, wire, body, func(_ context.Context, closed bool, data []byte) error { return store(closed, data) })
 }
 

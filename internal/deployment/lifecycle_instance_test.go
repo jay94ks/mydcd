@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/engine"
-	checker "github.com/jay94ks/mydcd/internal/workload/lifecycle"
-	contract "github.com/jay94ks/mydcd/lifecycle/v1"
+	"github.com/jay94ks/seafield/internal/engine"
+	checker "github.com/jay94ks/seafield/internal/workload/lifecycle"
+	contract "github.com/jay94ks/seafield/lifecycle/v1"
 )
 
 func restartingExecution(t *testing.T, appChecks ...LifecycleCheck) *executionFixture {
@@ -25,7 +25,7 @@ func restartingExecutionContext(t *testing.T, appChecks ...LifecycleCheck) (*exe
 	t.Helper()
 	x := runFixture(t)
 	ctx := contextFor(t, x.f)
-	policy := checker.TenantPolicy{Tenant: "tenant", Enabled: true, Execution: checker.ExecutionPolicy{MaxConcurrent: 1, TimeoutMS: 5000, NanoCPU: 100000000, MemoryBytes: 32 << 20, MaxPIDs: 16, OutputBytes: 4096, ProbeBytes: 4096, Capabilities: []string{"file"}}, Resolver: checker.ResolverPolicy{AllowPackages: []string{"context", "github.com/jay94ks/mydcd/lifecycle/v1"}, SourceCacheBytes: 1 << 20}}
+	policy := checker.TenantPolicy{Tenant: "tenant", Enabled: true, Execution: checker.ExecutionPolicy{MaxConcurrent: 1, TimeoutMS: 5000, NanoCPU: 100000000, MemoryBytes: 32 << 20, MaxPIDs: 16, OutputBytes: 4096, ProbeBytes: 4096, Capabilities: []string{"file"}}, Resolver: checker.ResolverPolicy{AllowPackages: []string{"context", "github.com/jay94ks/seafield/lifecycle/v1"}, SourceCacheBytes: 1 << 20}}
 	book, err := checker.NewCatalog(x.f.cluster)
 	if err != nil {
 		t.Fatal(err)
@@ -41,10 +41,10 @@ func restartingExecutionContext(t *testing.T, appChecks ...LifecycleCheck) (*exe
 	ctx.Features["lifecycle"] = true
 	c := smallCompose(t)
 	web := c.Services["web"]
-	web.MyDC.Lifecycle = &ServiceLifecycle{Checks: []LifecycleCheck{{ID: "alive", Phase: contract.Liveness, LifecycleTemplate: LifecycleTemplate{Builtin: "docker_health"}, Actions: &checker.ActionPolicy{OnDead: checker.RestartContainer}}}}
+	web.Sfc.Lifecycle = &ServiceLifecycle{Checks: []LifecycleCheck{{ID: "alive", Phase: contract.Liveness, LifecycleTemplate: LifecycleTemplate{Builtin: "docker_health"}, Actions: &checker.ActionPolicy{OnDead: checker.RestartContainer}}}}
 	c.Services["web"] = web
 	if len(appChecks) > 0 {
-		c.MyDC.Lifecycle = &LifecycleDeclaration{Checks: appChecks}
+		c.Sfc.Lifecycle = &LifecycleDeclaration{Checks: appChecks}
 	}
 	x.b, err = Compile(c, x.f.c, ctx)
 	if err != nil {

@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/deployment"
+	"github.com/jay94ks/seafield/internal/deployment"
 )
 
 func TestAppDiffReplacementPlanKeepsExactScopeAndSourceCoordinates(t *testing.T) {

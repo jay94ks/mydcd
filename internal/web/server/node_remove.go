@@ -7,18 +7,18 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/web/mydc"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/web/sfc"
 )
 
 // POST /nodes/{node}/isolate | /restore | /remove {opId, operation?,
 // epoch?, expected?} → isolate-node / restore-node / remove-node
-// (control.NodeLifecycleChange, as `mydc node isolate|restore|remove`).
-// System admin, judged by mydcd. operation is the node lifecycle operation
+// (control.NodeLifecycleChange, as `sfcli node isolate|restore|remove`).
+// System admin, judged by sfcd. operation is the node lifecycle operation
 // ID (lowercase letters, digits, -; default "<verb>-<opId>"); epoch defaults
 // to the members page's node operation epoch and expected to the server's
 // revision. Whether the change is allowed (last voter, quorum, pending node
-// work, storage) is mydcd's answer: a refusal comes back as the op's result.
+// work, storage) is sfcd's answer: a refusal comes back as the op's result.
 // Only a request that would not change anything is answered early (409
 // unchanged): isolating an isolated server, restoring one that is not
 // isolated, or any change to a removed server.
@@ -35,7 +35,7 @@ func (s *Server) handleNodeLifecycle(action string) func(http.ResponseWriter, *h
 			return
 		}
 		node := r.PathValue("node")
-		s.sharedCreate(w, r, ws, req.OpID, actionBody{action, req}, func(ctx context.Context, c mydc.Conn, _ mydc.Session) (string, any, uint64, string, error) {
+		s.sharedCreate(w, r, ws, req.OpID, actionBody{action, req}, func(ctx context.Context, c sfc.Conn, _ sfc.Session) (string, any, uint64, string, error) {
 			op, err := nodeOperation(req.Operation, verb, req.OpID)
 			if err != nil {
 				return "", nil, 0, "", err
@@ -48,11 +48,11 @@ func (s *Server) handleNodeLifecycle(action string) func(http.ResponseWriter, *h
 				return "", nil, 0, "", &httpErr{http.StatusNotFound, "not-found", "no such server"}
 			}
 			switch {
-			case m.Phase == mydc.NodePhaseRemoved:
+			case m.Phase == sfc.NodePhaseRemoved:
 				return "", nil, 0, "", &httpErr{http.StatusConflict, "unchanged", "the server is removed"}
-			case action == mydc.ActionIsolateNode && m.Phase == mydc.NodePhaseIsolated:
+			case action == sfc.ActionIsolateNode && m.Phase == sfc.NodePhaseIsolated:
 				return "", nil, 0, "", &httpErr{http.StatusConflict, "unchanged", "the server is already isolated"}
-			case action == mydc.ActionRestoreNode && m.Phase != mydc.NodePhaseIsolated:
+			case action == sfc.ActionRestoreNode && m.Phase != sfc.NodePhaseIsolated:
 				return "", nil, 0, "", &httpErr{http.StatusConflict, "unchanged", "the server is not isolated"}
 			}
 			if req.Epoch != 0 {

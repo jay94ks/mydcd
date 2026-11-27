@@ -13,16 +13,16 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/engine"
-	"github.com/jay94ks/mydcd/internal/reconcile"
-	"github.com/jay94ks/mydcd/internal/tenancy"
-	"github.com/jay94ks/mydcd/internal/workload"
-	"github.com/jay94ks/mydcd/internal/workload/volumes"
-	"github.com/jay94ks/mydcd/tests/gitfixture"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/engine"
+	"github.com/jay94ks/seafield/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/tenancy"
+	"github.com/jay94ks/seafield/internal/workload"
+	"github.com/jay94ks/seafield/internal/workload/volumes"
+	"github.com/jay94ks/seafield/tests/gitfixture"
 	"github.com/moby/moby/client"
 	"gopkg.in/yaml.v3"
 )
@@ -147,13 +147,13 @@ func verifyManagedAppMoveQuiesce(t *testing.T, ctx context.Context, source, targ
 	if err != nil || !row.State.Applied.Present {
 		t.Fatal(err)
 	}
-	compatibility := sha256.Sum256(append([]byte("mydc-volume-cold-recipe-1\x00"), []byte(row.State.Applied.Spec)...))
+	compatibility := sha256.Sum256(append([]byte("sfc-volume-cold-recipe-1\x00"), []byte(row.State.Applied.Spec)...))
 	c, err := p.Catalog(read().State)
 	if err != nil {
 		t.Fatal(err)
 	}
 	tenant, _ := c.Tenant("tenant")
-	change("move-app-node-scope", "set-nodes", tenant.Revision, control.NodeAssignment{Tenant: "tenant", Nodes: []string{"node-a", "node-b"}})
+	change("move-app-node-scope", "set-nodes", tenant.Revision, control.NodeChangeTo("tenant", tenant.AllowedNodes, []string{"node-a", "node-b"}))
 	for _, scope := range []string{"", "tenant"} {
 		change("move-app-target-quota-"+scope, "set-node-quota", 0, tenancy.NodeLimit{Tenant: scope, Node: "node-b", Capacity: workload.Resources{CPU: 1e9, Memory: 256 << 20}, Networks: 2, MaxConsumers: 8})
 	}
@@ -194,7 +194,7 @@ func verifyManagedAppMoveQuiesce(t *testing.T, ctx context.Context, source, targ
 	spec.Node = "node-b"
 	spec.NodeKey = target.Identity.Public
 	spec.Materialization = "m-app-move"
-	filter := client.Filters{}.Add("label", "org.mydc.owner="+docker.Owner)
+	filter := client.Filters{}.Add("label", "org.sfc.owner="+docker.Owner)
 	prior, err := docker.API.VolumeList(ctx, client.VolumeListOptions{Filters: filter})
 	if err != nil || len(prior.Items) != 0 {
 		t.Fatal("target owner prestate", err)
@@ -253,14 +253,14 @@ func verifyManagedAppMoveQuiesce(t *testing.T, ctx context.Context, source, targ
 		t.Fatal(err)
 	}
 	web := input.Services["web"]
-	web.MyDC.Node = "node-b"
+	web.Sfc.Node = "node-b"
 	if scenario == managedAppVolumeMoveReadonly {
 		for i := range web.Volumes {
 			web.Volumes[i].ReadOnly = true
 		}
 	} else if scenario == managedAppVolumeMoveUnused {
 		web.Volumes = nil
-		delete(web.Environment, "MYDC_VOLUME_FIXTURE")
+		delete(web.Environment, "SFC_VOLUME_FIXTURE")
 		// This fixture image declares VOLUME /data. Cover it explicitly with
 		// an unrelated ephemeral mount, never Docker's implicit named volume
 		// or the restored data volume that this target deliberately leaves idle.
@@ -289,10 +289,10 @@ func verifyManagedAppMoveQuiesce(t *testing.T, ctx context.Context, source, targ
 	// Management owns both named networks. The app borrows its node-local
 	// member by name and cannot create or remove either native Bridge. A lone
 	// member projects only a Bridge; multi-peer TUN/DNS is a separate fixture.
-	targetNetwork := tenancy.TUNDefinition{Tenant: "tenant", Name: "move-target-network", Members: []tenancy.TUNNode{{Node: "node-b", Pools: []tenancy.Subnet{{ID: "pool", Prefix: next, Gateway: next.Addr().Next(), MTU: sourceNetwork.Pools[0].MTU}}, Addresses: []netip.Prefix{netip.MustParsePrefix("198.18.254.2/32")}}}}
+	targetNetwork := tenancy.TUNDefinition{Tenant: "tenant", Name: "move-target-network", Members: []tenancy.TUNNode{{Node: "node-b", Pools: []tenancy.Subnet{{ID: "pool", Prefix: next, Gateway: next.Addr().Next(), MTU: sourceNetwork.Pools[0].MTU}}}}}
 	// Persist target ownership before its management source can create a native
 	// Bridge. Preserve the source manifest's exact JSON numbers and key arrays.
-	manifestPath := os.Getenv("MYDC_NATIVE_MANIFEST")
+	manifestPath := os.Getenv("SFC_NATIVE_MANIFEST")
 	manifestRaw, err := os.ReadFile(manifestPath)
 	if err != nil {
 		t.Fatal(err)
@@ -322,7 +322,7 @@ func verifyManagedAppMoveQuiesce(t *testing.T, ctx context.Context, source, targ
 	}
 	input.Networks = map[string]deployment.ComposeNetwork{"move-target": {External: true, Name: targetNetwork.Name}}
 	decl := input.Volumes["data"]
-	decl.MyDC.Node = "node-b"
+	decl.Sfc.Node = "node-b"
 	input.Volumes["data"] = decl
 	c, err = p.Catalog(read().State)
 	if err != nil {
@@ -429,7 +429,7 @@ func verifyManagedAppMoveQuiesce(t *testing.T, ctx context.Context, source, targ
 	if _, err = resources.Networks.Create(c, "admin", resources.Networks.Revision(), competitor); !errors.Is(err, tenancy.ErrPolicy) {
 		t.Fatal("CIDR competition must reject the reserved subnet", err)
 	}
-	reject("move-target-cidr-competition", "create-tun-network", resources.Networks.Revision(), tenancy.TUNDefinition{Tenant: competitor.Tenant, Name: competitor.ID, Members: []tenancy.TUNNode{{Node: competitor.Node, Pools: competitor.Pools, Addresses: []netip.Prefix{netip.MustParsePrefix("10.99.250.1/32")}}}}, state.ConditionFailed)
+	reject("move-target-cidr-competition", "create-tun-network", resources.Networks.Revision(), tenancy.TUNDefinition{Tenant: competitor.Tenant, Name: competitor.ID, Members: []tenancy.TUNNode{{Node: competitor.Node, Pools: competitor.Pools}}}, state.ConditionFailed)
 	if read().State.Object(control.ResourcesKey) != rootBefore {
 		t.Fatal("rejected competition changed original policy")
 	}

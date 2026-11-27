@@ -9,8 +9,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/certstore"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/certstore"
 )
 
 // CertificateIntent is public original input identity plus a sealed receipt.

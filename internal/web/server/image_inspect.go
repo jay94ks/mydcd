@@ -18,7 +18,7 @@ import (
 )
 
 // Layer view (UI-89) and tag add over the registry API with a pull (and for
-// tags push) credential mydcd issues for the repository.
+// tags push) credential sfcd issues for the repository.
 
 type layerView struct {
 	Digest    string `json:"digest"`

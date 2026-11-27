@@ -12,8 +12,8 @@ import (
 	"errors"
 	"math"
 
-	"github.com/jay94ks/mydcd/internal/schema"
-	"github.com/jay94ks/mydcd/internal/storage"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/storage"
 )
 
 const compiledPrefix = sourcePrefix + "compiled/"

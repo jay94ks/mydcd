@@ -7,7 +7,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/registryclient"
+	"github.com/jay94ks/seafield/internal/registryclient"
 )
 
 func TestSourceContentModeIsFixedByOriginalNativeJournalAndKeepsLegacyJSON(t *testing.T) {

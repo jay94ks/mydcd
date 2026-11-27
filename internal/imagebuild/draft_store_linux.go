@@ -12,7 +12,7 @@ import (
 	"io"
 	"os"
 
-	"github.com/jay94ks/mydcd/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/reconcile"
 	bolt "go.etcd.io/bbolt"
 	"golang.org/x/sys/unix"
 )

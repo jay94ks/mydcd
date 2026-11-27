@@ -7,10 +7,10 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	checker "github.com/jay94ks/mydcd/internal/workload/lifecycle"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/deployment"
+	checker "github.com/jay94ks/seafield/internal/workload/lifecycle"
 )
 
 // AppPlanRequest is an authenticated read-only request. Large reply artifacts
@@ -116,10 +116,10 @@ func (p Policy) AppPlanArtifact(s state.State, session access.Session, at int64,
 		if !ctx.Features["lifecycle"] {
 			return nil, &deployment.InputError{Code: "FEATURE_UNAVAILABLE", Path: "lifecycle"}
 		}
-		if input.MyDC.Tenant != "" && input.MyDC.Tenant != tenant {
+		if input.Sfc.Tenant != "" && input.Sfc.Tenant != tenant {
 			return nil, access.ErrDenied
 		}
-		input.MyDC.Tenant = tenant
+		input.Sfc.Tenant = tenant
 		if _, err := input.ResolveLifecycle(ctx.Checkers); err != nil {
 			return nil, err
 		}

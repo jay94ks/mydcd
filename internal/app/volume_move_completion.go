@@ -9,21 +9,21 @@ import (
 	"errors"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/reconcile"
-	"github.com/jay94ks/mydcd/internal/workload"
-	"github.com/jay94ks/mydcd/internal/workload/volumes"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/workload"
+	"github.com/jay94ks/seafield/internal/workload/volumes"
 )
 
 func (r *Runtime) reportMoveActive(ctx context.Context, job control.VolumeMove) error {
 	if r.activations == nil || r.nativeVolumes == nil {
-		return mydcp.ErrAdmission
+		return sfcp.ErrAdmission
 	}
 	permit, err := r.volumeMovePermit(ctx, job, "active")
 	if err != nil || permit.ActiveIdle == (permit.ActiveTask != nil) {
-		return errors.Join(mydcp.ErrAdmission, err)
+		return errors.Join(sfcp.ErrAdmission, err)
 	}
 	sameCandidate := func(other control.VolumeMovePermit) bool {
 		if other.ActiveIdle != permit.ActiveIdle {
@@ -40,13 +40,13 @@ func (r *Runtime) reportMoveActive(ctx context.Context, job control.VolumeMove) 
 	}
 	current, err := r.controlPolicy.VolumeMovePermit(view.State, r.Identity.Public, control.VolumeMovePermitRequest{Selection: job.Selection(), Kind: "active"}, time.Now().Unix())
 	if err != nil || !sameCandidate(current) || view.State.Object(control.VolumesKey).Revision < permit.RootRevision {
-		return mydcp.ErrAdmission
+		return sfcp.ErrAdmission
 	}
 	proof := volumes.ActiveProof{Binding: job.Binding, Idle: permit.ActiveIdle}
 	if permit.ActiveIdle {
 		ready, err := r.nativeVolumes.Ready(ctx, volumes.NativeKey(job.Target), r.Identity.Private)
 		if err != nil || ready.Spec != job.Target || ready.Owner != job.Binding.Target || ready.Generation != 1 {
-			return errors.Join(mydcp.ErrAdmission, err)
+			return errors.Join(sfcp.ErrAdmission, err)
 		}
 		if err = r.activations.RetainReady(ctx, volumes.NativeKey(job.Target), job.Binding.Scope, job.Binding.Target); err != nil {
 			return err
@@ -56,12 +56,12 @@ func (r *Runtime) reportMoveActive(ctx context.Context, job control.VolumeMove) 
 		}
 	} else {
 		if r.workload == nil {
-			return mydcp.ErrAdmission
+			return sfcp.ErrAdmission
 		}
 		candidate := *permit.ActiveTask
 		material, err := r.controlPolicy.AppTaskMaterial(view.State, candidate.Task)
 		if err != nil || material.Binding.Digest() != candidate.Binding {
-			return mydcp.ErrAdmission
+			return sfcp.ErrAdmission
 		}
 		apps, err := r.controlPolicy.ReadApps(view.State)
 		if err != nil {
@@ -76,19 +76,19 @@ func (r *Runtime) reportMoveActive(ctx context.Context, job control.VolumeMove) 
 		use := material.Binding.Needs().Use
 		taskID, idErr := deployment.ResourceIDFromKey("task", use.Tenant, use.App, candidate.Task.Key)
 		if err != nil || idErr != nil || !execution.MatchesTaskRecipe(taskID, material, spec) {
-			return mydcp.ErrAdmission
+			return sfcp.ErrAdmission
 		}
 		matched := 0
 		for _, mount := range spec.Volumes {
 			if mount.Scope == job.Binding.Scope {
 				if mount.Consumer != candidate.Consumer || mount.NativeKey != volumes.NativeKey(job.Target) || mount.NativeGeneration != 1 {
-					return mydcp.ErrAdmission
+					return sfcp.ErrAdmission
 				}
 				matched++
 			}
 		}
 		if matched != 1 {
-			return mydcp.ErrAdmission
+			return sfcp.ErrAdmission
 		}
 		// Status checks this original native recipe, mounts, complete activation
 		// batch/pins and the original immutable container ID. It never restarts it.
@@ -100,7 +100,7 @@ func (r *Runtime) reportMoveActive(ctx context.Context, job control.VolumeMove) 
 	}
 	latest, err := r.volumeMovePermit(ctx, job, "active")
 	if err != nil || !sameCandidate(latest) {
-		return mydcp.ErrAdmission
+		return sfcp.ErrAdmission
 	}
 	proof.Signature = ed25519.Sign(r.Identity.Private, volumes.ActiveBytes(proof))
 	return r.commitVolumeMoveReport(ctx, control.VolumeMoveReport{Operation: "move", Schema: 1, Selection: job.Selection(), Binding: job.Digest(), Epoch: latest.Epoch, RootRevision: latest.RootRevision, Revision: latest.Revision, At: time.Now().Unix(), Kind: "active", Active: &proof})
@@ -112,7 +112,7 @@ func (r *Runtime) finishMoveSource(ctx context.Context, job control.VolumeMove) 
 		return err
 	}
 	if r.backupArtifacts == nil || r.activations == nil || permit.Move.ReaderClosed == nil {
-		return mydcp.ErrAdmission
+		return sfcp.ErrAdmission
 	}
 	intent := moveArtifactIntent{Schema: 1, Job: job, Reader: permit.Move.ReaderClosed.Consumer}
 	if err = r.backupArtifacts.moveSourceClosed(ctx, intent); err != nil {
@@ -124,7 +124,7 @@ func (r *Runtime) finishMoveSource(ctx context.Context, job control.VolumeMove) 
 	}
 	gate, err := r.activations.Checkpoint(cold.Writer)
 	if err != nil || gate.FenceThrough < job.Binding.SourceOwnerRevision || gate.Starting != nil {
-		return mydcp.ErrAdmission
+		return sfcp.ErrAdmission
 	}
 	latest, err := r.volumeMovePermit(ctx, job, "cleanup-source")
 	if err != nil {
@@ -148,11 +148,11 @@ type moveRestoreReceiptDriver struct {
 
 func (d moveRestoreReceiptDriver) Execute(ctx context.Context, key string, op reconcile.Operation) (reconcile.Outcome, error) {
 	if key != moveRestoreKey(d.intent) || op.Kind != reconcile.Remove {
-		return reconcile.EffectUnknown, mydcp.ErrAdmission
+		return reconcile.EffectUnknown, sfcp.ErrAdmission
 	}
 	original, err := d.r.moveRestoreBinding(key, op.Target)
 	if err != nil || original.digest() != d.intent.digest() {
-		return reconcile.EffectUnknown, mydcp.ErrAdmission
+		return reconcile.EffectUnknown, sfcp.ErrAdmission
 	}
 	if _, err = d.r.volumeMovePermit(ctx, d.intent.Job, "cleanup-target"); err != nil {
 		return reconcile.EffectUnknown, err
@@ -169,20 +169,20 @@ type activeMoveReceiver struct{ r *Runtime }
 
 func (d activeMoveReceiver) Authorize(ctx context.Context, b moveReceiveIntent, cleanup bool) error {
 	if !cleanup {
-		return mydcp.ErrAdmission
+		return sfcp.ErrAdmission
 	}
 	p, err := d.r.volumeMovePermit(ctx, b.Job, "cleanup-target")
 	if err != nil {
 		return err
 	}
 	if p.Move.Manifest == nil || p.Move.Manifest.Binding != b.Manifest.Binding || p.Move.Manifest.ArchiveReceipt() != b.Manifest.ArchiveReceipt() {
-		return mydcp.ErrAdmission
+		return sfcp.ErrAdmission
 	}
 	return nil
 }
 
-func (activeMoveReceiver) Transfer(context.Context, moveReceiveIntent, uint64, [32]byte, mydcp.VolumeSink) error {
-	return mydcp.ErrAdmission
+func (activeMoveReceiver) Transfer(context.Context, moveReceiveIntent, uint64, [32]byte, sfcp.VolumeSink) error {
+	return sfcp.ErrAdmission
 }
 
 func (r *Runtime) finishMoveTarget(ctx context.Context, job control.VolumeMove) error {
@@ -193,7 +193,7 @@ func (r *Runtime) finishMoveTarget(ctx context.Context, job control.VolumeMove) 
 		return err
 	}
 	if r.backupArtifacts == nil || r.volumeRestores == nil || r.nativeVolumes == nil || permit.Move.Manifest == nil || permit.Move.Preparation == nil {
-		return mydcp.ErrAdmission
+		return sfcp.ErrAdmission
 	}
 	b := moveReceiveIntent{Schema: 1, Job: job, Manifest: *permit.Move.Manifest}
 	if err = r.nativeVolumes.CheckColdReleased(permit.Move.Preparation.Target, job.StagingConsumer()); err != nil {
@@ -210,7 +210,7 @@ func (r *Runtime) finishMoveTarget(ctx context.Context, job control.VolumeMove) 
 		return reconcile.ErrPending
 	}
 	if row.State.Applied.Present && row.State.Applied != resource {
-		return mydcp.ErrAdmission
+		return sfcp.ErrAdmission
 	}
 	if !row.State.Applied.Present && (row.State.GenerationFloor != 1 || row.State.Desired.Revision < 2 || row.State.Desired.Present || row.State.Pending != nil || row.State.LastID < 2) {
 		return reconcile.ErrPending

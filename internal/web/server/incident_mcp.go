@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/web/store"
+	"github.com/jay94ks/seafield/internal/web/store"
 )
 
 // MCP in incident diagnosis (W2.3a): read tools set to "diagnose" that

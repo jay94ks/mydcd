@@ -7,10 +7,10 @@ import (
 	"errors"
 	"slices"
 
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/imagebuild"
-	"github.com/jay94ks/mydcd/internal/mydcp"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/imagebuild"
+	"github.com/jay94ks/seafield/internal/sfcp"
 )
 
 // The existing module loop collects unused editor bodies, including fenced
@@ -27,13 +27,13 @@ func (r *Runtime) reconcileImageBuildDraftFiles(ctx context.Context, view cluste
 	r.life.RLock()
 	defer r.life.RUnlock()
 	if r.closed || r.ctx.Err() != nil || r.nodeRoots == nil || r.reports == nil {
-		return mydcp.ErrAdmission
+		return sfcp.ErrAdmission
 	}
 	r.imageBuildMu.Lock()
 	defer r.imageBuildMu.Unlock()
 	view, err = r.currentView(ctx)
 	if err != nil || view.Local {
-		return errors.Join(mydcp.ErrAdmission, err)
+		return errors.Join(sfcp.ErrAdmission, err)
 	}
 	currentPolicy, err := r.controlPolicy.Current(view.State)
 	if err != nil {

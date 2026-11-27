@@ -11,7 +11,7 @@ import (
 	"strings"
 
 	"github.com/distribution/reference"
-	"github.com/jay94ks/mydcd/internal/cluster/lifecycle"
+	"github.com/jay94ks/seafield/internal/cluster/lifecycle"
 )
 
 // JobSpec fixes the accepted inputs. Public ARGs and Secret references remain
@@ -34,7 +34,7 @@ type JobSpec struct {
 	CreatedAt                       uint64
 }
 
-func (s JobSpec) Digest() [32]byte { return digestJSON("mydc-imagebuild-job-1", s) }
+func (s JobSpec) Digest() [32]byte { return digestJSON("sfc-imagebuild-job-1", s) }
 func (s JobSpec) Shape() error {
 	if s.Schema != 1 || !lifecycle.ValidID(s.ID) || s.Cluster == ([32]byte{}) || s.Policy.Validate(s.Cluster) != nil || s.Context.Validate() != nil || !s.Context.Under(s.Policy) || s.Context.Tenant != s.Tenant || s.Scope.Validate() != nil || s.Scope.Cluster != s.Cluster || s.Scope.Tenant != s.Tenant || s.Scope.Context != s.Context.ID || s.Scope.Root != s.Context.Root || s.Scope.Dockerfile != s.Context.Dockerfile || s.Seal.Schema != 1 || s.Seal.Scope != s.Scope.Hash() || s.Seal.ZIP != s.Scope.Digest || s.Seal.Tree == ([32]byte{}) || s.Seal.Entries == 0 || s.Seal.Entries > MaxTreeEntries || s.Seal.ExpandedBytes < 0 || s.Seal.ExpandedBytes > s.Scope.ExpandedLimit || s.Seal.ExpandedBytes > s.Policy.WorkspaceBytes || len(s.Seal.Signature) != ed25519.SignatureSize || s.Version != VersionID(s.Seal) || s.Number == 0 || s.ContextRevision == 0 || s.PolicyRevision == 0 || s.RegistryGeneration == 0 || s.RegistrySpec == ([32]byte{}) || s.CreatedAt == 0 || s.CreatedAt > math.MaxInt64-s.Policy.Seconds {
 		return ErrInvalid
@@ -112,7 +112,7 @@ type JobClosure struct {
 func JobClosureBytes(r JobClosure) []byte {
 	r.Signature = nil
 	raw, _ := json.Marshal(r)
-	return append([]byte("mydc-imagebuild-job-closure-1\x00"), raw...)
+	return append([]byte("sfc-imagebuild-job-closure-1\x00"), raw...)
 }
 func (c JobClosure) Valid(s JobSpec) bool {
 	return c.Schema == 1 && c.Job == s.Digest() && c.Native != ([32]byte{}) && c.At >= s.CreatedAt && c.At <= math.MaxInt64 && c.Result.Valid(s) && ed25519.Verify(s.Scope.Root.Key[:], JobClosureBytes(c), c.Signature)

@@ -6,7 +6,7 @@ import (
 	"bytes"
 	"encoding/json"
 
-	"github.com/jay94ks/mydcd/internal/access"
+	"github.com/jay94ks/seafield/internal/access"
 )
 
 // AppDocument binds original user bytes to the same effective plan. Overrides
@@ -140,11 +140,11 @@ func matchesBlueprintInput(input Compose, b Blueprint, defaultNode *string) bool
 	if input.Name == "" {
 		input.Name = b.d.App
 	}
-	if input.MyDC.Tenant == "" {
-		input.MyDC.Tenant = b.d.Tenant
+	if input.Sfc.Tenant == "" {
+		input.Sfc.Tenant = b.d.Tenant
 	}
-	if input.MyDC.Deployment == "" {
-		input.MyDC.Deployment = b.d.Deployment
+	if input.Sfc.Deployment == "" {
+		input.Sfc.Deployment = b.d.Deployment
 	}
 	// Compile resolves omitted placement/resource defaults from the captured
 	// node admission. Check these permitted resolutions without replaying any
@@ -154,19 +154,19 @@ func matchesBlueprintInput(input Compose, b Blueprint, defaultNode *string) bool
 		if !ok {
 			return false
 		}
-		if len(source.MyDC.Nodes) > 0 {
+		if len(source.Sfc.Nodes) > 0 {
 			// Per-instance defaults/addresses live in the frozen Task goals.
 			// The original logical service remains the same declaration.
 			input.Services[name] = source
 			continue
 		}
-		if source.MyDC.Node == "" {
-			source.MyDC.Node = bound.MyDC.Node
+		if source.Sfc.Node == "" {
+			source.Sfc.Node = bound.Sfc.Node
 			if defaultNode != nil {
-				source.MyDC.Node = *defaultNode
+				source.Sfc.Node = *defaultNode
 			}
 		}
-		node, ok := b.d.Nodes[bound.MyDC.Node]
+		node, ok := b.d.Nodes[bound.Sfc.Node]
 		if !ok {
 			return false
 		}
@@ -197,8 +197,8 @@ func matchesBlueprintInput(input Compose, b Blueprint, defaultNode *string) bool
 		input.Services[name] = source
 	}
 	for name, source := range input.Volumes {
-		if source.MyDC.Node == "" {
-			source.MyDC.Node = b.d.Input.Volumes[name].MyDC.Node
+		if source.Sfc.Node == "" {
+			source.Sfc.Node = b.d.Input.Volumes[name].Sfc.Node
 		}
 		input.Volumes[name] = source
 	}

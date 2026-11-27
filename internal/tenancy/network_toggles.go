@@ -5,7 +5,7 @@ package tenancy
 import (
 	"slices"
 
-	"github.com/jay94ks/mydcd/internal/access"
+	"github.com/jay94ks/seafield/internal/access"
 )
 
 // NetworkToggle names one on/off option of a TUN network. A member lists the
@@ -30,6 +30,8 @@ var toggleRules = map[NetworkToggle]toggleRule{
 	// On only with one server: join is refused while it is on, and turning
 	// it on needs a lone member. Off is allowed at any size.
 	ToggleLocal: {allowed: func(on bool, members int) bool { return !on || members <= 1 }},
+	// At any size: it only says whether another tenant may bridge to it.
+	ToggleBridgeInbound: {allowed: func(bool, int) bool { return true }},
 }
 
 // validToggles: known toggles, sorted, no repeats, on a TUN member only.

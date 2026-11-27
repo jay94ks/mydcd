@@ -15,13 +15,13 @@ import (
 
 	"github.com/google/nftables"
 	"github.com/google/nftables/expr"
-	"github.com/jay94ks/mydcd/internal/engine"
+	"github.com/jay94ks/seafield/internal/engine"
 )
 
 // Native nft transaction/readback only, guarded by an owned namespace. The
 // two-owner Docker/packet fixture must prove real service access/default deny.
 func TestRealBoundaryTenantIsolationOwnedAtomicPolicy(t *testing.T) {
-	host, authority := os.Getenv("MYDC_KERNEL_HOST_NETNS"), os.Getenv("MYDC_KERNEL_TEST_OWNER")
+	host, authority := os.Getenv("SFC_KERNEL_HOST_NETNS"), os.Getenv("SFC_KERNEL_TEST_OWNER")
 	if host == "" {
 		t.Skip("owned isolated network namespace and prior rollback plan required")
 	}
@@ -85,7 +85,7 @@ func TestRealBoundaryTenantIsolationOwnedAtomicPolicy(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := isolationRules(spec)
-	fault := &nftables.Rule{Table: table, Chain: want.chains[1], Exprs: []expr.Any{&expr.Verdict{Kind: expr.VerdictReturn}}, UserData: []byte("mydc-isolation-owned-fault-1")}
+	fault := &nftables.Rule{Table: table, Chain: want.chains[1], Exprs: []expr.Any{&expr.Verdict{Kind: expr.VerdictReturn}}, UserData: []byte("sfc-isolation-owned-fault-1")}
 	// Register before the fault write; an unknown ACK must still roll back.
 	t.Cleanup(func() {
 		exists, err := IsolationExists(spec.Owner)

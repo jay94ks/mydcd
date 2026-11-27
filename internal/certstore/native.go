@@ -11,7 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 
-	"github.com/jay94ks/mydcd/internal/storage"
+	"github.com/jay94ks/seafield/internal/storage"
 	bolt "go.etcd.io/bbolt"
 )
 

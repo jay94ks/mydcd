@@ -15,7 +15,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/jay94ks/mydcd/internal/cluster/lifecycle"
+	"github.com/jay94ks/seafield/internal/cluster/lifecycle"
 )
 
 var (
@@ -71,7 +71,7 @@ type Event struct {
 func ValidKind(kind string) bool {
 	return slices.Contains([]string{"node-shell-opened", "node-shell-closed", "node-shell-denied", "standalone-extended", "task-restarted", "task-exited", "probe-failed", "node-unreachable", "node-resource-low", "tunnel-down", "tunnel-up", "registry-stopped", "quorum-degraded", "cert-expiring", "event-source-gap",
 		"cd-candidate-created", "cd-approval-required", "cd-approved", "cd-rejected", "cd-sync-started", "cd-sync-succeeded", "cd-sync-failed", "cd-drift-detected", "cd-paused", "cd-resumed", "cd-rolled-back",
-		"raft-compact-started", "raft-compact-completed", "node-cache-cleaned", "tunnel-reconnected", "task-restart-requested", "node-cordoned", "node-uncordoned", "cert-expired", "ingress-blocked", "ingress-unblocked", "ingress-backends-empty", "ingress-backends-restored", "ingress-listener-down", "ingress-listener-up", "ingress-certificate-missing", "ingress-source-rejected-spike"}, kind)
+		"raft-compact-started", "raft-compact-completed", "node-cache-cleaned", "tunnel-reconnected", "task-restart-requested", "node-cordoned", "node-uncordoned", "cert-expired", "ingress-blocked", "ingress-unblocked", "ingress-backends-empty", "ingress-backends-restored", "ingress-listener-down", "ingress-listener-up", "ingress-certificate-missing", "ingress-source-rejected-spike", "node-disk-formatted", "node-disk-mounted", "node-disk-unmounted", "node-disk-failed", "node-firewall-changed", "node-firewall-failed", "container-logs-cleared", "cluster-firewall-changed"}, kind)
 }
 func text(s string, max int) bool { return len(s) <= max && !strings.ContainsAny(s, "\x00\r\n") }
 func digest(s string) bool {
@@ -152,7 +152,7 @@ type Record struct {
 func SigningBytes(r Record) []byte {
 	r.Signature = nil
 	b, _ := json.Marshal(r)
-	return append([]byte("mydc-diagnostic-event-1\x00"), b...)
+	return append([]byte("sfc-diagnostic-event-1\x00"), b...)
 }
 func (r Record) Origin() string {
 	return hex.EncodeToString(r.SourceKey[:]) + "/" + hex.EncodeToString(r.Stream[:])
@@ -186,7 +186,7 @@ type Batch struct {
 func BatchBytes(b Batch) []byte {
 	b.Signature = nil
 	r, _ := json.Marshal(b)
-	return append([]byte("mydc-diagnostic-event-batch-1\x00"), r...)
+	return append([]byte("sfc-diagnostic-event-batch-1\x00"), r...)
 }
 func (b Batch) Valid() bool {
 	if b.Kind != "node-events" || b.Schema != 1 || b.Cluster == ([32]byte{}) || b.Key == ([32]byte{}) || !lifecycle.ValidID(b.Node) || b.Stream == ([16]byte{}) || b.Floor == 0 || b.Floor > b.Last+1 || b.At == 0 || len(b.Records) > MaxBatch {

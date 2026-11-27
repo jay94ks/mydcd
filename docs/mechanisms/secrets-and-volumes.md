@@ -18,6 +18,6 @@ Secret 값 입력과 backup/restore/이관은 명시 작업이다. `app.yaml`과
 
 앱이 임의 host 경로를 자동 생성하거나 fixed Volume을 다른 노드로 옮기지 않는다. 등록 해제와 원 데이터 삭제를 구분한다.
 
-이관은 원 writer의 확실한 종료/fence와 MYDCP 전송·복원 결과를 정산한 뒤 소유권과 consumer를 연결한다. timeout이나 응답 유실은 새 copy/새 operation을 자동 실행할 근거가 아니다. 원 작업·보존 source·전송/복원 참조를 유지해 결과를 확인한다.
+이관은 원 writer의 확실한 종료/fence와 SFCP 전송·복원 결과를 정산한 뒤 소유권과 consumer를 연결한다. timeout이나 응답 유실은 새 copy/새 operation을 자동 실행할 근거가 아니다. 원 작업·보존 source·전송/복원 참조를 유지해 결과를 확인한다.
 
 [자원표](../architecture/resource-ownership.md), [Secret 예시](../examples/php-mysql/secret-groups.example.yaml), [fixed Volume 예시](../examples/php-mysql/fixed-volume.example.app.yaml)를 참조한다. 상세 계약은 Secret Group·Vault/Volume·노드 저장에 있다.

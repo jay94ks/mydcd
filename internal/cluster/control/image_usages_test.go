@@ -10,10 +10,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/imagesource"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/imagesource"
 )
 
 // Real shared planner/reducer/signatures; lifecycle/native success is simulated
@@ -21,7 +21,7 @@ import (
 func TestImageUsesAndCacheShareAcceptedClaimsAndPreviousVersionReferences(t *testing.T) {
 	f := managedDNSTaskCoreFixture(t)
 	image := "docker.io/library/php@sha256:" + strings.Repeat("a", 64)
-	raw := []byte("name: source-view\nservices:\n  web:\n    image: " + image + "\n    cpus: '0.1'\n    mem_limit: 16m\n    networks: {lan: {ipv4_address: 10.80.1.9}}\n    x-mydc: {node: node-a}\nnetworks:\n  lan: {external: true, name: services}\n")
+	raw := []byte("name: source-view\nservices:\n  web:\n    image: " + image + "\n    cpus: '0.1'\n    mem_limit: 16m\n    networks: {lan: {ipv4_address: 10.80.1.9}}\n    x-sfc: {node: node-a}\nnetworks:\n  lan: {external: true, name: services}\n")
 	acceptSourceVersion(t, f, "uses-first", raw)
 	apps, err := f.p.Apps(f.s)
 	if err != nil {

@@ -4,12 +4,13 @@ package control
 
 import (
 	"crypto/ed25519"
+	"slices"
 	"strings"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/imagesource"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/imagesource"
 )
 
 func resolveTrust(t *testing.T, f *nodeStorageFixture, rules []access.TrustRule) {
@@ -19,7 +20,21 @@ func resolveTrust(t *testing.T, f *nodeStorageFixture, rules []access.TrustRule)
 		t.Fatal(err)
 	}
 	tenant, _ := c.Tenant("tenant")
-	c, err = c.SetTrust("manager", "tenant", tenant.Revision, rules)
+	var add, remove []access.TrustRule
+	for _, r := range rules {
+		if !slices.Contains(tenant.ImageSources, r) {
+			add = append(add, r)
+		}
+	}
+	for _, r := range tenant.ImageSources {
+		if !slices.Contains(rules, r) {
+			remove = append(remove, r)
+		}
+	}
+	if len(add)+len(remove) == 0 {
+		return
+	}
+	c, err = c.ChangeTrust("manager", "tenant", tenant.Revision, add, remove)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -8,10 +8,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/registryclient"
-	"github.com/jay94ks/mydcd/internal/userauth"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/registryclient"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/userauth"
 )
 
 type imageContentBody struct {
@@ -29,11 +29,11 @@ func (r *imageContentBody) Close() error {
 func (r *Runtime) currentImageContent(ctx context.Context, read control.ImageContentRead) error {
 	view, err := r.currentView(ctx)
 	if err != nil {
-		return mydcp.ErrAdmission
+		return sfcp.ErrAdmission
 	}
 	current, err := r.controlPolicy.CurrentImageContent(view.State, read, time.Now().Unix())
 	if err != nil || current.Resolve.Target.Code != "" || current.Resolve.Target.Owner != r.Identity.Public {
-		return mydcp.ErrAdmission
+		return sfcp.ErrAdmission
 	}
 	if run := current.Resolve.Target.Managed; run != nil {
 		_, _, err = r.registryCurrent(ctx, *run)
@@ -42,7 +42,7 @@ func (r *Runtime) currentImageContent(ctx context.Context, read control.ImageCon
 	if source := current.Resolve.Target.External; source != nil {
 		work, err := r.externalRegistryWork(ctx, *source)
 		if err != nil || work.Inputs.ReadSet != current.Resolve.Target.ExternalReadSet {
-			return mydcp.ErrAdmission
+			return sfcp.ErrAdmission
 		}
 	}
 	return nil
@@ -78,7 +78,7 @@ func (r *Runtime) openImageContentTarget(ctx context.Context, target control.Ima
 			work, cause := r.externalRegistryWork(ctx, *source)
 			if cause != nil || work.Inputs.ReadSet != target.ExternalReadSet {
 				cleanup()
-				return userauth.ImageContentSource{}, mydcp.ErrAdmission
+				return userauth.ImageContentSource{}, sfcp.ErrAdmission
 			}
 			release, err = r.acquireExternalReader(work)
 			if err == nil {
@@ -112,7 +112,7 @@ func (r *Runtime) openImageContentTarget(ctx context.Context, target control.Ima
 		}
 		cleanup()
 		if err == nil {
-			err = mydcp.ErrAdmission
+			err = sfcp.ErrAdmission
 		}
 		return userauth.ImageContentSource{}, err
 	}

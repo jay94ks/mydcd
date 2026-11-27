@@ -20,13 +20,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/config"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/userauth"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/config"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/userauth"
 	"golang.org/x/sys/unix"
 	"gopkg.in/yaml.v3"
 )
@@ -40,11 +40,11 @@ import (
 // This is a single installed node and tests Unix entry plus real TLS entry,
 // not cross-node relay or an arbitrary detached shell-descendant guarantee.
 func TestRQ14NodeShellManagedRuntimeOwnedRootFS(t *testing.T) {
-	if os.Getenv("MYDC_NODE_SHELL_NATIVE_CHILD") == "1" && os.Getenv("MYDC_NODE_SHELL_RUNTIME_CHILD") != "1" {
+	if os.Getenv("SFC_NODE_SHELL_NATIVE_CHILD") == "1" && os.Getenv("SFC_NODE_SHELL_RUNTIME_CHILD") != "1" {
 		t.Fatal("runtime child selector missing")
 	}
-	if os.Getenv("MYDC_NODE_SHELL_NATIVE_CHILD") != "1" && os.Getenv("MYDC_TEST_NODE_SHELL_RUNTIME") != "1" {
-		t.Skip("set MYDC_TEST_NODE_SHELL_RUNTIME=1 and explicit prebuilt daemon/CLI paths")
+	if os.Getenv("SFC_NODE_SHELL_NATIVE_CHILD") != "1" && os.Getenv("SFC_TEST_NODE_SHELL_RUNTIME") != "1" {
+		t.Skip("set SFC_TEST_NODE_SHELL_RUNTIME=1 and explicit prebuilt daemon/CLI paths")
 	}
 	nodeShellOwnedRootFS(t, true)
 }
@@ -52,7 +52,7 @@ func TestRQ14NodeShellManagedRuntimeOwnedRootFS(t *testing.T) {
 func nodeShellRuntimeInputs(t *testing.T) map[string]string {
 	t.Helper()
 	out := map[string]string{}
-	for env, name := range map[string]string{"MYDC_TEST_NODE_SHELL_DAEMON": "mydcd", "MYDC_TEST_NODE_SHELL_CLI": "mydc"} {
+	for env, name := range map[string]string{"SFC_TEST_NODE_SHELL_DAEMON": "sfcd", "SFC_TEST_NODE_SHELL_CLI": "sfc"} {
 		path := os.Getenv(env)
 		info, err := os.Lstat(path)
 		if err != nil || !filepath.IsAbs(path) || filepath.Clean(path) != path || !info.Mode().IsRegular() || info.Mode().Perm()&0111 == 0 {
@@ -64,7 +64,7 @@ func nodeShellRuntimeInputs(t *testing.T) map[string]string {
 }
 func nodeShellRuntimeBindInputs(t *testing.T, root string) {
 	t.Helper()
-	dir := filepath.Join(root, "opt/mydc")
+	dir := filepath.Join(root, "opt/sfc")
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -112,7 +112,7 @@ func nodeShellRuntimeCLI(t *testing.T, ctx context.Context, home, profile string
 	} else {
 		flags = append(flags, "--wallet-password-fd", "3", "--no-input")
 	}
-	command := exec.CommandContext(ctx, "/opt/mydc/mydc", append(flags, args...)...)
+	command := exec.CommandContext(ctx, "/opt/sfc/sfcli", append(flags, args...)...)
 	command.Env = append(os.Environ(), "HOME="+home)
 	command.ExtraFiles = extras
 	var out, diagnostic bytes.Buffer
@@ -152,12 +152,12 @@ func nodeShellRuntimeNativeAssertions(t *testing.T, ctx context.Context) {
 	endpoint := packet.LocalAddr().String()
 	_ = packet.Close()
 	nodeConfig := filepath.Join(root, "node.yaml")
-	configText := fmt.Sprintf("version: 1\nnode:\n id: node-a\n listen: '%s'\n state_dir: %s/state\n identity_dir: %s/node-key\n management_socket: %s/mydc.sock\nmodules:\n network: {enabled: false}\n workload: {enabled: false}\n ingress: {enabled: false}\n", endpoint, root, root, root)
+	configText := fmt.Sprintf("version: 1\nnode:\n id: node-a\n listen: '%s'\n state_dir: %s/state\n identity_dir: %s/node-key\n management_socket: %s/sfcdp.sock\nmodules:\n network: {enabled: false}\n workload: {enabled: false}\n ingress: {enabled: false}\n", endpoint, root, root, root)
 	if err = os.WriteFile(nodeConfig, []byte(configText), 0600); err != nil {
 		t.Fatal(err)
 	}
 	tlsProfile := filepath.Join(root, "tls.yaml")
-	init := exec.CommandContext(ctx, "/opt/mydc/mydcd", "--config", nodeConfig, "init", "--admin-public-key", keys["admin"].Actor(), "--request-id", "shell-original-init", "--client-config-out", tlsProfile)
+	init := exec.CommandContext(ctx, "/opt/sfc/sfcd", "--config", nodeConfig, "init", "--admin-public-key", keys["admin"].Actor(), "--request-id", "shell-original-init", "--client-config-out", tlsProfile)
 	init.Stdout, init.Stderr = io.Discard, io.Discard
 	if err = init.Run(); err != nil {
 		t.Fatal("actual managed CLI init", err)
@@ -183,7 +183,7 @@ func nodeShellRuntimeNativeAssertions(t *testing.T, ctx context.Context) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	profile.Peers[0].Endpoint = "unix://" + filepath.Join(root, "mydc.sock")
+	profile.Peers[0].Endpoint = "unix://" + filepath.Join(root, "sfcdp.sock")
 	raw, err = yaml.Marshal(profile)
 	if err != nil {
 		t.Fatal(err)
@@ -213,7 +213,7 @@ func nodeShellRuntimeNativeAssertions(t *testing.T, ctx context.Context) {
 	}
 	defer stopDaemon()
 	startDaemon := func() {
-		daemon = exec.CommandContext(ctx, "/opt/mydc/mydcd", "--config", nodeConfig, "run")
+		daemon = exec.CommandContext(ctx, "/opt/sfc/sfcd", "--config", nodeConfig, "run")
 		daemon.Stdout, daemon.Stderr = io.Discard, io.Discard
 		if err := daemon.Start(); err != nil {
 			t.Fatal(err)
@@ -236,7 +236,7 @@ func nodeShellRuntimeNativeAssertions(t *testing.T, ctx context.Context) {
 	}
 	startDaemon()
 	wait("managed Unix listener", func() bool {
-		info, err := os.Lstat(filepath.Join(root, "mydc.sock"))
+		info, err := os.Lstat(filepath.Join(root, "sfcdp.sock"))
 		return err == nil && info.Mode()&os.ModeSocket != 0
 	})
 	home := func(name string) string {
@@ -280,20 +280,20 @@ func nodeShellRuntimeNativeAssertions(t *testing.T, ctx context.Context) {
 		ok(login.home, login.profile, "wallet", "init")
 		ok(login.home, login.profile, "login", "--username", login.name, "--method", "private-key", "--key-file", filepath.Join(root, login.name+"-key/key.pem"))
 	}
-	// This SDK client authenticates independently over real MYDCP/TLS. It
+	// This SDK client authenticates independently over real SFCP/TLS. It
 	// reads the same committed policy/owner reports produced by CLI operations.
 	self, err := identity.Ephemeral()
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer clear(self.Private)
-	peer := mydcp.Peer{ID: "node-a", Endpoint: endpoint, Policy: mydcp.Policy{Key: mydcp.Identity(nodeKey), Respond: true}}
-	mesh, err := mydcp.NewTransport(self, clusterID, func(key mydcp.Identity) (mydcp.Peer, bool) { return peer, key == peer.Key })
+	peer := sfcp.Peer{ID: "node-a", Endpoint: endpoint, Policy: sfcp.Policy{Key: sfcp.Identity(nodeKey), Respond: true}}
+	mesh, err := sfcp.NewTransport(self, clusterID, func(key sfcp.Identity) (sfcp.Peer, bool) { return peer, key == peer.Key })
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer mesh.Close()
-	client := userauth.Client{Self: self, Mesh: mesh, Cluster: clusterID, Peers: []mydcp.Peer{peer}}
+	client := userauth.Client{Self: self, Mesh: mesh, Cluster: clusterID, Peers: []sfcp.Peer{peer}}
 	adminSession, err := client.Login(ctx, peer, "admin", keys["admin"].Private)
 	if err != nil {
 		t.Fatal("actual current admin TLS login", err)
@@ -373,8 +373,8 @@ func nodeShellRuntimeNativeAssertions(t *testing.T, ctx context.Context) {
 		return false
 	})
 	first := startNodeShellRuntimePTY(t, ctx, aliceHome, unixProfile, "shell-bob-close")
-	first.send(t, "printf 'RQ14-IDENTITY='; whoami; printf 'RQ14-ACTOR=%s\\n' \"$MYDC_USER\"\n")
-	wait("actual nonroot dedicated SSH attribution", func() bool { return first.contains("RQ14-IDENTITY=mydc-shell") && first.contains("RQ14-ACTOR=alice") })
+	first.send(t, "printf 'RQ14-IDENTITY='; whoami; printf 'RQ14-ACTOR=%s\\n' \"$SFC_USER\"\n")
+	wait("actual nonroot dedicated SSH attribution", func() bool { return first.contains("RQ14-IDENTITY=sfc-shell") && first.contains("RQ14-ACTOR=alice") })
 	if err := unix.IoctlSetWinsize(int(first.slave.Fd()), unix.TIOCSWINSZ, &unix.Winsize{Row: 40, Col: 120}); err != nil {
 		t.Fatal("owned CLI PTY resize", err)
 	}
@@ -549,7 +549,7 @@ func startNodeShellRuntimePTY(t *testing.T, ctx context.Context, home, profile, 
 	if len(resume) != 0 && resume[0] {
 		args = append(args, "--resume-original")
 	}
-	p.command = exec.CommandContext(ctx, "/opt/mydc/mydc", args...)
+	p.command = exec.CommandContext(ctx, "/opt/sfc/sfcli", args...)
 	p.command.Env = append(os.Environ(), "HOME="+home)
 	p.command.ExtraFiles = []*os.File{password}
 	p.command.Stdin, p.command.Stdout, p.command.Stderr = slave, slave, slave

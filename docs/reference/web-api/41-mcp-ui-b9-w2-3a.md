@@ -1,6 +1,6 @@
 ## MCP 연동 (UI-B9, W2.3a)
 
-전부 mydc-web 몫이다. 시스템 관리자만 읽고 바꾼다(요청마다 mydcd whoami). 토큰은 봉인 저장소(`mcp-token-{name}`)에만 있고 bbolt·로그·응답에 남지 않는다(`last4`만). 도구의 응답 본문은 저장하지 않는다. 클라이언트는 Streamable HTTP(프로토콜 2025-06-18; 2025-03-26도 받음)로 `initialize` → `notifications/initialized` → `tools/list`(cursor로 10쪽, 도구 200개까지, 응답 1 MiB까지)를 부르고, JSON과 SSE 응답을 다 읽으며 `Mcp-Session-Id`를 이어 보낸다. 주소 규칙은 웹훅과 같다(https만, 사설·루프백·링크 로컬·특수 주소는 저장할 때와 접속할 때 둘 다 막고, 리다이렉트는 따르지 않음). 한 번 연결에 15초.
+전부 sfc-web 몫이다. 시스템 관리자만 읽고 바꾼다(요청마다 sfcd whoami). 토큰은 봉인 저장소(`mcp-token-{name}`)에만 있고 bbolt·로그·응답에 남지 않는다(`last4`만). 도구의 응답 본문은 저장하지 않는다. 클라이언트는 Streamable HTTP(프로토콜 2025-06-18; 2025-03-26도 받음)로 `initialize` → `notifications/initialized` → `tools/list`(cursor로 10쪽, 도구 200개까지, 응답 1 MiB까지)를 부르고, JSON과 SSE 응답을 다 읽으며 `Mcp-Session-Id`를 이어 보낸다. 주소 규칙은 웹훅과 같다(https만, 사설·루프백·링크 로컬·특수 주소는 저장할 때와 접속할 때 둘 다 막고, 리다이렉트는 따르지 않음). 한 번 연결에 15초.
 
 - `GET /system/mcp` → `{servers:[서버]}`. 서버: `{name, url, auth:{kind: bearer|oauth|none, set, last4?, expiresAt?(oauth 접근 토큰 만료), needsLogin?(갱신 실패, 다시 로그인)}, enabled, state: ok|error|unchecked, error?, checkedAt?, info?:{serverName, version?}, catalogRevision, tools:[도구], users:{systemAdmins: true, tenants:[t…]}, usedBy:[지침 범위], createdBy, createdAt, revision}`. `users.tenants`가 비면 시스템 관리자만 쓴다.
   - 도구: `{name, title?, description, readOnlyHint, args:[{name, type?, description?, required?}], kind: read|change|notify, coordinator, incident: off|diagnose|notify|propose-approve|propose-auto, tenants:[t…]|"all", new, auto?:{floor, inputs:{arg:{kind: max|incident|template|fixed, value?}}, perIncident, perDay, revert:{tool?|irreversible}, signals?}, hint?}`. 이름이 `[A-Za-z0-9_-]{1,64}`가 아닌 도구는 목록에서 뺀다.
@@ -17,10 +17,10 @@
   - `POST /system/mcp/{name}/oauth/login` → `{name, loginUrl, expiresAt}`(다시 로그인, 끝날 때까지 옛 토큰을 쓴다). OAuth 서버가 아니면 422.
   - 접근 토큰은 끝나기 1분 전부터 쓸 때 갱신 토큰으로 바꾼다. 갱신이 안 되면 `needsLogin: true`이고 호출은 `mcp-connect`로 실패한다.
   - PUT으로 `auth.kind: oauth`는 줄 수 없고(위 경로로), OAuth 서버의 `url`을 바꾸면 422 `login-required`. bearer/none으로 바꾸면 OAuth 토큰을 지운다.
-- `DELETE /system/mcp/{name} {confirmName}` → 204. 이름이 다르면 422 `confirm-name`. 봉인 토큰을 지우고, 지금 지침의 `mcpServers`에서도 뺀다(지난 버전은 그대로).
+- `DELETE /system/mcp/{name} {confirmName}` → 200 `{trash:{id, expiresAt}}`([지운 것](53-ops-trash.md), 토큰 없이). 이름이 다르면 422 `confirm-name`. 봉인 토큰을 지우고, 지금 지침의 `mcpServers`에서도 뺀다(지난 버전은 그대로).
 - `POST /system/mcp/{name}/tools/{tool}/test {incident}` → `{steps:[{label, detail?}], result}`. 지난 사건에 이 도구를 장애 대응이 어떻게 썼을지 보인다(입력 제한으로 채운 인자, 하한, 지금 정책 수준). 도구는 부르지 않는다. 없는 사건은 422 `invalid`.
 - URL의 호스트를 바꿀 때 bearer 토큰을 다시 보내지 않으면 422 `token-required`(봉인 토큰은 처음 호스트에만 보낸다).
-- 코디네이터: 로그인 사용자가 쓸 수 있는(시스템 관리자, 또는 서버 `users.tenants`와 도구 `tenants`가 함께 허락한 작업 공간의 구성원; 요청마다 mydcd로 확인) `coordinator: true` 도구가 모델에 `mcp_{server}__{tool}`(찾아 쓰는 도구)로 보인다. 도구 줄의 `name`은 `mcp.{server}.{tool}`이다. 서버가 준 설명은 지시가 아닌 데이터로 감싸 넘긴다.
+- 코디네이터: 로그인 사용자가 쓸 수 있는(시스템 관리자, 또는 서버 `users.tenants`와 도구 `tenants`가 함께 허락한 작업 공간의 구성원; 요청마다 sfcd로 확인) `coordinator: true` 도구가 모델에 `mcp_{server}__{tool}`(찾아 쓰는 도구)로 보인다. 도구 줄의 `name`은 `mcp.{server}.{tool}`이다. 서버가 준 설명은 지시가 아닌 데이터로 감싸 넘긴다.
   - read 도구는 바로 부르고 결과는 모델에만 간다(저장하지 않음). 인자는 서버 inputSchema의 이름만, 필수 인자는 있어야 한다(16 KiB까지).
   - change·notify 도구는 제안 카드다: `tool: "mcp.{server}.{tool}"`, `action: "mcp-call"`, `target: "mcp/{server}"`, `mcp: {server, tool}`, `impact`는 change medium·notify low, `revert`는 `auto.revert`의 되돌리기 도구(없으면 "서버가 되돌리는 방법을 알려 주지 않음", irreversible이면 `irreversible: true`·`confirmName`=도구 이름). `PUT /ai/proposals/{id} {payload}`는 같은 인자 규칙으로 고친다.
   - 승인 `POST /ai/proposals/{id}/approve {opId, basisHash}` → `{mcp: {ok, server, tool, error?}}`. 카드를 먼저 approved(op=opId)로 바꾼 뒤 한 번만 부르고, 같은 opId로 다시 보내면 부르지 않고 같은 결과를 준다. 다른 opId는 409 `proposal-approved`. 쓸 수 없게 됐으면 403 `denied`. 결과 원문은 남기지 않고, 다음 차례에 모델에 성공·실패만 알린다. 앞 단계가 MCP 제안이면 그 호출이 성공해야 다음을 승인할 수 있다.

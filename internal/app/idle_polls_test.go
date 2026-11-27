@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/control"
 )
 
 func TestEventPeerCurrentSkipsOnlyAConfirmedIdlePeer(t *testing.T) {

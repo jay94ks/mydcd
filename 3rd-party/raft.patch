@@ -1,6 +1,17 @@
 --- a/api.go
 +++ b/api.go
-@@ -215,6 +215,12 @@
+@@ -163,6 +163,10 @@
+ 	// of the main loop.
+ 	latestConfiguration atomic.Value
+ 
++	// MyDC: a copy of the committed configuration, read off the main loop by
++	// the heartbeat fast path's sender check.
++	committedConfiguration atomic.Value
++
+ 	// RPC chan comes from the transport layer
+ 	rpcCh <-chan RPC
+ 
+@@ -215,6 +219,12 @@
  	// followerNotifyCh is used to tell followers that config has changed
  	followerNotifyCh chan struct{}
  
@@ -13,7 +24,7 @@
  	// mainThreadSaturation measures the saturation of the main raft goroutine.
  	mainThreadSaturation *saturationMetric
  
-@@ -580,6 +586,8 @@
+@@ -580,6 +590,8 @@
  		leadershipTransferCh:  make(chan *leadershipTransferFuture, 1),
  		leaderNotifyCh:        make(chan struct{}, 1),
  		followerNotifyCh:      make(chan struct{}, 1),
@@ -22,7 +33,7 @@
  		mainThreadSaturation:  newSaturationMetric([]string{"raft", "thread", "main", "saturation"}, 1*time.Second),
  		preVoteDisabled:       conf.PreVoteDisabled || !transportSupportPreVote,
  		noLegacyTelemetry:     conf.NoLegacyTelemetry,
-@@ -1171,6 +1179,41 @@
+@@ -1171,6 +1183,41 @@
  	return fmt.Sprintf("Node at %s [%v]", r.localAddr, r.getState())
  }
  
@@ -241,7 +252,18 @@
  		case <-r.followerNotifyCh:
  			//  Ignore since we are not a follower
  
-@@ -1467,6 +1529,7 @@
+@@ -1410,6 +1472,10 @@
+ 		rpc.Respond(nil, err)
+ 		return
+ 	}
++	if cmd, ok := rpc.Command.(*TimeoutNowRequest); ok && !r.timeoutNowFromLeader(cmd) {
++		rpc.Respond(nil, errors.New("timeout now is accepted only from the current leader"))
++		return
++	}
+ 
+ 	switch cmd := rpc.Command.(type) {
+ 	case *AppendEntriesRequest:
+@@ -1467,9 +1533,19 @@
  	}
  	var rpcErr error
  	defer func() {
@@ -249,6 +271,245 @@
  		rpc.Respond(resp, rpcErr)
  	}()
  
++	// MyDC: a server this follower knows as a non-voter cannot be a leader,
++	// unless the request itself carries the configuration that made it a
++	// voter (this follower is behind). Refuse before the term or leader
++	// changes, as a log mismatch, so a real leader backs off to our last log.
++	if r.refusedLeader(ServerID(a.ID), a.Entries, nil) {
++		r.logger.Warn("rejecting appendEntries from a non-voter", "from", ServerID(a.ID), "term", a.Term)
++		return
++	}
++
+ 	// Ignore an older term
+ 	if a.Term < r.getCurrentTerm() {
+ 		return
+@@ -1670,6 +1746,13 @@
+ 			return
+ 		}
+ 	}
++	// MyDC: a non-voter's vote request is refused before it can raise our
++	// term. Pre-vote is on, so a demoted server that does not know it yet never
++	// raises its own term past the voters' (the upstream step-down for #526).
++	if len(req.ID) > 0 && r.knownNonVoter(ServerID(req.ID)) {
++		r.logger.Warn("rejecting vote request since node is not a voter", "from", candidate)
++		return
++	}
+ 	if leaderAddr, leaderID := r.LeaderWithID(); leaderAddr != "" && leaderAddr != candidate && !req.LeadershipTransfer {
+ 		r.logger.Warn("rejecting vote request since we have a leader",
+ 			"from", candidate,
+@@ -1854,6 +1937,13 @@
+ 		return
+ 	}
+ 
++	// MyDC: as for appendEntries, a known non-voter cannot send a snapshot
++	// unless the snapshot's own configuration makes it a voter.
++	if r.refusedLeader(ServerID(req.ID), nil, req.Configuration) {
++		r.logger.Warn("rejecting installSnapshot from a non-voter", "from", ServerID(req.ID), "term", req.Term)
++		return
++	}
++
+ 	// Ignore an older term
+ 	if req.Term < r.getCurrentTerm() {
+ 		r.logger.Info("ignoring installSnapshot request with older term than current term",
+@@ -2247,6 +2337,70 @@
+ func (r *Raft) setCommittedConfiguration(c Configuration, i uint64) {
+ 	r.configurations.committed = c
+ 	r.configurations.committedIndex = i
++	r.committedConfiguration.Store(c.Clone())
++}
++
++// MyDC: getCommittedConfiguration reads the copy of the committed
++// configuration, like getLatestConfiguration.
++func (r *Raft) getCommittedConfiguration() Configuration {
++	switch c := r.committedConfiguration.Load().(type) {
++	case Configuration:
++		return c
++	default:
++		return Configuration{}
++	}
++}
++
++// MyDC: knownNonVoter reports whether id is in this server's latest
++// configuration and has no vote there or in the committed configuration. An
++// empty configuration (a joining server before its first log) knows nobody,
++// and the transport has already admitted the sender's key.
++func (r *Raft) knownNonVoter(id ServerID) bool {
++	latest := r.getLatestConfiguration()
++	if len(latest.Servers) == 0 || !inConfiguration(latest, id) {
++		return false
++	}
++	return !hasVote(latest, id) && !hasVote(r.getCommittedConfiguration(), id)
++}
++
++// MyDC: refusedLeader reports whether a request that only a leader sends
++// comes from a known non-voter while this server follows (or is) another
++// leader. A server unknown here may be a voter added in entries this follower
++// has not got, so it is not refused. Without a current leader the request is
++// taken: a lagging follower (one that missed the sender's promotion, possibly
++// by more than one batch of entries) then catches up, and a non-voter can no
++// longer displace a working leader. A request that carries a configuration
++// giving the sender a vote is taken as well.
++func (r *Raft) refusedLeader(id ServerID, entries []*Log, snapshot []byte) bool {
++	// An old-protocol header without an ID is left to the transport, which in
++	// MyDC binds every request to the authenticated peer's ID.
++	if len(id) == 0 || !r.knownNonVoter(id) {
++		return false
++	}
++	if _, leader := r.LeaderWithID(); leader == "" || leader == id {
++		return false
++	}
++	for _, e := range entries {
++		if e.Type == LogConfiguration && votesIn(e.Data, id) {
++			return false
++		}
++	}
++	return !(len(snapshot) > 0 && votesIn(snapshot, id))
++}
++
++// MyDC: votesIn decodes a configuration from a peer without the panic of
++// DecodeConfiguration; an undecodable one gives no vote.
++func votesIn(buf []byte, id ServerID) bool {
++	var c Configuration
++	return decodeMsgPack(buf, &c) == nil && hasVote(c, id)
++}
++
++// MyDC: timeoutNowFromLeader reports whether a leadership transfer comes from
++// the leader this server follows. Only that leader sends it, after it has
++// brought this server up to date.
++func (r *Raft) timeoutNowFromLeader(req *TimeoutNowRequest) bool {
++	_, leader := r.LeaderWithID()
++	return len(req.ID) > 0 && leader == ServerID(req.ID)
+ }
+ 
+ // getLatestConfiguration reads the configuration from a copy of the main
+--- a/raft_test.go
++++ b/raft_test.go
+@@ -3501,3 +3501,125 @@
+ 		t.Fatalf("expected pre-vote to not be granted, but it was granted, %+v", resp)
+ 	}
+ }
++
++// MyDC: a non-voter's key can neither lead, raise a voter's term nor start a
++// leadership transfer; a lagging follower still takes the leader's promotion.
++func TestRaft_NonVoterCannotActAsLeader(t *testing.T) {
++	c := MakeCluster(3, t, nil)
++	defer c.Close()
++	c1 := MakeClusterNoBootstrap(1, t, nil)
++	c.Merge(c1)
++	c.FullyConnect()
++	leader := c.Leader()
++	learner := c1.rafts[0]
++	if err := leader.AddNonvoter(learner.localID, learner.localAddr, 0, time.Second).Error(); err != nil {
++		t.Fatal(err)
++	}
++	c.WaitForReplication(0)
++	follower := c.Followers()[0]
++	for follower.getLatestConfiguration().Servers == nil || !inConfiguration(follower.getLatestConfiguration(), learner.localID) {
++		time.Sleep(10 * time.Millisecond)
++	}
++	var trans LoopbackTransport
++	for i, r := range c.rafts {
++		if r == learner {
++			trans = c.trans[i]
++		}
++	}
++	term := follower.getCurrentTerm()
++	_, leaderID := follower.LeaderWithID()
++	header := learner.getRPCHeader()
++
++	var resp AppendEntriesResponse
++	if err := trans.AppendEntries(follower.localID, follower.localAddr, &AppendEntriesRequest{RPCHeader: header, Term: term + 5, PrevLogEntry: follower.getLastIndex(), PrevLogTerm: term}, &resp); err != nil {
++		t.Fatal(err)
++	}
++	if resp.Success || follower.getCurrentTerm() != term {
++		t.Fatal("non-voter appendEntries accepted", resp.Success, follower.getCurrentTerm(), term)
++	}
++	var vote RequestVoteResponse
++	if err := trans.RequestVote(follower.localID, follower.localAddr, &RequestVoteRequest{RPCHeader: header, Term: term + 5, LastLogIndex: 1 << 40, LastLogTerm: term + 5, LeadershipTransfer: true}, &vote); err != nil {
++		t.Fatal(err)
++	}
++	if vote.Granted || follower.getCurrentTerm() != term {
++		t.Fatal("non-voter raised a voter's term", vote.Granted, follower.getCurrentTerm(), term)
++	}
++	var now TimeoutNowResponse
++	if err := trans.TimeoutNow(follower.localID, follower.localAddr, &TimeoutNowRequest{RPCHeader: header}, &now); err == nil {
++		t.Fatal("non-voter started a leadership transfer")
++	}
++	var snap InstallSnapshotResponse
++	if err := trans.InstallSnapshot(follower.localID, follower.localAddr, &InstallSnapshotRequest{RPCHeader: header, SnapshotVersion: SnapshotVersionMax, Term: term + 5, LastLogIndex: 1 << 40}, &snap, bytes.NewReader(nil)); err != nil {
++		t.Fatal(err)
++	}
++	if snap.Success || follower.getCurrentTerm() != term {
++		t.Fatal("non-voter snapshot accepted")
++	}
++	if _, id := follower.LeaderWithID(); id != leaderID || follower.getState() != Follower {
++		t.Fatal("follower left its leader", id, leaderID)
++	}
++
++	// A follower that has not got the promotion yet takes it from the
++	// promoted leader's entries or snapshot.
++	latest := follower.getLatestConfiguration()
++	promoted := latest.Clone()
++	for i := range promoted.Servers {
++		if promoted.Servers[i].ID == learner.localID {
++			promoted.Servers[i].Suffrage = Voter
++		}
++	}
++	data := EncodeConfiguration(promoted)
++	if follower.refusedLeader(learner.localID, []*Log{{Type: LogConfiguration, Data: data}}, nil) || follower.refusedLeader(learner.localID, nil, data) {
++		t.Fatal("promotion refused")
++	}
++	if !follower.refusedLeader(learner.localID, []*Log{{Type: LogConfiguration, Data: []byte("bad")}}, []byte("bad")) {
++		t.Fatal("undecodable configuration gave a vote")
++	}
++	// A voter and a server this follower does not know yet still lead.
++	if follower.refusedLeader(leader.localID, nil, nil) || follower.refusedLeader("unknown", nil, nil) {
++		t.Fatal("voter or unknown server refused")
++	}
++
++	// The cluster still works, and the learner is promoted and can lead.
++	if err := leader.Apply([]byte("x"), time.Second).Error(); err != nil {
++		t.Fatal(err)
++	}
++	if err := leader.AddVoter(learner.localID, learner.localAddr, 0, time.Second).Error(); err != nil {
++		t.Fatal(err)
++	}
++	if err := leader.LeadershipTransferToServer(learner.localID, learner.localAddr).Error(); err != nil {
++		t.Fatal(err)
++	}
++	deadline := time.Now().Add(5 * time.Second)
++	for _, r := range c.rafts {
++		for {
++			if _, id := r.LeaderWithID(); id == learner.localID {
++				break
++			}
++			if time.Now().After(deadline) {
++				t.Fatal("promoted learner did not lead", r.localID)
++			}
++			time.Sleep(10 * time.Millisecond)
++		}
++	}
++}
++
++// MyDC: without a current leader a known non-voter's leader requests are
++// taken, so a follower that missed its promotion by many entries catches up.
++func TestRaft_LaggingFollowerTakesPromotedLeader(t *testing.T) {
++	r := &Raft{}
++	cfg := Configuration{Servers: []Server{{ID: "a", Suffrage: Voter}, {ID: "b", Suffrage: Nonvoter}}}
++	r.setLatestConfiguration(cfg, 2)
++	r.setCommittedConfiguration(cfg, 2)
++	if r.refusedLeader("b", nil, nil) {
++		t.Fatal("refused without a current leader")
++	}
++	r.setLeader("addr-a", "a")
++	if !r.refusedLeader("b", nil, nil) || r.refusedLeader("a", nil, nil) {
++		t.Fatal("non-voter displaced the current leader")
++	}
++	r.setLeader("addr-b", "b")
++	if r.refusedLeader("b", nil, nil) {
++		t.Fatal("refused the leader this server already follows")
++	}
++}
 --- a/replication.go
 +++ b/replication.go
 @@ -77,6 +77,12 @@

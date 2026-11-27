@@ -16,13 +16,13 @@ type Endpoint struct {
 }
 
 func NetworkID(cluster [32]byte, name string) [16]byte {
-	b := append([]byte("mydc-network-1\x00"), cluster[:]...)
+	b := append([]byte("sfc-network-1\x00"), cluster[:]...)
 	b = append(b, []byte(name)...)
 	h := sha256.Sum256(b)
 	return [16]byte(h[:16])
 }
 func EndpointID(cluster [32]byte, network, owner, key string, generation uint64, address netip.Addr) [16]byte {
-	b := append([]byte("mydc-endpoint-1\x00"), cluster[:]...)
+	b := append([]byte("sfc-endpoint-1\x00"), cluster[:]...)
 	for _, part := range []string{network, owner, key, address.String()} {
 		b = binary.LittleEndian.AppendUint32(b, uint32(len(part)))
 		b = append(b, part...)

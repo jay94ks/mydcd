@@ -6,11 +6,11 @@ import (
 	"context"
 	"net/http"
 
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/web/mydc"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/web/sfc"
 )
 
-// RQ10 reads through mydcd's common PublicRead envelope
+// RQ10 reads through sfcd's common PublicRead envelope
 // (docs/reference/resource-queries.md): pages of at most 8 rows, each a
 // Key and one payload. Key and Next are opaque: Next only goes back as the
 // next After. A cursor conflict (the snapshot or the caller's permission
@@ -21,17 +21,17 @@ const publicReadPages = 64
 
 // publicReadAll reads every row of one method/tenant/selector. The page
 // returned is the first one (its revisions, Rules and Total).
-func publicReadAll(ctx context.Context, c mydc.Conn, method, tenant string, q control.PublicReadQuery) (control.PublicReadPage, []control.PublicReadRow, error) {
+func publicReadAll(ctx context.Context, c sfc.Conn, method, tenant string, q control.PublicReadQuery) (control.PublicReadPage, []control.PublicReadRow, error) {
 	for try := 0; ; try++ {
 		first, rows, err := publicReadOnce(ctx, c, method, tenant, q)
-		if err != nil && try == 0 && isMydcCode(err, mydc.CodeConflict) {
+		if err != nil && try == 0 && isSfcCode(err, sfc.CodeConflict) {
 			continue
 		}
 		return first, rows, err
 	}
 }
 
-func publicReadOnce(ctx context.Context, c mydc.Conn, method, tenant string, q control.PublicReadQuery) (control.PublicReadPage, []control.PublicReadRow, error) {
+func publicReadOnce(ctx context.Context, c sfc.Conn, method, tenant string, q control.PublicReadQuery) (control.PublicReadPage, []control.PublicReadRow, error) {
 	var first control.PublicReadPage
 	var rows []control.PublicReadRow
 	after := ""
@@ -55,7 +55,7 @@ func publicReadOnce(ctx context.Context, c mydc.Conn, method, tenant string, q c
 // resourceUsers folds network-users / volume-users rows into the web's
 // users view: one entry per app service (or standalone container, or
 // volume operation) and server, with a selection per present container.
-// network: attached = mydcd saw the endpoint; volume: the container is
+// network: attached = sfcd saw the endpoint; volume: the container is
 // there (Writable from the consumer).
 func resourceUsers(rows []control.PublicReadRow, network bool) ([]resourceUser, int, int) {
 	out := []resourceUser{}
@@ -68,11 +68,11 @@ func resourceUsers(rows []control.PublicReadRow, network bool) ([]resourceUser, 
 		}
 		kind := u.Kind
 		switch kind {
-		case "app", "app-service", "": // mydcd TaskView kind "app"
-			kind = mydc.NetworkUserService
+		case "app", "app-service", "": // sfcd TaskView kind "app"
+			kind = sfc.NetworkUserService
 			apps[u.App] = true
 		case "standalone":
-			kind = mydc.NetworkUserStandalone
+			kind = sfc.NetworkUserStandalone
 			standalones[u.Standalone] = true
 		}
 		k := [5]string{kind, u.App, u.Service, u.Standalone, u.Node}
@@ -97,10 +97,10 @@ func resourceUsers(rows []control.PublicReadRow, network bool) ([]resourceUser, 
 			continue
 		}
 		e.Attached = true
-		if kind == mydc.NetworkUserStandalone {
-			e.Selection = append(e.Selection, mydc.ContainerSelection{Standalone: u.Standalone})
+		if kind == sfc.NetworkUserStandalone {
+			e.Selection = append(e.Selection, sfc.ContainerSelection{Standalone: u.Standalone})
 		} else {
-			e.Selection = append(e.Selection, mydc.ContainerSelection{App: u.App, Service: u.Service})
+			e.Selection = append(e.Selection, sfc.ContainerSelection{App: u.App, Service: u.Service})
 		}
 	}
 	return out, len(apps), len(standalones)
@@ -116,7 +116,7 @@ type resourceUser struct {
 	Consumer                 string `json:",omitempty"`
 	ReadOnly                 bool
 	Attached                 bool
-	Selection                []mydc.ContainerSelection `json:",omitempty"`
+	Selection                []sfc.ContainerSelection `json:",omitempty"`
 }
 
 type resourceUsersView struct {
@@ -129,7 +129,7 @@ type resourceUsersView struct {
 	Total       int
 }
 
-func readResourceUsers(ctx context.Context, c mydc.Conn, method, tenant, name, app string) (resourceUsersView, error) {
+func readResourceUsers(ctx context.Context, c sfc.Conn, method, tenant, name, app string) (resourceUsersView, error) {
 	p, rows, err := publicReadAll(ctx, c, method, tenant, control.PublicReadQuery{Name: name, App: app})
 	if err != nil {
 		return resourceUsersView{}, err
@@ -147,15 +147,15 @@ func readResourceUsers(ctx context.Context, c mydc.Conn, method, tenant, name, a
 
 // readImageTrust: image-trust's page Rules and Image rows as the web's
 // trust model; Revision is the tenant revision (set-trust's Expected).
-func readImageTrust(ctx context.Context, c mydc.Conn, tenant string) (mydc.ImageTrust, error) {
+func readImageTrust(ctx context.Context, c sfc.Conn, tenant string) (sfc.ImageTrust, error) {
 	p, rows, err := publicReadAll(ctx, c, "image-trust", tenant, control.PublicReadQuery{})
 	if err != nil {
-		return mydc.ImageTrust{}, err
+		return sfc.ImageTrust{}, err
 	}
-	t := mydc.ImageTrust{Tenant: tenant, Revision: p.TenantRevision, Rules: p.Rules, Uses: []mydc.ImageTrustUse{}}
+	t := sfc.ImageTrust{Tenant: tenant, Revision: p.TenantRevision, Rules: p.Rules, Uses: []sfc.ImageTrustUse{}}
 	for _, r := range rows {
 		if u := r.Image; u != nil {
-			t.Uses = append(t.Uses, mydc.ImageTrustUse{App: u.App, Deployment: u.Deployment, Service: u.Service, Standalone: u.Standalone, Image: u.Reference, Rules: u.Rules})
+			t.Uses = append(t.Uses, sfc.ImageTrustUse{App: u.App, Deployment: u.Deployment, Service: u.Service, Standalone: u.Standalone, Image: u.Reference, Rules: u.Rules})
 		}
 	}
 	return t, nil
@@ -163,7 +163,7 @@ func readImageTrust(ctx context.Context, c mydc.Conn, tenant string) (mydc.Image
 
 // readFileGrants: volume-file-grants rows for one volume (or the tenant
 // when volume is "").
-func readFileGrants(ctx context.Context, c mydc.Conn, tenant, volume, app string) ([]control.PublicFileGrant, error) {
+func readFileGrants(ctx context.Context, c sfc.Conn, tenant, volume, app string) ([]control.PublicFileGrant, error) {
 	_, rows, err := publicReadAll(ctx, c, "volume-file-grants", tenant, control.PublicReadQuery{Name: volume, App: app})
 	if err != nil {
 		return nil, err
@@ -179,7 +179,7 @@ func readFileGrants(ctx context.Context, c mydc.Conn, tenant, volume, app string
 
 // readClosure: network-closure of one draining member (one row, After is
 // not allowed).
-func readClosure(ctx context.Context, c mydc.Conn, tenant, member string) (control.NetworkClosureStatus, error) {
+func readClosure(ctx context.Context, c sfc.Conn, tenant, member string) (control.NetworkClosureStatus, error) {
 	p, err := c.PublicRead(ctx, "network-closure", tenant, control.PublicReadQuery{Name: member}, "")
 	if err != nil {
 		return control.NetworkClosureStatus{}, err
@@ -189,13 +189,13 @@ func readClosure(ctx context.Context, c mydc.Conn, tenant, member string) (contr
 			return *r.Closure, nil
 		}
 	}
-	return control.NetworkClosureStatus{}, &httpErr{http.StatusBadGateway, "closure-missing", "mydcd gave no closure row for the member"}
+	return control.NetworkClosureStatus{}, &httpErr{http.StatusBadGateway, "closure-missing", "sfcd gave no closure row for the member"}
 }
 
 // readBackupLimits: volume-backup-limits rows (tenant "" = the server-wide
 // rows, system administrator); a tenant's rows only say whether the
 // server-wide row exists (GlobalPresent).
-func readBackupLimits(ctx context.Context, c mydc.Conn, tenant, node string) ([]control.PublicBackupLimit, error) {
+func readBackupLimits(ctx context.Context, c sfc.Conn, tenant, node string) ([]control.PublicBackupLimit, error) {
 	_, rows, err := publicReadAll(ctx, c, "volume-backup-limits", tenant, control.PublicReadQuery{Node: node})
 	if err != nil {
 		return nil, err
@@ -210,7 +210,7 @@ func readBackupLimits(ctx context.Context, c mydc.Conn, tenant, node string) ([]
 }
 
 // readLifecycleUses: lifecycle-uses of one named script.
-func readLifecycleUses(ctx context.Context, c mydc.Conn, tenant, name string) ([]control.PublicLifecycleUse, error) {
+func readLifecycleUses(ctx context.Context, c sfc.Conn, tenant, name string) ([]control.PublicLifecycleUse, error) {
 	_, rows, err := publicReadAll(ctx, c, "lifecycle-uses", tenant, control.PublicReadQuery{Name: name})
 	if err != nil {
 		return nil, err
@@ -226,7 +226,7 @@ func readLifecycleUses(ctx context.Context, c mydc.Conn, tenant, name string) ([
 
 // readRouteEndpoints: route-endpoints of another tenant, the open
 // TUN members it offers as route destinations.
-func readRouteEndpoints(ctx context.Context, c mydc.Conn, tenant string) ([]control.RouteEndpoint, error) {
+func readRouteEndpoints(ctx context.Context, c sfc.Conn, tenant string) ([]control.RouteEndpoint, error) {
 	_, rows, err := publicReadAll(ctx, c, "route-endpoints", tenant, control.PublicReadQuery{})
 	if err != nil {
 		return nil, err

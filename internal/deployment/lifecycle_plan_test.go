@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	checker "github.com/jay94ks/mydcd/internal/workload/lifecycle"
+	checker "github.com/jay94ks/seafield/internal/workload/lifecycle"
 	"gopkg.in/yaml.v3"
 )
 
@@ -23,13 +23,13 @@ func lifecyclePlanFixture(t *testing.T) (*fixture, Compose, PlanningContext, Blu
 	if err != nil {
 		t.Fatal(err)
 	}
-	c.MyDC.Lifecycle.Optimizer.Compile = false
-	named := c.MyDC.Lifecycle.Scripts["registered"]
+	c.Sfc.Lifecycle.Optimizer.Compile = false
+	named := c.Sfc.Lifecycle.Scripts["registered"]
 	named.Ref.Revision = 1
-	c.MyDC.Lifecycle.Scripts["registered"] = named
+	c.Sfc.Lifecycle.Scripts["registered"] = named
 	policy := checker.TenantPolicy{Tenant: "tenant", Enabled: true,
 		Execution: checker.ExecutionPolicy{MaxConcurrent: 1, TimeoutMS: 5000, NanoCPU: 100000000, MemoryBytes: 32 << 20, MaxPIDs: 16, OutputBytes: 4096, ProbeBytes: 4096, Capabilities: []string{"file"}},
-		Resolver:  checker.ResolverPolicy{AllowPackages: []string{"context", "github.com/jay94ks/mydcd/lifecycle/v1"}, SourceCacheBytes: 1 << 20}}
+		Resolver:  checker.ResolverPolicy{AllowPackages: []string{"context", "github.com/jay94ks/seafield/lifecycle/v1"}, SourceCacheBytes: 1 << 20}}
 	book, err := checker.NewCatalog(f.cluster)
 	if err != nil {
 		t.Fatal(err)
@@ -50,7 +50,7 @@ func lifecyclePlanFixture(t *testing.T) (*fixture, Compose, PlanningContext, Blu
 	}
 	ctx.Checkers = book
 	ctx.CheckerProviders = map[[32]byte]bool{public(f.na): true}
-	ctx.CheckerSources = map[string]checker.SourceFact{"inline": fact(c.MyDC.Lifecycle.Scripts["inline"].Source)}
+	ctx.CheckerSources = map[string]checker.SourceFact{"inline": fact(c.Sfc.Lifecycle.Scripts["inline"].Source)}
 	ctx.Features["lifecycle"] = true
 	plan, err := CompileApp(c, f.c, ctx)
 	if err != nil {
@@ -63,7 +63,7 @@ func TestCheckerAcceptedPlanSurvivesPositiveRetirementAndEquivalentPolicyRestore
 	f := newDeliveryFixture(t, "automatic")
 	policy := checker.TenantPolicy{Tenant: "tenant", Enabled: true,
 		Execution: checker.ExecutionPolicy{MaxConcurrent: 1, TimeoutMS: 5000, NanoCPU: 100000000, MemoryBytes: 32 << 20, MaxPIDs: 16, OutputBytes: 4096, ProbeBytes: 4096, Capabilities: []string{"file"}},
-		Resolver:  checker.ResolverPolicy{AllowPackages: []string{"context", "github.com/jay94ks/mydcd/lifecycle/v1"}, SourceCacheBytes: 1 << 20}}
+		Resolver:  checker.ResolverPolicy{AllowPackages: []string{"context", "github.com/jay94ks/seafield/lifecycle/v1"}, SourceCacheBytes: 1 << 20}}
 	book, err := checker.NewCatalog(f.f.cluster)
 	if err != nil {
 		t.Fatal(err)
@@ -78,7 +78,7 @@ func TestCheckerAcceptedPlanSurvivesPositiveRetirementAndEquivalentPolicyRestore
 		t.Fatal(err)
 	}
 	db := input.Services["db"]
-	db.MyDC.Lifecycle = &ServiceLifecycle{Checks: []LifecycleCheck{{ID: "marker", Phase: "liveness", LifecycleTemplate: LifecycleTemplate{Builtin: "file", Parameters: LifecycleParameters(`{"path":"/run/ready","kind":"regular"}`)}}}}
+	db.Sfc.Lifecycle = &ServiceLifecycle{Checks: []LifecycleCheck{{ID: "marker", Phase: "liveness", LifecycleTemplate: LifecycleTemplate{Builtin: "file", Parameters: LifecycleParameters(`{"path":"/run/ready","kind":"regular"}`)}}}}
 	input.Services["db"] = db
 	f.body, err = yaml.Marshal(input)
 	if err != nil {
@@ -231,7 +231,7 @@ func TestCheckerFrozenPlanRejectsChangedSourceProviderAndTaskProjection(t *testi
 	raw, _ := b.Encode()
 	for label, mutate := range map[string]func(*Blueprint){
 		"normalized phase":       func(b *Blueprint) { b.d.Checkers.Program.Services["web"][0].Phase = "shutdown" },
-		"raw declaration":        func(b *Blueprint) { b.d.Input.MyDC.Lifecycle.Optimizer.Compile = true },
+		"raw declaration":        func(b *Blueprint) { b.d.Input.Sfc.Lifecycle.Optimizer.Compile = true },
 		"policy":                 func(b *Blueprint) { b.d.Checkers.Policy.Revision++ },
 		"extra source":           func(b *Blueprint) { b.d.Checkers.Sources["extra"] = b.d.Checkers.Sources["inline"] },
 		"missing frozen program": func(b *Blueprint) { b.d.Checkers = nil },

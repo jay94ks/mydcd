@@ -5,9 +5,9 @@ package app
 import (
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/imagesource"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/imagesource"
 )
 
 func TestSourceReaderFenceRetainsActiveCallsAndRejectsOldGeneration(t *testing.T) {

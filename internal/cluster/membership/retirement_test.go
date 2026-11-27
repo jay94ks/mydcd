@@ -6,10 +6,11 @@ import (
 	"bytes"
 	"crypto/ed25519"
 	"encoding/json"
+	"net/netip"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/cluster/lifecycle"
-	"github.com/jay94ks/mydcd/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/cluster/lifecycle"
+	"github.com/jay94ks/seafield/internal/reconcile"
 )
 
 // Probe failures and SDK configurations are injected facts, not real network
@@ -57,6 +58,24 @@ func TestForceRetirementPreservesUnknownAndNeverAssertsNativeClosure(t *testing.
 	d = checked(t, n, err)
 	if _, found := d.NodeOperation("force-b"); !found {
 		t.Fatal("rotation forgot logical retirement evidence")
+	}
+	// The retired server's address is free again, but not while a
+	// network member still uses it; its leftover members keep checking
+	// against it.
+	gone, _ := d.Entry("b")
+	if a := d.ServerAddresses()["b"]; a != gone.Address || a != netip.MustParseAddr("10.254.240.2") {
+		t.Fatal("retired server address", a)
+	}
+	peer, _ := testPeer("c", 3, false)
+	if n, err := d.Invite(peer, "join-c", map[netip.Addr]bool{gone.Address: true}); err != nil {
+		t.Fatal(err)
+	} else if e, _ := n.Entry("c"); e.Address == gone.Address {
+		t.Fatal("an address a network still uses was handed out", e.Address)
+	}
+	if n, err := d.Invite(peer, "join-c", nil); err != nil {
+		t.Fatal(err)
+	} else if e, _ := n.Entry("c"); e.Address != gone.Address {
+		t.Fatal("a free address was not reused", e.Address)
 	}
 }
 

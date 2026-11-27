@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/imagecache"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/imagecache"
 )
 
 func TestResolvedConfigFenceRejectsOriginalUnknownBareImageCacheJob(t *testing.T) {

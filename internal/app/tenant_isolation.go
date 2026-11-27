@@ -10,13 +10,13 @@ import (
 	"encoding/json"
 	"errors"
 
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/network"
-	"github.com/jay94ks/mydcd/internal/network/services"
-	"github.com/jay94ks/mydcd/internal/reconcile"
-	"github.com/jay94ks/mydcd/internal/schema"
-	"github.com/jay94ks/mydcd/internal/storage"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/network"
+	"github.com/jay94ks/seafield/internal/network/services"
+	"github.com/jay94ks/seafield/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/storage"
 )
 
 type isolationRecord struct {
@@ -87,6 +87,20 @@ func (r *Runtime) isolationSharedHash(v cluster.View, projection control.Resourc
 	return sha256.Sum256(raw), nil
 }
 
+// tunnelTenantPrefixes is what a TUN adds to its tenant's isolation
+// prefixes: its routes and addresses, except server addresses. Every TUN
+// network on a server uses the server's own address and routes to its
+// peers' addresses, so those are no tenant's.
+func tunnelTenantPrefixes(tenant string, tunnel network.TunnelSpec) []network.TenantPrefix {
+	var out []network.TenantPrefix
+	for _, prefix := range append(tunnel.Clone().Routes, tunnel.Addresses...) {
+		if !network.SharedServerPrefix(prefix) {
+			out = append(out, network.TenantPrefix{Tenant: tenant, Prefix: prefix})
+		}
+	}
+	return out
+}
+
 func (r *Runtime) buildIsolationSpec(v cluster.View, projection control.ResourceProjection, includeOriginal bool) (network.IsolationSpec, error) {
 	spec := network.IsolationSpec{Schema: 1, Owner: r.owner}
 	if r.Identity == nil {
@@ -96,9 +110,8 @@ func (r *Runtime) buildIsolationSpec(v cluster.View, projection control.Resource
 		for _, pool := range definition.Pools {
 			spec.Prefixes = append(spec.Prefixes, network.TenantPrefix{Tenant: definition.Scope(), Prefix: pool.Prefix})
 		}
-		for _, address := range definition.TunnelAddresses {
-			spec.Prefixes = append(spec.Prefixes, network.TenantPrefix{Tenant: definition.Scope(), Prefix: address})
-		}
+		// A tunnel address is the server's address, shared by every network
+		// on the server inside each network's own namespace: no tenant's.
 	}
 	addBridge := func(tenant, key string, generation uint64, native reconcile.Resource) error {
 		bridge, err := network.DecodeBridge(native.Spec)
@@ -137,10 +150,8 @@ func (r *Runtime) buildIsolationSpec(v cluster.View, projection control.Resource
 		if err != nil {
 			return err
 		}
-		spec.Tunnels = append(spec.Tunnels, network.IsolationTunnel{Tenant: tenant, Device: device, Prefixes: tunnel.Routes})
-		for _, prefix := range append(tunnel.Clone().Routes, tunnel.Addresses...) {
-			spec.Prefixes = append(spec.Prefixes, network.TenantPrefix{Tenant: tenant, Prefix: prefix})
-		}
+		spec.Tunnels = append(spec.Tunnels, network.IsolationTunnel{Tenant: tenant, Device: device, Prefixes: tunnel.Overlay()})
+		spec.Prefixes = append(spec.Prefixes, tunnelTenantPrefixes(tenant, tunnel)...)
 		return nil
 	}
 	for key, source := range projection.ManagedSources {
@@ -259,6 +270,23 @@ func (r *Runtime) buildIsolationSpec(v cluster.View, projection control.Resource
 	return network.NormalizeIsolation(spec)
 }
 
+// isolationDesired stamps the wanted spec with a revision past the journal's.
+// The view index is only a stamp, not the spec's source: the spec also
+// follows this server's own Bridge and TUN journals, which move between
+// passes without a new Raft entry (a network draining, a TUN apply that
+// failed). A different spec at the same index must still go forward, or every
+// later pass stops on ErrDesired until the cluster writes again.
+func isolationDesired(old, wanted reconcile.Desired) reconcile.Desired {
+	if wanted.Revision > old.Revision {
+		return wanted
+	}
+	wanted.Revision = old.Revision
+	if wanted != old {
+		wanted.Revision++
+	}
+	return wanted
+}
+
 func (r *Runtime) reconcileTenantIsolation(ctx context.Context, v cluster.View, projection control.ResourceProjection) error {
 	r.isolationMu.Lock()
 	defer r.isolationMu.Unlock()
@@ -313,7 +341,7 @@ func (r *Runtime) reconcileTenantIsolation(ctx context.Context, v cluster.View, 
 	} else {
 		wanted.Retiring = record.State.GenerationFloor
 	}
-	record.State, err = reconcile.SetDesired(record.State, wanted)
+	record.State, err = reconcile.SetDesired(record.State, isolationDesired(record.State.Desired, wanted))
 	if err != nil {
 		return err
 	}

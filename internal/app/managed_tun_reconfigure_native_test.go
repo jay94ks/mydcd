@@ -6,10 +6,10 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/tenancy"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/tenancy"
 )
 
 // Uses the existing owned two-namespace/two-Engine fixture after app borrows
@@ -162,7 +162,7 @@ func verifyManagedTUNReconfiguration(t *testing.T, p control.Policy, read func()
 		t.Fatal(err)
 	}
 	tenant, _ := catalog.Tenant("tenant")
-	apply("e3-gateway/revoke-target", "set-nodes", tenant.Revision, control.NodeAssignment{Tenant: "tenant", Nodes: []string{"node-a"}})
+	apply("e3-gateway/revoke-target", "set-nodes", tenant.Revision, control.NodeChangeTo("tenant", tenant.AllowedNodes, []string{"node-a"}))
 	reserved := read().State.Object(control.ResourcesKey)
 	blocked := submit("e3-gateway/blocked-commit", "commit-network-change", resources().Networks.Revision(), control.NetworkChangeCommit{Tenant: "tenant", Network: "alpha", Members: selected})
 	if blocked.Code != state.Forbidden || read().State.Object(control.ResourcesKey) != reserved {
@@ -179,7 +179,7 @@ func verifyManagedTUNReconfiguration(t *testing.T, p control.Policy, read func()
 		t.Fatal(err)
 	}
 	tenant, _ = catalog.Tenant("tenant")
-	apply("e3-gateway/restore-target", "set-nodes", tenant.Revision, control.NodeAssignment{Tenant: "tenant", Nodes: []string{"node-a", "node-b"}})
+	apply("e3-gateway/restore-target", "set-nodes", tenant.Revision, control.NodeChangeTo("tenant", tenant.AllowedNodes, []string{"node-a", "node-b"}))
 	// stopB joins the exact owned daemon handle. A management timeout is not
 	// treated as evidence that the original process or its work has stopped.
 	members, err := p.Members(read().State)

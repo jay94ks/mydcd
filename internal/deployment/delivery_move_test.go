@@ -9,10 +9,10 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/network"
-	"github.com/jay94ks/mydcd/internal/tenancy"
-	"github.com/jay94ks/mydcd/internal/workload/volumes"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/network"
+	"github.com/jay94ks/seafield/internal/tenancy"
+	"github.com/jay94ks/seafield/internal/workload/volumes"
 )
 
 // Native observations/copy facts are explicit failure-injection fixtures. The
@@ -23,7 +23,7 @@ func TestCDExplicitMoveKeepsSourceAndRequiresPositiveRetainedHandoff(t *testing.
 	ctx.Features["git-cd"] = true
 	input := smallCompose(t)
 	db := input.Services["db"]
-	db.Secrets, db.MyDC.Sources = nil, nil
+	db.Secrets, db.Sfc.Sources = nil, nil
 	db.Networks = map[string]Attachment{"source": {IPv4: "10.240.20.10"}}
 	input.Services = map[string]ComposeService{"db": db}
 	input.Secrets = nil
@@ -47,7 +47,7 @@ func TestCDExplicitMoveKeepsSourceAndRequiresPositiveRetainedHandoff(t *testing.
 	}
 	_, _, sample, _ := acceptedDeliveryAdapterFixture(t)
 	policy, _ := sample.DeliveryPolicy()
-	input.MyDC.Delivery = &policy
+	input.Sfc.Delivery = &policy
 	b, err := CompileApp(input, f.c, ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -84,12 +84,12 @@ func TestCDExplicitMoveKeepsSourceAndRequiresPositiveRetainedHandoff(t *testing.
 		t.Fatal(err)
 	}
 	db = next.Services["db"]
-	db.MyDC.Node = "node-a"
+	db.Sfc.Node = "node-a"
 	db.Networks = map[string]Attachment{"target": {IPv4: "10.240.10.20"}}
 	next.Services["db"] = db
 	next.Networks = map[string]ComposeNetwork{"target": {External: true, Name: "shared-lan"}}
 	volume := next.Volumes["mysql-data"]
-	volume.MyDC.Node = "node-a"
+	volume.Sfc.Node = "node-a"
 	next.Volumes["mysql-data"] = volume
 	target := volumes.Owner{Node: "node-a", Key: public(f.na), Native: "target-data"}
 	placement := VolumeMovePlacement{Scope: core.Scope(), Source: source, SourceOwnerRevision: revision, Target: target}

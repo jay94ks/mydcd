@@ -5,9 +5,9 @@ package control
 import (
 	"slices"
 
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/ingress"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/ingress"
 )
 
 // nodeGatewayHostPortUse is only the listener geometry of a verified gateway

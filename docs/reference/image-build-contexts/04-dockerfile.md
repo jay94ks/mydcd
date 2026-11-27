@@ -21,9 +21,9 @@ owner가 다르면 기존 인증 member Management `image-build-content-owner`�
 `Part:file`에는 canonical 상대 `Path`가 필수다. 첫 요청의 선택 `Offset:uint64`는 byte 위치이며 생략하면0이다. 후속 `After` cursor와0이 아닌 Offset을 함께 보내면 거부한다. 디렉터리·링크·장치·없는 항목·절대 경로·`../`는 반환하지 않는다. 파일의 Bytes/Executable/Digest는 원 inspected tree의 항목이며, 서버가 page마다 만든 새 파일 지문이 아니다. 응답의 `File.Total == File.Entry.Bytes`, `File.Offset`는 요청 위치, `File.Next`는 다음 byte 위치 또는 EOF의0이다. 빈 파일도 전체 길이0/빈 Data/Next0인 regular file로 구분한다. tree/Dockerfile의 기존 JSON·cursor와 필드 타입은 유지한다.
 
 ```sh
-mydc --tenant tenant-a build context cat source composer.json --version 3
+sfcli --tenant tenant-a build context cat source composer.json --version 3
 # 전체 다운로드: 끝까지 받고 크기와 SHA-256을 확인한 뒤에만 파일을 남긴다.
-mydc --tenant tenant-a build context cat source composer.json --version 3 -O composer.json
+sfcli --tenant tenant-a build context cat source composer.json --version 3 -O composer.json
 ```
 
 owner의 기존 Content cache는 선택 regular file의 원 ZIP FD·decompressor·누적 hash를 최대1건 유지한다. 순차 Next 조회는 전체 O(n) 압축 해제/해시이고 EOF에서 원 entry 지문/CRC/길이를 확인한다. 임의 offset이나 파일 전환 뒤 조회는 해당 파일 처음부터 prefix를 건너뛰므로 O(offset)이며 현재 요청의 취소/시간 예산을 따른다. 전체 파일을 메모리나 별도 디스크 사본에 올리지 않는다. 원 artifact의 recorded pin·inode·seal을 매 요청 확인하고 cache 교체·오류·회수·Runtime 종료에서 reader를 닫는다. 원 version 삭제 뒤에는 남은 cache를 조회하지 않는다.

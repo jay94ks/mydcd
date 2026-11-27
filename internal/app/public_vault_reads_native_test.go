@@ -11,12 +11,12 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/secrets"
-	"github.com/jay94ks/mydcd/internal/userauth"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/secrets"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/userauth"
 )
 
 // These checks extend the original ordered Secret/Group fixture, including its
@@ -28,7 +28,7 @@ type managedVaultReadChecks struct {
 	usages   func(*testing.T, context.Context, int)
 }
 
-func captureManagedVaultReads(t *testing.T, ctx context.Context, root string, user userauth.Client, peer mydcp.Peer, session access.Session, p control.Policy, read func() cluster.View, grants []secrets.Grant) *managedVaultReadChecks {
+func captureManagedVaultReads(t *testing.T, ctx context.Context, root string, user userauth.Client, peer sfcp.Peer, session access.Session, p control.Policy, read func() cluster.View, grants []secrets.Grant) *managedVaultReadChecks {
 	t.Helper()
 	checks := &managedVaultReadChecks{}
 	checks.page = func(t *testing.T, ctx context.Context) []secrets.PublicApproval {
@@ -63,7 +63,7 @@ func captureManagedVaultReads(t *testing.T, ctx context.Context, root string, us
 		// to the current tenant's records. Populated same-name realm isolation
 		// is covered by the shared-book core test.
 		foreign, err := user.PublicRead(ctx, peer, session, "vault-approvals", "other", query, "")
-		if err == nil || foreign.PublicRead != nil && len(foreign.PublicRead.Rows) != 0 {
+		if err == nil || len(foreign.Rows) != 0 {
 			t.Fatal("missing foreign realm disclosed own approval rows", foreign, err)
 		}
 		return rows

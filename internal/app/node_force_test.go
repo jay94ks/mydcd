@@ -7,17 +7,17 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/cluster/lifecycle"
-	"github.com/jay94ks/mydcd/internal/cluster/membership"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/userauth"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/lifecycle"
+	"github.com/jay94ks/seafield/internal/cluster/membership"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/userauth"
 )
 
-// This source connects the existing real N3 fixture. The target mydcd stops;
-// the remaining pair must commit one original SDK effect after a fresh MYDCP
+// This source connects the existing real N3 fixture. The target sfcd stops;
+// the remaining pair must commit one original SDK effect after a fresh SFCP
 // probe. Native workload modules are disabled, so this proves no Task stop or
 // Volume writer fence. Those pins are covered separately by the core input.
 func verifyRuntimeForceRemoval(t *testing.T, ctx context.Context, controls []*Runtime, user userauth.Client, session access.Session, policy control.Policy, wait func(string, func() bool)) {
@@ -39,14 +39,14 @@ func verifyRuntimeForceRemoval(t *testing.T, ctx context.Context, controls []*Ru
 		}
 		return nil, membership.Directory{}, false
 	}
-	peerFor := func(runtime *Runtime) mydcp.Peer {
+	peerFor := func(runtime *Runtime) sfcp.Peer {
 		for _, peer := range user.Peers {
 			if [32]byte(peer.Key) == runtime.Identity.Public {
 				return peer
 			}
 		}
 		t.Fatal("missing pinned control")
-		return mydcp.Peer{}
+		return sfcp.Peer{}
 	}
 	wait("N3 installed before force removal", func() bool {
 		_, d, ok := current()
@@ -94,7 +94,7 @@ func verifyRuntimeForceRemoval(t *testing.T, ctx context.Context, controls []*Ru
 	before, _ := d.Entry(id)
 	stopped = target
 	if err = target.Close(); err != nil {
-		t.Fatal("stop original target mydcd", err)
+		t.Fatal("stop original target sfcd", err)
 	}
 	wait("surviving installed quorum", func() bool { _, _, ok := current(); return ok })
 	leader, d, _ = current()
@@ -120,7 +120,7 @@ func verifyRuntimeForceRemoval(t *testing.T, ctx context.Context, controls []*Ru
 	if after.Peer != before.Peer || d.MemberKey(oldKey) || d.ReplicationKey(oldKey) || !d.HistoricalMemberKey(oldKey) {
 		t.Fatal("force retirement replaced history or leaked current authority")
 	}
-	if _, approved := leader.Mesh.Peer(mydcp.Identity(oldKey)); approved {
+	if _, approved := leader.Mesh.Peer(sfcp.Identity(oldKey)); approved {
 		t.Fatal("retired TLS key fell back into public user authentication")
 	}
 	actual, err := leader.Engine().InstalledConfiguration(ctx, true)

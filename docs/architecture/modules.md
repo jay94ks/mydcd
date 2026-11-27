@@ -6,13 +6,13 @@
 
 ## 실행과 기능 범위
 
-논리 노드당 `mydcd` 하나가 필수 cluster/MYDCP와 선택 network·workload·ingress를 구성한다. control 여부는 Raft 투표 구성의 속성이며 역할별 데몬 모드가 아니다. CLI `mydc`는 자기 설정을 읽고 MYDCP 관리 API를 호출한다. CLI 명령 해석·출력·종료 코드는 각 실행 파일에 둔다.
+논리 노드당 `sfcd` 하나가 필수 cluster/SFCP와 선택 network·workload·ingress를 구성한다. control 여부는 Raft 투표 구성의 속성이며 역할별 데몬 모드가 아니다. CLI `sfcli`는 자기 설정을 읽고 SFCP 관리 API를 호출한다. CLI 명령 해석·출력·종료 코드는 각 실행 파일에 둔다.
 
-산출물은 `mydc`·`mydcd` 두 Go 실행 파일과 공유 내부 package다. 새 구현은 `libmydc.so`/외부 C++ ABI를 제공하지 않는다.
+산출물은 `sfcli`·`sfcd` 두 Go 실행 파일과 공유 내부 package다. 새 구현은 `libsfc.so`/외부 C++ ABI를 제공하지 않는다.
 
 현재 기능은 과반수 관리·인계·노드별 운영 데이터·Docker·다중 CIDR/TUN·HTTP/1.1·2·3/로컬 TLS다. HTTP 인스턴스는 여러 listener를 가질 수 있다. 일반 TCP/UDP 공개·다단계 worker 프로세스·ACME/Certbot은 후속 범위다. 후속 자식 프로세스는 Go runtime 안의 임의 fork 대신 새 실행 상태를 갖는 exec 경계를 사용한다. 다중 노드 기능과 서로 다른 물리 호스트의 장애 독립성 검증은 구분한다. 최종 환경은 같은 물리 호스트의 독립 Linux KVM 게스트2개다.
 
-입력의 책임은 [관리 명령과 앱 선언](commands-and-declarations.md)을 따른다. 명시 운영 작업과 app.yaml 목표 상태는 같은 권한·Raft·Inventory 코어를 사용한다. 로컬 관리는 기본 `/var/run/mydc.sock`의 TLS/MYDCP Unix socket으로 User/SecretInput을 제공한다. 노드 간 QUIC/UDP MYDCP와 같은 사용자 관리 코어를 사용하며 [Docker의 HTTP Unix API와 구분](../reference/unix-sockets.md)한다.
+입력의 책임은 [관리 명령과 앱 선언](commands-and-declarations.md)을 따른다. 명시 운영 작업과 app.yaml 목표 상태는 같은 권한·Raft·Inventory 코어를 사용한다. 로컬 관리는 기본 `/run/sfcdp.sock`의 TLS/SFCP Unix socket으로 User/SecretInput을 제공한다. 노드 간 QUIC/UDP SFCP와 같은 사용자 관리 코어를 사용하며 [Docker의 HTTP Unix API와 구분](../reference/unix-sockets.md)한다.
 
 ## 컨테이너 앱 소스 배치
 
@@ -25,7 +25,7 @@
 | **cluster** | 가입·투표 구성·관리 명령·권한/CAS·결정적 FSM·최신/로컬 조회·Raft log/Snapshot | 확정 Desired·관리 공개키/권한·요청 중복 결과·FSM 위치·Raft term/vote/log·공유 상태 Snapshot | Docker/커널/HTTP 부작용, 자체 합의나 별도 체인 동기화 |
 | **network** | IPAM의 로컬 적용·Bridge/TUN·route/nft·패킷 전달·경로/MTU 관측·endpoint 예약/대여·Drain | 자기 노드의 네트워크 journal/Applied/Observed·장치/규칙/Bridge·flow·endpoint lease | 전역 관리 변경의 독자 확정, 컨테이너 task 실행 |
 | **workload** | 확정된 task의 이미지/컨테이너 실행·관측·자원 예약·배치 정책의 명시 제안 | 자기 노드의 task journal/Applied/Observed·컨테이너 ID·실행 자원 예약 | 자체 CIDR/TUN 조작, 로컬 관측으로 확정 Desired 덮어쓰기 |
-| **ingress** | listener·TLS·HTTP/1.1·2·3·Host/Path·backend/health/분산·연결/스트림 종료 | listener/request/connection·backend lease·로컬 적용 상태와 인증서 참조 | 관리 커밋, Docker/커널 직접 변경, MYDCP 신원 공유 |
+| **ingress** | listener·TLS·HTTP/1.1·2·3·Host/Path·backend/health/분산·연결/스트림 종료 | listener/request/connection·backend lease·로컬 적용 상태와 인증서 참조 | 관리 커밋, Docker/커널 직접 변경, SFCP 신원 공유 |
 
 배치 정책의 입력은 실제 owner의 관측이며 출력은 읽기 전용 관리 제안이다. 별도 CAS의 과반수 커밋만 Desired를 바꾼다. typed Bridge/task의 IPAM·노드 예산·의존성은 app이 주입한 결정적 validator로 확정 FSM 안에서 검사한다. 모듈 실행기는 확정 Desired와 원 journal을 소비하며 원격 관측/배치 제안이 실제 실행을 대신하지 않는다.
 
@@ -33,7 +33,7 @@
 
 | 기반 | 계약 |
 |---|---|
-| **MYDCP** | 노드 간 관리·조회·Raft·Snapshot·상태·터널 통신. 신원/목적별 허가·기한·길이/큐 예산·요청 수명. 기능 모듈이 직접 라이브러리 listener를 만들지 않음 |
+| **SFCP** | 노드 간 관리·조회·Raft·Snapshot·상태·터널 통신. 신원/목적별 허가·기한·길이/큐 예산·요청 수명. 기능 모듈이 직접 라이브러리 listener를 만들지 않음 |
 | **identity** | 로컬 키/인증서·전체 공개키 검증·challenge·현재 권한 연결. 접속 성공/공개키 등록과 투표권을 구분 |
 | **storage adapters** | 모듈별 내구 저장의 구현. 임의 공용 KV 접근을 다른 모듈에 주지 않음. 원자 batch/동기 저장과 오류를 숨기지 않음 |
 | **Docker/OS adapters** | Docker API·Netlink·nft·TUN의 실제 I/O. 비즈니스 결정·자원 소유권은 기능 모듈에 유지 |
@@ -45,11 +45,11 @@ typed legacy 정리는 원본 native Desired와 매핑/예약을 하나의 FSM p
 
 CD metadata의 prepare/send/collect는 현재 leader가 수행하며 local Docker/network 어댑터를 요구하지 않는다. native 단계의 dispatch는 원 owner와 실제 설치 어댑터를 요구하고, metadata 확정만으로 native Healthy나 앱 전체 완료를 판정하지 않는다.
 
-각 기능은 재사용 가능한 제품 코어와 실제 storage/identity·MYDCP·Raft/FSM·Docker/OS 어댑터를 사용한다. CLI 명령 처리와 daemon 조립은 두 `cmd` 실행 파일의 책임이다.
+각 기능은 재사용 가능한 제품 코어와 실제 storage/identity·SFCP·Raft/FSM·Docker/OS 어댑터를 사용한다. CLI 명령 처리와 daemon 조립은 두 `cmd` 실행 파일의 책임이다.
 
 ```mermaid
 flowchart TD
-  CLI[mydc 명령 처리] --> P[MYDCP / 인증된 요청]
+  CLI[sfc 명령 처리] --> P[SFCP / 인증된 요청]
   P --> C[cluster / Raft / 결정적 FSM]
   C --> V[확정 Desired 읽기 view]
   V --> N[network]
@@ -62,7 +62,7 @@ flowchart TD
   N -->|패킷| P
 ```
 
-그림은 실행 흐름/소비 관계다. Go import는 각 기능이 cluster의 **순수 읽기/모델 경계**와 소비자 쪽 작은 port에만 의존하게 한다. cluster는 network/workload/ingress 구현을 import하거나 호출하지 않는다. MYDCP는 기능 구현을 import하지 않고 app에서 handler를 등록한다. network가 MYDCP를 사용하면서 MYDCP가 network를 import하는 순환을 만들지 않는다.
+그림은 실행 흐름/소비 관계다. Go import는 각 기능이 cluster의 **순수 읽기/모델 경계**와 소비자 쪽 작은 port에만 의존하게 한다. cluster는 network/workload/ingress 구현을 import하거나 호출하지 않는다. SFCP는 기능 구현을 import하지 않고 app에서 handler를 등록한다. network가 SFCP를 사용하면서 SFCP가 network를 import하는 순환을 만들지 않는다.
 
 Workload와 network는 같은 Docker client를 공유할 수 있지만 객체별 writer는 하나다. **Docker network/Bridge는 network, container는 workload**가 소유한다. network가 컨테이너를 정지/삭제하지 않으며 workload가 임의 Bridge를 제거하지 않는다. Ingress는 backend descriptor/lease를 소비하며 컨테이너 DB를 읽지 않는다.
 
@@ -72,7 +72,7 @@ Network/Workload Manager는 각 운영 DB를 내부에 두고 Workload가 작은
 
 관리 망의 source key와 논리 packet namespace는 `tenancy.SourceIdentity`/`PacketNamespace`에서 표현한다. 이 식별자는 권한이나 native 준비 증거가 아니다. tenant catalog·현재 member/권한·정확한 source revision과 실제 owner permit은 기존 관리 경계가 확인한다. 앱은 `NetworkReference`에 고정한 source/group/hash를 소비하며 원 참조의 node-local TUN 선택은 `LocalTunnel`을 사용한다.
 
-Task의 native Bridge/관리 망 참조를 읽는 경계는 `deployment.ResolveTaskNetwork` 하나다. control의 Task material과 Ingress가 같은 reader를 호출하며 원 Task의 tenant/app/deployment/node/owner·정확한 dependency를 대조한다. 현재 수락·quorum·실제 Acquire/Read-back은 이 reader의 책임이 아니다. `control.NativePermit`은 관리 source와 앱 source의 현재 native 사용을 판정하고, Runtime의 원 모듈 owner가 journal·외부 효과·종료를 담당한다. 내부 타입 이름과 별개로 기존 MYDCP method/원 JSON·작업 ID는 그대로 보존한다.
+Task의 native Bridge/관리 망 참조를 읽는 경계는 `deployment.ResolveTaskNetwork` 하나다. control의 Task material과 Ingress가 같은 reader를 호출하며 원 Task의 tenant/app/deployment/node/owner·정확한 dependency를 대조한다. 현재 수락·quorum·실제 Acquire/Read-back은 이 reader의 책임이 아니다. `control.NativePermit`은 관리 source와 앱 source의 현재 native 사용을 판정하고, Runtime의 원 모듈 owner가 journal·외부 효과·종료를 담당한다. 내부 타입 이름과 별개로 기존 SFCP method/원 JSON·작업 ID는 그대로 보존한다.
 
 | 상태 | 권위/쓰기 경계 | 복제 |
 |---|---|---|
@@ -93,13 +93,13 @@ Task의 native Bridge/관리 망 참조를 읽는 경계는 `deployment.ResolveT
 
 새 Desired가 와도 이미 dispatch한 작업의 대상/ID/결과를 유지한다. 결과 불명은 inspect/recovery 뒤 해소한다. 삭제 완료 증거와 새 생성의 generation을 별도로 보존한다. lease는 새 대여 차단·기존 사용자 정산·실제 자원 제거를 구분한다. 프로세스 종료/FD 폐쇄를 DB 정리 완료로 대체하지 않는다.
 
-시작은 필수 identity/storage/MYDCP/cluster 준비 후 선택 모듈의 의존 순서로, 종료는 신규 수락 차단→기존 작업 정산/내구 복구 필요 기록→lease 반환→자원/저장 닫기 순서다. DB/로그/외부 부작용을 한 거대 transaction으로 가정하지 않는다. 미구현/실패/복구 필요를 Ready로 표시하지 않는다.
+시작은 필수 identity/storage/SFCP/cluster 준비 후 선택 모듈의 의존 순서로, 종료는 신규 수락 차단→기존 작업 정산/내구 복구 필요 기록→lease 반환→자원/저장 닫기 순서다. DB/로그/외부 부작용을 한 거대 transaction으로 가정하지 않는다. 미구현/실패/복구 필요를 Ready로 표시하지 않는다.
 
 <a id="후속-cidr-내장-서비스"></a>
 
 ## CIDR/IPAM·내장 DNS
 
-CIDR/IPAM·DNS 계약은 network 모듈이 클러스터 전역 CIDR·tenant/node 소유권과 주소/참조를 통제하고, 실제 컨테이너 주소는 Docker IPAM/SDK로 설정하도록 한다. DNS는 담당 mydcd 내부에서 제공하며 별도 서버 컨테이너/daemon을 만들지 않는다. 공유 설정/주소 예약·owner CAS는 cluster, 실제 socket/query/TTL·native pin 정산은 network owner가 담당한다. 질의/cache는 로컬이고 질의마다 Raft를 쓰지 않는다. route는 양측 승인·방향/port·원 flow/native 참조를 검증하며 실제 packet provenance와 peer boot를 별도로 확인한다. CIDR/gateway/owner·DNS/운영 한도는 실행 중 명시 관리 CAS와 원 정산/새 generation으로 전환한다. DHCP 서버·UDP67·외부 client·DHCP lease/guard/전용 RPC는 범위에서 제외한다.
+CIDR/IPAM·DNS 계약은 network 모듈이 클러스터 전역 CIDR·tenant/node 소유권과 주소/참조를 통제하고, 실제 컨테이너 주소는 Docker IPAM/SDK로 설정하도록 한다. DNS는 담당 sfcd 내부에서 제공하며 별도 서버 컨테이너/daemon을 만들지 않는다. 공유 설정/주소 예약·owner CAS는 cluster, 실제 socket/query/TTL·native pin 정산은 network owner가 담당한다. 질의/cache는 로컬이고 질의마다 Raft를 쓰지 않는다. route는 양측 승인·방향/port·원 flow/native 참조를 검증하며 실제 packet provenance와 peer boot를 별도로 확인한다. CIDR/gateway/owner·DNS/운영 한도는 실행 중 명시 관리 CAS와 원 정산/새 generation으로 전환한다. DHCP 서버·UDP67·외부 client·DHCP lease/guard/전용 RPC는 범위에서 제외한다.
 
 
 <a id="후속-secret-group과-승인"></a>
@@ -122,7 +122,7 @@ Secret Group 계약은 cluster→tenant root→다단 Group→Secret의 접근 �
 
 tenant·사용자 계약은 네 기능 모듈에 tenant-qualified 자원·권한·예산을 적용한다. cluster가 user/membership/system admin·전역 CIDR 예약·양측 route 승인·tenant별 image trust를 확정하고, password/private-key/token 사용자 인증은 node Member/Raft/Tunnel admission과 분리한다. 한 user는 여러 tenant의 역할을 가지며 system admin은 membership 없이 모든 tenant를 관리한다. 일반 사용자 API와 native endpoint/Ingress/flow 모두 tenant 경계를 검사한다. tenant별 daemon/Raft나 임의 Docker socket 접근을 제공하지 않는다.
 
-Secret은 cluster→tenant root→다단 Group→Secret으로 격리한다. private registry는 `mydcd`가 직접 서비스하는 tenant별 OCI HTTP endpoint다. 서버 owner가 원 retained Volume writer와 TLS/인가·요청/upload 수명을 관리하고, workload의 기존 Volume/종료 정산을 재사용한다. 별도 registry 컨테이너나 bootstrap 이미지를 요구하지 않는다. tenant별 신뢰 registry/repository는 생성 시 Docker Hub만으로 초기화하고 cache/create/CD까지 적용한다. 생성한 registry의 자동 신뢰는 없다. 전체 FSM을 가진 신뢰 node의 복제와 tenant 사용자에게 허가한 조회를 구분한다.
+Secret은 cluster→tenant root→다단 Group→Secret으로 격리한다. private registry는 `sfcd`가 직접 서비스하는 tenant별 OCI HTTP endpoint다. 서버 owner가 원 retained Volume writer와 TLS/인가·요청/upload 수명을 관리하고, workload의 기존 Volume/종료 정산을 재사용한다. 별도 registry 컨테이너나 bootstrap 이미지를 요구하지 않는다. tenant별 신뢰 registry/repository는 생성 시 Docker Hub만으로 초기화하고 cache/create/CD까지 적용한다. 생성한 registry의 자동 신뢰는 없다. 전체 FSM을 가진 신뢰 node의 복제와 tenant 사용자에게 허가한 조회를 구분한다.
 
 외부 registry의 참조 선택은 순수 `imagesource` 코어, 실제 OCI 읽기는 `registryclient`, 로컬 이미지 사용/적재는 기존 `engine`이 맡는다. registryclient는 별도 daemon/DB/cache가 아닌 호출별 I/O 경계이며 현재 권한은 control·원 Secret Binding에서 판정한다. tenant CA·자격을 해당 클라이언트에만 적용하고 검증한 원 platform manifest/config·압축 layer graph를 태그 없는 OCI+Docker tar stream으로 기존 Docker SDK에 적재한다. 원 manifest와 config만 정확한 native ID로 조회하며 legacy store의 config ID 또는 containerd store의 manifest ID를 기존 Process에 고정한다. 앱 Goal/Process·원 Task/사용 참조는 기존 workload가 소유한다. [외부 registry](../reference/external-registries.md)의 현재 연결·수락 범위를 따른다.
 
@@ -142,7 +142,7 @@ bootstrap 계약은 독립 init/대상 cluster join을 명시 선택하고 자�
 
 ## 컨테이너 lifecycle과 스크립트 실행
 
-lifecycle 계약의 scheduler/내장 Docker 검사·Yaegi/compiled runner는 workload 기능 모듈 안에 둔다. cluster는 tenant named script/리비전·실행/resolver/빌드 정책·공유 artifact ref와 원 operation을 관리하며, deployment는 app/service mapping과 같은 Inventory/Execution을 사용한다. 스크립트는 접속 검사와 결과별 부가 동작을 커스텀하고, 담당 mydcd는 검사 결과·앱 목표/정책에 따라 Docker SDK로 시작/종료/재시작을 결정한다. compiler는 내구 job이 있을 때만 기동해 유한 batch 뒤 종료/Wait·정리한다. source/compiled cache·run journal은 각 node owner가 운영하고 원 upload/job/사용 참조를 정산한 뒤 회수한다. 별도 합의/배포 실행기·상시 compiler worker·외부 Yaegi daemon을 두지 않는다.
+lifecycle 계약의 scheduler/내장 Docker 검사·Yaegi/compiled runner는 workload 기능 모듈 안에 둔다. cluster는 tenant named script/리비전·실행/resolver/빌드 정책·공유 artifact ref와 원 operation을 관리하며, deployment는 app/service mapping과 같은 Inventory/Execution을 사용한다. 스크립트는 접속 검사와 결과별 부가 동작을 커스텀하고, 담당 sfcd는 검사 결과·앱 목표/정책에 따라 Docker SDK로 시작/종료/재시작을 결정한다. compiler는 내구 job이 있을 때만 기동해 유한 batch 뒤 종료/Wait·정리한다. source/compiled cache·run journal은 각 node owner가 운영하고 원 upload/job/사용 참조를 정산한 뒤 회수한다. 별도 합의/배포 실행기·상시 compiler worker·외부 Yaegi daemon을 두지 않는다.
 
 ## 제품 계약과 샘플 앱
 

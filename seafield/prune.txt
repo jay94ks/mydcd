@@ -1,0 +1,19 @@
+# Seafield에서 통째로 지우는 업스트림 경로. 한 줄에 경로 하나, 저장소 루트 기준.
+# 삭제 diff 대신 이 목록으로 지워 업스트림이 그 파일을 바꿔도 적용이 깨지지 않게 한다.
+# 지운 경로를 부르던 연결부는 patches/의 작은 패치로 고친다.
+
+# 외부 로그 드라이버 (json-file/local은 로그 queue file이 생길 때까지 남김)
+daemon/logger/awslogs
+daemon/logger/etwlogs
+daemon/logger/fluentd
+daemon/logger/gcplogs
+daemon/logger/gelf
+daemon/logger/journald
+daemon/logger/splunk
+daemon/logger/syslog
+daemon/logdrivers_windows.go
+
+# Swarm·checkpoint·plugin API 라우터 (연결부는 0002 패치)
+daemon/server/router/swarm
+daemon/server/router/checkpoint
+daemon/server/router/plugin

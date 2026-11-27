@@ -11,13 +11,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/schema"
-	"github.com/jay94ks/mydcd/internal/workload"
-	checker "github.com/jay94ks/mydcd/internal/workload/lifecycle"
-	contract "github.com/jay94ks/mydcd/lifecycle/v1"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/workload"
+	checker "github.com/jay94ks/seafield/internal/workload/lifecycle"
+	contract "github.com/jay94ks/seafield/lifecycle/v1"
 )
 
 // Two installed member keys, actual planner/FSM/Binding/signature validation;
@@ -44,10 +44,10 @@ func checkerProbePermitFixture(t *testing.T) (*backupCoreFixture, CheckerProbeRe
 		alpha := input.Services["web"]
 		delete(input.Services, "web")
 		beta := alpha
-		beta.MyDC.Node = "node-b"
+		beta.Sfc.Node = "node-b"
 		beta.Networks = map[string]deployment.Attachment{"lan": {IPv4: "10.80.2.10", Aliases: []string{"second"}}}
 		input.Services["alpha"], input.Services["beta"] = alpha, beta
-		input.MyDC.Lifecycle = &deployment.LifecycleDeclaration{Checks: []deployment.LifecycleCheck{{ID: "inspect", Phase: contract.Liveness, LifecycleTemplate: deployment.LifecycleTemplate{Builtin: "file", Parameters: deployment.LifecycleParameters(`{"service":"beta","path":"/ready","kind":"regular"}`)}}}}
+		input.Sfc.Lifecycle = &deployment.LifecycleDeclaration{Checks: []deployment.LifecycleCheck{{ID: "inspect", Phase: contract.Liveness, LifecycleTemplate: deployment.LifecycleTemplate{Builtin: "file", Parameters: deployment.LifecycleParameters(`{"service":"beta","path":"/ready","kind":"regular"}`)}}}}
 		ctx.Features["lifecycle"] = true // core planning input, not advertised live support
 	})
 	for _, node := range []string{"node-a", "node-b"} {
@@ -281,7 +281,7 @@ func TestCheckerProbePermitDoesNotReuseAuthorityAfterTargetNodeRevocation(t *tes
 	if !ok {
 		t.Fatal("original tenant missing")
 	}
-	managedDNSChange(t, f, "revoke-probe-target-node", "set-nodes", tenant.Revision, NodeAssignment{Tenant: "tenant", Nodes: []string{"node-a"}}, state.Applied)
+	managedDNSChange(t, f, "revoke-probe-target-node", "set-nodes", tenant.Revision, NodeChangeTo("tenant", tenant.AllowedNodes, []string{"node-a"}), state.Applied)
 	for _, caller := range [][32]byte{consumer, provider} {
 		if _, err := f.p.CheckerProbePermit(f.s, caller, q); err == nil {
 			t.Fatal("target authority reused across state reads")

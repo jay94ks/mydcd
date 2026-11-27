@@ -10,8 +10,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/nodeshell"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/nodeshell"
 )
 
 type nodeShellStreamFake struct {

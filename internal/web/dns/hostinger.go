@@ -20,7 +20,7 @@ import (
 
 	"golang.org/x/time/rate"
 
-	"github.com/jay94ks/mydcd/internal/web/provlog"
+	"github.com/jay94ks/seafield/internal/web/provlog"
 )
 
 // Hostinger DNS adapter. Paths and fields follow the Hostinger API OpenAPI

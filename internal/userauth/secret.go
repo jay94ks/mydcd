@@ -12,12 +12,12 @@ import (
 	"errors"
 	"log"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/certstore"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/secrets"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/certstore"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/secrets"
+	"github.com/jay94ks/seafield/internal/sfcp"
 )
 
 var ErrApprovalUnknown = errors.New("original approval submission outcome unknown")
@@ -27,6 +27,7 @@ var ErrApprovalUnknown = errors.New("original approval submission outcome unknow
 // Its public ID names an already committed/dispatched original provider write.
 type SecretRequest struct {
 	Certificate     *CertificateInput             `json:",omitempty"`
+	VPSCredential   *VPSCredentialInput           `json:",omitempty"`
 	Selection       *control.AppApprovalSelection `json:",omitempty"`
 	Schema          uint8
 	Realm, ID, Mode string
@@ -38,6 +39,9 @@ type SecretRequest struct {
 }
 
 func validSecretRequest(q SecretRequest) bool {
+	if q.VPSCredential != nil || q.Mode == "vps-credential" {
+		return q.Schema == 1 && q.Nonce != ([32]byte{}) && q.Mode == "vps-credential" && q.VPSCredential != nil && validVPSCredentialInput(*q.VPSCredential) && q.ID == q.VPSCredential.Request && q.Certificate == nil && q.Realm == "" && q.Values == nil && q.Target == nil && q.Password == nil && q.Origin == nil && q.Selection == nil
+	}
 	if q.Certificate != nil || q.Mode == "certificate" {
 		return q.Schema == 1 && q.Nonce != ([32]byte{}) && q.Mode == "certificate" && q.Certificate != nil && validCertificateInput(*q.Certificate) && q.ID == q.Certificate.Request && q.Realm == "" && q.Values == nil && q.Target == nil && q.Password == nil && q.Origin == nil && q.Selection == nil
 	}
@@ -62,19 +66,19 @@ func validSecretRequest(q SecretRequest) bool {
 	}
 	return total <= 16<<10 && (q.Mode != "execute" || len(q.Values) > 0)
 }
-func (s Service) secretInput(ctx context.Context, conn *mydcp.Session, stream mydcp.Stream, frame mydcp.Frame) error {
+func (s Service) secretInput(ctx context.Context, conn *sfcp.Session, stream sfcp.Stream, frame sfcp.Frame) error {
 	defer clear(frame.Fields[0].Value)
-	if frame.Kind != 1 || frame.Purpose != mydcp.SecretInput || s.VaultWriter == nil && s.VaultApprover == nil && s.CertificateWriter == nil {
-		return mydcp.ErrAdmission
+	if frame.Kind != 1 || frame.Purpose != sfcp.SecretInput || s.VaultWriter == nil && s.VaultApprover == nil && s.CertificateWriter == nil && s.VPSCredentialSealer == nil {
+		return sfcp.ErrAdmission
 	}
 	var envelope Envelope
 	if strict(frame.Fields[0].Value, &envelope) != nil {
-		return mydcp.ErrFrame
+		return sfcp.ErrFrame
 	}
 	defer clear(envelope.Body)
 	var q SecretRequest
 	if strict(envelope.Body, &q) != nil {
-		return mydcp.ErrFrame
+		return sfcp.ErrFrame
 	}
 	defer func() {
 		for _, value := range q.Values {
@@ -85,8 +89,12 @@ func (s Service) secretInput(ctx context.Context, conn *mydcp.Session, stream my
 			clear(q.Certificate.Chain)
 			clear(q.Certificate.Key)
 		}
+		if q.VPSCredential != nil {
+			clear(q.VPSCredential.AccessKey)
+			clear(q.VPSCredential.SecretKey)
+		}
 	}()
-	if q.Mode == "certificate" {
+	if q.Mode == "certificate" || q.Mode == "vps-credential" {
 		if err := streamEOF(stream); err != nil {
 			return err
 		}
@@ -100,13 +108,13 @@ func (s Service) secretInput(ctx context.Context, conn *mydcp.Session, stream my
 	if verified {
 		var view cluster.View
 		var err error
-		if q.Mode == "certificate" {
+		if q.Mode == "certificate" || q.Mode == "vps-credential" {
 			// Keep private input on this exact provider. Freshness comes from
 			// the quorum status receipt and this provider's durable prefix,
 			// rather than forwarding certificate material to the leader.
 			view, err = s.authenticationView(ctx)
 			if err == nil && view.Local {
-				err = mydcp.ErrAdmission
+				err = sfcp.ErrAdmission
 			}
 		} else {
 			view, err = s.Engine.Read(ctx, false)
@@ -119,16 +127,24 @@ func (s Service) secretInput(ctx context.Context, conn *mydcp.Session, stream my
 			if marshalErr != nil {
 				return marshalErr
 			}
-			return mydcp.WriteFrame(stream, mydcp.Frame{Purpose: mydcp.SecretInput, Kind: 2, Request: frame.Request, Fields: []mydcp.Field{{Tag: 1, Required: true, Value: raw}, {Tag: 2, Required: true, Value: digest[:]}}})
+			return sfcp.WriteFrame(stream, sfcp.Frame{Purpose: sfcp.SecretInput, Kind: 2, Request: frame.Request, Fields: []sfcp.Field{{Tag: 1, Required: true, Value: raw}, {Tag: 2, Required: true, Value: digest[:]}}})
 		}
-		if q.Mode == "certificate" && s.CertificateWriter != nil {
+		if q.Mode == "vps-credential" && s.VPSCredentialSealer != nil {
+			v, err := s.VPSCredentialSealer(ctx, *envelope.Session, *q.VPSCredential)
+			if err == nil {
+				reply.Code = "ok"
+				reply.VPSCredential = &v
+			} else {
+				reply.Code = "denied"
+			}
+		} else if q.Mode == "certificate" && s.CertificateWriter != nil {
 			v, err := s.CertificateWriter(ctx, *envelope.Session, *q.Certificate)
 			if err == nil {
 				reply.Code = "ok"
 				reply.Certificate = &v
 			} else if errors.Is(err, access.ErrConflict) || errors.Is(err, certstore.ErrConflict) {
 				reply.Code = "conflict"
-			} else if errors.Is(err, access.ErrDenied) || errors.Is(err, mydcp.ErrAdmission) || errors.Is(err, certstore.ErrCertificate) {
+			} else if errors.Is(err, access.ErrDenied) || errors.Is(err, sfcp.ErrAdmission) || errors.Is(err, certstore.ErrCertificate) {
 				reply.Code = "denied"
 			} else {
 				reply.Code = "unknown"
@@ -160,33 +176,33 @@ func (s Service) secretInput(ctx context.Context, conn *mydcp.Session, stream my
 	if err != nil {
 		return err
 	}
-	return mydcp.WriteFrame(stream, mydcp.Frame{Purpose: mydcp.SecretInput, Kind: 2, Request: frame.Request, Fields: []mydcp.Field{{Tag: 1, Required: true, Value: raw}, {Tag: 2, Required: true, Value: digest[:]}}})
+	return sfcp.WriteFrame(stream, sfcp.Frame{Purpose: sfcp.SecretInput, Kind: 2, Request: frame.Request, Fields: []sfcp.Field{{Tag: 1, Required: true, Value: raw}, {Tag: 2, Required: true, Value: digest[:]}}})
 }
 
 // WriteVault never redirects or relays private input. A lost/unknown response
 // requires an explicit mode=recover request without private values.
-func (c Client) WriteVault(ctx context.Context, target mydcp.Peer, session access.Session, q SecretRequest) (Reply, error) {
+func (c Client) WriteVault(ctx context.Context, target sfcp.Peer, session access.Session, q SecretRequest) (Reply, error) {
 	if c.Verify(session) != nil {
-		return Reply{}, mydcp.ErrAdmission
+		return Reply{}, sfcp.ErrAdmission
 	}
 	q.Schema = 1
 	if _, err := rand.Read(q.Nonce[:]); err != nil {
 		return Reply{}, err
 	}
 	if !validSecretRequest(q) {
-		return Reply{}, mydcp.ErrAdmission
+		return Reply{}, sfcp.ErrAdmission
 	}
 	body, err := json.Marshal(q)
 	if err != nil {
 		return Reply{}, err
 	}
 	defer clear(body)
-	reply, _, err := c.exchangePurpose(ctx, target, func(conn *mydcp.Session) (Envelope, error) {
+	reply, _, err := c.exchangePurpose(ctx, target, func(conn *sfcp.Session) (Envelope, error) {
 		return Envelope{Body: body, Session: &session, Signature: ed25519.Sign(c.Self.Private, access.RequestBytes(session, conn.PeerChallenge(), body))}, nil
-	}, false, 1, mydcp.SecretInput)
+	}, false, 1, sfcp.SecretInput)
 	return reply, err
 }
 
-func (c Client) ApproveVault(ctx context.Context, target mydcp.Peer, session access.Session, want secrets.Target, password []byte) (Reply, error) {
+func (c Client) ApproveVault(ctx context.Context, target sfcp.Peer, session access.Session, want secrets.Target, password []byte) (Reply, error) {
 	return c.WriteVault(ctx, target, session, SecretRequest{Realm: want.Realm, ID: want.ApprovalID, Mode: "approve", Target: &want, Password: password})
 }

@@ -8,7 +8,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/jay94ks/mydcd/internal/registryclient"
+	"github.com/jay94ks/seafield/internal/registryclient"
 	"github.com/pelletier/go-toml/v2"
 )
 
@@ -93,5 +93,5 @@ func buildTrustControls(inputs []FrozenSource, roots []registryclient.RegistryTr
 		return nil, [32]byte{}, ErrInvalid
 	}
 	files = append(files, buildTrustFile{"buildkitd.toml", raw})
-	return files, digestJSON("mydc-imagebuild-registry-trust-1", normalized), nil
+	return files, digestJSON("sfc-imagebuild-registry-trust-1", normalized), nil
 }

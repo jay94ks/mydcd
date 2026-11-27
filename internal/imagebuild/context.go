@@ -9,8 +9,8 @@ import (
 	"unicode"
 
 	"github.com/distribution/reference"
-	"github.com/jay94ks/mydcd/internal/cluster/lifecycle"
-	"github.com/jay94ks/mydcd/internal/nodestorage"
+	"github.com/jay94ks/seafield/internal/cluster/lifecycle"
+	"github.com/jay94ks/seafield/internal/nodestorage"
 )
 
 // ContextSpec contains public configuration and Vault references only. Git

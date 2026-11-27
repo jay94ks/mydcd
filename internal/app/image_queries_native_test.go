@@ -16,10 +16,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/registryclient"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/registryclient"
 )
 
 // This consumes the same live CLI/User/Raft and owned registry fixtures. A
@@ -73,14 +73,14 @@ func imageQueryWithdrawTrustNative(t *testing.T, authority, prefix string, p con
 		return value
 	}
 	original := tenant()
-	rules := slices.DeleteFunc(slices.Clone(original.ImageSources), func(rule access.TrustRule) bool { return rule.Registry == authority })
-	if len(rules) == len(original.ImageSources) {
+	rules := slices.DeleteFunc(slices.Clone(original.ImageSources), func(rule access.TrustRule) bool { return rule.Registry != authority })
+	if len(rules) == 0 {
 		t.Fatal("image query trust withdrawal has no current matching rule")
 	}
-	change(prefix+"-withdraw", "set-trust", original.Revision, control.TrustAssignment{Tenant: "tenant", Rules: rules})
+	change(prefix+"-withdraw", "set-trust", original.Revision, control.TrustChange{Tenant: "tenant", Remove: rules})
 	defer func() {
 		current := tenant()
-		change(prefix+"-restore", "set-trust", current.Revision, control.TrustAssignment{Tenant: "tenant", Rules: slices.Clone(original.ImageSources)})
+		change(prefix+"-restore", "set-trust", current.Revision, control.TrustChange{Tenant: "tenant", Add: rules})
 		if !reflect.DeepEqual(tenant().ImageSources, original.ImageSources) {
 			t.Error("image query did not restore original trust")
 		}

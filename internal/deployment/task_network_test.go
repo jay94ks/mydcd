@@ -8,7 +8,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/schema"
+	"github.com/jay94ks/seafield/internal/schema"
 )
 
 func TestTaskNetworkResolverPreservesManagedRawAndFrozenGoalSources(t *testing.T) {

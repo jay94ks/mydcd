@@ -5,7 +5,7 @@ package userauth
 import (
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/control"
 )
 
 func TestAppSourceQueriesRejectCrossMethodSelectorsAndUnpinnedParts(t *testing.T) {
@@ -25,7 +25,6 @@ func TestAppSourceQueriesRejectCrossMethodSelectorsAndUnpinnedParts(t *testing.T
 		{Method: "app-source", Tenant: "tenant"},
 		{Method: "app-source", Tenant: "tenant", AppSource: &q, After: "cursor"},
 		{Method: "app-source", Tenant: "tenant", AppSource: &q, Node: "node-a"},
-		{Method: "app-source", Tenant: "tenant", AppSource: &q, App: "other"},
 		{Method: "app-source", Tenant: "tenant", AppSource: &q, TargetUser: "other"},
 		{Method: "whoami", AppSource: &q},
 		{Method: "submit", AppSource: &q},

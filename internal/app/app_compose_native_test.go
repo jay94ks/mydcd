@@ -19,11 +19,11 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/userauth"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/userauth"
 )
 
 func TestRealBoundaryManagedAppComposeCLIObservations(t *testing.T) {
@@ -40,9 +40,9 @@ func TestP0RealBoundaryManagedNetworkComposeCLI(t *testing.T) {
 
 // The CLI is prebuilt as the ordinary user. The owned native fixture executes
 // only that binary; it never builds as root or supplies owner observations.
-func prepareManagedComposeCLI(t *testing.T, ctx context.Context, root string, user userauth.Client, peer mydcp.Peer, document, managementInput []byte, p control.Policy, read func() cluster.View, refresh bool, waitBudget time.Duration, groups ...string) []func() {
+func prepareManagedComposeCLI(t *testing.T, ctx context.Context, root string, user userauth.Client, peer sfcp.Peer, document, managementInput []byte, p control.Policy, read func() cluster.View, refresh bool, waitBudget time.Duration, groups ...string) []func() {
 	t.Helper()
-	binary := os.Getenv("MYDC_TEST_CLI")
+	binary := os.Getenv("SFC_TEST_CLI")
 	if !filepath.IsAbs(binary) {
 		t.Fatal("explicit user-prebuilt CLI required")
 	}
@@ -172,25 +172,23 @@ func prepareManagedComposeCLI(t *testing.T, ctx context.Context, root string, us
 			if !found || original.Observation == nil {
 				t.Fatal("missing original network observation", kind)
 			}
-			// Completed success must not freeze the original network observation.
-			for {
-				apps, err = p.Apps(read().State)
-				if err != nil {
-					t.Fatal(err)
-				}
-				e, _ = apps.Execution("tenant", "app")
-				current, found := e.Stage(bridge)
-				if !found || current.Observation == nil {
-					t.Fatal("missing current network observation", kind)
-				}
-				if current.Observation.Sequence > original.Observation.Sequence {
-					break
-				}
-				select {
-				case <-ctx.Done():
-					t.Fatal("completed bridge did not refresh", ctx.Err())
-				case <-time.After(100 * time.Millisecond):
-				}
+			// The linked owner renews an unchanged completed observation on
+			// the leader (in memory, never Raft), so it outlives the unlinked
+			// 30s window without a new sequence and is never expired.
+			until := time.Unix(int64(original.Observation.At+control.AppObservationMaxAge+2), 0)
+			select {
+			case <-ctx.Done():
+				t.Fatal("waiting past the unlinked observation window", ctx.Err())
+			case <-time.After(time.Until(until)):
+			}
+			apps, err = p.Apps(read().State)
+			if err != nil {
+				t.Fatal(err)
+			}
+			e, _ = apps.Execution("tenant", "app")
+			current, found := e.Stage(bridge)
+			if !found || current.Observation == nil || current.Observation.Expired || current.Observation.Sequence < original.Observation.Sequence {
+				t.Fatal("linked owner did not keep the completed network observation live", kind, current.Observation)
 			}
 			waited("healthy", "rollout")
 		}
@@ -207,10 +205,12 @@ func prepareManagedComposeCLI(t *testing.T, ctx context.Context, root string, us
 			}
 		}
 		rows, _, err := apps.ObservedPage(catalog, "admin", "tenant", "", newest+control.AppObservationMaxAge+1)
-		if err != nil || len(rows) != 1 || rows[0].Operation.Status != "Succeeded" || rows[0].Health != "Unknown" {
-			t.Fatal("historical success became fresh health", rows, err)
+		if err != nil || len(rows) != 1 || rows[0].Operation.Status != "Succeeded" || rows[0].Health != "Healthy" {
+			// Health follows the leader's expiry, not the reader's clock:
+			// while the owner stays linked its renewals keep it live.
+			t.Fatal("linked owner's success lost its health past the unlinked window", rows, err)
 		}
-		t.Log("prebuilt CLI up -> actual Vault/Secret/Volume/Task -> fresh Healthy wait and Keep diff; completed Bridge refreshes original signed observation; expired owner evidence remains Unknown despite Succeeded")
+		t.Log("prebuilt CLI up -> actual Vault/Secret/Volume/Task -> fresh Healthy wait and Keep diff; linked owner keeps the completed observations live and Healthy past the unlinked window")
 	}
 	down := func() { call(0, "compose", "down", "-p", "app", "--tenant", "tenant", "--operation", "stop-app") }
 	retired := func() {
@@ -236,14 +236,14 @@ func runManagedCLICommandInput(ctx context.Context, binary, home, profile string
 	}
 	// A test's own 'wallet init' finds the wallet already made by the login below.
 	if len(args) == 2 && args[0] == "wallet" && args[1] == "init" {
-		if _, e := os.Stat(filepath.Join(home, ".mydc", "wallet.bin")); e == nil {
+		if _, e := os.Stat(filepath.Join(home, ".sfc", "wallet.bin")); e == nil {
 			return nil, nil, nil
 		}
 	}
 	if legacyLoginArgs(args) {
 		// The new commands keep their key in the wallet, so the old login
 		// needs one too. Fixtures that never ran 'wallet init' get it here.
-		if _, e := os.Stat(filepath.Join(home, ".mydc", "wallet.bin")); errors.Is(e, fs.ErrNotExist) {
+		if _, e := os.Stat(filepath.Join(home, ".sfc", "wallet.bin")); errors.Is(e, fs.ErrNotExist) {
 			if out, diagnostic, e := runLegacyCLICommandInput(ctx, binary, home, profile, []string{"wallet", "init"}, nil, nil); e != nil {
 				return out, append(diagnostic, []byte("native wallet init: "+e.Error()+"\n")...), e
 			}
@@ -260,10 +260,10 @@ func runManagedCLICommandInput(ctx context.Context, binary, home, profile string
 	return out, diagnostic, err
 }
 
-// Commands the new frame (cmd/mydc commands.go newRoot) owns. They take a
+// Commands the new frame (cmd/sfcli commands.go newRoot) owns. They take a
 // context, not --config, so the fixture runs them against the context that
 // ensureNativeContext made after the old login. login itself stays old here.
-var nativeNewFrame = map[string]bool{"context": true, "key": true, "app": true, "op": true, "volume": true, "registry": true, "image": true, "build": true, "cd": true, "certificate": true, "ingress": true, "lifecycle": true, "node": true, "cluster": true, "events": true, "secret": true}
+var nativeNewFrame = map[string]bool{"context": true, "key": true, "app": true, "op": true, "volume": true, "registry": true, "image": true, "build": true, "cd": true, "certificate": true, "ingress": true, "lifecycle": true, "node": true, "cluster": true, "events": true, "secret": true, "standalone": true}
 
 // nativeCommandWord skips leading global options (--tenant X, --timeout D).
 func nativeCommandWord(args []string) (int, string) {
@@ -356,7 +356,7 @@ func runNewFrameCLI(ctx context.Context, binary, home string, args []string, inp
 		return nil, nil, err
 	}
 	cmd := exec.CommandContext(ctx, binary, append([]string{"-o", "json", "-y"}, args...)...)
-	cmd.Env = append(os.Environ(), "HOME="+home, "MYDC_WALLET_PASSWORD_FILE="+password, "MYDC_NONINTERACTIVE=1")
+	cmd.Env = append(os.Environ(), "HOME="+home, "SFC_WALLET_PASSWORD_FILE="+password, "SFC_NONINTERACTIVE=1")
 	cmd.ExtraFiles = inputs
 	cmd.Stdin = stdin
 	var output, diagnostic bytes.Buffer
@@ -426,7 +426,7 @@ func ensureNativeContext(ctx context.Context, binary, home, profile string, args
 	}
 	name := "native-" + user
 	if _, err := os.Stat(filepath.Join(home, ".native-context-"+name)); err != nil {
-		if err = run("--user", user, "context", "add", name, "mydcp://"+peer.Endpoint, "--key", peer.Key, "--wallet-key", keyName); err != nil {
+		if err = run("--user", user, "context", "add", name, "sfcp://"+peer.Endpoint, "--key", peer.Key, "--wallet-key", keyName); err != nil {
 			return err
 		}
 		if err = os.WriteFile(filepath.Join(home, ".native-context-"+name), nil, 0600); err != nil {
@@ -459,7 +459,7 @@ func nativeCLICmd(ctx context.Context, binary, home, profile string, args ...str
 	}
 	if newFrameCommand(args) {
 		cmd := exec.CommandContext(ctx, binary, append([]string{"-o", "json", "-y"}, args...)...)
-		cmd.Env = append(os.Environ(), "HOME="+home, "MYDC_WALLET_PASSWORD_FILE="+password, "MYDC_NONINTERACTIVE=1")
+		cmd.Env = append(os.Environ(), "HOME="+home, "SFC_WALLET_PASSWORD_FILE="+password, "SFC_NONINTERACTIVE=1")
 		return cmd
 	}
 	// The old frame reads the password from fd 3. A shell opens the file

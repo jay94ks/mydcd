@@ -1,0 +1,202 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: seafield <seafield@invalid>
+Date: Fri, 27 Nov 2026 07:59:47 +0000
+Subject: [PATCH 02/20] swarm: run without the cluster component; drop swarm,
+ checkpoint and plugin routes
+
+
+diff --git a/daemon/command/daemon.go b/daemon/command/daemon.go
+index 0911096..34e5b28 100644
+--- a/daemon/command/daemon.go
++++ b/daemon/command/daemon.go
+@@ -24,7 +24,6 @@
+ 	"github.com/moby/moby/v2/daemon"
+ 	buildbackend "github.com/moby/moby/v2/daemon/builder/backend"
+ 	"github.com/moby/moby/v2/daemon/builder/dockerfile"
+-	"github.com/moby/moby/v2/daemon/cluster"
+ 	"github.com/moby/moby/v2/daemon/command/debug"
+ 	"github.com/moby/moby/v2/daemon/command/trap"
+ 	"github.com/moby/moby/v2/daemon/config"
+@@ -40,16 +39,13 @@
+ 	"github.com/moby/moby/v2/daemon/server/middleware"
+ 	"github.com/moby/moby/v2/daemon/server/router"
+ 	"github.com/moby/moby/v2/daemon/server/router/build"
+-	checkpointrouter "github.com/moby/moby/v2/daemon/server/router/checkpoint"
+ 	"github.com/moby/moby/v2/daemon/server/router/container"
+ 	debugrouter "github.com/moby/moby/v2/daemon/server/router/debug"
+ 	distributionrouter "github.com/moby/moby/v2/daemon/server/router/distribution"
+ 	grpcrouter "github.com/moby/moby/v2/daemon/server/router/grpc" //nolint:staticcheck // Deprecated endpoint kept for backward compatibility
+ 	"github.com/moby/moby/v2/daemon/server/router/image"
+ 	"github.com/moby/moby/v2/daemon/server/router/network"
+-	pluginrouter "github.com/moby/moby/v2/daemon/server/router/plugin"
+ 	sessionrouter "github.com/moby/moby/v2/daemon/server/router/session"
+-	swarmrouter "github.com/moby/moby/v2/daemon/server/router/swarm"
+ 	systemrouter "github.com/moby/moby/v2/daemon/server/router/system"
+ 	"github.com/moby/moby/v2/daemon/server/router/volume"
+ 	"github.com/moby/moby/v2/dockerversion"
+@@ -317,17 +313,9 @@ func (cli *daemonCLI) start(ctx context.Context) (retErr error) {
+ 		return errors.Wrap(err, "failed to start metrics server")
+ 	}
+ 
+-	c, err := createAndStartCluster(d, cli.Config)
+-	if err != nil {
+-		return fmt.Errorf("failed to start cluster component: %w", err)
+-	}
+-
+-	// Restart all autostart containers which has a swarm endpoint
+-	// and is not yet running now that we have successfully
+-	// initialized the cluster.
+-	if err := d.RestartSwarmContainers(ctx); err != nil {
+-		return fmt.Errorf("failed to restart swarm containers: %w", err)
+-	}
++	// Seafield has no Swarm mode: sfcd manages the cluster.
++	c := noSwarm{}
++	d.SetCluster(c)
+ 
+ 	b, shutdownBuildKit, err := initBuildkit(ctx, d, cdiCache, cli.containerdDialer)
+ 	if err != nil {
+@@ -365,8 +353,6 @@ func (cli *daemonCLI) start(ctx context.Context) (retErr error) {
+ 	httpServer.Handler = handler
+ 	d.StartAPISockets(handler)
+ 
+-	go d.ProcessClusterNotifications(ctx, c.GetWatchStream())
+-
+ 	cli.setupConfigReloadTrap(ctx)
+ 
+ 	log.G(ctx).Info("Daemon has completed initialization")
+@@ -412,8 +398,6 @@ func (cli *daemonCLI) start(ctx context.Context) (retErr error) {
+ 	apiWG.Wait()
+ 	close(errAPI)
+ 
+-	c.Cleanup()
+-
+ 	// notify systemd that we're shutting down
+ 	notifyStopping()
+ 	shutdownDaemon(ctx, d)
+@@ -531,7 +515,7 @@ func initBuildkit(ctx context.Context, d *daemon.Daemon, cdiCache *cdi.Cache, co
+ type routerOptions struct {
+ 	features func() map[string]bool
+ 	daemon   *daemon.Daemon
+-	cluster  *cluster.Cluster
++	cluster  noSwarm
+ 	builder  builderOptions
+ }
+ 
+@@ -842,8 +826,6 @@ func normalizeHosts(cfg *config.Config) error {
+ 
+ func buildRouters(opts routerOptions) []router.Router {
+ 	routers := []router.Router{
+-		// we need to add the checkpoint router before the container router or the DELETE gets masked
+-		checkpointrouter.NewRouter(opts.daemon),
+ 		container.NewRouter(opts.daemon),
+ 		image.NewRouter(
+ 			opts.daemon.ImageService(),
+@@ -853,8 +835,6 @@ func buildRouters(opts routerOptions) []router.Router {
+ 		volume.NewRouter(opts.daemon.VolumesService(), opts.cluster),
+ 		build.NewRouter(opts.builder.backend, opts.daemon),
+ 		sessionrouter.NewRouter(opts.builder.sessionManager), //nolint:staticcheck // Deprecated endpoint kept for backward compatibility
+-		swarmrouter.NewRouter(opts.cluster),
+-		pluginrouter.NewRouter(opts.daemon.PluginManager()),
+ 		distributionrouter.NewRouter(opts.daemon.ImageBackend()),
+ 		network.NewRouter(opts.daemon, opts.cluster),
+ 		debugrouter.NewRouter(),
+@@ -1055,31 +1035,6 @@ func loadListeners(cfg *config.Config, tlsConfig *tls.Config) ([]net.Listener, [
+ 	return lss, hosts, nil
+ }
+ 
+-func createAndStartCluster(d *daemon.Daemon, cfg *config.Config) (*cluster.Cluster, error) {
+-	name, _ := os.Hostname()
+-	c, err := cluster.New(cluster.Config{
+-		Root:                   cfg.Root,
+-		Name:                   name,
+-		Backend:                d,
+-		VolumeBackend:          d.VolumesService(),
+-		ImageBackend:           d.ImageBackend(),
+-		PluginBackend:          d.PluginManager(),
+-		NetworkSubnetsProvider: d,
+-		GenerateServiceName:    d.GenerateServiceName,
+-		DefaultAdvertiseAddr:   cfg.SwarmDefaultAdvertiseAddr,
+-		RaftHeartbeatTick:      cfg.SwarmRaftHeartbeatTick,
+-		RaftElectionTick:       cfg.SwarmRaftElectionTick,
+-		RuntimeRoot:            getSwarmRunRoot(cfg),
+-	})
+-	if err != nil {
+-		return nil, err
+-	}
+-	d.SetCluster(c)
+-	err = c.Start()
+-
+-	return c, err
+-}
+-
+ // validates that the plugins requested with the --authorization-plugin flag are valid AuthzDriver
+ // plugins present on the host and available to the daemon
+ func validateAuthzPlugins(requestedPlugins []string, pg plugingetter.PluginGetter) error {
+diff --git a/daemon/command/seafield_noswarm.go b/daemon/command/seafield_noswarm.go
+new file mode 100644
+index 0000000..ae12f48
+--- /dev/null
++++ b/daemon/command/seafield_noswarm.go
+@@ -0,0 +1,62 @@
++// SPDX-License-Identifier: Apache-2.0
++
++package command
++
++import (
++	"context"
++
++	"github.com/moby/moby/api/types/network"
++	"github.com/moby/moby/api/types/swarm"
++	"github.com/moby/moby/api/types/volume"
++	"github.com/moby/moby/v2/daemon/libnetwork/cluster"
++	dnetwork "github.com/moby/moby/v2/daemon/network"
++	"github.com/moby/moby/v2/daemon/server/volumebackend"
++	"github.com/moby/moby/v2/errdefs"
++)
++
++// noSwarm stands in for the Swarm cluster component, which Seafield does not
++// have: sfcd manages the cluster. Every swarm-scoped lookup finds nothing and
++// every swarm-scoped change is refused, so the local network, volume and
++// system routes behave exactly as on a node that never joined a swarm.
++type noSwarm struct{}
++
++var errNoSwarm = errdefs.NotImplemented(swarmDisabled{})
++
++type swarmDisabled struct{}
++
++func (swarmDisabled) Error() string { return "swarm mode is not available in Seafield" }
++
++func (noSwarm) IsAgent() bool   { return false }
++func (noSwarm) IsManager() bool { return false }
++
++func (noSwarm) SendClusterEvent(cluster.ConfigEventType) {}
++
++func (noSwarm) Info(context.Context) swarm.Info {
++	return swarm.Info{LocalNodeState: swarm.LocalNodeStateInactive}
++}
++
++func (noSwarm) GetNetwork(name string, _ bool) (network.Inspect, error) {
++	return network.Inspect{}, errdefs.NotFound(swarmDisabled{})
++}
++
++func (noSwarm) GetNetworks(dnetwork.Filter, bool) ([]network.Inspect, error) { return nil, nil }
++
++func (noSwarm) GetNetworkSummaries(dnetwork.Filter) ([]network.Summary, error) { return nil, nil }
++
++func (noSwarm) GetNetworksByName(string) ([]network.Network, error) { return nil, nil }
++
++func (noSwarm) CreateNetwork(network.CreateRequest) (string, error) { return "", errNoSwarm }
++
++func (noSwarm) RemoveNetwork(string) error { return errdefs.NotFound(swarmDisabled{}) }
++
++func (noSwarm) GetVolume(string) (volume.Volume, error) {
++	return volume.Volume{}, errdefs.NotFound(swarmDisabled{})
++}
++
++func (noSwarm) GetVolumes(volumebackend.ListOptions) ([]volume.Volume, error) { return nil, nil }
++
++func (noSwarm) CreateVolume(volume.CreateRequest) (*volume.Volume, error) { return nil, errNoSwarm }
++
++func (noSwarm) RemoveVolume(string, bool) error { return errNoSwarm }
++
++func (noSwarm) UpdateVolume(string, uint64, volumebackend.UpdateOptions) error { return errNoSwarm }

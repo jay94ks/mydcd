@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/workload"
+	"github.com/jay94ks/seafield/internal/workload"
 	"gopkg.in/yaml.v3"
 )
 
@@ -73,7 +73,7 @@ func TestComposePublishedPortsStandardFormsAndFrozenTaskRecipe(t *testing.T) {
 func TestStandalonePublishedPortsUseSameServiceDefinition(t *testing.T) {
 	f, input, ctx, _ := externalFixture(t)
 	input.Name = ""
-	input.MyDC.Delivery = nil
+	input.Sfc.Delivery = nil
 	for name := range input.Services {
 		if len(input.Services) > 1 {
 			delete(input.Services, name)
@@ -82,8 +82,8 @@ func TestStandalonePublishedPortsUseSameServiceDefinition(t *testing.T) {
 	ports, _ := workload.NormalizePublishedPorts([]workload.PublishedPort{{Target: 8080, Published: "18080", HostIP: "127.0.0.1"}, {Target: 53, Published: "", Protocol: "udp"}})
 	for name, s := range input.Services {
 		s.DependsOn = nil
-		s.MyDC.Nodes = nil
-		s.MyDC.PerNode = 0
+		s.Sfc.Nodes = nil
+		s.Sfc.PerNode = 0
 		s.Ports = ports
 		input.Services[name] = s
 	}

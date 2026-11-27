@@ -4,10 +4,10 @@ package app
 
 import (
 	"context"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/schema"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/sfcp"
 )
 
 func (r *Runtime) networkDNSRead(ctx context.Context, target control.NetworkDNSTarget) (control.DNSPolicyView, error) {
@@ -17,11 +17,11 @@ func (r *Runtime) networkDNSRead(ctx context.Context, target control.NetworkDNST
 	stop := context.AfterFunc(r.ctx, cancel)
 	defer stop()
 	if ctx.Err() != nil || !r.life.TryRLock() {
-		return out, mydcp.ErrAdmission
+		return out, sfcp.ErrAdmission
 	}
 	defer r.life.RUnlock()
 	if r.closed {
-		return out, mydcp.ErrAdmission
+		return out, sfcp.ErrAdmission
 	}
 	var raw []byte
 	if target.Owner == r.Identity.Public {
@@ -31,16 +31,16 @@ func (r *Runtime) networkDNSRead(ctx context.Context, target control.NetworkDNST
 		}
 		o := v.State.Object(target.Source.Key)
 		if !o.Present || o.Generation != target.Source.Generation || o.Revision != target.Source.Revision {
-			return out, mydcp.ErrAdmission
+			return out, sfcp.ErrAdmission
 		}
 		raw, err = r.observeAppDNS(ctx, target.Source.Key, v)
 		if err != nil {
 			return out, err
 		}
 	} else {
-		peer, ok := r.Mesh.Peer(mydcp.Identity(target.Owner))
+		peer, ok := r.Mesh.Peer(sfcp.Identity(target.Owner))
 		if !ok || !peer.Member || peer.ID != target.Node {
-			return out, mydcp.ErrAdmission
+			return out, sfcp.ErrAdmission
 		}
 		reply, err := cluster.CallManagement(ctx, r.Mesh, r.Identity, r.controlPolicy.Cluster, peer, cluster.ManagementRequest{Method: "observe", Key: target.Source.Key, Latest: false})
 		if err != nil {
@@ -50,7 +50,7 @@ func (r *Runtime) networkDNSRead(ctx context.Context, target control.NetworkDNST
 	}
 	o, err := schema.Decode[ModuleObservation](raw)
 	if err != nil || o.Schema != 1 || o.Key != target.Source.Key || o.Generation != target.Source.Generation || o.Revision != target.Source.Revision || o.DNS == nil {
-		return out, mydcp.ErrAdmission
+		return out, sfcp.ErrAdmission
 	}
 	ready := o.Ready && !o.DNS.Stopped && !o.DNS.Failed && o.Error == ""
 	out.Ready = &ready

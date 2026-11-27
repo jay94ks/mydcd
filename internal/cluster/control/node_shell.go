@@ -12,9 +12,9 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/lifecycle"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/lifecycle"
+	"github.com/jay94ks/seafield/internal/cluster/state"
 )
 
 const NodeShellKey = "control/node-shell"
@@ -310,7 +310,7 @@ type NodeShellReport struct {
 func NodeShellReportBytes(r NodeShellReport) []byte {
 	r.Signature = nil
 	raw, _ := json.Marshal(r)
-	return append([]byte("mydc-node-shell-report-1\x00"), raw...)
+	return append([]byte("sfc-node-shell-report-1\x00"), raw...)
 }
 func (r NodeShellReport) validProof(cluster [32]byte) bool {
 	if r.Schema != 1 || r.Cluster != cluster || r.Reporter == ([32]byte{}) || !lifecycle.ValidID(r.Node) || r.At <= 0 || r.Epoch == 0 || r.RequestID == "" || r.Sequence == 0 || r.LastActivity < 0 || r.LastActivity > r.At || !ed25519.Verify(r.Reporter[:], NodeShellReportBytes(r), r.Signature) {
@@ -666,4 +666,20 @@ func (p Policy) reduceNodeShellReport(s state.State, b NodeShellBook, cmd state.
 		return p.nodeShellCheckpoint(s, b)
 	}
 	return nil, state.ConditionFailed
+}
+
+// nodeShellBook is the NodeShellKey Raft book (see book.go).
+var nodeShellBook = Book{
+	Key:     NodeShellKey,
+	Actions: []string{"set-node-shell-policy", "set-node-shell-node", "set-node-shell-grant", "open-node-shell", "close-node-shell"},
+	Reduce:  Policy.reduceNodeShell,
+	Authorize: func(p Policy, s state.State, c access.Catalog, op UserOperation) error {
+		return p.authorizeNodeShell(s, c, op)
+	},
+	OwnScope: true,
+	AdmitReport: func(p Policy, s state.State, cmd state.Command) error {
+		_, err := p.nodeShellReport(s, cmd)
+		return err
+	},
+	ReportOnly: true,
 }

@@ -8,9 +8,9 @@ import (
 	"encoding/hex"
 	"encoding/json"
 
-	"github.com/jay94ks/mydcd/internal/engine"
-	"github.com/jay94ks/mydcd/internal/reconcile"
-	"github.com/jay94ks/mydcd/internal/schema"
+	"github.com/jay94ks/seafield/internal/engine"
+	"github.com/jay94ks/seafield/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/schema"
 )
 
 // This is the original A2 EffectCheckpoint, not a second execution journal or

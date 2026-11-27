@@ -50,7 +50,7 @@ func TestUnchangedMoveCancellationPreservesOriginalWriterAndOwnerRevision(t *tes
 			}
 			// The preserved owner revision remains the next original source.
 			next := f.target
-			next.Native = "mydc-another-stage"
+			next.Native = "sfc-another-stage"
 			f.prepare("another", next)
 		})
 	}
@@ -101,7 +101,7 @@ func TestCleanupProofUnchangedOmissionPreservesSchemaOneSigningBytes(t *testing.
 		Signature                      []byte
 	}{Binding: p.Binding, Owner: p.Owner, TransferClosed: p.TransferClosed, RetainedFenced: p.RetainedFenced}
 	raw, _ := json.Marshal(legacy)
-	want := append([]byte("mydc-volume-move-cleanup-1\x00"), raw...)
+	want := append([]byte("sfc-volume-move-cleanup-1\x00"), raw...)
 	if !bytes.Equal(want, CleanupBytes(p)) {
 		t.Fatal("new optional cancellation flag changed existing schema1 signatures")
 	}

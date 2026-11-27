@@ -4,14 +4,14 @@ package control
 
 import (
 	"encoding/json"
-	"github.com/jay94ks/mydcd/internal/access"
+	"github.com/jay94ks/seafield/internal/access"
 	"net/netip"
 	"strings"
 
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/desired"
-	"github.com/jay94ks/mydcd/internal/network"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/desired"
+	"github.com/jay94ks/seafield/internal/network"
 )
 
 // Listener and serving budgets are projected from original committed sources,
@@ -366,6 +366,9 @@ func ingressHostAllowed(host string, allowed []string) bool {
 // Current host grants admit new effects; revoking one preserves already
 // accepted app references and does not invalidate the whole Raft state.
 func (p Policy) admitIngressDeclaration(s state.State, tenant, actor string, d deployment.IngressDeclaration) error {
+	if err := p.admitClusterAppRouteClaims(s, d); err != nil {
+		return err
+	}
 	shared := false
 	for _, listener := range d.Listeners {
 		shared = shared || listener.Shared != ""

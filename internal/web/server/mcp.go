@@ -16,13 +16,13 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/jay94ks/mydcd/internal/web/mydc"
-	"github.com/jay94ks/mydcd/internal/web/store"
+	"github.com/jay94ks/seafield/internal/web/sfc"
+	"github.com/jay94ks/seafield/internal/web/store"
 )
 
 // MCP servers (W2.3a, UI-B9): system administrators connect remote tool
 // servers (bearer or no auth; OAuth later) and say per tool where it may be
-// used. All mydc-web: the catalog is the web's own data, the token sits in
+// used. All sfc-web: the catalog is the web's own data, the token sits in
 // the seal box, tool answers are never stored.
 
 var (
@@ -766,7 +766,7 @@ func (s *Server) notifyMCPTools(ctx context.Context, ws *webSession, m *store.MC
 	var users []string
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	err := ws.do(ctx, func(ctx context.Context, c mydc.Conn) error {
+	err := ws.do(ctx, func(ctx context.Context, c sfc.Conn) error {
 		after := ""
 		for range incidentMaxPages {
 			p, err := c.Users(ctx, after)
@@ -819,6 +819,14 @@ func (s *Server) handleDeleteMCP(w http.ResponseWriter, r *http.Request, ws *web
 		return
 	}
 	used := s.mcpUsedBy(m.Name)
+	var guides []string
+	if all, err := s.opt.Store.ListGuides(); err == nil {
+		for _, g := range all {
+			if slices.Contains(g.Fields.MCPServers, m.Name) {
+				guides = append(guides, g.Scope)
+			}
+		}
+	}
 	if err := s.opt.Store.DeleteMCPServer(m.Name); err != nil {
 		writeError(w, http.StatusInternalServerError, "internal", err.Error())
 		return
@@ -832,7 +840,7 @@ func (s *Server) handleDeleteMCP(w http.ResponseWriter, r *http.Request, ws *web
 	}
 	s.mcpOAuth.mu.Unlock()
 	s.audit(ws, "", "mcp", "delete", m.Name, nil, map[string]any{"usedBy": used})
-	w.WriteHeader(http.StatusNoContent)
+	writeDeleted(w, s.putTrash(ws.user.ID, ws.user.Username, store.TrashMCPServer, "", m.Name, "", "", store.TrashMCPData{Server: *m, Guides: guides}))
 }
 
 // mcpUsable: the server may be used for tenant ("" = cluster scope, system

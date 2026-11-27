@@ -1,4 +1,4 @@
-module github.com/jay94ks/mydcd
+module github.com/jay94ks/seafield
 
 go 1.27.0
 
@@ -14,6 +14,7 @@ require (
 	github.com/go-git/go-git/v5 v5.19.3
 	github.com/google/go-containerregistry v0.22.1
 	github.com/google/nftables v0.3.0
+	github.com/hashicorp/go-immutable-radix v1.3.1
 	github.com/hashicorp/raft v1.8.0
 	github.com/hashicorp/raft-boltdb/v2 v2.4.2
 	github.com/hashicorp/vault/api v1.23.0
@@ -82,7 +83,6 @@ require (
 	github.com/hashicorp/errwrap v1.1.0 // indirect
 	github.com/hashicorp/go-cleanhttp v0.5.2 // indirect
 	github.com/hashicorp/go-hclog v1.6.3 // indirect
-	github.com/hashicorp/go-immutable-radix v1.3.1 // indirect
 	github.com/hashicorp/go-metrics v0.7.0 // indirect
 	github.com/hashicorp/go-msgpack/v2 v2.1.5 // indirect
 	github.com/hashicorp/go-multierror v1.1.1 // indirect

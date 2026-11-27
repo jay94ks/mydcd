@@ -8,11 +8,11 @@ RV5의 사용자 exec 시험도 이 shell-free 이미지에서 수행한다. `--
 
 `--exit-code <0..255>`는 명시한 코드로 즉시 종료하는 단발 실행 입력이다. 실제 Docker Start 직후의 빠른 exit와 원 Task/DB 재개를 검증할 때 사용한다. HTTP health 검사인 `--probe`와 구분하며 종료 자체를 writer fence나 Volume 반환으로 간주하지 않는다.
 
-`--shutdown-delay <duration>`는 HTTP backend를 실행하면서 SIGTERM/SIGQUIT 수신 후 명시한 유한 시간(0–1시간)을 기다리고 코드0으로 종료한다. 서비스별 stop signal/grace 안의 느린 종료와 유예 초과 강제 종료 입력에 사용한다. 지연은 이 fixture의 앱 동작이며 MyDC 엔진에 별도 이미지 특례를 넣지 않는다.
+`--shutdown-delay <duration>`는 HTTP backend를 실행하면서 SIGTERM/SIGQUIT 수신 후 명시한 유한 시간(0–1시간)을 기다리고 코드0으로 종료한다. 서비스별 stop signal/grace 안의 느린 종료와 유예 초과 강제 종료 입력에 사용한다. 지연은 이 fixture의 앱 동작이며 Seafield Cluster 엔진에 별도 이미지 특례를 넣지 않는다.
 
 시험 이미지는 현재 소스로 명시 빌드하고 고정 digest를 사용한다. 다른 입력의 과거 이미지/검증 성공을 새 종료 모드의 실행 근거로 재사용하지 않는다. 빌드·실제 컨테이너 검증은 해당 마일스톤의 마지막 검증에서 수행한다.
 
-`--route-serve`는 유한한 cross-tenant 시험 입력이다. TCP33100/33101과 IPv4 UDP53100/53101에서 최대1024바이트를 echo하며 TCP 동시 접속은8개로 제한한다. SIGTERM/SIGINT로 종료하고 컨테이너의 실제 Wait는 fixture가 확인한다. IP 패킷을 전달하거나 MyDC 권한/flow 정산을 대신하지 않는다.
+`--route-serve`는 유한한 cross-tenant 시험 입력이다. TCP33100/33101과 IPv4 UDP53100/53101에서 최대1024바이트를 echo하며 TCP 동시 접속은8개로 제한한다. SIGTERM/SIGINT로 종료하고 컨테이너의 실제 Wait는 fixture가 확인한다. IP 패킷을 전달하거나 Seafield Cluster 권한/flow 정산을 대신하지 않는다.
 
 `--route-probe <tcp|udp> <numeric-address:port> <local-port>`는 실제 컨테이너 소켓에서 원 source port를 고정해 한 번 보내고 같은 응답 bytes를 확인한다. 로컬 port는1024–65535이며 숫자 IPv6 주소는 `[주소]:port` 형식이다. 오류/불일치는 코드1이고 자동 재시도는 하지 않는다. TCP는 성공 뒤 linger0의 명시 RST로 닫으므로 정상 FIN/TIME_WAIT의 근거로 사용하지 않는다. 전체 기한12초·I/O10초의 유한 입력이며 부하 시험이 아니다.
 
@@ -20,4 +20,4 @@ RV5의 사용자 exec 시험도 이 shell-free 이미지에서 수행한다. `--
 
 route server는 실제 accept/read에서 `route peer tcp|udp <address:port>`를 stdout에 남긴다. fixture는 작은 tail과 유한 크기로 읽어 목적 컨테이너가 본 원 source IP/port를 대조한다. `--route-probe`의 socket timeout은 코드1과 `route socket timeout:` marker로 식별하며 잘못된 입력/주소 설정/서버 거부를 timeout으로 바꾸지 않는다. 이 로그만으로 native flow/참조 종료를 주장하지 않는다.
 
-`MYDC_SERVICE_CALL_FIXTURE=1`은 owned service-call 시험 입력으로 `/call`의 body 길이/SHA-256, `/call-large`의64KiB 초과 응답, `/call-redirect`의302를 제공하고(응답 전에256KiB까지의 요청 본문을 끝까지 소비), 같은 컨테이너의8443에서 HTTPS를 제공한다. TLS leaf는 실제 컨테이너 IP SAN을 포함하며 `tests/servicecallfixture`의 공개 시험 CA만 사용한다. 이 fixture의 고정 CA private seed는 제품 키나 신뢰로 사용할 수 없다. 제품 서비스 호출은 이미지 이름·환경 변수·포트 특례에 의존하지 않는다.
+`SFC_SERVICE_CALL_FIXTURE=1`은 owned service-call 시험 입력으로 `/call`의 body 길이/SHA-256, `/call-large`의64KiB 초과 응답, `/call-redirect`의302를 제공하고(응답 전에256KiB까지의 요청 본문을 끝까지 소비), 같은 컨테이너의8443에서 HTTPS를 제공한다. TLS leaf는 실제 컨테이너 IP SAN을 포함하며 `tests/servicecallfixture`의 공개 시험 CA만 사용한다. 이 fixture의 고정 CA private seed는 제품 키나 신뢰로 사용할 수 없다. 제품 서비스 호출은 이미지 이름·환경 변수·포트 특례에 의존하지 않는다.

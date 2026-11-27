@@ -11,12 +11,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/reconcile"
-	"github.com/jay94ks/mydcd/internal/storage"
-	"github.com/jay94ks/mydcd/internal/workload/volumes"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/storage"
+	"github.com/jay94ks/seafield/internal/workload/volumes"
 )
 
 // The source reconciler has already joined/returned any original archive
@@ -26,7 +26,7 @@ func (r *Runtime) cancelMoveSource(ctx context.Context, plan control.VolumeMoveP
 	stage := "managers"
 	defer func() { r.logMoveCancel(job, "source", stage, failure) }()
 	if r.activations == nil || r.backupArtifacts == nil || plan.Move.Phase != volumes.Cancelling || plan.Reader != nil {
-		return mydcp.ErrAdmission
+		return sfcp.ErrAdmission
 	}
 	if plan.Move.SourceCleanup != nil {
 		return nil
@@ -45,7 +45,7 @@ func (r *Runtime) cancelMoveSource(ctx context.Context, plan control.VolumeMoveP
 			stage = "unchanged-permit"
 			latest, err := r.volumeMovePermit(ctx, job, "cancel-source")
 			if err != nil || !latest.SourceUnchanged {
-				return errors.Join(mydcp.ErrAdmission, err)
+				return errors.Join(sfcp.ErrAdmission, err)
 			}
 			return r.reportMoveCleanup(ctx, latest, "cancel-source", volumes.CleanupProof{Binding: job.Binding, Owner: job.Binding.Source, TransferClosed: true, Unchanged: true})
 		}
@@ -84,7 +84,7 @@ func (r *Runtime) cancelMoveSource(ctx context.Context, plan control.VolumeMoveP
 		stage = "fence"
 		proof, err := r.activations.FenceStoppedSource(ctx, job.Source, job.Binding, func(ctx context.Context, b volumes.Binding) error {
 			if b != job.Binding {
-				return mydcp.ErrAdmission
+				return sfcp.ErrAdmission
 			}
 			_, err := r.volumeMovePermit(ctx, job, "cancel-fence")
 			return err
@@ -98,7 +98,7 @@ func (r *Runtime) cancelMoveSource(ctx context.Context, plan control.VolumeMoveP
 	stage = "fenced-permit"
 	permit, err := r.volumeMovePermit(ctx, job, "cancel-source")
 	if err != nil || permit.SourceUnchanged {
-		return errors.Join(mydcp.ErrAdmission, err)
+		return errors.Join(sfcp.ErrAdmission, err)
 	}
 	stage = "fenced-source-idle"
 	if permit.Move.ReaderClosed != nil {
@@ -118,11 +118,11 @@ func (r *Runtime) cancelMoveSource(ctx context.Context, plan control.VolumeMoveP
 	}
 	gate, err := r.activations.Checkpoint(cold.Writer)
 	if err != nil || gate.Starting != nil || gate.FenceThrough < job.Binding.SourceOwnerRevision {
-		return errors.Join(mydcp.ErrAdmission, err)
+		return errors.Join(sfcp.ErrAdmission, err)
 	}
 	latest, err := r.volumeMovePermit(ctx, job, "cancel-source")
 	if err != nil || latest.SourceUnchanged {
-		return errors.Join(mydcp.ErrAdmission, err)
+		return errors.Join(sfcp.ErrAdmission, err)
 	}
 	return r.reportMoveCleanup(ctx, latest, "cancel-source", volumes.CleanupProof{Binding: job.Binding, Owner: job.Binding.Source, TransferClosed: true, RetainedFenced: true})
 }
@@ -133,7 +133,7 @@ func (r *Runtime) cancelMoveTarget(ctx context.Context, job control.VolumeMove) 
 	r.volumeMoveTargetMu.Lock()
 	defer r.volumeMoveTargetMu.Unlock()
 	if r.nativeVolumes == nil || r.volumeRestores == nil || r.backupArtifacts == nil {
-		return mydcp.ErrAdmission
+		return sfcp.ErrAdmission
 	}
 	stage = "permit"
 	permit, err := r.volumeMovePermit(ctx, job, "cancel-target")
@@ -151,7 +151,7 @@ func (r *Runtime) cancelMoveTarget(ctx context.Context, job control.VolumeMove) 
 	}
 	if err == nil {
 		if permit.Move.Manifest == nil {
-			return mydcp.ErrAdmission // no transfer could have admitted this intent
+			return sfcp.ErrAdmission // no transfer could have admitted this intent
 		}
 		if err = r.stepMoveRestoreLocked(ctx, b, true); err != nil {
 			return err
@@ -206,7 +206,7 @@ func (r *Runtime) logMoveCancel(job control.VolumeMove, side, stage string, err 
 	class := "waiting"
 	switch {
 	case err == nil:
-	case errors.Is(err, mydcp.ErrAdmission):
+	case errors.Is(err, sfcp.ErrAdmission):
 		class = "admission"
 	case errors.Is(err, access.ErrDenied):
 		class = "denied"

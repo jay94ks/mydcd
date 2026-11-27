@@ -63,7 +63,7 @@ func tunnelRulesMode(s TunnelSpec, id tunnelIdentity, fenced bool) tunnelFirewal
 			add(c, &expr.Verdict{Kind: expr.VerdictDrop})
 			continue
 		}
-		for _, p := range s.Routes {
+		for _, p := range s.Overlay() {
 			family, offset := byte(unix.NFPROTO_IPV6), uint32(8)
 			if p.Addr().Is4() {
 				family, offset = unix.NFPROTO_IPV4, 12

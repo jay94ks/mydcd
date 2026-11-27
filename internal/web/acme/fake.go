@@ -37,6 +37,7 @@ type FakeCA struct {
 	accounts map[string]string // thumbprint → URL
 	orders   map[string]*fakeOrder
 	revoked  map[string]bool
+	reasons  []RevokeReason
 	seq      int
 	failNext error
 	issued   int
@@ -52,7 +53,7 @@ type fakeOrder struct {
 // NewFakeCA returns a fake CA.
 func NewFakeCA() *FakeCA {
 	k, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	tpl := &x509.Certificate{SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "MyDC Fake ACME Root"}, NotBefore: time.Now().Add(-time.Hour),
+	tpl := &x509.Certificate{SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "Seafield Cluster Fake ACME Root"}, NotBefore: time.Now().Add(-time.Hour),
 		NotAfter: time.Now().Add(10 * 365 * 24 * time.Hour), IsCA: true, BasicConstraintsValid: true, KeyUsage: x509.KeyUsageCertSign}
 	der, _ := x509.CreateCertificate(rand.Reader, tpl, tpl, &k.PublicKey, k)
 	root, _ := x509.ParseCertificate(der)
@@ -64,6 +65,13 @@ func (f *FakeCA) FailNext(err error) { f.mu.Lock(); f.failNext = err; f.mu.Unloc
 
 // Issued counts issued certificates.
 func (f *FakeCA) Issued() int { f.mu.Lock(); defer f.mu.Unlock(); return f.issued }
+
+// RevokeReasons lists the reasons of every revocation, in order.
+func (f *FakeCA) RevokeReasons() []RevokeReason {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]RevokeReason(nil), f.reasons...)
+}
 
 // Revoked reports whether a leaf (DER) was revoked.
 func (f *FakeCA) Revoked(der []byte) bool {
@@ -81,7 +89,7 @@ func (f *FakeCA) enter() error {
 
 // Info implements CA.
 func (f *FakeCA) Info() CAInfo {
-	return CAInfo{ID: "fake", Name: "Fake ACME (development)", Directory: "fake://acme", Staging: true, CAA: "mydc-fake-ca.invalid",
+	return CAInfo{ID: "fake", Name: "Fake ACME (development)", Directory: "fake://acme", Staging: true, CAA: "sfc-fake-ca.invalid",
 		KeyTypes: []KeyType{EC256, EC384, RSA2048, RSA3072}, Ready: true, Note: "in-process fake; certificates are not trusted"}
 }
 
@@ -235,11 +243,12 @@ func (f *FakeCA) Finalize(ctx context.Context, key crypto.Signer, account string
 }
 
 // Revoke implements CA.
-func (f *FakeCA) Revoke(ctx context.Context, key crypto.Signer, account string, der []byte) error {
+func (f *FakeCA) Revoke(ctx context.Context, key crypto.Signer, account string, der []byte, reason RevokeReason) error {
 	defer f.mu.Unlock()
 	if err := f.enter(); err != nil {
 		return err
 	}
 	f.revoked[string(der)] = true
+	f.reasons = append(f.reasons, reason)
 	return nil
 }

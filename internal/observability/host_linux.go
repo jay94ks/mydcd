@@ -5,6 +5,7 @@ package observability
 import (
 	"bufio"
 	"errors"
+	"github.com/jay94ks/seafield/internal/buildinfo"
 	"io"
 	"os"
 	"strconv"
@@ -28,7 +29,7 @@ func CPUUsage(previous, current CPUCounter) *uint64 {
 }
 
 func ReadHost(previous CPUCounter) (Host, CPUCounter, error) {
-	h := Host{Version: "1"}
+	h := Host{Version: buildinfo.Version(), Features: buildinfo.Own.Names()}
 	stat, err := os.Open("/proc/stat")
 	if err != nil {
 		return h, CPUCounter{}, err

@@ -6,8 +6,8 @@ import (
 	"context"
 	"net/http"
 
-	"github.com/jay94ks/mydcd/internal/servicecall"
-	"github.com/jay94ks/mydcd/internal/web/mydc"
+	"github.com/jay94ks/seafield/internal/servicecall"
+	"github.com/jay94ks/seafield/internal/web/sfc"
 )
 
 // POST /t/{t}/apps/{app}/call {service, port, path, headers?, body?(base64)
@@ -15,7 +15,7 @@ import (
 // node?, elapsedMs}: one POST from inside the tenant network to a service
 // port (REQ-24/55 `service-call`, CallService; scheme https with
 // insecureSkipVerify? for a TLS port). The target is a tenant/app/service/port
-// only; mydcd picks a ready task and refuses anything else. A failed call
+// only; sfcd picks a ready task and refuses anything else. A failed call
 // is code (SERVICE_NO_READY_TASK, SERVICE_CALL_TIMEOUT, ...), not an error.
 // Calls are not journaled and the web keeps neither request nor answer.
 func (s *Server) handleServiceCall(w http.ResponseWriter, r *http.Request, ws *webSession) {
@@ -54,7 +54,7 @@ func (s *Server) handleServiceCall(w http.ResponseWriter, r *http.Request, ws *w
 		writeError(w, http.StatusUnprocessableEntity, "invalid", "timeoutMs: 0..30000 (0 = 10 s)")
 		return
 	}
-	read(s, w, r, ws, func(ctx context.Context, c mydc.Conn) (serviceCallView, error) {
+	read(s, w, r, ws, func(ctx context.Context, c sfc.Conn) (serviceCallView, error) {
 		res, err := c.CallService(ctx, r.PathValue("t"), servicecall.Request{App: r.PathValue("app"), Service: req.Service, Port: req.Port,
 			Path: req.Path, Method: http.MethodPost, Headers: req.Headers, Body: req.Body, TimeoutMS: req.TimeoutMS,
 			Scheme: req.Scheme, InsecureSkipVerify: req.Insecure})

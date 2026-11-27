@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/network/services"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/network/services"
 )
 
 func TestDNSPolicyCacheExactCommittedViewAndName(t *testing.T) {

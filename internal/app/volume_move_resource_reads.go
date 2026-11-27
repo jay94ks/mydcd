@@ -9,15 +9,15 @@ import (
 	"fmt"
 	"net/netip"
 
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/ingress"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/network"
-	"github.com/jay94ks/mydcd/internal/reconcile"
-	"github.com/jay94ks/mydcd/internal/schema"
-	"github.com/jay94ks/mydcd/internal/workload/volumes"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/ingress"
+	"github.com/jay94ks/seafield/internal/network"
+	"github.com/jay94ks/seafield/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/workload/volumes"
 	"github.com/moby/moby/client"
 )
 
@@ -41,12 +41,12 @@ func (r *Runtime) checkMoveResourceReads(ctx context.Context, v cluster.View, re
 		}
 		current = row
 		if r.installation == nil || row.Node != r.installation.record.Root.Self.ID {
-			return mydcp.ErrAdmission
+			return sfcp.ErrAdmission
 		}
 		if row.Source.Key != "" {
 			o := v.State.Object(row.Source.Key)
 			if !o.Present || o.Generation != row.Source.Generation || o.Revision != row.Source.Revision || sha256.Sum256([]byte(o.Value)) != row.Spec {
-				return mydcp.ErrAdmission
+				return sfcp.ErrAdmission
 			}
 		}
 		if row.Kind == "native-bridge" || row.Kind == "native-tunnel" {
@@ -69,30 +69,30 @@ func (r *Runtime) checkMoveResourceReads(ctx context.Context, v cluster.View, re
 		switch row.Kind {
 		case "task", "registry":
 			if r.workload == nil {
-				return mydcp.ErrAdmission
+				return sfcp.ErrAdmission
 			}
 		case "inputs":
 			if r.projections == nil {
-				return mydcp.ErrAdmission
+				return sfcp.ErrAdmission
 			}
 		case "volume":
 			if r.nativeVolumes == nil || row.Volume == nil || row.Volume.Node != row.Node || row.Volume.NodeKey != r.Identity.Public || row.VolumeGeneration == 0 {
-				return mydcp.ErrAdmission
+				return sfcp.ErrAdmission
 			}
 			ready, err := r.nativeVolumes.Ready(ctx, volumes.NativeKey(*row.Volume), r.Identity.Private)
 			if err != nil {
 				return err
 			}
 			if ready.Spec != *row.Volume || ready.Generation != row.VolumeGeneration {
-				return mydcp.ErrAdmission
+				return sfcp.ErrAdmission
 			}
 		case "dns":
 			if r.dnsPath == "" {
-				return mydcp.ErrAdmission
+				return sfcp.ErrAdmission
 			}
 		case "bridge":
 			if r.network == nil || row.Bridge == nil || row.Bridge.Owner != r.Identity.Public || row.Bridge.Node != row.Node {
-				return mydcp.ErrAdmission
+				return sfcp.ErrAdmission
 			}
 			var prefixes []netip.Prefix
 			for _, pool := range row.Bridge.Pools {
@@ -103,20 +103,20 @@ func (r *Runtime) checkMoveResourceReads(ctx context.Context, v cluster.View, re
 			}
 		case "tunnel":
 			if r.tunnel == nil {
-				return mydcp.ErrAdmission
+				return sfcp.ErrAdmission
 			}
 			if err := r.tunnel.manager.CheckAccess(ctx); err != nil {
 				return err
 			}
 		case "ingress":
 			if r.ingress == nil || row.Ingress == nil || row.Ingress.Node != row.Node {
-				return mydcp.ErrAdmission
+				return sfcp.ErrAdmission
 			}
 			var current *ingress.Spec
 			if row.Source.Key != "" {
 				goal, exists := projection.Goals[row.Source.Key]
 				if !exists || goal.Goal.Owner != r.Identity.Public || goal.Ingress == nil {
-					return mydcp.ErrAdmission
+					return sfcp.ErrAdmission
 				}
 				current = goal.Ingress
 			}
@@ -132,7 +132,7 @@ func (r *Runtime) checkMoveResourceReads(ctx context.Context, v cluster.View, re
 		}
 		if !pinged {
 			if r.docker == nil {
-				return mydcp.ErrAdmission
+				return sfcp.ErrAdmission
 			}
 			if _, err := r.docker.API.Ping(ctx, client.PingOptions{}); err != nil {
 				return err
@@ -150,7 +150,7 @@ func (r *Runtime) checkMoveNativeNetwork(ctx context.Context, v cluster.View, pr
 	var err error
 	if row.Kind == "native-bridge" {
 		if r.network == nil {
-			return mydcp.ErrAdmission
+			return sfcp.ErrAdmission
 		}
 		if source, found := projection.ManagedSources[row.Key]; found && source.Bridge != nil {
 			expected = *source.Bridge
@@ -169,7 +169,7 @@ func (r *Runtime) checkMoveNativeNetwork(ctx context.Context, v cluster.View, pr
 		}
 	} else {
 		if r.tunnel == nil {
-			return mydcp.ErrAdmission
+			return sfcp.ErrAdmission
 		}
 		if source, found := projection.ManagedSources[row.Key]; found && source.Tunnel != nil {
 			expected = *source.Tunnel
@@ -198,7 +198,7 @@ func (r *Runtime) checkMoveNativeNetwork(ctx context.Context, v cluster.View, pr
 		return err
 	}
 	if native == "" || record.State.Pending != nil || record.State.Desired.Revision != row.Source.Revision || !record.State.Applied.Present || record.State.Applied.Generation != row.Source.Generation || record.State.Applied != record.State.Desired.Resource || record.State.Applied.Spec != string(raw) {
-		return mydcp.ErrAdmission
+		return sfcp.ErrAdmission
 	}
 	return nil
 }

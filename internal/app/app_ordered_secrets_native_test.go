@@ -15,16 +15,16 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/secrets"
-	"github.com/jay94ks/mydcd/internal/userauth"
-	"github.com/jay94ks/mydcd/internal/workload"
-	"github.com/jay94ks/mydcd/tests/vaultfixture"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/secrets"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/userauth"
+	"github.com/jay94ks/seafield/internal/workload"
+	"github.com/jay94ks/seafield/tests/vaultfixture"
 )
 
 func TestRealBoundaryManagedOrderedSecretGroups(t *testing.T) {
@@ -34,7 +34,7 @@ func TestRealBoundaryManagedOrderedSecretGroups(t *testing.T) {
 func managedOrderedSecretDocument(raw []byte) []byte {
 	s := strings.Replace(string(raw), "secrets_from: [data]", "secrets_from: [group/common, group/department, data]", 1)
 	s = strings.Replace(s, "mode: '0400'}]", "mode: '0400'}, {source: username, target: /run/secrets/db-user, uid: '10001', gid: '10001', mode: '0400'}, {source: database, target: /run/secrets/database, uid: '10001', gid: '10001', mode: '0400'}]", 1)
-	s += " username:\n  x-mydc: {key: DB_USER}\n database:\n  x-mydc: {key: DATABASE}\n"
+	s += " username:\n  x-sfc: {key: DB_USER}\n database:\n  x-sfc: {key: DATABASE}\n"
 	return []byte(s)
 }
 
@@ -61,7 +61,7 @@ func openManagedSecretAudit(t *testing.T, v *vaultfixture.Vault, p control.Polic
 	}
 	// Default HMAC redaction remains enabled. Only public path/count metadata
 	// leaves this private provider audit; values/token/HMACs are not exported.
-	v.API("PUT", "sys/audit/mydc-groups", map[string]any{"type": "file", "options": map[string]string{"file_path": a.path, "mode": "0600", "log_raw": "false"}}, nil, v.Admin)
+	v.API("PUT", "sys/audit/sfc-groups", map[string]any{"type": "file", "options": map[string]string{"file_path": a.path, "mode": "0600", "log_raw": "false"}}, nil, v.Admin)
 	a.before = a.counts(t)
 	return a
 }
@@ -101,7 +101,7 @@ func (a *managedSecretAudit) counts(t *testing.T) map[string]int {
 	return counts
 }
 
-func verifyManagedOrderedSecrets(t *testing.T, ctx context.Context, r *Runtime, root string, user userauth.Client, peer mydcp.Peer, session access.Session, p control.Policy, read func() cluster.View, change func(string, string, uint64, any), audit *managedSecretAudit) map[string]any {
+func verifyManagedOrderedSecrets(t *testing.T, ctx context.Context, r *Runtime, root string, user userauth.Client, peer sfcp.Peer, session access.Session, p control.Policy, read func() cluster.View, change func(string, string, uint64, any), audit *managedSecretAudit) map[string]any {
 	t.Helper()
 	counts := audit.counts(t)
 	for group, count := range counts {

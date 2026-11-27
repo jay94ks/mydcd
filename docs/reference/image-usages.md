@@ -3,8 +3,8 @@
 이미지 사용처는 현재 tenant의 공유 상태에서 읽는다. 실제 Task 선언, 수락된 앱 실행·남아 있는 claim, 교체 중 원 컨테이너, CD 후보/연속성 계획, 직전 앱 버전, 진행 중 lifecycle compiler job을 구분한다. 컨테이너의 현재 생존 여부는 [Task·컨테이너 관측](container-operations.md)에서 별도로 확인한다.
 
 ```sh
-mydc --tenant payments image usages IMAGE_OR_DIGEST
-mydc --tenant payments image usages --source SOURCE_NAME
+sfcli --tenant payments image usages IMAGE_OR_DIGEST
+sfcli --tenant payments image usages --source SOURCE_NAME
 ```
 
 Read 또는 ManageRegistry 권한이 필요하다. 관리 operation이나 자격 입력을 만들지 않는다. CLI는 페이지를 모두 모으고 동일한 공개 결과 root인지 확인한 뒤 출력한다. 중간에 사용처가 바뀌면 부분 목록을 정상 결과로 내지 않는다. CLI 수집은65536행 이내이며 더 큰 결과는 아래의 페이지 API로 읽는다.

@@ -9,9 +9,9 @@ import (
 	"net/netip"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/network/services"
-	"github.com/jay94ks/mydcd/internal/tenancy"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/network/services"
+	"github.com/jay94ks/seafield/internal/tenancy"
 )
 
 // This fixture consumes the actual planner/change/FSM/Authority, with explicit
@@ -65,7 +65,7 @@ func TestNetworkMembershipRebindShrinkAndExpansionRetainExactClosedSources(t *te
 	// Move node-a's CIDR responsibility to node-b while removing node-a. A
 	// single-member result has a new TUN without routes; both old TUN
 	// identities stay closed.
-	q.Target.Members = []tenancy.TUNNode{{Node: "node-b", Pools: a.Pools, Addresses: a.TunnelAddresses}}
+	q.Target.Members = []tenancy.TUNNode{{Node: "node-b", Pools: a.Pools}}
 	r, _ := f.p.Resources(f.s)
 	before := f.s
 	managedDNSChange(t, f, "membership-rebind", "reconfigure-tun-network", r.Networks.Revision(), q, state.Applied)

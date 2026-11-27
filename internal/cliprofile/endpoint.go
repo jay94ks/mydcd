@@ -20,7 +20,7 @@ var (
 	ErrTrust     = errors.New("CLI profile and trusted node keys do not match")
 )
 
-const DefaultEndpoint = "unix:///var/run/mydc.sock"
+const DefaultEndpoint = "unix:///run/sfcdp.sock"
 
 type Endpoint struct{ URI, Network, Address string }
 
@@ -50,7 +50,7 @@ func ParseEndpoint(raw string, allowPath bool) (Endpoint, error) {
 			return Endpoint{}, ErrInput
 		}
 		return Endpoint{canonical, "unix", u.Path}, nil
-	case "mydcp":
+	case "sfcp":
 		if u.Path != "" || u.RawPath != "" || u.Host == "" {
 			return Endpoint{}, ErrInput
 		}
@@ -81,7 +81,7 @@ func ParseEndpoint(raw string, allowPath bool) (Endpoint, error) {
 			}
 		}
 		address := net.JoinHostPort(host, port)
-		return Endpoint{"mydcp://" + address, "mydcp", address}, nil
+		return Endpoint{"sfcp://" + address, "sfcp", address}, nil
 	default:
 		return Endpoint{}, ErrInput
 	}

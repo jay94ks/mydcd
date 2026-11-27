@@ -7,18 +7,18 @@ import (
 	"encoding/json"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/containerops"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/schema"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/containerops"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/sfcp"
 )
 
 func (r *Runtime) containerSessionRead(_ context.Context, method, key string, input []byte, v cluster.View) ([]byte, error) {
 	if v.Local {
-		return nil, mydcp.ErrAdmission
+		return nil, sfcp.ErrAdmission
 	}
 	caller, err := identity.ParseKey(key)
 	if err != nil {
@@ -27,7 +27,7 @@ func (r *Runtime) containerSessionRead(_ context.Context, method, key string, in
 	if method == "container-session-plan" {
 		members, err := r.controlPolicy.Members(v.State)
 		if err != nil || !members.MemberKey(caller) {
-			return nil, mydcp.ErrAdmission
+			return nil, sfcp.ErrAdmission
 		}
 		q, err := schema.Decode[control.ContainerSessionPlan](input)
 		if err != nil {
@@ -61,7 +61,7 @@ func (r *Runtime) containerSessionPlan(ctx context.Context, q control.ContainerS
 	}
 	target, err := schema.Decode[containerops.Target](reply.Data)
 	if err != nil || !target.Valid() || reply.Local || reply.RaftIndex == 0 || reply.CommandIndex < target.Revision {
-		return containerops.Target{}, mydcp.ErrAdmission
+		return containerops.Target{}, sfcp.ErrAdmission
 	}
 	return target, nil
 }
@@ -77,9 +77,20 @@ func (r *Runtime) containerSessionPermit(ctx context.Context, q control.Containe
 	}
 	index, err := schema.Decode[uint64](reply.Data)
 	if err != nil || index == 0 || reply.Local || reply.RaftIndex == 0 || reply.CommandIndex < index {
-		return mydcp.ErrAdmission
+		return sfcp.ErrAdmission
 	}
 	return nil
+}
+
+// localContainerSessionPermit checks a log follow session against this
+// node's own applied state, as localContainerReadPermit does for a read.
+func (r *Runtime) localContainerSessionPermit(ctx context.Context, q control.ContainerSessionPermit) error {
+	view, err := r.Engine().Read(ctx, false)
+	if err != nil {
+		return err
+	}
+	_, err = r.controlPolicy.ContainerSessionPermit(view.State, r.Identity.Public, q, time.Now().Unix())
+	return err
 }
 
 func (r *Runtime) containerExecStatus(ctx context.Context, current access.Session, intent containerops.SessionIntent) (containerops.ExecStatus, error) {
@@ -87,17 +98,17 @@ func (r *Runtime) containerExecStatus(ctx context.Context, current access.Sessio
 	if intent.Target.Owner != r.Identity.Public {
 		owner, ok := r.nativeOwner(intent.Target.Owner)
 		if !ok || !r.acceptsResourceOwner(ctx, intent.Target.Node, intent.Target.Owner) {
-			return out, mydcp.ErrAdmission
+			return out, sfcp.ErrAdmission
 		}
 		return owner.containerExecStatus(ctx, current, intent)
 	}
 	if intent.Target.Owner != r.Identity.Public || intent.User != current.User {
-		return out, mydcp.ErrAdmission
+		return out, sfcp.ErrAdmission
 	}
 	r.life.RLock()
 	defer r.life.RUnlock()
 	if r.closed || r.workload == nil {
-		return out, mydcp.ErrAdmission
+		return out, sfcp.ErrAdmission
 	}
 	return r.containerExecStatusLocked(ctx, current, intent)
 }

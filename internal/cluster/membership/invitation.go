@@ -7,9 +7,9 @@ import (
 	"crypto/ed25519"
 	"encoding/json"
 
-	"github.com/jay94ks/mydcd/internal/cluster/lifecycle"
-	"github.com/jay94ks/mydcd/internal/config"
-	"github.com/jay94ks/mydcd/internal/identity"
+	"github.com/jay94ks/seafield/internal/cluster/lifecycle"
+	"github.com/jay94ks/seafield/internal/config"
+	"github.com/jay94ks/seafield/internal/identity"
 )
 
 // Invitation is verified against EXPLICIT external cluster/control pins before
@@ -28,19 +28,19 @@ type Invitation struct {
 func InvitationBytes(i Invitation) []byte {
 	i.Signature = nil
 	b, _ := json.Marshal(i)
-	return append([]byte("mydc-member-invitation-1\x00"), b...)
+	return append([]byte("sfc-member-invitation-1\x00"), b...)
 }
 func (i Invitation) Verify(cluster, source [32]byte) error {
 	key, err := identity.ParseKey(i.Source.Key)
 	if i.Schema != 1 || cluster == ([32]byte{}) || i.Cluster != cluster || i.Admin == ([32]byte{}) || err != nil || source == ([32]byte{}) || key != source || !validPeer(i.Genesis) || !i.Genesis.Voter || !validPeer(i.Source) || !i.Source.Voter || !validPeer(i.Target) || i.Target.Voter || !lifecycle.ValidID(i.JoinID) || i.JoinID == "genesis" || i.ApprovalRevision < 2 || i.MinimumIndex == 0 || !ed25519.Verify(ed25519.PublicKey(source[:]), InvitationBytes(i), i.Signature) {
 		return ErrMember
 	}
-	for _, peer := range []config.Peer{i.Genesis, i.Source} {
-		if i.Target.ID == peer.ID || i.Target.Key == peer.Key || i.Target.Endpoint == peer.Endpoint {
-			return ErrMember
-		}
+	// The genesis may be gone (force-removed, or lost before a restore), and
+	// a gone server's endpoint is free: only its name and key stay taken.
+	if i.Target.ID == i.Genesis.ID || i.Target.Key == i.Genesis.Key || i.Target.ID == i.Source.ID || i.Target.Key == i.Source.Key || i.Target.Endpoint == i.Source.Endpoint {
+		return ErrMember
 	}
-	if i.Source.ID == i.Genesis.ID || i.Source.Key == i.Genesis.Key || i.Source.Endpoint == i.Genesis.Endpoint {
+	if i.Source.ID == i.Genesis.ID || i.Source.Key == i.Genesis.Key {
 		if i.Source != i.Genesis {
 			return ErrMember
 		}

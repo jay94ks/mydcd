@@ -23,30 +23,30 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/web/mydc"
-	"github.com/jay94ks/mydcd/internal/web/store"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/web/sfc"
+	"github.com/jay94ks/seafield/internal/web/store"
 )
 
 // Web data auto-backup (UI-C1 자동 백업): a gzip copy of the web DB, sealed
 // with the web's seal key, written as a file into a fixed tenant volume
-// under mydc-web-backups/, the oldest
+// under sfc-web-backups/, the oldest
 // copies beyond keep removed, and a restore staged straight from such a
 // file. The schedule and the copies are web-own work; the files are REQ-28
 // volume files (volume_file_jobs.go), so every list/get/put/delete is a
-// signed volume-file op and mydcd judges who may touch the volume. The copy holds every workspace's
+// signed volume-file op and sfcd judges who may touch the volume. The copy holds every workspace's
 // web data, so it is sealed: whoever can read the volume sees ciphertext
 // only, and only a web with the same seal key restores it.
 //
-// A run needs a mydcd session to sign with. "Run now" uses the
+// A run needs a sfcd session to sign with. "Run now" uses the
 // administrator's own session. Scheduled runs log in as the web's
-// automation account (automation.go, REQ-9 mock); mydcd decides whether that
+// automation account (automation.go, REQ-9 mock); sfcd decides whether that
 // account may write the folder. Without one, or when its login fails, the
 // due run is recorded (automation-account-missing / automation-login-failed)
 // and the administrator who set it up is told; nothing is written.
 
 const (
-	autoBackupPrefix = "mydc-web-backups/"
+	autoBackupPrefix = "sfc-web-backups/"
 	backupPurpose    = "web-backup"
 	NotifyWebBackup  = "web-backup"
 )
@@ -106,7 +106,7 @@ type autoBackupView struct {
 	AccountID string `json:"accountId,omitempty"`
 	// Granted: whether the automation account holds an active file grant on
 	// prefix of the volume (REQ-49 volume-file-grants, read with the
-	// caller's session). Left out when there is no account or mydcd does
+	// caller's session). Left out when there is no account or sfcd does
 	// not tell the caller.
 	Granted   *bool  `json:"granted,omitempty"`
 	UpdatedBy string `json:"updatedBy,omitempty"`
@@ -168,7 +168,7 @@ func (s *Server) handlePutAutoBackup(w http.ResponseWriter, r *http.Request, ws 
 	}
 	if req.Tenant != "" || req.Volume != "" {
 		ctx, cancel := s.callCtx(r)
-		err := ws.do(ctx, func(ctx context.Context, c mydc.Conn) error { return backupVolume(ctx, c, req.Tenant, req.Volume) })
+		err := ws.do(ctx, func(ctx context.Context, c sfc.Conn) error { return backupVolume(ctx, c, req.Tenant, req.Volume) })
 		cancel()
 		if err != nil {
 			s.writeOpOutcome(w, ws, nil, 0, err)
@@ -195,7 +195,7 @@ func (s *Server) handlePutAutoBackup(w http.ResponseWriter, r *http.Request, ws 
 }
 
 // backupVolume: a fixed volume of the tenant that no app owns.
-func backupVolume(ctx context.Context, c mydc.Conn, tenant, volume string) error {
+func backupVolume(ctx context.Context, c sfc.Conn, tenant, volume string) error {
 	after := ""
 	for {
 		p, err := volumePage(ctx, c, tenant, after)
@@ -273,14 +273,14 @@ func (s *Server) backupNow(ctx context.Context, ws *webSession, cfg store.AutoBa
 		run.Error = "seal: " + err.Error()
 		return run
 	}
-	if len(sealed) > mydc.MaxVolumeFileBytes {
+	if len(sealed) > sfc.MaxVolumeFileBytes {
 		run.Error = fmt.Sprintf("the sealed web data (%d bytes) is larger than a volume file may be", len(sealed))
 		return run
 	}
 	name := autoBackupPrefix + "web-" + now.UTC().Format("2006-01-02T1504") + "Z.db.gz.sealed"
-	err = ws.do(ctx, func(ctx context.Context, c mydc.Conn) error {
-		q := control.VolumeFileQuery{Volume: cfg.Volume, Path: name, Method: mydc.ActionPutVolumeFile, Size: int64(len(sealed)),
-			MaxBytes: mydc.MaxVolumeFileBytes, Digest: sha256.Sum256(sealed), Overwrite: true}
+	err = ws.do(ctx, func(ctx context.Context, c sfc.Conn) error {
+		q := control.VolumeFileQuery{Volume: cfg.Volume, Path: name, Method: sfc.ActionPutVolumeFile, Size: int64(len(sealed)),
+			MaxBytes: sfc.MaxVolumeFileBytes, Digest: sha256.Sum256(sealed), Overwrite: true}
 		res, err := s.runVolumeFile(ctx, c, ws, vfJob{tenant: cfg.Tenant, q: q, body: sealed, o: newVolumeFileOp(ws, "", cfg.Tenant, q, backupReason)})
 		if err != nil {
 			return err
@@ -303,7 +303,7 @@ func (s *Server) backupNow(ctx context.Context, ws *webSession, cfg store.AutoBa
 var backupReason = &store.OpReason{Reason: "web-backup"}
 
 // pruneBackups removes the oldest web-*.db.gz.sealed copies beyond keep.
-func (s *Server) pruneBackups(ctx context.Context, c mydc.Conn, ws *webSession, cfg store.AutoBackup) error {
+func (s *Server) pruneBackups(ctx context.Context, c sfc.Conn, ws *webSession, cfg store.AutoBackup) error {
 	entries, _, err := s.volumeFileList(ctx, c, ws, cfg.Tenant, cfg.Volume, autoBackupPrefix, backupReason, incidentMaxPages)
 	if err != nil {
 		return err
@@ -316,7 +316,7 @@ func (s *Server) pruneBackups(ctx context.Context, c mydc.Conn, ws *webSession, 
 	}
 	slices.Sort(names) // the names sort by time
 	for len(names) > cfg.Keep {
-		q := control.VolumeFileQuery{Volume: cfg.Volume, Path: names[0], Method: mydc.ActionDeleteVolumeFile}
+		q := control.VolumeFileQuery{Volume: cfg.Volume, Path: names[0], Method: sfc.ActionDeleteVolumeFile}
 		res, err := s.runVolumeFile(ctx, c, ws, vfJob{tenant: cfg.Tenant, q: q, o: newVolumeFileOp(ws, "", cfg.Tenant, q, backupReason)})
 		if err == nil && res.reply.Code != "ok" && res.reply.Code != "not-found" {
 			err = errors.New(res.reply.Code)
@@ -434,8 +434,8 @@ func (s *Server) handleRestoreFrom(w http.ResponseWriter, r *http.Request, ws *w
 	ctx, cancel := s.callCtx(r)
 	defer cancel()
 	var data []byte
-	err := ws.do(ctx, func(ctx context.Context, c mydc.Conn) error {
-		res, err := s.volumeFileGet(ctx, c, ws, req.Tenant, req.Volume, req.Path, mydc.MaxVolumeFileBytes, backupReason)
+	err := ws.do(ctx, func(ctx context.Context, c sfc.Conn) error {
+		res, err := s.volumeFileGet(ctx, c, ws, req.Tenant, req.Volume, req.Path, sfc.MaxVolumeFileBytes, backupReason)
 		if err != nil {
 			return volumeFileErr(err)
 		}
@@ -511,7 +511,7 @@ func newOpID() string {
 	return h[0:8] + "-" + h[8:12] + "-" + h[12:16] + "-" + h[16:20] + "-" + h[20:]
 }
 
-// addGranted fills v.Granted from mydcd's grant list for the volume.
+// addGranted fills v.Granted from sfcd's grant list for the volume.
 func (s *Server) addGranted(r *http.Request, ws *webSession, v *autoBackupView) {
 	a := s.automationRow()
 	if a == nil || a.UserID == "" || v.Tenant == "" || v.Volume == "" {
@@ -520,7 +520,7 @@ func (s *Server) addGranted(r *http.Request, ws *webSession, v *autoBackupView) 
 	ctx, cancel := s.callCtx(r)
 	defer cancel()
 	var rows []control.PublicFileGrant
-	if err := ws.do(ctx, func(ctx context.Context, c mydc.Conn) error {
+	if err := ws.do(ctx, func(ctx context.Context, c sfc.Conn) error {
 		var err error
 		rows, err = readFileGrants(ctx, c, v.Tenant, v.Volume, "")
 		return err

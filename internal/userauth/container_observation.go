@@ -7,11 +7,11 @@ import (
 	"errors"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/containerops"
-	"github.com/jay94ks/mydcd/internal/mydcp"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/containerops"
+	"github.com/jay94ks/seafield/internal/sfcp"
 )
 
 func (s Service) containerObservation(ctx context.Context, view cluster.View, q Request, session access.Session) Reply {
@@ -50,7 +50,7 @@ func (s Service) containerObservation(ctx context.Context, view cluster.View, q 
 
 // InspectContainer collects one immutable bounded snapshot; an interrupted or
 // inconsistent assembly never returns partial detail as a complete result.
-func (c Client) InspectContainer(ctx context.Context, peer mydcp.Peer, session access.Session, tenant string, q containerops.Query) (Reply, error) {
+func (c Client) InspectContainer(ctx context.Context, peer sfcp.Peer, session access.Session, tenant string, q containerops.Query) (Reply, error) {
 	assembly, err := containerops.NewDetailAssembly(q)
 	if err != nil {
 		return Reply{}, err
@@ -63,7 +63,7 @@ func (c Client) InspectContainer(ctx context.Context, peer mydcp.Peer, session a
 			return Reply{}, err
 		}
 		if reply.Container == nil || assembly.Accept(q, *reply.Container) != nil {
-			return Reply{}, mydcp.ErrFrame
+			return Reply{}, sfcp.ErrFrame
 		}
 		var more bool
 		q, more = assembly.Next()
@@ -73,22 +73,22 @@ func (c Client) InspectContainer(ctx context.Context, peer mydcp.Peer, session a
 	}
 	result, err := assembly.Result()
 	if err != nil {
-		return Reply{}, mydcp.ErrFrame
+		return Reply{}, sfcp.ErrFrame
 	}
 	reply.Container = &result
 	return reply, nil
 }
 
-func (c Client) ObserveContainer(ctx context.Context, peer mydcp.Peer, session access.Session, tenant string, q containerops.Query) (Reply, error) {
+func (c Client) ObserveContainer(ctx context.Context, peer sfcp.Peer, session access.Session, tenant string, q containerops.Query) (Reply, error) {
 	if tenant == "" || q.Validate() != nil {
-		return Reply{}, mydcp.ErrAdmission
+		return Reply{}, sfcp.ErrAdmission
 	}
 	reply, err := c.query(ctx, peer, session, Request{Method: "container-observe", Tenant: tenant, Container: &q})
 	if err != nil {
 		return reply, err
 	}
 	if reply.Container == nil || reply.ContainerViewIndex == 0 || reply.Container.Target.Cluster != c.Cluster || reply.Container.Target.Tenant != tenant || !q.Selection.Matches(reply.Container.Target) || reply.Container.Validate(q, reply.Container.Target) != nil {
-		return Reply{}, mydcp.ErrFrame
+		return Reply{}, sfcp.ErrFrame
 	}
 	return reply, nil
 }

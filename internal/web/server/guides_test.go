@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/web/mydc"
+	"github.com/jay94ks/seafield/internal/web/sfc"
 )
 
 func guidePut(f *fixture, scope string, rev any, text string, fields map[string]any) (int, map[string]any) {
@@ -21,7 +21,7 @@ func TestGuides(t *testing.T) {
 	f.srv.opt.AI = v.endpoints()
 	ctx := context.Background()
 	fakeLogin(t, f, "admin")
-	makeAutomation(t, f, "mydc-autofix", "a1b2c3d4-0000-4000-8000-0000000000f1", true, true)
+	makeAutomation(t, f, "sfc-autofix", "a1b2c3d4-0000-4000-8000-0000000000f1", true, true)
 	if code, out := f.do("PUT", "/api/v1/incidents/policy", map[string]any{"revision": 0, "level": "auto-low", "ratePerHour": 5,
 		"approvers": map[string]any{"label": "관리자", "deadlineMinutes": 30}, "quiet": []string{}, "newAppDefault": "suggest"}); code != 200 {
 		t.Fatalf("policy: %d %v", code, out)
@@ -93,7 +93,7 @@ func TestGuides(t *testing.T) {
 	}
 	now := clock.Add(60)
 	for i := int64(3); i > 0; i-- {
-		fake.AddEvent(mydc.FixtureEvent{Time: now - i*10, Scope: "app", Tenant: "shop", App: "php-shop", Node: "node-a", Kind: "task-restarted", Target: "shop/php-shop/web/1"})
+		fake.AddEvent(sfc.FixtureEvent{Time: now - i*10, Scope: "app", Tenant: "shop", App: "php-shop", Node: "node-a", Kind: "task-restarted", Target: "shop/php-shop/web/1"})
 	}
 	f.srv.watchOnce(ctx)
 	fakeLogin(t, f, "alice")
@@ -143,7 +143,7 @@ func TestGuides(t *testing.T) {
 	if code, _ := f.do("DELETE", "/api/v1/guides/app/shop/php-shop", map[string]any{"confirmName": "php-shop"}); code != 422 {
 		t.Fatalf("delete confirm: %d", code)
 	}
-	if code, _ := f.do("DELETE", "/api/v1/guides/app/shop/php-shop", map[string]any{"confirmName": "app/shop/php-shop"}); code != 204 {
+	if code, _ := f.do("DELETE", "/api/v1/guides/app/shop/php-shop", map[string]any{"confirmName": "app/shop/php-shop"}); code != 200 {
 		t.Fatalf("delete: %d", code)
 	}
 	if _, g := f.do("GET", "/api/v1/guides/app/shop/php-shop", nil); g["version"] != float64(0) {

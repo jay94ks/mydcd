@@ -12,8 +12,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/storage"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/storage"
 )
 
 func fixture(t *testing.T, node string) (*Store, *storage.DB) {
@@ -281,5 +281,22 @@ func TestAcceptedSourceClockSkewDoesNotLoseEventAndIdleHistoryExpires(t *testing
 	}
 	if err = s.UpdateRelated(nil, now+1001+RetentionMillis); err != nil {
 		t.Fatal("idle retention with no source metadata update", err)
+	}
+}
+
+// Notify fires once per locally appended record, not for a replayed tag.
+func TestNotifyFiresForLocalAppends(t *testing.T) {
+	s, db := fixture(t, "node-a")
+	defer db.Close()
+	var got []Record
+	s.Notify(func(r Record) { got = append(got, r) })
+	if _, err := s.Append("one", taskEvent(100000, "tenant", "task-restarted"), 100001); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Append("one", taskEvent(100000, "tenant", "task-restarted"), 100002); err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Event.Target.Tenant != "tenant" {
+		t.Fatalf("notified %d records: %+v", len(got), got)
 	}
 }

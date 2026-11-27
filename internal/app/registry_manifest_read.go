@@ -6,8 +6,8 @@ import (
 	"context"
 
 	oci "github.com/google/go-containerregistry/pkg/registry"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/registryclient"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/registryclient"
 )
 
 // The original owner lock joins this bounded metadata read with quiesce and

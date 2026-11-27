@@ -12,9 +12,9 @@ import (
 	"os"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/userauth"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/userauth"
 )
 
 func main() {
@@ -27,7 +27,7 @@ func main() {
 func run() error {
 	var input struct {
 		Cluster      [32]byte
-		Local, Voter mydcp.Peer
+		Local, Voter sfcp.Peer
 		Username     string
 		PrivateKey   []byte
 	}
@@ -42,7 +42,7 @@ func run() error {
 		return err
 	}
 	defer clear(self.Private)
-	mesh, err := mydcp.NewTransport(self, input.Cluster, func(k mydcp.Identity) (mydcp.Peer, bool) {
+	mesh, err := sfcp.NewTransport(self, input.Cluster, func(k sfcp.Identity) (sfcp.Peer, bool) {
 		if k == input.Local.Key {
 			return input.Local, true
 		}
@@ -52,16 +52,12 @@ func run() error {
 		return err
 	}
 	defer mesh.Close()
-	c := userauth.Client{Self: self, Mesh: mesh, Cluster: input.Cluster, Peers: []mydcp.Peer{input.Local, input.Voter}}
+	c := userauth.Client{Self: self, Mesh: mesh, Cluster: input.Cluster, Peers: []sfcp.Peer{input.Local, input.Voter}}
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	if _, err = c.Login(ctx, input.Local, input.Username, input.PrivateKey); err == nil {
-		return errors.New("non-voter issued session")
-	} else {
-		var denied *userauth.Error
-		if !errors.As(err, &denied) || denied.Code != "not-session-issuer" {
-			return errors.New("unexpected local refusal")
-		}
+	// The non-voter relays a private-key login to the leader, which issues it.
+	if relayed, err := c.Login(ctx, input.Local, input.Username, input.PrivateKey); err != nil || relayed.Issuer != [32]byte(input.Voter.Key) {
+		return errors.New("non-voter login relay")
 	}
 	s, err := c.Login(ctx, input.Voter, input.Username, input.PrivateKey)
 	if err != nil {
@@ -71,5 +67,5 @@ func run() error {
 	if err != nil || r.User == nil || r.User.Username != input.Username {
 		return errors.New("user query")
 	}
-	return json.NewEncoder(os.Stdout).Encode(map[string]any{"User": r.User.ID, "LocalCode": "not-session-issuer", "Issuer": s.Issuer, "Voter": input.Voter.ID})
+	return json.NewEncoder(os.Stdout).Encode(map[string]any{"User": r.User.ID, "LocalCode": "relayed", "Issuer": s.Issuer, "Voter": input.Voter.ID})
 }

@@ -10,8 +10,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/workload"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/workload"
 )
 
 type executionFixture struct {
@@ -414,7 +416,7 @@ func TestExecutionCurrentPolicyBlocksSendAndAdminStillSettlesOriginal(t *testing
 	u.Revision = 0
 	u.Enabled = false
 	var err error
-	x.f.c, err = x.f.c.PutUser("admin", revision, u)
+	x.f.c, err = x.f.c.PutUser("admin", revision, access.User{ID: u.ID, Username: u.Username})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -529,5 +531,52 @@ func TestExecutionValidationBindsEveryObservationAndWitnessToCanonicalPlan(t *te
 	bad, _ := json.Marshal(forged)
 	if _, err := DecodeExecution(bad); err == nil {
 		t.Fatal("validated-plan digest bypassed frozen metadata validation")
+	}
+}
+
+// A step left Unknown can be resent once on an explicit authorization: the
+// same command goes out again, the ledger answers it, and a second resend
+// needs a new authorization. A step whose result exists cannot be resent.
+func TestExecutionReplaySendsTheSameCommandOnce(t *testing.T) {
+	x := runFixture(t)
+	key := x.b.Steps()[0].Key
+	cmd := x.prepare(key)
+	x.send(key)
+	x.save(x.e.Unknown(x.e.Revision(), key))
+	steps := x.e.UnknownSteps()
+	if len(steps) != 1 || steps[0].Key != key || steps[0].Command != state.Digest(cmd) || steps[0].Resent {
+		t.Fatal("unknown step not listed", steps)
+	}
+	_, err := x.e.AuthorizeReplay(x.e.Revision(), key, "replay-1", [32]byte{1}, x.shared)
+	deny(t, err)
+	_, err = x.e.AuthorizeReplay(x.e.Revision()+1, key, "replay-1", state.Digest(cmd), x.shared)
+	deny(t, err)
+	x.save(x.e.AuthorizeReplay(x.e.Revision(), key, "replay-1", state.Digest(cmd), x.shared))
+	if s, _ := x.e.Stage(key); !s.Sendable() || !x.e.UnknownSteps()[0].Resent {
+		t.Fatal("authorized replay not due")
+	}
+	_, err = x.e.AuthorizeReplay(x.e.Revision(), key, "replay-2", state.Digest(cmd), x.shared)
+	deny(t, err)
+	if sent := x.send(key); sent != cmd {
+		t.Fatal("replay changed the command")
+	}
+	if s, _ := x.e.Stage(key); s.Sendable() || s.Journal.Pending.Phase != reconcile.Dispatched || x.e.Status() == "Unknown" {
+		t.Fatal("replay not dispatched")
+	}
+	_, _, err = x.e.Send(x.f.c, x.e.Revision(), key, x.now)
+	deny(t, err)
+	// Lost again: a new authorization with a new request is allowed.
+	x.save(x.e.Unknown(x.e.Revision(), key))
+	_, err = x.e.AuthorizeReplay(x.e.Revision(), key, "replay-1", state.Digest(cmd), x.shared)
+	deny(t, err)
+	x.save(x.e.AuthorizeReplay(x.e.Revision(), key, "replay-2", state.Digest(cmd), x.shared))
+	x.send(key)
+	r := x.apply(cmd)
+	x.save(x.e.Unknown(x.e.Revision(), key))
+	_, err = x.e.AuthorizeReplay(x.e.Revision(), key, "replay-3", state.Digest(cmd), x.shared)
+	deny(t, err)
+	x.save(x.e.Commit(x.e.Revision(), key, cmd, r))
+	if len(x.e.UnknownSteps()) != 0 {
+		t.Fatal("committed step still unknown")
 	}
 }

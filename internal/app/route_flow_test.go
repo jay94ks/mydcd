@@ -9,14 +9,14 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/network/services"
-	"github.com/jay94ks/mydcd/internal/reconcile"
-	"github.com/jay94ks/mydcd/internal/tenancy"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/network/services"
+	"github.com/jay94ks/seafield/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/tenancy"
 )
 
 // Real owner DB and reusable route core; native installation/boot are model
-// facts. This does not exercise MYDCP, Bridge, kernel, or service traffic.
+// facts. This does not exercise SFCP, Bridge, kernel, or service traffic.
 func routeFlowOwnerCandidate(t *testing.T, path string) (*Runtime, services.ReferenceConsumer, routeOwnerRecord, services.RouteRuntime, services.RouteFlow) {
 	t.Helper()
 	ref, record, catalog, networks, authority := routeOwnerCoreFixture(t)

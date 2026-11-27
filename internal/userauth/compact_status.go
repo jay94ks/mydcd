@@ -2,7 +2,7 @@
 
 package userauth
 
-import "github.com/jay94ks/mydcd/internal/cluster/control"
+import "github.com/jay94ks/seafield/internal/cluster/control"
 
 type RaftCompactNode struct {
 	Operation, User, State, Code          string

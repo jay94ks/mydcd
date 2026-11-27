@@ -12,15 +12,15 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/identity"
-	checker "github.com/jay94ks/mydcd/internal/workload/lifecycle"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/identity"
+	checker "github.com/jay94ks/seafield/internal/workload/lifecycle"
 )
 
 func composeSourceDocument() []byte {
 	source := "package checker\n// literal $UNEXPANDED\n" + strings.Repeat("// original source\n", 4000)
 	source = "          " + strings.ReplaceAll(source, "\n", "\n          ")
-	return []byte("name: source-app\nx-mydc:\n  lifecycle:\n    scripts:\n      inline:\n        source: |\n" + source + "\nservices:\n  web:\n    image: docker.io/library/php@sha256:" + strings.Repeat("a", 64) + "\n    x-mydc:\n      lifecycle:\n        checks:\n          - {id: custom, phase: readiness, script: inline}\n")
+	return []byte("name: source-app\nx-sfc:\n  lifecycle:\n    scripts:\n      inline:\n        source: |\n" + source + "\nservices:\n  web:\n    image: docker.io/library/php@sha256:" + strings.Repeat("a", 64) + "\n    x-sfc:\n      lifecycle:\n        checks:\n          - {id: custom, phase: readiness, script: inline}\n")
 }
 
 func stagedComposeSources(t *testing.T) (string, Client, access.Session, *identity.Identity, ComposeSourcePreparation) {

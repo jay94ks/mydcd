@@ -12,8 +12,8 @@ import (
 	"errors"
 	"unicode/utf8"
 
-	"github.com/jay94ks/mydcd/internal/schema"
-	"github.com/jay94ks/mydcd/internal/storage"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/storage"
 )
 
 var ErrSourceStore = errors.New("lifecycle source artifact unavailable or inconsistent")

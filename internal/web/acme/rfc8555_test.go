@@ -26,7 +26,7 @@ import (
 
 	xacme "golang.org/x/crypto/acme"
 
-	"github.com/jay94ks/mydcd/internal/web/provlog"
+	"github.com/jay94ks/seafield/internal/web/provlog"
 )
 
 // acmeServer is a small RFC 8555 server: enough for the Directory flow
@@ -211,7 +211,7 @@ func TestDirectoryIssueDNS01(t *testing.T) {
 	if err != nil || len(chain) != 2 || len(ci.Names) != 2 || ci.Issuer != "Test ACME Root" {
 		t.Fatalf("chain: %d %+v %v", len(chain), ci, err)
 	}
-	if err := ca.Revoke(ctx, key, acct, chain[0]); err != nil || a.revoked != 1 {
+	if err := ca.Revoke(ctx, key, acct, chain[0], "superseded"); err != nil || a.revoked != 1 {
 		t.Fatalf("revoke: %v", err)
 	}
 

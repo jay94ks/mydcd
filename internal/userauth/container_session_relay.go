@@ -10,10 +10,10 @@ import (
 	"io"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/mydcp"
+	"github.com/jay94ks/seafield/internal/sfcp"
 )
 
-func (s Service) forwardContainerSession(ctx context.Context, conn *mydcp.Session, stream mydcp.Stream, frame mydcp.Frame, digest [32]byte, envelope Envelope, binding userBinding, q ContainerSessionRequest) error {
+func (s Service) forwardContainerSession(ctx context.Context, conn *sfcp.Session, stream sfcp.Stream, frame sfcp.Frame, digest [32]byte, envelope Envelope, binding userBinding, q ContainerSessionRequest) error {
 	current := q.Intent.Target.Owner
 
 	if s.Engine == nil {
@@ -28,14 +28,14 @@ func (s Service) forwardContainerSession(ctx context.Context, conn *mydcp.Sessio
 		return containerSessionReply(stream, frame, digest, ContainerSessionReply{Code: "denied"})
 	}
 
-	peer, ok := s.Mesh.Peer(mydcp.Identity(current))
-	if !ok || !peer.Member || peer.Key == mydcp.Identity(s.Self.Public) {
+	peer, ok := s.Mesh.Peer(sfcp.Identity(current))
+	if !ok || !peer.Member || peer.Key == sfcp.Identity(s.Self.Public) {
 		return containerSessionReply(stream, frame, digest, ContainerSessionReply{Code: "unavailable"})
 	}
 	c := Client{Mesh: s.Mesh, Self: s.Self, Cluster: s.Policy.Cluster}
-	remote, reply, err := c.containerSessionExchange(ctx, peer, q, 3, 10*time.Second, func(conn *mydcp.Session, body []byte) (Envelope, error) {
+	remote, reply, err := c.containerSessionExchange(ctx, peer, q, 3, 10*time.Second, func(conn *sfcp.Session, body []byte) (Envelope, error) {
 		if !bytes.Equal(body, envelope.Body) {
-			return Envelope{}, mydcp.ErrFrame
+			return Envelope{}, sfcp.ErrFrame
 		}
 		copy := envelope
 		copy.Relay = &Relay{Node: s.Self.Public, Target: [32]byte(peer.Key), Caller: binding.key, Challenge: binding.challenge, Connection: conn.PeerChallenge()}
@@ -48,7 +48,7 @@ func (s Service) forwardContainerSession(ctx context.Context, conn *mydcp.Sessio
 	if err != nil {
 		code := "unavailable"
 		var failure *Error
-		if errors.As(err, &failure) && failure.Phase == mydcp.Completed {
+		if errors.As(err, &failure) && failure.Phase == sfcp.Completed {
 			code = failure.Code
 		}
 		return containerSessionReply(stream, frame, digest, ContainerSessionReply{Code: code})

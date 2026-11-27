@@ -14,36 +14,36 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/registryclient"
-	"github.com/jay94ks/mydcd/internal/userauth"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/registryclient"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/userauth"
 )
 
 // Reuses the installed registry/retained Volume, CLI wallet, authenticated
 // control handoff and owned rollback. This remaining scope does not build an
 // image or repeat the app or large-context lifecycle.
 func TestRQ6RegistryPruneInstalledFollowerOwnerOriginalResults(t *testing.T) {
-	if os.Getenv("MYDC_TEST_RQ6_REMAINING") != "prune-follower" {
+	if os.Getenv("SFC_TEST_RQ6_REMAINING") != "prune-follower" {
 		t.Skip("explicit prune-follower remaining scope required")
 	}
-	if os.Getenv("MYDC_TEST_RQ6_IMAGE_BUILD") == "1" {
+	if os.Getenv("SFC_TEST_RQ6_IMAGE_BUILD") == "1" {
 		t.Fatal("prune-follower uses the installed registry fixture without the image-build opt-in")
 	}
-	if os.Getenv("MYDC_REGISTRY_TEST_IP") == "" || os.Getenv("MYDC_STORAGE_TEST_ROOT") == "" || os.Getenv("MYDC_STORAGE_TEST_OWNER") == "" || os.Getenv("MYDC_STORAGE_HOST_MOUNT_NS") == "" {
+	if os.Getenv("SFC_REGISTRY_TEST_IP") == "" || os.Getenv("SFC_STORAGE_TEST_ROOT") == "" || os.Getenv("SFC_STORAGE_TEST_OWNER") == "" || os.Getenv("SFC_STORAGE_HOST_MOUNT_NS") == "" {
 		t.Skip("installed registry IPv4 and owned storage/mount rollback inputs required")
 	}
 	runManagedAppOwner(t, true, true, true, true, managedAppRegistry, true, false, false)
 }
 
-func (f *managedRegistryNative) verifyRegistryPruneFollowerNative(t *testing.T, ctx context.Context, owner, remote *Runtime, user userauth.Client, peer mydcp.Peer, p control.Policy, read func() cluster.View, change func(string, string, uint64, any)) {
+func (f *managedRegistryNative) verifyRegistryPruneFollowerNative(t *testing.T, ctx context.Context, owner, remote *Runtime, user userauth.Client, peer sfcp.Peer, p control.Policy, read func() cluster.View, change func(string, string, uint64, any)) {
 	t.Helper()
 	if owner == nil || remote == nil || f.spec.Node != "node-a" || f.original.Owner != owner.Identity.Public || !owner.Engine().IsLeader() {
 		t.Fatal("prune follower requires the original installed node-a registry owner")
 	}
-	remotePeer, found := owner.Mesh.Peer(mydcp.Identity(remote.Identity.Public))
+	remotePeer, found := owner.Mesh.Peer(sfcp.Identity(remote.Identity.Public))
 	if !found || remotePeer.ID != "node-c" || !remotePeer.Member {
 		t.Fatal("prune follower requires the installed node-c control")
 	}
@@ -132,7 +132,7 @@ func (f *managedRegistryNative) verifyRegistryPruneFollowerNative(t *testing.T, 
 	if _, err := user.RegistryPrune(ctx, peer, session, "tenant", resultQuery, "", true); err != nil {
 		t.Fatal("current member original follower results", err)
 	}
-	if _, err := user.Query(ctx, peer, session, "select-tenant", "prune-other"); err != nil {
+	if _, err := user.SelectTenant(ctx, peer, session, "prune-other"); err != nil {
 		t.Fatal("foreign tenant reader lacks its own valid membership", err)
 	}
 	deny := func(tenant string, query control.RegistryPruneQuery, results bool) {
@@ -166,7 +166,7 @@ func (f *managedRegistryNative) verifyRegistryPruneFollowerNative(t *testing.T, 
 		t.Fatal("original reader membership missing")
 	}
 	change("prune-follower-reader-revoke", "set-membership", member.Revision, access.Membership{Tenant: "tenant", User: username, Role: access.Manager, Enabled: false})
-	if out, err := owner.registryPruneResultsOwner(ctx, accepted); !errors.Is(err, mydcp.ErrAdmission) || out.Schema != 0 {
+	if out, err := owner.registryPruneResultsOwner(ctx, accepted); !errors.Is(err, sfcp.ErrAdmission) || out.Schema != 0 {
 		t.Fatal("post-I/O follower result gate reused revoked membership", err)
 	}
 	deny("tenant", previewQuery, false)

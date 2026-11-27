@@ -14,7 +14,7 @@ import (
 // Incident response (W2.3): incidents the watcher opened, the cluster and
 // app policies, and the watcher's cursor. Incidents are kept until an
 // administrator deletes them. The cluster state they describe stays with
-// mydcd; an incident holds what was seen and decided.
+// sfcd; an incident holds what was seen and decided.
 
 var (
 	bucketIncidents      = []byte("incidents")
@@ -149,7 +149,8 @@ type IncidentOption struct {
 }
 
 // PutIncident stores an incident.
-func (s *Store) PutIncident(in *Incident) error {
+func (s *Store) PutIncident(in *Incident) (err error) {
+	defer func() { s.changed(err, Change{Kind: "incident", Tenant: in.Tenant, ID: in.ID}) }()
 	return s.db.Update(func(tx *bolt.Tx) error {
 		return putJSON(tx.Bucket(bucketIncidents), []byte(in.ID), in)
 	})
@@ -182,6 +183,7 @@ func (s *Store) UpdateIncident(id string, fn func(in *Incident) error) (*Inciden
 		out.Revision++
 		return putJSON(b, []byte(id), &out)
 	})
+	s.changed(err, Change{Kind: "incident", Tenant: out.Tenant, ID: id})
 	if err != nil {
 		return nil, err
 	}
@@ -212,13 +214,21 @@ func (s *Store) ListIncidents() ([]*Incident, error) {
 
 // DeleteIncident deletes one incident.
 func (s *Store) DeleteIncident(id string) error {
-	return s.db.Update(func(tx *bolt.Tx) error {
+	var tenant string
+	err := s.db.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket(bucketIncidents)
-		if b.Get([]byte(id)) == nil {
+		raw := b.Get([]byte(id))
+		if raw == nil {
 			return ErrNotFound
+		}
+		var in Incident
+		if json.Unmarshal(raw, &in) == nil {
+			tenant = in.Tenant
 		}
 		return b.Delete([]byte(id))
 	})
+	s.changed(err, Change{Kind: "incident", Tenant: tenant, ID: id, Deleted: true})
+	return err
 }
 
 // IncidentPolicy is the cluster policy (system administrators).
@@ -366,7 +376,7 @@ func (s *Store) ListAppIncidentPolicies() ([]*AppIncidentPolicy, error) {
 	return out, err
 }
 
-// IncidentWatcher is the watcher's place in mydcd's event stream and the
+// IncidentWatcher is the watcher's place in sfcd's event stream and the
 // recent signals its rules count.
 type IncidentWatcher struct {
 	Cursors map[string]string `json:"cursors,omitempty"` // "" = all workspaces (system admin), else per workspace

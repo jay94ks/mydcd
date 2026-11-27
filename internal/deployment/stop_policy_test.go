@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/engine"
+	"github.com/jay94ks/seafield/internal/engine"
 )
 
 func TestComposeStopsPreservePerServicePolicyAndRejectInvalidExplicitInputs(t *testing.T) {

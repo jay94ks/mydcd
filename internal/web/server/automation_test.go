@@ -15,9 +15,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/web/mydc"
-	"github.com/jay94ks/mydcd/internal/web/seal"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/web/seal"
+	"github.com/jay94ks/seafield/internal/web/sfc"
 )
 
 func TestAutomationAccount(t *testing.T) {
@@ -30,7 +30,7 @@ func TestAutomationAccount(t *testing.T) {
 		t.Fatalf("non-admin: %d", code)
 	}
 	fakeLogin(t, f, "admin")
-	if code, out := f.do("PUT", "/api/v1/system/automation", map[string]any{"username": "mydc-autofix"}); code != 503 || errCode(out) != "seal-unavailable" {
+	if code, out := f.do("PUT", "/api/v1/system/automation", map[string]any{"username": "sfc-autofix"}); code != 503 || errCode(out) != "seal-unavailable" {
 		t.Fatalf("without seal: %d %v", code, out)
 	}
 	box, err := seal.Open(t.TempDir(), make([]byte, seal.KeySize))
@@ -44,15 +44,15 @@ func TestAutomationAccount(t *testing.T) {
 	if code, _ := f.do("PUT", "/api/v1/system/automation", map[string]any{"username": "Bad Name"}); code != 422 {
 		t.Fatalf("bad name: %d", code)
 	}
-	code, out := f.do("PUT", "/api/v1/system/automation", map[string]any{"username": "mydc-autofix"})
+	code, out := f.do("PUT", "/api/v1/system/automation", map[string]any{"username": "sfc-autofix"})
 	pub, _ := out["publicKey"].(string)
-	if code != 200 || len(pub) != 64 || out["username"] != "mydc-autofix" || out["createdBy"] != "admin" {
+	if code != 200 || len(pub) != 64 || out["username"] != "sfc-autofix" || out["createdBy"] != "admin" {
 		t.Fatalf("make key: %d %v", code, out)
 	}
-	if _, out := f.do("PUT", "/api/v1/system/automation", map[string]any{"username": "mydc-autofix"}); out["publicKey"] != pub {
+	if _, out := f.do("PUT", "/api/v1/system/automation", map[string]any{"username": "sfc-autofix"}); out["publicKey"] != pub {
 		t.Fatal("the same name made a new key")
 	}
-	_, out = f.do("PUT", "/api/v1/system/automation", map[string]any{"username": "mydc-autofix", "rotate": true})
+	_, out = f.do("PUT", "/api/v1/system/automation", map[string]any{"username": "sfc-autofix", "rotate": true})
 	if out["publicKey"] == pub {
 		t.Fatal("rotate kept the key")
 	}
@@ -70,14 +70,14 @@ func TestAutomationAccount(t *testing.T) {
 	raw, _ := hex.DecodeString(pub)
 	var key [32]byte
 	copy(key[:], raw)
-	code, out = f.do("POST", "/api/v1/ops", map[string]any{"opId": "a1b2c3d4-0000-4000-8000-0000000000a1", "action": mydc.ActionPutUser, "principal": "u-admin", "expected": 0,
-		"payload": map[string]any{"ID": "u-autofix", "Username": "mydc-autofix", "Enabled": true,
-			"Credentials": []any{map[string]any{"ID": "web-1", "Method": string(mydc.MethodPrivateKey), "PublicKey": key, "Enabled": true}}}})
+	code, out = f.do("POST", "/api/v1/ops", map[string]any{"opId": "a1b2c3d4-0000-4000-8000-0000000000a1", "action": sfc.ActionPutUser, "principal": "u-admin", "expected": 0,
+		"payload": map[string]any{"ID": "u-autofix", "Username": "sfc-autofix", "Enabled": true,
+			"Credentials": []any{map[string]any{"ID": "web-1", "Method": string(sfc.MethodPrivateKey), "PublicKey": key, "Enabled": true}}}})
 	if opState(t, code, out) != "applied" {
 		t.Fatalf("put-user: %d %v", code, out)
 	}
 	code, out = f.do("POST", "/api/v1/system/automation/check", map[string]any{})
-	if code != 200 || out["ok"] != true || out["user"] != "u-autofix" || out["username"] != "mydc-autofix" {
+	if code != 200 || out["ok"] != true || out["user"] != "u-autofix" || out["username"] != "sfc-autofix" {
 		t.Fatalf("check: %d %v", code, out)
 	}
 	if _, out := f.do("GET", "/api/v1/system/automation", nil); out["lastCheck"].(map[string]any)["ok"] != true || out["userId"] != "u-autofix" {
@@ -85,7 +85,7 @@ func TestAutomationAccount(t *testing.T) {
 	}
 
 	// a scheduled backup signs as the automation account
-	if code, out := f.do("PUT", "/api/v1/system/auto-backup", map[string]any{"enabled": true, "at": "03:00", "keep": 2, "tenant": "payments", "volume": "ledger-data"}); code != 200 || out["account"] != "mydc-autofix" || out["accountId"] != "u-autofix" {
+	if code, out := f.do("PUT", "/api/v1/system/auto-backup", map[string]any{"enabled": true, "at": "03:00", "keep": 2, "tenant": "payments", "volume": "ledger-data"}); code != 200 || out["account"] != "sfc-autofix" || out["accountId"] != "u-autofix" {
 		t.Fatalf("auto-backup: %d %v", code, out)
 	}
 	clock.Add(3 * 3600)
@@ -102,9 +102,9 @@ func TestAutomationAccount(t *testing.T) {
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	// mydcd decides: the account has no membership in payments, so the
+	// sfcd decides: the account has no membership in payments, so the
 	// write is denied (the web does not lend it the admin's authority)
-	if last["by"] != "mydc-autofix" || last["ok"] != false || !strings.Contains(last["error"].(string), "denied") {
+	if last["by"] != "sfc-autofix" || last["ok"] != false || !strings.Contains(last["error"].(string), "denied") {
 		t.Fatalf("scheduled run: %v", last)
 	}
 
@@ -112,30 +112,30 @@ func TestAutomationAccount(t *testing.T) {
 		t.Fatalf("granted before the grant: %v", st)
 	}
 	// the workspace manager grants the folder; the next scheduled run writes.
-	// mydcd grants files only to a member of the workspace (viewer here).
-	if err := withAdminConn(t, fake, func(c mydc.Conn) error {
+	// sfcd grants files only to a member of the workspace (viewer here).
+	if err := withAdminConn(t, fake, func(c sfc.Conn) error {
 		p, err := c.TenantMembers(context.Background(), "payments", "")
 		if err != nil {
 			return err
 		}
-		raw, _ := json.Marshal(access.Membership{Tenant: "payments", User: "u-autofix", Role: mydc.RoleViewer, Enabled: true})
+		raw, _ := json.Marshal(access.Membership{Tenant: "payments", User: "u-autofix", Role: sfc.RoleViewer, Enabled: true})
 		who, err := c.Whoami(context.Background())
 		if err != nil {
 			return err
 		}
-		op, err := c.Prepare(context.Background(), mydc.Change{Schema: 1, Action: mydc.ActionSetMembership, Principal: "u-admin", Expected: p.Revision, Payload: raw}, who.RootFor(mydc.ActionSetMembership))
+		op, err := c.Prepare(context.Background(), sfc.Change{Schema: 1, Action: sfc.ActionSetMembership, Principal: "u-admin", Expected: p.Revision, Payload: raw}, who.RootFor(sfc.ActionSetMembership))
 		if err != nil {
 			return err
 		}
 		res, err := c.Submit(context.Background(), op)
-		if err == nil && res.Code != mydc.ResultApplied {
+		if err == nil && res.Code != sfc.ResultApplied {
 			err = fmt.Errorf("membership: %+v", res)
 		}
 		return err
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if code, out := f.do("POST", "/api/v1/t/payments/volumes/ledger-data/file-grants", map[string]any{"opId": "a1b2c3d4-0000-4000-8000-0000000000a2", "prefix": "mydc-web-backups/", "user": "u-autofix"}); opState(t, code, out) != "applied" {
+	if code, out := f.do("POST", "/api/v1/t/payments/volumes/ledger-data/file-grants", map[string]any{"opId": "a1b2c3d4-0000-4000-8000-0000000000a2", "prefix": "sfc-web-backups/", "user": "u-autofix"}); opState(t, code, out) != "applied" {
 		t.Fatalf("grant: %d %v", code, out)
 	}
 	if _, st := f.do("GET", "/api/v1/system/auto-backup", nil); st["granted"] != true {
@@ -154,7 +154,7 @@ func TestAutomationAccount(t *testing.T) {
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	if last["ok"] != true || last["by"] != "mydc-autofix" {
+	if last["ok"] != true || last["by"] != "sfc-autofix" {
 		t.Fatalf("granted scheduled run: %v", last)
 	}
 
@@ -195,9 +195,9 @@ func makeAutomation(t *testing.T, f *fixture, username, opID string, register, s
 	raw, _ := hex.DecodeString(out["publicKey"].(string))
 	var key [32]byte
 	copy(key[:], raw)
-	code, out = f.do("POST", "/api/v1/ops", map[string]any{"opId": opID, "action": mydc.ActionPutUser, "principal": "u-admin", "expected": 0,
+	code, out = f.do("POST", "/api/v1/ops", map[string]any{"opId": opID, "action": sfc.ActionPutUser, "principal": "u-admin", "expected": 0,
 		"payload": map[string]any{"ID": "u-" + username, "Username": username, "Enabled": true, "SystemAdmin": systemAdmin,
-			"Credentials": []any{map[string]any{"ID": "web-1", "Method": string(mydc.MethodPrivateKey), "PublicKey": key, "Enabled": true}}}})
+			"Credentials": []any{map[string]any{"ID": "web-1", "Method": string(sfc.MethodPrivateKey), "PublicKey": key, "Enabled": true}}}})
 	if opState(t, code, out) != "applied" {
 		t.Fatalf("put-user: %d %v", code, out)
 	}
@@ -220,8 +220,8 @@ func TestACMERenewAsAutomation(t *testing.T) {
 		f.srv.acmeTick()
 	}
 
-	// a key mydcd does not know: the order stops before the CA and retries later
-	makeAutomation(t, f, "mydc-web", "", false, false)
+	// a key sfcd does not know: the order stops before the CA and retries later
+	makeAutomation(t, f, "sfc-web", "", false, false)
 	due()
 	out := waitCert(t, f, "shop")
 	if o := lastOrder(out); o["state"] != "failed" || o["errorCode"] != "renew-account" || o["auto"] != true || ca.Issued() != 1 {
@@ -233,14 +233,14 @@ func TestACMERenewAsAutomation(t *testing.T) {
 
 	// registered (put-certificate here needs a system administrator): the
 	// renewal is signed by the automation account
-	makeAutomation(t, f, "mydc-web", "a1b2c3d4-0000-4000-8000-0000000000b2", true, true)
+	makeAutomation(t, f, "sfc-web", "a1b2c3d4-0000-4000-8000-0000000000b2", true, true)
 	due()
 	out = waitCert(t, f, "shop")
 	o := lastOrder(out)
-	if o["state"] != "done" || ca.Issued() != 2 || journalCount(fake, mydc.ActionPutCertificate) != 2 {
+	if o["state"] != "done" || ca.Issued() != 2 || journalCount(fake, sfc.ActionPutCertificate) != 2 {
 		t.Fatalf("renewal: %v issued=%d", o, ca.Issued())
 	}
-	if op, _ := f.store.GetOp("u-mydc-web", o["storeOp"].(string)); op == nil || op.User != "u-mydc-web" || op.Username != "mydc-web" {
+	if op, _ := f.store.GetOp("u-sfc-web", o["storeOp"].(string)); op == nil || op.User != "u-sfc-web" || op.Username != "sfc-web" {
 		t.Fatalf("store op signer: %+v", op)
 	}
 }

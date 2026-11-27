@@ -7,9 +7,9 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	checker "github.com/jay94ks/mydcd/internal/workload/lifecycle"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	checker "github.com/jay94ks/seafield/internal/workload/lifecycle"
 )
 
 // LifecycleKey stores tenant source/policy metadata and accepted app/build pins.
@@ -284,3 +284,6 @@ func (p Policy) LifecyclePage(s state.State, session access.Session, now int64, 
 	}
 	return entries[i : i+1], "", nil
 }
+
+// lifecycleBook is the LifecycleKey book (books.go).
+var lifecycleBook = Book{Key: LifecycleKey, Reduce: Policy.reduceLifecycle}

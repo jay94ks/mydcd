@@ -12,11 +12,11 @@ import (
 	"time"
 
 	cerrdefs "github.com/containerd/errdefs"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/engine"
-	"github.com/jay94ks/mydcd/internal/reconcile"
-	"github.com/jay94ks/mydcd/internal/workload/volumes"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/engine"
+	"github.com/jay94ks/seafield/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/workload/volumes"
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/api/types/mount"
 	"github.com/moby/moby/client"
@@ -46,8 +46,8 @@ func verifyBackupMountBoundary(t *testing.T, ctx context.Context, owner *Runtime
 			}
 		}
 	}
-	name := "mydc-cold-mount-" + source.Owner.Native[len(source.Owner.Native)-24:]
-	labels := map[string]string{"org.mydc.owner": engine.Owner(source.Spec.Scope.Cluster, source.Owner.Key), "org.mydc.kind": "container", "org.mydc.test": os.Getenv("MYDC_DOCKER_TEST_OWNER")}
+	name := "sfc-cold-mount-" + source.Owner.Native[len(source.Owner.Native)-24:]
+	labels := map[string]string{"org.sfc.owner": engine.Owner(source.Spec.Scope.Cluster, source.Owner.Key), "org.sfc.kind": "container", "org.sfc.test": os.Getenv("SFC_DOCKER_TEST_OWNER")}
 	cleanup := func() {
 		clean, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
@@ -59,7 +59,7 @@ func verifyBackupMountBoundary(t *testing.T, ctx context.Context, owner *Runtime
 			t.Error(err)
 			return
 		}
-		if found.Container.Config.Labels["org.mydc.owner"] != labels["org.mydc.owner"] || found.Container.Config.Labels["org.mydc.test"] != labels["org.mydc.test"] || found.Container.State.Running {
+		if found.Container.Config.Labels["org.sfc.owner"] != labels["org.sfc.owner"] || found.Container.Config.Labels["org.sfc.test"] != labels["org.sfc.test"] || found.Container.State.Running {
 			t.Error("mount reference rollback owner/state mismatch")
 			return
 		}

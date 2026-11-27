@@ -17,7 +17,7 @@ import (
 const compileTestSource = `package checker
 import (
  "context"
- lifecycle "github.com/jay94ks/mydcd/lifecycle/v1"
+ lifecycle "github.com/jay94ks/seafield/lifecycle/v1"
 )
 func Check(ctx context.Context, in lifecycle.Request, probe lifecycle.Probe) (lifecycle.Result,error) {
  r,err := probe.File(ctx,lifecycle.FileProbe{Service:"web",Path:"/ready",Kind:"regular",ContentDigest:"2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",MaxBytes:16})

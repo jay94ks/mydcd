@@ -11,11 +11,11 @@ import (
 	"encoding/json"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/containerops"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/schema"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/containerops"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/sfcp"
 )
 
 type ContainerSessionRequest struct {
@@ -66,19 +66,19 @@ func (q ContainerSessionRequest) valid() bool {
 	return false
 }
 
-func containerSessionReply(stream mydcp.Stream, frame mydcp.Frame, digest [32]byte, reply ContainerSessionReply) error {
+func containerSessionReply(stream sfcp.Stream, frame sfcp.Frame, digest [32]byte, reply ContainerSessionReply) error {
 	reply.Schema = 1
 	if !reply.valid() {
-		return mydcp.ErrFrame
+		return sfcp.ErrFrame
 	}
 	raw, err := json.Marshal(reply)
 	if err != nil {
 		return err
 	}
-	return mydcp.WriteFrame(stream, mydcp.Frame{Purpose: mydcp.ContainerSession, Kind: 2, Request: frame.Request, Fields: []mydcp.Field{{Tag: 1, Required: true, Value: raw}, {Tag: 2, Required: true, Value: digest[:]}}})
+	return sfcp.WriteFrame(stream, sfcp.Frame{Purpose: sfcp.ContainerSession, Kind: 2, Request: frame.Request, Fields: []sfcp.Field{{Tag: 1, Required: true, Value: raw}, {Tag: 2, Required: true, Value: digest[:]}}})
 }
 
-func (s Service) handleContainerSession(ctx context.Context, conn *mydcp.Session, stream mydcp.Stream, frame mydcp.Frame) error {
+func (s Service) handleContainerSession(ctx context.Context, conn *sfcp.Session, stream sfcp.Stream, frame sfcp.Frame) error {
 	ctx, cancelLifetime := context.WithCancel(ctx)
 	defer cancelLifetime()
 	if s.ContainerLifetime != nil {
@@ -86,15 +86,15 @@ func (s Service) handleContainerSession(ctx context.Context, conn *mydcp.Session
 		defer stop()
 	}
 	if frame.Kind != 1 && frame.Kind != 3 {
-		return mydcp.ErrFrame
+		return sfcp.ErrFrame
 	}
 	digest := sha256.Sum256(frame.Fields[0].Value)
 	if !bytes.Equal(digest[:], frame.Fields[1].Value) {
-		return mydcp.ErrFrame
+		return sfcp.ErrFrame
 	}
 	envelope, err := schema.Decode[Envelope](frame.Fields[0].Value)
 	if err != nil {
-		return mydcp.ErrFrame
+		return sfcp.ErrFrame
 	}
 	defer clear(frame.Fields[0].Value)
 	defer clear(envelope.Body)
@@ -132,7 +132,7 @@ func (s Service) handleContainerSession(ctx context.Context, conn *mydcp.Session
 	}
 	if q.Method != "open" {
 		if streamEOF(stream) != nil {
-			return mydcp.ErrFrame
+			return sfcp.ErrFrame
 		}
 		if q.Method == "capabilities" {
 			return containerSessionReply(stream, frame, digest, ContainerSessionReply{Code: "ok", Supported: true})
@@ -197,19 +197,19 @@ func (s Service) handleContainerSession(ctx context.Context, conn *mydcp.Session
 	return s.ContainerRunner(channel.Context(), *envelope.Session, i, channel)
 }
 
-func (c Client) containerSessionExchange(ctx context.Context, peer mydcp.Peer, request ContainerSessionRequest, kind uint8, setup time.Duration, makeEnvelope func(*mydcp.Session, []byte) (Envelope, error)) (*ContainerChannel, ContainerSessionReply, error) {
+func (c Client) containerSessionExchange(ctx context.Context, peer sfcp.Peer, request ContainerSessionRequest, kind uint8, setup time.Duration, makeEnvelope func(*sfcp.Session, []byte) (Envelope, error)) (*ContainerChannel, ContainerSessionReply, error) {
 	var reply ContainerSessionReply
 	if !request.valid() || c.Mesh == nil || c.Self == nil || c.Self.Public != [32]byte(c.Mesh.LocalKey()) {
-		return nil, reply, mydcp.ErrAdmission
+		return nil, reply, sfcp.ErrAdmission
 	}
 	if setup <= 0 || setup > time.Minute {
-		return nil, reply, mydcp.ErrAdmission
+		return nil, reply, sfcp.ErrAdmission
 	}
 	admit, finish := context.WithTimeout(ctx, setup)
 	defer finish()
 	conn, err := c.Mesh.Dial(admit, peer)
 	if err != nil {
-		return nil, reply, &Error{Code: "transport", Phase: mydcp.NotSent, Cause: err, stage: "container-dial"}
+		return nil, reply, &Error{Code: "transport", Phase: sfcp.NotSent, Cause: err, stage: "container-dial"}
 	}
 	body, err := json.Marshal(request)
 	if err != nil {
@@ -228,7 +228,7 @@ func (c Client) containerSessionExchange(ctx context.Context, peer mydcp.Peer, r
 	digest := sha256.Sum256(raw)
 	stream, err := conn.OpenContainerStream(admit)
 	if err != nil {
-		return nil, reply, &Error{Code: "transport", Phase: mydcp.NotSent, Cause: err, stage: "container-open"}
+		return nil, reply, &Error{Code: "transport", Phase: sfcp.NotSent, Cause: err, stage: "container-open"}
 	}
 	keep := false
 	defer func() {
@@ -242,43 +242,43 @@ func (c Client) containerSessionExchange(ctx context.Context, peer mydcp.Peer, r
 	deadline, _ := admit.Deadline()
 	_ = stream.SetDeadline(deadline)
 	id := c.Mesh.NextRequest()
-	frame := mydcp.Frame{Purpose: mydcp.ContainerSession, Kind: kind, Request: id, Fields: []mydcp.Field{{Tag: 1, Required: true, Value: raw}, {Tag: 2, Required: true, Value: digest[:]}}}
-	if _, err = mydcp.Encode(frame); err != nil {
+	frame := sfcp.Frame{Purpose: sfcp.ContainerSession, Kind: kind, Request: id, Fields: []sfcp.Field{{Tag: 1, Required: true, Value: raw}, {Tag: 2, Required: true, Value: digest[:]}}}
+	if _, err = sfcp.Encode(frame); err != nil {
 		return nil, reply, err
 	}
-	if err = mydcp.WriteFrame(stream, frame); err != nil {
-		return nil, reply, &Error{Code: "transport", Phase: mydcp.Unknown, Cause: err, stage: "container-send"}
+	if err = sfcp.WriteFrame(stream, frame); err != nil {
+		return nil, reply, &Error{Code: "transport", Phase: sfcp.Unknown, Cause: err, stage: "container-send"}
 	}
 	if request.Method != "open" {
 		if err = stream.Close(); err != nil {
 			return nil, reply, err
 		}
 	}
-	response, err := mydcp.ReadFrame(stream, 128<<10)
+	response, err := sfcp.ReadFrame(stream, 128<<10)
 	if err != nil {
-		return nil, reply, &Error{Code: "transport", Phase: mydcp.Unknown, Cause: err, stage: "container-accept"}
+		return nil, reply, &Error{Code: "transport", Phase: sfcp.Unknown, Cause: err, stage: "container-accept"}
 	}
-	if response.Purpose != mydcp.ContainerSession || response.Kind != 2 || response.Request != id || conn.Admit(response, mydcp.ContainerSession, false) != nil || !bytes.Equal(response.Fields[1].Value, digest[:]) {
-		return nil, reply, mydcp.ErrFrame
+	if response.Purpose != sfcp.ContainerSession || response.Kind != 2 || response.Request != id || conn.Admit(response, sfcp.ContainerSession, false) != nil || !bytes.Equal(response.Fields[1].Value, digest[:]) {
+		return nil, reply, sfcp.ErrFrame
 	}
 	reply, err = schema.Decode[ContainerSessionReply](response.Fields[0].Value)
 	if err != nil || !reply.valid() {
-		return nil, reply, mydcp.ErrFrame
+		return nil, reply, sfcp.ErrFrame
 	}
 	if request.Method == "open" && reply.Code == "ok" {
-		return nil, reply, mydcp.ErrFrame
+		return nil, reply, sfcp.ErrFrame
 	}
 	if request.Method != "open" || reply.Code != "ready" {
 		if err = streamEOF(stream); err != nil {
 			return nil, reply, err
 		}
 		if reply.Code != "ok" {
-			return nil, reply, &Error{Code: reply.Code, Phase: mydcp.Completed}
+			return nil, reply, &Error{Code: reply.Code, Phase: sfcp.Completed}
 		}
 		return nil, reply, nil
 	}
 	if !reply.Supported || reply.Target == nil || !reply.Target.Matches(request.Intent.Target) {
-		return nil, reply, mydcp.ErrFrame
+		return nil, reply, sfcp.ErrFrame
 	}
 	channel, err := newContainerChannel(ctx, conn, stream, id, *request.Intent, envelope.Session.ExpiresAt, true)
 	if err != nil {
@@ -288,40 +288,40 @@ func (c Client) containerSessionExchange(ctx context.Context, peer mydcp.Peer, r
 	return channel, reply, nil
 }
 
-func (c Client) callContainerSession(ctx context.Context, peer mydcp.Peer, session access.Session, q ContainerSessionRequest, setup time.Duration) (*ContainerChannel, ContainerSessionReply, error) {
+func (c Client) callContainerSession(ctx context.Context, peer sfcp.Peer, session access.Session, q ContainerSessionRequest, setup time.Duration) (*ContainerChannel, ContainerSessionReply, error) {
 	if c.Verify(session) != nil {
-		return nil, ContainerSessionReply{}, mydcp.ErrAdmission
+		return nil, ContainerSessionReply{}, sfcp.ErrAdmission
 	}
 	q.Schema = 1
 	if _, err := rand.Read(q.Nonce[:]); err != nil {
 		return nil, ContainerSessionReply{}, err
 	}
-	return c.containerSessionExchange(ctx, peer, q, 1, setup, func(conn *mydcp.Session, body []byte) (Envelope, error) {
+	return c.containerSessionExchange(ctx, peer, q, 1, setup, func(conn *sfcp.Session, body []byte) (Envelope, error) {
 		return Envelope{Body: body, Session: &session, Signature: ed25519.Sign(c.Self.Private, access.RequestBytes(session, conn.PeerChallenge(), body))}, nil
 	})
 }
 
-func (c Client) ResolveContainerSession(ctx context.Context, peer mydcp.Peer, session access.Session, tenant string, selection containerops.Selection, spec containerops.SessionSpec) (containerops.Target, error) {
+func (c Client) ResolveContainerSession(ctx context.Context, peer sfcp.Peer, session access.Session, tenant string, selection containerops.Selection, spec containerops.SessionSpec) (containerops.Target, error) {
 	_, reply, err := c.callContainerSession(ctx, peer, session, ContainerSessionRequest{Method: "resolve", Tenant: tenant, Selection: selection, Spec: &spec}, 10*time.Second)
 	if err != nil {
 		return containerops.Target{}, err
 	}
 	if !reply.Supported || reply.Target == nil || !reply.Target.Valid() || reply.Target.Cluster != c.Cluster || reply.Target.Tenant != tenant || (selection.Standalone == "" && (reply.Target.Standalone != "" || reply.Target.App != selection.App) || selection.Standalone != "" && reply.Target.Standalone != selection.Standalone) || selection.Service != "" && reply.Target.Service != selection.Service || selection.Instance != "" && selection.Instance != reply.Target.Instance || reply.Target.NativeID == "" || reply.Target.StartedAt == "" {
-		return containerops.Target{}, mydcp.ErrFrame
+		return containerops.Target{}, sfcp.ErrFrame
 	}
 	return *reply.Target, nil
 }
-func (c Client) OpenContainerSession(ctx context.Context, peer mydcp.Peer, session access.Session, intent containerops.SessionIntent, setup time.Duration) (*ContainerChannel, error) {
+func (c Client) OpenContainerSession(ctx context.Context, peer sfcp.Peer, session access.Session, intent containerops.SessionIntent, setup time.Duration) (*ContainerChannel, error) {
 	channel, _, err := c.callContainerSession(ctx, peer, session, ContainerSessionRequest{Method: "open", Tenant: intent.Target.Tenant, Intent: &intent}, setup)
 	return channel, err
 }
-func (c Client) ContainerExecStatus(ctx context.Context, peer mydcp.Peer, session access.Session, intent containerops.SessionIntent) (containerops.ExecStatus, error) {
+func (c Client) ContainerExecStatus(ctx context.Context, peer sfcp.Peer, session access.Session, intent containerops.SessionIntent) (containerops.ExecStatus, error) {
 	_, reply, err := c.callContainerSession(ctx, peer, session, ContainerSessionRequest{Method: "status", Tenant: intent.Target.Tenant, Intent: &intent}, 10*time.Second)
 	if err != nil {
 		return containerops.ExecStatus{}, err
 	}
 	if reply.Status == nil || reply.Status.Schema != 1 || reply.Status.Request != intent.Request || reply.Status.Target != intent.Target || reply.Status.Receipt.Intent != intent.Digest() || reply.Status.Receipt.Validate() != nil {
-		return containerops.ExecStatus{}, mydcp.ErrFrame
+		return containerops.ExecStatus{}, sfcp.ErrFrame
 	}
 	return *reply.Status, nil
 }

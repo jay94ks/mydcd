@@ -8,34 +8,44 @@ import (
 	"crypto/x509"
 	"encoding/hex"
 	"errors"
-	"github.com/jay94ks/mydcd/internal/bootstrap"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/cluster/lifecycle"
-	"github.com/jay94ks/mydcd/internal/cluster/membership"
-	"github.com/jay94ks/mydcd/internal/config"
-	"github.com/jay94ks/mydcd/internal/containerops"
-	"github.com/jay94ks/mydcd/internal/credentials"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/desired"
-	"github.com/jay94ks/mydcd/internal/engine"
-	"github.com/jay94ks/mydcd/internal/eventlog"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/imagebuild"
-	"github.com/jay94ks/mydcd/internal/ingress"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/network"
-	"github.com/jay94ks/mydcd/internal/network/services"
-	"github.com/jay94ks/mydcd/internal/nodestorage"
-	"github.com/jay94ks/mydcd/internal/observability"
-	"github.com/jay94ks/mydcd/internal/reconcile"
-	"github.com/jay94ks/mydcd/internal/servicecall"
-	"github.com/jay94ks/mydcd/internal/storage"
-	"github.com/jay94ks/mydcd/internal/userauth"
-	"github.com/jay94ks/mydcd/internal/workload"
-	checker "github.com/jay94ks/mydcd/internal/workload/lifecycle"
-	"github.com/jay94ks/mydcd/internal/workload/volumes"
+	"github.com/jay94ks/seafield/internal/bootstrap"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/lifecycle"
+	"github.com/jay94ks/seafield/internal/cluster/membership"
+	"github.com/jay94ks/seafield/internal/clusterapp"
+	"github.com/jay94ks/seafield/internal/config"
+	"github.com/jay94ks/seafield/internal/containerops"
+	"github.com/jay94ks/seafield/internal/credentials"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/desired"
+	"github.com/jay94ks/seafield/internal/engine"
+	"github.com/jay94ks/seafield/internal/engineevents"
+	"github.com/jay94ks/seafield/internal/engineimage"
+	"github.com/jay94ks/seafield/internal/eventbus"
+	"github.com/jay94ks/seafield/internal/eventlog"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/imagebuild"
+	"github.com/jay94ks/seafield/internal/ingress"
+	"github.com/jay94ks/seafield/internal/loginlog"
+	"github.com/jay94ks/seafield/internal/logstore"
+	"github.com/jay94ks/seafield/internal/network"
+	"github.com/jay94ks/seafield/internal/network/services"
+	"github.com/jay94ks/seafield/internal/nodestorage"
+	"github.com/jay94ks/seafield/internal/observability"
+	"github.com/jay94ks/seafield/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/secrets"
+	"github.com/jay94ks/seafield/internal/servicecall"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/storage"
+	"github.com/jay94ks/seafield/internal/userauth"
+	"github.com/jay94ks/seafield/internal/volumeshare/remote"
+	"github.com/jay94ks/seafield/internal/vps"
+	"github.com/jay94ks/seafield/internal/workload"
+	checker "github.com/jay94ks/seafield/internal/workload/lifecycle"
+	"github.com/jay94ks/seafield/internal/workload/volumes"
 	"log"
+	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -44,6 +54,12 @@ import (
 )
 
 type Runtime struct {
+	// vpsEnv reaches VPS provider APIs; tests point it at a fake.
+	vpsEnv     vps.Env
+	vpsWatcher *vpsWatch
+	vpsTX      *vpsTXRecorder // this server's own traffic history
+	// engineImages holds the pull tickets purpose 37 answers from.
+	engineImages              *engineimage.Tickets
 	serviceCallLimit          servicecall.Limiter
 	cdProbeLimit              servicecall.Limiter
 	serviceCAs                map[string]*x509.CertPool
@@ -60,15 +76,17 @@ type Runtime struct {
 	registryPruneLoaded       map[string]registryPrunePreviewRecord
 	registryMaintenanceBusy   bool
 	registryMaintenanceCursor int
-	imageCacheBusy            bool
-	tunnelBusy                bool
-	compactBusy               bool
+	imageCacheJob             nodeJob
+	tunnelJob                 nodeJob
+	compactJob                nodeJob
+	engineEvents              *engineevents.Consumer
+	engineFollowMu            sync.Mutex
 	logPages                  containerops.ReadPages
 	observationMu             sync.Mutex
 	observationCPU            observability.CPUCounter
 	observationContainers     map[string]observedContainerCPU
 	Identity                  *identity.Identity
-	Mesh                      *mydcp.Transport
+	Mesh                      *sfcp.Transport
 	engine                    *cluster.Engine
 	mu                        sync.RWMutex
 	closeOnce                 sync.Once
@@ -83,6 +101,7 @@ type Runtime struct {
 	owner                     string
 	docker                    *engine.Client
 	network                   *network.Manager
+	engineNetwork             *network.EngineHooks // answers the engine's sfc network driver (purpose 36)
 	dns                       *services.DNSOwner
 	dnsMu                     sync.RWMutex
 	dnsPolicies               dnsPolicyCache
@@ -101,8 +120,8 @@ type Runtime struct {
 	registrySessions          map[string]*registrySession
 	reports                   *storage.DB
 	events                    *eventlog.Store
+	logins                    *loginlog.Store
 	eventError                error
-	dockerEventError          error
 	eventPeerCursor           int
 	eventPeers                map[[32]byte]eventPeerSynced // managedEventLoop only
 	standaloneMu              sync.Mutex
@@ -134,7 +153,9 @@ type Runtime struct {
 	checkerRemoteSizes        map[string]int
 	checkerRemoteReady        bool
 	reportMu                  sync.Mutex
+	bus                       *eventbus.Bus // report/alarm notices, see Events
 	reportWake                chan struct{}
+	moduleWake                chan struct{}
 	moduleError               error
 	appWaitMu                 sync.Mutex
 	appWaits                  map[string]string // app step -> last logged wait reason
@@ -154,6 +175,8 @@ type Runtime struct {
 	memberMu                  sync.Mutex
 	credentials               *credentials.Backend
 	vaultBackends             map[string]*vaultBackend
+	builtinValues             *secrets.BuiltinStore
+	builtinUpkeepAt           time.Time
 	vaultApprovalLife         sync.RWMutex
 	vaultApprovals            *reconcile.Journal
 	vaultApprovalBudget       *credentials.Budget
@@ -171,6 +194,10 @@ type Runtime struct {
 	imageBuildDraftAfter      string            // guarded by imageBuildMu; finite GC passes rotate
 	imageBuildGeneratedAfter  map[string]string // same gate; per-context original evidence cursor
 	activations               *volumes.Activations
+	remoteVolumes             remoteVolumeMounts // nil until shared volumes are served on this node
+	remoteMounts              *remote.Mounts     // the same, for the task start path
+	sharedHome                *remote.Home
+	remoteJournal             *storage.DB
 	volumeUsageMu             sync.Mutex
 	volumeSourceMu            sync.Mutex
 	volumeMoveTargetMu        sync.Mutex // joins prepare/restore/final cleanup of original moves
@@ -180,11 +207,33 @@ type Runtime struct {
 	moveCancelLog             sync.Map // move/side -> last cancel wait line
 	reportHold                sync.Map // report stream -> moveReportBackoff after a rejection
 	nodeShell                 *nodeShellRuntime
-	systemNetworkFull         atomic.Uint64 // networks revision last logged as out of system addresses
+	nodeDisks                 *nodeDiskRuntime
+	nodeFirewall              *nodeFirewallRuntime
+	clusterApps               *clusterapp.Owner
+	clusterAppStateDir        string
+	// logs is the central container log store (engine log queue → here).
+	logs *logstore.Store
+	// defaultStorage is where this node keeps its default storage root
+	// (state_dir + "-storage"), and defaultStorageNext when it may next try
+	// to register it.
+	defaultStorage     string
+	defaultStorageNode string
+	defaultStorageNext time.Time
+	defaultStorageDone bool
+	clusterAppImages   map[string]loadedClusterAppImage        // cluster app -> loaded Engine image; reconcile pass only
+	clusterAppProblems clusterAppProblems                      // last reconcile problem per cluster app, for the host report
+	webPort            clusterAppPort                          // node.yaml cluster_apps.web.port
+	clusterAppNAT      func([]network.ClusterAppForward) error // network.SetClusterApps on a real server
+	systemNetwork      systemNetworkProblem                    // why this server is not on the system network yet, for the log and host report
+	// joinSeeds are the current members a joining node learned from its
+	// pinned source before its own state replicated (see addJoinSeeds).
+	joinSeeds    map[sfcp.Identity]sfcp.Peer
+	lookupCaches []*peerLookupCache
+	recovery     recoveryState // `sfcd recover` result the cluster has not recorded yet
 }
 
 func Open(c config.Node) (*Runtime, error) {
-	if err := CheckNodeApps(c); err != nil {
+	if err := CheckClusterApps(c); err != nil {
 		return nil, err
 	}
 	original := c
@@ -198,16 +247,16 @@ func Open(c config.Node) (*Runtime, error) {
 	if err != nil {
 		return nil, err
 	}
-	key := mydcp.Identity(self.Public)
+	key := sfcp.Identity(self.Public)
 	clusterID, _ := config.ClusterKey(c.Common.Cluster)
 	managedCatalog := control.Policy{Cluster: clusterID, BootstrapKey: installation.Admin, TrustRoot: installation.Root.TrustRoot, Genesis: installation.Genesis}
 
-	peers := map[mydcp.Identity]mydcp.Peer{}
-	byID := map[string]mydcp.Peer{}
+	peers := map[sfcp.Identity]sfcp.Peer{}
+	byID := map[string]sfcp.Peer{}
 	servers := make([]raft.Server, 0, len(c.Common.Peers))
 	for _, p := range c.Common.Peers {
 		full, _ := identity.ParseKey(p.Key)
-		peer := mydcp.Peer{ID: p.ID, Endpoint: p.Endpoint, Policy: mydcp.Policy{Key: mydcp.Identity(full), Member: true, Snapshot: true, Respond: true, Read: true, Report: true}}
+		peer := sfcp.Peer{ID: p.ID, Endpoint: p.Endpoint, Policy: sfcp.Policy{Key: sfcp.Identity(full), Member: true, Snapshot: true, Respond: true, Read: true, Report: true}}
 		if installation.Join != nil {
 			peer.Member, peer.Read, peer.Report, peer.Replicate = false, false, false, true
 		}
@@ -222,7 +271,7 @@ func Open(c config.Node) (*Runtime, error) {
 	if own, ok := peers[key]; !ok || own.ID != c.Node.ID {
 		return nil, errors.New("local identity does not match approved node ID")
 	}
-	r := &Runtime{Identity: self, controlIdentity: self, identityRestart: make(chan struct{}), networkEnabled: c.Modules["network"].Enabled}
+	r := &Runtime{bus: eventbus.New(), Identity: self, controlIdentity: self, identityRestart: make(chan struct{}), networkEnabled: c.Modules["network"].Enabled, vpsWatcher: newVPSWatch(), vpsTX: newVPSTXRecorder(c.Node.StateDir), engineImages: engineimage.New()}
 
 	r.installation = &managedInstallation{config: original, record: installation}
 
@@ -234,8 +283,9 @@ func Open(c config.Node) (*Runtime, error) {
 		}
 	}()
 	var peerCache, controlPeerCache peerLookupCache
-	lookupPurpose := func(key mydcp.Identity, purpose mydcp.Purpose) (mydcp.Peer, bool) {
-		packetPolicy := purpose == 0 || purpose == mydcp.Packet || purpose == mydcp.PathControl
+	r.lookupCaches = []*peerLookupCache{&peerCache, &controlPeerCache}
+	lookupPurpose := func(key sfcp.Identity, purpose sfcp.Purpose) (sfcp.Peer, bool) {
+		packetPolicy := purpose == 0 || purpose == sfcp.Packet || purpose == sfcp.PathControl
 		cache := &controlPeerCache
 		if packetPolicy {
 			cache = &peerCache
@@ -248,22 +298,22 @@ func Open(c config.Node) (*Runtime, error) {
 		if engine != nil {
 			view, readErr = engine.Read(context.Background(), false)
 		}
-		return cache.resolve(engine, view, readErr, key, func() (mydcp.Peer, bool) {
+		peer, ok := cache.resolve(engine, view, readErr, key, func() (sfcp.Peer, bool) {
 			err := readErr
 			peer, known := peers[key]
 			member := known && peer.Member
 			if !known {
-				peer = mydcp.Peer{ID: hex.EncodeToString(key[:]), Policy: mydcp.Policy{Key: key}}
+				peer = sfcp.Peer{ID: hex.EncodeToString(key[:]), Policy: sfcp.Policy{Key: key}}
 			}
 			actor := hex.EncodeToString(key[:])
 			allowed := actor == c.Common.Admin && engine == nil
 			if engine != nil {
 
-				peer, member = mydcp.Peer{ID: actor, Policy: mydcp.Policy{Key: key}}, false
+				peer, member = sfcp.Peer{ID: actor, Policy: sfcp.Policy{Key: key}}, false
 				if err == nil {
 					if directory, e := managedCatalog.Members(view.State); e == nil {
 						if directory.HistoricalMemberKey([32]byte(key)) && !directory.ReplicationKey([32]byte(key)) {
-							return mydcp.Peer{}, false
+							return sfcp.Peer{}, false
 						}
 						for _, entry := range directory.Entries {
 							if entry.CurrentPeer().Key == actor {
@@ -272,9 +322,9 @@ func Open(c config.Node) (*Runtime, error) {
 								// Retained historic proof keys never fall through into
 								// the generic ephemeral User TLS admission below.
 								if membership.FullMember(entry) && !replicate {
-									return mydcp.Peer{}, false
+									return sfcp.Peer{}, false
 								}
-								peer = mydcp.Peer{ID: entry.Peer.ID, Endpoint: entry.Peer.Endpoint, Policy: mydcp.Policy{Key: key, Replicate: replicate, Member: member, Snapshot: replicate, Respond: true, Read: member, Report: member}}
+								peer = sfcp.Peer{ID: entry.Peer.ID, Endpoint: entry.Peer.Endpoint, Policy: sfcp.Policy{Key: key, Replicate: replicate, Member: member, Snapshot: replicate, Respond: true, Read: member, Report: member}}
 								break
 							}
 						}
@@ -282,6 +332,8 @@ func Open(c config.Node) (*Runtime, error) {
 				}
 				if installation.Join != nil && installation.Root.Installed.Index == 0 && (err != nil || view.RaftIndex < installation.Join.MinimumIndex) && !member {
 					if seed, ok := peers[key]; ok {
+						peer = seed
+					} else if seed, ok := r.joinSeed(key, ""); ok {
 						peer = seed
 					}
 				}
@@ -313,6 +365,12 @@ func Open(c config.Node) (*Runtime, error) {
 			}
 			return peer, member || peer.Replicate || allowed || peer.UserAuth
 		})
+		// A voter `sfcd recover` dropped stays refused until the cluster
+		// records it as retired: it must not rejoin with its old configuration.
+		if ok && r.recovery.denied(peer.ID) {
+			return sfcp.Peer{}, false
+		}
+		return peer, ok
 	}
 	policy := desired.Policy{Cluster: clusterID, Owners: map[string][32]byte{}}
 	for _, p := range peers {
@@ -320,39 +378,51 @@ func Open(c config.Node) (*Runtime, error) {
 		policy.Owners[desired.Owner(clusterID, pub)] = pub
 	}
 	r.policy, r.owner = policy, desired.Owner(clusterID, self.Public)
-	r.Mesh, err = mydcp.NewTransportWithPurposeLookup(self, clusterID, lookupPurpose)
+	r.Mesh, err = sfcp.NewTransportWithPurposeLookup(self, clusterID, lookupPurpose)
 	if err != nil {
 		return nil, err
 	}
+	// Until the installation is proven, peers' requests can arrive before
+	// membership is loaded; their refusals are summarized, not logged each.
+	r.Mesh.SetStarting(true)
+	r.Mesh.SetInboundOnly(c.Node.InboundOnly)
 	if err = r.Mesh.EnableDiscovery(c.Node.ID); err != nil {
 		return nil, err
 	}
-	if err = r.Mesh.Listen(c.Node.Listen); err != nil {
+	if err = listenWhenAddressReady(r.ctx, c.Node.Listen, r.Mesh.Listen); err != nil {
 		return nil, err
 	}
-	resolve := func(id raft.ServerID, address raft.ServerAddress) (mydcp.Peer, bool) {
+	resolve := func(id raft.ServerID, address raft.ServerAddress) (sfcp.Peer, bool) {
 
 		if engine := r.Engine(); engine != nil {
 			if view, err := engine.Read(context.Background(), false); err == nil {
 				if directory, err := managedCatalog.Members(view.State); err == nil {
-					if entry, found := directory.Entry(string(id)); found && entry.Peer.Endpoint == string(address) {
+					if entry, found := directory.Entry(string(id)); found && entry.EndpointMatches(string(address)) {
 						full, _ := identity.ParseKey(entry.CurrentPeer().Key)
-						return lookupPurpose(mydcp.Identity(full), mydcp.Raft)
+						return lookupPurpose(sfcp.Identity(full), sfcp.Raft)
 					}
 				}
 			}
 		}
 		if installation.Join != nil && installation.Root.Installed.Index == 0 {
-			if seed, found := byID[string(id)]; found && seed.Endpoint == string(address) {
-				peer, ok := lookupPurpose(seed.Key, mydcp.Raft)
+			seed, found := byID[string(id)]
+			if !found {
+				seed, found = r.joinSeed(sfcp.Identity{}, string(id))
+			}
+			if found && seed.Endpoint == string(address) {
+				peer, ok := lookupPurpose(seed.Key, sfcp.Raft)
 				return peer, ok && peer.ID == string(id) && (peer.Member || peer.Replicate)
 			}
 		}
-		return mydcp.Peer{}, false
+		return sfcp.Peer{}, false
 	}
 	manifestID := control.ManagedManifest(installation.Root.Cluster, installation.Admin, installation.Genesis)
 	options := cluster.Options{ID: c.Node.ID, Root: c.Node.StateDir, Admin: c.Common.Admin, Cluster: clusterID, Mesh: r.Mesh, Resolve: resolve, Servers: servers, Manifest: manifestID, Validate: policy.Validate, ReadModule: r.readModule}
 	options.Prepared = func(engine *cluster.Engine) {
+		// A recovery plan ran inside cluster.Open just before this.
+		if err := r.recovery.load(c.Node.StateDir); err != nil {
+			log.Printf("quorum recovery result unreadable: %v", err)
+		}
 		// Publish the verified durable directory before the SDK starts peer
 		// traffic; old static seeds must not revive a removed managed member.
 		r.mu.Lock()
@@ -372,6 +442,9 @@ func Open(c config.Node) (*Runtime, error) {
 	}
 
 	if err = r.openVaultApprovals(c.Node.StateDir); err != nil {
+		return nil, err
+	}
+	if r.logs, err = logstore.Open(filepath.Join(c.Node.StateDir, "logs")); err != nil {
 		return nil, err
 	}
 
@@ -416,6 +489,15 @@ func Open(c config.Node) (*Runtime, error) {
 	}
 
 	r.nativeRoot = nativeConfig.Node.StateDir
+	r.defaultStorage, r.defaultStorageNode = defaultStoragePath(original.Node.StateDir), c.Node.ID
+	// Before openModules: its loops read r.nodeDisks without a lock.
+	if err = r.openNodeDisks(original.Node.StateDir); err != nil {
+		return nil, err
+	}
+	// Before the modules: the saved rules are back before anything listens.
+	if err = r.openNodeFirewall(r.ctx, original.Node.StateDir, c.Node.ID, c.Node.Listen, c.Firewall); err != nil {
+		return nil, err
+	}
 	if err = r.openModules(nativeConfig, peers); err != nil {
 		return nil, err
 	}
@@ -443,14 +525,24 @@ func Open(c config.Node) (*Runtime, error) {
 		return nil, err
 	}
 	{
+		var external *credentials.Backend
 		if p := c.Credentials; p != nil {
-			r.credentials, err = credentials.OpenLocal(p.Profile, p.Address, p.Mount, p.Namespace, p.CAFile, p.TokenFile)
+			external, err = credentials.OpenLocal(p.Profile, p.Address, p.Mount, p.Namespace, p.CAFile, p.TokenFile)
 			if err != nil {
 				return nil, err
 			}
 		}
+		// Every node has the builtin store; an installed Vault is added next to it.
+		if r.credentials, err = credentials.NewBackends(builtinLedger{r}, external); err != nil {
+			external.Close()
+			return nil, err
+		}
 		service := userauth.Service{Engine: engine, Mesh: r.Mesh, Self: self, Policy: catalog, Credentials: r.credentials, Enabled: engine.ModuleEnabledAt}
 
+		changes := &userauth.ChangeFeed{Engine: engine, Policy: catalog}
+		go changes.Run(r.ctx)
+		service.Changes = changes
+		service.Events = r.bus
 		service.NodeShellLifetime = r.ctx
 		service.NodeShellOpen = func(ctx context.Context, id string) (userauth.NodeShellStream, error) {
 			return r.OpenNodeShell(ctx, id)
@@ -458,9 +550,17 @@ func Open(c config.Node) (*Runtime, error) {
 		service.NodeDrainPlanner = r.nodeDrainPlan
 		service.NodeForceProbe = r.nodeForceProbe
 		service.NodeDiagnostics = r.nodeDiagnostics
+		service.NodeDiskChanger = r.nodeDiskChange
+		service.LogsClearer = r.clearLogs
+		service.StoredLogsReader = r.storedLogs
+		service.NodeFirewall = r.nodeFirewallRequest
 		service.VaultWriter = r.writeVault
 		service.VaultApprover = r.approveVault
 		service.CertificateWriter = r.writeCertificate
+		service.VPSCredentialSealer = r.sealVPSCredential
+		service.VPSOfferReader = r.readVPSOffer
+		service.VPSStatusReader = r.readVPSStatus
+		service.ClusterBackupMaster = r.certificateMaster
 		service.IngressObserver = r.readIngresses
 		service.ServiceCaller = r.callService
 		service.ServiceCallLimiter = &r.serviceCallLimit
@@ -481,6 +581,8 @@ func Open(c config.Node) (*Runtime, error) {
 		service.ImageContent = r.openImageContent
 		service.ImageBuildBaseContent = r.openImageBuildBaseContent
 		service.EventReader = r.readEvents
+		service.LoginRecorder = r.recordLogin
+		service.LoginRecords = r.loginRecords
 		service.ImageCachePlanner = r.imageCachePlan
 		service.ContainerPlanner = r.containerSessionPlan
 		service.ContainerLifetime = r.ctx
@@ -505,13 +607,22 @@ func Open(c config.Node) (*Runtime, error) {
 	if err = r.serveCertificateMaterial(); err != nil {
 		return nil, err
 	}
+	if err = r.serveVaultValue(); err != nil {
+		return nil, err
+	}
 	if err = r.serveMembership(); err != nil {
 		return nil, err
 	}
 	r.wg.Add(1)
 	go r.memberLoop()
 	r.wg.Add(1)
+	go r.meshLinkLoop()
+	r.wg.Add(1)
 	go r.deliverySourceLoop()
+	r.wg.Add(1)
+	go r.vpsLoop()
+	r.wg.Add(1)
+	go r.vpsTrafficLoop()
 
 	ok = true
 	return r, nil
@@ -530,7 +641,7 @@ func (r *Runtime) Close() error {
 		if r.Mesh != nil && !r.historicalOwner {
 			phase("unix-admission")
 			// Stop local producers before waiting for modules/consensus. Keep
-			// MYDCP peer paths alive for their existing retirement/closure.
+			// SFCP peer paths alive for their existing retirement/closure.
 			r.closeErr = errors.Join(r.closeErr, r.Mesh.CloseUnix())
 		}
 		for _, owner := range r.nativeOwners {
@@ -562,6 +673,8 @@ func (r *Runtime) Close() error {
 		r.imageBuildTree = nil
 		r.imageBuildMu.Unlock()
 		r.logPages.Clear()
+		phase("cluster-apps")
+		r.closeErr = errors.Join(r.closeErr, r.shutdownClusterApps())
 		if r.ingress != nil {
 			phase("ingress")
 			r.closeErr = errors.Join(r.closeErr, r.ingress.Close())
@@ -591,6 +704,17 @@ func (r *Runtime) Close() error {
 			}
 			r.closeErr = errors.Join(r.closeErr, r.backupArtifacts.Close())
 		}
+		if r.sharedHome != nil {
+			phase("shared-volumes")
+			r.closeErr = errors.Join(r.closeErr, r.sharedHome.Close())
+		}
+		if r.remoteMounts != nil {
+			phase("remote-volumes")
+			r.remoteMounts.Close()
+		}
+		if r.remoteJournal != nil {
+			r.closeErr = errors.Join(r.closeErr, r.remoteJournal.Close())
+		}
 		if r.activations != nil {
 			phase("activations")
 			r.closeErr = errors.Join(r.closeErr, r.activations.Close())
@@ -602,6 +726,14 @@ func (r *Runtime) Close() error {
 		if r.fixedVolumes != nil {
 			phase("fixed-volumes")
 			r.closeErr = errors.Join(r.closeErr, r.fixedVolumes.Close())
+		}
+		if r.nodeDisks != nil {
+			phase("node-disks")
+			r.closeErr = errors.Join(r.closeErr, r.nodeDisks.Close())
+		}
+		if r.nodeFirewall != nil {
+			phase("node-firewall")
+			r.closeErr = errors.Join(r.closeErr, r.nodeFirewall.Close())
 		}
 		if r.nodeRoots != nil {
 			phase("node-roots")
@@ -640,6 +772,9 @@ func (r *Runtime) Close() error {
 				}
 				backend.provider.Close()
 			}
+			if r.builtinValues != nil {
+				r.closeErr = errors.Join(r.closeErr, r.builtinValues.Close())
+			}
 		}
 		if r.vaultApprovals != nil {
 			r.closeErr = errors.Join(r.closeErr, r.vaultApprovals.Close())
@@ -663,3 +798,7 @@ func (r *Runtime) Close() error {
 	})
 	return r.closeErr
 }
+
+// Events is the bus of accepted-report notices (eventbus.TopicReport) the
+// Event purpose and the web daemon's live updates subscribe to.
+func (r *Runtime) Events() *eventbus.Bus { return r.bus }

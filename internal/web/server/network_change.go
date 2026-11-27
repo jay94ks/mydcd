@@ -9,22 +9,22 @@ import (
 	"net/netip"
 	"slices"
 
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/tenancy"
-	"github.com/jay94ks/mydcd/internal/web/mydc"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/tenancy"
+	"github.com/jay94ks/seafield/internal/web/sfc"
 )
 
 // Network change and retirement (UI-50 row menu, UI-51 steps). The daemon
-// builds every payload from the network's member rows; mydcd decides. A
+// builds every payload from the network's member rows; sfcd decides. A
 // member goes plan (reserved) → drain (draining) → fence (fenced) → commit;
 // a reserved change can be cancelled. Fence and a bridge network's retire
 // carry the owner node's signed NetworkClosure (network-closure, REQ-33).
 
 // findNetwork reads a tenant network row by name and the Networks revision.
-func findNetwork(ctx context.Context, c mydc.Conn, tenant, name string) (*mydc.Network, uint64, error) {
+func findNetwork(ctx context.Context, c sfc.Conn, tenant, name string) (*sfc.Network, uint64, error) {
 	after := ""
 	for {
-		p, err := c.Resources(ctx, tenant, after)
+		p, err := screenResources(ctx, c, tenant, after)
 		if err != nil {
 			return nil, 0, err
 		}
@@ -40,7 +40,7 @@ func findNetwork(ctx context.Context, c mydc.Conn, tenant, name string) (*mydc.N
 	}
 }
 
-func memberOn(n *mydc.Network, node string) (*mydc.NetworkMember, error) {
+func memberOn(n *sfc.Network, node string) (*sfc.NetworkMember, error) {
 	for i := range n.Members {
 		if n.Members[i].Node == node {
 			return &n.Members[i], nil
@@ -57,9 +57,9 @@ type changeMemberView struct {
 	Revision uint64 `json:"revision"`
 	Draining bool   `json:"draining"`
 	// Phase: none / reserved / draining / fenced / committed / cancelled.
-	Phase  string              `json:"phase"`
-	Target string              `json:"target"`
-	Change *mydc.NetworkChange `json:"change,omitempty"`
+	Phase  string             `json:"phase"`
+	Target string             `json:"target"`
+	Change *sfc.NetworkChange `json:"change,omitempty"`
 }
 
 type changeView struct {
@@ -76,7 +76,7 @@ type changeView struct {
 	Closure []closureView `json:"closure"`
 }
 
-func networkChangeView(n *mydc.Network, rev uint64) changeView {
+func networkChangeView(n *sfc.Network, rev uint64) changeView {
 	v := changeView{Name: n.Name, Kind: n.Kind, NetworksRevision: rev, DNSEnabled: n.DNS != nil && n.DNS.Enabled, Members: []changeMemberView{}}
 	phases := map[string]int{}
 	for _, m := range n.Members {
@@ -101,13 +101,13 @@ func networkChangeView(n *mydc.Network, rev uint64) changeView {
 	return v
 }
 
-func activeChange(c *mydc.NetworkChange) bool {
+func activeChange(c *sfc.NetworkChange) bool {
 	return c != nil && c.Phase != string(tenancy.ChangeCommitted) && c.Phase != string(tenancy.ChangeCancelled)
 }
 
 // GET /t/{t}/networks/{name}/change
 func (s *Server) handleNetworkChangeStatus(w http.ResponseWriter, r *http.Request, ws *webSession) {
-	read(s, w, r, ws, func(ctx context.Context, c mydc.Conn) (changeView, error) {
+	read(s, w, r, ws, func(ctx context.Context, c sfc.Conn) (changeView, error) {
 		n, rev, err := findNetwork(ctx, c, r.PathValue("t"), r.PathValue("name"))
 		if err != nil {
 			return changeView{}, err
@@ -123,9 +123,9 @@ func (s *Server) handleNetworkChangeStatus(w http.ResponseWriter, r *http.Reques
 // networkStep is a network change endpoint: build gets the network row and
 // the Networks revision.
 func (s *Server) networkStep(w http.ResponseWriter, r *http.Request, ws *webSession, opID string, body any,
-	build func(ctx context.Context, c mydc.Conn, n *mydc.Network, rev uint64) (string, any, uint64, error)) {
+	build func(ctx context.Context, c sfc.Conn, n *sfc.Network, rev uint64) (string, any, uint64, error)) {
 	tenant, name := r.PathValue("t"), r.PathValue("name")
-	s.sharedCreate(w, r, ws, opID, body, func(ctx context.Context, c mydc.Conn, _ mydc.Session) (string, any, uint64, string, error) {
+	s.sharedCreate(w, r, ws, opID, body, func(ctx context.Context, c sfc.Conn, _ sfc.Session) (string, any, uint64, string, error) {
 		if !validName(name) {
 			return "", nil, 0, "", invalid("network name")
 		}
@@ -151,7 +151,7 @@ func (s *Server) handleNetworkChangePlan(w http.ResponseWriter, r *http.Request,
 	if !readJSON(w, r, &req) {
 		return
 	}
-	s.networkStep(w, r, ws, req.OpID, req, func(_ context.Context, _ mydc.Conn, n *mydc.Network, _ uint64) (string, any, uint64, error) {
+	s.networkStep(w, r, ws, req.OpID, req, func(_ context.Context, _ sfc.Conn, n *sfc.Network, _ uint64) (string, any, uint64, error) {
 		m, err := memberOn(n, req.Node)
 		if err != nil {
 			return "", nil, 0, err
@@ -170,12 +170,12 @@ func (s *Server) handleNetworkChangePlan(w http.ResponseWriter, r *http.Request,
 		target := m.Source
 		target.Pools = slices.Clone(m.Source.Pools)
 		target.Pools[0] = pool
-		// A plan target is a definition: mydcd (tenancy.validDefinition)
+		// A plan target is a definition: sfcd (tenancy.validDefinition)
 		// refuses one that still carries the member's state.
 		target.Owner, target.Draining, target.PendingChange = [32]byte{}, false, 0
 		target.Generation, target.Revision = 0, 0
 		q := control.NetworkChangePlan{Tenant: target.Tenant, ID: m.ID, Change: "chg-" + req.OpID, Target: target}
-		return mydc.ActionPlanNetworkChange, q, m.Revision, nil
+		return sfc.ActionPlanNetworkChange, q, m.Revision, nil
 	})
 }
 
@@ -189,12 +189,12 @@ func (s *Server) handleNetworkChangeDrain(w http.ResponseWriter, r *http.Request
 	if !readJSON(w, r, &req) {
 		return
 	}
-	s.networkStep(w, r, ws, req.OpID, req, func(_ context.Context, _ mydc.Conn, n *mydc.Network, _ uint64) (string, any, uint64, error) {
+	s.networkStep(w, r, ws, req.OpID, req, func(_ context.Context, _ sfc.Conn, n *sfc.Network, _ uint64) (string, any, uint64, error) {
 		m, err := memberOn(n, req.Node)
 		if err != nil {
 			return "", nil, 0, err
 		}
-		return mydc.ActionDrainNetwork, control.NetworkSelection{Tenant: m.Source.Tenant, ID: m.ID}, m.Revision, nil
+		return sfc.ActionDrainNetwork, control.NetworkSelection{Tenant: m.Source.Tenant, ID: m.ID}, m.Revision, nil
 	})
 }
 
@@ -208,7 +208,7 @@ func (s *Server) handleNetworkChangeCancel(w http.ResponseWriter, r *http.Reques
 	if !readJSON(w, r, &req) {
 		return
 	}
-	s.networkStep(w, r, ws, req.OpID, req, func(_ context.Context, _ mydc.Conn, n *mydc.Network, _ uint64) (string, any, uint64, error) {
+	s.networkStep(w, r, ws, req.OpID, req, func(_ context.Context, _ sfc.Conn, n *sfc.Network, _ uint64) (string, any, uint64, error) {
 		m, err := memberOn(n, req.Node)
 		if err != nil {
 			return "", nil, 0, err
@@ -217,12 +217,12 @@ func (s *Server) handleNetworkChangeCancel(w http.ResponseWriter, r *http.Reques
 			return "", nil, 0, &httpErr{http.StatusConflict, "not-reserved", "only a planned change that has not been drained can be cancelled"}
 		}
 		q := control.NetworkChangeCancel{Tenant: m.Source.Tenant, ID: m.ID, Generation: m.Change.Generation}
-		return mydc.ActionCancelNetworkChange, q, m.Change.Revision, nil
+		return sfc.ActionCancelNetworkChange, q, m.Change.Revision, nil
 	})
 }
 
 // changeVersions: every member's change version; all must be fenced.
-func changeVersions(n *mydc.Network) ([]tenancy.NetworkChangeVersion, error) {
+func changeVersions(n *sfc.Network) ([]tenancy.NetworkChangeVersion, error) {
 	var out []tenancy.NetworkChangeVersion
 	for _, m := range n.Members {
 		if m.Change == nil || m.Change.Phase != string(tenancy.ChangeFenced) {
@@ -255,36 +255,34 @@ func (s *Server) handleNetworkChangeCommit(w http.ResponseWriter, r *http.Reques
 	if !readJSON(w, r, &req) {
 		return
 	}
-	s.networkStep(w, r, ws, req.OpID, req, func(_ context.Context, _ mydc.Conn, n *mydc.Network, rev uint64) (string, any, uint64, error) {
+	s.networkStep(w, r, ws, req.OpID, req, func(_ context.Context, _ sfc.Conn, n *sfc.Network, rev uint64) (string, any, uint64, error) {
 		if n.Kind != "tun" {
-			return "", nil, 0, &httpErr{http.StatusConflict, "not-tun", "mydcd commits network changes only for TUN networks"}
+			return "", nil, 0, &httpErr{http.StatusConflict, "not-tun", "sfcd commits network changes only for TUN networks"}
 		}
 		versions, err := changeVersions(n)
 		if err != nil {
 			return "", nil, 0, err
 		}
 		tenant := r.PathValue("t")
-		return mydc.ActionCommitNetworkChange, control.NetworkChangeCommit{Tenant: tenant, Network: n.Name, Members: versions}, expectedOr(req.Expected, rev), nil
+		return sfc.ActionCommitNetworkChange, control.NetworkChangeCommit{Tenant: tenant, Network: n.Name, Members: versions}, expectedOr(req.Expected, rev), nil
 	})
 }
 
 // POST /t/{t}/networks/{name}/reconfigure {opId, members:[{node, cidr?,
-// gateway?, tunnel?}], tunnelCidr?, expected?} → reconfigure-tun-network: the
-// full new member list. A kept server keeps its pool and tunnel address
-// unless given; a new one needs cidr and a tunnel (or tunnelCidr). Every
-// current member must be fenced.
+// gateway?}], expected?} → reconfigure-tun-network: the full new member
+// list. A kept server keeps its pool unless given; a new one needs cidr.
+// Tunnel addresses are the servers' own. Every current member must be
+// fenced.
 func (s *Server) handleNetworkReconfigure(w http.ResponseWriter, r *http.Request, ws *webSession) {
 	type member struct {
 		Node    string `json:"node"`
 		CIDR    string `json:"cidr,omitempty"`
 		Gateway string `json:"gateway,omitempty"`
-		Tunnel  string `json:"tunnel,omitempty"`
 	}
 	var req struct {
-		OpID       string   `json:"opId"`
-		Members    []member `json:"members"`
-		TunnelCIDR string   `json:"tunnelCidr,omitempty"`
-		Expected   uint64   `json:"expected,omitempty"`
+		OpID     string   `json:"opId"`
+		Members  []member `json:"members"`
+		Expected uint64   `json:"expected,omitempty"`
 	}
 	if !readJSON(w, r, &req) {
 		return
@@ -292,7 +290,7 @@ func (s *Server) handleNetworkReconfigure(w http.ResponseWriter, r *http.Request
 	if req.Members == nil {
 		req.Members = []member{}
 	}
-	s.networkStep(w, r, ws, req.OpID, req, func(_ context.Context, _ mydc.Conn, n *mydc.Network, rev uint64) (string, any, uint64, error) {
+	s.networkStep(w, r, ws, req.OpID, req, func(_ context.Context, _ sfc.Conn, n *sfc.Network, rev uint64) (string, any, uint64, error) {
 		if n.Kind != "tun" {
 			return "", nil, 0, &httpErr{http.StatusConflict, "not-tun", "only a TUN network has members to reconfigure"}
 		}
@@ -318,21 +316,15 @@ func (s *Server) handleNetworkReconfigure(w http.ResponseWriter, r *http.Request
 		if len(n.Members) > 0 && len(n.Members[0].Source.Pools) > 0 && n.Members[0].Source.Pools[0].MTU != 0 {
 			mtu = n.Members[0].Source.Pools[0].MTU
 		}
-		d, err := tunDefinition(tenant, n.Name, mtu, req.TunnelCIDR, func(yield func(node, cidr, gateway, tunnel string) error) error {
+		d, err := tunDefinition(tenant, n.Name, mtu, func(yield func(node, cidr, gateway string) error) error {
 			for _, m := range req.Members {
-				cidr, gateway, tunnel := m.CIDR, m.Gateway, m.Tunnel
+				cidr, gateway := m.CIDR, m.Gateway
 				for _, cur := range n.Members {
-					if cur.Node != m.Node || len(cur.Source.Pools) == 0 {
-						continue
-					}
-					if cidr == "" {
+					if cur.Node == m.Node && len(cur.Source.Pools) > 0 && cidr == "" {
 						cidr, gateway = cur.Source.Pools[0].Prefix.String(), cur.Source.Pools[0].Gateway.String()
 					}
-					if tunnel == "" && len(cur.Source.TunnelAddresses) > 0 && req.TunnelCIDR == "" {
-						tunnel = cur.Source.TunnelAddresses[0].Addr().String()
-					}
 				}
-				if err := yield(m.Node, cidr, gateway, tunnel); err != nil {
+				if err := yield(m.Node, cidr, gateway); err != nil {
 					return err
 				}
 			}
@@ -342,11 +334,11 @@ func (s *Server) handleNetworkReconfigure(w http.ResponseWriter, r *http.Request
 			return "", nil, 0, err
 		}
 		d.Toggles = slices.Clone(n.Toggles)
-		return mydc.ActionReconfigureTUN, control.NetworkReconfigure{Target: d, Members: versions}, expectedOr(req.Expected, rev), nil
+		return sfc.ActionReconfigureTUN, control.NetworkReconfigure{Target: d, Members: versions}, expectedOr(req.Expected, rev), nil
 	})
 }
 
-// POST /t/{t}/networks/{name}/members {opId, node, cidr, gateway?, tunnel,
+// POST /t/{t}/networks/{name}/members {opId, node, cidr, gateway?,
 // expected?} → join-tun-network: one server joins a TUN network at its MTU.
 // The other servers keep their device; only their routes change. 409
 // member-changing while a member drains or has a change in progress.
@@ -356,18 +348,14 @@ func (s *Server) handleNetworkJoin(w http.ResponseWriter, r *http.Request, ws *w
 		Node     string `json:"node"`
 		CIDR     string `json:"cidr"`
 		Gateway  string `json:"gateway,omitempty"`
-		Tunnel   string `json:"tunnel"`
 		Expected uint64 `json:"expected,omitempty"`
 	}
 	if !readJSON(w, r, &req) {
 		return
 	}
-	s.networkStep(w, r, ws, req.OpID, req, func(_ context.Context, _ mydc.Conn, n *mydc.Network, rev uint64) (string, any, uint64, error) {
+	s.networkStep(w, r, ws, req.OpID, req, func(_ context.Context, _ sfc.Conn, n *sfc.Network, rev uint64) (string, any, uint64, error) {
 		if n.Kind != "tun" {
 			return "", nil, 0, &httpErr{http.StatusConflict, "not-tun", "only a TUN network takes more servers"}
-		}
-		if req.Tunnel == "" {
-			return "", nil, 0, invalid("tunnel: the new server's tunnel address")
 		}
 		for _, t := range tenancy.NetworkToggles() {
 			if !tenancy.ToggleAllowed(t, slices.Contains(n.Toggles, t), len(n.Members)+1) {
@@ -387,23 +375,20 @@ func (s *Server) handleNetworkJoin(w http.ResponseWriter, r *http.Request, ws *w
 			}
 		}
 		tenant := r.PathValue("t")
-		d, err := tunDefinition(tenant, n.Name, mtu, "", func(yield func(node, cidr, gateway, tunnel string) error) error {
-			return yield(req.Node, req.CIDR, req.Gateway, req.Tunnel)
+		d, err := tunDefinition(tenant, n.Name, mtu, func(yield func(node, cidr, gateway string) error) error {
+			return yield(req.Node, req.CIDR, req.Gateway)
 		})
 		if err != nil {
 			return "", nil, 0, err
 		}
 		for _, m := range n.Members {
 			for _, p := range m.Source.Pools {
-				if p.Prefix.Overlaps(d.Members[0].Pools[0].Prefix) || p.Prefix.Contains(d.Members[0].Addresses[0].Addr()) {
-					return "", nil, 0, invalid("cidr and tunnel must not overlap another server's pool")
+				if p.Prefix.Overlaps(d.Members[0].Pools[0].Prefix) {
+					return "", nil, 0, invalid("cidr must not overlap another server's pool")
 				}
 			}
-			if slices.Contains(m.Source.TunnelAddresses, d.Members[0].Addresses[0]) || d.Members[0].Pools[0].Prefix.Contains(firstAddr(m.Source.TunnelAddresses)) {
-				return "", nil, 0, invalid("cidr and tunnel must not overlap another server's tunnel address")
-			}
 		}
-		return mydc.ActionJoinTUN, control.NetworkJoin{Tenant: tenant, Name: n.Name, Member: d.Members[0]}, expectedOr(req.Expected, rev), nil
+		return sfc.ActionJoinTUN, control.NetworkJoin{Tenant: tenant, Name: n.Name, Member: d.Members[0]}, expectedOr(req.Expected, rev), nil
 	})
 }
 
@@ -420,7 +405,7 @@ func (s *Server) handleNetworkLeave(w http.ResponseWriter, r *http.Request, ws *
 	if !readJSON(w, r, &req) {
 		return
 	}
-	s.networkStep(w, r, ws, req.OpID, req, func(ctx context.Context, c mydc.Conn, n *mydc.Network, _ uint64) (string, any, uint64, error) {
+	s.networkStep(w, r, ws, req.OpID, req, func(ctx context.Context, c sfc.Conn, n *sfc.Network, _ uint64) (string, any, uint64, error) {
 		m, err := memberOn(n, req.Node)
 		if err != nil {
 			return "", nil, 0, err
@@ -436,7 +421,7 @@ func (s *Server) handleNetworkLeave(w http.ResponseWriter, r *http.Request, ws *
 		if err != nil {
 			return "", nil, 0, err
 		}
-		return mydc.ActionLeaveTUN, closed, m.Revision, nil
+		return sfc.ActionLeaveTUN, closed, m.Revision, nil
 	})
 }
 
@@ -456,7 +441,7 @@ func (s *Server) handleNetworkToggle(w http.ResponseWriter, r *http.Request, ws 
 	if !readJSON(w, r, &req) {
 		return
 	}
-	s.networkStep(w, r, ws, req.OpID, req, func(_ context.Context, _ mydc.Conn, n *mydc.Network, rev uint64) (string, any, uint64, error) {
+	s.networkStep(w, r, ws, req.OpID, req, func(_ context.Context, _ sfc.Conn, n *sfc.Network, rev uint64) (string, any, uint64, error) {
 		t := tenancy.NetworkToggle(req.Toggle)
 		if !slices.Contains(tenancy.NetworkToggles(), t) {
 			return "", nil, 0, invalid(fmt.Sprintf("toggle: one of %v", tenancy.NetworkToggles()))
@@ -475,7 +460,7 @@ func (s *Server) handleNetworkToggle(w http.ResponseWriter, r *http.Request, ws 
 		if !tenancy.ToggleAllowed(t, req.On, len(n.Members)) {
 			return "", nil, 0, &httpErr{http.StatusConflict, "toggle-not-allowed", fmt.Sprintf("%s cannot be %v with %d servers", t, req.On, len(n.Members))}
 		}
-		return mydc.ActionSetNetworkToggle, control.NetworkToggleSet{Tenant: r.PathValue("t"), Name: n.Name, Toggle: t, On: req.On}, expectedOr(req.Expected, rev), nil
+		return sfc.ActionSetNetworkToggle, control.NetworkToggleSet{Tenant: r.PathValue("t"), Name: n.Name, Toggle: t, On: req.On}, expectedOr(req.Expected, rev), nil
 	})
 }
 
@@ -499,7 +484,7 @@ func (s *Server) handleNetworkRetire(w http.ResponseWriter, r *http.Request, ws 
 	if !readJSON(w, r, &req) {
 		return
 	}
-	s.networkStep(w, r, ws, req.OpID, req, func(_ context.Context, _ mydc.Conn, n *mydc.Network, rev uint64) (string, any, uint64, error) {
+	s.networkStep(w, r, ws, req.OpID, req, func(_ context.Context, _ sfc.Conn, n *sfc.Network, rev uint64) (string, any, uint64, error) {
 		if n.DNS != nil && n.DNS.Enabled {
 			return "", nil, 0, &httpErr{http.StatusConflict, "dns-enabled", "turn the network's DNS off first"}
 		}
@@ -508,27 +493,27 @@ func (s *Server) handleNetworkRetire(w http.ResponseWriter, r *http.Request, ws 
 			return "", nil, 0, err
 		}
 		target := tenancy.TUNDefinition{Tenant: r.PathValue("t"), Name: n.Name, Members: []tenancy.TUNNode{}}
-		return mydc.ActionReconfigureTUN, control.NetworkReconfigure{Target: target, Members: versions}, expectedOr(req.Expected, rev), nil
+		return sfc.ActionReconfigureTUN, control.NetworkReconfigure{Target: target, Members: versions}, expectedOr(req.Expected, rev), nil
 	})
 }
 
 // memberClosed reads the member's closure (REQ-33 PublicRead
 // network-closure): the owner-signed proof once nothing uses the drained
 // member, else 409 in-use / unreachable.
-func memberClosed(ctx context.Context, c mydc.Conn, m *mydc.NetworkMember) (mydc.NetworkClosure, error) {
+func memberClosed(ctx context.Context, c sfc.Conn, m *sfc.NetworkMember) (sfc.NetworkClosure, error) {
 	v, err := readClosure(ctx, c, m.Source.Tenant, m.ID)
 	if err != nil {
-		return mydc.NetworkClosure{}, err
+		return sfc.NetworkClosure{}, err
 	}
 	switch {
 	case v.State == "unreachable":
-		return mydc.NetworkClosure{}, &httpErr{http.StatusConflict, "unreachable", "the server of " + m.Node + " does not answer"}
+		return sfc.NetworkClosure{}, &httpErr{http.StatusConflict, "unreachable", "the server of " + m.Node + " does not answer"}
 	case v.State != "closed" || v.Closure == nil:
 		msg := "containers on " + m.Node + " still use the network"
 		if v.PendingEndpoints != nil {
 			msg = fmt.Sprintf("%d %s", *v.PendingEndpoints, msg)
 		}
-		return mydc.NetworkClosure{}, &httpErr{http.StatusConflict, "in-use", msg}
+		return sfc.NetworkClosure{}, &httpErr{http.StatusConflict, "in-use", msg}
 	}
 	return *v.Closure, nil
 }
@@ -544,7 +529,7 @@ func (s *Server) handleNetworkChangeFence(w http.ResponseWriter, r *http.Request
 	if !readJSON(w, r, &req) {
 		return
 	}
-	s.networkStep(w, r, ws, req.OpID, req, func(ctx context.Context, c mydc.Conn, n *mydc.Network, _ uint64) (string, any, uint64, error) {
+	s.networkStep(w, r, ws, req.OpID, req, func(ctx context.Context, c sfc.Conn, n *sfc.Network, _ uint64) (string, any, uint64, error) {
 		m, err := memberOn(n, req.Node)
 		if err != nil {
 			return "", nil, 0, err
@@ -557,11 +542,11 @@ func (s *Server) handleNetworkChangeFence(w http.ResponseWriter, r *http.Request
 			return "", nil, 0, err
 		}
 		q := control.NetworkChangeFence{Tenant: m.Source.Tenant, ID: m.ID, Generation: m.Change.Generation, Closed: closed}
-		return mydc.ActionFenceNetworkChange, q, m.Change.Revision, nil
+		return sfc.ActionFenceNetworkChange, q, m.Change.Revision, nil
 	})
 }
 
-// closureView is one drained member's closure report. A count mydcd has
+// closureView is one drained member's closure report. A count sfcd has
 // not measured is null (never guessed as 0); nativeGone likewise.
 type closureView struct {
 	Node             string  `json:"node"`
@@ -575,7 +560,7 @@ type closureView struct {
 }
 
 // closures reads the closure report of each drained member (nil when none).
-func closures(ctx context.Context, c mydc.Conn, n *mydc.Network) ([]closureView, error) {
+func closures(ctx context.Context, c sfc.Conn, n *sfc.Network) ([]closureView, error) {
 	var out []closureView
 	for i := range n.Members {
 		m := &n.Members[i]

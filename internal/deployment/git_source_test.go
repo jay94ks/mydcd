@@ -36,7 +36,7 @@ func TestGitLibraryReadsOnePinnedRegularComposeBlob(t *testing.T) {
 	if _, err = w.Add("app.yaml"); err != nil {
 		t.Fatal(err)
 	}
-	h, err := w.Commit("input", &git.CommitOptions{Author: &object.Signature{Name: "fixture", Email: "fixture@mydc.test", When: time.Unix(1, 0)}})
+	h, err := w.Commit("input", &git.CommitOptions{Author: &object.Signature{Name: "fixture", Email: "fixture@sfc.test", When: time.Unix(1, 0)}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -74,7 +74,7 @@ func TestGitLibraryReadsOnePinnedRegularComposeBlob(t *testing.T) {
 	if _, err = w.Add("management.yaml"); err != nil {
 		t.Fatal(err)
 	}
-	badCommit, err := w.Commit("management input is not an app", &git.CommitOptions{Author: &object.Signature{Name: "fixture", Email: "fixture@mydc.test", When: time.Unix(2, 0)}})
+	badCommit, err := w.Commit("management input is not an app", &git.CommitOptions{Author: &object.Signature{Name: "fixture", Email: "fixture@sfc.test", When: time.Unix(2, 0)}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,7 +87,7 @@ func TestGitLibraryReadsOnePinnedRegularComposeBlob(t *testing.T) {
 	if _, err = w.Add("link.yaml"); err != nil {
 		t.Fatal(err)
 	}
-	h, err = w.Commit("link", &git.CommitOptions{Author: &object.Signature{Name: "fixture", Email: "fixture@mydc.test", When: time.Unix(2, 0)}})
+	h, err = w.Commit("link", &git.CommitOptions{Author: &object.Signature{Name: "fixture", Email: "fixture@sfc.test", When: time.Unix(2, 0)}})
 	if err != nil {
 		t.Fatal(err)
 	}

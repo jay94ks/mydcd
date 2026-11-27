@@ -14,20 +14,23 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/config"
-	"github.com/jay94ks/mydcd/internal/credentials"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/secrets"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/config"
+	"github.com/jay94ks/seafield/internal/credentials"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/loginlog"
+	"github.com/jay94ks/seafield/internal/secrets"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/storage"
 
 	"github.com/hashicorp/raft"
 )
@@ -38,7 +41,7 @@ import (
 func TestMultiUserPasswordIdleRebindAndSelfCredentialActualRuntime(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
-	root, err := os.MkdirTemp("", "mydc-rq2-auth-")
+	root, err := os.MkdirTemp("", "sfc-rq2-auth-")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -54,14 +57,14 @@ func TestMultiUserPasswordIdleRebindAndSelfCredentialActualRuntime(t *testing.T)
 	}
 	node, admin, web, browser := newKey(), newKey(), newKey(), newKey()
 	clusterID := [32]byte{202}
-	peer := mydcp.Peer{ID: "node", Policy: mydcp.Policy{Key: mydcp.Identity(node.Public), Member: true, Read: true, Respond: true}}
-	lookup := func(k mydcp.Identity) (mydcp.Peer, bool) {
-		if k == mydcp.Identity(web.Public) {
-			return mydcp.Peer{ID: "web", Policy: mydcp.Policy{Key: k, UserAuth: true}}, true
+	peer := sfcp.Peer{ID: "node", Policy: sfcp.Policy{Key: sfcp.Identity(node.Public), Member: true, Read: true, Respond: true}}
+	lookup := func(k sfcp.Identity) (sfcp.Peer, bool) {
+		if k == sfcp.Identity(web.Public) {
+			return sfcp.Peer{ID: "web", Policy: sfcp.Policy{Key: k, UserAuth: true}}, true
 		}
 		return peer, k == peer.Key
 	}
-	server, err := mydcp.NewTransport(node, clusterID, lookup)
+	server, err := sfcp.NewTransport(node, clusterID, lookup)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,7 +75,7 @@ func TestMultiUserPasswordIdleRebindAndSelfCredentialActualRuntime(t *testing.T)
 	peer.Endpoint = server.Addr().String()
 	policy := control.Policy{Cluster: clusterID, BootstrapKey: admin.Public, Issuers: [][32]byte{node.Public}, TrustRoot: node.Public, Genesis: config.Peer{ID: "node", Key: node.Actor(), Endpoint: peer.Endpoint, Voter: true}}
 	e, err := cluster.Open(cluster.Options{ID: "node", Root: filepath.Join(root, "db"), Admin: admin.Actor(), Cluster: clusterID, Mesh: server, Bootstrap: true,
-		Servers: []raft.Server{{ID: "node", Address: raft.ServerAddress(peer.Endpoint), Suffrage: raft.Voter}}, Resolve: func(id raft.ServerID, _ raft.ServerAddress) (mydcp.Peer, bool) { return peer, id == "node" }, ModuleID: policy.ID(), Validate: policy.Validate, Reduce: policy.Reduce, AdmitModule: policy.AdmitModule, TrackConfiguration: true})
+		Servers: []raft.Server{{ID: "node", Address: raft.ServerAddress(peer.Endpoint), Suffrage: raft.Voter}}, Resolve: func(id raft.ServerID, _ raft.ServerAddress) (sfcp.Peer, bool) { return peer, id == "node" }, ModuleID: policy.ID(), Validate: policy.Validate, Reduce: policy.Reduce, AdmitModule: policy.AdmitModule, TrackConfiguration: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -171,25 +174,37 @@ func TestMultiUserPasswordIdleRebindAndSelfCredentialActualRuntime(t *testing.T)
 	}
 	defer backend.Close()
 	svc := Service{Engine: e, Mesh: server, Self: node, Policy: policy, Credentials: backend}
+	logins := openLoginRecords(t, root)
+	svc.LoginRecorder = func(r loginlog.Record) {
+		if err := logins.Add(r, time.Now()); err != nil {
+			t.Error("login record", err)
+		}
+	}
+	svc.LoginRecords = func(_ context.Context, _ cluster.View, s access.Session, q loginlog.Query) (loginlog.Page, error) {
+		if q.User != s.User {
+			t.Error("login records for another user", q.User)
+		}
+		return logins.Page(q, time.Now())
+	}
 	if err = svc.Serve(); err != nil {
 		t.Fatal(err)
 	}
-	socket := filepath.Join(root, "mydc.sock")
+	socket := filepath.Join(root, "sfcdp.sock")
 	if err = server.ListenUnix(socket); err != nil {
 		t.Fatal(err)
 	}
 	target := peer
 	target.Endpoint = "unix://" + socket
-	newMesh := func(target mydcp.Peer) *mydcp.Transport {
+	newMesh := func(target sfcp.Peer) *sfcp.Transport {
 		t.Helper()
-		m, err := mydcp.NewTransport(web, clusterID, func(k mydcp.Identity) (mydcp.Peer, bool) { return target, k == target.Key })
+		m, err := sfcp.NewTransport(web, clusterID, func(k sfcp.Identity) (sfcp.Peer, bool) { return target, k == target.Key })
 		if err != nil {
 			t.Fatal(err)
 		}
 		t.Cleanup(func() { _ = m.Close() })
 		return m
 	}
-	c := Client{Self: web, Cluster: clusterID, Peers: []mydcp.Peer{target}, Mesh: newMesh(target)}
+	c := Client{Self: web, Cluster: clusterID, Peers: []sfcp.Peer{target}, Mesh: newMesh(target)}
 	// Username rejection must not drain the shared UID/global source bucket.
 	for range 5 {
 		if _, err = c.LoginCredential(ctx, target, "failed", access.Password, "password", []byte("wrong")); err == nil {
@@ -201,14 +216,27 @@ func TestMultiUserPasswordIdleRebindAndSelfCredentialActualRuntime(t *testing.T)
 			t.Fatal("failed user's rate cap bypassed")
 		}
 	}
+	// The failed user's wrong passwords are kept for that account only, the
+	// throttled ones as their own coalesced row.
+	failed, err := logins.Page(loginlog.Query{User: "failed", Limit: 10}, time.Now())
+	if err != nil || len(failed.Items) != 2 || failed.Items[0].Reason != "throttled" || failed.Items[1].Reason != "denied" || failed.Items[1].Count != 5 || failed.Items[0].Count != 25 {
+		t.Fatalf("failed user's records = %+v: %v", failed, err)
+	}
 	sessions := map[string]access.Session{}
 	clients := map[string]Client{}
 	for _, name := range []string{"alice", "bob", "carol"} {
 		caller := c
 		caller.Mesh = newMesh(target)
-		s, err := caller.LoginCredential(ctx, target, name, access.Password, "password", password)
+		s, err := caller.LoginCredential(WithLoginClient(ctx, loginlog.Client{Client: "test " + name, Address: "203.0.113.7"}), target, name, access.Password, "password", password)
 		if err != nil {
 			t.Fatal("other user's password login blocked", name, err)
+		}
+		page, budget, err := caller.LoginRecords(ctx, target, s, "", 10)
+		if err != nil || len(page.Items) != 1 || !page.Items[0].OK || page.Items[0].Session != s.ID || page.Items[0].Client.Client != "test "+name || budget == nil || budget.Max != 5 || budget.Left != 4 {
+			t.Fatalf("%s login records = %+v budget %+v: %v", name, page, budget, err)
+		}
+		if open, err := caller.OwnSessions(ctx, target, s); err != nil || len(open.Items) != 1 || open.Items[0].Session != s.ID {
+			t.Fatalf("%s open sessions = %+v: %v", name, open, err)
 		}
 		sessions[name] = s
 		clients[name] = caller
@@ -222,8 +250,8 @@ func TestMultiUserPasswordIdleRebindAndSelfCredentialActualRuntime(t *testing.T)
 			defer workers.Done()
 			s := sessions[name]
 			caller := clients[name]
-			r, err := caller.Query(ctx, target, s, "tenants", "")
-			if err != nil || len(r.Tenants) != 1 || r.Tenants[0].ID != name {
+			listed, err := caller.Tenants(ctx, target, s)
+			if err != nil || len(listed.Tenants) != 1 || listed.Tenants[0].ID != name {
 				errs <- fmt.Errorf("multi-user query %s: %w", name, err)
 				return
 			}
@@ -231,8 +259,9 @@ func TestMultiUserPasswordIdleRebindAndSelfCredentialActualRuntime(t *testing.T)
 			// simultaneously live on the same client, never selected from a cache.
 			writes.Lock()
 			defer writes.Unlock()
-			raw, _ := json.Marshal(control.TrustAssignment{Tenant: name, Rules: []access.TrustRule{{Registry: "docker.io", Repository: "**"}}})
-			op, err := caller.Prepare(ctx, target, s, "trust-"+name, control.Change{Schema: 1, Action: "set-trust", Principal: name, Expected: r.Tenants[0].Revision, Payload: raw})
+			raw, _ := json.Marshal(control.TrustChange{Tenant: name, Add: []access.TrustRule{{Registry: "docker.io", Repository: "library/php"}}})
+			op, err := caller.Prepare(ctx, target, s, "trust-"+name, control.Change{Schema: 1, Action: "set-trust", Principal: name, Expected: listed.Tenants[0].Revision, Payload: raw})
+			var r Reply
 			if err == nil {
 				r, err = caller.Operation(ctx, target, op, false)
 			}
@@ -284,7 +313,7 @@ func TestMultiUserPasswordIdleRebindAndSelfCredentialActualRuntime(t *testing.T)
 	// browser account signing or password. Expiry/issuer are not extended.
 	remote := c
 	remote.Mesh = newMesh(peer)
-	remote.Peers = []mydcp.Peer{peer}
+	remote.Peers = []sfcp.Peer{peer}
 	if _, err = remote.Query(ctx, peer, session, "my-credentials", ""); err != nil {
 		t.Fatal("original session on fresh network connection", err)
 	}
@@ -301,6 +330,7 @@ func TestMultiUserPasswordIdleRebindAndSelfCredentialActualRuntime(t *testing.T)
 		}
 		return r
 	}
+	revokedID := session.ID
 	if r := mutate(session, "revoke-idle-original", "revoke-session", session.AccountRevision, control.SessionRevocation{User: session.User, Session: session.ID}); r.Result == nil || r.Result.Code != state.Applied {
 		t.Fatal("revoke exact idle session", r.Code)
 	}
@@ -313,6 +343,9 @@ func TestMultiUserPasswordIdleRebindAndSelfCredentialActualRuntime(t *testing.T)
 	session, err = c.LoginCredential(ctx, target, "alice", access.Password, "password", password)
 	if err != nil {
 		t.Fatal("fresh login after original session revoke", err)
+	}
+	if open, err := c.OwnSessions(ctx, target, session); err != nil || len(open.Items) == 0 || slices.ContainsFunc(open.Items, func(r loginlog.Record) bool { return r.Session == revokedID }) {
+		t.Fatalf("open sessions after revoke = %+v: %v", open, err)
 	}
 	// Cross-user mutation fails even though the client TLS key is shared.
 	addition, err := c.NewCredentialAddition(session, "browser", "local browser", browser.Private)
@@ -400,4 +433,18 @@ func TestMultiUserPasswordIdleRebindAndSelfCredentialActualRuntime(t *testing.T)
 	if _, err = remote.Query(ctx, peer, fresh, "my-credentials", ""); err == nil {
 		t.Fatal("revoked session rebound on another connection")
 	}
+}
+
+func openLoginRecords(t *testing.T, root string) *loginlog.Store {
+	t.Helper()
+	db, err := storage.Open(filepath.Join(root, "logins.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	s, err := loginlog.Open(db, "node-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return s
 }

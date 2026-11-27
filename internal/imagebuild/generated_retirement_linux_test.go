@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/reconcile"
 )
 
 // Native bytes, original inode/ZIP and DB are real; current quorum authority
@@ -30,7 +30,7 @@ func generatedRetirementFixture(t *testing.T, kind string, adopted bool) (*Spool
 			t.Fatal(err)
 		}
 		a = GeneratedArtifact{Scope: scope, Draft: &p}
-		source = filepath.Join(scope.Root.Path, ".mydc-imagebuild", string(store.key), freezeName(p))
+		source = filepath.Join(scope.Root.Path, ".sfc-imagebuild", string(store.key), freezeName(p))
 		if adopted {
 			if _, err := store.AdoptFreeze(ctx, p, key); err != nil {
 				t.Fatal(err)
@@ -49,7 +49,7 @@ func generatedRetirementFixture(t *testing.T, kind string, adopted bool) (*Spool
 			t.Fatal(err)
 		}
 		a = GeneratedArtifact{Scope: scope, Git: &p}
-		source = filepath.Join(scope.Root.Path, ".mydc-imagebuild", gitSaveName(p))
+		source = filepath.Join(scope.Root.Path, ".sfc-imagebuild", gitSaveName(p))
 		if adopted {
 			if _, err := spool.AdoptGit(ctx, p, key); err != nil {
 				t.Fatal(err)
@@ -81,7 +81,7 @@ func TestGeneratedRetirementReusesOriginalPlacementAndDeletionWithoutFabricating
 				if err != nil || !h.Deleted || !generatedIdentity(h, original) || h.Unpublished == nil || !h.Unpublished.Returning || h.Unpublished.Borrowed != (lease.Token != 0) || (h.Seal != nil) != (mode == "adopted") {
 					t.Fatal("original inode/evidence changed or cleanup fabricated a seal", h, err)
 				}
-				for _, name := range []string{source, filepath.Join(a.Scope.Root.Path, ".mydc-imagebuild", scopeName(a.Scope)+".zip")} {
+				for _, name := range []string{source, filepath.Join(a.Scope.Root.Path, ".sfc-imagebuild", scopeName(a.Scope)+".zip")} {
 					if _, err := os.Stat(name); !os.IsNotExist(err) {
 						t.Fatal("original source/body retained", name, err)
 					}
@@ -151,7 +151,7 @@ func TestGeneratedRetirementRecoversEveryOriginalCommitBoundary(t *testing.T) {
 					t.Fatal("injected commit boundary missing", err)
 				}
 				_, sourceErr := os.Stat(source)
-				_, bodyErr := os.Stat(filepath.Join(g.Artifact.Scope.Root.Path, ".mydc-imagebuild", scopeName(g.Artifact.Scope)+".zip"))
+				_, bodyErr := os.Stat(filepath.Join(g.Artifact.Scope.Root.Path, ".sfc-imagebuild", scopeName(g.Artifact.Scope)+".zip"))
 				if failAt == 1 && sourceErr != nil || failAt != 1 && !os.IsNotExist(sourceErr) || failAt == 2 && bodyErr != nil || failAt > 2 && !os.IsNotExist(bodyErr) {
 					t.Fatal("wrong native mutation boundary", sourceErr, bodyErr)
 				}

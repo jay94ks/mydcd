@@ -195,3 +195,16 @@ func (c Catalog) TenantMembersPage(actor, tenant, after string) ([]TenantMember,
 	}
 	return rows, nodes, next, nil
 }
+
+// VerifierReferenced reports whether any account credential, enabled or
+// not, names verifier reference ref.
+func (c Catalog) VerifierReferenced(ref string) bool {
+	for _, u := range c.users {
+		for _, credential := range u.Credentials {
+			if credential.VerifierRef == ref {
+				return true
+			}
+		}
+	}
+	return false
+}

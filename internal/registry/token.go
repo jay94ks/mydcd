@@ -12,13 +12,13 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/schema"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/schema"
 )
 
 // Subject is public session provenance inside a signed, registry-only
-// credential. The original MYDCP proof key/password is never included.
+// credential. The original SFCP proof key/password is never included.
 type Subject struct {
 	Session *access.Session `json:",omitempty"`
 	Task    *TaskSubject    `json:",omitempty"`
@@ -44,8 +44,8 @@ type TaskSubject struct {
 
 const MaxGrantSeconds = 300
 
-const TaskUsername = "mydc-task"
-const BuildUsername = "mydc-build"
+const TaskUsername = "sfc-task"
+const BuildUsername = "sfc-build"
 
 type Grant struct {
 	Schema                                  uint8
@@ -58,8 +58,8 @@ type Grant struct {
 	Signature                               []byte
 }
 
-const loginDomain = "mydc-registry-login-1"
-const accessDomain = "mydc-registry-access-1"
+const loginDomain = "sfc-registry-login-1"
+const accessDomain = "sfc-registry-access-1"
 
 func grantBytes(g Grant, domain string) []byte {
 	g.Signature = nil
@@ -166,7 +166,7 @@ func parseGrant(raw, domain string, now int64) (Grant, error) {
 }
 
 // Login credentials may be used only at the token endpoint, never as access
-// tokens or MYDCP sessions. These redacted wrappers prevent incidental logging.
+// tokens or SFCP sessions. These redacted wrappers prevent incidental logging.
 type LoginCredential struct{ value string }
 
 func (LoginCredential) MarshalJSON() ([]byte, error) { return nil, ErrUnauthorized }

@@ -14,16 +14,16 @@ import (
 	"slices"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/cluster/membership"
-	"github.com/jay94ks/mydcd/internal/eventlog"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/schema"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/membership"
+	"github.com/jay94ks/seafield/internal/eventlog"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/sfcp"
 )
 
-// Diagnostic logs are the existing allowlisted mydcd event journal. Raw error
+// Diagnostic logs are the existing allowlisted sfcd event journal. Raw error
 // strings, operator reasons, process output, environment, credentials and keys
 // never enter the archive; filtering occurs before JSON/archive serialization.
 type nodeDiagnosticLog struct {
@@ -44,7 +44,7 @@ func packNodeDiagnostics(node string, at time.Time, config, status any, logs []n
 	files := []struct {
 		name  string
 		value any
-	}{{"config-summary.json", config}, {"status.json", status}, {"mydcd-events.json", logs}}
+	}{{"config-summary.json", config}, {"status.json", status}, {"sfcd-events.json", logs}}
 	var output bytes.Buffer
 	zip := gzip.NewWriter(&output)
 	archive := tar.NewWriter(zip)
@@ -83,9 +83,9 @@ func (r *Runtime) nodeDiagnostics(ctx context.Context, read control.NodeDiagnost
 	if read.Owner == r.Identity.Public {
 		return r.nodeDiagnosticsLocal(ctx, read)
 	}
-	peer, ok := r.Mesh.Peer(mydcp.Identity(read.Owner))
+	peer, ok := r.Mesh.Peer(sfcp.Identity(read.Owner))
 	if !ok || !peer.Member || peer.ID != read.Node {
-		return control.NodeDiagnosticsBundle{}, mydcp.ErrAdmission
+		return control.NodeDiagnosticsBundle{}, sfcp.ErrAdmission
 	}
 	raw, _ := json.Marshal(read)
 	reply, err := cluster.CallManagement(ctx, r.Mesh, r.Identity, r.controlPolicy.Cluster, peer, cluster.ManagementRequest{Method: "node-diagnostics-owner", Input: raw})
@@ -94,13 +94,13 @@ func (r *Runtime) nodeDiagnostics(ctx context.Context, read control.NodeDiagnost
 	}
 	bundle, err := schema.Decode[control.NodeDiagnosticsBundle](reply.Data)
 	if err != nil || !bundle.Valid(read.Node) {
-		return bundle, mydcp.ErrAdmission
+		return bundle, sfcp.ErrAdmission
 	}
 	return bundle, nil
 }
 func (r *Runtime) nodeDiagnosticsLocal(ctx context.Context, read control.NodeDiagnosticsRead) (control.NodeDiagnosticsBundle, error) {
 	if r.installation == nil || read.Owner != r.Identity.Public || read.Node != r.installation.record.Root.Self.ID {
-		return control.NodeDiagnosticsBundle{}, mydcp.ErrAdmission
+		return control.NodeDiagnosticsBundle{}, sfcp.ErrAdmission
 	}
 	// Recheck the current user at a quorum barrier on the owner, including a
 	// relayed call. A formerly approved read is not a lasting diagnostic grant.
@@ -111,7 +111,7 @@ func (r *Runtime) nodeDiagnosticsLocal(ctx context.Context, read control.NodeDia
 	}
 	current, err := schema.Decode[control.NodeDiagnosticsRead](permit.Data)
 	if err != nil || current.Node != read.Node || current.Owner != r.Identity.Public || !bytes.Equal(access.SessionBytes(current.Session), access.SessionBytes(read.Session)) || !bytes.Equal(current.Session.Signature, read.Session.Signature) {
-		return control.NodeDiagnosticsBundle{}, mydcp.ErrAdmission
+		return control.NodeDiagnosticsBundle{}, sfcp.ErrAdmission
 	}
 	view, err := r.Engine().ReadAtLeast(ctx, current.Index)
 	if err != nil {
@@ -122,7 +122,7 @@ func (r *Runtime) nodeDiagnosticsLocal(ctx context.Context, read control.NodeDia
 	now := time.Now().UTC()
 	live, err := r.controlPolicy.ReadNodeDiagnostics(view.State, current.Session, now.Unix(), current.Node)
 	if err != nil || view.State.Index() < current.Index || view.State.ModuleEpoch() != current.Epoch || live.Owner != current.Owner || live.MembersRoot != current.MembersRoot {
-		return control.NodeDiagnosticsBundle{}, mydcp.ErrAdmission
+		return control.NodeDiagnosticsBundle{}, sfcp.ErrAdmission
 	}
 	d, err := r.controlPolicy.Members(view.State)
 	if err != nil {
@@ -130,14 +130,14 @@ func (r *Runtime) nodeDiagnosticsLocal(ctx context.Context, read control.NodeDia
 	}
 	node, found := d.NodeView(read.Node)
 	if !found {
-		return control.NodeDiagnosticsBundle{}, mydcp.ErrAdmission
+		return control.NodeDiagnosticsBundle{}, sfcp.ErrAdmission
 	}
 	logs := []nodeDiagnosticLog{}
 	incomplete := true
 	r.life.RLock()
 	defer r.life.RUnlock()
 	if r.closed {
-		return control.NodeDiagnosticsBundle{}, mydcp.ErrAdmission
+		return control.NodeDiagnosticsBundle{}, sfcp.ErrAdmission
 	}
 	incomplete = false
 	for _, owner := range append([]*Runtime{r}, r.nativeOwners...) {
@@ -170,7 +170,7 @@ func (r *Runtime) nodeDiagnosticsLocal(ctx context.Context, read control.NodeDia
 		Schema                              uint8
 		Node, Endpoint                      string
 		Managed, Network, Workload, Ingress bool
-	}{1, read.Node, r.installation.record.Endpoint, true, r.networkEnabled, r.workload != nil, r.ingress != nil}
+	}{1, read.Node, r.installation.record.CurrentListen(), true, r.networkEnabled, r.workload != nil, r.ingress != nil}
 	status := struct {
 		Schema                                    uint8
 		Index, MembersRoot, ConfigurationIndex    uint64

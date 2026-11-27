@@ -11,7 +11,6 @@ import (
 	"io"
 	"net/netip"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -19,24 +18,24 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/containerops"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/userauth"
-	"github.com/jay94ks/mydcd/internal/workload"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/containerops"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/userauth"
+	"github.com/jay94ks/seafield/internal/workload"
 	"github.com/moby/moby/client"
 )
 
 // The parent prepares this pinned shell-bearing image in the same private
 // Engine/rollback baseline. This root never downloads/builds/imports it.
 func TestRQ9RealStandaloneShellPinPoliciesAndDaemonRecovery(t *testing.T) {
-	if !strings.Contains(os.Getenv("MYDC_TEST_STANDALONE_IMAGE"), "@sha256:") {
-		t.Skip("requires explicit pre-provisioned pinned shell image MYDC_TEST_STANDALONE_IMAGE")
+	if !strings.Contains(os.Getenv("SFC_TEST_STANDALONE_IMAGE"), "@sha256:") {
+		t.Skip("requires explicit pre-provisioned pinned shell image SFC_TEST_STANDALONE_IMAGE")
 	}
 	runManagedAppOwner(t, true, true, false, true, managedAppStandalone, true)
 }
@@ -45,29 +44,29 @@ func TestRQ9RealStandaloneShellPinPoliciesAndDaemonRecovery(t *testing.T) {
 // native22. This actual set keeps the original pin/write-layer setup followed
 // by on-failure, same-DB recovery and exact manual controls.
 func TestRQ9RealStandalonePinnedControlsAndDaemonRecovery(t *testing.T) {
-	if !strings.Contains(os.Getenv("MYDC_TEST_STANDALONE_IMAGE"), "@sha256:") {
+	if !strings.Contains(os.Getenv("SFC_TEST_STANDALONE_IMAGE"), "@sha256:") {
 		t.Skip("requires pre-provisioned pinned shell image")
 	}
 	runManagedAppOwner(t, true, true, false, true, managedAppStandaloneFixed, true)
 }
 
 func TestRQ9RealStandaloneTemporaryExtensionAndOriginalRecovery(t *testing.T) {
-	if !strings.Contains(os.Getenv("MYDC_TEST_STANDALONE_IMAGE"), "@sha256:") {
+	if !strings.Contains(os.Getenv("SFC_TEST_STANDALONE_IMAGE"), "@sha256:") {
 		t.Skip("requires pre-provisioned pinned shell image")
 	}
 	runManagedAppOwner(t, true, true, false, true, managedAppStandaloneExtend, true)
 }
 
 func TestRQ9RealStandaloneQuotaReservationsAndOriginalCleanup(t *testing.T) {
-	if !strings.Contains(os.Getenv("MYDC_TEST_STANDALONE_IMAGE"), "@sha256:") {
-		t.Skip("requires explicit pre-provisioned pinned shell image MYDC_TEST_STANDALONE_IMAGE")
+	if !strings.Contains(os.Getenv("SFC_TEST_STANDALONE_IMAGE"), "@sha256:") {
+		t.Skip("requires explicit pre-provisioned pinned shell image SFC_TEST_STANDALONE_IMAGE")
 	}
 	runManagedAppOwner(t, true, true, false, true, managedAppStandaloneQuota, true)
 }
 
-func prepareStandaloneUserNative(t *testing.T, ctx context.Context, r *Runtime, root string, user userauth.Client, peer mydcp.Peer, session access.Session, p control.Policy, read func() cluster.View, change func(string, string, uint64, any), wait func(string, func() bool), manifest map[string]any, saveManifest func(), quotaOnly, fixedOnly, extendOnly bool) func(*Runtime) {
+func prepareStandaloneUserNative(t *testing.T, ctx context.Context, r *Runtime, root string, user userauth.Client, peer sfcp.Peer, session access.Session, p control.Policy, read func() cluster.View, change func(string, string, uint64, any), wait func(string, func() bool), manifest map[string]any, saveManifest func(), quotaOnly, fixedOnly, extendOnly bool) func(*Runtime) {
 	t.Helper()
-	image := os.Getenv("MYDC_TEST_STANDALONE_IMAGE")
+	image := os.Getenv("SFC_TEST_STANDALONE_IMAGE")
 	imageBefore, err := r.docker.API.ImageInspect(ctx, image)
 	if err != nil {
 		t.Fatal("standalone shell input must already exist in this private Engine", err)
@@ -86,11 +85,11 @@ func prepareStandaloneUserNative(t *testing.T, ctx context.Context, r *Runtime, 
 	}
 	manifest["BorrowedImages"] = []string{image}
 	saveManifest()
-	cli := &fixedAppNativeFixture{home: filepath.Join(root, "cli-home"), profile: filepath.Join(root, "cli.yaml"), binary: os.Getenv("MYDC_TEST_CLI")}
+	cli := &fixedAppNativeFixture{home: filepath.Join(root, "cli-home"), profile: filepath.Join(root, "cli.yaml"), binary: os.Getenv("SFC_TEST_CLI")}
 	call := func(want int, args ...string) map[string]json.RawMessage {
 		return cli.cli(t, ctx, want, append([]string{"--tenant", "tenant"}, args...)...)
 	}
-	prefix := netip.MustParsePrefix(os.Getenv("MYDC_DOCKER_TEST_CIDR"))
+	prefix := netip.MustParsePrefix(os.Getenv("SFC_DOCKER_TEST_CIDR"))
 	address := func(offset int) string {
 		a := prefix.Addr()
 		for i := 0; i < offset; i++ {
@@ -134,7 +133,7 @@ func prepareStandaloneUserNative(t *testing.T, ctx context.Context, r *Runtime, 
 		if !quotaOnly && !fixedOnly {
 			dnsInput = fmt.Sprintf("  dns: [%s]\n", address(1))
 		}
-		body := fmt.Sprintf("services:\n debug:\n  image: %q\n  entrypoint: [/bin/sh]\n  command: [-i]\n  user: '1000:1000'\n  cpus: '0.01'\n  mem_limit: 16m\n  stdin_open: true\n  tty: true\n  tmpfs: [%s]\n  networks: {lan: {ipv4_address: %s}}\n%s  logging: {driver: local, options: {max-size: 16k, max-file: '2'}}\n  healthcheck: {test: [CMD, /bin/sh, -c, 'exit 0'], interval: 1s, timeout: 1s, retries: 2}\n  x-mydc: {node: node-a}\nnetworks:\n lan: {external: true, name: shared-services}\n", imageRef, strings.Join(tmpfsInput, ", "), address(offset), dnsInput)
+		body := fmt.Sprintf("services:\n debug:\n  image: %q\n  entrypoint: [/bin/sh]\n  command: [-i]\n  user: '1000:1000'\n  cpus: '0.01'\n  mem_limit: 16m\n  stdin_open: true\n  tty: true\n  tmpfs: [%s]\n  networks: {lan: {ipv4_address: %s}}\n%s  logging: {driver: local, options: {max-size: 16k, max-file: '2'}}\n  healthcheck: {test: [CMD, /bin/sh, -c, 'exit 0'], interval: 1s, timeout: 1s, retries: 2}\n  x-sfc: {node: node-a}\nnetworks:\n lan: {external: true, name: shared-services}\n", imageRef, strings.Join(tmpfsInput, ", "), address(offset), dnsInput)
 		file := filepath.Join(root, "standalone-"+name+".yaml")
 		if err := os.WriteFile(file, []byte(body), 0600); err != nil {
 			t.Fatal(err)
@@ -242,11 +241,11 @@ func prepareStandaloneUserNative(t *testing.T, ctx context.Context, r *Runtime, 
 		initialTTL, initialGrace = "3600", "600"
 	}
 	file := definition("shell", 3, image)
-	planned := call(0, "standalone", "plan", "debug", "-f", file, "--mode", "shell", "--lifetime", "temp", "--ttl-seconds", initialTTL, "--grace-seconds", initialGrace)
+	planned := call(0, "standalone", "run", "debug", "-f", file, "--mode", "shell", "--lifetime", "temp", "--ttl", initialTTL+"s", "--grace", initialGrace+"s", "--dry-run")
 	if string(planned["InputKind"]) != `"standalone"` || string(planned["Schema"]) != "1" {
 		t.Fatal("standalone plan omitted actual artifact", planned)
 	}
-	call(0, "standalone", "up", "debug", "-f", file, "--mode", "shell", "--lifetime", "temp", "--ttl-seconds", initialTTL, "--grace-seconds", initialGrace, "--operation", "debug-create")
+	call(0, "standalone", "run", "debug", "-f", file, "--mode", "shell", "--lifetime", "temp", "--ttl", initialTTL+"s", "--grace", initialGrace+"s", "--id", "debug-create")
 	first := running("debug")
 	firstView := page("debug")
 	removal, err := p.PlanNodeRemoval(read().State, session, time.Now().Unix(), first.Node)
@@ -328,7 +327,7 @@ func prepareStandaloneUserNative(t *testing.T, ctx context.Context, r *Runtime, 
 	if extendOnly {
 		extend := func(name, operation string, ttl int64, want int) control.StandaloneExtensionPlan {
 			t.Helper()
-			out := call(want, "standalone", "extend", name, "--ttl-seconds", fmt.Sprint(ttl), "--operation", operation)
+			out := call(want, "standalone", "extend", name, fmt.Sprint(ttl)+"s", "--id", operation)
 			var plan control.StandaloneExtensionPlan
 			if raw := out["extension"]; len(raw) > 0 {
 				if json.Unmarshal(raw, &plan) != nil {
@@ -360,11 +359,11 @@ func prepareStandaloneUserNative(t *testing.T, ctx context.Context, r *Runtime, 
 		if replayed != plan {
 			t.Fatal("extension replay changed original coordinates")
 		}
-		limit := extend("debug", "extend-limit", 86400, 3)
+		limit := extend("debug", "extend-limit", 86400, 1)
 		if limit.AllowedTTLSeconds <= 0 || limit.AllowedTTLSeconds >= 86400 || page("debug").Metadata.ExpiresAt != plan.ProposedExpiresAt {
 			t.Fatal("24 hour limit refused without numeric allowance or changed expiry")
 		}
-		extend("debug", "extend-short", 1, 3)
+		extend("debug", "extend-short", 1, 1)
 		checkOriginal("debug")
 		unixPath := filepath.Join(root, "standalone-extension.sock")
 		if err := r.Mesh.ListenUnix(unixPath); err != nil {
@@ -373,12 +372,12 @@ func prepareStandaloneUserNative(t *testing.T, ctx context.Context, r *Runtime, 
 		unixPeer := peer
 		unixPeer.Endpoint = "unix://" + unixPath
 		local := user
-		local.Mesh, err = mydcp.NewTransport(user.Self, user.Cluster, func(key mydcp.Identity) (mydcp.Peer, bool) { return unixPeer, key == unixPeer.Key })
+		local.Mesh, err = sfcp.NewTransport(user.Self, user.Cluster, func(key sfcp.Identity) (sfcp.Peer, bool) { return unixPeer, key == unixPeer.Key })
 		if err != nil {
 			t.Fatal("create exact pinned Unix client", err)
 		}
 		defer local.Mesh.Close()
-		local.Peers = []mydcp.Peer{unixPeer}
+		local.Peers = []sfcp.Peer{unixPeer}
 		current := page("debug")
 		unixChange := control.StandaloneExtendChange{Tenant: "tenant", Name: "debug", Scope: current.Metadata.Scope, Operation: "extend-unix", CreatedAt: current.Metadata.CreatedAt, PreviousExpiresAt: current.Metadata.ExpiresAt, TTLSeconds: 8000, Target: current.Target}
 		unixRaw, _ := control.ChangeBytes("standalone-extend", session.User, current.Metadata.Revision, unixChange)
@@ -433,11 +432,11 @@ func prepareStandaloneUserNative(t *testing.T, ctx context.Context, r *Runtime, 
 				t.Fatal("extension or same DB lost original PID/write layer")
 			}
 			_ = channel.Close()
-			call(0, "standalone", "pin", "debug", "--name", "kept", "--operation", "extend-pin")
-			call(3, "standalone", "extend", "kept", "--ttl-seconds", "3600", "--operation", "extend-fixed")
+			call(0, "standalone", "keep", "debug", "--name", "kept", "--id", "extend-pin")
+			call(3, "standalone", "extend", "kept", "3600s", "--id", "extend-fixed")
 			// Generic result crosses the User service after pin; original arithmetic
 			// must not become the fixed policy's zero expiry or current metadata.
-			old, e := userauth.LoadOperation(cli.home, user, session, "standalone/extend/tenant/extend-first")
+			old, e := userauth.LoadOperation(cli.home, user, session, "extend-first")
 			if e != nil {
 				t.Fatal(e)
 			}
@@ -445,13 +444,13 @@ func prepareStandaloneUserNative(t *testing.T, ctx context.Context, r *Runtime, 
 			if e != nil || result.Result == nil || result.Result.Code != state.Applied || result.StandaloneExtension == nil || *result.StandaloneExtension != plan {
 				t.Fatal("wire original extension result changed after pin", e)
 			}
-			call(0, "standalone", "remove", "kept", "--operation", "extended-remove")
-			call(3, "standalone", "extend", "kept", "--ttl-seconds", "3600", "--operation", "extend-cleanup")
+			call(0, "standalone", "remove", "kept", "--id", "extended-remove")
+			call(3, "standalone", "extend", "kept", "3600s", "--id", "extend-cleanup")
 			gone("kept", "")
 			t.Log("extended original survives same DB/pin; fixed/cleanup refused and original native retired")
 		}
 	}
-	call(0, "standalone", "pin", "debug", "--name", "kept", "--restart", "on-failure", "--operation", "pin-debug")
+	call(0, "standalone", "keep", "debug", "--name", "kept", "--restart", "on-failure", "--id", "pin-debug")
 	kept := page("kept")
 	apps, err = p.Apps(read().State)
 	if err != nil {
@@ -469,7 +468,7 @@ func prepareStandaloneUserNative(t *testing.T, ctx context.Context, r *Runtime, 
 	}
 	_ = reconnected.Close()
 	wait("fixed connection metadata after disconnect", func() bool { return page("kept").Metadata.Connections == 0 })
-	call(0, "standalone", "get", "kept")
+	call(0, "standalone", "show", "kept")
 	currentKept := page("kept")
 	if len(currentKept.Tasks) != 1 || currentKept.Tasks[0].Kind != "standalone" || currentKept.Tasks[0].Standalone != "kept" || currentKept.Tasks[0].App != "" || currentKept.Tasks[0].Container != first.NativeID {
 		t.Fatal("standalone get did not reuse explicit-kind Task projection")
@@ -480,7 +479,7 @@ func prepareStandaloneUserNative(t *testing.T, ctx context.Context, r *Runtime, 
 			t.Fatal("ordinary app list mixed standalone owners", err)
 		}
 		for _, kind := range []string{"logs", "top", "stats", "inspect"} {
-			result := call(0, "standalone", kind, "kept", "--json")
+			result := call(0, "standalone", kind, "kept")
 			var actual containerops.Target
 			if json.Unmarshal(result["Target"], &actual) != nil || actual.NativeID != first.NativeID || actual.Standalone != "kept" {
 				t.Fatal("standalone did not use common observation target", kind)
@@ -501,7 +500,7 @@ func prepareStandaloneUserNative(t *testing.T, ctx context.Context, r *Runtime, 
 			t.Fatal("ordinary app plan adopted standalone internal scope")
 		}
 		untrusted := definition("untrusted", 14, "untrusted.invalid/fixture@sha256:"+strings.Repeat("a", 64))
-		call(-1, "standalone", "plan", "untrusted", "-f", untrusted, "--mode", "shell")
+		call(-1, "standalone", "run", "untrusted", "-f", untrusted, "--mode", "shell", "--dry-run")
 		change("rq9-foreign-tenant", "create-tenant", 0, control.TenantID{ID: "foreign"})
 		limited := session
 		limited.Scopes = []access.Scope{{Tenant: "tenant", Actions: []access.Action{access.Read, access.Deploy}}}
@@ -514,9 +513,9 @@ func prepareStandaloneUserNative(t *testing.T, ctx context.Context, r *Runtime, 
 		}
 
 		graceFile := definition("grace", 4, image)
-		call(0, "standalone", "up", "grace", "-f", graceFile, "--mode", "shell", "--ttl-seconds", "120", "--grace-seconds", "2", "--operation", "grace-create")
+		call(0, "standalone", "run", "grace", "-f", graceFile, "--mode", "shell", "--ttl", "120s", "--grace", "2s", "--id", "grace-create")
 		_ = running("grace")
-		call(-1, "standalone", "pin", "grace", "--name", "kept", "--operation", "deny-name-collision")
+		call(-1, "standalone", "keep", "grace", "--name", "kept", "--id", "deny-name-collision")
 		viewerKey, err := identity.Create(filepath.Join(root, "standalone-viewer"))
 		if err != nil {
 			t.Fatal(err)
@@ -554,7 +553,7 @@ func prepareStandaloneUserNative(t *testing.T, ctx context.Context, r *Runtime, 
 		gone("grace", "disconnected")
 		t.Log("original grace policy retired its exact Task and native container")
 		ttlFile := definition("ttl", 5, image)
-		call(0, "standalone", "up", "ttl", "-f", ttlFile, "--mode", "shell", "--ttl-seconds", "30", "--grace-seconds", "1", "--operation", "ttl-create")
+		call(0, "standalone", "run", "ttl", "-f", ttlFile, "--mode", "shell", "--ttl", "30s", "--grace", "1s", "--id", "ttl-create")
 		_ = running("ttl")
 		gone("ttl", "ttl")
 		t.Log("original TTL policy removed an actually running Task")
@@ -564,7 +563,7 @@ func prepareStandaloneUserNative(t *testing.T, ctx context.Context, r *Runtime, 
 			t.Log("fixed original restart policy", policy)
 			name := "fixed-" + policy
 			file := definition(name, 4, image)
-			call(0, "standalone", "up", name, "-f", file, "--mode", "shell", "--lifetime", "fixed", "--restart", policy, "--operation", name+"-create")
+			call(0, "standalone", "run", name, "-f", file, "--mode", "shell", "--lifetime", "fixed", "--restart", policy, "--id", name+"-create")
 			original := running(name)
 			channel, _ := open(name, name+"-connection")
 			code := 7
@@ -599,7 +598,7 @@ func prepareStandaloneUserNative(t *testing.T, ctx context.Context, r *Runtime, 
 					t.Fatal("fixed no restarted/replaced original", err)
 				}
 			}
-			call(0, "standalone", "remove", name, "--operation", name+"-remove")
+			call(0, "standalone", "remove", name, "--id", name+"-remove")
 			gone(name, "")
 			t.Log("fixed policy original retired", policy)
 		}
@@ -642,8 +641,8 @@ func prepareStandaloneUserNative(t *testing.T, ctx context.Context, r *Runtime, 
 		for _, action := range []string{"stop", "start", "restart"} {
 			t.Log("original standalone manual control", action)
 			operation := "control-" + action
-			call(0, "standalone", action, "kept", "--preview")
-			call(0, "standalone", action, "kept", "--operation", operation)
+			call(0, "standalone", action, "kept", "--dry-run")
+			call(0, "standalone", action, "kept", "--id", operation)
 			wait("common original Task control "+action, func() bool {
 				apps, err := p.Apps(read().State)
 				status := apps.TaskRestartStatus("tenant", kept.Metadata.Scope, operation)
@@ -652,7 +651,9 @@ func prepareStandaloneUserNative(t *testing.T, ctx context.Context, r *Runtime, 
 				}
 				return err == nil && status != nil && status.Status == "completed"
 			})
-			call(0, "standalone", "control-status", "kept", "--operation", operation)
+			if op := call(0, "op", "show", operation); string(op["state"]) != `"done"` {
+				t.Fatal("standalone control op state", action, string(op["state"]), string(op["detail"]))
+			}
 			got, err := r.docker.API.ContainerInspect(ctx, first.NativeID, client.ContainerInspectOptions{})
 			if err != nil || got.Container.State == nil || (got.Container.State.Running != (action != "stop")) {
 				t.Fatal("common native control target/state", action, err)
@@ -666,7 +667,7 @@ func prepareStandaloneUserNative(t *testing.T, ctx context.Context, r *Runtime, 
 				}
 			}
 		}
-		call(0, "standalone", "remove", "kept", "--operation", "kept-remove")
+		call(0, "standalone", "remove", "kept", "--id", "kept-remove")
 		gone("kept", "")
 		imageAfter, err := r.docker.API.ImageInspect(ctx, image)
 		if err != nil || imageAfter.ID != imageBefore.ID {
@@ -686,14 +687,14 @@ func verifyStandaloneQuotaReservations(t *testing.T, image string, definition fu
 	for i := 0; i < control.StandaloneTempLimitUser; i++ {
 		name := fmt.Sprintf("quota-%d", i)
 		f := definition(name, 6+i, image)
-		call(0, "standalone", "up", name, "-f", f, "--mode", "shell", "--ttl-seconds", "3600", "--operation", name+"-create")
+		call(0, "standalone", "run", name, "-f", f, "--mode", "shell", "--ttl", "3600s", "--id", name+"-create")
 	}
 	quotaOver := definition("quota-over", 14, image)
 	refuse(quotaOver)
-	call(-1, "standalone", "plan", "quota-over", "-f", quotaOver, "--mode", "shell")
+	call(-1, "standalone", "run", "quota-over", "-f", quotaOver, "--mode", "shell", "--dry-run")
 	for i := 0; i < control.StandaloneTempLimitUser; i++ {
 		name := fmt.Sprintf("quota-%d", i)
-		call(0, "standalone", "remove", name, "--operation", name+"-remove")
+		call(0, "standalone", "remove", name, "--id", name+"-remove")
 		gone(name, "")
 	}
 	t.Log("eight real user-quota reservations rejected the ninth and retired original operations")
@@ -703,19 +704,7 @@ func verifyStandaloneQuotaReservations(t *testing.T, image string, definition fu
 // disconnect a live stdin connection without sending EOF to the shell.
 func standaloneCLIAttachMarker(t *testing.T, ctx context.Context, cli *fixedAppNativeFixture, name, id, command, marker string, connected func()) string {
 	t.Helper()
-	password, writer, err := os.Pipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer password.Close()
-	_, err = io.WriteString(writer, "private-fixture-wallet-passphrase\n")
-	_ = writer.Close()
-	if err != nil {
-		t.Fatal(err)
-	}
-	child := exec.CommandContext(ctx, cli.binary, "--config", cli.profile, "--wallet-password-fd", "3", "--no-input", "--tenant", "tenant", "standalone", "attach", name, "--operation", id, "-it")
-	child.Env = append(os.Environ(), "HOME="+cli.home)
-	child.ExtraFiles = []*os.File{password}
+	child := nativeCLICmd(ctx, cli.binary, cli.home, cli.profile, "--tenant", "tenant", "standalone", "attach", name, "--id", id, "-i", "-t")
 	input, err := child.StdinPipe()
 	if err != nil {
 		t.Fatal(err)

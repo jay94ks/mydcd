@@ -1,0 +1,480 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Fri, 27 Nov 2026 08:29:32 +0000
+Subject: [PATCH 09/20] volumes: mount the directory descriptor sfcd passes
+ (open_tree + move_mount), per container
+
+
+diff --git a/daemon/command/daemon.go b/daemon/command/daemon.go
+index 7c667fe..f9e4ad2 100644
+--- a/daemon/command/daemon.go
++++ b/daemon/command/daemon.go
+@@ -309,6 +309,7 @@ func (cli *daemonCLI) start(ctx context.Context) (retErr error) {
+ 	eventfeed.Attach(feed)
+ 	defer feed.Close()
+ 	logqueue.Root = cli.Config.Root
++	volumedrv.Root = filepath.Join(cli.Config.ExecRoot, "volumes")
+ 	volumeservice.ExtraDrivers = append(volumeservice.ExtraDrivers, volumedrv.New(sfcd.New(sfcd.Socket(), peer.Allowed())))
+ 
+ 	d, err := daemon.NewDaemon(ctx, cli.Config, pluginStore, cli.authzMiddleware, cli.containerdDialer)
+diff --git a/daemon/create_unix.go b/daemon/create_unix.go
+index 5dba30f..046b715 100644
+--- a/daemon/create_unix.go
++++ b/daemon/create_unix.go
+@@ -118,7 +118,7 @@ func (daemon *Daemon) populateVolume(ctx context.Context, c *container.Container
+ 	}
+ 
+ 	uid, gid := daemon.idMapping.RootPair()
+-	volumePath, cleanup, err := mnt.Setup(ctx, c.MountLabel, idtools.Identity{UID: uid, GID: gid}, nil)
++	volumePath, cleanup, err := mnt.Setup(volumemounts.WithContainer(ctx, c.ID), c.MountLabel, idtools.Identity{UID: uid, GID: gid}, nil)
+ 	if err != nil {
+ 		if cerrdefs.IsNotFound(err) {
+ 			return nil
+diff --git a/daemon/seafield/sfcd/client.go b/daemon/seafield/sfcd/client.go
+index 8e50c6d..fcb16c2 100644
+--- a/daemon/seafield/sfcd/client.go
++++ b/daemon/seafield/sfcd/client.go
+@@ -26,6 +26,7 @@
+ // that the process listening on the socket is an allowed sfcd binary.
+ type Client struct {
+ 	http *http.Client
++	dial func(ctx context.Context, _, _ string) (net.Conn, error)
+ }
+ 
+ // Socket is DefaultSocket unless SEAFIELD_SFCD_SOCKET names another path
+@@ -52,12 +53,13 @@ func New(path string, allowed []string) *Client {
+ 		}
+ 		return c, nil
+ 	}
+-	return &Client{http: &http.Client{Transport: &http.Transport{DialContext: dial, MaxIdleConns: 4, IdleConnTimeout: 30 * time.Second}}}
++	return &Client{dial: dial, http: &http.Client{Transport: &http.Transport{DialContext: dial, MaxIdleConns: 4, IdleConnTimeout: 30 * time.Second}}}
+ }
+ 
+ // Error is a non-2xx answer from sfcd.
+ type Error struct {
+ 	Status  int
++	Code    string `json:"code,omitempty"` // e.g. not-ready, not-owner
+ 	Message string `json:"message"`
+ }
+ 
+diff --git a/daemon/seafield/sfcd/fd_linux.go b/daemon/seafield/sfcd/fd_linux.go
+new file mode 100644
+index 0000000..64b150b
+--- /dev/null
++++ b/daemon/seafield/sfcd/fd_linux.go
+@@ -0,0 +1,95 @@
++// SPDX-License-Identifier: Apache-2.0
++
++package sfcd
++
++import (
++	"bufio"
++	"bytes"
++	"context"
++	"encoding/json"
++	"errors"
++	"io"
++	"net"
++	"net/http"
++
++	"golang.org/x/sys/unix"
++)
++
++// DoFD is Do for an answer that carries one descriptor (SCM_RIGHTS on the
++// first bytes of the response): the volume Mount answer. It uses its own
++// connection, which sfcd closes after the answer. The caller owns the
++// returned fd; it is -1 when err is not nil.
++func (c *Client) DoFD(ctx context.Context, method, path string, body, out any) (int, error) {
++	b, err := json.Marshal(body)
++	if err != nil {
++		return -1, err
++	}
++	req, err := http.NewRequestWithContext(ctx, method, "http://sfcd/v1"+path, bytes.NewReader(b))
++	if err != nil {
++		return -1, err
++	}
++	req.Header.Set("Content-Type", "application/json")
++	conn, err := c.dial(ctx, "unix", "")
++	if err != nil {
++		return -1, err
++	}
++	defer conn.Close()
++	if dl, ok := ctx.Deadline(); ok {
++		_ = conn.SetDeadline(dl)
++	}
++	uc := conn.(*net.UnixConn)
++	if err = req.Write(uc); err != nil {
++		return -1, err
++	}
++	buf, oob := make([]byte, 64<<10), make([]byte, unix.CmsgSpace(4*4))
++	n, oobn, _, _, err := uc.ReadMsgUnix(buf, oob)
++	if err != nil {
++		return -1, err
++	}
++	fd := -1
++	if oobn > 0 {
++		msgs, err := unix.ParseSocketControlMessage(oob[:oobn])
++		if err != nil {
++			return -1, err
++		}
++		for i := range msgs {
++			fds, err := unix.ParseUnixRights(&msgs[i])
++			if err != nil {
++				continue
++			}
++			for _, f := range fds {
++				if fd < 0 {
++					fd = f
++				} else {
++					_ = unix.Close(f)
++				}
++			}
++		}
++	}
++	ok := false
++	defer func() {
++		if !ok && fd >= 0 {
++			_ = unix.Close(fd)
++		}
++	}()
++	resp, err := http.ReadResponse(bufio.NewReader(io.MultiReader(bytes.NewReader(buf[:n]), uc)), req)
++	if err != nil {
++		return -1, err
++	}
++	defer resp.Body.Close()
++	if resp.StatusCode/100 != 2 {
++		e := &Error{Status: resp.StatusCode}
++		_ = json.NewDecoder(io.LimitReader(resp.Body, 64<<10)).Decode(e)
++		return -1, e
++	}
++	if fd < 0 {
++		return -1, errors.New("sfcd answer carried no descriptor")
++	}
++	if out != nil {
++		if err = json.NewDecoder(io.LimitReader(resp.Body, 64<<10)).Decode(out); err != nil {
++			return -1, err
++		}
++	}
++	ok = true
++	return fd, nil
++}
+diff --git a/daemon/seafield/volumedrv/driver.go b/daemon/seafield/volumedrv/driver.go
+index d744693..adaf451 100644
+--- a/daemon/seafield/volumedrv/driver.go
++++ b/daemon/seafield/volumedrv/driver.go
+@@ -8,13 +8,16 @@
+ 
+ import (
+ 	"context"
++	"errors"
+ 	"net/http"
+ 	"net/url"
+ 	"time"
+ 
+ 	"github.com/moby/moby/v2/daemon/seafield/sfcd"
+ 	"github.com/moby/moby/v2/daemon/volume"
++	"github.com/moby/moby/v2/daemon/volume/mounts"
+ 	"github.com/moby/moby/v2/errdefs"
++	"golang.org/x/sys/unix"
+ )
+ 
+ // Name is the driver name.
+@@ -42,8 +45,17 @@ func (d *Driver) Scope() string { return volume.LocalScope }
+ func call(c *sfcd.Client, method, path string, body, out any) error {
+ 	ctx, cancel := context.WithTimeout(context.Background(), callTimeout)
+ 	defer cancel()
+-	err := c.Do(ctx, method, path, body, out)
++	return mapErr(c.Do(ctx, method, path, body, out))
++}
++
++func mapErr(err error) error {
+ 	if e, ok := err.(*sfcd.Error); ok {
++		switch e.Code {
++		case "not-ready":
++			return errdefs.Unavailable(e)
++		case "not-owner":
++			return errdefs.Forbidden(e)
++		}
+ 		switch e.Status {
+ 		case http.StatusNotFound:
+ 			return errdefs.NotFound(e)
+@@ -102,21 +114,47 @@ func (v *vol) Path() string                  { return v.path }
+ func (v *vol) CreatedAt() (time.Time, error) { return v.info.CreatedAt, nil }
+ func (v *vol) Status() map[string]any        { return v.info.Status }
+ 
++// Mount without a container is refused: sfcd answers only for containers
++// it created (see MountFor).
+ func (v *vol) Mount(id string) (string, error) {
+-	var out struct {
+-		Path string `json:"path"`
++	return v.MountFor(context.Background(), id)
++}
++
++// MountFor asks sfcd for the volume's directory as a descriptor and mounts
++// it at an engine-owned path (mount_linux.go). The engine never resolves a
++// path sfcd named.
++func (v *vol) MountFor(ctx context.Context, id string) (string, error) {
++	cid := mounts.ContainerFrom(ctx)
++	if cid == "" {
++		return "", errdefs.Forbidden(errors.New("sfc volumes mount only into containers sfcd creates"))
+ 	}
+-	if err := call(v.d.c, http.MethodPost, "/volumes/"+url.PathEscape(v.info.Name)+"/mount", map[string]string{"mount_id": id}, &out); err != nil {
+-		return "", err
++	target, err := mountPath(id)
++	if err != nil {
++		return "", errdefs.InvalidParameter(err)
+ 	}
+-	if out.Path == "" {
+-		return "", errdefs.System(errNoPath{})
++	var out mountAnswer
++	ctx, cancel := context.WithTimeout(context.Background(), callTimeout)
++	defer cancel()
++	fd, err := v.d.c.DoFD(ctx, http.MethodPost, "/volumes/"+url.PathEscape(v.info.Name)+"/mount", map[string]string{"mount_id": id, "container_id": cid}, &out)
++	if err != nil {
++		return "", mapErr(err)
++	}
++	defer unix.Close(fd)
++	if err = attach(fd, target, out); err != nil {
++		return "", errdefs.System(err)
+ 	}
+-	v.path = out.Path
+-	return out.Path, nil
++	v.path = target
++	return target, nil
+ }
+ 
+ func (v *vol) Unmount(id string) error {
++	target, err := mountPath(id)
++	if err != nil {
++		return errdefs.InvalidParameter(err)
++	}
++	if err = detach(target); err != nil {
++		return errdefs.System(err)
++	}
+ 	return call(v.d.c, http.MethodPost, "/volumes/"+url.PathEscape(v.info.Name)+"/unmount", map[string]string{"mount_id": id}, nil)
+ }
+ 
+diff --git a/daemon/seafield/volumedrv/mount_linux.go b/daemon/seafield/volumedrv/mount_linux.go
+new file mode 100644
+index 0000000..d4a05ba
+--- /dev/null
++++ b/daemon/seafield/volumedrv/mount_linux.go
+@@ -0,0 +1,91 @@
++// SPDX-License-Identifier: Apache-2.0
++
++package volumedrv
++
++import (
++	"errors"
++	"fmt"
++	"os"
++	"path/filepath"
++	"regexp"
++
++	"golang.org/x/sys/unix"
++)
++
++// Root is where volume mounts are attached, under the engine exec-root
++// (set at start: <exec-root>/volumes). runc bind-mounts from here.
++var Root = "/run/sfe/volumes"
++
++type mountAnswer struct {
++	ReadOnly bool   `json:"read_only"`
++	Dev      uint64 `json:"dev"`
++	Ino      uint64 `json:"ino"`
++}
++
++var validID = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$`)
++
++func mountPath(id string) (string, error) {
++	if !validID.MatchString(id) {
++		return "", fmt.Errorf("invalid mount id %q", id)
++	}
++	return filepath.Join(Root, id), nil
++}
++
++// attach clones the mount tree of the directory fd sfcd passed
++// (open_tree OPEN_TREE_CLONE), applies read-only when asked, and moves it
++// onto target. A target already holding the same directory (the same
++// mount_id again) is left as it is.
++func attach(fd int, target string, a mountAnswer) error {
++	var st unix.Stat_t
++	if err := unix.Fstat(fd, &st); err != nil {
++		return err
++	}
++	if st.Mode&unix.S_IFMT != unix.S_IFDIR {
++		return errors.New("sfcd passed a descriptor that is not a directory")
++	}
++	if (a.Dev != 0 || a.Ino != 0) && (uint64(st.Dev) != a.Dev || st.Ino != a.Ino) {
++		return fmt.Errorf("sfcd descriptor is %d:%d, answer says %d:%d", st.Dev, st.Ino, a.Dev, a.Ino)
++	}
++	if err := os.MkdirAll(Root, 0o700); err != nil {
++		return err
++	}
++	if err := os.Mkdir(target, 0o700); err != nil && !errors.Is(err, os.ErrExist) {
++		return err
++	}
++	var cur unix.Stat_t
++	if err := unix.Lstat(target, &cur); err == nil && cur.Dev == st.Dev && cur.Ino == st.Ino {
++		return nil
++	}
++	tree, err := unix.OpenTree(fd, "", unix.OPEN_TREE_CLONE|unix.OPEN_TREE_CLOEXEC|unix.AT_EMPTY_PATH)
++	if err != nil {
++		return fmt.Errorf("open_tree: %w", err)
++	}
++	defer unix.Close(tree)
++	if a.ReadOnly {
++		attr := unix.MountAttr{Attr_set: unix.MOUNT_ATTR_RDONLY}
++		if err = unix.MountSetattr(tree, "", unix.AT_EMPTY_PATH|unix.AT_RECURSIVE, &attr); err != nil {
++			return fmt.Errorf("mount_setattr rdonly: %w", err)
++		}
++	}
++	if err = unix.MoveMount(tree, "", unix.AT_FDCWD, target, unix.MOVE_MOUNT_F_EMPTY_PATH); err != nil {
++		return fmt.Errorf("move_mount: %w", err)
++	}
++	return nil
++}
++
++// detach removes the mount at target (if any) and the empty directory.
++func detach(target string) error {
++	for {
++		err := unix.Unmount(target, unix.MNT_DETACH|unix.UMOUNT_NOFOLLOW)
++		if err != nil {
++			if errors.Is(err, unix.EINVAL) || errors.Is(err, unix.ENOENT) {
++				break
++			}
++			return err
++		}
++	}
++	if err := os.Remove(target); err != nil && !errors.Is(err, os.ErrNotExist) {
++		return err
++	}
++	return nil
++}
+diff --git a/daemon/volume/mounts/mounts.go b/daemon/volume/mounts/mounts.go
+index e6d090e..342d053 100644
+--- a/daemon/volume/mounts/mounts.go
++++ b/daemon/volume/mounts/mounts.go
+@@ -190,7 +190,7 @@ func (m *MountPoint) Setup(ctx context.Context, mountLabel string, rootIDs idtoo
+ 		if id == "" {
+ 			id = stringid.GenerateRandomID()
+ 		}
+-		volumePath, err := m.Volume.Mount(id)
++		volumePath, err := MountVolume(ctx, m.Volume, id)
+ 		if err != nil {
+ 			return "", noCleanup, errors.Wrapf(err, "error while mounting volume '%s'", m.Source)
+ 		}
+diff --git a/daemon/volume/mounts/seafield_container.go b/daemon/volume/mounts/seafield_container.go
+new file mode 100644
+index 0000000..76df622
+--- /dev/null
++++ b/daemon/volume/mounts/seafield_container.go
+@@ -0,0 +1,44 @@
++// SPDX-License-Identifier: Apache-2.0
++
++package mounts
++
++import (
++	"context"
++
++	"github.com/moby/moby/v2/daemon/volume"
++)
++
++type containerKey struct{}
++
++// WithContainer records which container a mount is being set up for. The
++// built-in sfc volume driver needs it: sfcd answers a mount only for a
++// container it created.
++func WithContainer(ctx context.Context, id string) context.Context {
++	return context.WithValue(ctx, containerKey{}, id)
++}
++
++// ContainerFrom returns the id set by WithContainer, or "".
++func ContainerFrom(ctx context.Context) string {
++	id, _ := ctx.Value(containerKey{}).(string)
++	return id
++}
++
++// ContainerMounter is a volume that mounts per container (driver "sfc").
++type ContainerMounter interface {
++	MountFor(ctx context.Context, id string) (string, error)
++}
++
++// MountVolume mounts v for ref, passing ctx (and its container) to a
++// ContainerMounter found through any Unwrap chain.
++func MountVolume(ctx context.Context, v volume.Volume, id string) (string, error) {
++	for {
++		if cm, ok := v.(ContainerMounter); ok {
++			return cm.MountFor(ctx, id)
++		}
++		u, ok := v.(interface{ Unwrap() volume.Volume })
++		if !ok {
++			return v.Mount(id)
++		}
++		v = u.Unwrap()
++	}
++}
+diff --git a/daemon/volume/service/service.go b/daemon/volume/service/service.go
+index 6ae354a..1ee633e 100644
+--- a/daemon/volume/service/service.go
++++ b/daemon/volume/service/service.go
+@@ -14,6 +14,7 @@
+ 	"github.com/moby/moby/v2/daemon/internal/stringid"
+ 	"github.com/moby/moby/v2/daemon/volume"
+ 	"github.com/moby/moby/v2/daemon/volume/drivers"
++	"github.com/moby/moby/v2/daemon/volume/mounts"
+ 	"github.com/moby/moby/v2/daemon/volume/service/opts"
+ 	"github.com/moby/moby/v2/errdefs"
+ 	"github.com/moby/moby/v2/pkg/plugingetter"
+@@ -125,7 +126,7 @@ func (s *VolumesService) Mount(ctx context.Context, vol *volumetypes.Volume, ref
+ 		}
+ 		return "", err
+ 	}
+-	return v.Mount(ref)
++	return mounts.MountVolume(ctx, v, ref)
+ }
+ 
+ // Unmount unmounts the volume.
+diff --git a/daemon/volume/service/store.go b/daemon/volume/service/store.go
+index 0590fa4..63b3637 100644
+--- a/daemon/volume/service/store.go
++++ b/daemon/volume/service/store.go
+@@ -36,6 +36,9 @@ type volumeWrapper struct {
+ 	options map[string]string
+ }
+ 
++// Unwrap returns the driver's volume (Seafield: per-container mounts).
++func (v volumeWrapper) Unwrap() volume.Volume { return v.Volume }
++
+ func (v volumeWrapper) Options() map[string]string {
+ 	if v.options == nil {
+ 		return nil
+diff --git a/daemon/volumes.go b/daemon/volumes.go
+index aa657e2..ef1e190 100644
+--- a/daemon/volumes.go
++++ b/daemon/volumes.go
+@@ -315,6 +315,11 @@ func (v *volumeWrapper) Mount(ref string) (string, error) {
+ 	return v.s.Mount(context.TODO(), v.v, ref)
+ }
+ 
++// MountFor passes ctx (the container being set up) down to the driver.
++func (v *volumeWrapper) MountFor(ctx context.Context, ref string) (string, error) {
++	return v.s.Mount(ctx, v.v, ref)
++}
++
+ func (v *volumeWrapper) Unmount(ref string) error {
+ 	return v.s.Unmount(context.TODO(), v.v, ref)
+ }
+diff --git a/daemon/volumes_unix.go b/daemon/volumes_unix.go
+index a64a84b..7f622b2 100644
+--- a/daemon/volumes_unix.go
++++ b/daemon/volumes_unix.go
+@@ -63,7 +63,7 @@ func (daemon *Daemon) setupMounts(ctx context.Context, c *container.Container) (
+ 		}
+ 
+ 		uid, gid := daemon.idMapping.RootPair()
+-		path, clean, err := m.Setup(ctx, c.MountLabel, idtools.Identity{UID: uid, GID: gid}, checkfunc)
++		path, clean, err := m.Setup(volumemounts.WithContainer(ctx, c.ID), c.MountLabel, idtools.Identity{UID: uid, GID: gid}, checkfunc)
+ 		if err != nil {
+ 			return nil, nil, err
+ 		}

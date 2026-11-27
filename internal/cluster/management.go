@@ -12,9 +12,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/mydcp"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/sfcp"
 	"io"
 
 	"github.com/quic-go/quic-go"
@@ -30,11 +30,37 @@ type ManagementRequest struct {
 	Input   []byte
 }
 type signedRequest struct {
-	Caller    mydcp.Identity
+	Caller    sfcp.Identity
 	Body      []byte
 	Signature []byte
 	Forwarded bool
 }
+
+// signedRequestWire carries Body as itself, not base64 (design O4).
+type signedRequestWire struct {
+	Caller    sfcp.Identity
+	Body      json.RawMessage
+	Signature []byte
+	Forwarded bool
+}
+
+func (r signedRequest) MarshalJSON() ([]byte, error) {
+	body, err := sfcp.RawBody(r.Body)
+	if err != nil {
+		return nil, err
+	}
+	return json.Marshal(signedRequestWire{r.Caller, body, r.Signature, r.Forwarded})
+}
+
+func (r *signedRequest) UnmarshalJSON(raw []byte) error {
+	var w signedRequestWire
+	if err := sfcp.StrictJSON(raw, &w); err != nil {
+		return err
+	}
+	*r = signedRequest{Caller: w.Caller, Body: bytes.Clone(w.Body), Signature: w.Signature, Forwarded: w.Forwarded}
+	return nil
+}
+
 type ObjectView struct {
 	Revision, Generation uint64
 	Present              bool
@@ -54,7 +80,7 @@ type ManagementReply struct {
 }
 type ManagementError struct {
 	Code, Message string
-	Phase         mydcp.Phase
+	Phase         sfcp.Phase
 }
 
 func (e *ManagementError) Error() string {
@@ -62,7 +88,7 @@ func (e *ManagementError) Error() string {
 }
 
 func signingBytes(cluster [32]byte, body []byte) []byte {
-	b := append([]byte("mydc-management-1"), cluster[:]...)
+	b := append([]byte("sfc-management-1"), cluster[:]...)
 	return append(b, body...)
 }
 func strictJSON(b []byte, target any) error {
@@ -77,11 +103,11 @@ func strictJSON(b []byte, target any) error {
 	return nil
 }
 func (e *Engine) ServeManagement() error {
-	return e.mesh.On(mydcp.Management, e.management)
+	return e.mesh.On(sfcp.Management, e.management)
 }
-func (e *Engine) management(ctx context.Context, s *mydcp.Session, stream *quic.Stream, f mydcp.Frame) error {
-	if f.Kind != 1 && f.Kind != 3 && f.Kind != 4 {
-		return mydcp.ErrFrame
+func (e *Engine) management(ctx context.Context, s *sfcp.Session, stream *quic.Stream, f sfcp.Frame) error {
+	if f.Kind != sfcp.KindRequest && f.Kind != sfcp.KindManagementRead && f.Kind != sfcp.KindRelay {
+		return sfcp.ErrFrame
 	}
 	var envelope signedRequest
 	if err := strictJSON(f.Fields[0].Value, &envelope); err != nil {
@@ -89,15 +115,15 @@ func (e *Engine) management(ctx context.Context, s *mydcp.Session, stream *quic.
 	}
 	digest := sha256.Sum256(envelope.Body)
 	if !bytes.Equal(digest[:], f.Fields[1].Value) || !ed25519.Verify(ed25519.PublicKey(envelope.Caller[:]), signingBytes(e.cluster, envelope.Body), envelope.Signature) {
-		return mydcp.ErrAdmission
+		return sfcp.ErrAdmission
 	}
 	if envelope.Forwarded {
 		relay, current := e.mesh.Peer(s.Peer().Key)
-		if f.Kind != 4 || !current || !relay.Member {
-			return mydcp.ErrAdmission
+		if f.Kind != sfcp.KindRelay || !current || !relay.Member {
+			return sfcp.ErrAdmission
 		}
-	} else if f.Kind == 4 || envelope.Caller != s.Peer().Key {
-		return mydcp.ErrAdmission
+	} else if f.Kind == sfcp.KindRelay || envelope.Caller != s.Peer().Key {
+		return sfcp.ErrAdmission
 	}
 	var request ManagementRequest
 	if err := strictJSON(envelope.Body, &request); err != nil {
@@ -105,10 +131,10 @@ func (e *Engine) management(ctx context.Context, s *mydcp.Session, stream *quic.
 	}
 	canonical, err := json.Marshal(request)
 	if err != nil || !bytes.Equal(canonical, envelope.Body) || request.Schema != 1 || request.Nonce == [16]byte{} {
-		return mydcp.ErrFrame
+		return sfcp.ErrFrame
 	}
-	if !envelope.Forwarded && (request.Method == "submit") != (f.Kind == 1) {
-		return mydcp.ErrFrame
+	if !envelope.Forwarded && (request.Method == "submit") != (f.Kind == sfcp.KindRequest) {
+		return sfcp.ErrFrame
 	}
 	caller, approved := e.mesh.Peer(envelope.Caller)
 	reply := ManagementReply{Schema: 1, Code: "denied", Message: "current caller permission denied", Node: e.id}
@@ -125,12 +151,12 @@ func (e *Engine) management(ctx context.Context, s *mydcp.Session, stream *quic.
 					reply.Message = "no authenticated leader"
 				} else {
 					envelope.Forwarded = true
-					forward, phase, callErr := exchange(ctx, e.mesh, target, envelope, 4)
+					forward, phase, callErr := exchange(ctx, e.mesh, target, envelope, sfcp.KindRelay)
 					if callErr == nil {
 						reply = forward
 					} else {
 						reply.Code = "unknown"
-						if phase == mydcp.NotSent {
+						if phase == sfcp.NotSent {
 							reply.Code = "unavailable"
 						}
 						reply.Message = callErr.Error()
@@ -147,9 +173,9 @@ func (e *Engine) management(ctx context.Context, s *mydcp.Session, stream *quic.
 	if err != nil {
 		return err
 	}
-	return mydcp.WriteFrame(stream, mydcp.Frame{Purpose: mydcp.Management, Kind: 2, Request: f.Request, Fields: []mydcp.Field{{Tag: 1, Required: true, Value: b}, {Tag: 2, Required: true, Value: digest[:]}}})
+	return sfcp.WriteFrame(stream, sfcp.Frame{Purpose: sfcp.Management, Kind: sfcp.KindResponse, Request: f.Request, Fields: []sfcp.Field{{Tag: 1, Required: true, Value: b}, {Tag: 2, Required: true, Value: digest[:]}}})
 }
-func (e *Engine) executeManagement(ctx context.Context, caller mydcp.Identity, r ManagementRequest) ManagementReply {
+func (e *Engine) executeManagement(ctx context.Context, caller sfcp.Identity, r ManagementRequest) ManagementReply {
 	reply := ManagementReply{Schema: 1, Code: "ok", Node: e.id}
 	if r.Method == "submit" {
 		if e.nodeCLIAllowed != nil {
@@ -202,12 +228,8 @@ func (e *Engine) executeManagement(ctx context.Context, caller mydcp.Identity, r
 		reply.Code, reply.Message = "denied", "node CLI operations are disabled; use an authenticated user query"
 		return reply
 	}
-	method := r.Method
-	if _, report := ReportMethod(method); report {
-		method = reportKind
-	}
-	switch method {
-	case reportKind:
+	switch m, known := nodeMethods[r.Method]; {
+	case known && m.kind == nodeReport:
 		if e.commandModule == nil || !r.Latest || v.Local || !current.Member || r.Key != "" || r.Command != nil {
 			reply.Code = "denied"
 			break
@@ -231,7 +253,7 @@ func (e *Engine) executeManagement(ctx context.Context, caller mydcp.Identity, r
 		reply.RaftIndex = committed.RaftIndex
 		reply.AppliedTerm = committed.Term
 		reply.CommandIndex = committed.Result.Index
-	case "app-observation-renew", "node-shell-owner-view", "node-shell-permit", "node-identity-activation", "node-diagnostics-permit", "lifecycle-source-version-permit", "service-call-permit", "image-build-base-work", "image-build-registry-permit", "image-build-secret-inputs", "image-build-cache-prune-work", "image-build-job-work", "image-build-artifact-work", "image-build-io-permit", "image-build-part-permit", "registry-maintenance-work", "image-cache-plan-permit", "image-cache-work", "tunnel-reconnect-work", "compact-work", "task-restart-permit", "container-session-plan", "container-session-permit", "container-read-permit", "tenant-retirement-work", "node-runtime-work", "route-native-permit", "route-work", "registry-image-permit", "registry-work", "external-registry-work", "checker-cache-gc-fence", "checker-probe-permit", "checker-shutdown-permit", "checker-build-permit", "checker-source-permit", "checker-artifact-permit", "app-native-permit", "app-binding-permit", "app-input-read-permit", "app-delivery-permit", "app-delivery-sync-work", "app-result", "vault-write-permit", "vault-approval-permit", "vault-approval-result", "volume-file-work", "volume-usage-permit", "volume-backup-permit", "volume-restore-permit", "volume-delete-permit", "volume-retained-delete-permit", "volume-create-permit", "volume-move-permit", "node-storage-permit":
+	case known && m.kind == nodeLeaderRead:
 		if e.readModule == nil || !r.Latest || v.Local || !current.Member || r.Key != "" || r.Command != nil {
 			reply.Code = "denied"
 			break
@@ -239,48 +261,22 @@ func (e *Engine) executeManagement(ctx context.Context, caller mydcp.Identity, r
 		data, err := e.readModule(ctx, r.Method, hex.EncodeToString(caller[:]), r.Input, v)
 		if err != nil {
 			reply.Code = "denied"
-			reply.Message = "current app read denied"
+			reply.Message = m.fail
 		} else {
 			reply.Data = data
 		}
-	case "node-diagnostics-owner", "lifecycle-source-version-owner", "ingress-observe", "image-build-base-tls-owner", "image-build-registry-tls-owner", "image-build-base-token-owner", "image-build-base-owner", "image-build-caches-owner", "image-build-cache-owner", "image-build-logs-owner", "image-build-publication-owner", "image-build-git-owner", "image-build-draft-owner", "image-build-content-owner", "image-build-source-owner", "image-build-owner", "registry-prune-owner", "registry-catalog-owner", "event-receipt", "image-cache-native-plan", "external-registry-probe", "image-resolve-owner", "container-observe", "route-flow-observe", "checker-cache-observe", "volume-usage-observe", "volume-backup-source-observe", "volume-move-recipe-observe", "volume-move-inputs-observe", "node-storage-space-observe":
-		// Node-local readback deliberately stays on the native owner. It is not
-		// an authority read: that owner obtains fresh quorum permits itself.
+	case known && m.kind == nodeOwnerRead:
 		if e.readModule == nil || r.Latest || !current.Member || r.Key != "" || r.Command != nil {
 			reply.Code = "denied"
 			break
 		}
 		data, err := e.readModule(ctx, r.Method, hex.EncodeToString(caller[:]), r.Input, v)
 		if err != nil {
-			reply.Code, reply.Message = "unavailable", "volume observation unavailable"
-			if r.Method == "image-build-publication-owner" {
-				reply.Message = "image build publication observation unavailable"
-			}
-			if r.Method == "image-build-base-owner" {
-				reply.Message = "image build base resolution unavailable"
-			}
-			if r.Method == "image-build-base-tls-owner" || r.Method == "image-build-registry-tls-owner" {
-				reply.Message = "image build registry trust unavailable"
-			}
-			if r.Method == "image-build-base-token-owner" {
-				reply.Message = "image build base authentication unavailable"
-			}
-			if r.Method == "image-build-cache-owner" || r.Method == "image-build-caches-owner" {
-				reply.Message = "image build cache observation unavailable"
-			}
-			if r.Method == "image-build-logs-owner" {
-				reply.Message = "image build logs unavailable"
-			}
-			if r.Method == "route-flow-observe" {
-				reply.Message = "route flow observation unavailable"
-			}
-			if r.Method == "checker-cache-observe" {
-				reply.Message = "checker cache observation unavailable"
-			}
+			reply.Code, reply.Message = "unavailable", m.fail
 		} else {
 			reply.Data = data
 		}
-	case "volume-permit":
+	case known && m.kind == nodeVolumePermit:
 		if e.readModule == nil || !r.Latest || !current.Member || r.Key != "" || v.Local {
 			reply.Code = "denied"
 			reply.Message = "fresh member volume read required"
@@ -291,10 +287,20 @@ func (e *Engine) executeManagement(ctx context.Context, caller mydcp.Identity, r
 		data, err := e.readModule(ctx, r.Method, hex.EncodeToString(caller[:]), r.Input, v)
 		if err != nil {
 			reply.Code = "denied"
-			reply.Message = "current volume activation denied"
+			reply.Message = m.fail
 		} else {
 			reply.Data = data
 		}
+	default:
+		e.builtinManagement(ctx, caller, r, v, &reply)
+	}
+	return reply
+}
+
+// builtinManagement serves the methods every node has: status, get, result,
+// observe and plan.
+func (e *Engine) builtinManagement(ctx context.Context, caller sfcp.Identity, r ManagementRequest, v View, reply *ManagementReply) {
+	switch r.Method {
 	case "status":
 	case "get":
 		if r.Key == "" || len(r.Key) > 512 {
@@ -336,18 +342,13 @@ func (e *Engine) executeManagement(ctx context.Context, caller mydcp.Identity, r
 		reply.Code = "invalid"
 		reply.Message = "unsupported management method"
 	}
-	return reply
 }
-
-// reportKind stands for every ReportMethod in the management switch. It is
-// not a valid method name.
-const reportKind = "\x00report"
 
 // CallManagement signs the original payload once. The transport never retries a
 // command, even if its first write is followed by a timeout or connection loss.
-func CallManagement(ctx context.Context, mesh *mydcp.Transport, self *identity.Identity, cluster [32]byte, peer mydcp.Peer, r ManagementRequest) (ManagementReply, error) {
-	if self == nil || mydcp.Identity(self.Public) != mesh.LocalKey() {
-		return ManagementReply{}, mydcp.ErrAdmission
+func CallManagement(ctx context.Context, mesh *sfcp.Transport, self *identity.Identity, cluster [32]byte, peer sfcp.Peer, r ManagementRequest) (ManagementReply, error) {
+	if self == nil || sfcp.Identity(self.Public) != mesh.LocalKey() {
+		return ManagementReply{}, sfcp.ErrAdmission
 	}
 	r.Schema = 1
 	if _, err := rand.Read(r.Nonce[:]); err != nil {
@@ -357,10 +358,10 @@ func CallManagement(ctx context.Context, mesh *mydcp.Transport, self *identity.I
 	if err != nil {
 		return ManagementReply{}, err
 	}
-	envelope := signedRequest{Caller: mydcp.Identity(self.Public), Body: body, Signature: ed25519.Sign(self.Private, signingBytes(cluster, body))}
-	kind := uint8(3)
+	envelope := signedRequest{Caller: sfcp.Identity(self.Public), Body: body, Signature: ed25519.Sign(self.Private, signingBytes(cluster, body))}
+	kind := sfcp.KindManagementRead
 	if r.Method == "submit" {
-		kind = 1
+		kind = sfcp.KindRequest
 	}
 	reply, phase, err := exchange(ctx, mesh, peer, envelope, kind)
 	if err != nil {
@@ -371,19 +372,19 @@ func CallManagement(ctx context.Context, mesh *mydcp.Transport, self *identity.I
 	}
 	return reply, nil
 }
-func exchange(ctx context.Context, mesh *mydcp.Transport, peer mydcp.Peer, envelope signedRequest, kind uint8) (ManagementReply, mydcp.Phase, error) {
+func exchange(ctx context.Context, mesh *sfcp.Transport, peer sfcp.Peer, envelope signedRequest, kind uint8) (ManagementReply, sfcp.Phase, error) {
 	digest := sha256.Sum256(envelope.Body)
 	id := mesh.NextRequest()
-	request, _ := mydcp.NewRequest(fmt.Sprint(id), digest)
-	fail := func(err error) (ManagementReply, mydcp.Phase, error) {
+	request, _ := sfcp.NewRequest(fmt.Sprint(id), digest)
+	fail := func(err error) (ManagementReply, sfcp.Phase, error) {
 		return ManagementReply{}, request.Abandon().Phase(), err
 	}
 	b, err := json.Marshal(envelope)
 	if err != nil {
 		return fail(err)
 	}
-	frame := mydcp.Frame{Purpose: mydcp.Management, Kind: kind, Request: id, Fields: []mydcp.Field{{Tag: 1, Required: true, Value: b}, {Tag: 2, Required: true, Value: digest[:]}}}
-	if _, err = mydcp.Encode(frame); err != nil {
+	frame := sfcp.Frame{Purpose: sfcp.Management, Kind: kind, Request: id, Fields: []sfcp.Field{{Tag: 1, Required: true, Value: b}, {Tag: 2, Required: true, Value: digest[:]}}}
+	if _, err = sfcp.Encode(frame); err != nil {
 		return fail(err)
 	}
 	if err = ctx.Err(); err != nil {
@@ -393,32 +394,14 @@ func exchange(ctx context.Context, mesh *mydcp.Transport, peer mydcp.Peer, envel
 	if err != nil {
 		return fail(err)
 	}
-	stream, err := s.Open(ctx)
+	received, err := s.Call(ctx, frame, sfcp.CallOptions{Echo: digest[:], Sent: func() { request, _ = request.BeginSend() }})
 	if err != nil {
-		return fail(err)
-	}
-	defer stream.CancelRead(0)
-	defer stream.Close()
-	stop := context.AfterFunc(ctx, func() { stream.CancelRead(1); stream.CancelWrite(1) })
-	defer stop()
-	if err = ctx.Err(); err != nil {
-		return fail(err)
-	}
-	request, _ = request.BeginSend()
-	if err = mydcp.WriteFrame(stream, frame); err != nil {
-		return fail(err)
-	}
-	received, err := mydcp.ReadFrame(stream, 128<<10)
-	if err != nil {
-		return fail(err)
-	}
-	if received.Request != id || received.Purpose != mydcp.Management || received.Kind != 2 || s.Admit(received, mydcp.Management, false) != nil || !bytes.Equal(received.Fields[1].Value, digest[:]) {
-		return fail(mydcp.ErrAdmission)
+		return fail(sfcp.CallCause(err))
 	}
 	var reply ManagementReply
 	if err = strictJSON(received.Fields[0].Value, &reply); err != nil || reply.Schema != 1 {
 		if err == nil {
-			err = mydcp.ErrFrame
+			err = sfcp.ErrFrame
 		}
 		return fail(err)
 	}

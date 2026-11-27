@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/web/provlog"
+	"github.com/jay94ks/seafield/internal/web/provlog"
 )
 
 // hostingerAPI is a stand-in for the Hostinger API with the response

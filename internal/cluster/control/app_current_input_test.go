@@ -11,9 +11,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/config"
-	"github.com/jay94ks/mydcd/internal/storage"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/config"
+	"github.com/jay94ks/seafield/internal/storage"
 )
 
 // Test-only corruption of existing rows in an owned canonical snapshot. This
@@ -91,8 +91,7 @@ func TestPermitAppsStructuralReuseComparesWholeCurrentInput(t *testing.T) {
 		t.Fatal("same-index different bytes reused structural success", err)
 	}
 	good := decoded.current.Load()
-	part := partKey(CatalogKey, 0)
-	bad := structuralSnapshotWrites(t, b, map[string][]byte{part: []byte(b.Object(part).Value + " ")})
+	bad := structuralSnapshotWrites(t, b, map[string][]byte{CatalogKey: []byte(b.Object(CatalogKey).Value + " ")})
 	if _, err := f.p.ReadApps(bad); err == nil || decoded.current.Load() != good {
 		t.Fatal("changed Catalog bypassed validation or poisoned last success")
 	}
@@ -109,7 +108,7 @@ func TestPermitAppsStructuralReuseComparesWholeCurrentInput(t *testing.T) {
 // Reuse the exact closed E8 input; no DB mutation, credentials, clocks in the
 // product transition, native effect or substituted implementation is involved.
 func TestClosedTargetAppsStructuralReuseRejectsChangedVolume(t *testing.T) {
-	prefix := os.Getenv("MYDC_E8_TARGET_CLOSED_SOURCE_PREFIX")
+	prefix := os.Getenv("SFC_E8_TARGET_CLOSED_SOURCE_PREFIX")
 	if prefix == "" {
 		t.Skip("explicit original closed target input required")
 	}
@@ -210,7 +209,7 @@ func TestClosedTargetAppsStructuralReuseRejectsChangedVolume(t *testing.T) {
 	if _, err := p.ReadApps(changed); err == nil || decoded.current.Load() != current {
 		t.Fatal("changed Volume native proof reused old success")
 	}
-	part := partKey(VolumesKey, 0)
+	part := storedPart(t, s, VolumesKey)
 	corrupt := structuralSnapshotWrites(t, s, map[string][]byte{part: []byte(s.Object(part).Value + " ")})
 	if _, err := p.ReadApps(corrupt); err == nil || decoded.current.Load() != current {
 		t.Fatal("changed Volume checkpoint part reused old success")

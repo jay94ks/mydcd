@@ -12,10 +12,12 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/cluster/membership"
-	"github.com/jay94ks/mydcd/internal/mydcp"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/membership"
+	"github.com/jay94ks/seafield/internal/config"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/sfcp"
 	"github.com/quic-go/quic-go"
 )
 
@@ -23,41 +25,83 @@ type MemberRequest struct {
 	Schema               uint8
 	Method, Node, JoinID string
 	Ack                  *membership.Ack `json:",omitempty"`
+	// Joiner is set only when a member that is not the leader relays a
+	// joining node's request: the joining node's TLS key, as hex. The
+	// leader checks it exactly as it checks a direct requester's key.
+	Joiner string `json:",omitempty"`
 }
 type MemberReply struct {
 	Schema  uint8
 	Code    string
 	Message string            `json:",omitempty"`
 	Entry   *membership.Entry `json:",omitempty"`
+	// Leader, with Code "unavailable", names the leader a member could not
+	// relay to, so the joining node can ask it directly.
+	Leader *MemberLeader `json:",omitempty"`
+	// Members, on an "ok" join reply, lists the current full members, so
+	// a joining node accepts replication from a leader that is not its
+	// invitation's genesis or source. It arrives over the authenticated
+	// session with the pinned source, which vouches for it as it would for
+	// the replicated state itself.
+	Members []config.Peer `json:",omitempty"`
+}
+
+// MemberLeader identifies the current leader for a joining node.
+type MemberLeader struct {
+	ID, Key, Endpoint string
 }
 
 func memberDecode(raw []byte, target any) error {
 	d := json.NewDecoder(bytes.NewReader(raw))
 	d.DisallowUnknownFields()
 	if d.Decode(target) != nil {
-		return mydcp.ErrFrame
+		return sfcp.ErrFrame
 	}
 	b, err := json.Marshal(target)
 	if err != nil || !bytes.Equal(b, raw) {
-		return mydcp.ErrFrame
+		return sfcp.ErrFrame
 	}
 	return nil
 }
-func (r *Runtime) serveMembership() error { return r.Mesh.On(mydcp.Membership, r.membershipRequest) }
-func (r *Runtime) membershipRequest(ctx context.Context, session *mydcp.Session, stream *quic.Stream, f mydcp.Frame) error {
+func (r *Runtime) serveMembership() error { return r.Mesh.On(sfcp.Membership, r.membershipRequest) }
+func (r *Runtime) membershipRequest(ctx context.Context, session *sfcp.Session, stream *quic.Stream, f sfcp.Frame) error {
 	if f.Kind != 1 {
-		return mydcp.ErrFrame
+		return sfcp.ErrFrame
 	}
 	digest := sha256.Sum256(f.Fields[0].Value)
 	var req MemberRequest
 	if !bytes.Equal(digest[:], f.Fields[1].Value) || memberDecode(f.Fields[0].Value, &req) != nil || req.Schema != 1 {
-		return mydcp.ErrFrame
+		return sfcp.ErrFrame
 	}
 	reply := MemberReply{Schema: 1, Code: "denied"}
+	// requester is the joining node's TLS key: the session's own, or the
+	// one a current full member relays.
+	requester := session.Peer().Key
+	relayed := req.Joiner != ""
+	if relayed {
+		relayer, ok := r.Mesh.Peer(session.Peer().Key)
+		key, err := identity.ParseKey(req.Joiner)
+		if !ok || !relayer.Member || err != nil || fmt.Sprintf("%x", key) != req.Joiner || sfcp.Identity(key) == session.Peer().Key {
+			return r.writeMemberReply(stream, f, digest, reply)
+		}
+		requester = sfcp.Identity(key)
+	}
+	if engine := r.Engine(); engine != nil && !engine.IsLeader() {
+		// Only the leader reads the latest state and changes membership.
+		// The invitation source may have become a follower since it
+		// signed the invitation, so pass the request on; a relayed request
+		// is never relayed again.
+		if relayed {
+			reply.Code = "unavailable"
+		} else {
+			reply = r.relayMembership(ctx, requester, req)
+		}
+		return r.writeMemberReply(stream, f, digest, reply)
+	}
 	view, d, err := r.members(ctx, true)
 	if err != nil {
 		reply.Code = "unavailable"
-	} else if entry, ok := d.Entry(req.Node); ok && entry.JoinID == req.JoinID && entry.Peer.Key == fmt.Sprintf("%x", session.Peer().Key) {
+	} else if entry, ok := d.Entry(req.Node); ok && entry.JoinID == req.JoinID && entry.Peer.Key == fmt.Sprintf("%x", requester) {
 		// Only this joining TLS key can request its own approved operation.
 		switch req.Method {
 		case "join":
@@ -73,7 +117,7 @@ func (r *Runtime) membershipRequest(ctx context.Context, session *mydcp.Session,
 				}
 			}
 		case "install":
-			if req.Ack != nil && req.Ack.Schema == 1 && req.Ack.Cluster == d.Cluster && req.Ack.Node == req.Node && req.Ack.JoinID == req.JoinID && req.Ack.Key == [32]byte(session.Peer().Key) && ed25519.Verify(ed25519.PublicKey(req.Ack.Key[:]), membership.AckBytes(*req.Ack), req.Ack.Signature) {
+			if req.Ack != nil && req.Ack.Schema == 1 && req.Ack.Cluster == d.Cluster && req.Ack.Node == req.Node && req.Ack.JoinID == req.JoinID && req.Ack.Key == [32]byte(requester) && ed25519.Verify(ed25519.PublicKey(req.Ack.Key[:]), membership.AckBytes(*req.Ack), req.Ack.Signature) {
 				if membership.FullMember(entry) {
 					reply.Code = "ok"
 				} else {
@@ -96,16 +140,55 @@ func (r *Runtime) membershipRequest(ctx context.Context, session *mydcp.Session,
 				if current, ok := now.Entry(req.Node); ok {
 					reply.Entry = &current
 				}
+				if req.Method == "join" {
+					for _, e := range now.Entries {
+						if membership.FullMember(e) && e.Peer.ID != req.Node {
+							reply.Members = append(reply.Members, e.CurrentPeer())
+						}
+					}
+				}
 			} else {
 				reply.Code = "unavailable"
 			}
 		}
 	}
+	return r.writeMemberReply(stream, f, digest, reply)
+}
+
+func (r *Runtime) writeMemberReply(stream *quic.Stream, f sfcp.Frame, digest [32]byte, reply MemberReply) error {
 	raw, err := json.Marshal(reply)
 	if err != nil {
 		return err
 	}
-	return mydcp.WriteFrame(stream, mydcp.Frame{Purpose: mydcp.Membership, Kind: 2, Request: f.Request, Fields: []mydcp.Field{{Tag: 1, Required: true, Value: raw}, {Tag: 2, Required: true, Value: digest[:]}}})
+	return sfcp.WriteFrame(stream, sfcp.Frame{Purpose: sfcp.Membership, Kind: 2, Request: f.Request, Fields: []sfcp.Field{{Tag: 1, Required: true, Value: raw}, {Tag: 2, Required: true, Value: digest[:]}}})
+}
+
+// relayMembership passes a joining node's request to the leader and returns
+// the leader's reply. A failure before the request reached the leader is
+// "unavailable" with the leader named, so the joining node may ask it
+// directly; a failure after it was sent is "unknown", as for a direct call.
+func (r *Runtime) relayMembership(ctx context.Context, requester sfcp.Identity, req MemberRequest) MemberReply {
+	reply := MemberReply{Schema: 1, Code: "unavailable"}
+	leader, ok := r.Engine().LeaderPeer()
+	if !ok {
+		return reply
+	}
+	reply.Leader = &MemberLeader{ID: leader.ID, Key: fmt.Sprintf("%x", leader.Key), Endpoint: leader.Endpoint}
+	if leader.Key == r.Mesh.LocalKey() {
+		return reply
+	}
+	req.Joiner = fmt.Sprintf("%x", requester)
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	relayed, err := CallMembership(ctx, r.Mesh, leader, req)
+	switch {
+	case err == nil || relayed.Code != "" && relayed.Code != "unknown":
+		relayed.Leader = nil
+		return relayed
+	case errors.Is(err, cluster.ErrUnknown):
+		return MemberReply{Schema: 1, Code: "unknown", Message: err.Error()}
+	}
+	return reply
 }
 
 // reportInstalled commits the joiner's signed ACK. Other nodes' reports
@@ -137,7 +220,7 @@ func (r *Runtime) reportInstalled(ctx context.Context, view cluster.View, entry 
 
 // CallMembership sends once. Transport uncertainty never creates a new Join ID
 // or silently resubmits a configuration change; the original shared A2 survives.
-func CallMembership(ctx context.Context, mesh *mydcp.Transport, target mydcp.Peer, req MemberRequest) (MemberReply, error) {
+func CallMembership(ctx context.Context, mesh *sfcp.Transport, target sfcp.Peer, req MemberRequest) (MemberReply, error) {
 	req.Schema = 1
 	raw, err := json.Marshal(req)
 	if err != nil {
@@ -145,8 +228,11 @@ func CallMembership(ctx context.Context, mesh *mydcp.Transport, target mydcp.Pee
 	}
 	digest := sha256.Sum256(raw)
 	id := mesh.NextRequest()
-	lifetime, _ := mydcp.NewRequest(fmt.Sprint(id), digest)
-	conn, err := mesh.Dial(ctx, target)
+	lifetime, _ := sfcp.NewRequest(fmt.Sprint(id), digest)
+	// A joining node may be unable to reach its source (it sits on a private
+	// network); the source then connects to it, and that session carries the
+	// request (see meshLinks).
+	conn, err := mesh.DialWait(ctx, target)
 	if err != nil {
 		return MemberReply{}, err
 	}
@@ -158,24 +244,24 @@ func CallMembership(ctx context.Context, mesh *mydcp.Transport, target mydcp.Pee
 	defer stream.Close()
 	stop := context.AfterFunc(ctx, func() { stream.CancelRead(1); stream.CancelWrite(1) })
 	defer stop()
-	f := mydcp.Frame{Purpose: mydcp.Membership, Kind: 1, Request: id, Fields: []mydcp.Field{{Tag: 1, Required: true, Value: raw}, {Tag: 2, Required: true, Value: digest[:]}}}
-	if _, err = mydcp.Encode(f); err != nil {
+	f := sfcp.Frame{Purpose: sfcp.Membership, Kind: 1, Request: id, Fields: []sfcp.Field{{Tag: 1, Required: true, Value: raw}, {Tag: 2, Required: true, Value: digest[:]}}}
+	if _, err = sfcp.Encode(f); err != nil {
 		return MemberReply{}, err
 	}
 	if err = ctx.Err(); err != nil {
 		return MemberReply{}, err
 	}
 	lifetime, _ = lifetime.BeginSend()
-	if err = mydcp.WriteFrame(stream, f); err != nil {
+	if err = sfcp.WriteFrame(stream, f); err != nil {
 		return MemberReply{}, fmt.Errorf("%w: %v", cluster.ErrUnknown, err)
 	}
-	response, err := mydcp.ReadFrame(stream, 128<<10)
+	response, err := sfcp.ReadFrame(stream, 128<<10)
 	if err != nil {
 		return MemberReply{}, fmt.Errorf("%w: %v", cluster.ErrUnknown, err)
 	}
 	var reply MemberReply
-	if response.Purpose != mydcp.Membership || response.Kind != 2 || response.Request != id || conn.Admit(response, mydcp.Membership, false) != nil || !bytes.Equal(response.Fields[1].Value, digest[:]) || memberDecode(response.Fields[0].Value, &reply) != nil || reply.Schema != 1 {
-		return MemberReply{}, mydcp.ErrFrame
+	if response.Purpose != sfcp.Membership || response.Kind != 2 || response.Request != id || conn.Admit(response, sfcp.Membership, false) != nil || !bytes.Equal(response.Fields[1].Value, digest[:]) || memberDecode(response.Fields[0].Value, &reply) != nil || reply.Schema != 1 {
+		return MemberReply{}, sfcp.ErrFrame
 	}
 	if reply.Code == "unknown" {
 		return reply, fmt.Errorf("%w: %s", cluster.ErrUnknown, reply.Message)

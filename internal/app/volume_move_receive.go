@@ -15,12 +15,12 @@ import (
 	"os"
 	"syscall"
 
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/reconcile"
-	"github.com/jay94ks/mydcd/internal/schema"
-	"github.com/jay94ks/mydcd/internal/storage"
-	"github.com/jay94ks/mydcd/internal/workload/volumes"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/storage"
+	"github.com/jay94ks/seafield/internal/workload/volumes"
 )
 
 // Receipt/offset files record local I/O, never a second ownership authority.
@@ -43,7 +43,7 @@ func moveReceiveKey(b moveReceiveIntent) string {
 
 type moveReceiveBackend interface {
 	Authorize(context.Context, moveReceiveIntent, bool) error
-	Transfer(context.Context, moveReceiveIntent, uint64, [32]byte, mydcp.VolumeSink) error
+	Transfer(context.Context, moveReceiveIntent, uint64, [32]byte, sfcp.VolumeSink) error
 }
 type moveReceiveProgress struct {
 	Schema                uint8
@@ -423,7 +423,7 @@ func (m *backupArtifacts) openReceive(ctx context.Context, b moveReceiveIntent, 
 		return nil, err
 	}
 	p, err := schema.Decode[moveReceiveProgress](raw)
-	if err != nil || p.Schema != 1 || p.Binding != b.digest() || p.Inode == 0 || p.Offset > b.Manifest.Bytes || p.Offset != b.Manifest.Bytes && p.Offset%mydcp.VolumeChunkSize != 0 {
+	if err != nil || p.Schema != 1 || p.Binding != b.digest() || p.Inode == 0 || p.Offset > b.Manifest.Bytes || p.Offset != b.Manifest.Bytes && p.Offset%sfcp.VolumeChunkSize != 0 {
 		return nil, errBackupArtifact
 	}
 	f, err := dir.OpenFile("archive.tar", os.O_RDWR|syscall.O_NOFOLLOW, 0)
@@ -437,10 +437,10 @@ func (m *backupArtifacts) openReceive(ctx context.Context, b moveReceiveIntent, 
 	}()
 	s := &moveReceiveSink{m: m, b: b, backend: backend, dir: dir, file: f, progress: p, prefix: sha256.New()}
 	size, err := s.originalFile()
-	if err != nil || size < p.Offset || size > min(b.Manifest.Bytes, p.Offset+mydcp.VolumeChunkSize) {
+	if err != nil || size < p.Offset || size > min(b.Manifest.Bytes, p.Offset+sfcp.VolumeChunkSize) {
 		return nil, errBackupArtifact
 	}
-	buffer := make([]byte, mydcp.VolumeChunkSize)
+	buffer := make([]byte, sfcp.VolumeChunkSize)
 	defer clear(buffer)
 	for offset := uint64(0); offset < p.Offset; {
 		if err = ctx.Err(); err != nil {
@@ -514,7 +514,7 @@ func (s *moveReceiveSink) WriteChunk(ctx context.Context, offset uint64, data []
 	if err := ctx.Err(); err != nil {
 		return 0, err
 	}
-	if s.finished || offset != s.progress.Offset || offset >= s.b.Manifest.Bytes || uint64(len(data)) != min(uint64(mydcp.VolumeChunkSize), s.b.Manifest.Bytes-offset) {
+	if s.finished || offset != s.progress.Offset || offset >= s.b.Manifest.Bytes || uint64(len(data)) != min(uint64(sfcp.VolumeChunkSize), s.b.Manifest.Bytes-offset) {
 		return 0, errBackupArtifact
 	}
 	if err := s.backend.Authorize(ctx, s.b, false); err != nil {

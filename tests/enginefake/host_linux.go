@@ -17,7 +17,7 @@ import (
 
 // Docker makes a kernel bridge for each bridge network and a network
 // namespace for each running container, joined to its bridges by veth
-// links; mydcd reads both back (bridge type, MTU, gateways; routes inside
+// links; sfcd reads both back (bridge type, MTU, gateways; routes inside
 // the container's namespace, named by its PID and sandbox key). With UseHost
 // the fake does the same (needs root): bridges live in its namespace (the
 // node's namespace; empty is the test's own), and a running container's
@@ -61,6 +61,13 @@ func (e *Engine) createBridgeLink(n *netw) error {
 	}
 	defer h.Close()
 	name := n.Options["com.docker.network.bridge.name"]
+	if n.Driver == sfcDriver && len(n.Name) >= 12 {
+		// Seafield's sfc driver takes the device name from sfcd's create
+		// hook (purpose 36), which names it "md" + the network name's last
+		// 12 characters (network.BridgeDeviceName); the fake asks no hook
+		// and uses that name directly.
+		name = "md" + n.Name[len(n.Name)-12:]
+	}
 	if name == "" {
 		name = "br-" + n.ID[:12]
 	}

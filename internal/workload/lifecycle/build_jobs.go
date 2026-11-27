@@ -9,7 +9,7 @@ import (
 	"encoding/json"
 	"slices"
 
-	"github.com/jay94ks/mydcd/internal/access"
+	"github.com/jay94ks/seafield/internal/access"
 )
 
 const maxBuildJobs = 4096
@@ -41,7 +41,7 @@ func (b BuildIntent) Clone() BuildIntent {
 }
 func (b BuildIntent) Digest() [32]byte {
 	raw, _ := json.Marshal(b)
-	return sha256.Sum256(append([]byte("mydc-checker-build-intent-1\x00"), raw...))
+	return sha256.Sum256(append([]byte("sfc-checker-build-intent-1\x00"), raw...))
 }
 func (b BuildIntent) Validate() error {
 	if raw, err := json.Marshal(b); err != nil || len(raw) > MaxBuildIntentBytes {
@@ -159,7 +159,7 @@ func validateBuildArtifacts(b BuildIntent, artifacts []BuildArtifact) error {
 func BuildClosureBytes(c BuildClosure) []byte {
 	c.Signature = nil
 	raw, _ := json.Marshal(c)
-	return append([]byte("mydc-checker-build-closure-1\x00"), raw...)
+	return append([]byte("sfc-checker-build-closure-1\x00"), raw...)
 }
 func (c BuildClosure) Digest() [32]byte { raw, _ := json.Marshal(c); return sha256.Sum256(raw) }
 func (c BuildClosure) Verify(b BuildIntent, phase string) error {

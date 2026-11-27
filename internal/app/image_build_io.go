@@ -8,12 +8,12 @@ import (
 	"errors"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/imagebuild"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/nodestorage"
-	"github.com/jay94ks/mydcd/internal/schema"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/imagebuild"
+	"github.com/jay94ks/seafield/internal/nodestorage"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/sfcp"
 )
 
 func buildArtifactConsumer(scope imagebuild.UploadScope) string {
@@ -31,7 +31,7 @@ func (r *Runtime) imageBuildIOPermit(ctx context.Context, call control.ImageBuil
 	}
 	work, err := schema.Decode[control.ImageBuildIOWork](reply.Data)
 	if err != nil || work.Schema != 1 || work.Cluster != r.controlPolicy.Cluster || work.Scope.Validate() != nil || work.Scope.Cluster != work.Cluster || work.Scope.Root.Key != r.Identity.Public || work.Scope.Tenant != call.Tenant || work.Scope.Upload != call.Request.Upload || work.Expected < call.Request.Expected || work.Expected != call.Request.Expected && !work.Recorded || work.Recorded && (!call.Request.Record || call.Request.Kind != "part") || work.Root.Reference(work.Cluster) != work.Scope.Root || work.Epoch == 0 || work.Index == 0 || call.Request.Record && (work.RootRevision == 0 || work.RootRevision > work.Index) || !call.Request.Record && work.RootRevision != 0 {
-		return control.ImageBuildIOWork{}, mydcp.ErrAdmission
+		return control.ImageBuildIOWork{}, sfcp.ErrAdmission
 	}
 	return work, nil
 }
@@ -48,7 +48,7 @@ func imageBuildPermitInput(call control.ImageBuildIOCall) (string, []byte, error
 		return "image-build-part-permit", raw, err
 	}
 	if !call.Request.Valid() {
-		return "", nil, mydcp.ErrAdmission
+		return "", nil, sfcp.ErrAdmission
 	}
 	raw, err := json.Marshal(call)
 	return "image-build-io-permit", raw, err
@@ -59,7 +59,7 @@ func imageBuildPermitInput(call control.ImageBuildIOCall) (string, []byte, error
 // current authority after acquiring the native gate and after the actual I/O.
 func (r *Runtime) imageBuildTransfer(ctx context.Context, view cluster.View, call control.ImageBuildIOCall) (control.ImageBuildIOResult, error) {
 	if view.Local || view.RaftIndex == 0 || ctx.Err() != nil || r.ctx.Err() != nil {
-		return control.ImageBuildIOResult{}, mydcp.ErrAdmission
+		return control.ImageBuildIOResult{}, sfcp.ErrAdmission
 	}
 	b, err := r.controlPolicy.ImageBuilds(view.State)
 	if err != nil {
@@ -67,7 +67,7 @@ func (r *Runtime) imageBuildTransfer(ctx context.Context, view cluster.View, cal
 	}
 	u, ok := b.Upload(call.Tenant, call.Request.Upload)
 	if !ok {
-		return control.ImageBuildIOResult{}, mydcp.ErrAdmission
+		return control.ImageBuildIOResult{}, sfcp.ErrAdmission
 	}
 	call.At = time.Now().Unix()
 	if _, err := r.controlPolicy.ImageBuildIOPermit(view.State, u.Scope.Root.Key, call); err != nil {
@@ -76,18 +76,18 @@ func (r *Runtime) imageBuildTransfer(ctx context.Context, view cluster.View, cal
 	if u.Scope.Root.Key == r.Identity.Public {
 		return r.imageBuildTransferOwner(ctx, call)
 	}
-	peer, ok := r.Mesh.Peer(mydcp.Identity(u.Scope.Root.Key))
+	peer, ok := r.Mesh.Peer(sfcp.Identity(u.Scope.Root.Key))
 	if !ok || !peer.Member || peer.ID != u.Scope.Root.Node {
-		return control.ImageBuildIOResult{}, mydcp.ErrAdmission
+		return control.ImageBuildIOResult{}, sfcp.ErrAdmission
 	}
 	raw, _ := json.Marshal(call)
 	reply, err := cluster.CallManagement(ctx, r.Mesh, r.Identity, r.controlPolicy.Cluster, peer, cluster.ManagementRequest{Method: "image-build-owner", Input: raw})
 	if err != nil || reply.Code != "ok" {
-		return control.ImageBuildIOResult{}, mydcp.ErrAdmission
+		return control.ImageBuildIOResult{}, sfcp.ErrAdmission
 	}
 	result, err := schema.Decode[control.ImageBuildIOResult](reply.Data)
 	if err != nil || !result.Valid(u.Scope, call.Request) {
-		return control.ImageBuildIOResult{}, mydcp.ErrAdmission
+		return control.ImageBuildIOResult{}, sfcp.ErrAdmission
 	}
 	return result, nil
 }
@@ -109,7 +109,7 @@ func (r *Runtime) imageBuildTransferOwner(ctx context.Context, call control.Imag
 	r.life.RLock()
 	defer r.life.RUnlock()
 	if r.closed || r.nodeRoots == nil || r.reports == nil || r.ctx.Err() != nil {
-		return control.ImageBuildIOResult{}, mydcp.ErrAdmission
+		return control.ImageBuildIOResult{}, sfcp.ErrAdmission
 	}
 	r.imageBuildMu.Lock()
 	defer r.imageBuildMu.Unlock()
@@ -120,7 +120,7 @@ func (r *Runtime) imageBuildTransferOwner(ctx context.Context, call control.Imag
 	// start writing because its previous grant once succeeded.
 	work, err := r.imageBuildIOPermit(ctx, call)
 	if err != nil {
-		return control.ImageBuildIOResult{}, mydcp.ErrAdmission
+		return control.ImageBuildIOResult{}, sfcp.ErrAdmission
 	}
 	var pin nodestorage.RootPin
 	if work.Recorded {
@@ -192,7 +192,7 @@ func (r *Runtime) imageBuildTransferOwner(ctx context.Context, call control.Imag
 	// dependency. The creator may abort; only native reclamation can return it.
 	latest, err := r.imageBuildIOPermit(ctx, call)
 	if err != nil || latest.Scope != work.Scope {
-		return control.ImageBuildIOResult{}, mydcp.ErrAdmission
+		return control.ImageBuildIOResult{}, sfcp.ErrAdmission
 	}
 	if result.Code == "OK" && result.Part != nil && call.Request.Record {
 		if !latest.Recorded {

@@ -6,7 +6,7 @@ import "math"
 
 const SessionChunkBytes = 16 << 10
 
-// SessionRecord is carried by the container-session purpose only. The MYDCP
+// SessionRecord is carried by the container-session purpose only. The SFCP
 // request and signed intent digest remain fixed outside this ordered record.
 // A distinct stdin-eof keeps the reverse output direction open on Unix/QUIC.
 type SessionRecord struct {

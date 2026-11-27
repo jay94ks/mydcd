@@ -2,7 +2,7 @@
 
 package imagebuild
 
-import "github.com/jay94ks/mydcd/internal/reconcile"
+import "github.com/jay94ks/seafield/internal/reconcile"
 
 // GeneratedArtifact identifies existing native source evidence, never a new
 // upload/operation. Only one original plan is present.
@@ -31,7 +31,7 @@ func (a GeneratedArtifact) PlanDigest() [32]byte {
 	return [32]byte{}
 }
 func (a GeneratedArtifact) Digest() [32]byte {
-	return digestJSON("mydc-imagebuild-generated-artifact-1", a)
+	return digestJSON("sfc-imagebuild-generated-artifact-1", a)
 }
 
 type GeneratedArchiveGrant struct {

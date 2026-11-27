@@ -10,21 +10,21 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/servicecall"
-	"github.com/jay94ks/mydcd/internal/userauth"
-	"github.com/jay94ks/mydcd/tests/gitfixture"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/servicecall"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/userauth"
+	"github.com/jay94ks/seafield/tests/gitfixture"
 )
 
 // Called only by the original service diagnostics native root, after its real
 // CD pause/source-read join. Existing owner leases and Git counters distinguish
 // admission refusal from a request that reached the native/source adapters.
-func verifyManagedDiagnosticsAuthority(t *testing.T, ctx context.Context, r *Runtime, user userauth.Client, peer mydcp.Peer, p control.Policy, read func() cluster.View, wait func(string, func() bool), change func(string, string, uint64, any), source *gitfixture.Fixture, probe deployment.GitProbeRequest, call servicecall.Request, body, commit string, size int64, fingerprint func() [32]byte) {
+func verifyManagedDiagnosticsAuthority(t *testing.T, ctx context.Context, r *Runtime, user userauth.Client, peer sfcp.Peer, p control.Policy, read func() cluster.View, wait func(string, func() bool), change func(string, string, uint64, any), source *gitfixture.Fixture, probe deployment.GitProbeRequest, call servicecall.Request, body, commit string, size int64, fingerprint func() [32]byte) {
 	t.Helper()
 	baseline := fingerprint()
 	create := func(id string) (access.Session, *identity.Identity) {
@@ -95,12 +95,12 @@ func verifyManagedDiagnosticsAuthority(t *testing.T, ctx context.Context, r *Run
 		beforeNative, beforeGit := nativeReads(), source.Stats()
 		service, err := user.CallService(ctx, peer, session, tenant, call)
 		var refused *userauth.Error
-		if !errors.As(err, &refused) || refused.Code != "denied" || refused.Phase != mydcp.Completed || len(service.Body) != 0 || service.Task != "" {
+		if !errors.As(err, &refused) || refused.Code != "denied" || refused.Phase != sfcp.Completed || len(service.Body) != 0 || service.Task != "" {
 			t.Fatal("service authority refusal was not an authenticated server denial", err)
 		}
 		result, err := user.ProbeCD(ctx, peer, session, tenant, probe)
 		refused = nil
-		if !errors.As(err, &refused) || refused.Code != "denied" || refused.Phase != mydcp.Completed || result.Commit != "" || result.Size != 0 {
+		if !errors.As(err, &refused) || refused.Code != "denied" || refused.Phase != sfcp.Completed || result.Commit != "" || result.Size != 0 {
 			t.Fatal("Git authority refusal was not an authenticated server denial", err)
 		}
 		if nativeReads() != beforeNative || !reflect.DeepEqual(source.Stats(), beforeGit) {

@@ -7,9 +7,9 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
-	"github.com/jay94ks/mydcd/internal/engine"
-	"github.com/jay94ks/mydcd/internal/network"
-	"github.com/jay94ks/mydcd/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/engine"
+	"github.com/jay94ks/seafield/internal/network"
+	"github.com/jay94ks/seafield/internal/reconcile"
 	"net/netip"
 	"os"
 	"path/filepath"
@@ -21,7 +21,7 @@ import (
 )
 
 func TestRealBoundaryPrecreateRejectionAndDependencyReturn(t *testing.T) {
-	owner := os.Getenv("MYDC_DOCKER_TEST_OWNER")
+	owner := os.Getenv("SFC_DOCKER_TEST_OWNER")
 	if owner == "" {
 		t.Skip("requires explicit owner and docs/testing/system-rollback.md prestate")
 	}
@@ -43,7 +43,7 @@ func TestRealBoundaryPrecreateRejectionAndDependencyReturn(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = w.Close() }()
-	prefix := netip.MustParsePrefix(os.Getenv("MYDC_DOCKER_TEST_CIDR"))
+	prefix := netip.MustParsePrefix(os.Getenv("SFC_DOCKER_TEST_CIDR"))
 	bridge := network.BridgeSpec{Schema: 1, Network: "precreate", Owner: owner, MTU: 1280, Internal: true, Pools: []network.Pool{{ID: "a", Network: "precreate", Owner: owner, Prefix: prefix, Gateway: prefix.Addr().Next(), MTU: 1280}}}
 	bridgeKey, taskKey := "network/precreate", "workload/precreate"
 	if err = n.Desired(bridgeKey, 1, 1, &bridge, 2); err != nil {

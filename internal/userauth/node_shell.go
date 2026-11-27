@@ -13,10 +13,10 @@ import (
 	"io"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/schema"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/sfcp"
 )
 
 // NodeShellStream is the existing native owner's original-ID SSH session. The
@@ -55,29 +55,29 @@ func (r NodeShellReply) valid() bool {
 	}
 	return false
 }
-func nodeShellResponse(stream mydcp.Stream, f mydcp.Frame, digest [32]byte, reply NodeShellReply) error {
+func nodeShellResponse(stream sfcp.Stream, f sfcp.Frame, digest [32]byte, reply NodeShellReply) error {
 	reply.Schema = 1
 	if !reply.valid() {
-		return mydcp.ErrFrame
+		return sfcp.ErrFrame
 	}
 	raw, err := json.Marshal(reply)
 	if err != nil {
 		return err
 	}
-	return mydcp.WriteFrame(stream, mydcp.Frame{Purpose: mydcp.NodeShell, Kind: 2, Request: f.Request, Fields: []mydcp.Field{{Tag: 1, Required: true, Value: raw}, {Tag: 2, Required: true, Value: digest[:]}}})
+	return sfcp.WriteFrame(stream, sfcp.Frame{Purpose: sfcp.NodeShell, Kind: 2, Request: f.Request, Fields: []sfcp.Field{{Tag: 1, Required: true, Value: raw}, {Tag: 2, Required: true, Value: digest[:]}}})
 }
-func (s Service) handleNodeShell(ctx context.Context, conn *mydcp.Session, stream mydcp.Stream, frame mydcp.Frame) error {
+func (s Service) handleNodeShell(ctx context.Context, conn *sfcp.Session, stream sfcp.Stream, frame sfcp.Frame) error {
 	if frame.Kind != 1 && frame.Kind != 3 {
-		return mydcp.ErrFrame
+		return sfcp.ErrFrame
 	}
 	digest := sha256.Sum256(frame.Fields[0].Value)
 	if !bytes.Equal(digest[:], frame.Fields[1].Value) {
-		return mydcp.ErrFrame
+		return sfcp.ErrFrame
 	}
 	envelope, err := schema.Decode[Envelope](frame.Fields[0].Value)
 	defer clear(frame.Fields[0].Value)
 	if err != nil {
-		return mydcp.ErrFrame
+		return sfcp.ErrFrame
 	}
 	defer clear(envelope.Body)
 	respond := func(code string) error { return nodeShellResponse(stream, frame, digest, NodeShellReply{Code: code}) }
@@ -179,7 +179,7 @@ func serveNodeShell(channel *NodeShellChannel, native NodeShellStream) error {
 			case "half-close":
 				err = native.CloseWrite()
 			case "ping":
-				err = channel.Send(mydcp.NodeShellRecord{Kind: "ping"})
+				err = channel.Send(sfcp.NodeShellRecord{Kind: "ping"})
 			}
 			if err != nil {
 				_ = native.Close()
@@ -189,12 +189,12 @@ func serveNodeShell(channel *NodeShellChannel, native NodeShellStream) error {
 		}
 	}()
 	defer func() { _ = native.Close(); channel.StopReceive(); <-input }()
-	buffer := make([]byte, mydcp.NodeShellChunkBytes)
+	buffer := make([]byte, sfcp.NodeShellChunkBytes)
 	defer clear(buffer)
 	for {
 		n, err := native.Read(buffer)
 		if n > 0 {
-			if e := channel.Send(mydcp.NodeShellRecord{Kind: "stdout", Data: buffer[:n]}); e != nil {
+			if e := channel.Send(sfcp.NodeShellRecord{Kind: "stdout", Data: buffer[:n]}); e != nil {
 				return e
 			}
 		}
@@ -209,22 +209,22 @@ func serveNodeShell(channel *NodeShellChannel, native NodeShellStream) error {
 	if err != nil {
 		return err
 	}
-	wire := mydcp.NodeShellEnd{Code: end.Code, Reason: end.Reason}
+	wire := sfcp.NodeShellEnd{Code: end.Code, Reason: end.Reason}
 	if end.ClosedBy != nil {
-		wire.ClosedBy = &mydcp.NodeShellActor{User: end.ClosedBy.User, Username: end.ClosedBy.Username}
+		wire.ClosedBy = &sfcp.NodeShellActor{User: end.ClosedBy.User, Username: end.ClosedBy.Username}
 	}
-	return channel.Send(mydcp.NodeShellRecord{Kind: "end", End: &wire})
+	return channel.Send(sfcp.NodeShellRecord{Kind: "end", End: &wire})
 }
-func (c Client) nodeShellExchange(ctx context.Context, peer mydcp.Peer, q NodeShellRequest, expires int64, kind uint8, makeEnvelope func(*mydcp.Session, []byte) (Envelope, error)) (*NodeShellChannel, NodeShellReply, error) {
+func (c Client) nodeShellExchange(ctx context.Context, peer sfcp.Peer, q NodeShellRequest, expires int64, kind uint8, makeEnvelope func(*sfcp.Session, []byte) (Envelope, error)) (*NodeShellChannel, NodeShellReply, error) {
 	var reply NodeShellReply
 	if !q.valid() || c.Mesh == nil || c.Self == nil || c.Self.Public != [32]byte(c.Mesh.LocalKey()) {
-		return nil, reply, mydcp.ErrAdmission
+		return nil, reply, sfcp.ErrAdmission
 	}
 	setup, finish := context.WithTimeout(ctx, 10*time.Second)
 	defer finish()
 	conn, err := c.Mesh.Dial(setup, peer)
 	if err != nil {
-		return nil, reply, &Error{Code: "transport", Phase: mydcp.NotSent, Cause: err}
+		return nil, reply, &Error{Code: "transport", Phase: sfcp.NotSent, Cause: err}
 	}
 	body, err := json.Marshal(q)
 	if err != nil {
@@ -242,7 +242,7 @@ func (c Client) nodeShellExchange(ctx context.Context, peer mydcp.Peer, q NodeSh
 	digest := sha256.Sum256(raw)
 	stream, err := conn.OpenNodeShellStream(setup)
 	if err != nil {
-		return nil, reply, &Error{Code: "transport", Phase: mydcp.NotSent, Cause: err}
+		return nil, reply, &Error{Code: "transport", Phase: sfcp.NotSent, Cause: err}
 	}
 	keep := false
 	defer func() {
@@ -256,29 +256,29 @@ func (c Client) nodeShellExchange(ctx context.Context, peer mydcp.Peer, q NodeSh
 	deadline, _ := setup.Deadline()
 	_ = stream.SetDeadline(deadline)
 	id := c.Mesh.NextRequest()
-	f := mydcp.Frame{Purpose: mydcp.NodeShell, Kind: kind, Request: id, Fields: []mydcp.Field{{Tag: 1, Required: true, Value: raw}, {Tag: 2, Required: true, Value: digest[:]}}}
-	if err = mydcp.WriteFrame(stream, f); err != nil {
-		return nil, reply, &Error{Code: "transport", Phase: mydcp.Unknown, Cause: err}
+	f := sfcp.Frame{Purpose: sfcp.NodeShell, Kind: kind, Request: id, Fields: []sfcp.Field{{Tag: 1, Required: true, Value: raw}, {Tag: 2, Required: true, Value: digest[:]}}}
+	if err = sfcp.WriteFrame(stream, f); err != nil {
+		return nil, reply, &Error{Code: "transport", Phase: sfcp.Unknown, Cause: err}
 	}
-	response, err := mydcp.ReadFrame(stream, 128<<10)
+	response, err := sfcp.ReadFrame(stream, 128<<10)
 	if err != nil {
-		return nil, reply, &Error{Code: "transport", Phase: mydcp.Unknown, Cause: err}
+		return nil, reply, &Error{Code: "transport", Phase: sfcp.Unknown, Cause: err}
 	}
-	if response.Purpose != mydcp.NodeShell || response.Kind != 2 || response.Request != id || conn.Admit(response, mydcp.NodeShell, false) != nil || !bytes.Equal(response.Fields[1].Value, digest[:]) {
-		return nil, reply, mydcp.ErrFrame
+	if response.Purpose != sfcp.NodeShell || response.Kind != 2 || response.Request != id || conn.Admit(response, sfcp.NodeShell, false) != nil || !bytes.Equal(response.Fields[1].Value, digest[:]) {
+		return nil, reply, sfcp.ErrFrame
 	}
 	reply, err = schema.Decode[NodeShellReply](response.Fields[0].Value)
 	if err != nil || !reply.valid() {
-		return nil, reply, mydcp.ErrFrame
+		return nil, reply, sfcp.ErrFrame
 	}
 	if reply.Code != "ready" {
 		if streamEOF(stream) != nil {
-			return nil, reply, mydcp.ErrFrame
+			return nil, reply, sfcp.ErrFrame
 		}
-		return nil, reply, &Error{Code: reply.Code, Phase: mydcp.Completed}
+		return nil, reply, &Error{Code: reply.Code, Phase: sfcp.Completed}
 	}
 	if reply.Session.SessionID != q.SessionID {
-		return nil, reply, mydcp.ErrFrame
+		return nil, reply, sfcp.ErrFrame
 	}
 	channel, err := newNodeShellChannel(ctx, conn, stream, id, sha256.Sum256(body), expires, true)
 	if err != nil {
@@ -287,15 +287,15 @@ func (c Client) nodeShellExchange(ctx context.Context, peer mydcp.Peer, q NodeSh
 	keep = true
 	return channel, reply, nil
 }
-func (c Client) OpenNodeShell(ctx context.Context, peer mydcp.Peer, session access.Session, originalID string) (*NodeShellChannel, control.NodeShellSession, error) {
+func (c Client) OpenNodeShell(ctx context.Context, peer sfcp.Peer, session access.Session, originalID string) (*NodeShellChannel, control.NodeShellSession, error) {
 	if c.Verify(session) != nil {
-		return nil, control.NodeShellSession{}, mydcp.ErrAdmission
+		return nil, control.NodeShellSession{}, sfcp.ErrAdmission
 	}
 	q := NodeShellRequest{Schema: 1, SessionID: originalID}
 	if _, err := rand.Read(q.Nonce[:]); err != nil {
 		return nil, control.NodeShellSession{}, err
 	}
-	channel, reply, err := c.nodeShellExchange(ctx, peer, q, session.ExpiresAt, 1, func(conn *mydcp.Session, body []byte) (Envelope, error) {
+	channel, reply, err := c.nodeShellExchange(ctx, peer, q, session.ExpiresAt, 1, func(conn *sfcp.Session, body []byte) (Envelope, error) {
 		return Envelope{Body: body, Session: &session, Signature: ed25519.Sign(c.Self.Private, access.RequestBytes(session, conn.PeerChallenge(), body))}, nil
 	})
 	if err != nil {
@@ -303,19 +303,19 @@ func (c Client) OpenNodeShell(ctx context.Context, peer mydcp.Peer, session acce
 	}
 	if reply.Session.User != session.User {
 		_ = channel.Close()
-		return nil, control.NodeShellSession{}, mydcp.ErrFrame
+		return nil, control.NodeShellSession{}, sfcp.ErrFrame
 	}
 	return channel, *reply.Session, nil
 }
-func (s Service) forwardNodeShell(ctx context.Context, conn *mydcp.Session, stream mydcp.Stream, frame mydcp.Frame, digest [32]byte, envelope Envelope, binding userBinding, q NodeShellRequest, owner [32]byte) error {
-	peer, ok := s.Mesh.Peer(mydcp.Identity(owner))
-	if !ok || !peer.Member || peer.Key == mydcp.Identity(s.Self.Public) {
+func (s Service) forwardNodeShell(ctx context.Context, conn *sfcp.Session, stream sfcp.Stream, frame sfcp.Frame, digest [32]byte, envelope Envelope, binding userBinding, q NodeShellRequest, owner [32]byte) error {
+	peer, ok := s.Mesh.Peer(sfcp.Identity(owner))
+	if !ok || !peer.Member || peer.Key == sfcp.Identity(s.Self.Public) {
 		return nodeShellResponse(stream, frame, digest, NodeShellReply{Code: "node-unreachable"})
 	}
 	c := Client{Mesh: s.Mesh, Self: s.Self, Cluster: s.Policy.Cluster}
-	remote, reply, err := c.nodeShellExchange(ctx, peer, q, envelope.Session.ExpiresAt, 3, func(conn *mydcp.Session, body []byte) (Envelope, error) {
+	remote, reply, err := c.nodeShellExchange(ctx, peer, q, envelope.Session.ExpiresAt, 3, func(conn *sfcp.Session, body []byte) (Envelope, error) {
 		if !bytes.Equal(body, envelope.Body) {
-			return Envelope{}, mydcp.ErrFrame
+			return Envelope{}, sfcp.ErrFrame
 		}
 		copy := envelope
 		copy.Relay = &Relay{Node: s.Self.Public, Target: [32]byte(peer.Key), Caller: binding.key, Challenge: binding.challenge, Connection: conn.PeerChallenge()}
@@ -325,7 +325,7 @@ func (s Service) forwardNodeShell(ctx context.Context, conn *mydcp.Session, stre
 	if err != nil {
 		code := "unavailable"
 		var e *Error
-		if errors.As(err, &e) && e.Phase == mydcp.Completed {
+		if errors.As(err, &e) && e.Phase == sfcp.Completed {
 			code = e.Code
 		}
 		return nodeShellResponse(stream, frame, digest, NodeShellReply{Code: code})

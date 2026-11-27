@@ -11,16 +11,16 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/config"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/reconcile"
-	"github.com/jay94ks/mydcd/internal/secrets"
-	"github.com/jay94ks/mydcd/internal/userauth"
-	"github.com/jay94ks/mydcd/tests/vaultfixture"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/config"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/secrets"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/userauth"
+	"github.com/jay94ks/seafield/tests/vaultfixture"
 )
 
 func installManagedVault(t *testing.T, c *config.Node, root string, v *vaultfixture.Vault, lifetime ...time.Duration) {
@@ -36,14 +36,14 @@ func installManagedVault(t *testing.T, c *config.Node, root string, v *vaultfixt
 	if seconds < 1 {
 		t.Fatal("positive provider credential lifetime required")
 	}
-	v.API("PUT", "sys/policies/acl/mydc-native-app", map[string]any{"policy": `path "kv/data/tenant/*" { capabilities = ["create","update","read"] } path "kv/data/groups/tenant/*" { capabilities = ["create","update","read"] }`}, nil, v.Admin)
+	v.API("PUT", "sys/policies/acl/sfc-native-app", map[string]any{"policy": `path "kv/data/tenant/*" { capabilities = ["create","update","read"] } path "kv/data/groups/tenant/*" { capabilities = ["create","update","read"] }`}, nil, v.Admin)
 	var issued struct {
 		Auth struct {
 			Token   string `json:"client_token"`
 			Seconds int    `json:"lease_duration"`
 		} `json:"auth"`
 	}
-	v.API("POST", "auth/token/create", map[string]any{"policies": []string{"mydc-native-app"}, "no_default_policy": true, "ttl": fmt.Sprintf("%ds", seconds), "renewable": false}, &issued, v.Admin)
+	v.API("POST", "auth/token/create", map[string]any{"policies": []string{"sfc-native-app"}, "no_default_policy": true, "ttl": fmt.Sprintf("%ds", seconds), "renewable": false}, &issued, v.Admin)
 	if issued.Auth.Token == "" || issued.Auth.Seconds < seconds {
 		t.Fatal("owned provider credential does not cover the finite scenario")
 	}
@@ -60,14 +60,14 @@ func installManagedVault(t *testing.T, c *config.Node, root string, v *vaultfixt
 	}
 }
 
-func prepareManagedAppSecrets(t *testing.T, ctx context.Context, r *Runtime, user userauth.Client, peer mydcp.Peer, session access.Session, p control.Policy, read func() cluster.View, change func(string, string, uint64, any), consumers ...*Runtime) {
+func prepareManagedAppSecrets(t *testing.T, ctx context.Context, r *Runtime, user userauth.Client, peer sfcp.Peer, session access.Session, p control.Policy, read func() cluster.View, change func(string, string, uint64, any), consumers ...*Runtime) {
 	consumer := r
 	if len(consumers) > 0 {
 		consumer = consumers[0]
 	}
 	prepareManagedAppSecretScenario(t, ctx, r, user, peer, session, p, read, change, consumer, managedAppOrdinary)
 }
-func prepareManagedAppSecretScenario(t *testing.T, ctx context.Context, r *Runtime, user userauth.Client, peer mydcp.Peer, session access.Session, p control.Policy, read func() cluster.View, change func(string, string, uint64, any), consumer *Runtime, scenario managedAppScenario) {
+func prepareManagedAppSecretScenario(t *testing.T, ctx context.Context, r *Runtime, user userauth.Client, peer sfcp.Peer, session access.Session, p control.Policy, read func() cluster.View, change func(string, string, uint64, any), consumer *Runtime, scenario managedAppScenario) {
 	t.Helper()
 	ordered, localFiles := scenario == managedAppOrderedSecrets, scenario == managedAppLocalSecrets
 	current := func() control.Vault {

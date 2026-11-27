@@ -6,13 +6,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"github.com/jay94ks/mydcd/internal/cluster/lifecycle"
-	"github.com/jay94ks/mydcd/internal/containerops"
-	"github.com/jay94ks/mydcd/internal/engine"
-	"github.com/jay94ks/mydcd/internal/network"
-	"github.com/jay94ks/mydcd/internal/reconcile"
-	"github.com/jay94ks/mydcd/internal/schema"
-	"github.com/jay94ks/mydcd/internal/workload/volumes"
+	"github.com/jay94ks/seafield/internal/cluster/lifecycle"
+	"github.com/jay94ks/seafield/internal/containerops"
+	"github.com/jay94ks/seafield/internal/engine"
+	"github.com/jay94ks/seafield/internal/network"
+	"github.com/jay94ks/seafield/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/workload/volumes"
 	"log"
 	"net/netip"
 	"reflect"
@@ -44,15 +44,17 @@ type ContainerSpec struct {
 	IPv4, IPv6       netip.Addr
 	Memory, NanoCPU  int64
 	Lifecycle        schema.Lifecycle
-	Process          *Process           `json:",omitempty"`
-	Inputs           *InputRef          `json:",omitempty"`
-	Tmpfs            []Tmpfs            `json:",omitempty"`
-	Volumes          []VolumeMount      `json:",omitempty"`
-	Readiness        *HTTPReadiness     `json:",omitempty"`
-	Routes           []ContainerRoute   `json:",omitempty"`
-	Resolver         *Resolver          `json:",omitempty"`
-	Stop             *engine.StopPolicy `json:",omitempty"`
-	Logging          *LogPolicy         `json:",omitempty"`
+	Process          *Process      `json:",omitempty"`
+	Inputs           *InputRef     `json:",omitempty"`
+	Tmpfs            []Tmpfs       `json:",omitempty"`
+	Volumes          []VolumeMount `json:",omitempty"`
+	// RemoteVolumes are shared Volumes whose home is another server.
+	RemoteVolumes []RemoteVolumeMount `json:",omitempty"`
+	Readiness     *HTTPReadiness      `json:",omitempty"`
+	Routes        []ContainerRoute    `json:",omitempty"`
+	Resolver      *Resolver           `json:",omitempty"`
+	Stop          *engine.StopPolicy  `json:",omitempty"`
+	Logging       *LogPolicy          `json:",omitempty"`
 }
 
 func DecodeContainer(value string) (ContainerSpec, error) {
@@ -81,7 +83,7 @@ func DecodeContainer(value string) (ContainerSpec, error) {
 	if s.Inputs != nil && (s.Process == nil || !strings.HasPrefix(s.Inputs.Key, "workload/inputs/") || len(s.Inputs.Key) > 512 || strings.ContainsRune(s.Inputs.Key, 0) || s.Inputs.Generation == 0 || s.Inputs.Binding == ([32]byte{})) {
 		return s, ErrPlacement
 	}
-	if !s.validBridgeOwner() || validateVolumeMounts(s) != nil {
+	if !s.validBridgeOwner() || validateVolumeMounts(s) != nil || validateRemoteVolumes(s) != nil {
 		return s, ErrVolumeMount
 	}
 	if s.Readiness != nil && (s.Process == nil || !s.Readiness.Valid()) {
@@ -118,6 +120,7 @@ type DockerDriver struct {
 	Network        BridgeProvider
 	Inputs         InputProvider
 	Volumes        *volumes.Activations
+	Remote         RemoteVolumes // nil: tasks with remote Volumes are refused
 	Authority      TaskAuthority
 	ImageAuthority TaskImageAuthority
 	// These belong to one Manager.Step invocation; never shared across actors.
@@ -151,6 +154,9 @@ func (d *DockerDriver) parameters(key string, op reconcile.Operation) (Container
 		if _, err = volumeReferences(s, key, op); err != nil {
 			return s, engine.Identity{}, err
 		}
+	}
+	if len(s.RemoteVolumes) > 0 && d.Remote == nil {
+		return s, engine.Identity{}, ErrVolumeMount
 	}
 	id, err := d.Engine.Identity("container", key, op.Target)
 	return s, id, err
@@ -223,7 +229,7 @@ func (d *DockerDriver) options(ctx context.Context, s ContainerSpec, id engine.I
 	if ValidateTmpfs(s.Tmpfs, s.Memory, targets) != nil {
 		return client.ContainerCreateOptions{}, ErrTmpfs
 	}
-	volumeMounts, err := d.taskMounts(s.Volumes)
+	volumeMounts, err := d.specMounts(s)
 	if err != nil {
 		return client.ContainerCreateOptions{}, err
 	}
@@ -250,7 +256,7 @@ func (d *DockerDriver) options(ctx context.Context, s ContainerSpec, id engine.I
 }
 
 func (d *DockerDriver) matchContainer(ctx context.Context, got container.InspectResponse, s ContainerSpec, id engine.Identity, l network.BridgeLease, files []InputFile) bool {
-	volumeMounts, err := d.taskMounts(s.Volumes)
+	volumeMounts, err := d.specMounts(s)
 	if err != nil {
 		return false
 	}
@@ -268,7 +274,7 @@ func (d *DockerDriver) matchContainer(ctx context.Context, got container.Inspect
 	} else if got.Config != nil && (!reflect.DeepEqual(got.Config.Cmd, command) || !reflect.DeepEqual(got.Config.Env, env)) {
 		return false
 	}
-	if got.Config == nil || got.HostConfig == nil || got.State == nil || got.NetworkSettings == nil || !id.Matches(got.Name, got.Config.Labels) || got.ID == "" || got.Config.Image != image || got.HostConfig.Memory != s.Memory || got.HostConfig.NanoCPUs != s.NanoCPU || got.HostConfig.ReadonlyRootfs == s.Writable || got.Config.Tty != s.TTY || got.Config.OpenStdin != s.StdinOpen || got.HostConfig.Privileged || got.HostConfig.NetworkMode != container.NetworkMode(networkID) || len(got.HostConfig.Binds) != 0 || !matchResolvedTaskMounts(got, files, s.Volumes, volumeMounts) || !matchTmpfs(got, s.Tmpfs) {
+	if got.Config == nil || got.HostConfig == nil || got.State == nil || got.NetworkSettings == nil || !id.Matches(got.Name, got.Config.Labels) || got.ID == "" || got.Config.Image != image || got.HostConfig.Memory != s.Memory || got.HostConfig.NanoCPUs != s.NanoCPU || got.HostConfig.ReadonlyRootfs == s.Writable || got.Config.Tty != s.TTY || got.Config.OpenStdin != s.StdinOpen || got.HostConfig.Privileged || got.HostConfig.NetworkMode != container.NetworkMode(networkID) || len(got.HostConfig.Binds) != 0 || !matchResolvedTaskMounts(got, files, len(s.Volumes)+len(s.RemoteVolumes), volumeMounts) || !matchTmpfs(got, s.Tmpfs) {
 		return false
 	}
 	if !matchPublishedPorts(s.Ports, got) {
@@ -372,6 +378,11 @@ func (d *DockerDriver) Execute(ctx context.Context, key string, op reconcile.Ope
 				return d.beforeCreateFailed(ctx, s, id, key, op, err)
 			}
 		}
+		// Remote Volumes are mounted here first; the engine's Mount answer
+		// for the new container needs them.
+		if err = d.holdRemote(ctx, s); err != nil {
+			return d.beforeCreateFailed(ctx, s, id, key, op, err)
+		}
 		if len(s.Volumes) > 0 {
 			refs, refErr := volumeReferences(s, key, op)
 			if refErr != nil {
@@ -454,6 +465,10 @@ func (d *DockerDriver) Recover(ctx context.Context, key string, op reconcile.Ope
 	got, err := d.Engine.API.ContainerInspect(ctx, id.Name, client.ContainerInspectOptions{})
 	if cerrdefs.IsNotFound(err) {
 		if op.Kind == reconcile.Remove {
+			// Inspect found no container: its remote mounts may go.
+			if e := d.releaseRemote(s); e != nil {
+				return reconcile.EffectUnknown, e
+			}
 			if e := d.retireVolumes(ctx, s, key, op); e != nil {
 				return reconcile.EffectUnknown, e
 			}
@@ -513,6 +528,15 @@ func (d *DockerDriver) Recover(ctx context.Context, key string, op reconcile.Ope
 	if op.Kind == reconcile.Remove {
 		return reconcile.EffectUnknown, nil
 	}
+	if err = d.bindRemote(s, got.Container.ID); err != nil {
+		return reconcile.EffectUnknown, err
+	}
+	if got.Container.State.Running || exited {
+		// Positive evidence that an earlier Start ran.
+		if err = d.endRemoteStart(s); err != nil {
+			return reconcile.EffectUnknown, err
+		}
+	}
 	if len(s.Volumes) == 0 {
 		if err = d.startIdentity(op, got.Container.ID); err != nil {
 			return reconcile.EffectUnknown, err
@@ -523,6 +547,12 @@ func (d *DockerDriver) Recover(ctx context.Context, key string, op reconcile.Ope
 	}
 	if !got.Container.State.Running && !exited && d.Authority != nil {
 		if err = d.Authority(ctx, key, op); err != nil {
+			return reconcile.EffectUnknown, err
+		}
+	}
+	if !got.Container.State.Running && !exited {
+		// Journaled before the Start; an unknown outcome stays recorded.
+		if err = d.beginRemoteStart(s); err != nil {
 			return reconcile.EffectUnknown, err
 		}
 	}
@@ -569,6 +599,11 @@ func (d *DockerDriver) Recover(ctx context.Context, key string, op reconcile.Ope
 			return reconcile.EffectUnknown, engine.ErrOwnership
 		}
 	}
+	if got.Container.State.Running || engine.ObserveContainerExit(got.Container.State) != nil {
+		if err = d.endRemoteStart(s); err != nil {
+			return reconcile.EffectUnknown, err
+		}
+	}
 	if !got.Container.State.Running && engine.ObserveContainerExit(got.Container.State) != nil {
 		return reconcile.EffectApplied, nil
 	}
@@ -604,6 +639,7 @@ type Manager struct {
 	controlMu sync.Mutex // serialize lifecycle effects with Desired/Step
 	journal   *reconcile.Journal
 	driver    *DockerDriver
+	logs      LogReader
 }
 
 func OpenManager(path string, c *engine.Client, n BridgeProvider) (*Manager, error) {
@@ -642,6 +678,16 @@ func OpenManagerWithImageAuthority(path string, c *engine.Client, n BridgeProvid
 	}
 	m.driver.ImageAuthority = images
 	return m, nil
+}
+
+// AttachRemoteVolumes is Runtime assembly, before the module loop runs any
+// Step: the runner journal of remote shared Volumes (remote.Mounts).
+func (m *Manager) AttachRemoteVolumes(r RemoteVolumes) error {
+	if r == nil || m.driver.Remote != nil {
+		return ErrPlacement
+	}
+	m.driver.Remote = r
+	return nil
 }
 func (m *Manager) Desired(key string, revision, generation uint64, s *ContainerSpec, capacity int) error {
 	m.controlMu.Lock()

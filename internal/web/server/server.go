@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// Package server is the mydc-web HTTP layer: browser login sessions, the
+// Package server is the sfc-web HTTP layer: browser login sessions, the
 // /api/v1 JSON API, and static UI serving. It holds no management power of
-// its own; every cluster call runs on the logged-in user's MYDCP session.
+// its own; every cluster call runs on the logged-in user's SFCP session.
 package server
 
 import (
@@ -10,7 +10,7 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"errors"
-	"github.com/jay94ks/mydcd/internal/web/ai"
+	"github.com/jay94ks/seafield/internal/web/ai"
 	"io"
 	"io/fs"
 	"log/slog"
@@ -20,17 +20,17 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/web/acme"
-	"github.com/jay94ks/mydcd/internal/web/dns"
-	"github.com/jay94ks/mydcd/internal/web/mydc"
-	"github.com/jay94ks/mydcd/internal/web/provlog"
-	"github.com/jay94ks/mydcd/internal/web/seal"
-	"github.com/jay94ks/mydcd/internal/web/store"
+	"github.com/jay94ks/seafield/internal/web/acme"
+	"github.com/jay94ks/seafield/internal/web/dns"
+	"github.com/jay94ks/seafield/internal/web/provlog"
+	"github.com/jay94ks/seafield/internal/web/seal"
+	"github.com/jay94ks/seafield/internal/web/sfc"
+	"github.com/jay94ks/seafield/internal/web/store"
 )
 
 // Options configures a Server.
 type Options struct {
-	Client mydc.Client
+	Client sfc.Client
 	Store  *store.Store
 	Static fs.FS // UI build (index.html at root); nil serves a notice
 	// TrustedProxies: connections from these addresses (the ingress) may
@@ -40,13 +40,13 @@ type Options struct {
 	OpRetention    time.Duration
 	Logger         *slog.Logger
 	Now            func() time.Time
-	CallTimeout    time.Duration // per mydcd call
+	CallTimeout    time.Duration // per sfcd call
 	Seal           *seal.Box     // sealed secrets; nil or not ready turns the features needing it off
 	DataDir        string        // data folder (staged restores go here)
 	Version        string        // shown in web app settings
-	Socket         string        // mydcd socket path, shown in web app settings
+	Socket         string        // sfcd socket path, shown in web app settings
 	DBPath         string        // web.db path, shown in web app settings
-	// SealKeySource: "env" or "file" (where MYDC_WEB_SEAL_KEY came from;
+	// SealKeySource: "env" or "file" (where SFC_WEB_SEAL_KEY came from;
 	// empty without a key), shown in web app settings.
 	SealKeySource string
 	DNS           *dns.Registry // external DNS vendor adapters
@@ -83,14 +83,16 @@ type Options struct {
 type Server struct {
 	opt           Options
 	sessions      *sessions
-	mux           *http.ServeMux
+	mux           *routeMux
 	log           *slog.Logger
 	now           func() time.Time
 	cur           atomic.Pointer[store.Settings] // saved web settings (nil: defaults)
 	acme          acmeRunner
 	acmeAuto      acmeAutoState
+	vpsDNS        vpsDNSState
 	acmeResponder acmeResponderState
 	acmeHTTP      acmeHTTPState
+	live          liveState
 	mcpOAuth      mcpOAuthState
 	images        imageCache // registry catalog pages (memory only)
 	uploads       uploadSet  // image archive uploads (data folder)
@@ -117,12 +119,13 @@ func New(opt Options) *Server {
 	if opt.CallTimeout == 0 {
 		opt.CallTimeout = 30 * time.Second
 	}
-	s := &Server{opt: opt, log: opt.Logger, now: opt.Now, mux: http.NewServeMux()}
+	s := &Server{opt: opt, log: opt.Logger, now: opt.Now, mux: newRouteMux()}
 	s.sessions = newSessions(opt.Store, opt.Now, opt.LoginTTL)
 	s.loadSettings()
 	s.sessions.limits = s.sessionLimits
 	s.sessions.perUser = func() int { return s.settings().MaxSessionsPerUser }
 	s.routes()
+	opt.Store.OnChange(s.storeChanged)
 	return s
 }
 
@@ -162,8 +165,8 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if strings.HasPrefix(r.URL.Path, "/api/") {
 		w.Header().Set("Cache-Control", "no-store")
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
-			if r.Header.Get("X-MyDC-Web") != "1" || !sameOrigin(r) {
-				writeError(w, http.StatusForbidden, "csrf", "missing X-MyDC-Web header or cross-origin request")
+			if r.Header.Get("X-SFC-Web") != "1" || !sameOrigin(r) {
+				writeError(w, http.StatusForbidden, "csrf", "missing X-SFC-Web header or cross-origin request")
 				return
 			}
 		}
@@ -182,10 +185,13 @@ func setSecurityHeaders(w http.ResponseWriter) {
 
 // requestHTTPS reports whether the browser's request was HTTPS: this
 // listener's own TLS, or X-Forwarded-Proto from a trusted ingress. Any
-// other connection's header is ignored (other node apps share mydc-system).
+// other connection's header is ignored (other cluster apps share sfc-system).
 func (s *Server) requestHTTPS(r *http.Request) bool {
 	if r.TLS != nil {
 		return true
+	}
+	if r.Context().Value(directKey{}) != nil {
+		return false
 	}
 	ap, err := netip.ParseAddrPort(r.RemoteAddr)
 	if err != nil {
@@ -200,6 +206,24 @@ func (s *Server) requestHTTPS(r *http.Request) bool {
 	// Without a configured ingress the request is taken as HTTPS (an HTTPS
 	// front the web cannot see), except a plain connection from loopback.
 	return len(s.opt.TrustedProxies) == 0 && !from.IsLoopback()
+}
+
+type directKey struct{}
+
+// DirectHandler serves the web on a listener that trusts no proxy: sfcd's
+// node.yaml port forwards here from the server's own address, so whatever
+// a client wrote in X-Forwarded-* is dropped and a plain request is plain.
+func (s *Server) DirectHandler() http.Handler { return direct(s) }
+
+func direct(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		for k := range r.Header {
+			if strings.HasPrefix(http.CanonicalHeaderKey(k), "X-Forwarded-") || http.CanonicalHeaderKey(k) == "Forwarded" {
+				r.Header.Del(k)
+			}
+		}
+		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), directKey{}, true)))
+	})
 }
 
 // sameOrigin rejects requests whose Origin header names another host.
@@ -237,12 +261,12 @@ func writeError(w http.ResponseWriter, status int, code, msg string) {
 	writeJSON(w, status, map[string]apiError{"error": {Code: code, Message: msg}})
 }
 
-// statusOf maps a mydcd reply code to an HTTP status.
+// statusOf maps a sfcd reply code to an HTTP status.
 func statusOf(code string) int {
 	switch code {
 	case "denied", "not-session-issuer", "forbidden":
 		return http.StatusForbidden
-	case "node-shell-disabled", "node-shell-not-ready", "limit":
+	case "node-shell-disabled", "node-shell-not-ready", "limit", "build-disabled":
 		return http.StatusConflict
 	case "node-unreachable":
 		return http.StatusServiceUnavailable
@@ -267,7 +291,7 @@ func statusOf(code string) int {
 	}
 }
 
-// writeBackendError writes a mydcd error. When the connection or the login
+// writeBackendError writes a sfcd error. When the connection or the login
 // session behind ws is gone, the web session ends too and the browser gets
 // 401 session-expired so it can log in again in place.
 func (s *Server) writeBackendError(w http.ResponseWriter, ws *webSession, err error) {
@@ -282,26 +306,26 @@ func (s *Server) backendError(ws *webSession, err error) (int, apiError) {
 	if errors.As(err, &he) {
 		return he.status, apiError{Code: he.code, Message: he.msg}
 	}
-	var me *mydc.Error
+	var me *sfc.Error
 	if errors.As(err, &me) {
 		code := string(me.Code)
 		switch me.Code {
-		case mydc.CodeClosed, mydc.CodeSessionExpired, mydc.CodeNotLoggedIn:
+		case sfc.CodeClosed, sfc.CodeSessionExpired, sfc.CodeNotLoggedIn:
 			if ws != nil {
 				s.sessions.end(ws, code)
-				return http.StatusUnauthorized, apiError{Code: "session-expired", Message: "the mydcd session ended (" + code + "); log in again"}
+				return http.StatusUnauthorized, apiError{Code: "session-expired", Message: "the sfcd session ended (" + code + "); log in again"}
 			}
 			code = "disconnected"
-		case mydc.CodeTransport:
+		case sfc.CodeTransport:
 			code = "disconnected"
 		}
 		return statusOf(code), apiError{Code: code, InputCode: me.InputCode, Leader: me.Leader, Message: me.Detail}
 	}
 	if errors.Is(err, context.DeadlineExceeded) {
-		return http.StatusGatewayTimeout, apiError{Code: "timeout", Message: "mydcd did not answer in time"}
+		return http.StatusGatewayTimeout, apiError{Code: "timeout", Message: "sfcd did not answer in time"}
 	}
 	s.log.Error("backend call", "err", err)
-	return http.StatusBadGateway, apiError{Code: "disconnected", Message: "mydcd connection failed"}
+	return http.StatusBadGateway, apiError{Code: "disconnected", Message: "sfcd connection failed"}
 }
 
 const maxBody = 8 << 20 // app.yaml documents are at most 4 MiB

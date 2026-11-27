@@ -11,9 +11,9 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/web/mydc"
-	"github.com/jay94ks/mydcd/internal/web/store"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/web/sfc"
+	"github.com/jay94ks/seafield/internal/web/store"
 )
 
 type deployReq struct {
@@ -73,9 +73,9 @@ func (s *Server) handleDeploy(w http.ResponseWriter, r *http.Request, ws *webSes
 
 	ctx, cancel := s.callCtx(r)
 	defer cancel()
-	err = ws.do(ctx, func(ctx context.Context, c mydc.Conn) error {
+	err = ws.do(ctx, func(ctx context.Context, c sfc.Conn) error {
 		if parent == nil {
-			plan, err := c.AppPlan(ctx, mydc.AppPlanRequest{Tenant: tenant, Document: doc, Deployment: req.Deployment, Node: req.Node})
+			plan, err := c.AppPlan(ctx, sfc.AppPlanRequest{Tenant: tenant, Document: doc, Deployment: req.Deployment, Node: req.Node})
 			if err != nil {
 				return err
 			}
@@ -83,7 +83,7 @@ func (s *Server) handleDeploy(w http.ResponseWriter, r *http.Request, ws *webSes
 				return &httpErr{http.StatusUnprocessableEntity, "invalid", "the plan names no app"}
 			}
 			now := s.now()
-			// The upload is mydcd's planned artifact (the blueprint the
+			// The upload is sfcd's planned artifact (the blueprint the
 			// plan stream returned), as the CLI uploads it.
 			art := plan.Data
 			if len(art) == 0 || len(art) > 4<<20 || plan.Length != len(art) || sha256.Sum256(art) != plan.Digest {
@@ -92,7 +92,7 @@ func (s *Server) handleDeploy(w http.ResponseWriter, r *http.Request, ws *webSes
 			parent = &store.Op{ID: req.OpID, User: ws.user.ID, Username: ws.user.Username, Action: "deploy", Tenant: tenant, Target: plan.App,
 				Digest: dg, State: store.OpRunning, SubmittedAt: now, UpdatedAt: now,
 				Deploy: &store.DeployJob{Tenant: tenant, App: plan.App, Deployment: req.Deployment, Node: req.Node, UploadID: "web-" + req.OpID,
-					Document: art, Digest: hex.EncodeToString(plan.Digest[:]), Parts: (len(art) + mydc.AppPartBytes - 1) / mydc.AppPartBytes}}
+					Document: art, Digest: hex.EncodeToString(plan.Digest[:]), Parts: (len(art) + sfc.AppPartBytes - 1) / sfc.AppPartBytes}}
 			existing, err := s.opt.Store.CreateOp(parent)
 			if err != nil {
 				return err
@@ -118,7 +118,7 @@ func (s *Server) handleDeploy(w http.ResponseWriter, r *http.Request, ws *webSes
 func stepID(parent string, step int) string { return fmt.Sprintf("%s.%d", parent, step) }
 
 // runDeploy sends the remaining steps of a deploy job in order.
-func (s *Server) runDeploy(ctx context.Context, c mydc.Conn, ws *webSession, parent *store.Op, prune bool) error {
+func (s *Server) runDeploy(ctx context.Context, c sfc.Conn, ws *webSession, parent *store.Op, prune bool) error {
 	j := parent.Deploy
 	defer func() {
 		parent.UpdatedAt = s.now()
@@ -143,12 +143,12 @@ func (s *Server) runDeploy(ctx context.Context, c mydc.Conn, ws *webSession, par
 				parent.State, parent.ErrorCode = store.OpRunning, "approval-required"
 				return nil
 			}
-			action := mydc.ActionBeginApp
+			action := sfc.ActionBeginApp
 			if j.Standalone != nil {
-				action = mydc.ActionStandaloneUp
+				action = sfc.ActionStandaloneUp
 			}
 			child = &store.Op{ID: id, User: ws.user.ID, Username: ws.user.Username, Action: action, Tenant: j.Tenant, Target: j.App, Parent: parent.ID, Digest: parent.Digest}
-			if existing, err := s.sendPrepared(ctx, c, child, mydc.SignedOp(j.Origin)); err != nil {
+			if existing, err := s.sendPrepared(ctx, c, child, sfc.SignedOp(j.Origin)); err != nil {
 				return err
 			} else if existing != nil {
 				child = existing
@@ -206,7 +206,7 @@ func (s *Server) runDeploy(ctx context.Context, c mydc.Conn, ws *webSession, par
 }
 
 // deployChange builds the change of the job's current step.
-func (s *Server) deployChange(ctx context.Context, c mydc.Conn, ws *webSession, j *store.DeployJob, prune bool) (mydc.Change, error) {
+func (s *Server) deployChange(ctx context.Context, c sfc.Conn, ws *webSession, j *store.DeployJob, prune bool) (sfc.Change, error) {
 	var action string
 	var expected uint64
 	var payload any
@@ -215,43 +215,43 @@ func (s *Server) deployChange(ctx context.Context, c mydc.Conn, ws *webSession, 
 		var dg [32]byte
 		raw, _ := hex.DecodeString(j.Digest)
 		copy(dg[:], raw)
-		action, expected = mydc.ActionBeginAppUpload, 0
+		action, expected = sfc.ActionBeginAppUpload, 0
 		payload = control.AppUploadBegin{Tenant: j.Tenant, App: j.App, Deployment: j.Deployment, ID: j.UploadID, Length: len(j.Document), Digest: dg}
 	case j.Step <= j.Parts:
 		i := j.Step - 1
-		end := min(len(j.Document), (i+1)*mydc.AppPartBytes)
+		end := min(len(j.Document), (i+1)*sfc.AppPartBytes)
 		rev, err := s.uploadRevision(ctx, c, j)
 		if err != nil {
-			return mydc.Change{}, err
+			return sfc.Change{}, err
 		}
-		action, expected = mydc.ActionPutAppPart, rev
-		payload = control.AppUploadPart{Tenant: j.Tenant, ID: j.UploadID, Index: i, Data: j.Document[i*mydc.AppPartBytes : end]}
+		action, expected = sfc.ActionPutAppPart, rev
+		payload = control.AppUploadPart{Tenant: j.Tenant, ID: j.UploadID, Index: i, Data: j.Document[i*sfc.AppPartBytes : end]}
 	case j.Move != nil:
 		raw := append([]byte(nil), j.Move.Begin...)
-		return mydc.Change{Schema: 1, Action: mydc.ActionBeginVolumeMove, Principal: ws.user.ID, Expected: j.Move.Expected, Payload: raw}, nil
+		return sfc.Change{Schema: 1, Action: sfc.ActionBeginVolumeMove, Principal: ws.user.ID, Expected: j.Move.Expected, Payload: raw}, nil
 	case j.Local != nil:
 		raw := append([]byte(nil), j.Local.Change...)
-		return mydc.Change{Schema: 1, Action: mydc.ActionPutAppLocalServices, Principal: ws.user.ID, Expected: j.Local.Expected, Payload: raw}, nil
+		return sfc.Change{Schema: 1, Action: sfc.ActionPutAppLocalServices, Principal: ws.user.ID, Expected: j.Local.Expected, Payload: raw}, nil
 	case j.Standalone != nil:
 		raw := append([]byte(nil), j.Standalone.Begin...)
-		return mydc.Change{Schema: 1, Action: mydc.ActionStandaloneUp, Principal: ws.user.ID, Expected: j.Standalone.Expected, Payload: raw}, nil
+		return sfc.Change{Schema: 1, Action: sfc.ActionStandaloneUp, Principal: ws.user.ID, Expected: j.Standalone.Expected, Payload: raw}, nil
 	default:
 		rev, err := s.appRevision(ctx, c, j.Tenant, j.App)
 		if err != nil {
-			return mydc.Change{}, err
+			return sfc.Change{}, err
 		}
-		action, expected = mydc.ActionBeginApp, rev
+		action, expected = sfc.ActionBeginApp, rev
 		payload = control.AppBegin{Tenant: j.Tenant, App: j.App, Deployment: j.Deployment, Upload: j.UploadID, Operation: j.UploadID, Prune: prune, DefaultNode: j.Node}
 	}
 	raw, err := json.Marshal(payload)
 	if err != nil {
-		return mydc.Change{}, err
+		return sfc.Change{}, err
 	}
-	return mydc.Change{Schema: 1, Action: action, Principal: ws.user.ID, Expected: expected, Payload: raw}, nil
+	return sfc.Change{Schema: 1, Action: action, Principal: ws.user.ID, Expected: expected, Payload: raw}, nil
 }
 
 // uploadRevision finds the current revision of the job's upload.
-func (s *Server) uploadRevision(ctx context.Context, c mydc.Conn, j *store.DeployJob) (uint64, error) {
+func (s *Server) uploadRevision(ctx context.Context, c sfc.Conn, j *store.DeployJob) (uint64, error) {
 	after := ""
 	for {
 		p, err := c.AppUploads(ctx, j.Tenant, after)
@@ -271,7 +271,7 @@ func (s *Server) uploadRevision(ctx context.Context, c mydc.Conn, j *store.Deplo
 }
 
 // appRevision is the current AppView.Revision (0 for a new app).
-func (s *Server) appRevision(ctx context.Context, c mydc.Conn, tenant, app string) (uint64, error) {
+func (s *Server) appRevision(ctx context.Context, c sfc.Conn, tenant, app string) (uint64, error) {
 	after := ""
 	for {
 		p, err := c.Apps(ctx, tenant, after)

@@ -67,7 +67,7 @@ func open(t *testing.T, root string) *Vault {
 
 func pinnedBinary(t *testing.T) string {
 	t.Helper()
-	requested := os.Getenv("MYDC_VAULT_TEST_BINARY")
+	requested := os.Getenv("SFC_VAULT_TEST_BINARY")
 	path := requested
 	if path == "" {
 		// the repository's work/ directory, whichever package runs the test
@@ -193,7 +193,7 @@ func openNew(t *testing.T, root, binary string) *Vault {
 	v.Admin, v.Unseal = initialized.Token, initialized.Keys[0]
 	v.UnsealOriginal()
 	v.API("POST", "sys/mounts/kv", map[string]any{"type": "kv", "options": map[string]string{"version": "2"}}, nil, v.Admin)
-	v.API("PUT", "sys/policies/acl/mydc-system-reader", map[string]any{"policy": `path "kv/data/system/credentials/*" { capabilities = ["read"] }`}, nil, v.Admin)
+	v.API("PUT", "sys/policies/acl/sfc-system-reader", map[string]any{"policy": `path "kv/data/system/credentials/*" { capabilities = ["read"] }`}, nil, v.Admin)
 	return v
 }
 
@@ -346,7 +346,7 @@ func (v *Vault) ReaderToken() string {
 			Token string `json:"client_token"`
 		} `json:"auth"`
 	}
-	v.API("POST", "auth/token/create", map[string]any{"policies": []string{"mydc-system-reader"}, "no_default_policy": true, "ttl": "5m"}, &out, v.Admin)
+	v.API("POST", "auth/token/create", map[string]any{"policies": []string{"sfc-system-reader"}, "no_default_policy": true, "ttl": "5m"}, &out, v.Admin)
 	if out.Auth.Token == "" {
 		v.t.Fatal("owned system reader token missing")
 	}

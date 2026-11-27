@@ -11,15 +11,15 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/config"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/secrets"
-	"github.com/jay94ks/mydcd/internal/web/mydc"
-	"github.com/jay94ks/mydcd/internal/web/store"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/config"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/secrets"
+	"github.com/jay94ks/seafield/internal/web/sfc"
+	"github.com/jay94ks/seafield/internal/web/store"
 )
 
-// Protected Group approvals of a deploy job (UI-72), as `mydc compose up`:
+// Protected Group approvals of a deploy job (UI-72), as `sfcli compose up`:
 // the begin-app original is prepared once and kept in the job; every realm
 // its blueprint uses is planned with it as Origin (vault-approval-plan);
 // a Group without an existing approval waits for the requester's password,
@@ -50,7 +50,7 @@ func approvalRealms(artifact []byte, requester [32]byte, tenant string) ([]strin
 
 // deployApprovals prepares the begin-app original (once) and refreshes the
 // job's Group approvals. ready: none is still required.
-func (s *Server) deployApprovals(ctx context.Context, c mydc.Conn, ws *webSession, parent *store.Op, prune bool) (bool, error) {
+func (s *Server) deployApprovals(ctx context.Context, c sfc.Conn, ws *webSession, parent *store.Op, prune bool) (bool, error) {
 	j := parent.Deploy
 	if len(j.Origin) == 0 {
 		ch, err := s.deployChange(ctx, c, ws, j, prune)
@@ -70,7 +70,7 @@ func (s *Server) deployApprovals(ctx context.Context, c mydc.Conn, ws *webSessio
 			return false, err
 		}
 	}
-	origin, err := mydc.DecodeOperation(mydc.SignedOp(j.Origin))
+	origin, err := sfc.DecodeOperation(sfc.SignedOp(j.Origin))
 	if err != nil {
 		return false, err
 	}
@@ -90,7 +90,7 @@ func (s *Server) deployApprovals(ctx context.Context, c mydc.Conn, ws *webSessio
 // approval journal ID) and keeps what prev already knew. known=false: a
 // realm may have no use, and "denied" then means none. ready: no Group is
 // still required.
-func planApprovals(ctx context.Context, c mydc.Conn, tenant, id string, origin *mydc.UserOperation, realms []string, known bool, prev []store.DeployApproval) ([]store.DeployApproval, bool, error) {
+func planApprovals(ctx context.Context, c sfc.Conn, tenant, id string, origin *sfc.UserOperation, realms []string, known bool, prev []store.DeployApproval) ([]store.DeployApproval, bool, error) {
 	before := map[string]string{}
 	for _, a := range prev {
 		before[a.Realm+"/"+a.Group] = a.State
@@ -98,9 +98,9 @@ func planApprovals(ctx context.Context, c mydc.Conn, tenant, id string, origin *
 	var next []store.DeployApproval
 	ready := true
 	for _, realm := range realms {
-		plan, err := c.PlanVaultApprovals(ctx, tenant, mydc.VaultApprovalPlanRequest{Realm: realm, ID: id, Origin: origin})
-		var me *mydc.Error
-		if err != nil && !known && errors.As(err, &me) && me.Code == mydc.CodeDenied {
+		plan, err := c.PlanVaultApprovals(ctx, tenant, sfc.VaultApprovalPlanRequest{Realm: realm, ID: id, Origin: origin})
+		var me *sfc.Error
+		if err != nil && !known && errors.As(err, &me) && me.Code == sfc.CodeDenied {
 			continue // no use of this realm
 		}
 		if err != nil {
@@ -157,14 +157,14 @@ func (s *Server) handleDeployApprove(w http.ResponseWriter, r *http.Request, ws 
 		writeError(w, http.StatusConflict, "already-approved", "this Group is already approved")
 		return
 	}
-	origin, err := mydc.DecodeOperation(mydc.SignedOp(j.Origin))
+	origin, err := sfc.DecodeOperation(sfc.SignedOp(j.Origin))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal", "stored approval")
 		return
 	}
 	ctx, cancel := s.callCtx(r)
 	defer cancel()
-	err = ws.do(ctx, func(ctx context.Context, c mydc.Conn) error {
+	err = ws.do(ctx, func(ctx context.Context, c sfc.Conn) error {
 		err := approveGroup(ctx, c, tenant, a, &origin, pw)
 		parent.UpdatedAt = s.now()
 		if e := s.saveOp(parent); e != nil {
@@ -233,13 +233,13 @@ func writeApproveOutcome(w http.ResponseWriter, ws *webSession, s *Server, a *st
 // approveGroup sends the Group's password to its approver for origin
 // (SecretInput mode approve) and sets a.State: approved, required (the
 // password was not accepted) or unknown (the answer was lost).
-func approveGroup(ctx context.Context, c mydc.Conn, tenant string, a *store.DeployApproval, origin *mydc.UserOperation, pw []byte) error {
+func approveGroup(ctx context.Context, c sfc.Conn, tenant string, a *store.DeployApproval, origin *sfc.UserOperation, pw []byte) error {
 	var target secrets.Target
 	var approver config.Peer
 	if json.Unmarshal(a.Target, &target) != nil || json.Unmarshal(a.Approver, &approver) != nil {
 		return &httpErr{http.StatusInternalServerError, "internal", "stored approval"}
 	}
-	code, err := c.ApproveVault(ctx, tenant, approver, mydc.VaultApprove{Target: target, Password: pw, Origin: origin})
+	code, err := c.ApproveVault(ctx, tenant, approver, sfc.VaultApprove{Target: target, Password: pw, Origin: origin})
 	switch {
 	case err != nil:
 		a.State = "unknown"
@@ -297,8 +297,8 @@ func (s *Server) handleVaultApprovals(w http.ResponseWriter, r *http.Request, ws
 
 // cdSelection reads ?candidate=<hex> / ?operation=<id> (or the same body
 // fields) into an approval selection.
-func cdSelection(candidate, operation string) (mydc.AppApprovalSelection, error) {
-	var sel mydc.AppApprovalSelection
+func cdSelection(candidate, operation string) (sfc.AppApprovalSelection, error) {
+	var sel sfc.AppApprovalSelection
 	switch {
 	case candidate != "" && operation == "":
 		d, err := hex.DecodeString(candidate)
@@ -319,14 +319,14 @@ func cdSelection(candidate, operation string) (mydc.AppApprovalSelection, error)
 }
 
 // cdApprovals plans every realm of a CD registration for its selection.
-func cdApprovals(ctx context.Context, c mydc.Conn, tenant, app string, sel mydc.AppApprovalSelection) (mydc.AppCDRegistration, []mydc.VaultApprovalTarget, error) {
+func cdApprovals(ctx context.Context, c sfc.Conn, tenant, app string, sel sfc.AppApprovalSelection) (sfc.AppCDRegistration, []sfc.VaultApprovalTarget, error) {
 	reg, err := c.AppDeliveryRegistration(ctx, tenant, app, sel)
 	if err != nil {
 		return reg, nil, err
 	}
-	var out []mydc.VaultApprovalTarget
+	var out []sfc.VaultApprovalTarget
 	for _, realm := range reg.Realms {
-		plan, err := c.PlanVaultApprovals(ctx, tenant, mydc.VaultApprovalPlanRequest{Realm: realm, ID: "compose/" + app + "/cd", Origin: &reg.Origin, Selection: &reg.Selection})
+		plan, err := c.PlanVaultApprovals(ctx, tenant, sfc.VaultApprovalPlanRequest{Realm: realm, ID: "compose/" + app + "/cd", Origin: &reg.Origin, Selection: &reg.Selection})
 		if err != nil {
 			return reg, nil, err
 		}
@@ -335,7 +335,7 @@ func cdApprovals(ctx context.Context, c mydc.Conn, tenant, app string, sel mydc.
 	return reg, out, nil
 }
 
-func cdApprovalViews(targets []mydc.VaultApprovalTarget) []approvalView {
+func cdApprovalViews(targets []sfc.VaultApprovalTarget) []approvalView {
 	out := []approvalView{}
 	for _, t := range targets {
 		state := "required"
@@ -357,7 +357,7 @@ func (s *Server) handleCDApprovals(w http.ResponseWriter, r *http.Request, ws *w
 		s.writeOpOutcome(w, ws, nil, 0, err)
 		return
 	}
-	read(s, w, r, ws, func(ctx context.Context, c mydc.Conn) (map[string]any, error) {
+	read(s, w, r, ws, func(ctx context.Context, c sfc.Conn) (map[string]any, error) {
 		_, targets, err := cdApprovals(ctx, c, tenant, app, sel)
 		if err != nil {
 			return nil, err
@@ -368,7 +368,7 @@ func (s *Server) handleCDApprovals(w http.ResponseWriter, r *http.Request, ws *w
 
 // POST /t/{t}/apps/{app}/cd/approvals {candidate?|operation?, realm?, group,
 // password} → the Group's password to its approver for that CD selection,
-// as `mydc cd approve`. Reply {app, approvals}. Errors as deploy approve.
+// as `sfcli cd approve`. Reply {app, approvals}. Errors as deploy approve.
 func (s *Server) handleCDApprove(w http.ResponseWriter, r *http.Request, ws *webSession) {
 	var req struct {
 		Candidate string `json:"candidate,omitempty"`
@@ -400,12 +400,12 @@ func (s *Server) handleCDApprove(w http.ResponseWriter, r *http.Request, ws *web
 	ctx, cancel := s.callCtx(r)
 	defer cancel()
 	var views []approvalView
-	err = ws.do(ctx, func(ctx context.Context, c mydc.Conn) error {
+	err = ws.do(ctx, func(ctx context.Context, c sfc.Conn) error {
 		reg, targets, err := cdApprovals(ctx, c, tenant, app, sel)
 		if err != nil {
 			return err
 		}
-		i := slices.IndexFunc(targets, func(t mydc.VaultApprovalTarget) bool {
+		i := slices.IndexFunc(targets, func(t sfc.VaultApprovalTarget) bool {
 			return t.Target.Realm == req.Realm && t.Target.Group == req.Group
 		})
 		switch {
@@ -416,7 +416,7 @@ func (s *Server) handleCDApprove(w http.ResponseWriter, r *http.Request, ws *web
 		case targets[i].Approver == nil:
 			return &httpErr{http.StatusConflict, "no-approver", "the Group has no current approver"}
 		}
-		code, err := c.ApproveVault(ctx, tenant, *targets[i].Approver, mydc.VaultApprove{Target: targets[i].Target, Password: pw, Origin: &reg.Origin, Selection: &reg.Selection})
+		code, err := c.ApproveVault(ctx, tenant, *targets[i].Approver, sfc.VaultApprove{Target: targets[i].Target, Password: pw, Origin: &reg.Origin, Selection: &reg.Selection})
 		switch {
 		case err != nil || code != "ok" && code != "denied":
 			return &httpErr{http.StatusBadGateway, "approval-unknown", "the approver's answer was lost; send the password again"}
@@ -462,7 +462,7 @@ type grantedApproval struct {
 // is vault-revoke-approval's expected.
 func (s *Server) handleGrantedApprovals(w http.ResponseWriter, r *http.Request, ws *webSession) {
 	tenant, q := r.PathValue("t"), r.URL.Query()
-	read(s, w, r, ws, func(ctx context.Context, c mydc.Conn) (map[string]any, error) {
+	read(s, w, r, ws, func(ctx context.Context, c sfc.Conn) (map[string]any, error) {
 		p, err := c.PublicRead(ctx, "vault-approvals", tenant, control.PublicReadQuery{App: q.Get("app")}, q.Get("after"))
 		if err != nil {
 			return nil, err
@@ -489,13 +489,13 @@ func (s *Server) handleGrantedApprovals(w http.ResponseWriter, r *http.Request, 
 
 // approvalRevision: vault-revoke-approval's Expected (the Vault approval
 // book revision, which the vault read carries).
-func approvalRevision(ctx context.Context, c mydc.Conn, tenant string) (uint64, error) {
+func approvalRevision(ctx context.Context, c sfc.Conn, tenant string) (uint64, error) {
 	p, err := c.Vault(ctx, tenant, "")
 	return p.ApprovalRevision, err
 }
 
 // POST /t/{t}/vault/approvals/granted/{id}/revoke {opId, expected?} →
-// vault-revoke-approval {ID} (Expected = the list's collection; mydcd
+// vault-revoke-approval {ID} (Expected = the list's collection; sfcd
 // decides who may revoke).
 func (s *Server) handleRevokeApproval(w http.ResponseWriter, r *http.Request, ws *webSession) {
 	var req struct {
@@ -506,11 +506,11 @@ func (s *Server) handleRevokeApproval(w http.ResponseWriter, r *http.Request, ws
 		return
 	}
 	tenant, id := r.PathValue("t"), r.PathValue("id")
-	s.sharedCreate(w, r, ws, req.OpID, req, func(ctx context.Context, c mydc.Conn, _ mydc.Session) (string, any, uint64, string, error) {
+	s.sharedCreate(w, r, ws, req.OpID, req, func(ctx context.Context, c sfc.Conn, _ sfc.Session) (string, any, uint64, string, error) {
 		rev, err := approvalRevision(ctx, c, tenant)
 		if err != nil {
 			return "", nil, 0, "", err
 		}
-		return mydc.ActionVaultRevokeApproval, mydc.VaultApprovalSelection{ID: id}, expectedOr(req.Expected, rev), "approval/" + id, nil
+		return sfc.ActionVaultRevokeApproval, sfc.VaultApprovalSelection{ID: id}, expectedOr(req.Expected, rev), "approval/" + id, nil
 	})
 }

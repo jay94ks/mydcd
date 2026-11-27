@@ -16,16 +16,16 @@ import (
 
 	"github.com/hashicorp/raft"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/cluster/membership"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/config"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/reconcile"
-	"github.com/jay94ks/mydcd/internal/userauth"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/membership"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/config"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/userauth"
 )
 
 // This boundary intentionally does NOT invoke AddNonvoter/AddVoter. It verifies
@@ -77,19 +77,19 @@ func TestRealManagedMemberDirectoryApprovalAndUnknownSameDB(t *testing.T) {
 	clusterID := initialized.Installation.Root.Cluster
 	genesis := initialized.Installation.Genesis
 	policy := control.Policy{Cluster: clusterID, BootstrapKey: admin.Public, TrustRoot: initialized.Installation.Root.TrustRoot, Genesis: genesis}
-	peer := mydcp.Peer{ID: genesis.ID, Endpoint: address, Policy: mydcp.Policy{Key: mydcp.Identity(runtime.Identity.Public), Respond: true}}
+	peer := sfcp.Peer{ID: genesis.ID, Endpoint: address, Policy: sfcp.Policy{Key: sfcp.Identity(runtime.Identity.Public), Respond: true}}
 	clientFor := func() *userauth.Client {
 		t.Helper()
 		self, err := identity.Ephemeral()
 		if err != nil {
 			t.Fatal(err)
 		}
-		mesh, err := mydcp.NewTransport(self, clusterID, func(k mydcp.Identity) (mydcp.Peer, bool) { return peer, k == peer.Key })
+		mesh, err := sfcp.NewTransport(self, clusterID, func(k sfcp.Identity) (sfcp.Peer, bool) { return peer, k == peer.Key })
 		if err != nil {
 			t.Fatal(err)
 		}
 		t.Cleanup(func() { _ = mesh.Close(); clear(self.Private) })
-		return &userauth.Client{Mesh: mesh, Self: self, Cluster: clusterID, Peers: []mydcp.Peer{peer}}
+		return &userauth.Client{Mesh: mesh, Self: self, Cluster: clusterID, Peers: []sfcp.Peer{peer}}
 	}
 	client := clientFor()
 	enrolled, err := client.Enroll(ctx, peer, control.Enrollment{Schema: 1, RequestID: "enroll-admin", User: access.User{ID: "admin", Username: "admin", Enabled: true, SystemAdmin: true, Credentials: []access.Credential{{ID: "key", Method: access.PrivateKey, Enabled: true, PublicKey: admin.Public}}}}, admin.Private)
@@ -176,7 +176,7 @@ func TestRealManagedMemberDirectoryApprovalAndUnknownSameDB(t *testing.T) {
 	if err != nil || !duplicate.Found || duplicate.Result == nil || *duplicate.Result != *approved.Result || read().State.Index() != after.State.Index() {
 		t.Fatal("original approval receipt", err)
 	}
-	looked, found := runtime.Mesh.Peer(mydcp.Identity(b.Public))
+	looked, found := runtime.Mesh.Peer(sfcp.Identity(b.Public))
 	if !found || !looked.Replicate || !looked.Snapshot || looked.Member || looked.Manage || looked.Read || looked.Report || looked.Tunnel {
 		t.Fatal("invitation widened rights", looked)
 	}
@@ -255,15 +255,27 @@ func TestRealManagedMemberDirectoryApprovalAndUnknownSameDB(t *testing.T) {
 	// report may commit first; the other then fails the directory CAS.
 	job := entry.Job.Pending.ID
 	unknown := report(runtime.Identity, control.MemberReport{Action: "unknown", Node: target.ID, Expected: entry.Revision, JobID: job, RequestID: "unknown-b"})
-	if out, err := runtime.Engine().Submit(ctx, unknown); err != nil || out.Result.Code != state.Applied && out.Result.Code != state.ConditionFailed {
-		t.Fatal("report", out.Result, err)
+	reported, err := runtime.Engine().Submit(ctx, unknown)
+	if err != nil || reported.Result.Code != state.Applied && reported.Result.Code != state.ConditionFailed {
+		t.Fatal("report", reported.Result, err)
 	}
-	entry, _ = directory().Entry(target.ID)
-	if entry.Job.Pending == nil || entry.Job.Pending.ID != job {
-		t.Fatal("unknown report replaced the original job", entry.Job)
+	// node-b is not in the committed configuration at or after the dispatch
+	// index, and the CAS-guarded add can never commit later, so the member
+	// loop settles the Unknown as absent: the same invitation is planned again
+	// and can be retried or cancelled.
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		entry, _ = directory().Entry(target.ID)
+		if entry.Job.Pending != nil && entry.Job.Pending.Phase == reconcile.Prepared || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
 	}
-	if entry.Job.Pending.Phase != reconcile.RecoveryRequired || entry.BaseIndex != cfg.Index || entry.Peer.Voter {
-		t.Fatal("original unsettled operation lost")
+	if entry.Job.Pending == nil || entry.Job.Pending.ID != job || entry.Job.LastID != 1 {
+		t.Fatal("absent settle replaced the invitation's job", entry.Job)
+	}
+	if entry.Phase != membership.Invited || entry.Job.Pending.Phase != reconcile.Prepared || entry.BaseIndex != 0 || entry.Peer.Voter {
+		t.Fatal("absent join not planned again", entry.Phase, entry.Job.Pending.Phase, entry.BaseIndex)
 	}
 	if rights, epoch, _, ok := read().State.Principal("node/" + runtime.Identity.Actor()); !ok || rights != 0 || epoch != 1 {
 		t.Fatal("node report actor granted legacy rights")
@@ -292,7 +304,7 @@ func TestRealManagedMemberDirectoryApprovalAndUnknownSameDB(t *testing.T) {
 	if err != nil || len(cfgAfter.Configuration.Servers) != 1 || cfgAfter.Configuration.Servers[0].ID != "node-a" {
 		t.Fatal("Unknown auto-submitted native membership", err)
 	}
-	if receipt, found := read().State.LookupResult(unknown); !found || receipt.Code != state.Applied || receipt != func() state.Result { r, _ := savedView.State.LookupResult(unknown); return r }() {
+	if receipt, found := read().State.LookupResult(unknown); !found || receipt.Code != reported.Result.Code || receipt != func() state.Result { r, _ := savedView.State.LookupResult(unknown); return r }() {
 		t.Fatal("report receipt lost")
 	}
 	final, err := client.Query(ctx, peer, session, "members", "")
@@ -323,5 +335,5 @@ func TestRealManagedMemberDirectoryApprovalAndUnknownSameDB(t *testing.T) {
 	if _, err := client.MemberPage(ctx, peer, session, "bad/cursor"); err == nil {
 		t.Fatal("invalid continuation cursor accepted")
 	}
-	t.Logf("real MYDCP user approval; actual Raft/FSM/bbolt receipt+Snapshot; unresolved job retained; native configuration N1 remains; no AddNonvoter invoked; %s", fmt.Sprint(entry.Job.Pending.ID))
+	t.Logf("real SFCP user approval; actual Raft/FSM/bbolt receipt+Snapshot; absent join planned again; native configuration N1 remains; no AddNonvoter invoked; %s", fmt.Sprint(entry.Job.Pending.ID))
 }

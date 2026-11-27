@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// Package config holds mydc-web daemon settings.
+// Package config holds sfc-web daemon settings.
 package config
 
 import (
@@ -21,8 +21,8 @@ type Config struct {
 	Listen  string // HTTP listen address
 	TLSCert string // optional TLS certificate file
 	TLSKey  string // optional TLS key file
-	Socket  string // mydcd Unix socket path (the node app socket mydcd opens for this container)
-	// Cluster, Node and NodeKey pin the mydcd behind Socket (hex cluster ID,
+	Socket  string // sfcd Unix socket path (the cluster app socket sfcd opens for this container)
+	// Cluster, Node and NodeKey pin the sfcd behind Socket (hex cluster ID,
 	// node ID, hex node identity key), as a CLI context trusts a node out of
 	// band. Required.
 	Cluster       string
@@ -31,15 +31,16 @@ type Config struct {
 	DataDir       string // directory of web.db
 	StaticDir     string // serve the UI from disk instead of the embedded build
 	ACMEListen    string // ACME HTTP-01 responder address (empty: off)
+	DirectListen  string // listener that trusts no proxy headers (sfcd's node.yaml port; empty: off)
 	ACMEAdvertise string // responder IP:port ingress dials (default: ACMEListen when it is a concrete IP:port)
 	// TrustedProxies: comma-separated IPs or CIDRs of the ingress that
 	// forwards to this container (the node TUN host addresses on
-	// mydc-system). Only a connection from one of them may say, by
+	// sfc-system). Only a connection from one of them may say, by
 	// X-Forwarded-Proto, that the browser's request was HTTPS.
 	TrustedProxies string
 	OpRetention    time.Duration // keep settled ops this long
 	LoginTimeout   time.Duration // pending login (ticket) lifetime
-	SealKey        string        // MYDC_WEB_SEAL_KEY (hex or base64 of 32 bytes); env only, never a flag
+	SealKey        string        // SFC_WEB_SEAL_KEY (hex or base64 of 32 bytes); env only, never a flag
 	SealKeyFile    string        // file holding the seal key (a Docker secret)
 	// SealKeyNext / SealKeyNextFile: a new seal key. On start every sealed
 	// file is sealed again with it; then it replaces SealKey.
@@ -57,14 +58,14 @@ type Config struct {
 func Default() Config {
 	return Config{
 		Listen:       ":8080",
-		Socket:       "/var/run/mydc/mydc.sock",
-		DataDir:      "/var/lib/mydc-web",
+		Socket:       "/run/sfc/sfcdp.sock",
+		DataDir:      "/var/lib/sfc-web",
 		OpRetention:  30 * 24 * time.Hour,
 		LoginTimeout: 5 * time.Minute,
 	}
 }
 
-// Parse reads flags and MYDC_WEB_* environment variables.
+// Parse reads flags and SFC_WEB_* environment variables.
 func Parse(args []string, getenv func(string) string) (Config, error) {
 	c := Default()
 	env := func(name string, dst *string) {
@@ -72,47 +73,49 @@ func Parse(args []string, getenv func(string) string) (Config, error) {
 			*dst = v
 		}
 	}
-	env("MYDC_WEB_LISTEN", &c.Listen)
-	env("MYDC_WEB_TLS_CERT", &c.TLSCert)
-	env("MYDC_WEB_TLS_KEY", &c.TLSKey)
-	env("MYDC_WEB_SOCKET", &c.Socket)
-	env("MYDC_WEB_CLUSTER", &c.Cluster)
-	env("MYDC_WEB_NODE", &c.Node)
-	env("MYDC_WEB_NODE_KEY", &c.NodeKey)
-	env("MYDC_WEB_DATA_DIR", &c.DataDir)
-	env("MYDC_WEB_STATIC_DIR", &c.StaticDir)
-	env("MYDC_WEB_ACME_LISTEN", &c.ACMEListen)
-	env("MYDC_WEB_ACME_ADVERTISE", &c.ACMEAdvertise)
-	env("MYDC_WEB_SEAL_KEY", &c.SealKey)
-	env("MYDC_WEB_SEAL_KEY_FILE", &c.SealKeyFile)
-	env("MYDC_WEB_SEAL_KEY_NEXT", &c.SealKeyNext)
-	env("MYDC_WEB_SEAL_KEY_NEXT_FILE", &c.SealKeyNextFile)
-	env("MYDC_WEB_AI_CLAUDE_URL", &c.AIClaudeURL)
-	env("MYDC_WEB_AI_OPENAI_URL", &c.AIOpenAIURL)
-	env("MYDC_WEB_AI_HIDE_MODELS_FILE", &c.AIHideModelFile)
-	env("MYDC_WEB_TRUSTED_PROXIES", &c.TrustedProxies)
-	if v := getenv("MYDC_WEB_OP_RETENTION"); v != "" {
+	env("SFC_WEB_LISTEN", &c.Listen)
+	env("SFC_WEB_TLS_CERT", &c.TLSCert)
+	env("SFC_WEB_TLS_KEY", &c.TLSKey)
+	env("SFC_WEB_SOCKET", &c.Socket)
+	env("SFC_WEB_CLUSTER", &c.Cluster)
+	env("SFC_WEB_NODE", &c.Node)
+	env("SFC_WEB_NODE_KEY", &c.NodeKey)
+	env("SFC_WEB_DATA_DIR", &c.DataDir)
+	env("SFC_WEB_STATIC_DIR", &c.StaticDir)
+	env("SFC_WEB_ACME_LISTEN", &c.ACMEListen)
+	env("SFC_WEB_DIRECT_LISTEN", &c.DirectListen)
+	env("SFC_WEB_ACME_ADVERTISE", &c.ACMEAdvertise)
+	env("SFC_WEB_SEAL_KEY", &c.SealKey)
+	env("SFC_WEB_SEAL_KEY_FILE", &c.SealKeyFile)
+	env("SFC_WEB_SEAL_KEY_NEXT", &c.SealKeyNext)
+	env("SFC_WEB_SEAL_KEY_NEXT_FILE", &c.SealKeyNextFile)
+	env("SFC_WEB_AI_CLAUDE_URL", &c.AIClaudeURL)
+	env("SFC_WEB_AI_OPENAI_URL", &c.AIOpenAIURL)
+	env("SFC_WEB_AI_HIDE_MODELS_FILE", &c.AIHideModelFile)
+	env("SFC_WEB_TRUSTED_PROXIES", &c.TrustedProxies)
+	if v := getenv("SFC_WEB_OP_RETENTION"); v != "" {
 		d, err := time.ParseDuration(v)
 		if err != nil {
-			return c, fmt.Errorf("MYDC_WEB_OP_RETENTION: %w", err)
+			return c, fmt.Errorf("SFC_WEB_OP_RETENTION: %w", err)
 		}
 		c.OpRetention = d
 	}
 
-	fs := flag.NewFlagSet("mydc-web", flag.ContinueOnError)
+	fs := flag.NewFlagSet("sfc-web", flag.ContinueOnError)
 	fs.StringVar(&c.Listen, "listen", c.Listen, "HTTP listen address")
 	fs.StringVar(&c.TLSCert, "tls-cert", c.TLSCert, "TLS certificate file (optional)")
 	fs.StringVar(&c.TLSKey, "tls-key", c.TLSKey, "TLS key file (optional)")
-	fs.StringVar(&c.Socket, "socket", c.Socket, "mydcd Unix socket path")
-	fs.StringVar(&c.Cluster, "cluster", c.Cluster, "cluster ID of the mydcd behind the socket (hex)")
-	fs.StringVar(&c.Node, "node", c.Node, "node ID of the mydcd behind the socket")
-	fs.StringVar(&c.NodeKey, "node-key", c.NodeKey, "identity key of the mydcd behind the socket (hex)")
+	fs.StringVar(&c.Socket, "socket", c.Socket, "sfcd Unix socket path")
+	fs.StringVar(&c.Cluster, "cluster", c.Cluster, "cluster ID of the sfcd behind the socket (hex)")
+	fs.StringVar(&c.Node, "node", c.Node, "node ID of the sfcd behind the socket")
+	fs.StringVar(&c.NodeKey, "node-key", c.NodeKey, "identity key of the sfcd behind the socket (hex)")
 	fs.StringVar(&c.DataDir, "data-dir", c.DataDir, "directory for web.db")
 	fs.StringVar(&c.ACMEListen, "acme-listen", c.ACMEListen, "plain HTTP address of the ACME HTTP-01 responder that ingress forwards /.well-known/acme-challenge/ to (empty: off)")
 	fs.StringVar(&c.ACMEAdvertise, "acme-advertise", c.ACMEAdvertise, "IP:port ingress dials to reach the responder; filled into the cluster setting (default: -acme-listen when it is a concrete IP:port)")
+	fs.StringVar(&c.DirectListen, "direct-listen", c.DirectListen, "HTTP address that trusts no X-Forwarded-* headers; sfcd forwards the node.yaml port here (empty: off)")
 	fs.StringVar(&c.StaticDir, "static-dir", c.StaticDir, "serve UI files from this directory instead of the embedded build")
 	fs.StringVar(&c.TrustedProxies, "trusted-proxies", c.TrustedProxies, "comma-separated IPs or CIDRs of the ingress allowed to say by X-Forwarded-Proto that a request was HTTPS")
-	fs.StringVar(&c.SealKeyFile, "seal-key-file", c.SealKeyFile, "file holding the seal key for sealed secrets (MYDC_WEB_SEAL_KEY is the env alternative)")
+	fs.StringVar(&c.SealKeyFile, "seal-key-file", c.SealKeyFile, "file holding the seal key for sealed secrets (SFC_WEB_SEAL_KEY is the env alternative)")
 	fs.StringVar(&c.SealKeyNextFile, "seal-key-next-file", c.SealKeyNextFile, "file holding a new seal key; sealed files are sealed again with it on start")
 	fs.StringVar(&c.AIHideModelFile, "ai-hide-models-file", c.AIHideModelFile, "file of OpenAI model ID patterns hidden from AI role pickers (one regexp per line)")
 	fs.DurationVar(&c.OpRetention, "op-retention", c.OpRetention, "keep settled operations this long")
@@ -139,10 +142,10 @@ func (c Config) validate() error {
 		return errors.New("data-dir is required")
 	}
 	if c.SealKey != "" && c.SealKeyFile != "" {
-		return errors.New("set MYDC_WEB_SEAL_KEY or seal-key-file, not both")
+		return errors.New("set SFC_WEB_SEAL_KEY or seal-key-file, not both")
 	}
 	if c.SealKeyNext != "" && c.SealKeyNextFile != "" {
-		return errors.New("set MYDC_WEB_SEAL_KEY_NEXT or seal-key-next-file, not both")
+		return errors.New("set SFC_WEB_SEAL_KEY_NEXT or seal-key-next-file, not both")
 	}
 	if _, err := c.TrustedProxyNets(); err != nil {
 		return err

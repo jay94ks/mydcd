@@ -5,9 +5,9 @@ package app
 import (
 	"errors"
 
-	"github.com/jay94ks/mydcd/internal/imagecache"
-	"github.com/jay94ks/mydcd/internal/reconcile"
-	"github.com/jay94ks/mydcd/internal/workload"
+	"github.com/jay94ks/seafield/internal/imagecache"
+	"github.com/jay94ks/seafield/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/workload"
 )
 
 // Private resolved Process IDs are authoritative even for untagged SDK loads.

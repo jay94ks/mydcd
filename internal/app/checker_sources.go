@@ -8,12 +8,12 @@ import (
 	"errors"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/schema"
-	"github.com/jay94ks/mydcd/internal/storage"
-	checker "github.com/jay94ks/mydcd/internal/workload/lifecycle"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/storage"
+	checker "github.com/jay94ks/seafield/internal/workload/lifecycle"
 )
 
 // The same backend serves QUIC and local Unix management streams. No store
@@ -33,7 +33,7 @@ func (b checkerSourceBackend) permit(ctx context.Context, session access.Session
 	}
 	permit, err := schema.Decode[control.LifecycleSourcePermit](reply.Data)
 	if err != nil || r.installation == nil || permit.Schema != 1 || permit.Cluster != r.controlPolicy.Cluster || permit.Provider != r.Identity.Public || permit.Node != r.installation.record.Root.Self.ID || permit.Source.Tenant != d.Tenant || permit.Source.ContentDigest() != d.ContentDigest() || permit.Recover != recover || permit.Index == 0 || permit.Epoch == 0 || permit.Policy.Validate() != nil || permit.Policy.Tenant != d.Tenant || !recover && !permit.Policy.AllowsDescriptor(d) {
-		return checker.TenantPolicy{}, mydcp.ErrAdmission
+		return checker.TenantPolicy{}, sfcp.ErrAdmission
 	}
 	return permit.Policy, nil
 }
@@ -49,7 +49,7 @@ func (b checkerSourceBackend) publicationOwner(ctx context.Context, d checker.So
 		owner.life.RLock()
 		if owner.closed || owner.ctx.Err() != nil || owner.checkerSources == nil {
 			owner.life.RUnlock()
-			return nil, mydcp.ErrAdmission
+			return nil, sfcp.ErrAdmission
 		}
 		release, err := owner.checkerSources.HoldUpload(ctx, d, id, true)
 		owner.life.RUnlock()
@@ -69,7 +69,7 @@ func (b checkerSourceBackend) publicationOwner(ctx context.Context, d checker.So
 		return nil, storage.ErrMissing
 	}
 	if !b.runtime.acceptsResourceKey(ctx, found.Identity.Public) {
-		return nil, mydcp.ErrAdmission
+		return nil, sfcp.ErrAdmission
 	}
 	return found, nil
 }
@@ -93,7 +93,7 @@ func (b checkerSourceBackend) BeginPublication(ctx context.Context, session acce
 	r.life.RLock()
 	defer r.life.RUnlock()
 	if r.closed || r.ctx.Err() != nil || r.checkerSources == nil {
-		return nil, mydcp.ErrAdmission
+		return nil, sfcp.ErrAdmission
 	}
 	if !recover {
 		if err = r.checkerSources.BeginUpload(ctx, d, id); err != nil {
@@ -111,7 +111,7 @@ func (b checkerSourceBackend) StagePublication(ctx context.Context, session acce
 	r.life.RLock()
 	defer r.life.RUnlock()
 	if r.closed || r.ctx.Err() != nil || r.checkerSources == nil {
-		return checker.SourceFact{}, mydcp.ErrAdmission
+		return checker.SourceFact{}, sfcp.ErrAdmission
 	}
 	if _, err = r.checkerSources.Stage(ctx, d, data, policy); err != nil {
 		return checker.SourceFact{}, err
@@ -129,7 +129,7 @@ func (b checkerSourceBackend) RecoverPublication(ctx context.Context, session ac
 	r.life.RLock()
 	defer r.life.RUnlock()
 	if r.closed || r.ctx.Err() != nil || r.checkerSources == nil {
-		return checker.SourceFact{}, mydcp.ErrAdmission
+		return checker.SourceFact{}, sfcp.ErrAdmission
 	}
 	return r.checkerSources.UploadedFact(ctx, d, id, true)
 }
@@ -144,7 +144,7 @@ func (b checkerSourceBackend) RecoverPublicationModule(ctx context.Context, sess
 	r.life.RLock()
 	defer r.life.RUnlock()
 	if r.closed || r.ctx.Err() != nil || r.checkerSources == nil {
-		return checker.ModuleFact{}, mydcp.ErrAdmission
+		return checker.ModuleFact{}, sfcp.ErrAdmission
 	}
 	return r.checkerSources.RecoverModule(ctx, d.Tenant, pin)
 }
@@ -157,7 +157,7 @@ func (b checkerSourceBackend) StagePublicationModule(ctx context.Context, sessio
 	r.life.RLock()
 	defer r.life.RUnlock()
 	if r.closed || r.ctx.Err() != nil || r.checkerSources == nil {
-		return checker.ModuleFact{}, mydcp.ErrAdmission
+		return checker.ModuleFact{}, sfcp.ErrAdmission
 	}
 	return r.checkerSources.StageModule(ctx, d, a, policy)
 }

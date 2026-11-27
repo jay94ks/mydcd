@@ -1,0 +1,27 @@
+# SPDX-License-Identifier: Apache-2.0
+# Seafield Engine. Install the binary under /usr/lib/sfc/bin,
+# /usr/local/lib/sfc/bin or /usr/local/bin (sfcd checks the resolved path).
+[Unit]
+Description=Seafield Engine (sfed)
+Documentation=https://github.com/jay94ks/seafield/tree/main/seafield/docs
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=notify
+# The per-server values come from node.yaml engine (sfcd engine-config).
+ExecStartPre=/usr/local/lib/sfc/bin/sfcd --config /etc/sfc/node.yaml engine-config --output /etc/sfe/daemon.json
+ExecStart=/usr/local/lib/sfc/bin/sfed --config-file /etc/sfe/daemon.json
+ExecReload=/bin/kill -s HUP $MAINPID
+Delegate=yes
+KillMode=process
+LimitNOFILE=infinity
+LimitNPROC=infinity
+TasksMax=infinity
+OOMScoreAdjust=-500
+Restart=always
+RestartSec=2
+TimeoutStartSec=0
+
+[Install]
+WantedBy=multi-user.target

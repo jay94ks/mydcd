@@ -7,7 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 
-	"github.com/jay94ks/mydcd/internal/access"
+	"github.com/jay94ks/seafield/internal/access"
 )
 
 // LocalServicesDocument is the separately accepted local source of services.
@@ -38,8 +38,8 @@ func localServicesInput(d *LocalServicesDocument) (Compose, error) {
 	}
 	// Only new service declarations and references are contributed. No local
 	// app root may reconfigure the registered source or the Git app's policy.
-	if c.MyDC.Delivery != nil || c.MyDC.Ingress != nil || c.MyDC.Vault != nil || c.MyDC.Routing != nil || len(c.MyDC.Nodes) != 0 || len(c.MyDC.Registries) != 0 {
-		return Compose{}, inputError("CD_LOCAL_SERVICES_ONLY", "x-mydc")
+	if c.Sfc.Delivery != nil || c.Sfc.Ingress != nil || c.Sfc.Vault != nil || c.Sfc.Routing != nil || len(c.Sfc.Nodes) != 0 || len(c.Sfc.Registries) != 0 {
+		return Compose{}, inputError("CD_LOCAL_SERVICES_ONLY", "x-sfc")
 	}
 	for name, n := range c.Networks {
 		if !n.External {
@@ -56,8 +56,8 @@ func localServicesInput(d *LocalServicesDocument) (Compose, error) {
 			return Compose{}, inputError("INLINE_SECRET_FORBIDDEN", name)
 		}
 	}
-	if c.MyDC.Lifecycle != nil && len(c.MyDC.Lifecycle.Checks) != 0 {
-		return Compose{}, inputError("CD_LOCAL_GLOBAL_CHECK_FORBIDDEN", "x-mydc.lifecycle.checks")
+	if c.Sfc.Lifecycle != nil && len(c.Sfc.Lifecycle.Checks) != 0 {
+		return Compose{}, inputError("CD_LOCAL_GLOBAL_CHECK_FORBIDDEN", "x-sfc.lifecycle.checks")
 	}
 	return c, nil
 }
@@ -90,12 +90,12 @@ func mergeLocalServices(input Compose, local *LocalServicesDocument, scope AppSc
 		scope.App = input.Name
 	}
 	if scope.Tenant == "" {
-		scope.Tenant = input.MyDC.Tenant
+		scope.Tenant = input.Sfc.Tenant
 	}
 	if scope.Deployment == "" {
-		scope.Deployment = input.MyDC.Deployment
+		scope.Deployment = input.Sfc.Deployment
 	}
-	for _, pair := range [][2]string{{addition.Name, scope.App}, {addition.MyDC.Tenant, scope.Tenant}, {addition.MyDC.Deployment, scope.Deployment}} {
+	for _, pair := range [][2]string{{addition.Name, scope.App}, {addition.Sfc.Tenant, scope.Tenant}, {addition.Sfc.Deployment, scope.Deployment}} {
 		if pair[0] != "" && pair[1] != "" && pair[0] != pair[1] {
 			return Compose{}, inputError("CD_LOCAL_SCOPE_CONFLICT", "scope")
 		}
@@ -131,11 +131,11 @@ func mergeLocalServices(input Compose, local *LocalServicesDocument, scope AppSc
 	if err != nil {
 		return Compose{}, err
 	}
-	if declaration := addition.MyDC.Lifecycle; declaration != nil {
-		if merged.MyDC.Lifecycle == nil {
-			merged.MyDC.Lifecycle = &LifecycleDeclaration{Optimizer: declaration.Optimizer}
+	if declaration := addition.Sfc.Lifecycle; declaration != nil {
+		if merged.Sfc.Lifecycle == nil {
+			merged.Sfc.Lifecycle = &LifecycleDeclaration{Optimizer: declaration.Optimizer}
 		}
-		l := merged.MyDC.Lifecycle
+		l := merged.Sfc.Lifecycle
 		if declaration.Optimizer != nil && !bytes.Equal(goal(declaration.Optimizer), goal(l.Optimizer)) {
 			return Compose{}, inputError("CD_LOCAL_OPTIMIZER_CONFLICT", "lifecycle")
 		}

@@ -19,12 +19,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/network"
-	"github.com/jay94ks/mydcd/internal/reconcile"
-	"github.com/jay94ks/mydcd/internal/storage"
-	"github.com/jay94ks/mydcd/internal/tenancy"
-	"github.com/jay94ks/mydcd/internal/workload"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/network"
+	"github.com/jay94ks/seafield/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/storage"
+	"github.com/jay94ks/seafield/internal/tenancy"
+	"github.com/jay94ks/seafield/internal/workload"
 	"github.com/miekg/dns"
 	"golang.org/x/sys/unix"
 )
@@ -108,7 +108,7 @@ func dnsNativeBoot() ([32]byte, error) {
 	if err != nil || len(strings.TrimSpace(string(raw))) != 36 {
 		return [32]byte{}, errors.Join(err, ErrLease)
 	}
-	return sha256.Sum256(append([]byte("mydc-linux-boot-1/"), raw...)), nil
+	return sha256.Sum256(append([]byte("sfc-linux-boot-1/"), raw...)), nil
 }
 
 func NativeBootID() ([32]byte, error) { return dnsNativeBoot() }

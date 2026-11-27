@@ -12,7 +12,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/storage"
+	"github.com/jay94ks/seafield/internal/storage"
 )
 
 func TestSourceTypeMetadataHasNoToolchainAndCoversCompleteWhitelist(t *testing.T) {
@@ -81,7 +81,7 @@ func TestSourceEditorDiagnosticsDoNotRunRootOrModuleInitialization(t *testing.T)
 
 func TestSourceEditorTypesPreserveNativeMethodsConstantsAndModuleAliases(t *testing.T) {
 	archive := moduleArchive(t, "example.invalid/safe", map[string][]byte{"safe.go": []byte(`package safe
-import lifecycle "github.com/jay94ks/mydcd/lifecycle/v1"
+import lifecycle "github.com/jay94ks/seafield/lifecycle/v1"
 type Request = lifecycle.Request
 type Link struct { Next *Link }
 func (link *Link) Ready() bool { return link == nil || link.Next == nil }

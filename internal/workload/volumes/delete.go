@@ -3,7 +3,7 @@
 package volumes
 
 import (
-	"github.com/jay94ks/mydcd/internal/access"
+	"github.com/jay94ks/seafield/internal/access"
 )
 
 // NativeRemoved binds positive journal/SDK completion to one explicit shared
@@ -20,7 +20,7 @@ type NativeRemoved struct {
 
 func NativeRemovedBytes(p NativeRemoved) []byte {
 	p.Signature = nil
-	return signedBytes("mydc-volume-native-removed-1", p)
+	return signedBytes("sfc-volume-native-removed-1", p)
 }
 
 func (p NativeRemoved) Verify() error {

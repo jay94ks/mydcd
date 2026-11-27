@@ -9,9 +9,9 @@ import (
 )
 
 // Every node method that writes to Raft is listed, with its class, in the
-// table of docs/architecture/raft-and-mydcp.md. Adding one without classifying it fails here.
+// table of docs/architecture/raft-and-sfcp.md. Adding one without classifying it fails here.
 func TestReportMethodsMatchR14Table(t *testing.T) {
-	raw, err := os.ReadFile("../../docs/architecture/raft-and-mydcp.md")
+	raw, err := os.ReadFile("../../docs/architecture/raft-and-sfcp.md")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -33,12 +33,18 @@ func TestReportMethodsMatchR14Table(t *testing.T) {
 		}
 		listed += strings.Count(row, "`") / 2
 	}
-	for method, class := range reportMethods {
+	reports := 0
+	for method, m := range nodeMethods {
+		if m.kind != nodeReport {
+			continue
+		}
+		reports++
+		class := m.report
 		if !strings.Contains(rows[class], "`"+method+"`") {
-			t.Errorf("%s is class %d in reportMethods but not in that R14 table row", method, class)
+			t.Errorf("%s is class %d in nodeMethods but not in that R14 table row", method, class)
 		}
 	}
-	if listed != len(reportMethods) {
-		t.Errorf("R14 table lists %d methods, reportMethods has %d", listed, len(reportMethods))
+	if listed != reports {
+		t.Errorf("R14 table lists %d methods, nodeMethods has %d reports", listed, reports)
 	}
 }

@@ -15,22 +15,22 @@ import (
 
 	"golang.org/x/net/websocket"
 
-	"github.com/jay94ks/mydcd/internal/web/mydc"
-	"github.com/jay94ks/mydcd/internal/web/store"
+	"github.com/jay94ks/seafield/internal/web/sfc"
+	"github.com/jay94ks/seafield/internal/web/store"
 )
 
 // streamRecordView is one container stream record for the browser.
 type streamRecordView struct {
-	Type     string                `json:"type"`
-	Sequence uint64                `json:"sequence,omitempty"`
-	Data     []byte                `json:"data,omitempty"` // base64
-	Text     string                `json:"text,omitempty"` // Data when it is valid UTF-8
-	Sample   *mydc.ContainerSample `json:"sample,omitempty"`
-	Receipt  *mydc.ExecReceipt     `json:"receipt,omitempty"`
-	Code     string                `json:"code,omitempty"`
+	Type     string               `json:"type"`
+	Sequence uint64               `json:"sequence,omitempty"`
+	Data     []byte               `json:"data,omitempty"` // base64
+	Text     string               `json:"text,omitempty"` // Data when it is valid UTF-8
+	Sample   *sfc.ContainerSample `json:"sample,omitempty"`
+	Receipt  *sfc.ExecReceipt     `json:"receipt,omitempty"`
+	Code     string               `json:"code,omitempty"`
 }
 
-func viewRecord(r mydc.StreamRecord) streamRecordView {
+func viewRecord(r sfc.StreamRecord) streamRecordView {
 	v := streamRecordView{Type: r.Kind, Sequence: r.Sequence, Data: r.Data, Sample: r.Sample, Receipt: r.Receipt, Code: r.Code}
 	if len(r.Data) > 0 && utf8.Valid(r.Data) {
 		v.Text = string(r.Data)
@@ -42,9 +42,9 @@ func viewRecord(r mydc.StreamRecord) streamRecordView {
 // on the session's connection. The stream itself is independent of the
 // connection afterwards. store, when set, runs between signing and opening
 // (exec intents are stored before they are sent).
-func (s *Server) openStream(ctx context.Context, ws *webSession, tenant string, sel mydc.ContainerSelection, spec mydc.StreamSpec, requestID string, store func(mydc.StreamTarget, mydc.SignedIntent) error) (mydc.Stream, error) {
-	var st mydc.Stream
-	err := ws.do(ctx, func(ctx context.Context, c mydc.Conn) error {
+func (s *Server) openStream(ctx context.Context, ws *webSession, tenant string, sel sfc.ContainerSelection, spec sfc.StreamSpec, requestID string, store func(sfc.StreamTarget, sfc.SignedIntent) error) (sfc.Stream, error) {
+	var st sfc.Stream
+	err := ws.do(ctx, func(ctx context.Context, c sfc.Conn) error {
 		target, err := c.ResolveStream(ctx, tenant, sel, spec)
 		if err != nil {
 			return err
@@ -65,17 +65,17 @@ func (s *Server) openStream(ctx context.Context, ws *webSession, tenant string, 
 }
 
 // errSessionEnded is returned when the login ended while a stream opened.
-var errSessionEnded = &mydc.Error{Code: mydc.CodeSessionExpired, Detail: "the login ended"}
+var errSessionEnded = &sfc.Error{Code: sfc.CodeSessionExpired, Detail: "the login ended"}
 
 // selectionOf reads the container from the path: an app task
 // (/apps/{app}?service=&instance=) or a standalone container
 // (/standalone/{name}, REQ-29 mock).
-func selectionOf(r *http.Request) mydc.ContainerSelection {
+func selectionOf(r *http.Request) sfc.ContainerSelection {
 	if name := r.PathValue("name"); name != "" {
-		return mydc.ContainerSelection{Standalone: name}
+		return sfc.ContainerSelection{Standalone: name}
 	}
 	q := r.URL.Query()
-	return mydc.ContainerSelection{App: r.PathValue("app"), Service: q.Get("service"), Instance: q.Get("instance")}
+	return sfc.ContainerSelection{App: r.PathValue("app"), Service: q.Get("service"), Instance: q.Get("instance")}
 }
 
 func boolParam(r *http.Request, name string, def bool) bool {
@@ -99,7 +99,7 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request, ws *webSes
 		writeError(w, http.StatusBadRequest, "bad-request", "service is required")
 		return
 	}
-	var spec mydc.StreamSpec
+	var spec sfc.StreamSpec
 	switch kind := q.Get("kind"); kind {
 	case "", "logs":
 		tail, _ := strconv.Atoi(q.Get("tail"))
@@ -107,7 +107,7 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request, ws *webSes
 			writeError(w, http.StatusBadRequest, "bad-request", "tail must be 0..10000")
 			return
 		}
-		spec = mydc.LogsFollowSpec(sel, tail, boolParam(r, "stdout", true), boolParam(r, "stderr", true))
+		spec = sfc.LogsFollowSpec(sel, tail, boolParam(r, "stdout", true), boolParam(r, "stderr", true))
 	case "top", "stats":
 		iv := 5 * time.Second
 		if v := q.Get("interval"); v != "" {
@@ -118,7 +118,7 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request, ws *webSes
 			}
 			iv = d
 		}
-		spec = mydc.WatchSpec(kind, sel, iv)
+		spec = sfc.WatchSpec(kind, sel, iv)
 	default:
 		writeError(w, http.StatusBadRequest, "bad-request", "kind must be logs, top or stats")
 		return
@@ -175,7 +175,7 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request, ws *webSes
 			fl.Flush()
 			return
 		}
-		if rec.Kind == mydc.RecordPing {
+		if rec.Kind == sfc.RecordPing {
 			fmt.Fprint(w, ": ping\n\n")
 		} else {
 			sendEvent(w, rec.Kind, camel{viewRecord(rec)})
@@ -185,7 +185,7 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request, ws *webSes
 }
 
 func streamErrCode(err error) string {
-	var me *mydc.Error
+	var me *sfc.Error
 	if errors.As(err, &me) {
 		return string(me.Code)
 	}
@@ -239,7 +239,7 @@ func (s *Server) handleExec(w http.ResponseWriter, r *http.Request, ws *webSessi
 		writeError(w, http.StatusBadRequest, "bad-request", "service, cmd and (for tty) rows/cols are required")
 		return
 	}
-	spec := mydc.ExecStreamSpec(argv, stdin, tty, rows, cols)
+	spec := sfc.ExecStreamSpec(argv, stdin, tty, rows, cols)
 	digestReq := opRequest{Action: "exec", Payload: mustJSON(map[string]any{"sel": sel, "argv": argv, "tty": tty, "stdin": stdin})}
 	dg := digestReq.digest()
 
@@ -254,18 +254,18 @@ func (s *Server) handleExec(w http.ResponseWriter, r *http.Request, ws *webSessi
 	}
 
 	ctx, cancel := s.callCtx(r)
-	var st mydc.Stream
+	var st sfc.Stream
 	if old != nil {
 		// Same original intent: the server answers with its receipt only.
-		err = ws.do(ctx, func(ctx context.Context, c mydc.Conn) error {
+		err = ws.do(ctx, func(ctx context.Context, c sfc.Conn) error {
 			var err error
-			st, err = c.OpenStream(ctx, tenant, mydc.SignedIntent(old.Signed))
+			st, err = c.OpenStream(ctx, tenant, sfc.SignedIntent(old.Signed))
 			return err
 		})
 	} else {
-		// The exec operation ID must follow the mydcd ID grammar
+		// The exec operation ID must follow the sfcd ID grammar
 		// (starts with a letter), so it is "exec-<opId>".
-		st, err = s.openStream(ctx, ws, tenant, sel, spec, "exec-"+opID, func(t mydc.StreamTarget, in mydc.SignedIntent) error {
+		st, err = s.openStream(ctx, ws, tenant, sel, spec, "exec-"+opID, func(t sfc.StreamTarget, in sfc.SignedIntent) error {
 			now := s.now()
 			o := &store.Op{ID: opID, User: ws.user.ID, Username: ws.user.Username, RequestID: "exec-" + opID, Action: "exec", Tenant: tenant,
 				Target: execTarget(sel, t), Digest: dg, Signed: in, State: store.OpRunning, SubmittedAt: now, UpdatedAt: now}
@@ -299,7 +299,7 @@ func (s *Server) handleExec(w http.ResponseWriter, r *http.Request, ws *webSessi
 	wsrv.ServeHTTP(w, r)
 }
 
-func (s *Server) pumpExec(ctx context.Context, conn *websocket.Conn, st mydc.Stream, opID string, ws *webSession) {
+func (s *Server) pumpExec(ctx context.Context, conn *websocket.Conn, st sfc.Stream, opID string, ws *webSession) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	go func() {
@@ -341,10 +341,10 @@ func (s *Server) pumpExec(ctx context.Context, conn *websocket.Conn, st mydc.Str
 			}
 			return
 		}
-		if rec.Kind == mydc.RecordPing {
+		if rec.Kind == sfc.RecordPing {
 			continue
 		}
-		if rec.Kind == mydc.RecordReceipt && rec.Receipt != nil {
+		if rec.Kind == sfc.RecordReceipt && rec.Receipt != nil {
 			s.noteReceipt(ws, opID, *rec.Receipt)
 		}
 		raw, err := camelJSON(viewRecord(rec))
@@ -358,7 +358,7 @@ func (s *Server) pumpExec(ctx context.Context, conn *websocket.Conn, st mydc.Str
 }
 
 // noteReceipt records a finished exec's exit in its op.
-func (s *Server) noteReceipt(ws *webSession, opID string, rc mydc.ExecReceipt) {
+func (s *Server) noteReceipt(ws *webSession, opID string, rc sfc.ExecReceipt) {
 	o, err := s.opt.Store.GetOp(ws.user.ID, opID)
 	if err != nil {
 		return
@@ -367,9 +367,9 @@ func (s *Server) noteReceipt(ws *webSession, opID string, rc mydc.ExecReceipt) {
 	_ = s.saveOp(o)
 }
 
-func applyExecReceipt(o *store.Op, rc mydc.ExecReceipt, now time.Time) {
+func applyExecReceipt(o *store.Op, rc sfc.ExecReceipt, now time.Time) {
 	o.UpdatedAt = now
-	if rc.Phase == mydc.ExecFinished {
+	if rc.Phase == sfc.ExecFinished {
 		code := 0
 		if rc.ExitCode != nil {
 			code = *rc.ExitCode
@@ -387,10 +387,10 @@ func applyExecReceipt(o *store.Op, rc mydc.ExecReceipt, now time.Time) {
 func (s *Server) execStatus(w http.ResponseWriter, r *http.Request, ws *webSession, o *store.Op) {
 	ctx, cancel := s.callCtx(r)
 	defer cancel()
-	var es mydc.ExecStatus
-	err := ws.do(ctx, func(ctx context.Context, c mydc.Conn) error {
+	var es sfc.ExecStatus
+	err := ws.do(ctx, func(ctx context.Context, c sfc.Conn) error {
 		var err error
-		es, err = c.ExecStatus(ctx, o.Tenant, mydc.SignedIntent(o.Signed))
+		es, err = c.ExecStatus(ctx, o.Tenant, sfc.SignedIntent(o.Signed))
 		return err
 	})
 	if err != nil {
@@ -411,7 +411,7 @@ func mustJSON(v any) json.RawMessage {
 }
 
 // execTarget names the container of an exec op for the operation list.
-func execTarget(sel mydc.ContainerSelection, t mydc.StreamTarget) string {
+func execTarget(sel sfc.ContainerSelection, t sfc.StreamTarget) string {
 	if sel.Standalone != "" {
 		return "standalone/" + sel.Standalone
 	}

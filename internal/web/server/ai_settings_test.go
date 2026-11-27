@@ -16,8 +16,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/web/ai"
-	"github.com/jay94ks/mydcd/internal/web/seal"
+	"github.com/jay94ks/seafield/internal/web/ai"
+	"github.com/jay94ks/seafield/internal/web/seal"
 )
 
 const (

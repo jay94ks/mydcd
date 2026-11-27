@@ -7,11 +7,11 @@ import (
 	"unicode/utf8"
 
 	"encoding/json"
-	"github.com/jay94ks/mydcd/internal/cluster/lifecycle"
-	"github.com/jay94ks/mydcd/internal/cluster/membership"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/config"
-	"github.com/jay94ks/mydcd/internal/identity"
+	"github.com/jay94ks/seafield/internal/cluster/lifecycle"
+	"github.com/jay94ks/seafield/internal/cluster/membership"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/config"
+	"github.com/jay94ks/seafield/internal/identity"
 )
 
 const MembersKey = "control/members"
@@ -21,6 +21,11 @@ type NodeInvitation struct {
 	JoinID string
 }
 type NodeSelection struct{ ID string }
+
+// NodeEndpointChange (set-node-endpoint) moves a joined server to a new
+// endpoint (HOST:PORT) when its address or port changed. CAS: the entry's
+// revision.
+type NodeEndpointChange struct{ ID, Endpoint string }
 
 // NodeCordonChange is cordon-node's payload. Reason is the operator's note
 // (optional, at most 256 characters, one line). It lives only in the signed
@@ -61,12 +66,13 @@ type NodeOperationWindow struct{ Epoch uint64 }
 // CommandKey separates the CAS/receipt namespace without changing any existing
 // signed operation's JSON shape or catalog root semantics.
 func CommandKey(action string) string {
+	if b, ok := actionBook(action); ok {
+		return b.Key
+	}
 	switch action {
-	case "set-node-shell-policy", "set-node-shell-node", "set-node-shell-grant", "open-node-shell", "close-node-shell":
-		return NodeShellKey
 	case "put-certificate", "delete-certificate", "disable-certificate", "add-domain", "remove-domain", "set-acme-responder":
 		return CertificatesKey
-	case "set-node-gateways", "set-ingress-balance", "drain-ingress", "undrain-ingress", "set-ingress-host-policy", "ingress-block", "ingress-unblock", "ingress-block-extend":
+	case "set-node-gateways", "set-ingress-balance", "drain-ingress", "undrain-ingress", "set-ingress-host-policy", "ingress-block", "ingress-unblock", "ingress-block-extend", "put-cluster-app-route", "remove-cluster-app-route":
 		return IngressManagementKey
 	case ImageBuildCachePruneAction:
 		return ImageBuildKey
@@ -80,12 +86,6 @@ func CommandKey(action string) string {
 		return RegistryMaintenanceKey
 	case "put-external-registry", "delete-external-registry", "bind-external-registry", "unbind-external-registry":
 		return ExternalRegistriesKey
-	case "prune-node-images":
-		return ImageCacheKey
-	case "reconnect-tunnel":
-		return TunnelReconnectKey
-	case "raft-compact":
-		return CompactKey
 	case "override-app", "release-app-override":
 		return AppsKey
 	case "put-registry", "start-registry", "stop-registry", "delete-registry":
@@ -96,15 +96,15 @@ func CommandKey(action string) string {
 		return NodeStorageKey
 	case "vault-init", "vault-create", "vault-acl", "vault-reorder", "vault-move", "vault-approval-age", "vault-set-profile", "vault-prepare-write", "vault-dispatch-write", "vault-observe-write", "vault-publish-write", "vault-abandon-write", "vault-rotate-writes", "vault-revoke", "vault-retire", "vault-set-issuer", "vault-commit-approval", "vault-revoke-approval":
 		return VaultKey
-	case "standalone-extend", "standalone-stop", "standalone-start", "standalone-restart", "standalone-up", "standalone-pin", "standalone-remove", "put-app-local-services", "clear-app-local-services", "cd-approve", "cd-reject", "grant-cd-approver", "revoke-cd-approver", "restart-task", "clear-app-logs", "standalone-clear-logs", "begin-app-upload", "put-app-part", "abort-app-upload", "begin-app", "down-app", "resume-app-retirement", "rotate-app-history", "sync-app", "recover-app", "replan-app", "configure-app-cd", "pause-app-cd", "resume-app-cd", "abandon-app-sync":
+	case "standalone-extend", "standalone-stop", "standalone-start", "standalone-restart", "standalone-up", "standalone-pin", "standalone-remove", "put-app-local-services", "clear-app-local-services", "cd-approve", "cd-reject", "grant-cd-approver", "revoke-cd-approver", "restart-task", "clear-app-logs", "standalone-clear-logs", "begin-app-upload", "put-app-part", "abort-app-upload", "begin-app", "down-app", "resume-app-retirement", "resume-app-step", "rotate-app-history", "sync-app", "recover-app", "replan-app", "configure-app-cd", "pause-app-cd", "resume-app-cd", "abandon-app-sync":
 		return AppsKey
 	case "volume-file-put", "volume-file-list", "volume-file-get", "volume-file-delete", "begin-volume-move", "cancel-volume-move", "commit-volume-move", "begin-volume-create", "register-fixed-volume", "cancel-volume-create", "unregister-fixed-volume", "delete-volume", "delete-retained-volume", "create-volume", "acquire-volume", "release-volume", "set-volume-capacity", "set-volume-backup-limit", "begin-volume-backup", "cancel-volume-backup", "delete-volume-backup", "begin-volume-restore", "cancel-volume-restore":
 		return VolumesKey
 	case "rotate-ledger":
 		return StorageKey
-	case "rotate-node-identity", "drain-node", "cordon-node", "uncordon-node", "invite-node", "promote-node", "demote-node", "isolate-node", "restore-node", "remove-node", "force-remove-node", "resume-node-operation", "rotate-node-operations":
+	case "rotate-node-identity", "set-node-endpoint", "drain-node", "cordon-node", "uncordon-node", "invite-node", "cancel-node-invite", "abort-node-join", "promote-node", "demote-node", "isolate-node", "restore-node", "remove-node", "force-remove-node", "resume-node-operation", "rotate-node-operations":
 		return MembersKey
-	case "set-node-quota", "reserve-task", "drain-reservation", "release-reservation", "create-tun-network", "join-tun-network", "leave-tun-network", "set-network-toggle", "set-system-network-range", "configure-network-dns", "plan-network-change", "cancel-network-change", "fence-network-change", "commit-network-change", "reconfigure-tun-network", "propose-route", "approve-route", "withdraw-route", "drain-network":
+	case "set-node-quota", "reserve-task", "drain-reservation", "release-reservation", "create-tun-network", "join-tun-network", "leave-tun-network", "set-network-toggle", "configure-network-dns", "plan-network-change", "cancel-network-change", "fence-network-change", "commit-network-change", "reconfigure-tun-network", "propose-route", "approve-route", "withdraw-route", "create-virtual-bridge", "approve-virtual-bridge", "close-virtual-bridge", "drain-network":
 		return ResourcesKey
 	default:
 		return CatalogKey
@@ -183,6 +183,16 @@ func (p Policy) reduceMembers(s state.State, cmd state.Command) (map[string][]by
 		}
 		origin, _ := json.Marshal(op)
 		d, err = d.BeginIdentityRotation(q.ID, q.Operation, op.Change.Expected, s.Index()+1, origin)
+	case "set-node-endpoint":
+		var target NodeEndpointChange
+		if canonical(op.Change.Payload, &target) != nil || !lifecycle.ValidID(target.ID) {
+			return nil, state.Invalid
+		}
+		if entry, found := d.Entry(target.ID); found && entry.Revision != op.Change.Expected {
+			return nil, state.ConditionFailed
+		}
+		origin, _ := json.Marshal(op)
+		d, err = d.ChangeEndpoint(target.ID, op.Change.Expected, target.Endpoint, origin)
 	case "drain-node":
 		return p.beginNodeDrain(s, op, cmd)
 	case "invite-node":
@@ -190,7 +200,24 @@ func (p Policy) reduceMembers(s state.State, cmd state.Command) (map[string][]by
 		if op.Change.Expected != 0 || canonical(op.Change.Payload, &target) != nil {
 			return nil, state.Invalid
 		}
-		d, err = d.Invite(target.Peer, target.JoinID)
+		r, rerr := p.Resources(s)
+		if rerr != nil {
+			return nil, state.Invalid
+		}
+		d, err = d.Invite(target.Peer, target.JoinID, r.Networks.TunnelAddressesInUse())
+	case "cancel-node-invite":
+		var target NodeSelection
+		if canonical(op.Change.Payload, &target) != nil || !lifecycle.ValidID(target.ID) {
+			return nil, state.Invalid
+		}
+		d, err = d.CancelInvite(target.ID, op.Change.Expected)
+	case "abort-node-join":
+		var target NodeSelection
+		if canonical(op.Change.Payload, &target) != nil || !lifecycle.ValidID(target.ID) {
+			return nil, state.Invalid
+		}
+		origin, _ := json.Marshal(op)
+		d, err = d.BeginAbortJoin(target.ID, op.Change.Expected, origin)
 	case "cordon-node", "uncordon-node":
 		target, targetErr := cordonTarget(op.Change.Action, op.Change.Payload)
 		if targetErr != nil {
@@ -276,3 +303,6 @@ func (p Policy) memberCheckpoint(s state.State, d membership.Directory) (map[str
 	}
 	return writeCheckpoint(s, MembersKey, p.Cluster, p.TrustRoot, d.Revision, raw)
 }
+
+// membersBook is the MembersKey book (books.go).
+var membersBook = Book{Key: MembersKey, Reduce: byKind(map[state.CommandKind]reducer{state.Module: Policy.reduceMembers})}

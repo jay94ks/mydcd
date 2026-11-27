@@ -9,8 +9,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/containerops"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/containerops"
 )
 
 type ContainerExecRecord struct {

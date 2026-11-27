@@ -5,8 +5,8 @@ package control
 import (
 	"bytes"
 
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/workload/volumes"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/workload/volumes"
 )
 
 // Owner publication, Arm, and the original Inventory's target execution are

@@ -11,10 +11,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/wallet"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/wallet"
 )
 
 // These cases cover real encrypted storage/selection, not remote login. The
@@ -47,7 +47,7 @@ func TestU0SavedWalletAccountsCoexistAndRequireExplicitUser(t *testing.T) {
 	defer clear(issuer.Private)
 	defer clear(alice.Private)
 	defer clear(bob.Private)
-	c := Client{Cluster: [32]byte{42}, Peers: []mydcp.Peer{{ID: "node", Endpoint: "127.0.0.1:7443", Policy: mydcp.Policy{Key: mydcp.Identity(issuer.Public), Respond: true}}}}
+	c := Client{Cluster: [32]byte{42}, Peers: []sfcp.Peer{{ID: "node", Endpoint: "127.0.0.1:7443", Policy: sfcp.Policy{Key: sfcp.Identity(issuer.Public), Respond: true}}}}
 	store, err := OpenCredentials(home, password)
 	if err != nil {
 		t.Fatal(err)
@@ -100,14 +100,14 @@ func TestU0SavedWalletAccountsCoexistAndRequireExplicitUser(t *testing.T) {
 	if _, err := store.Load(c, ""); !errors.Is(err, ErrUserRequired) {
 		t.Fatal("reopen reset ambiguous accounts", err)
 	}
-	raw, err := os.ReadFile(filepath.Join(home, ".mydc", "wallet.bin"))
+	raw, err := os.ReadFile(filepath.Join(home, ".sfc", "wallet.bin"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if bytes.Contains(raw, []byte("stable-user-a")) || bytes.Contains(raw, []byte("alice")) || bytes.Contains(raw, alice.Private.Seed()) {
 		t.Fatal("login credential was not encrypted")
 	}
-	if _, err := os.Stat(filepath.Join(home, ".mydc", "sessions")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(home, ".sfc", "sessions")); !os.IsNotExist(err) {
 		t.Fatal("new login created a plaintext session file", err)
 	}
 }

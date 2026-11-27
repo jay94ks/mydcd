@@ -8,9 +8,9 @@ import (
 	"encoding/json"
 	"slices"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/reconcile"
-	"github.com/jay94ks/mydcd/internal/tenancy"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/tenancy"
 )
 
 // RouteFlowReceipt is published by the native owner only AFTER the original
@@ -33,7 +33,7 @@ type RouteFlowReceipt struct {
 func RouteFlowReceiptBytes(p RouteFlowReceipt) []byte {
 	p.Signature = nil
 	raw, _ := json.Marshal(p)
-	return append([]byte("mydc-route-flow-receipt-1\x00"), raw...)
+	return append([]byte("sfc-route-flow-receipt-1\x00"), raw...)
 }
 
 func ownRouteFlowReceipt(p RouteFlowReceipt) RouteFlowReceipt {

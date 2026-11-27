@@ -5,7 +5,7 @@ package network
 import "net/netip"
 
 // PoolIPAM is committed before native creation. Dynamic selects Docker's
-// automatic IP allocation range within the node-owned CIDR. MyDC manages
+// automatic IP allocation range within the node-owned CIDR. Seafield Cluster manages
 // ownership and static endpoint reservations; it does not run a DHCP server.
 type PoolIPAM struct {
 	Dynamic netip.Prefix `json:",omitzero"`

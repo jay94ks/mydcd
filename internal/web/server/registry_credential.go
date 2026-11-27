@@ -10,14 +10,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/registry"
-	"github.com/jay94ks/mydcd/internal/web/mydc"
+	"github.com/jay94ks/seafield/internal/registry"
+	"github.com/jay94ks/seafield/internal/web/sfc"
 )
 
 // POST /t/{t}/registries/{id}/credential {repository, access} → {registry,
 // authority, username, token, repository, access, expiresAt}: a short-lived
-// `docker login` for a built-in registry (UI-81, `mydc registry
-// credential`). access: pull / push / pull,push. Not an op: mydcd issues it
+// `docker login` for a built-in registry (UI-81, `sfcli registry
+// credential`). access: pull / push / pull,push. Not an op: sfcd issues it
 // to the session and decides who may have it (403 otherwise, also when the
 // registry is stopped). The token goes only into this response body
 // (no-store); the daemon does not store, log or journal it and clears its
@@ -41,10 +41,10 @@ func (s *Server) handleRegistryCredential(w http.ResponseWriter, r *http.Request
 	tenant, id := r.PathValue("t"), r.PathValue("id")
 	ctx, cancel := s.callCtx(r)
 	defer cancel()
-	var cred mydc.RegistryCredential
-	err = ws.do(ctx, func(ctx context.Context, c mydc.Conn) error {
+	var cred sfc.RegistryCredential
+	err = ws.do(ctx, func(ctx context.Context, c sfc.Conn) error {
 		var err error
-		cred, err = c.RegistryCredential(ctx, tenant, mydc.RegistryCredentialRequest{ID: id, Repository: repo, Actions: actions})
+		cred, err = c.RegistryCredential(ctx, tenant, sfc.RegistryCredentialRequest{ID: id, Repository: repo, Actions: actions})
 		return err
 	})
 	defer clear(cred.Token)

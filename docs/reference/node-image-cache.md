@@ -4,12 +4,12 @@
 
 ```sh
 # 각 이미지의 실제 사용 수와 수락된 참조 수를 확인한다.
-mydc node images node-a
+sfcli node images node-a
 # 명시한 immutable ID만 삭제한다. 미리 보기와 기다리지 않기:
-mydc node images delete node-a sha256:FULL_64_HEX --dry-run
-mydc node images delete node-a sha256:FULL_64_HEX --no-wait
+sfcli node images delete node-a sha256:FULL_64_HEX --dry-run
+sfcli node images delete node-a sha256:FULL_64_HEX --no-wait
 # 끊겼거나 --no-wait로 맡긴 작업은 작업 ID로 이어 본다.
-mydc op show ID
+sfcli op show ID
 ```
 
 ID는 `sha256:`와64개 소문자 hex다. 이름·tag·축약 ID를 삭제 대상으로 받지 않는다. ID는 인자로 최대8개까지 명시하며 중복은 거부한다. 선택을 생략한 전체 prune이나 `--force`·하위 이미지 재귀 삭제 옵션은 제공하지 않는다. 상태의 `accepted`는 원 job 수락이며 SDK 삭제/디스크 공간 회수가 아니다.
@@ -28,13 +28,13 @@ ID는 `sha256:`와64개 소문자 hex다. 이름·tag·축약 ID를 삭제 대�
 
 계획은 owner 키로 서명한 최근 관측이다. 전체 목록 페이지는 별도 시점의 관측이며 여러 페이지를 하나의 고정 Docker snapshot이라고 취급하지 않는다. 삭제는 항상 명시 ID 목록을 새로 계획하고 최신 사용/참조와 원 선택을 검사한다. 계획 보존 기간은30초다.
 
-원 job 수락 후에는 같은 노드의 pending 캐시 정리와 겹치는 새 정리 요청을 거부한다. 선택된 원 별칭은 pending 동안 새 app/CD·컴파일 배치 수락과 충돌하도록 검사한다. 미리보기/수락 뒤 이미지·컨테이너·참조가 바뀔 수 있으므로 owner가 각 SDK 호출 직전에 다시 검사한다. Docker 외부 운영자의 동시 변경까지 MyDC admission으로 직렬화한다고 표시하지 않는다. 최종 SDK는 `ImageRemove(Force=false,PruneChildren=false)`로 자체 사용 충돌도 검사한다.
+원 job 수락 후에는 같은 노드의 pending 캐시 정리와 겹치는 새 정리 요청을 거부한다. 선택된 원 별칭은 pending 동안 새 app/CD·컴파일 배치 수락과 충돌하도록 검사한다. 미리보기/수락 뒤 이미지·컨테이너·참조가 바뀔 수 있으므로 owner가 각 SDK 호출 직전에 다시 검사한다. Docker 외부 운영자의 동시 변경까지 Seafield Cluster admission으로 직렬화한다고 표시하지 않는다. 최종 SDK는 `ImageRemove(Force=false,PruneChildren=false)`로 자체 사용 충돌도 검사한다.
 
 CLI는 원 intent를 전송 전에 journal에 저장한다. 같은 request ID는 현재 존재 여부를 다시 계획하기 전에 원 서명·대상·결과를 사용한다. 원 요청의 node/ID 목록/action/operation이 달라지면 거부하며, 원 기록이 없는 `--resume-original`도 거부한다. 응답 유실을 새 operation ID나 새 선택으로 자동 대체하지 않는다.
 
 ## User API·포맷
 
-Unix 소켓과 네트워크 MYDCP의 기존 User purpose/frame·Session·서명 envelope를 사용한다. 다음은 추가 본문 예시이며 실제 client는 Nonce와 채널 challenge 서명을 포함한다. JSON 필드는 대문자로 시작하고 schema는1이다.
+Unix 소켓과 네트워크 SFCP의 기존 User purpose/frame·Session·서명 envelope를 사용한다. 다음은 추가 본문 예시이며 실제 client는 Nonce와 채널 challenge 서명을 포함한다. JSON 필드는 대문자로 시작하고 schema는1이다.
 
 ```json
 {"Schema":1,"Method":"image-cache-plan","ImageCache":{"Node":"node-a","After":"","Operation":"","Images":["sha256:FULL_64_HEX"]}}
@@ -50,7 +50,7 @@ Unix 소켓과 네트워크 MYDCP의 기존 User purpose/frame·Session·서명 
 |---|---|
 | image-cache-plan | ImageCachePlan |
 | image-cache-status | ImageCacheStatus |
-| whoami | ImageCacheRootRevision, 기존 ModuleEpoch |
+| whoami | `Data.Roots["control/image-cache"]`, `Data.ModuleEpoch` |
 | 기존 operation/result | 원 사용자 요청의 Result/Found·공개 사유 |
 
 | Plan 필드 | 내용 |
@@ -64,7 +64,7 @@ Unix 소켓과 네트워크 MYDCP의 기존 User purpose/frame·Session·서명 
 
 Image는 `{ID,Aliases,Bytes,Containers,References}`다. Aliases는 정규화·정렬한 tag/manifest digest 목록이며 최대32개다. 계획 전체는24KiB 이내다. 예산을 넘는 선택은 더 작은 명시 목록으로 나누며 원 수락 job을 분할/초기화하지 않는다. 지원 예산을 넘는 native metadata는 명시 실패이며0개/미사용으로 꾸미지 않는다.
 
-서명 domain은 `mydc-image-cache-plan-1` 뒤 NUL과 Signature를 null로 둔 JSON이다. `[32]byte`는 JSON 숫자 배열, 서명 바이트는 base64다. 실행은 기존 UserOperation의 `Change.Action=prune-node-images`, `Expected=0`, `Payload={Operation,Plan}`이다. 현재 ImageCacheRootRevision을 operation.RootRevision에 넣고 module epoch·원 request ID·선택 공개 Reason을 서명한다.
+서명 domain은 `sfc-image-cache-plan-1` 뒤 NUL과 Signature를 null로 둔 JSON이다. `[32]byte`는 JSON 숫자 배열, 서명 바이트는 base64다. 실행은 기존 UserOperation의 `Change.Action=prune-node-images`, `Expected=0`, `Payload={Operation,Plan}`이다. 현재 ImageCacheRootRevision을 operation.RootRevision에 넣고 module epoch·원 request ID·선택 공개 Reason을 서명한다.
 
 | Status 필드 | 내용 |
 |---|---|
@@ -99,10 +99,10 @@ Part는 `{ID,State,Code,Error,At}`이며 At는 UTC Unix 밀리초다.
 | image-cache-work | 원 Operation, owner 전용 현재 grant·진행/참조와 prefix |
 | image-cache-report | owner 서명 begin/item 보고, job/root/epoch CAS와 원 ID 순서 |
 
-보고는 `{Schema,Cluster,Owner,Operation,Action,Expected,RootRevision,Epoch,At,Part?,Signature}`이며 domain은 `mydc-image-cache-report-1` 뒤 NUL과 Signature를 null로 둔 JSON이다. SDK 직전에는 현재 원 grant와 참조 수를 확인하고 private sent 저장 성공 후 호출한다. 저장 실패 시 SDK를 호출하지 않는다.
+보고는 `{Schema,Cluster,Owner,Operation,Action,Expected,RootRevision,Epoch,At,Part?,Signature}`이며 domain은 `sfc-image-cache-report-1` 뒤 NUL과 Signature를 null로 둔 JSON이다. SDK 직전에는 현재 원 grant와 참조 수를 확인하고 private sent 저장 성공 후 호출한다. 저장 실패 시 SDK를 호출하지 않는다.
 
 재개는 먼저 원 결과와 정확한 ID의 실제 부재를 확인한다. 원 결과가 불명이고 여전히 존재하면 현재 원 grant와 같은 ID로 멱등 캐시 정리를 이어갈 수 있다. 권한 회수 뒤에는 새 SDK 호출을 금지하며 관측 부재만으로 미실행/성공을 판정하지 않는다. 이전 sent가 불명이라면 후속 호출의 skip/거부만으로 그 이전 효과를 정산하지 않고 긍정적인 실제 부재를 확인할 때까지 원 fence/참조를 보존한다. 이 복구를 Task Stop/Start나 Volume writer 작업의 재전송 규칙으로 일반화하지 않는다.
 
 공유 checkpoint는4MiB·최대128개 job이며 수락 전에 미정산 항목당4KiB를 예약한다. 실제 원 서명/계획 크기에 따라 더 일찍 예산 초과를 거부할 수 있다. 자동 무한 이력 보관·운영 캐시 전체 삭제를 약속하지 않는다.
 
-외부 OCI의 태그 없는 ImageLoad 결과도 private 레시피의 실제 Process.ImageID로 보호한다. Desired·Applied·Unknown/Pending의 원 Target을 검사하고 metadata 해석 오류를 참조0으로 바꾸지 않는다. 앱의 레시피 resolve→Desired 게시와 실제 캐시 제거는 같은 node-local 배제로 직렬화한다. 준비한 native image ID(legacy config digest 또는 보존된 OCI manifest digest)는 현재 cache job fence를 확인한 뒤 게시하고 실제 Create의 이미지 허가에서도 검사한다. 원 삭제가 Unknown이면 새로운 레시피/재생성이 그 ID를 빌리지 않는다. 기존 실행 중 컨테이너의 상태 검사에 새 registry 자격을 요구하지 않으며 Docker alias/RepoDigest를 조작하거나 별도 origin DB를 추가하지 않는다.
+외부 OCI에서 ticket으로 받은 이미지도 private 레시피의 실제 Process.ImageID로 보호한다. Desired·Applied·Unknown/Pending의 원 Target을 검사하고 metadata 해석 오류를 참조0으로 바꾸지 않는다. 앱의 레시피 resolve→Desired 게시와 실제 캐시 제거는 같은 node-local 배제로 직렬화한다. 준비한 native image ID(legacy config digest 또는 보존된 OCI manifest digest)는 현재 cache job fence를 확인한 뒤 게시하고 실제 Create의 이미지 허가에서도 검사한다. 원 삭제가 Unknown이면 새로운 레시피/재생성이 그 ID를 빌리지 않는다. 기존 실행 중 컨테이너의 상태 검사에 새 registry 자격을 요구하지 않으며 Docker alias/RepoDigest를 조작하거나 별도 origin DB를 추가하지 않는다.

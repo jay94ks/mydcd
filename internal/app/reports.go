@@ -8,12 +8,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/desired"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/storage"
-	"github.com/jay94ks/mydcd/internal/workload"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/desired"
+	"github.com/jay94ks/seafield/internal/eventbus"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/storage"
+	"github.com/jay94ks/seafield/internal/workload"
 	"maps"
 	"math"
 	"sync"
@@ -45,17 +46,17 @@ func nodeFloor(v cluster.View, g desired.Graph, owner string) uint64 {
 
 // A receipt follows this exact sync. Authenticated owner, current Desired,
 // generation, source, labels and bounds are checked before storing a report.
-func (r *Runtime) storeReport(key mydcp.Identity, b []byte) error {
+func (r *Runtime) storeReport(key sfcp.Identity, b []byte) error {
 	report, err := workload.DecodeReport(b)
 	if err != nil {
 		return err
 	}
 	owner := desired.Owner(r.policy.Cluster, [32]byte(key))
 	if report.Node.ID != owner {
-		return mydcp.ErrAdmission
+		return sfcp.ErrAdmission
 	}
 	if _, known := r.policy.Owners[owner]; !known {
-		return mydcp.ErrAdmission
+		return sfcp.ErrAdmission
 	}
 	r.reportMu.Lock()
 	defer r.reportMu.Unlock()
@@ -89,7 +90,11 @@ func (r *Runtime) storeReport(key mydcp.Identity, b []byte) error {
 	} else if !errors.Is(err, storage.ErrMissing) {
 		return err
 	}
-	return r.reports.Write(map[string][]byte{"node/" + owner: b})
+	if err := r.reports.Write(map[string][]byte{"node/" + owner: b}); err != nil {
+		return err
+	}
+	r.bus.Publish(eventbus.Event{Topic: eventbus.TopicReport, Kind: eventbus.KindNodeReport, Node: owner, Changed: true})
+	return nil
 }
 
 func (r *Runtime) collectReport(ctx context.Context) (workload.Report, error) {
@@ -138,7 +143,7 @@ func (r *Runtime) collectReport(ctx context.Context) (workload.Report, error) {
 	}
 	n.Capacity.CPU = min(n.Capacity.CPU, uint64(info.Info.NCPU)*1_000_000_000)
 	n.Capacity.Memory = min(n.Capacity.Memory, uint64(info.Info.MemTotal))
-	filters := client.Filters{}.Add("label", "org.mydc.owner="+r.owner)
+	filters := client.Filters{}.Add("label", "org.sfc.owner="+r.owner)
 	listed, err := r.docker.API.ContainerList(ctx, client.ContainerListOptions{All: true, Filters: filters})
 	if err != nil {
 		n.Ready = false
@@ -157,7 +162,7 @@ func (r *Runtime) collectReport(ctx context.Context) (workload.Report, error) {
 		}
 		n.Used.CPU += uint64(host.NanoCPUs)
 		n.Used.Memory += uint64(host.Memory)
-		key := item.Labels["org.mydc.key"]
+		key := item.Labels["org.sfc.key"]
 		t, known := g.Tasks[key]
 		if !known || t.Node != r.owner || t.Lifecycle.Released() || r.workload == nil {
 			n.Ready = false
@@ -193,7 +198,7 @@ func (r *Runtime) collectReport(ctx context.Context) (workload.Report, error) {
 	return report, nil
 }
 
-func (r *Runtime) reportLoop(peers map[mydcp.Identity]mydcp.Peer) {
+func (r *Runtime) reportLoop(peers map[sfcp.Identity]sfcp.Peer) {
 	tick := time.NewTicker(30 * time.Second)
 	defer tick.Stop()
 	for {
@@ -214,7 +219,7 @@ func (r *Runtime) reportLoop(peers map[mydcp.Identity]mydcp.Peer) {
 		}
 		b, err := json.Marshal(report)
 		if err == nil {
-			err = r.storeReport(mydcp.Identity(r.Identity.Public), b)
+			err = r.storeReport(sfcp.Identity(r.Identity.Public), b)
 		}
 		r.mu.Lock()
 		r.reportError = err
@@ -228,8 +233,8 @@ func (r *Runtime) reportLoop(peers map[mydcp.Identity]mydcp.Peer) {
 		var wg sync.WaitGroup
 		permits := make(chan struct{}, 4)
 		for _, key := range desired.Sorted(r.policy.Owners) {
-			pub := mydcp.Identity(r.policy.Owners[key])
-			if pub == mydcp.Identity(r.Identity.Public) {
+			pub := sfcp.Identity(r.policy.Owners[key])
+			if pub == sfcp.Identity(r.Identity.Public) {
 				continue
 			}
 			peer, ok := peers[pub]
@@ -249,7 +254,7 @@ func (r *Runtime) reportLoop(peers map[mydcp.Identity]mydcp.Peer) {
 				defer stop()
 				session, e := r.Mesh.Dial(call, peer)
 				if e == nil {
-					e = session.Report(call, b)
+					e = session.Report(call, sfcp.KindWorkloadReport, b)
 				}
 				r.mu.Lock()
 				if e == nil {

@@ -10,8 +10,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/tenancy"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/tenancy"
 )
 
 // ManagedDNSDefinition is tenant management policy. It contains neither app
@@ -42,6 +42,8 @@ type ManagedDNSPolicy struct {
 	Upstreams                                     []netip.AddrPort
 	MaxQueries, MaxCacheEntries, MaxResponseBytes int
 	MaxConnections, RequestTimeoutMS              int
+	// Records are the names added by hand (DNSRecord), at most MaxDNSRecords.
+	Records []DNSRecord `json:",omitempty"`
 }
 
 // DNSRegistration is derived from an original committed Task and its exact
@@ -70,6 +72,15 @@ type ManagedDNSPlan struct {
 
 const ManagedDNSPrefix = "control/network-services/dns/"
 
+// DefaultDNSTTL and DefaultDNSNegativeTTL are the TTLs (seconds) a new
+// managed DNS policy gets when its writer names none. TTL is also the most
+// a forwarded answer is cached and passed on for: apps on the network find
+// each other by name, and a moved service is found again within 10 seconds.
+const (
+	DefaultDNSTTL         = 10
+	DefaultDNSNegativeTTL = 5
+)
+
 func ManagedDNSKey(tenant, name string) string {
 	if !id(tenant) || !id(name) {
 		return ""
@@ -78,7 +89,7 @@ func ManagedDNSKey(tenant, name string) string {
 }
 
 func ManagedDNSServiceID(tenant, name, pool string) string {
-	h := sha256.Sum256([]byte("mydc-managed-dns-service-1\x00" + tenant + "/" + name + "/" + pool))
+	h := sha256.Sum256([]byte("sfc-managed-dns-service-1\x00" + tenant + "/" + name + "/" + pool))
 	return "d" + strings.ToLower(base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(h[:]))
 }
 
@@ -113,6 +124,11 @@ func (d ManagedDNSDefinition) plans(c access.Catalog, n tenancy.Networks, a Auth
 	if err != nil {
 		return nil, err
 	}
+	records, err := d.policyRecords(zone)
+	if err != nil {
+		return nil, err
+	}
+	records, _ = splitDNSRecords(records, names)
 	for _, name := range names {
 		allocation, found := a.AddressBook().Allocation(name.Endpoint)
 		if !found || allocation.Generation != name.Generation || allocation.Address.Is4() != strings.HasSuffix(name.Endpoint, "/0") {
@@ -130,7 +146,7 @@ func (d ManagedDNSDefinition) plans(c access.Catalog, n tenancy.Networks, a Auth
 	var out []ManagedDNSPlan
 	for _, row := range rows {
 		for _, pool := range row.Network.Pools {
-			cfg := DNSConfig{Tenant: d.Tenant, ID: ManagedDNSServiceID(d.Tenant, d.Network, pool.ID), Network: row.Network.ID, Pool: pool.ID, Source: source, Serial: serial, Enabled: p.Enabled, Reverse: p.Reverse, Zone: zone, ClientZone: p.ClientZone, TTL: p.TTL, NegativeTTL: p.NegativeTTL, QuerySeconds: uint32((p.RequestTimeoutMS+999)/1000) + 1, MaxQueries: p.MaxQueries, MaxCacheEntries: p.MaxCacheEntries, MaxResponseBytes: p.MaxResponseBytes, Members: slices.Clone(members), Names: slices.Clone(names), Upstreams: slices.Clone(p.Upstreams)}
+			cfg := DNSConfig{Tenant: d.Tenant, ID: ManagedDNSServiceID(d.Tenant, d.Network, pool.ID), Network: row.Network.ID, Pool: pool.ID, Source: source, Serial: serial, Enabled: p.Enabled, Reverse: p.Reverse, Zone: zone, ClientZone: p.ClientZone, TTL: p.TTL, NegativeTTL: p.NegativeTTL, QuerySeconds: uint32((p.RequestTimeoutMS+999)/1000) + 1, MaxQueries: p.MaxQueries, MaxCacheEntries: p.MaxCacheEntries, MaxResponseBytes: p.MaxResponseBytes, Members: slices.Clone(members), Names: slices.Clone(names), Records: slices.Clone(records), Upstreams: slices.Clone(p.Upstreams)}
 			projection, err := buildDNS(c, n, a, actor, cfg)
 			if err != nil {
 				return nil, err
@@ -203,4 +219,15 @@ func (d ManagedDNSDefinition) registrationNames(zone string, registrations []DNS
 		return strings.Compare(a.Name+"\x00"+a.Endpoint, b.Name+"\x00"+b.Endpoint)
 	})
 	return out, nil
+}
+
+// Names is the name set a managed DNS serves for registrations (the same
+// one its plans carry), for reading back. It allocates and checks nothing
+// beyond the registrations' own shape.
+func (d ManagedDNSDefinition) Names(registrations []DNSRegistration) ([]DNSName, error) {
+	zone, err := Domain(d.Policy.Zone)
+	if err != nil {
+		return nil, err
+	}
+	return d.registrationNames(zone, registrations)
 }

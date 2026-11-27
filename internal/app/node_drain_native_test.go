@@ -13,18 +13,17 @@ import (
 	"testing"
 
 	cerrdefs "github.com/containerd/errdefs"
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/config"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/engine"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/network"
-	"github.com/jay94ks/mydcd/internal/tenancy"
-	"github.com/jay94ks/mydcd/internal/workload/volumes"
-	"github.com/jay94ks/mydcd/tests/registryfixture"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/engine"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/network"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/tenancy"
+	"github.com/jay94ks/seafield/internal/workload/volumes"
+	"github.com/jay94ks/seafield/tests/registryfixture"
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/client"
 )
@@ -35,22 +34,22 @@ import (
 func testManagedNodeDrain(t *testing.T, ctx context.Context, a *Runtime, root, products string, configs, sockets [2]string, read func() cluster.View, change func(string, string, uint64, any), wait func(string, func() bool), run func(int, []string, ...string) ([]byte, error)) {
 	t.Helper()
 	p := a.controlPolicy
-	backend := os.Getenv("MYDC_DOCKER_TEST_BACKEND")
+	backend := os.Getenv("SFC_DOCKER_TEST_BACKEND")
 	if !filepath.IsAbs(backend) {
 		t.Fatal("user-prebuilt static backend required")
 	}
-	registry := registryfixture.OpenPreparedAt(t, backend, container.Config{Cmd: []string{"/backend"}, Env: []string{"MYDC_VOLUME_FIXTURE=1", "MYDC_READINESS_FIXTURE=1", "MYDC_GRACEFUL_FIXTURE=1"}, User: "10001:10001", Labels: map[string]string{"org.mydc.test.owner": os.Getenv("MYDC_KERNEL_TEST_OWNER")}}, "192.0.2.1:0")
+	registry := registryfixture.OpenPreparedAt(t, backend, container.Config{Cmd: []string{"/backend"}, Env: []string{"SFC_VOLUME_FIXTURE=1", "SFC_READINESS_FIXTURE=1", "SFC_GRACEFUL_FIXTURE=1"}, User: "10001:10001", Labels: map[string]string{"org.sfc.test.owner": os.Getenv("SFC_KERNEL_TEST_OWNER")}}, "192.0.2.1:0")
 	catalog, err := p.Catalog(read().State)
 	if err != nil {
 		t.Fatal(err)
 	}
 	tenant, _ := catalog.Tenant("tenant")
-	change("drain/trust", "set-trust", tenant.Revision, control.TrustAssignment{Tenant: "tenant", Rules: append(tenant.ImageSources, access.TrustRule{Registry: registry.Registry, Repository: "fixture"})})
+	change("drain/trust", "set-trust", tenant.Revision, control.TrustChange{Tenant: "tenant", Add: []access.TrustRule{access.TrustRule{Registry: registry.Registry, Repository: "fixture"}}})
 	var docker [2]*engine.Client
 	var keys [2][32]byte
 	public := sqlPublicFixture{Images: map[string]string{registry.Reference: registry.ConfigDigest}}
 	for n, path := range configs {
-		cfg, err := config.LoadNode(path)
+		cfg, err := loadTestNode(path)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -82,14 +81,14 @@ func testManagedNodeDrain(t *testing.T, ctx context.Context, a *Runtime, root, p
 	}
 	definition := tenancy.TUNDefinition{Tenant: "tenant", Name: "drain-lan", GatewayMode: network.ManagedGatewayMode}
 	for n, node := range []string{"node-a", "node-b"} {
-		definition.Members = append(definition.Members, tenancy.TUNNode{Node: node, Pools: []tenancy.Subnet{{ID: "pool", Prefix: netip.MustParsePrefix(fmt.Sprintf("198.19.90.%d/28", n*16)), Gateway: netip.MustParseAddr(fmt.Sprintf("198.19.90.%d", n*16+1)), MTU: 1280}}, Addresses: []netip.Prefix{netip.MustParsePrefix(fmt.Sprintf("198.19.91.%d/32", n+1))}})
+		definition.Members = append(definition.Members, tenancy.TUNNode{Node: node, Pools: []tenancy.Subnet{{ID: "pool", Prefix: netip.MustParsePrefix(fmt.Sprintf("198.19.90.%d/28", n*16)), Gateway: netip.MustParseAddr(fmt.Sprintf("198.19.90.%d", n*16+1)), MTU: 1280}}})
 		for _, tenant := range []string{"", "tenant"} {
 			change("drain/native-budget/"+tenant+"/"+node, "set-volume-backup-limit", 0, control.VolumeBackupLimit{Tenant: tenant, Node: node, Bytes: 256 << 10, Count: 2, StagingBytes: 256 << 10, StagingCount: 2, Original: &control.OriginalVolumeLimit{Bytes: 512 << 10, Count: 4}})
 		}
 	}
 	resources, _ := p.Resources(read().State)
 	change("drain/network", "create-tun-network", resources.Networks.Revision(), definition)
-	remote := mydcp.Peer{ID: "node-b", Endpoint: "192.0.2.2:44101", Policy: mydcp.Policy{Key: mydcp.Identity(keys[1]), Member: true, Read: true, Respond: true}}
+	remote := sfcp.Peer{ID: "node-b", Endpoint: "192.0.2.2:44101", Policy: sfcp.Policy{Key: sfcp.Identity(keys[1]), Member: true, Read: true, Respond: true}}
 	observe := func(n int, key string) (ModuleObservation, error) {
 		var raw []byte
 		var err error
@@ -141,7 +140,7 @@ func testManagedNodeDrain(t *testing.T, ctx context.Context, a *Runtime, root, p
 	}
 	call := func(args ...string) []byte {
 		t.Helper()
-		body, diagnostic, err := runManagedCLICommand(ctx, filepath.Join(products, "mydc"), home, profile, args, nil)
+		body, diagnostic, err := runManagedCLICommand(ctx, filepath.Join(products, "sfc"), home, profile, args, nil)
 		if err != nil {
 			t.Fatal("actual drain CLI", args, err, string(diagnostic), string(body))
 		}
@@ -160,14 +159,14 @@ services:
   networks: {lan: {}}
   volumes: [data:/data, logs:/logs]
   healthcheck: {test: [CMD, /backend, --volume-probe], interval: 1s, timeout: 1s, retries: 2}
-  x-mydc: {node: node-a, ready: {http: /readyz, port: 8080}}
+  x-sfc: {node: node-a, ready: {http: /readyz, port: 8080}}
 networks:
  lan: {external: true, name: drain-lan}
 volumes:
  data:
-  x-mydc: {node: node-a, size: 131072, uid: 10001, gid: 10001, mode: '0750'}
+  x-sfc: {node: node-a, size: 131072, uid: 10001, gid: 10001, mode: '0750'}
  logs:
-  x-mydc: {node: node-a, size: 131072, uid: 10001, gid: 10001, mode: '0750'}
+  x-sfc: {node: node-a, size: 131072, uid: 10001, gid: 10001, mode: '0750'}
 `, registry.Reference)
 	if err := os.WriteFile(file, []byte(document), 0600); err != nil {
 		t.Fatal(err)

@@ -13,14 +13,14 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/lifecycle"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/containerops"
-	"github.com/jay94ks/mydcd/internal/engine"
-	"github.com/jay94ks/mydcd/internal/reconcile"
-	"github.com/jay94ks/mydcd/internal/schema"
-	contract "github.com/jay94ks/mydcd/lifecycle/v1"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/lifecycle"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/containerops"
+	"github.com/jay94ks/seafield/internal/engine"
+	"github.com/jay94ks/seafield/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/schema"
+	contract "github.com/jay94ks/seafield/lifecycle/v1"
 )
 
 type ObjectRef struct {
@@ -51,6 +51,9 @@ type StageRecord struct {
 	Result      *state.Result
 	Noop        bool
 	Observation *Observation
+	// Replay is an explicit authorization to send the same Command again
+	// after its first send was left Unknown.
+	Replay *MutationReplay `json:",omitempty"`
 }
 
 type executionRecord struct {
@@ -383,6 +386,17 @@ func (e Execution) Send(c access.Catalog, expected uint64, key string, now uint6
 	if old.Pending == nil {
 		return e, state.Command{}, ErrInputs
 	}
+	if e.d.Stages[i].ReplayDue() {
+		n, err := e.clone()
+		if err != nil {
+			return e, state.Command{}, err
+		}
+		// Keep the original pending ID, target and Unknown history: this is
+		// the authorized second transmission of the same command, not a reset.
+		n.d.Stages[i].Journal.Pending.Phase = reconcile.Dispatched
+		n.d.Stages[i].Replay.Dispatched = true
+		return n, *n.d.Stages[i].Command, nil
+	}
 	j, err := reconcile.Dispatch(old, old.Pending.ID)
 	if err != nil {
 		return e, state.Command{}, err
@@ -393,6 +407,65 @@ func (e Execution) Send(c access.Catalog, expected uint64, key string, now uint6
 	}
 	n.d.Stages[i].Journal = j
 	return n, *n.d.Stages[i].Command, nil
+}
+
+// UnknownStep is a stage whose command send is Unknown and may be resent.
+type UnknownStep struct {
+	Key     string
+	Command [32]byte
+	// Resent is true when an authorized resend is waiting to go out.
+	Resent bool `json:",omitempty"`
+}
+
+// UnknownSteps lists the stages whose send is Unknown, in plan order.
+func (e Execution) UnknownSteps() []UnknownStep {
+	var out []UnknownStep
+	for _, s := range e.d.Stages {
+		if s.Command != nil && s.Result == nil && s.Journal.Pending != nil && s.Journal.Pending.Phase == reconcile.RecoveryRequired {
+			out = append(out, UnknownStep{Key: s.Key, Command: state.Digest(*s.Command), Resent: s.ReplayDue()})
+		}
+	}
+	return out
+}
+
+// ReplayDue reports whether an authorized replay is waiting to be sent.
+func (s StageRecord) ReplayDue() bool {
+	return s.Result == nil && s.Replay != nil && !s.Replay.Dispatched && s.Journal.Pending != nil && s.Journal.Pending.Phase == reconcile.RecoveryRequired
+}
+
+// Sendable reports whether the stage's command is waiting to be sent: first
+// prepared, or an authorized replay.
+func (s StageRecord) Sendable() bool {
+	return s.Journal.Pending != nil && s.Journal.Pending.Phase == reconcile.Prepared || s.ReplayDue()
+}
+
+// AuthorizeReplay lets the exact command of a stage left Unknown be sent once
+// more, on an explicit current management decision. The shared ledger
+// deduplicates the command by its request ID, so if the first send did
+// commit, the replay only finds that result; a late result is collected
+// normally. It never asserts the first send was not applied.
+func (e Execution) AuthorizeReplay(expected uint64, key, request string, digest [32]byte, shared state.State) (Execution, error) {
+	i := e.index(key)
+	if i < 0 || expected != e.d.Revision || request == "" || len(request) > 512 || e.d.Closed || e.d.Stopping || e.d.Paused {
+		return e, ErrInputs
+	}
+	s := e.d.Stages[i]
+	if s.Command == nil || s.Noop || s.Result != nil || s.Journal.Pending == nil || s.Journal.Pending.Phase != reconcile.RecoveryRequired || state.Digest(*s.Command) != digest || s.Replay != nil && (!s.Replay.Dispatched || s.Replay.Request == request) {
+		return e, ErrInputs
+	}
+	epoch, retained := shared.LedgerEpoch(s.Command.Actor)
+	if !retained || epoch != s.Command.Epoch || shared.ModuleExpired(*s.Command) {
+		return e, inputError("ORIGINAL_COMMAND_EXPIRED", key)
+	}
+	if _, found := shared.LookupResult(*s.Command); found {
+		return e, ErrInputs
+	}
+	n, err := e.clone()
+	if err != nil {
+		return e, err
+	}
+	n.d.Stages[i].Replay = &MutationReplay{Request: request, Revision: expected}
+	return n, nil
 }
 func (e Execution) Unknown(expected uint64, key string) (Execution, error) {
 	i := e.index(key)
@@ -472,6 +545,8 @@ type Observation struct {
 	Restart   *TaskRestart    `json:",omitempty"`
 	OwnerBoot string          `json:",omitempty"`
 	AppChecks *AppCheckResult `json:",omitempty"`
+	// Failure is a signed permanent Task preparation failure (task_failure.go).
+	Failure string `json:",omitempty"`
 }
 
 func successfulCompletion(o Observation) bool {
@@ -500,7 +575,7 @@ func ObservationRenews(old, o Observation) bool {
 func ObservationBytes(o Observation) []byte {
 	o.Signature, o.Expired = nil, false
 	raw, _ := json.Marshal(o)
-	return append([]byte("mydc-app-observation-1\x00"), raw...)
+	return append([]byte("sfc-app-observation-1\x00"), raw...)
 }
 func (e Execution) validObservation(i int, o Observation) bool {
 	return e.validObservationForPlan(i, o, (Blueprint{e.d.Plan}).Digest())
@@ -526,7 +601,7 @@ func (e Execution) validObservationForPlan(i int, o Observation, planDigest [32]
 	if !containerops.ValidLogDriver(o.LogDriver) || o.LogDriver != "" && step.Kind != "task" {
 		return false
 	}
-	if !e.validTaskInstance(i, o) {
+	if !e.validTaskInstance(i, o) || !e.validFailureObservation(i, o) {
 		return false
 	}
 	if !e.d.Stages[i].Held() && !e.validAppChecks(i, o) {
@@ -564,7 +639,7 @@ func (e Execution) Observe(expected uint64, o Observation, now uint64) (Executio
 		if !o.Released && old.LogDriver != "" && o.LogDriver != old.LogDriver {
 			return e, ErrInputs
 		}
-		if !validExitTransition(*old, o) {
+		if !validExitTransition(*old, o) || !validFailureTransition(*old, o) {
 			return e, ErrInputs
 		}
 	}
@@ -589,7 +664,7 @@ func (e Execution) Observe(expected uint64, o Observation, now uint64) (Executio
 	return n, nil
 }
 
-// CheckRenewal reports whether o, sent over MyDCP instead of Raft, only
+// CheckRenewal reports whether o, sent over SFCP instead of Raft, only
 // renews key's stored observation: same signed facts, later sequence, not
 // expired. A renewal never changes the Execution.
 func (e Execution) CheckRenewal(o Observation, now uint64) error {
@@ -755,7 +830,7 @@ func (e Execution) Status() string {
 	}
 	any, all := false, true
 	for _, s := range e.d.Stages {
-		if s.Result != nil && s.Result.Code != state.Applied {
+		if stageFailed(s) {
 			return "Failed"
 		}
 		if s.Journal.Pending != nil && s.Journal.Pending.Phase == reconcile.RecoveryRequired {
@@ -835,7 +910,7 @@ func (e Execution) Health(now uint64) string {
 // AvailableAt is serving evidence only. Callers separately validate the owner
 // signature, current object/ref and node eligibility; it proves no new effect.
 // Live reports whether o's owner still renews it at now. Owners renew an
-// unchanged observation over MyDCP, not Raft; the leader marks it Expired
+// unchanged observation over SFCP, not Raft; the leader marks it Expired
 // in Raft once renewals stop for AppObservationMaxAge. Age is never read
 // from the stored At, which only moves when a fact changes.
 func (o Observation) Live(now uint64) bool { return !o.Expired && o.At <= now }
@@ -852,10 +927,10 @@ func (e Execution) partialReplicaHealth(now uint64) bool {
 			continue
 		}
 		var service ComposeService
-		if json.Unmarshal(step.Goal, &service) != nil || service.MyDC.Instance == nil {
+		if json.Unmarshal(step.Goal, &service) != nil || service.Sfc.Instance == nil {
 			continue
 		}
-		count := services[service.MyDC.Instance.Service]
+		count := services[service.Sfc.Instance.Service]
 		count.total++
 		stage := e.d.Stages[i]
 		observation := stage.Observation
@@ -865,7 +940,7 @@ func (e Execution) partialReplicaHealth(now uint64) bool {
 		if observation != nil && observation.AvailableAt(now) {
 			count.available++
 		}
-		services[service.MyDC.Instance.Service] = count
+		services[service.Sfc.Instance.Service] = count
 	}
 	for _, count := range services {
 		if count.available > 0 && count.available < count.total {

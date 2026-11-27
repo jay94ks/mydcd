@@ -6,13 +6,19 @@ import (
 	"context"
 	"net/http"
 
-	"github.com/jay94ks/mydcd/internal/web/mydc"
+	"github.com/jay94ks/seafield/internal/web/sfc"
 )
 
 func (s *Server) routes() {
 	m := s.mux
 	a := s.authed
 
+	// ingress health checks (cluster app route backend): the process serves
+	m.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-store")
+		_, _ = w.Write([]byte("ok\n"))
+	})
 	// login
 	m.HandleFunc("POST /api/v1/auth/credential/challenge", s.handleCredentialChallenge)
 	m.HandleFunc("POST /api/v1/auth/credential/login", s.handleCredentialLogin)
@@ -26,10 +32,18 @@ func (s *Server) routes() {
 	// operations (UI-A0) and generic typed submit
 	m.HandleFunc("POST /api/v1/ops", a(s.handleSubmit))
 	m.HandleFunc("GET /api/v1/ops", a(s.handleListOps))
+	m.HandleFunc("GET /api/v1/ops/actions", a(s.handleOpActions))
+	m.HandleFunc("POST /api/v1/ops/actions/{action}/base", a(s.handleOpActionBase))
 	m.HandleFunc("GET /api/v1/ops/{id}", a(s.handleGetOp))
 	m.HandleFunc("POST /api/v1/ops/{id}/result", a(s.handleOpResult))
 	m.HandleFunc("POST /api/v1/ops/{id}/resume", a(s.handleOpResume))
 	m.HandleFunc("GET /api/v1/ops/{id}/reason", a(s.handleOpReason))
+	m.HandleFunc("GET /api/v1/ops/{id}/revert", a(s.handleOpRevertPlan))
+	m.HandleFunc("POST /api/v1/ops/{id}/revert", a(s.handleOpRevert))
+	m.HandleFunc("GET /api/v1/trash", a(s.handleListTrash))
+	m.HandleFunc("GET /api/v1/trash/{id}", a(s.handleGetTrash))
+	m.HandleFunc("DELETE /api/v1/trash/{id}", a(s.handleEmptyTrash))
+	m.HandleFunc("POST /api/v1/trash/{id}/restore", a(s.handleRestoreTrash))
 
 	// system: cluster and nodes
 	m.HandleFunc("GET /api/v1/dashboard", a(s.handleDashboard))
@@ -38,12 +52,12 @@ func (s *Server) routes() {
 	m.HandleFunc("GET /api/v1/nodes/{node}/invitation", a(s.handleNodeInvitation))
 	m.HandleFunc("GET /api/v1/nodes/{node}/invitation/summary", a(s.handleNodeInvitationSummary))
 	m.HandleFunc("POST /api/v1/nodes/{node}/promote", a(s.handlePromoteNode))
-	m.HandleFunc("POST /api/v1/nodes/{node}/cordon", a(s.handleCordon(mydc.ActionCordonNode)))
-	m.HandleFunc("POST /api/v1/nodes/{node}/uncordon", a(s.handleCordon(mydc.ActionUncordonNode)))
+	m.HandleFunc("POST /api/v1/nodes/{node}/cordon", a(s.handleCordon(sfc.ActionCordonNode)))
+	m.HandleFunc("POST /api/v1/nodes/{node}/uncordon", a(s.handleCordon(sfc.ActionUncordonNode)))
 	m.HandleFunc("GET /api/v1/nodes/{node}/remove-plan", a(s.handleNodeRemovePlan))
-	m.HandleFunc("POST /api/v1/nodes/{node}/isolate", a(s.handleNodeLifecycle(mydc.ActionIsolateNode)))
-	m.HandleFunc("POST /api/v1/nodes/{node}/restore", a(s.handleNodeLifecycle(mydc.ActionRestoreNode)))
-	m.HandleFunc("POST /api/v1/nodes/{node}/remove", a(s.handleNodeLifecycle(mydc.ActionRemoveNode)))
+	m.HandleFunc("POST /api/v1/nodes/{node}/isolate", a(s.handleNodeLifecycle(sfc.ActionIsolateNode)))
+	m.HandleFunc("POST /api/v1/nodes/{node}/restore", a(s.handleNodeLifecycle(sfc.ActionRestoreNode)))
+	m.HandleFunc("POST /api/v1/nodes/{node}/remove", a(s.handleNodeLifecycle(sfc.ActionRemoveNode)))
 	m.HandleFunc("GET /api/v1/nodes/{node}/drain-plan", a(s.handleNodeDrainPlan))
 	m.HandleFunc("GET /api/v1/nodes/{node}/drain-status", a(s.handleNodeDrainStatus))
 	m.HandleFunc("POST /api/v1/nodes/{node}/drain", a(s.handleDrainNode))
@@ -58,12 +72,12 @@ func (s *Server) routes() {
 	m.HandleFunc("GET /api/v1/image-prunes/{operation}", a(s.handleImagePruneStatus))
 	m.HandleFunc("GET /api/v1/nodes/summary", a(s.handleNodeSummary))
 	m.HandleFunc("GET /api/v1/nodes/{node}/tasks", a(func(w http.ResponseWriter, r *http.Request, ws *webSession) {
-		readPage(s, w, r, ws, func(ctx context.Context, c mydc.Conn, after string) (mydc.Page[mydc.Task], error) {
-			return c.Tasks(ctx, mydc.TaskFilter{Node: r.PathValue("node"), Tenant: r.URL.Query().Get("tenant")}, after)
+		readPage(s, w, r, ws, func(ctx context.Context, c sfc.Conn, after string) (sfc.Page[sfc.Task], error) {
+			return c.Tasks(ctx, sfc.TaskFilter{Node: r.PathValue("node"), Tenant: r.URL.Query().Get("tenant")}, after)
 		})
 	}))
 	m.HandleFunc("GET /api/v1/nodes/{node}/storage", a(func(w http.ResponseWriter, r *http.Request, ws *webSession) {
-		read(s, w, r, ws, func(ctx context.Context, c mydc.Conn) (listPage, error) {
+		read(s, w, r, ws, func(ctx context.Context, c sfc.Conn) (listPage, error) {
 			p, err := c.NodeStorage(ctx, r.PathValue("node"), r.URL.Query().Get("after"))
 			if err != nil {
 				return listPage{}, err
@@ -73,19 +87,26 @@ func (s *Server) routes() {
 	}))
 	m.HandleFunc("POST /api/v1/ledger/rotate", a(s.handleRotateLedger))
 	m.HandleFunc("POST /api/v1/nodes/{node}/storage", a(s.handleAddNodeStorage))
-	m.HandleFunc("PUT /api/v1/nodes/{node}/storage/{id}", a(s.handleSetNodeStoragePolicy))
-	m.HandleFunc("POST /api/v1/nodes/{node}/storage/{id}/drain", a(s.handleNodeStorageSelection(mydc.ActionDrainNodeStorage)))
-	m.HandleFunc("DELETE /api/v1/nodes/{node}/storage/{id}", a(s.handleNodeStorageSelection(mydc.ActionRemoveNodeStorage)))
-	m.HandleFunc("POST /api/v1/nodes/{node}/storage/{id}/remove", a(s.handleNodeStorageSelection(mydc.ActionRemoveNodeStorage)))
+	m.HandleFunc("PATCH /api/v1/nodes/{node}/storage/{id}", a(s.handleSetNodeStoragePolicy))
+	m.HandleFunc("POST /api/v1/nodes/{node}/storage/{id}/drain", a(s.handleNodeStorageSelection(sfc.ActionDrainNodeStorage)))
+	m.HandleFunc("DELETE /api/v1/nodes/{node}/storage/{id}", a(s.handleNodeStorageSelection(sfc.ActionRemoveNodeStorage)))
+	m.HandleFunc("POST /api/v1/nodes/{node}/storage/{id}/remove", a(s.handleNodeStorageSelection(sfc.ActionRemoveNodeStorage)))
 	m.HandleFunc("GET /api/v1/nodes/{node}/storage/{id}/space", a(func(w http.ResponseWriter, r *http.Request, ws *webSession) {
-		read(s, w, r, ws, func(ctx context.Context, c mydc.Conn) (storageSpaceView, error) {
+		read(s, w, r, ws, func(ctx context.Context, c sfc.Conn) (storageSpaceView, error) {
 			v, err := c.NodeStorageSpace(ctx, r.PathValue("node"), r.PathValue("id"))
 			return storageSpaceView{Node: v.Root.Node, ID: v.Root.ID, Generation: v.Root.Generation, Total: v.Total, Free: v.Free, Available: v.Available, ObservedIndex: v.ObservedIndex}, err
 		})
 	}))
 	m.HandleFunc("GET /api/v1/nodes/{node}/disks", a(s.handleNodeDisks))
+	m.HandleFunc("POST /api/v1/nodes/{node}/disks/{disk}/{action}", a(s.handleNodeDiskOp))
+	m.HandleFunc("GET /api/v1/nodes/{node}/disk-operations/{operation}", a(s.handleNodeDiskStatus))
+	m.HandleFunc("GET /api/v1/firewall", a(s.handleClusterFirewall))
+	m.HandleFunc("POST /api/v1/firewall", a(s.handleClusterFirewallChange))
+	m.HandleFunc("GET /api/v1/nodes/{node}/firewall", a(s.handleNodeFirewall))
+	m.HandleFunc("POST /api/v1/nodes/{node}/firewall", a(s.handleNodeFirewallChange))
+	m.HandleFunc("GET /api/v1/nodes/{node}/firewall/log", a(s.handleNodeFirewallLog))
 	m.HandleFunc("GET /api/v1/storage", a(func(w http.ResponseWriter, r *http.Request, ws *webSession) {
-		read(s, w, r, ws, func(ctx context.Context, c mydc.Conn) (listPage, error) {
+		read(s, w, r, ws, func(ctx context.Context, c sfc.Conn) (listPage, error) {
 			p, err := c.NodeStorage(ctx, "", r.URL.Query().Get("after"))
 			if err != nil {
 				return listPage{}, err
@@ -95,112 +116,119 @@ func (s *Server) routes() {
 	}))
 	m.HandleFunc("GET /api/v1/disks", a(s.handleNodeDisks))
 	m.HandleFunc("GET /api/v1/raft", a(s.handleRaftStatus))
+	m.HandleFunc("GET /api/v1/cluster/features", a(s.handleClusterFeatures))
 	m.HandleFunc("GET /api/v1/raft/compact", a(s.handleRaftCompact))
 	m.HandleFunc("POST /api/v1/raft/compact", a(s.handlePostRaftCompact))
 	m.HandleFunc("GET /api/v1/raft/compact/plan", a(s.handleRaftCompactPlan))
 	m.HandleFunc("GET /api/v1/raft/compactions/{operation}", a(s.handleRaftCompactionStatus))
 	m.HandleFunc("GET /api/v1/mesh", a(s.handleMeshLinks))
 	m.HandleFunc("GET /api/v1/node-cli-policy", a(func(w http.ResponseWriter, r *http.Request, ws *webSession) {
-		read(s, w, r, ws, func(ctx context.Context, c mydc.Conn) (mydc.NodeCLIPolicy, error) { return c.NodeCLIPolicy(ctx) })
+		read(s, w, r, ws, func(ctx context.Context, c sfc.Conn) (sfc.NodeCLIPolicy, error) { return c.NodeCLIPolicy(ctx) })
 	}))
 	m.HandleFunc("GET /api/v1/events", a(s.handleEvents))
 
 	// system: tenants and users
 	m.HandleFunc("GET /api/v1/tenants", a(func(w http.ResponseWriter, r *http.Request, ws *webSession) {
-		readList(s, w, r, ws, func(ctx context.Context, c mydc.Conn) ([]mydc.TenantView, error) { return c.Tenants(ctx) })
+		readList(s, w, r, ws, func(ctx context.Context, c sfc.Conn) ([]sfc.TenantView, error) { return c.Tenants(ctx) })
 	}))
 	m.HandleFunc("GET /api/v1/tenants/{t}", a(func(w http.ResponseWriter, r *http.Request, ws *webSession) {
-		read(s, w, r, ws, func(ctx context.Context, c mydc.Conn) (mydc.TenantView, error) {
+		read(s, w, r, ws, func(ctx context.Context, c sfc.Conn) (sfc.TenantView, error) {
 			return c.SelectTenant(ctx, r.PathValue("t"))
 		})
 	}))
 	m.HandleFunc("GET /api/v1/tenants/{t}/members", a(func(w http.ResponseWriter, r *http.Request, ws *webSession) {
-		readPage(s, w, r, ws, func(ctx context.Context, c mydc.Conn, after string) (mydc.Page[mydc.TenantMember], error) {
+		readPage(s, w, r, ws, func(ctx context.Context, c sfc.Conn, after string) (sfc.Page[sfc.TenantMember], error) {
 			return c.TenantMembers(ctx, r.PathValue("t"), after)
 		})
 	}))
 	m.HandleFunc("GET /api/v1/tenants/{t}/retirement", a(func(w http.ResponseWriter, r *http.Request, ws *webSession) {
-		read(s, w, r, ws, func(ctx context.Context, c mydc.Conn) (retirementView, error) {
+		read(s, w, r, ws, func(ctx context.Context, c sfc.Conn) (retirementView, error) {
 			v, err := c.TenantRetirement(ctx, r.PathValue("t"), r.URL.Query().Get("after"))
 			return newRetirementView(v), err
 		})
 	}))
-	m.HandleFunc("POST /api/v1/tenants/{t}/retire", a(s.handleTenantRetire(mydc.ActionBeginTenantRetirement)))
-	m.HandleFunc("POST /api/v1/tenants/{t}/retire/finish", a(s.handleTenantRetire(mydc.ActionFinishTenantRetirement)))
+	m.HandleFunc("POST /api/v1/tenants/{t}/retire", a(s.handleTenantRetire(sfc.ActionBeginTenantRetirement)))
+	m.HandleFunc("POST /api/v1/tenants/{t}/retire/finish", a(s.handleTenantRetire(sfc.ActionFinishTenantRetirement)))
 	m.HandleFunc("GET /api/v1/users", a(func(w http.ResponseWriter, r *http.Request, ws *webSession) {
-		readPage(s, w, r, ws, func(ctx context.Context, c mydc.Conn, after string) (mydc.Page[publicUserView], error) {
+		readPage(s, w, r, ws, func(ctx context.Context, c sfc.Conn, after string) (sfc.Page[userRow], error) {
 			p, err := c.Users(ctx, after)
-			return mapPage(p, publicUserRow), err
+			now := s.now()
+			return mapPage(p, func(u sfc.PublicUser) userRow { return userRow{publicUserRow(u), inviteOf(u.Credentials, now)} }), err
 		})
 	}))
 	m.HandleFunc("GET /api/v1/users/{u}", a(func(w http.ResponseWriter, r *http.Request, ws *webSession) {
-		read(s, w, r, ws, func(ctx context.Context, c mydc.Conn) (userView, error) {
+		read(s, w, r, ws, func(ctx context.Context, c sfc.Conn) (userView, error) {
 			u, err := c.UserCredentials(ctx, r.PathValue("u"))
 			return userView{User: u, AccountRevision: u.Revision}, err
 		})
 	}))
+	m.HandleFunc("POST /api/v1/users/{u}/invites", a(s.handleIssueInvite))
+	m.HandleFunc("POST /api/v1/users/{u}/invites/revoke", a(s.handleRevokeInvite))
+	m.HandleFunc("POST /api/v1/login/invite/open", s.handleInviteOpen)
+	m.HandleFunc("POST /api/v1/login/invite/finish", s.handleInviteFinish)
 	m.HandleFunc("GET /api/v1/users/{u}/scope", a(s.handleAccountScope))
-	m.HandleFunc("PUT /api/v1/users/{u}/scope", a(s.handleSetAccountScope))
+	m.HandleFunc("PATCH /api/v1/users/{u}/scope", a(s.handleSetAccountScope))
 
 	// tenant resources
-	tenantPage := func(path string, fn func(context.Context, mydc.Conn, string, string) (any, string, uint64, error)) {
+	tenantPage := func(path string, fn func(context.Context, sfc.Conn, string, string) (any, string, uint64, error)) {
 		m.HandleFunc("GET /api/v1/t/{t}/"+path, a(func(w http.ResponseWriter, r *http.Request, ws *webSession) {
-			read(s, w, r, ws, func(ctx context.Context, c mydc.Conn) (listPage, error) {
+			read(s, w, r, ws, func(ctx context.Context, c sfc.Conn) (listPage, error) {
 				items, next, rev, err := fn(ctx, c, r.PathValue("t"), r.URL.Query().Get("after"))
 				return s.page(items, next, rev), err
 			})
 		}))
 	}
-	tenantPage("resources", func(ctx context.Context, c mydc.Conn, t, after string) (any, string, uint64, error) {
-		p, err := c.Resources(ctx, t, after)
+	tenantPage("resources", func(ctx context.Context, c sfc.Conn, t, after string) (any, string, uint64, error) {
+		p, err := screenResources(ctx, c, t, after)
 		if err != nil {
 			return nil, "", 0, err
 		}
 		return resourceRows(ctx, c, t, p.Items), p.Next, p.Revision, nil
 	})
 	m.HandleFunc("PUT /api/v1/t/{t}/limits/{node}", a(s.handleSetTenantLimit))
-	tenantPage("storage", func(ctx context.Context, c mydc.Conn, t, after string) (any, string, uint64, error) {
+	tenantPage("storage", func(ctx context.Context, c sfc.Conn, t, after string) (any, string, uint64, error) {
 		p, err := c.TenantStoragePage(ctx, t, "", after)
 		if err != nil {
 			return nil, "", 0, err
 		}
 		return tenantStorageRows(ctx, c, t, p.Items), p.Next, p.Revision, nil
 	})
-	tenantPage("networks", func(ctx context.Context, c mydc.Conn, t, after string) (any, string, uint64, error) {
-		p, err := c.Resources(ctx, t, after)
+	tenantPage("networks", func(ctx context.Context, c sfc.Conn, t, after string) (any, string, uint64, error) {
+		p, err := screenResources(ctx, c, t, after)
 		if err != nil {
 			return nil, "", 0, err
 		}
 		// Networks are one kind of managed resource; the page cursor stays
 		// the resources cursor so paging does not skip entries.
-		var nets []mydc.ResourceEntry
+		var nets []sfc.ResourceEntry
 		for _, e := range p.Items {
 			if e.Network != nil {
 				nets = append(nets, e)
 			}
 		}
+		fillNetworkUsers(ctx, c, nets)
 		return nets, p.Next, p.Revision, nil
 	})
-	tenantPage("volumes", pageOf(func(ctx context.Context, c mydc.Conn, t, after string) (mydc.Page[volumeView], error) {
+	tenantPage("volumes", pageOf(func(ctx context.Context, c sfc.Conn, t, after string) (sfc.Page[volumeView], error) {
 		p, err := volumePage(ctx, c, t, after)
 		if err == nil {
 			fillWriters(ctx, c, p.Items)
 		}
 		return p, err
 	}))
-	tenantPage("volume-backups", pageOf(func(ctx context.Context, c mydc.Conn, t, after string) (mydc.Page[mydc.VolumeBackupView], error) {
+	tenantPage("volume-backups", pageOf(func(ctx context.Context, c sfc.Conn, t, after string) (sfc.Page[sfc.VolumeBackupView], error) {
 		return c.VolumeBackups(ctx, t, after)
 	}))
-	tenantPage("vault", pageOf(func(ctx context.Context, c mydc.Conn, t, after string) (mydc.Page[mydc.VaultView], error) {
+	tenantPage("vault", pageOf(func(ctx context.Context, c sfc.Conn, t, after string) (sfc.Page[sfc.VaultView], error) {
 		return c.Vault(ctx, t, after)
 	}))
-	tenantPage("lifecycles", pageOf(func(ctx context.Context, c mydc.Conn, t, after string) (mydc.Page[mydc.LifecycleEntry], error) {
+	tenantPage("lifecycles", pageOf(func(ctx context.Context, c sfc.Conn, t, after string) (sfc.Page[sfc.LifecycleEntry], error) {
 		return c.Lifecycles(ctx, t, after)
 	}))
 	m.HandleFunc("GET /api/v1/t/{t}/registries", a(s.handleRegistries))
 	m.HandleFunc("POST /api/v1/t/{t}/images/resolve", a(s.handleImageResolve))
 	m.HandleFunc("GET /api/v1/t/{t}/image-trust", a(s.handleImageTrust))
-	m.HandleFunc("PUT /api/v1/t/{t}/image-trust", a(s.handleSetTrust))
+	m.HandleFunc("PATCH /api/v1/t/{t}/image-trust", a(s.handleSetTrust))
 	m.HandleFunc("POST /api/v1/t/{t}/image-trust/preview", a(s.handleImageTrustPreview))
 	m.HandleFunc("PUT /api/v1/t/{t}/registries/{id}", a(s.handlePutRegistry))
 	m.HandleFunc("POST /api/v1/t/{t}/registries/{id}/credential", a(s.handleRegistryCredential))
@@ -231,7 +259,7 @@ func (s *Server) routes() {
 	m.HandleFunc("POST /api/v1/t/{t}/external-registries/{id}/bind/{op}/approve", a(s.handleBindApprove))
 	m.HandleFunc("POST /api/v1/t/{t}/external-registries/{id}/unbind", a(s.handleUnbindExternalRegistry))
 
-	// image builds (mydcd real contract; draft edits and zip uploads still
+	// image builds (sfcd real contract; draft edits and zip uploads still
 	// on the REQ-19/47 mock, see image_builds.go)
 	m.HandleFunc("GET /api/v1/t/{t}/build-policy", a(s.handleBuildPolicy))
 	m.HandleFunc("PUT /api/v1/t/{t}/build-policy", a(s.handleSetImageBuildPolicy))
@@ -255,43 +283,43 @@ func (s *Server) routes() {
 	m.HandleFunc("POST /api/v1/t/{t}/build-contexts/{id}/build", a(s.handleBeginImageBuild))
 	m.HandleFunc("GET /api/v1/t/{t}/builds", a(s.handleImageBuildJobs))
 	m.HandleFunc("GET /api/v1/t/{t}/builds/{id}/log", a(s.handleImageBuildLog))
-	m.HandleFunc("POST /api/v1/t/{t}/builds/{id}/cancel", a(s.jobOp(mydc.ActionCancelImageBuild)))
-	m.HandleFunc("POST /api/v1/t/{t}/builds/{id}/delete", a(s.jobOp(mydc.ActionDeleteImageBuildJob)))
+	m.HandleFunc("POST /api/v1/t/{t}/builds/{id}/cancel", a(s.jobOp(sfc.ActionCancelImageBuild)))
+	m.HandleFunc("POST /api/v1/t/{t}/builds/{id}/delete", a(s.jobOp(sfc.ActionDeleteImageBuildJob)))
 	m.HandleFunc("GET /api/v1/t/{t}/build-cache", a(s.handleImageBuildCache))
 	m.HandleFunc("GET /api/v1/t/{t}/build-cache/entries", a(s.handleImageBuildCacheEntries))
 	m.HandleFunc("POST /api/v1/t/{t}/build-cache/prune", a(s.handlePruneImageBuildCache))
 	for _, v := range []string{"start", "stop", "delete"} {
 		m.HandleFunc("POST /api/v1/t/{t}/registries/{id}/"+v, a(s.handleRegistryAction(v)))
 	}
-	tenantPage("uploads", pageOf(func(ctx context.Context, c mydc.Conn, t, after string) (mydc.Page[mydc.AppUploadView], error) {
+	tenantPage("uploads", pageOf(func(ctx context.Context, c sfc.Conn, t, after string) (sfc.Page[sfc.AppUploadView], error) {
 		return c.AppUploads(ctx, t, after)
 	}))
-	tenantPage("apps", pageOf(func(ctx context.Context, c mydc.Conn, t, after string) (mydc.Page[mydc.AppView], error) {
+	tenantPage("apps", pageOf(func(ctx context.Context, c sfc.Conn, t, after string) (sfc.Page[sfc.AppView], error) {
 		return c.Apps(ctx, t, after)
 	}))
-	tenantPage("tasks", pageOf(func(ctx context.Context, c mydc.Conn, t, after string) (mydc.Page[mydc.Task], error) {
-		return c.Tasks(ctx, mydc.TaskFilter{Tenant: t}, after)
+	tenantPage("tasks", pageOf(func(ctx context.Context, c sfc.Conn, t, after string) (sfc.Page[sfc.Task], error) {
+		return c.Tasks(ctx, sfc.TaskFilter{Tenant: t}, after)
 	}))
 
 	// apps
 	m.HandleFunc("GET /api/v1/t/{t}/apps/{app}/tasks", a(func(w http.ResponseWriter, r *http.Request, ws *webSession) {
-		readPage(s, w, r, ws, func(ctx context.Context, c mydc.Conn, after string) (mydc.Page[mydc.Task], error) {
-			return c.Tasks(ctx, mydc.TaskFilter{Tenant: r.PathValue("t"), App: r.PathValue("app")}, after)
+		readPage(s, w, r, ws, func(ctx context.Context, c sfc.Conn, after string) (sfc.Page[sfc.Task], error) {
+			return c.Tasks(ctx, sfc.TaskFilter{Tenant: r.PathValue("t"), App: r.PathValue("app")}, after)
 		})
 	}))
 	m.HandleFunc("GET /api/v1/t/{t}/apps/{app}/operations/{id}", a(func(w http.ResponseWriter, r *http.Request, ws *webSession) {
-		read(s, w, r, ws, func(ctx context.Context, c mydc.Conn) (mydc.AppOperation, error) {
+		read(s, w, r, ws, func(ctx context.Context, c sfc.Conn) (sfc.AppOperation, error) {
 			return c.AppOperation(ctx, r.PathValue("t"), r.PathValue("app"), r.PathValue("id"))
 		})
 	}))
 	m.HandleFunc("GET /api/v1/t/{t}/apps/{app}/source", a(func(w http.ResponseWriter, r *http.Request, ws *webSession) {
-		read(s, w, r, ws, func(ctx context.Context, c mydc.Conn) (appSourceView, error) {
+		read(s, w, r, ws, func(ctx context.Context, c sfc.Conn) (appSourceView, error) {
 			src, err := c.AppSource(ctx, r.PathValue("t"), r.PathValue("app"), queryUint(r, "version"))
 			return viewSource(src), err
 		})
 	}))
 	m.HandleFunc("GET /api/v1/t/{t}/apps/{app}/revisions", a(func(w http.ResponseWriter, r *http.Request, ws *webSession) {
-		readPage(s, w, r, ws, func(ctx context.Context, c mydc.Conn, after string) (mydc.Page[mydc.AppRevision], error) {
+		readPage(s, w, r, ws, func(ctx context.Context, c sfc.Conn, after string) (sfc.Page[sfc.AppRevision], error) {
 			return c.AppRevisions(ctx, r.PathValue("t"), r.PathValue("app"), after)
 		})
 	}))
@@ -303,9 +331,8 @@ func (s *Server) routes() {
 		m.HandleFunc("GET "+base+"/stats", a(s.handleTaskStats))
 	}
 	m.HandleFunc("POST /api/v1/t/{t}/apps/{app}/task/restart", a(s.handleRestartTask))
-	m.HandleFunc("GET /api/v1/t/{t}/apps/{app}/logs-clear/plan", a(s.handleLogClearPlan))
-	m.HandleFunc("POST /api/v1/t/{t}/apps/{app}/logs-clear", a(s.handleClearAppLogs))
-	m.HandleFunc("GET /api/v1/t/{t}/apps/{app}/logs-clear/{op}", a(s.handleLogClearStatus))
+	m.HandleFunc("POST /api/v1/t/{t}/logs/clear", a(s.handleClearLogs))
+	m.HandleFunc("GET /api/v1/t/{t}/logs/stored", a(s.handleStoredLogs))
 	m.HandleFunc("GET /api/v1/t/{t}/apps/{app}/relocation-check", a(s.handleRelocationCheck))
 	m.HandleFunc("GET /api/v1/t/{t}/apps/{app}/stream", a(s.handleStream))
 	m.HandleFunc("GET /api/v1/t/{t}/apps/{app}/exec", a(s.handleExec))
@@ -332,15 +359,17 @@ func (s *Server) routes() {
 	m.HandleFunc("POST /api/v1/t/{t}/apps/{app}/cd/approvals", a(s.handleCDApprove))
 	m.HandleFunc("GET /api/v1/t/{t}/apps/{app}/cd/local", a(s.handleCDLocal))
 	m.HandleFunc("PUT /api/v1/t/{t}/apps/{app}/cd/local", a(s.handlePutCDLocal))
-	m.HandleFunc("POST /api/v1/t/{t}/apps/{app}/cd/candidate/approve", a(s.handleCDDecision(mydc.ActionApproveAppCD)))
-	m.HandleFunc("POST /api/v1/t/{t}/apps/{app}/cd/candidate/reject", a(s.handleCDDecision(mydc.ActionRejectAppCD)))
+	m.HandleFunc("POST /api/v1/t/{t}/apps/{app}/cd/candidate/approve", a(s.handleCDDecision(sfc.ActionApproveAppCD)))
+	m.HandleFunc("POST /api/v1/t/{t}/apps/{app}/cd/candidate/reject", a(s.handleCDDecision(sfc.ActionRejectAppCD)))
 	m.HandleFunc("GET /api/v1/t/{t}/apps/{app}/cd/approvers", a(s.handleCDApprovers))
-	m.HandleFunc("POST /api/v1/t/{t}/apps/{app}/cd/approvers", a(s.handleCDApprover(mydc.ActionGrantCDApprover)))
-	m.HandleFunc("DELETE /api/v1/t/{t}/apps/{app}/cd/approvers", a(s.handleCDApprover(mydc.ActionDropCDApprover)))
+	m.HandleFunc("POST /api/v1/t/{t}/apps/{app}/cd/approvers", a(s.handleCDApprover(sfc.ActionGrantCDApprover)))
+	m.HandleFunc("DELETE /api/v1/t/{t}/apps/{app}/cd/approvers", a(s.handleCDApprover(sfc.ActionDropCDApprover)))
 	m.HandleFunc("POST /api/v1/t/{t}/apps/{app}/call", a(s.handleServiceCall))
 	m.HandleFunc("POST /api/v1/t/{t}/apps/{app}/down", a(s.handleDown))
 	m.HandleFunc("POST /api/v1/t/{t}/networks", a(s.handleCreateNetwork))
 	m.HandleFunc("POST /api/v1/t/{t}/networks/{name}/dns", a(s.handleNetworkDNS))
+	m.HandleFunc("GET /api/v1/t/{t}/networks/{name}/dns/names", a(s.handleNetworkDNSNames))
+	m.HandleFunc("PATCH /api/v1/t/{t}/networks/{name}/dns/records", a(s.handleNetworkDNSRecords))
 	m.HandleFunc("GET /api/v1/t/{t}/networks/{name}/change", a(s.handleNetworkChangeStatus))
 	m.HandleFunc("POST /api/v1/t/{t}/networks/{name}/change", a(s.handleNetworkChangePlan))
 	m.HandleFunc("POST /api/v1/t/{t}/networks/{name}/change/drain", a(s.handleNetworkChangeDrain))
@@ -355,14 +384,18 @@ func (s *Server) routes() {
 	m.HandleFunc("GET /api/v1/t/{t}/routes", a(s.handleRouteList))
 	m.HandleFunc("GET /api/v1/t/{t}/route-endpoints", a(s.handleRouteEndpoints))
 	m.HandleFunc("POST /api/v1/t/{t}/routes", a(s.handleRoutePropose))
-	m.HandleFunc("POST /api/v1/t/{t}/routes/{source}/{id}/approve", a(s.handleRouteSelect(mydc.ActionApproveRoute)))
-	m.HandleFunc("POST /api/v1/t/{t}/routes/{source}/{id}/withdraw", a(s.handleRouteSelect(mydc.ActionWithdrawRoute)))
+	m.HandleFunc("POST /api/v1/t/{t}/routes/{source}/{id}/approve", a(s.handleRouteSelect(sfc.ActionApproveRoute)))
+	m.HandleFunc("GET /api/v1/t/{t}/bridge-endpoints", a(s.handleBridgeEndpoints))
+	m.HandleFunc("POST /api/v1/t/{t}/bridges", a(s.handleBridgeCreate))
+	m.HandleFunc("POST /api/v1/t/{t}/bridges/{owner}/{name}/approve", a(s.handleBridgeSelect(sfc.ActionApproveVirtualBridge)))
+	m.HandleFunc("POST /api/v1/t/{t}/bridges/{owner}/{name}/close", a(s.handleBridgeSelect(sfc.ActionCloseVirtualBridge)))
+	m.HandleFunc("POST /api/v1/t/{t}/routes/{source}/{id}/withdraw", a(s.handleRouteSelect(sfc.ActionWithdrawRoute)))
 	m.HandleFunc("POST /api/v1/t/{t}/volumes", a(s.handleCreateVolume))
 	m.HandleFunc("GET /api/v1/t/{t}/volumes/{name}", a(s.handleVolumeDetail))
 	m.HandleFunc("DELETE /api/v1/t/{t}/volumes/{name}", a(s.handleVolumeDelete))
 	m.HandleFunc("POST /api/v1/t/{t}/volumes/{name}/backups", a(s.handleVolumeBackup))
-	m.HandleFunc("POST /api/v1/t/{t}/volumes/{name}/backups/{id}/cancel", a(s.handleVolumeBackupSelection(mydc.ActionCancelVolumeBackup)))
-	m.HandleFunc("DELETE /api/v1/t/{t}/volumes/{name}/backups/{id}", a(s.handleVolumeBackupSelection(mydc.ActionDeleteVolumeBackup)))
+	m.HandleFunc("POST /api/v1/t/{t}/volumes/{name}/backups/{id}/cancel", a(s.handleVolumeBackupSelection(sfc.ActionCancelVolumeBackup)))
+	m.HandleFunc("DELETE /api/v1/t/{t}/volumes/{name}/backups/{id}", a(s.handleVolumeBackupSelection(sfc.ActionDeleteVolumeBackup)))
 	m.HandleFunc("POST /api/v1/t/{t}/volumes/{name}/restore", a(s.handleVolumeRestore))
 	m.HandleFunc("POST /api/v1/t/{t}/volumes/{name}/restores/{id}/cancel", a(s.handleVolumeRestoreCancel))
 	m.HandleFunc("PUT /api/v1/t/{t}/volumes/{name}/capacity", a(s.handleVolumeCapacity))
@@ -392,16 +425,17 @@ func (s *Server) routes() {
 	m.HandleFunc("GET /api/v1/node-shell/sessions", a(s.handleNodeShellSessions))
 	m.HandleFunc("POST /api/v1/node-shell/sessions/{id}/close", a(s.handleNodeShellClose))
 	m.HandleFunc("GET /api/v1/nodes/{node}/shell", a(s.handleNodeShellOpen))
+	m.HandleFunc("GET /api/v1/live", a(s.handleLive))
 	m.HandleFunc("POST /api/v1/t/{t}/vault", a(s.handleCreateVault))
 	m.HandleFunc("POST /api/v1/t/{t}/vault/value", a(s.handleVaultValue))
 	m.HandleFunc("POST /api/v1/t/{t}/vault/password", a(s.handleVaultPassword))
-	m.HandleFunc("PUT /api/v1/t/{t}/vault/acl", a(s.handleVaultACL))
+	m.HandleFunc("PATCH /api/v1/t/{t}/vault/acl", a(s.handleVaultACL))
 	m.HandleFunc("POST /api/v1/t/{t}/vault/move", a(s.handleVaultMove))
 	m.HandleFunc("PUT /api/v1/t/{t}/vault/approval-age", a(s.handleVaultApprovalAge))
-	m.HandleFunc("POST /api/v1/t/{t}/vault/revoke", a(s.handleVaultSelection(mydc.ActionVaultRevoke)))
-	m.HandleFunc("POST /api/v1/t/{t}/vault/retire", a(s.handleVaultSelection(mydc.ActionVaultRetire)))
+	m.HandleFunc("POST /api/v1/t/{t}/vault/revoke", a(s.handleVaultSelection(sfc.ActionVaultRevoke)))
+	m.HandleFunc("POST /api/v1/t/{t}/vault/retire", a(s.handleVaultSelection(sfc.ActionVaultRetire)))
 	m.HandleFunc("GET /api/v1/t/{t}/vault/usages", a(s.handleVaultUsages))
-	// cluster Vault (realm ""; mydcd admits system administrators only)
+	// cluster Vault (realm ""; sfcd admits system administrators only)
 	cv := func(h func(http.ResponseWriter, *http.Request, *webSession)) http.HandlerFunc {
 		return a(clusterRealm(h))
 	}
@@ -410,18 +444,18 @@ func (s *Server) routes() {
 	m.HandleFunc("POST /api/v1/vault", cv(s.handleCreateVault))
 	m.HandleFunc("POST /api/v1/vault/value", cv(s.handleVaultValue))
 	m.HandleFunc("POST /api/v1/vault/password", cv(s.handleVaultPassword))
-	m.HandleFunc("PUT /api/v1/vault/acl", cv(s.handleVaultACL))
+	m.HandleFunc("PATCH /api/v1/vault/acl", cv(s.handleVaultACL))
 	m.HandleFunc("POST /api/v1/vault/move", cv(s.handleVaultMove))
 	m.HandleFunc("PUT /api/v1/vault/approval-age", cv(s.handleVaultApprovalAge))
-	m.HandleFunc("POST /api/v1/vault/revoke", cv(s.handleVaultSelection(mydc.ActionVaultRevoke)))
-	m.HandleFunc("POST /api/v1/vault/retire", cv(s.handleVaultSelection(mydc.ActionVaultRetire)))
+	m.HandleFunc("POST /api/v1/vault/revoke", cv(s.handleVaultSelection(sfc.ActionVaultRevoke)))
+	m.HandleFunc("POST /api/v1/vault/retire", cv(s.handleVaultSelection(sfc.ActionVaultRetire)))
 	m.HandleFunc("GET /api/v1/vault/usages", cv(s.handleVaultUsages))
 	// lifecycle (state check) scripts and policy (UI-90/91)
 	m.HandleFunc("GET /api/v1/t/{t}/lifecycle-scripts", a(s.handleLifecycleScripts))
 	m.HandleFunc("GET /api/v1/t/{t}/lifecycles/{name}", a(s.handleLifecycleScript))
 	m.HandleFunc("PUT /api/v1/t/{t}/lifecycles/{name}", a(s.handleLifecyclePut))
-	m.HandleFunc("POST /api/v1/t/{t}/lifecycles/{name}/retire", a(s.handleLifecycleSelect(mydc.ActionRetireLifecycleScript)))
-	m.HandleFunc("DELETE /api/v1/t/{t}/lifecycles/{name}", a(s.handleLifecycleSelect(mydc.ActionDeleteLifecycleScript)))
+	m.HandleFunc("POST /api/v1/t/{t}/lifecycles/{name}/retire", a(s.handleLifecycleSelect(sfc.ActionRetireLifecycleScript)))
+	m.HandleFunc("DELETE /api/v1/t/{t}/lifecycles/{name}", a(s.handleLifecycleSelect(sfc.ActionDeleteLifecycleScript)))
 	m.HandleFunc("GET /api/v1/t/{t}/lifecycle-policy", a(s.handleLifecyclePolicy))
 	m.HandleFunc("PUT /api/v1/t/{t}/lifecycle-policy", a(s.handleLifecyclePolicyPut))
 	// standalone containers
@@ -442,6 +476,9 @@ func (s *Server) routes() {
 	m.HandleFunc("POST /api/v1/t/{t}/archived/{key}/purge", a(s.handlePurgeArchived))
 
 	m.HandleFunc("GET /api/v1/me/credentials", a(s.handleOwnCredentials))
+	m.HandleFunc("GET /api/v1/me/logins", a(s.handleOwnLogins))
+	m.HandleFunc("GET /api/v1/me/sessions", a(s.handleOwnSessions))
+	m.HandleFunc("DELETE /api/v1/me/sessions/{id}", a(s.handleRevokeOwnSession))
 
 	// per-user UI preferences
 	m.HandleFunc("GET /api/v1/prefs", a(s.handleGetPrefs))
@@ -495,6 +532,9 @@ func (s *Server) routes() {
 	m.HandleFunc("DELETE /api/v1/ingress/blocks/{id}", a(s.handleDeleteIngressBlock))
 	m.HandleFunc("GET /api/v1/t/{t}/apps/{app}/ingress", a(s.handleAppIngress))
 	m.HandleFunc("GET /api/v1/ingress/history", a(s.handleIngressHistory))
+	m.HandleFunc("GET /api/v1/cluster-apps/{app}/routes", a(s.handleGetClusterAppRoutes))
+	m.HandleFunc("PUT /api/v1/cluster-apps/{app}/routes", a(s.handlePutClusterAppRoutes))
+	m.HandleFunc("DELETE /api/v1/cluster-apps/{app}/routes", a(s.handleDeleteClusterAppRoutes))
 	m.HandleFunc("GET /api/v1/nodes/{n}/gateways", a(s.handleGetGateways))
 	m.HandleFunc("PUT /api/v1/nodes/{n}/gateways", a(s.handlePutGateways))
 	m.HandleFunc("PUT /api/v1/t/{t}/apps/{app}/ingress/balance", a(s.handlePutIngressBalance))
@@ -566,6 +606,19 @@ func (s *Server) routes() {
 	m.HandleFunc("GET /api/v1/notify-prefs", a(s.handleGetNotifyPrefs))
 	m.HandleFunc("PUT /api/v1/notify-prefs", a(s.handlePutNotifyPrefs))
 
+	m.HandleFunc("GET /api/v1/system/vps", a(s.handleVPS))
+	m.HandleFunc("GET /api/v1/system/vps/accounts/{account}/offer", a(s.handleVPSOffer))
+	m.HandleFunc("POST /api/v1/system/vps/accounts", a(s.handleVPSAccountAdd))
+	m.HandleFunc("POST /api/v1/system/vps/accounts/{account}/rotate-key", a(s.handleVPSAccountRotate))
+	m.HandleFunc("PATCH /api/v1/system/vps/accounts/{account}", a(s.handleVPSAccountSet))
+	m.HandleFunc("DELETE /api/v1/system/vps/accounts/{account}", a(s.handleVPSAccountRemove))
+	m.HandleFunc("POST /api/v1/system/vps/servers", a(s.handleVPSCreate))
+	m.HandleFunc("POST /api/v1/system/vps/servers/{name}/stop", a(s.handleVPSServer("stop")))
+	m.HandleFunc("POST /api/v1/system/vps/servers/{name}/start", a(s.handleVPSServer("start")))
+	m.HandleFunc("POST /api/v1/system/vps/servers/{name}/cap", a(s.handleVPSServer("cap")))
+	m.HandleFunc("DELETE /api/v1/system/vps/servers/{name}", a(s.handleVPSServer("delete")))
+	m.HandleFunc("GET /api/v1/system/vps/servers/{name}/dns-plan", a(s.handleVPSDNSPlan))
+	m.HandleFunc("DELETE /api/v1/system/vps/servers/{name}/dns-holds/{domain}", a(s.handleVPSDNSDismiss))
 	m.HandleFunc("GET /api/v1/certificates", a(s.handleCertificates))
 	m.HandleFunc("POST /api/v1/certificates/check", a(s.handleCertificateCheck))
 	m.HandleFunc("POST /api/v1/certificates", a(s.handleCertificatePut))
@@ -602,6 +655,8 @@ func (s *Server) routes() {
 	m.HandleFunc("POST /api/v1/dns/domains", a(s.handleDNSAddDomain))
 	m.HandleFunc("PUT /api/v1/dns/domains/{domain}", a(s.handleDNSUpdateDomain))
 	m.HandleFunc("DELETE /api/v1/dns/domains/{domain}", a(s.handleDNSDeleteDomain))
+	m.HandleFunc("PUT /api/v1/dns/domains/{domain}/provider", a(s.handleDNSPutDomainProvider))
+	m.HandleFunc("DELETE /api/v1/dns/domains/{domain}/provider", a(s.handleDNSDeleteDomainProvider))
 	m.HandleFunc("GET /api/v1/dns/domains/{domain}/records", a(s.handleDNSRecords))
 	m.HandleFunc("GET /api/v1/dns/domains/{domain}/servers", a(s.handleDNSServers))
 	m.HandleFunc("PUT /api/v1/dns/domains/{domain}/servers/{node}", a(s.handlePutDNSServer))
@@ -622,8 +677,8 @@ func (s *Server) routes() {
 }
 
 // pageOf adapts a typed paged method to the tenant page helper.
-func pageOf[T any](fn func(context.Context, mydc.Conn, string, string) (mydc.Page[T], error)) func(context.Context, mydc.Conn, string, string) (any, string, uint64, error) {
-	return func(ctx context.Context, c mydc.Conn, t, after string) (any, string, uint64, error) {
+func pageOf[T any](fn func(context.Context, sfc.Conn, string, string) (sfc.Page[T], error)) func(context.Context, sfc.Conn, string, string) (any, string, uint64, error) {
+	return func(ctx context.Context, c sfc.Conn, t, after string) (any, string, uint64, error) {
 		p, err := fn(ctx, c, t, after)
 		return p.Items, p.Next, p.Revision, err
 	}

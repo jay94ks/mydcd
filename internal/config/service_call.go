@@ -2,7 +2,7 @@
 
 package config
 
-import "github.com/jay94ks/mydcd/internal/cliprofile"
+import "github.com/jay94ks/seafield/internal/cliprofile"
 
 // ServiceCA is an installed tenant trust bundle, never a user-supplied host
 // path or a server certificate/private key.

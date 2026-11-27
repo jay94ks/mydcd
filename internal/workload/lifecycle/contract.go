@@ -16,8 +16,8 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/jay94ks/mydcd/internal/schema"
-	contract "github.com/jay94ks/mydcd/lifecycle/v1"
+	"github.com/jay94ks/seafield/internal/schema"
+	contract "github.com/jay94ks/seafield/lifecycle/v1"
 )
 
 var (
@@ -154,7 +154,7 @@ func ownRequest(r contract.Request) contract.Request {
 
 func requestDigest(r contract.Request) [32]byte {
 	raw, _ := json.Marshal(r)
-	return sha256.Sum256(append([]byte("mydc-checker-request-1\x00"), raw...))
+	return sha256.Sum256(append([]byte("sfc-checker-request-1\x00"), raw...))
 }
 
 // ProbeBinding is the same original Request identity used by interpreted,

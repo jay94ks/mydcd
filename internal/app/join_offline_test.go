@@ -12,10 +12,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/bootstrap"
-	"github.com/jay94ks/mydcd/internal/cluster/membership"
-	"github.com/jay94ks/mydcd/internal/config"
-	"github.com/jay94ks/mydcd/internal/identity"
+	"github.com/jay94ks/seafield/internal/bootstrap"
+	"github.com/jay94ks/seafield/internal/cluster/membership"
+	"github.com/jay94ks/seafield/internal/config"
+	"github.com/jay94ks/seafield/internal/identity"
 )
 
 func TestRealOfflineJoinKeepsOriginalIntentAndCannotInit(t *testing.T) {

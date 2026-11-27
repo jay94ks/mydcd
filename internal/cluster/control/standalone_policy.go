@@ -7,13 +7,13 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/lifecycle"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/containerops"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/engine"
-	checker "github.com/jay94ks/mydcd/internal/workload/lifecycle"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/lifecycle"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/containerops"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/engine"
+	checker "github.com/jay94ks/seafield/internal/workload/lifecycle"
 	"math"
 	"slices"
 	"time"
@@ -44,7 +44,7 @@ func (q StandalonePolicyReport) resourceOwner() [32]byte {
 func StandalonePolicyBytes(q StandalonePolicyReport) []byte {
 	q.Signature = nil
 	raw, _ := json.Marshal(q)
-	return append([]byte("mydc-standalone-policy-1\x00"), raw...)
+	return append([]byte("sfc-standalone-policy-1\x00"), raw...)
 }
 func (q StandalonePolicyReport) Command() (state.Command, error) {
 	raw, err := json.Marshal(q)
@@ -300,7 +300,7 @@ func (r TaskRestartRecord) RequestDigest() [32]byte {
 		Policy StandalonePolicyReport
 		Target [32]byte
 	}{r.Origin, *r.Policy, r.Plan.Target})
-	return sha256.Sum256(append([]byte("mydc-standalone-policy-control-1\x00"), raw...))
+	return sha256.Sum256(append([]byte("sfc-standalone-policy-control-1\x00"), raw...))
 }
 func validStandalonePolicyRestart(r TaskRestartRecord, scope deployment.AppScope) bool {
 	q := r.Policy

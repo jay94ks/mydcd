@@ -12,10 +12,10 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/userauth"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/userauth"
 )
 
 const appVolumeReservation = uint64(1 << 20)
@@ -29,7 +29,7 @@ func TestRealBoundaryCLICreatedAppVolumeOriginalBudget(t *testing.T) {
 
 // The existing owner fixture owns the Engine/container/DB rollback. All policy
 // mutations below use the real product CLI -> signed operation -> Raft reducer.
-func prepareManagedVolumeBudget(t *testing.T, ctx context.Context, root string, user userauth.Client, peer mydcp.Peer, p control.Policy, read func() cluster.View) func(bool) {
+func prepareManagedVolumeBudget(t *testing.T, ctx context.Context, root string, user userauth.Client, peer sfcp.Peer, p control.Policy, read func() cluster.View) func(bool) {
 	t.Helper()
 	home, profile := filepath.Join(root, "budget-home"), filepath.Join(root, "budget.yaml")
 	if err := os.Mkdir(home, 0700); err != nil {
@@ -41,7 +41,7 @@ func prepareManagedVolumeBudget(t *testing.T, ctx context.Context, root string, 
 	}
 	cli := func(want int, args ...string) {
 		t.Helper()
-		cmd := nativeCLICmd(ctx, os.Getenv("MYDC_TEST_CLI"), home, profile, args...)
+		cmd := nativeCLICmd(ctx, os.Getenv("SFC_TEST_CLI"), home, profile, args...)
 		out, err := cmd.CombinedOutput()
 		code := 0
 		if err != nil {

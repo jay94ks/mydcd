@@ -15,12 +15,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/config"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/mydcp"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/config"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/sfcp"
 
 	"github.com/hashicorp/raft"
 )
@@ -29,18 +29,18 @@ type controlBoundary struct {
 	t            *testing.T
 	ctx          context.Context
 	node, client *identity.Identity
-	server, cli  *mydcp.Transport
+	server, cli  *sfcp.Transport
 	engine       *Engine
 	policy       control.Policy
 	options      Options
 	mu           sync.RWMutex
-	peers        map[mydcp.Identity]mydcp.Peer
+	peers        map[sfcp.Identity]sfcp.Peer
 }
 
 func newControlBoundary(t *testing.T, configure ...func(*controlBoundary)) *controlBoundary {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 40*time.Second)
-	f := &controlBoundary{t: t, ctx: ctx, peers: map[mydcp.Identity]mydcp.Peer{}}
+	f := &controlBoundary{t: t, ctx: ctx, peers: map[sfcp.Identity]sfcp.Peer{}}
 	t.Cleanup(cancel)
 	var err error
 	f.node, err = identity.Create(filepath.Join(t.TempDir(), "node-key"))
@@ -53,12 +53,12 @@ func newControlBoundary(t *testing.T, configure ...func(*controlBoundary)) *cont
 	}
 	f.policy = control.Policy{Cluster: [32]byte{71}, BootstrapKey: f.client.Public}
 	for i, key := range [][32]byte{f.node.Public, f.client.Public} {
-		peer := mydcp.Peer{ID: []string{"node", "client"}[i], Policy: mydcp.Policy{Key: mydcp.Identity(key), Member: i == 0, Snapshot: i == 0, Respond: true, Read: true, Manage: i == 1}}
+		peer := sfcp.Peer{ID: []string{"node", "client"}[i], Policy: sfcp.Policy{Key: sfcp.Identity(key), Member: i == 0, Snapshot: i == 0, Respond: true, Read: true, Manage: i == 1}}
 		f.peers[peer.Key] = peer
 	}
 	f.options = Options{ID: "node", Root: t.TempDir(), Admin: f.client.Actor(), Cluster: f.policy.Cluster, Bootstrap: true, Validate: f.policy.Validate, Reduce: f.policy.Reduce, ModuleID: f.policy.ID()}
-	f.options.Resolve = func(id raft.ServerID, address raft.ServerAddress) (mydcp.Peer, bool) {
-		p, ok := f.lookup(mydcp.Identity(f.node.Public))
+	f.options.Resolve = func(id raft.ServerID, address raft.ServerAddress) (sfcp.Peer, bool) {
+		p, ok := f.lookup(sfcp.Identity(f.node.Public))
 		return p, ok && p.ID == string(id) && p.Endpoint == string(address)
 	}
 	t.Cleanup(f.close)
@@ -79,13 +79,13 @@ func managedBoundary(f *controlBoundary) {
 	}
 	address := socket.LocalAddr().String()
 	_ = socket.Close()
-	peer := f.peers[mydcp.Identity(f.node.Public)]
+	peer := f.peers[sfcp.Identity(f.node.Public)]
 	peer.Endpoint = address
 	f.peers[peer.Key] = peer
 	f.policy.TrustRoot, f.policy.Genesis = f.node.Public, config.Peer{ID: "node", Key: f.node.Actor(), Endpoint: address, Voter: true}
 	f.options.Validate, f.options.Reduce, f.options.AdmitModule, f.options.ModuleID = f.policy.Validate, f.policy.Reduce, f.policy.AdmitModule, f.policy.ID()
 	f.options.TrackConfiguration = true
-	f.options.Resolve = func(id raft.ServerID, address raft.ServerAddress) (mydcp.Peer, bool) {
+	f.options.Resolve = func(id raft.ServerID, address raft.ServerAddress) (sfcp.Peer, bool) {
 		f.mu.RLock()
 		defer f.mu.RUnlock()
 		for _, p := range f.peers {
@@ -93,11 +93,11 @@ func managedBoundary(f *controlBoundary) {
 				return p, true
 			}
 		}
-		return mydcp.Peer{}, false
+		return sfcp.Peer{}, false
 	}
 }
 
-func (f *controlBoundary) lookup(key mydcp.Identity) (mydcp.Peer, bool) {
+func (f *controlBoundary) lookup(key sfcp.Identity) (sfcp.Peer, bool) {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
 	p, ok := f.peers[key]
@@ -115,7 +115,7 @@ func (f *controlBoundary) start() {
 func (f *controlBoundary) startUnready() {
 	f.t.Helper()
 	for i, id := range []*identity.Identity{f.node, f.client} {
-		mesh, err := mydcp.NewTransport(id, f.policy.Cluster, f.lookup)
+		mesh, err := sfcp.NewTransport(id, f.policy.Cluster, f.lookup)
 		if err != nil {
 			f.t.Fatal(err)
 		}
@@ -124,7 +124,7 @@ func (f *controlBoundary) startUnready() {
 		} else {
 			f.cli = mesh
 		}
-		peer, _ := f.lookup(mydcp.Identity(id.Public))
+		peer, _ := f.lookup(sfcp.Identity(id.Public))
 		address := peer.Endpoint
 		if address == "" {
 			address = "127.0.0.1:0"
@@ -137,7 +137,7 @@ func (f *controlBoundary) startUnready() {
 		f.peers[peer.Key] = peer
 		f.mu.Unlock()
 	}
-	peer, _ := f.lookup(mydcp.Identity(f.node.Public))
+	peer, _ := f.lookup(sfcp.Identity(f.node.Public))
 	f.options.Mesh = f.server
 	f.options.Servers = []raft.Server{{ID: "node", Address: raft.ServerAddress(peer.Endpoint), Suffrage: raft.Voter}}
 	var err error
@@ -211,10 +211,10 @@ func (f *controlBoundary) call(c state.Command) Committed {
 	if err != nil {
 		f.t.Fatal(err)
 	}
-	peer, _ := f.lookup(mydcp.Identity(f.node.Public))
+	peer, _ := f.lookup(sfcp.Identity(f.node.Public))
 	r, err := CallManagement(f.ctx, f.cli, f.client, f.policy.Cluster, peer, ManagementRequest{Method: "submit", Latest: true, Command: raw})
 	if err != nil || r.Committed == nil {
-		f.t.Fatal("authenticated MYDCP management boundary", r.Code, err)
+		f.t.Fatal("authenticated SFCP management boundary", r.Code, err)
 	}
 	return *r.Committed
 }
@@ -228,7 +228,7 @@ func (f *controlBoundary) enroll() state.Command {
 	return c
 }
 
-func TestRealControlCatalogMYDCPCASRevocationAndSnapshot(t *testing.T) {
+func TestRealControlCatalogSFCPCASRevocationAndSnapshot(t *testing.T) {
 	f := newControlBoundary(t)
 	initial := f.catalog()
 	if !initial.AwaitingAdmin() || initial.Revision() != 0 || len(initial.VisibleTenants("admin")) != 0 {
@@ -244,8 +244,8 @@ func TestRealControlCatalogMYDCPCASRevocationAndSnapshot(t *testing.T) {
 	if !ok || len(tenant.ImageSources) != 1 || tenant.ImageSources[0] != (access.TrustRule{Registry: "docker.io", Repository: "**"}) || f.catalog().AwaitingAdmin() {
 		t.Fatal("tenant default/bootstrap anchor", tenant)
 	}
-	stale := f.command("stale", "set-nodes", "admin", tenant.Revision, control.NodeAssignment{Tenant: "demo", Nodes: []string{"node"}})
-	trust := f.command("trust", "set-trust", "admin", tenant.Revision, control.TrustAssignment{Tenant: "demo", Rules: []access.TrustRule{}})
+	stale := f.command("stale", "set-nodes", "admin", tenant.Revision, control.NodeChangeTo("demo", tenant.AllowedNodes, []string{"node"}))
+	trust := f.command("trust", "set-trust", "admin", tenant.Revision, control.TrustChange{Tenant: "demo", Remove: tenant.ImageSources})
 	if f.call(trust).Result.Code != state.Applied {
 		t.Fatal("explicit trust removal")
 	}
@@ -277,12 +277,14 @@ func TestRealControlCatalogMYDCPCASRevocationAndSnapshot(t *testing.T) {
 		t.Fatal("same ID/different command was admitted")
 	}
 	// Current account policy wins even for the old genesis/node administrator.
-	u, _ := f.catalog().User("admin")
-	u.Revision = 0
-	u.Credentials = []access.Credential{{ID: "password", Method: access.Password, VerifierRef: "provider/admin-password", Enabled: true}}
 	// The account has its own revision, independent of tenant/catalog changes.
 	old, _ := f.catalog().User("admin")
-	revoke := f.command("remove-key", "put-user", "admin", old.Revision, u)
+	add := f.command("add-key", "add-credential", "admin", old.Revision, access.CredentialAddition{User: "admin", Credential: access.CredentialKey{ID: "other", Method: access.PrivateKey, PublicKey: [32]byte{77}}})
+	if f.call(add).Result.Code != state.Applied {
+		t.Fatal("replacement key")
+	}
+	old, _ = f.catalog().User("admin")
+	revoke := f.command("remove-key", "disable-credential", "admin", old.Revision, access.CredentialDisable{User: "admin", Credential: "key"})
 	if f.call(revoke).Result.Code != state.Applied {
 		t.Fatal("current credential replacement")
 	}
@@ -308,11 +310,20 @@ func TestRealControlCatalogLargeCheckpointUsesBoundedRows(t *testing.T) {
 	if err != nil || len(before) <= 64<<10 {
 		t.Fatal("fixture did not cross command value boundary", len(before), err)
 	}
+	// One row per record (R17 B2b): every row is small, and a change rewrites
+	// only its own rows, so older rows keep older revisions.
 	v := f.view()
+	rows := 0
 	for key, object := range v.State.Objects(control.CatalogKey + "/") {
-		if object.Present && (len(object.Value) > 32<<10 || object.Revision != v.State.Object(control.CatalogKey).Revision) {
-			t.Fatal("unbounded/unpublished checkpoint part", key)
+		if object.Present {
+			rows++
+			if len(object.Value) > 32<<10 || object.Revision > v.State.Object(control.CatalogKey).Revision {
+				t.Fatal("unbounded/unpublished catalog row", key)
+			}
 		}
+	}
+	if rows < 9 {
+		t.Fatal("catalog not stored as record rows", rows)
 	}
 	if err = f.engine.Snapshot(f.ctx); err != nil {
 		t.Fatal(err)
@@ -325,12 +336,12 @@ func TestRealControlCatalogLargeCheckpointUsesBoundedRows(t *testing.T) {
 	}
 	// Neither a missing reducer nor a changed bootstrap/policy can reopen this root.
 	f.close()
-	mesh, err := mydcp.NewTransport(f.node, f.policy.Cluster, f.lookup)
+	mesh, err := sfcp.NewTransport(f.node, f.policy.Cluster, f.lookup)
 	if err != nil {
 		t.Fatal(err)
 	}
 	f.server = mesh
-	p, _ := f.lookup(mydcp.Identity(f.node.Public))
+	p, _ := f.lookup(sfcp.Identity(f.node.Public))
 	if err = mesh.Listen(p.Endpoint); err != nil {
 		t.Fatal(err)
 	}
@@ -395,7 +406,7 @@ func TestRealManagedMutationPolicyUpgradePreservesCheckpointAndReceipt(t *testin
 		}
 		address := p.LocalAddr().String()
 		_ = p.Close()
-		peer := f.peers[mydcp.Identity(f.node.Public)]
+		peer := f.peers[sfcp.Identity(f.node.Public)]
 		peer.Endpoint = address
 		f.peers[peer.Key] = peer
 		f.policy.TrustRoot = f.node.Public
@@ -448,12 +459,12 @@ func TestRealManagedMutationPolicyUpgradePreservesCheckpointAndReceipt(t *testin
 	f.close()
 	refuseOpen := func(options Options) {
 		t.Helper()
-		mesh, e := mydcp.NewTransport(f.node, f.policy.Cluster, f.lookup)
+		mesh, e := sfcp.NewTransport(f.node, f.policy.Cluster, f.lookup)
 		if e != nil {
 			t.Fatal(e)
 		}
 		defer mesh.Close()
-		peer, _ := f.lookup(mydcp.Identity(f.node.Public))
+		peer, _ := f.lookup(sfcp.Identity(f.node.Public))
 		if e = mesh.Listen(peer.Endpoint); e != nil {
 			t.Fatal(e)
 		}

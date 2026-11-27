@@ -9,10 +9,10 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/engine"
-	"github.com/jay94ks/mydcd/internal/reconcile"
-	"github.com/jay94ks/mydcd/internal/workload/volumes"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/engine"
+	"github.com/jay94ks/seafield/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/workload/volumes"
 )
 
 func restoreCore(t *testing.T) (*backupCoreFixture, VolumeRestoreBegin) {
@@ -207,7 +207,7 @@ func TestVolumeRestoreCancelClosesOriginalAfterRevocation(t *testing.T) {
 		t.Fatal(err)
 	}
 	tenant, _ := c.Tenant("tenant")
-	f.apply("revoke-node", "set-nodes", tenant.Revision, NodeAssignment{Tenant: "tenant"}, state.Applied)
+	f.apply("revoke-node", "set-nodes", tenant.Revision, NodeChangeTo("tenant", tenant.AllowedNodes, nil), state.Applied)
 	if _, err = f.p.VolumeRestorePermit(f.s, q.Target.NodeKey, selection, false); err == nil {
 		t.Fatal("revoked copy permit")
 	}

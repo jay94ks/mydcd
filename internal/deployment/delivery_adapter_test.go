@@ -9,18 +9,18 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/cluster/state"
 )
 
 func acceptedDeliveryAdapterFixture(t *testing.T) (*fixture, PlanningContext, Blueprint, Delivery) {
 	t.Helper()
 	f, input, ctx, _ := externalFixture(t)
-	input.MyDC.Delivery = &DeliveryDeclaration{}
-	input.MyDC.Delivery.Enabled = true
-	input.MyDC.Delivery.Source.Kind = "git"
-	input.MyDC.Delivery.Source.Repository = "https://git.mydc.test/team/app.git"
-	input.MyDC.Delivery.Source.Ref = "refs/heads/main"
-	input.MyDC.Delivery.Source.Path = "app.yaml"
+	input.Sfc.Delivery = &DeliveryDeclaration{}
+	input.Sfc.Delivery.Enabled = true
+	input.Sfc.Delivery.Source.Kind = "git"
+	input.Sfc.Delivery.Source.Repository = "https://git.sfc.test/team/app.git"
+	input.Sfc.Delivery.Source.Ref = "refs/heads/main"
+	input.Sfc.Delivery.Source.Path = "app.yaml"
 	if err := input.normalize(); err != nil {
 		t.Fatal(err)
 	}
@@ -124,7 +124,7 @@ func TestDeliveryDefaultPlacementIsFrozenOnlyForRegisteredAppSources(t *testing.
 		t.Fatal("snapshot changed default placement", err)
 	}
 	input := b.d.Input
-	input.MyDC.Delivery = nil
+	input.Sfc.Delivery = nil
 	ordinary, err := CompileApp(input, f.c, ctx)
 	if err != nil || ordinary.CDDefaultNode() != "" {
 		t.Fatal("non-CD format acquired a source default field", err)
@@ -216,8 +216,8 @@ func TestDeliverySyncUsesOriginalCoreAndPauseCollectsExactUnknown(t *testing.T) 
 func TestAutomaticSyncDoesNotManufactureManualDriftApproval(t *testing.T) {
 	f, ctx, b, _ := acceptedDeliveryAdapterFixture(t)
 	input := b.d.Input
-	input.MyDC.Delivery.Sync.Mode = "automatic"
-	input.MyDC.Delivery.Sync.Drift = "report"
+	input.Sfc.Delivery.Sync.Mode = "automatic"
+	input.Sfc.Delivery.Sync.Drift = "report"
 	body, err := marshalApp(input)
 	if err != nil {
 		t.Fatal(err)

@@ -4,7 +4,7 @@
 
 package lifecycle
 
-import "github.com/jay94ks/mydcd/internal/schema"
+import "github.com/jay94ks/seafield/internal/schema"
 
 // Read the original durable records, without taking CompilerOwner's native
 // Wait lock. No live owner calls back into SourceStore during collection.

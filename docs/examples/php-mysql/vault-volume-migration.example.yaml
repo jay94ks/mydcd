@@ -1,6 +1,6 @@
 # 주제별 설명용 발췌/대안이다. 별도 배포 입력이나 include/자동 merge 파일이 아니다.
 # app.yaml은 기존 입력/Volume 소비 정책을 담고, metadata 관리·backup/restore/이관은 명시 관리 작업이다.
-# D2 설계 예시. 현재 mydc/mydcd 또는 docker compose에서 실행하지 않는다.
+# D2 설계 예시. 현재 sfc/sfcd 또는 docker compose에서 실행하지 않는다.
 # 이관 실행은 별도 명시 관리 작업이다. 요청 계약은 docs/development/vault-volume-migration-plan.md 참조.
 # runtime 입력/다단 Group/순서 병합/승인 예시는 secret-groups.example.yaml 참조.
 schema: 1
@@ -13,7 +13,7 @@ secret_bindings:
     # 주소/CA/auth는 각 노드의 로컬 설치 프로필. token/원문을 이 파일에 쓰지 않는다.
     provider_profile: app-vault
     object: php-mysql-demo/db-password
-    revision: 1 # 외부 공급자 revision; MyDC schema 번호와 별개
+    revision: 1 # 외부 공급자 revision; Seafield Cluster schema 번호와 별개
     consumers:
       - {service: web, node: node-a, target: /run/secrets/db-password}
       - {service: db, node: node-b, target: /run/secrets/db-password}

@@ -11,9 +11,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/mydcp"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/loginlog"
+	"github.com/jay94ks/seafield/internal/sfcp"
 )
 
 func TestNodeShellQueriesHaveExactSelectorsAndOriginalSigningRoot(t *testing.T) {
@@ -22,7 +23,7 @@ func TestNodeShellQueriesHaveExactSelectorsAndOriginalSigningRoot(t *testing.T) 
 		if !q.validMethodFields() || !q.validQuerySelectors() {
 			t.Fatal("query rejected", method)
 		}
-		foreign := []func(*Request){func(r *Request) { r.Tenant = "tenant" }, func(r *Request) { r.Operation = &control.UserOperation{} }, func(r *Request) { r.Container = nil; r.Username = "foreign" }}
+		foreign := []func(*Request){func(r *Request) { r.Tenant = "tenant" }, func(r *Request) { r.Operation = &control.UserOperation{} }, func(r *Request) { r.Container = nil; r.LoginQuery = &loginlog.Query{Limit: 1} }}
 		if method == "node-shell-policy" {
 			// node-shell-sessions takes a Node filter; the policy has none.
 			foreign = append(foreign, func(r *Request) { r.Node = "node-a" })
@@ -47,7 +48,7 @@ func TestNodeShellQueriesHaveExactSelectorsAndOriginalSigningRoot(t *testing.T) 
 	raw, _ := control.ChangeBytes("open-node-shell", session.User, 0, control.NodeShellOpen{Node: "node-a", Cols: 80, Rows: 24})
 	var change control.Change
 	_ = json.Unmarshal(raw, &change)
-	op, err := c.prepareOperation(session, "original-shell", change, Reply{RootRevision: 99, NodeShellRootRevision: 7, ModuleEpoch: 1}, time.Now().Unix())
+	op, err := c.prepareOperation(session, "original-shell", change, 1, 7, time.Now().Unix())
 	if err != nil || op.RootRevision != 7 || control.UploadCASAllowed(op.Change.Action) || control.StandaloneCASAllowed(op.Change) || control.AppDownCASAllowed(op.Change) || control.AppFieldCASAllowed(op.Change) || !ed25519.Verify(session.Key[:], control.OperationBytes(op), op.Signature) {
 		t.Fatal("wrong namespace/mode/signature", err)
 	}
@@ -70,10 +71,10 @@ func TestNodeShellChannelPartialFrameNeverRetriesOrAdvancesOriginal(t *testing.T
 		t.Fatal(err)
 	}
 	defer channel.Close()
-	if err = channel.Send(mydcp.NodeShellRecord{Kind: "stdout", Data: []byte("bounded")}); !errors.Is(err, io.ErrClosedPipe) {
+	if err = channel.Send(sfcp.NodeShellRecord{Kind: "stdout", Data: []byte("bounded")}); !errors.Is(err, io.ErrClosedPipe) {
 		t.Fatal(err)
 	}
-	if err = channel.Send(mydcp.NodeShellRecord{Kind: "end", End: &mydcp.NodeShellEnd{Reason: "exit"}}); !errors.Is(err, context.Canceled) || stream.writes.Load() != 1 {
+	if err = channel.Send(sfcp.NodeShellRecord{Kind: "end", End: &sfcp.NodeShellEnd{Reason: "exit"}}); !errors.Is(err, context.Canceled) || stream.writes.Load() != 1 {
 		t.Fatal("partial write retried on original byte stream", err)
 	}
 }

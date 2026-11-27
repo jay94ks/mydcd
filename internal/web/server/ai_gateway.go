@@ -6,8 +6,8 @@ import (
 	"context"
 	"errors"
 
-	"github.com/jay94ks/mydcd/internal/web/ai"
-	"github.com/jay94ks/mydcd/internal/web/store"
+	"github.com/jay94ks/seafield/internal/web/ai"
+	"github.com/jay94ks/seafield/internal/web/store"
 )
 
 // The AI gateway call every role uses (coordinator, diagnosis, impact,
@@ -56,7 +56,7 @@ func (s *Server) aiDailyUsed(user string) int64 {
 }
 
 // aiGenerate runs req for call.Role. Model, effort and output cap come
-// from the role settings; req.CacheKey defaults to mydc-<role>-v1.
+// from the role settings; req.CacheKey defaults to sfc-<role>-v1.
 func (s *Server) aiGenerate(ctx context.Context, call aiCall, req ai.Request) (aiResult, error) {
 	c := s.aiConfig()
 	role := c.Roles[call.Role]
@@ -69,7 +69,7 @@ func (s *Server) aiGenerate(ctx context.Context, call aiCall, req ai.Request) (a
 		req.MaxTokens = role.MaxOutputTokens
 	}
 	if req.CacheKey == "" {
-		req.CacheKey = "mydc-" + call.Role + "-v1"
+		req.CacheKey = "sfc-" + call.Role + "-v1"
 	}
 	tries, switched := aiTries(c, cats, role, call.UseFallback)
 	if len(tries) == 0 {

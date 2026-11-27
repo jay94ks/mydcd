@@ -9,9 +9,9 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/network"
-	"github.com/jay94ks/mydcd/internal/tenancy"
-	"github.com/jay94ks/mydcd/internal/workload"
+	"github.com/jay94ks/seafield/internal/network"
+	"github.com/jay94ks/seafield/internal/tenancy"
+	"github.com/jay94ks/seafield/internal/workload"
 	"github.com/miekg/dns"
 )
 
@@ -38,8 +38,8 @@ func managedDNSFixture(t *testing.T) (networkFixture, ManagedDNSDefinition, []DN
 		}
 	}
 	d := tenancy.TUNDefinition{Tenant: "first", Name: "shared", Members: []tenancy.TUNNode{
-		{Node: "node-a", Owner: pub(f.key), Pools: []tenancy.Subnet{{ID: "four", Prefix: netip.MustParsePrefix("10.60.0.0/24"), Gateway: addr("10.60.0.1"), MTU: 1280}, {ID: "six", Prefix: netip.MustParsePrefix("2001:db8:60::/64"), Gateway: addr("2001:db8:60::1"), MTU: 1280}}, Addresses: []netip.Prefix{netip.MustParsePrefix("10.62.0.1/32"), netip.MustParsePrefix("2001:db8:62::1/128")}},
-		{Node: "node-b", Owner: pub(private(32)), Pools: []tenancy.Subnet{{ID: "four", Prefix: netip.MustParsePrefix("10.61.0.0/24"), Gateway: addr("10.61.0.1"), MTU: 1280}, {ID: "six", Prefix: netip.MustParsePrefix("2001:db8:61::/64"), Gateway: addr("2001:db8:61::1"), MTU: 1280}}, Addresses: []netip.Prefix{netip.MustParsePrefix("10.62.0.2/32"), netip.MustParsePrefix("2001:db8:62::2/128")}},
+		{Node: "node-a", Owner: pub(f.key), Pools: []tenancy.Subnet{{ID: "four", Prefix: netip.MustParsePrefix("10.60.0.0/24"), Gateway: addr("10.60.0.1"), MTU: 1280}, {ID: "six", Prefix: netip.MustParsePrefix("2001:db8:60::/64"), Gateway: addr("2001:db8:60::1"), MTU: 1280}}},
+		{Node: "node-b", Owner: pub(private(32)), Pools: []tenancy.Subnet{{ID: "four", Prefix: netip.MustParsePrefix("10.61.0.0/24"), Gateway: addr("10.61.0.1"), MTU: 1280}, {ID: "six", Prefix: netip.MustParsePrefix("2001:db8:61::/64"), Gateway: addr("2001:db8:61::1"), MTU: 1280}}},
 	}}
 	f.n, err = f.n.CreateTUN(f.c, q, "admin", f.n.Revision(), d)
 	if err != nil {
@@ -78,7 +78,7 @@ func managedDNSFixture(t *testing.T) (networkFixture, ManagedDNSDefinition, []DN
 		}
 		registrations = append(registrations, r)
 	}
-	return f, ManagedDNSDefinition{Schema: 1, Tenant: "first", Network: "shared", Policy: ManagedDNSPolicy{Enabled: true, Reverse: true, Zone: "apps.mydc.test.", TTL: 30, NegativeTTL: 5, Transports: []string{"udp", "tcp"}, MaxQueries: 8, MaxCacheEntries: 8, MaxResponseBytes: 4096, MaxConnections: 4, RequestTimeoutMS: 1000}}, registrations
+	return f, ManagedDNSDefinition{Schema: 1, Tenant: "first", Network: "shared", Policy: ManagedDNSPolicy{Enabled: true, Reverse: true, Zone: "apps.sfc.test.", TTL: 30, NegativeTTL: 5, Transports: []string{"udp", "tcp"}, MaxQueries: 8, MaxCacheEntries: 8, MaxResponseBytes: 4096, MaxConnections: 4, RequestTimeoutMS: 1000}}, registrations
 }
 
 func TestManagedDNSDefinitionReusesAuthorityAcrossOwnersAndPools(t *testing.T) {
@@ -98,7 +98,7 @@ func TestManagedDNSDefinitionReusesAuthorityAcrossOwnersAndPools(t *testing.T) {
 		if plan.Config.Source != 77 || plan.Config.Serial != 4 || len(plan.Config.Names) != 8 || len(plan.Config.Members) != 2 || plan.BridgeKey != (tenancy.SourceIdentity{Kind: "bridge", Tenant: "first", Network: "shared", Node: plan.Node}).Key() {
 			t.Fatal("lost original management/member identity")
 		}
-		m, err := NewDNSManager(f.n.Cluster(), plan.Owner, []string{"mydc.test."}, 8, 8)
+		m, err := NewDNSManager(f.n.Cluster(), plan.Owner, []string{"sfc.test."}, 8, 8)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -117,9 +117,9 @@ func TestManagedDNSDefinitionReusesAuthorityAcrossOwnersAndPools(t *testing.T) {
 			kind    uint16
 			address string
 		}{
-			{"storage.apps.mydc.test.", dns.TypeA, "10.61.0.10"},
-			{"database.sample.apps.mydc.test.", dns.TypeAAAA, "2001:db8:61::10"},
-			{"public.apps.mydc.test.", dns.TypeA, "10.60.0.10"},
+			{"storage.apps.sfc.test.", dns.TypeA, "10.61.0.10"},
+			{"database.sample.apps.sfc.test.", dns.TypeAAAA, "2001:db8:61::10"},
+			{"public.apps.sfc.test.", dns.TypeA, "10.60.0.10"},
 		} {
 			var answer DNSResult
 			d, answer = askDNS(t, d, q.name, q.kind, 200)
@@ -158,7 +158,7 @@ func TestManagedDNSDefinitionRejectsForeignStaleAmbiguousRegistrations(t *testin
 		{"duplicate-alias", func(r *[]DNSRegistration) { (*r)[0].Aliases = []string{"public", "PUBLIC"} }},
 		{"out-of-zone", func(r *[]DNSRegistration) { (*r)[0].Aliases = []string{"outside.invalid."} }},
 		{"reserved-ns", func(r *[]DNSRegistration) { (*r)[0].Aliases = []string{"ns"} }},
-		{"zone-apex", func(r *[]DNSRegistration) { (*r)[0].Aliases = []string{"apps.mydc.test."} }},
+		{"zone-apex", func(r *[]DNSRegistration) { (*r)[0].Aliases = []string{"apps.sfc.test."} }},
 		{"empty-addresses", func(r *[]DNSRegistration) { (*r)[0].Addresses = nil }},
 	} {
 		t.Run(item.name, func(t *testing.T) {
@@ -203,7 +203,7 @@ func TestManagedDNSDefinitionSettingsOrderingOwnershipAndAuthority(t *testing.T)
 		func(d *ManagedDNSDefinition) {
 			d.Policy.Upstreams = []netip.AddrPort{netip.MustParseAddrPort("10.60.0.1:53")}
 		},
-		func(d *ManagedDNSDefinition) { d.Policy.ClientZone = "apps.mydc.test." },
+		func(d *ManagedDNSDefinition) { d.Policy.ClientZone = "apps.sfc.test." },
 	} {
 		d := definition
 		mutate(&d)

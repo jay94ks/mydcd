@@ -8,11 +8,11 @@ import (
 	"encoding/json"
 	"slices"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/imagecache"
-	"github.com/jay94ks/mydcd/internal/imagesource"
-	"github.com/jay94ks/mydcd/internal/registryclient"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/imagecache"
+	"github.com/jay94ks/seafield/internal/imagesource"
+	"github.com/jay94ks/seafield/internal/registryclient"
 )
 
 type ImageUsageQuery struct {
@@ -206,7 +206,7 @@ func pageImageUsages(cluster [32]byte, index uint64, session access.Session, ten
 	// Only authorized matched rows enter the digest. An unrelated tenant/node
 	// update cannot leak through or invalidate this user's page cursor.
 	hash := sha256.New()
-	_, _ = hash.Write([]byte("mydc-image-usages-view-1\x00"))
+	_, _ = hash.Write([]byte("sfc-image-usages-view-1\x00"))
 	encoder := json.NewEncoder(hash)
 	_ = encoder.Encode(struct {
 		Cluster      [32]byte

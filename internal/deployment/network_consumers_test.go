@@ -18,7 +18,7 @@ func TestNetworkConsumerDemandUsesSameGraphForLocalAndRemoteIngress(t *testing.T
 			i.Backend.Service = "web"
 			i.Backend.Port = 8080
 			i.Backend.HealthPath = "/readyz"
-			input.MyDC.Ingress = i
+			input.Sfc.Ingress = i
 			plan, err := Compile(input, f.c, contextFor(t, f))
 			if err != nil {
 				t.Fatal(err)
@@ -69,7 +69,7 @@ func TestNetworkConsumersMultipleRoutesPreserveFixedReplicaAndDistinctLeases(t *
 		{ID: "db", Host: "app.test", Prefix: "/db", Service: "db", Network: "app", Port: 3306, HealthPath: "/"},
 		{ID: "audit", Host: "app.test", Prefix: "/audit", Service: "web", Network: "app", Port: 8080, HealthPath: "/readyz"},
 	}}
-	input.MyDC.Ingress = i
+	input.Sfc.Ingress = i
 	plan, err := CompileApp(input, f.c, ctx)
 	if err != nil {
 		t.Fatal(err)

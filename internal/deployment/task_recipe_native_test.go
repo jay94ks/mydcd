@@ -15,18 +15,18 @@ import (
 	"time"
 
 	cerrdefs "github.com/containerd/errdefs"
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/engine"
-	"github.com/jay94ks/mydcd/internal/network"
-	"github.com/jay94ks/mydcd/internal/workload"
-	"github.com/jay94ks/mydcd/internal/workload/volumes"
-	"github.com/jay94ks/mydcd/tests/registryfixture"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/engine"
+	"github.com/jay94ks/seafield/internal/network"
+	"github.com/jay94ks/seafield/internal/workload"
+	"github.com/jay94ks/seafield/internal/workload/volumes"
+	"github.com/jay94ks/seafield/tests/registryfixture"
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/client"
 )
 
 func TestRealBoundarySingleFileCombinedInputsAndReadiness(t *testing.T) {
-	tag, backend, cidr := os.Getenv("MYDC_DOCKER_TEST_OWNER"), os.Getenv("MYDC_DOCKER_TEST_BACKEND"), os.Getenv("MYDC_DOCKER_TEST_CIDR")
+	tag, backend, cidr := os.Getenv("SFC_DOCKER_TEST_OWNER"), os.Getenv("SFC_DOCKER_TEST_BACKEND"), os.Getenv("SFC_DOCKER_TEST_CIDR")
 	if tag == "" || backend == "" || cidr == "" || os.Geteuid() != 0 {
 		t.Skip("requires owned Docker rollback prestate and user-prebuilt test/backend")
 	}
@@ -44,8 +44,8 @@ func TestRealBoundarySingleFileCombinedInputsAndReadiness(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = c.Close() })
-	registry := registryfixture.OpenPrepared(t, backend, container.Config{Cmd: []string{"/backend"}, User: "10001:10001", Volumes: map[string]struct{}{"/data": {}}, Labels: map[string]string{"org.mydc.test.owner": tag}})
-	filters := client.Filters{}.Add("label", "org.mydc.owner="+owner)
+	registry := registryfixture.OpenPrepared(t, backend, container.Config{Cmd: []string{"/backend"}, User: "10001:10001", Volumes: map[string]struct{}{"/data": {}}, Labels: map[string]string{"org.sfc.test.owner": tag}})
+	filters := client.Filters{}.Add("label", "org.sfc.owner="+owner)
 	before, err := c.API.ContainerList(ctx, client.ContainerListOptions{All: true, Filters: filters})
 	if err != nil || len(before.Items) != 0 {
 		t.Fatal("owner initially nonempty", err)
@@ -64,7 +64,7 @@ func TestRealBoundarySingleFileCombinedInputsAndReadiness(t *testing.T) {
 			return
 		}
 		for _, item := range containers.Items {
-			if item.Labels["org.mydc.owner"] != owner || item.Labels["org.mydc.kind"] != "container" {
+			if item.Labels["org.sfc.owner"] != owner || item.Labels["org.sfc.kind"] != "container" {
 				t.Error("container ownership")
 				continue
 			}
@@ -81,7 +81,7 @@ func TestRealBoundarySingleFileCombinedInputsAndReadiness(t *testing.T) {
 			return
 		}
 		for _, item := range networks.Items {
-			if item.Labels["org.mydc.owner"] != owner || item.Labels["org.mydc.kind"] != "bridge" {
+			if item.Labels["org.sfc.owner"] != owner || item.Labels["org.sfc.kind"] != "bridge" {
 				t.Error("bridge ownership")
 				continue
 			}
@@ -98,7 +98,7 @@ func TestRealBoundarySingleFileCombinedInputsAndReadiness(t *testing.T) {
 			return
 		}
 		for _, item := range values.Items {
-			if item.Labels["org.mydc.owner"] != owner || item.Labels["org.mydc.kind"] != "volume" {
+			if item.Labels["org.sfc.owner"] != owner || item.Labels["org.sfc.kind"] != "volume" {
 				t.Error("volume ownership")
 				continue
 			}
@@ -111,7 +111,7 @@ func TestRealBoundarySingleFileCombinedInputsAndReadiness(t *testing.T) {
 		}
 		image, e := c.API.ImageInspect(clean, registry.Reference)
 		if e == nil {
-			if image.Config == nil || image.Config.Labels["org.mydc.test.owner"] != tag {
+			if image.Config == nil || image.Config.Labels["org.sfc.test.owner"] != tag {
 				t.Error("image ownership")
 				return
 			}
@@ -135,7 +135,7 @@ func TestRealBoundarySingleFileCombinedInputsAndReadiness(t *testing.T) {
 	}
 	t.Logf("nativeOwner=%s registry=%s", owner, registry.Registry)
 	tenant, _ := f.c.Tenant("tenant")
-	f.c, err = f.c.SetTrust("alice", "tenant", tenant.Revision, append(tenant.ImageSources, access.TrustRule{Registry: registry.Registry, Repository: "fixture"}))
+	f.c, err = f.c.ChangeTrust("alice", "tenant", tenant.Revision, []access.TrustRule{{Registry: registry.Registry, Repository: "fixture"}}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -170,22 +170,22 @@ services:
     image: %s
     cpus: 0.1
     mem_limit: 32m
-    environment: {MYDC_PROJECTION_FILE: /run/secrets/db-password, MYDC_VOLUME_FIXTURE: "1", MYDC_READINESS_FIXTURE: "1"}
+    environment: {SFC_PROJECTION_FILE: /run/secrets/db-password, SFC_VOLUME_FIXTURE: "1", SFC_READINESS_FIXTURE: "1"}
     secrets: [{source: db-password, target: /run/secrets/db-password, uid: "10001", gid: "10001", mode: 0400}]
     volumes: [mysql-data:/data]
     tmpfs: ["/scratch:size=4m,uid=10001,gid=10001,mode=0700"]
     healthcheck: {test: [CMD, /backend, --projection-probe], interval: 1s, timeout: 1s, retries: 2}
     networks: {app: {ipv4_address: %s}}
-    x-mydc: {node: node-b, secrets_from: [group/common], ready: {http: /readyz, port: 8080}}
+    x-sfc: {node: node-b, secrets_from: [group/common], ready: {http: /readyz, port: 8080}}
 networks:
   app:
-    x-mydc: {mtu: 1280, pools: {node-b: {cidr: %s, gateway: %s}}}
+    x-sfc: {mtu: 1280, pools: {node-b: {cidr: %s, gateway: %s}}}
 volumes:
   mysql-data:
-    x-mydc: {node: node-b, uid: 10001, gid: 10001, mode: "0750"}
+    x-sfc: {node: node-b, uid: 10001, gid: 10001, mode: "0750"}
 secrets:
   db-password:
-    x-mydc: {key: DB_PASSWORD}
+    x-sfc: {key: DB_PASSWORD}
 `, registry.Reference, address, prefix, prefix.Addr().Next())))
 	if err != nil {
 		t.Fatal(err)
@@ -246,7 +246,7 @@ secrets:
 		t.Fatal("real registry reference/rootfs/transfer boundary", err)
 	}
 	// Authority/approval metadata here is the reused core fixture. The prior
-	// actual MYDCP/Raft Volume permit tests remain the quorum evidence.
+	// actual SFCP/Raft Volume permit tests remain the quorum evidence.
 	authority := func(ctx context.Context, r volumes.StartRequest) (volumes.Permit, error) {
 		if err := ctx.Err(); err != nil {
 			return volumes.Permit{}, err

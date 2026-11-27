@@ -1,18 +1,18 @@
 # key·login: 키와 로그인
 
 ```sh
-mydc key import admin /etc/mydc/admin-identity/key.pem
-mydc context add lab --user admin --wallet-key admin
-mydc enroll admin --key admin       # 새 클러스터의 첫 관리자, 한 번만
-mydc login
-mydc whoami
-mydc logout
-mydc version
+sfcli key import admin /etc/sfc/admin-identity/key.pem
+sfcli context add lab --user admin --wallet-key admin
+sfcli enroll admin --key admin       # 새 클러스터의 첫 관리자, 한 번만
+sfcli login
+sfcli whoami
+sfcli logout
+sfcli version
 ```
 
 ## key
 
-개인키는 `~/.mydc/wallet.bin`에 wallet 비밀번호로 암호화해 둔다. 개인키와 비밀번호는 출력하지 않는다.
+개인키는 `~/.sfc/wallet.bin`에 wallet 비밀번호로 암호화해 둔다. 개인키와 비밀번호는 출력하지 않는다.
 
 | 명령 | 하는 일 |
 |---|---|
@@ -24,7 +24,7 @@ mydc version
 
 - 첫 `create`나 `import`가 wallet을 만들며 새 비밀번호를 두 번 묻는다.
 - 저장이 중간에 끊긴 wallet은 다음 key 명령이 먼저 마무리한다.
-- 스크립트는 `MYDC_WALLET_PASSWORD_FILE`에 비밀번호 파일 경로를 준다. 0600 일반 파일이어야 하고 끝 줄바꿈 하나는 뺀다. 모든 명령의 wallet 비밀번호 질문이 이 파일을 쓴다.
+- 스크립트는 `SFC_WALLET_PASSWORD_FILE`에 비밀번호 파일 경로를 준다. 0600 일반 파일이어야 하고 끝 줄바꿈 하나는 뺀다. 모든 명령의 wallet 비밀번호 질문이 이 파일을 쓴다.
 
 ## login·logout·whoami
 
@@ -45,8 +45,10 @@ login 옵션:
 
 ## enroll
 
-`mydc enroll USER --key KEY [--user-id ID]`는 `mydcd init --admin-public-key`로 만든 빈 클러스터에 첫 system admin을 등록한다. KEY는 그 공개키에 맞는 wallet 키다. 요청 ID는 `enroll-<user-id>`로 정해지므로 다시 실행하면 같은 요청의 결과를 확인한다. user-id는 생략하면 USER와 같다.
+`sfcli enroll USER --key KEY [--user-id ID]`는 `sfcd init --admin-public-key`로 만든 빈 클러스터에 첫 system admin을 등록한다. KEY는 그 공개키에 맞는 wallet 키다. 요청 ID는 `enroll-<user-id>`로 정해지므로 다시 실행하면 같은 요청의 결과를 확인한다. user-id는 생략하면 USER와 같다.
 
 ## version
 
 CLI 버전과, 현재 context가 있으면 그 서버의 버전·프로토콜. 로그인이 필요 없다.
+
+버전은 `major.minor.build`(예: `0.1.3`)다. 릴리스가 아닌 개발 빌드는 `major.minor.0-dev`로 보인다. `sfcli --version`과 `sfcd version`은 한 줄로 `sfcd 0.1.3 (commit 1a2b3c4d5e6f)`처럼 출력한다. 빌드한 소스 트리에 커밋하지 않은 변경이 있었으면 `, modified`가 붙는다. 같은 major 안에서는 minor·build가 달라도 서로 호환된다.

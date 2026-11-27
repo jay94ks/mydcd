@@ -19,17 +19,17 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/config"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/tenancy"
-	"github.com/jay94ks/mydcd/internal/userauth"
-	"github.com/jay94ks/mydcd/internal/workload"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/config"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/tenancy"
+	"github.com/jay94ks/seafield/internal/userauth"
+	"github.com/jay94ks/seafield/internal/workload"
 	"github.com/moby/moby/client"
 	"github.com/quic-go/quic-go/http3"
 	"golang.org/x/net/http2"
@@ -39,7 +39,7 @@ func TestRealBoundaryManagedTwoTenantAPIAndNativeIsolation(t *testing.T) {
 	runManagedAppOwner(t, true, true, true, true, managedAppTenantIsolation, true, true, true)
 }
 
-func verifyManagedTenantIsolation(t *testing.T, ctx context.Context, r *Runtime, root string, cfg config.Node, admin userauth.Client, peer mydcp.Peer, adminSession access.Session, p control.Policy, read func() cluster.View, change func(string, string, uint64, any), image string) map[string]any {
+func verifyManagedTenantIsolation(t *testing.T, ctx context.Context, r *Runtime, root string, cfg config.Node, admin userauth.Client, peer sfcp.Peer, adminSession access.Session, p control.Policy, read func() cluster.View, change func(string, string, uint64, any), image string) map[string]any {
 	t.Helper()
 	change("isolation-second", "create-tenant", 0, control.TenantID{ID: "second"})
 	catalog, err := p.Catalog(read().State)
@@ -47,7 +47,7 @@ func verifyManagedTenantIsolation(t *testing.T, ctx context.Context, r *Runtime,
 		t.Fatal(err)
 	}
 	tenant, _ := catalog.Tenant("second")
-	change("second-nodes", "set-nodes", tenant.Revision, control.NodeAssignment{Tenant: "second", Nodes: []string{"node-a"}})
+	change("second-nodes", "set-nodes", tenant.Revision, control.NodeChangeTo("second", tenant.AllowedNodes, []string{"node-a"}))
 	change("second-quota", "set-node-quota", 0, tenancy.NodeLimit{Tenant: "second", Node: "node-a", Capacity: workload.Resources{CPU: 100000000, Memory: 16 << 20}, Networks: 1, MaxConsumers: 8, MaxIngressInstances: 1, MaxIngressListeners: 1, MaxIngressRequests: 2, MaxIngressConnections: 8, IngressBufferBytes: 128 << 10})
 	type manager struct {
 		user    userauth.Client
@@ -67,12 +67,12 @@ func verifyManagedTenantIsolation(t *testing.T, ctx context.Context, r *Runtime,
 			t.Fatal(err)
 		}
 		defer clear(self.Private)
-		mesh, err := mydcp.NewTransport(self, admin.Cluster, func(k mydcp.Identity) (mydcp.Peer, bool) { return peer, k == peer.Key })
+		mesh, err := sfcp.NewTransport(self, admin.Cluster, func(k sfcp.Identity) (sfcp.Peer, bool) { return peer, k == peer.Key })
 		if err != nil {
 			t.Fatal(err)
 		}
 		defer mesh.Close()
-		user := userauth.Client{Mesh: mesh, Self: self, Cluster: admin.Cluster, Peers: []mydcp.Peer{peer}}
+		user := userauth.Client{Mesh: mesh, Self: self, Cluster: admin.Cluster, Peers: []sfcp.Peer{peer}}
 		session, err := user.Login(ctx, peer, v.user, key.Private)
 		if err != nil {
 			t.Fatal(err)
@@ -162,10 +162,10 @@ func verifyManagedTenantIsolation(t *testing.T, ctx context.Context, r *Runtime,
 	registry := strings.Split(image, "/")[0]
 	catalog, _ = p.Catalog(read().State)
 	tenant, _ = catalog.Tenant("second")
-	if err := apply(ctx, bob, "second-trust", "set-trust", tenant.Revision, control.TrustAssignment{Tenant: "second", Rules: append(tenant.ImageSources, access.TrustRule{Registry: registry, Repository: "fixture"})}, state.Applied); err != nil {
+	if err := apply(ctx, bob, "second-trust", "set-trust", tenant.Revision, control.TrustChange{Tenant: "second", Add: []access.TrustRule{access.TrustRule{Registry: registry, Repository: "fixture"}}}, state.Applied); err != nil {
 		t.Fatal(err)
 	}
-	primary := netip.MustParsePrefix(os.Getenv("MYDC_DOCKER_TEST_CIDR"))
+	primary := netip.MustParsePrefix(os.Getenv("SFC_DOCKER_TEST_CIDR"))
 	if !primary.Addr().Is4() || primary.Bits() != 28 {
 		t.Fatal("two preflighted adjacent /28 fixture required")
 	}
@@ -186,9 +186,9 @@ func verifyManagedTenantIsolation(t *testing.T, ctx context.Context, r *Runtime,
 	if err != nil {
 		t.Fatal(err)
 	}
-	change("second-network", "create-tun-network", resources.Networks.Revision(), tenancy.TUNDefinition{Tenant: "second", Name: "second-services", Members: []tenancy.TUNNode{{Node: "node-a", Pools: []tenancy.Subnet{{ID: "pool", Prefix: second, Gateway: second.Addr().Next(), MTU: 1280}}, Addresses: []netip.Prefix{netip.MustParsePrefix("198.18.254.2/32")}}}})
+	change("second-network", "create-tun-network", resources.Networks.Revision(), tenancy.TUNDefinition{Tenant: "second", Name: "second-services", Members: []tenancy.TUNNode{{Node: "node-a", Pools: []tenancy.Subnet{{ID: "pool", Prefix: second, Gateway: second.Addr().Next(), MTU: 1280}}}}})
 	document := []byte(fmt.Sprintf(`name: second
-x-mydc:
+x-sfc:
  ingress:
   node: node-a
   host: second.test
@@ -200,11 +200,11 @@ services:
   image: %s
   cpus: 0.1
   mem_limit: 16m
-  environment: {MYDC_READINESS_FIXTURE: "1", MYDC_TENANT_FIXTURE: second}
+  environment: {SFC_READINESS_FIXTURE: "1", SFC_TENANT_FIXTURE: second}
   tmpfs: ["/data:size=4m,uid=10001,gid=10001,mode=0700"]
   healthcheck: {test: [CMD, /backend, --probe], interval: 1s, timeout: 1s, retries: 2}
   networks: {app: {ipv4_address: %s}}
-  x-mydc: {node: node-a, ready: {http: /readyz, port: 8080}}
+  x-sfc: {node: node-a, ready: {http: /readyz, port: 8080}}
 networks:
  app: {external: true, name: second-services}
 `, address, image, second.Addr().Next().Next()))
@@ -266,7 +266,7 @@ networks:
 		// A changed running Task requires an additional full reservation. Use
 		// a separate read-only candidate in the first tenant's existing free
 		// capacity and a free address; do not inflate the second tenant quota.
-		body := "name: network-check\nx-mydc: {}" + string(document[services:networks])
+		body := "name: network-check\nx-sfc: {}" + string(document[services:networks])
 		body = strings.Replace(body, second.Addr().Next().Next().String(), pool.Addr().Next().Next().Next().String(), 1)
 		body += fmt.Sprintf("\nnetworks:\n app: {external: true, name: %s}\n", networkID)
 		request := control.AppPlanRequest{Document: []byte(body)}
@@ -294,20 +294,23 @@ networks:
 		if scope == "tenant" {
 			foreign = "second"
 		}
-		for _, method := range []string{"apps", "resources", "volumes", "vault"} {
+		for _, method := range []string{"apps", "volumes", "vault"} {
 			if _, err := m.user.Query(ctx, peer, m.session, method, foreign); err == nil {
 				t.Fatal("foreign tenant API allowed", scope, method)
 			}
 		}
+		if _, err := m.user.Resources(ctx, peer, m.session, userauth.ResourcesQuery{Tenant: foreign}); err == nil {
+			t.Fatal("foreign tenant resources allowed", scope)
+		}
 		if _, err := m.user.AppOperation(ctx, peer, m.session, foreign, control.AppOperationRequest{App: "app", ID: "rollout"}); err == nil {
 			t.Fatal("foreign original operation exposed")
 		}
-		page, err := m.user.ResourcePage(ctx, peer, m.session, scope, "")
-		if err != nil || page.ResourcesViewIndex == 0 {
+		page, err := m.user.Resources(ctx, peer, m.session, userauth.ResourcesQuery{Tenant: scope})
+		if err != nil || page.Index == 0 {
 			t.Fatal("current projected resource view", err)
 		}
 		networks, tasks := 0, 0
-		for _, entry := range page.Resources {
+		for _, entry := range page.Items {
 			if entry.Limit != nil && entry.Limit.Tenant != scope || entry.Network != nil && entry.Network.Tenant != scope || entry.Reservation != nil && entry.Reservation.Tenant != scope {
 				t.Fatal("foreign resource leaked")
 			}
@@ -321,8 +324,8 @@ networks:
 		if networks != 1 || tasks != 1 {
 			t.Fatal("actual app resources omitted", scope, networks, tasks)
 		}
-		page, err = m.user.AppPage(ctx, peer, m.session, scope, "")
-		if err != nil || len(page.Apps) != 1 || page.Apps[0].Tenant != scope || page.Apps[0].Health != "Healthy" {
+		apps, err := m.user.AppPage(ctx, peer, m.session, scope, "")
+		if err != nil || len(apps.Apps) != 1 || apps.Apps[0].Tenant != scope || apps.Apps[0].Health != "Healthy" {
 			t.Fatal("own app observations", err)
 		}
 		app := "app"

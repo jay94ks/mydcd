@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/reconcile"
 	"github.com/moby/moby/api/types/container"
 	bolt "go.etcd.io/bbolt"
 )
@@ -126,14 +126,14 @@ func TestNativeWorkspaceRejectsChangedRootAndMissingOriginalSpool(t *testing.T) 
 	}
 	// Remove only the test's original spool identity. It must not be silently
 	// initialized by the native consumer of an already accepted source.
-	if err := os.Rename(filepath.Join(f.spec.Scope.Root.Path, ".mydc-imagebuild"), filepath.Join(f.spec.Scope.Root.Path, "old-spool")); err != nil {
+	if err := os.Rename(filepath.Join(f.spec.Scope.Root.Path, ".sfc-imagebuild"), filepath.Join(f.spec.Scope.Root.Path, "old-spool")); err != nil {
 		t.Fatal(err)
 	}
 	root := nativeTestRoot(t, f.spec)
 	if err := f.jobs.PrepareWorkspace(ctx, f.spec, int(root.Fd())); err == nil {
 		t.Fatal("lost original spool initialized")
 	}
-	if _, err := os.Stat(filepath.Join(f.spec.Scope.Root.Path, ".mydc-imagebuild")); !errors.Is(err, os.ErrNotExist) {
+	if _, err := os.Stat(filepath.Join(f.spec.Scope.Root.Path, ".sfc-imagebuild")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatal("missing spool recreated", err)
 	}
 }

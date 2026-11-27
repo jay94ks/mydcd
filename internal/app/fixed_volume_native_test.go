@@ -15,16 +15,16 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/config"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/engine"
-	"github.com/jay94ks/mydcd/internal/nodestorage"
-	"github.com/jay94ks/mydcd/internal/reconcile"
-	"github.com/jay94ks/mydcd/internal/schema"
-	"github.com/jay94ks/mydcd/internal/storage"
-	"github.com/jay94ks/mydcd/internal/workload/volumes"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/config"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/engine"
+	"github.com/jay94ks/seafield/internal/nodestorage"
+	"github.com/jay94ks/seafield/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/storage"
+	"github.com/jay94ks/seafield/internal/workload/volumes"
 	"github.com/moby/moby/client"
 	"gopkg.in/yaml.v3"
 )
@@ -117,7 +117,7 @@ func prepareFixedAppNativeSource(t *testing.T, ctx context.Context, r *Runtime, 
 			return
 		}
 		defer c.Close()
-		rows, err := c.API.ContainerList(ctx, client.ContainerListOptions{All: true, Filters: client.Filters{}.Add("label", "org.mydc.owner="+owner).Add("label", "org.mydc.kind=container")})
+		rows, err := c.API.ContainerList(ctx, client.ContainerListOptions{All: true, Filters: client.Filters{}.Add("label", "org.sfc.owner="+owner).Add("label", "org.sfc.kind=container")})
 		if err != nil {
 			t.Log("fixed Task failure list", err)
 			return
@@ -137,7 +137,7 @@ func prepareFixedAppNativeSource(t *testing.T, ctx context.Context, r *Runtime, 
 			}
 		}
 	})
-	image, tag, hostNS := os.Getenv("MYDC_STORAGE_TEST_ROOT"), os.Getenv("MYDC_STORAGE_TEST_OWNER"), os.Getenv("MYDC_STORAGE_HOST_MOUNT_NS")
+	image, tag, hostNS := os.Getenv("SFC_STORAGE_TEST_ROOT"), os.Getenv("SFC_STORAGE_TEST_OWNER"), os.Getenv("SFC_STORAGE_HOST_MOUNT_NS")
 	if image == "" || tag == "" || hostNS == "" {
 		t.Fatal("S1 requires planned owned ext4 image/private mount namespace")
 	}
@@ -145,7 +145,7 @@ func prepareFixedAppNativeSource(t *testing.T, ctx context.Context, r *Runtime, 
 	if err != nil || ns == hostNS {
 		t.Fatal("host namespace cannot run S1 mounts", err)
 	}
-	marker, err := os.ReadFile(filepath.Join(image, ".mydc-storage-test-owner"))
+	marker, err := os.ReadFile(filepath.Join(image, ".sfc-storage-test-owner"))
 	if err != nil || string(marker) != tag {
 		t.Fatal("exact owned ext4 image marker required", err)
 	}
@@ -153,7 +153,7 @@ func prepareFixedAppNativeSource(t *testing.T, ctx context.Context, r *Runtime, 
 	if err != nil {
 		t.Fatal(err)
 	}
-	f := &fixedAppNativeFixture{base: base, source: filepath.Join(base, "hdd", "data"), home: filepath.Join(root, "fixed-cli-home"), profile: filepath.Join(root, "fixed-cli.yaml"), binary: os.Getenv("MYDC_TEST_CLI")}
+	f := &fixedAppNativeFixture{base: base, source: filepath.Join(base, "hdd", "data"), home: filepath.Join(root, "fixed-cli-home"), profile: filepath.Join(root, "fixed-cli.yaml"), binary: os.Getenv("SFC_TEST_CLI")}
 	for _, path := range []string{filepath.Join(base, "hdd"), filepath.Join(base, "ssd"), f.source, f.home} {
 		if err = os.Mkdir(path, 0700); err != nil {
 			t.Fatal(err)
@@ -226,7 +226,7 @@ func prepareFixedAppNativeSource(t *testing.T, ctx context.Context, r *Runtime, 
 	return f
 }
 
-// This uses a real shared consumer/MYDCP permit, the product Gate and native
+// This uses a real shared consumer/SFCP permit, the product Gate and native
 // writer-data adapter. The test-owned DB stands in for the embedded service's
 // own durable Gate checkpoint; it does not claim an E5 registry server.
 func verifyEmbeddedFixedWriter(t *testing.T, ctx context.Context, r *Runtime, root string, p control.Policy, read func() cluster.View, change func(string, string, uint64, any), ready volumes.NativeReady) {
@@ -447,7 +447,7 @@ func verifyFixedAppNative(t *testing.T, ctx context.Context, runtime **Runtime, 
 	}
 	hdd, _ := book.Root("node-a", "hdd")
 	f.cli(t, ctx, -1, "node", "storage", "remove", "node-a", "hdd", "--if-revision", fmt.Sprint(hdd.Revision), "--id", "fixed-live-root-remove")
-	f.cli(t, ctx, 0, "node", "storage", "set", "node-a", "hdd", "--no-tenants", "--max-volumes", "2", "--if-revision", fmt.Sprint(hdd.Revision), "--id", "fixed-revoke-root")
+	f.cli(t, ctx, 0, "node", "storage", "set", "node-a", "hdd", "--remove-tenants", "tenant", "--if-revision", fmt.Sprint(hdd.Revision), "--id", "fixed-revoke-root")
 	if _, err = r.appInputPermit(ctx, control.AppBindingRequest{Task: ref, Digest: bound.Digest()}); err == nil {
 		t.Fatal("revoked root still authorized a new Task effect")
 	}
@@ -481,7 +481,7 @@ func verifyFixedAppNative(t *testing.T, ctx context.Context, runtime **Runtime, 
 		t.Fatal(err)
 	}
 	hdd, _ = book.Root("node-a", "hdd")
-	f.cli(t, ctx, 0, "node", "storage", "set", "node-a", "hdd", "--tenants", "tenant", "--max-volumes", "2", "--if-revision", fmt.Sprint(hdd.Revision), "--id", "fixed-restore-root")
+	f.cli(t, ctx, 0, "node", "storage", "set", "node-a", "hdd", "--add-tenants", "tenant", "--if-revision", fmt.Sprint(hdd.Revision), "--id", "fixed-restore-root")
 	verifyFixedReadOnlyApp(t, ctx, r, filepath.Dir(f.profile), p, read, f)
 	f.cli(t, ctx, 0, "volume", "unregister", "data", "--id", "fixed-unregister", "--no-wait")
 	fixedNativeWait(t, ctx, "fixed original non-destructive unregister", func() bool {

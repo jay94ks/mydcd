@@ -1,15 +1,16 @@
 ## Ingress와 인증서 메시지
 
-Unix TLS의 User purpose8은 `ingresses`, `certificates`를 받는다. 네트워크 MYDCP와 같은 현재 계정/credential·tenant/node 권한과 원 operation을 사용한다.
+Unix TLS의 User purpose8은 `ingresses`, `certificates`를 받는다. 네트워크 SFCP와 같은 현재 계정/credential·tenant/node 권한과 원 operation을 사용한다.
 
 | 요청 Method | 전용 Request 필드 | Reply 필드 |
 |---|---|---|
-| `ingresses` | `Tenant, Ingress:{Node,Tenant,App,Key,Part,After,Offset}` | `Ingress:{Schema:1,Index,Epoch,RootRevision,Mappings,Nodes,Blocks,HostPolicies,Next}` |
-| `certificates` | `Certificate:{ID?,After?}` | `CertificatePage:{Revision,Certificates,Chain?,Domains?,Next}` |
+| `ingresses` | typed `Params:{Node,Tenant,App,Key,Part,After,Offset}` | `Data:{Schema:1,Index,Epoch,RootRevision,Mappings,Nodes,Blocks,HostPolicies,Next}` |
+| `certificates` | `Params:{ID?,After?}` (After 512바이트 이하) | `Data:{Page:{Revision,Certificates,Chain?,Domains?,Next},RootRevision}` |
+| `vps` | `Params:{Status?,Offer?:{Account,Zone?,Flavors:{Zones,Images,CoreTypes,MinVCPU,MaxVCPU,MinMemoryMiB,MaxMemoryMiB,MinDiskGB,MaxDiskGB,MinGPU,MaxGPU}}}` | `Data:{Page:{Revision,Accounts:[{Name,Vendor,OverageKRWPerGB,OverageTiers?:[{UpToGB,KRWPerGB}],KeyHint,SSHPublic,SSHKeyID,Guard?:{WindowMin?,AverageMin?,PatternOff?},AddedBy,AddedAt,UpdatedBy,UpdatedAt}],Servers:[{Name,Account,Zone,Image,Flavor,Script,SSHKeys,CapKRW,CapAction?,Voter,Port,Request,CreatedBy,CreatedAt,Phase,PhaseAt,PowerRequest?,StopAfter?,CapStop?,DeleteRequest?,InstanceID,PublicIP,Failure}]},RootRevision,Offer?,Status?}`. 시스템 관리자만. 봉인한 키는 넣지 않는다. `Offer`가 있으면 투표 서버가 공급자를 바로 읽어 `Offer:{Account,At,Zones,Images,Flavors,SSHKeys,Scripts}`도 돌려준다(`create-vps-node` 권한 필요, 공급자를 못 읽으면 `unavailable`). `Status:true`면 리더 메모리의 10분 감시를 `Status:{Leader,Servers:[{Name,UpdatedAt,CapKRW,SoFarKRW,ProjectedKRW,BaseSoFarKRW,BaseMonthKRW,TrafficSoFarKRW,TrafficMonthKRW,UsedGB,ProjectedGB,RecentMB,IncludedGB?,IncludedPeriod?,IncludedMonthGB?,IncludedMaxGB?,TodayMB?,Daily?:[{Day,MB}],TrafficCounting?,Guard?:{At,RateMbps,PrevMbps,AverageMbps,ForecastGB,PatternGB?,PatternDays?,PatternUsed?,MonthGB,RemainingGB?,Unlimited?,Soon?,SoonAt?},Judgeable,Over?,CapBlocked?,Failure?,FailureAt?}],Accounts:[{Name,BillKRW,OursKRW,UpdatedAt,Failure?,FailureAt?}]}`로 돌려준다(리더에 못 닿으면 `unavailable`) |
 
-다른 업무 selector와 혼합하지 않으며 `After`는 전용 객체 안에 둔다. mapping/지표 상세는 [Ingress 운영](../ingress-management.md), 공개 인증서 metadata와 cursor는 [인증서 보관함](../certificate-store.md)을 따른다. 응답에 원 사용자 grant·비공개 키를 넣지 않는다. `whoami`는 기존 root revision들과 함께 `IngressRootRevision`, `CertificatesRootRevision`을 반환해 새 typed operation의 root CAS를 고정한다.
+`ingresses`, `certificates`, `vps`는 typed method다. Request에는 `Schema`, `Method`, `Nonce`, `Params`만 두고 Reply는 `Code`와 `Data`만 쓴다([typed method](10-user.md#typed-method)). mapping/지표 상세는 [Ingress 운영](../ingress-management.md), 공개 인증서 metadata와 cursor는 [인증서 보관함](../certificate-store.md)을 따른다. 응답에 원 사용자 grant·비공개 키를 넣지 않는다. `whoami`는 기존 root revision들과 함께 `IngressRootRevision`, `CertificatesRootRevision`, `VPSRootRevision`을 반환해 새 typed operation의 root CAS를 고정한다.
 
-User `ingresses`의 Part에는 `gateways`, `history`도 있다. gateways는 Node를 필수로 지정한 시스템 조회이며 `NodeGateways:[{Node,Source,Revision,AppliedRevision,Configuration,Error?}]`를 반환한다. history는 tenant/app/node·현재 권한을 검사한 `History:[{At,Actor,Action,Request,Tenant,App,Node,Route,Gateway,Detail,Previous}]`와 `Next`를 반환한다. 원 Session·서명 원문은 이 공개 행에 포함하지 않는다.
+User `ingresses`의 Part에는 `gateways`, `history`도 있다. gateways는 Node를 필수로 지정한 시스템 조회이며 `NodeGateways:[{Node,Source,Revision,AppliedRevision,Configuration,Error?,LocalAddresses?}]`를 반환한다. history는 tenant/app/node·현재 권한을 검사한 `History:[{At,Actor,Action,Request,Tenant,App,Node,Route,Gateway,Detail,Previous}]`와 `Next`를 반환한다. 원 Session·서명 원문은 이 공개 행에 포함하지 않는다.
 
 같은 User `submit/result/resume`의 Change.Action은 `set-node-gateways`(Node,External?,Local?,SDK가 붙이는 Evidence), `set-ingress-balance`(Tenant,App,Route,Balance), `drain-ingress/undrain-ingress`(Tenant,App,Node?,DrainSeconds?)를 지원한다. gateway는 현재 system-admin·owner preflight, 나머지는 현재 tenant Network 관리 권한·record CAS와 원 operation을 유지한다. payload와 세부 필드는 [Ingress 운영](../ingress-management.md#gateway분배drain-변경과-공개-이력)을 따른다. frame/record/EOF 규격은 기존 User purpose8과 같다.
 
@@ -27,6 +28,6 @@ User `ingresses`의 Part에는 `gateways`, `history`도 있다. gateways는 Node
 
 최종 `put-certificate`는 이 receipt를 기존 UserOperation으로 서명해 Raft에서 확정한다. `delete-certificate`, `disable-certificate`(payload `{ID}`), `ingress-block`, `ingress-unblock`, `ingress-block-extend`, `set-ingress-host-policy`도 User의 기존 apply/result/resume를 사용한다. SecretInput 성공만으로 관리 게시 완료를 뜻하지 않는다.
 
-node 간 비공개 version key 전송 `CertificateMaterial=17`은 이 Unix listener에 노출하지 않는다. 전용 member kind1/2·64KiB·현재 ingress 소비 참조/권한·EOF 계약은 [MYDCP](../../protocol/mydcp/28-ingress-raft-certificatematerial.md)에서 규정한다.
+node 간 비공개 version key 전송 `CertificateMaterial=17`은 이 Unix listener에 노출하지 않는다. 전용 member kind1/2·64KiB·현재 ingress 소비 참조/권한·EOF 계약은 [SFCP](../../protocol/sfcp/28-ingress-raft-certificatematerial.md)에서 규정한다.
 
 

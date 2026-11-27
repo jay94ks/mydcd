@@ -13,18 +13,18 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/userauth"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/userauth"
 )
 
 // Reuses the owned Docker/CLI fixture. Only its private cluster is changed:
 // two added control voters, original DB close/reopen and original leadership
 // restoration. No foreign process, host configuration or disk capacity changes.
-func verifyManualCompactUserNative(t *testing.T, ctx context.Context, source, second *Runtime, root string, client userauth.Client, peer mydcp.Peer, session access.Session, policy control.Policy, change func(string, string, uint64, any)) []*Runtime {
+func verifyManualCompactUserNative(t *testing.T, ctx context.Context, source, second *Runtime, root string, client userauth.Client, peer sfcp.Peer, session access.Session, policy control.Policy, change func(string, string, uint64, any)) []*Runtime {
 	t.Helper()
 	var third *Runtime
 	read := func() cluster.View {
@@ -102,13 +102,13 @@ func verifyManualCompactUserNative(t *testing.T, ctx context.Context, source, se
 			}
 		}
 	}()
-	if os.Getenv("MYDC_TEST_RQ4_TUNNEL_USER") == "1" {
+	if os.Getenv("SFC_TEST_RQ4_TUNNEL_USER") == "1" {
 		verifyTunnelReconnectUserNative(t, ctx, source, second, &third, root, client, peer, session, reopen, read)
 		return []*Runtime{second, third}
 	}
 	run := func(args ...string) []byte {
 		t.Helper()
-		out, diag, err := runManagedCLICommand(ctx, os.Getenv("MYDC_TEST_CLI"), filepath.Join(root, "cli-home"), filepath.Join(root, "cli.yaml"), args, nil)
+		out, diag, err := runManagedCLICommand(ctx, os.Getenv("SFC_TEST_CLI"), filepath.Join(root, "cli-home"), filepath.Join(root, "cli.yaml"), args, nil)
 		if err != nil {
 			t.Fatal("real compact CLI", args, err, string(diag))
 		}
@@ -117,9 +117,9 @@ func verifyManualCompactUserNative(t *testing.T, ctx context.Context, source, se
 	waitJob := func(operation string) control.CompactStatusPage {
 		t.Helper()
 		for {
-			reply, err := client.CompactStatus(ctx, peer, session, control.CompactQuery{Operation: operation})
-			if err == nil && reply.CompactStatus != nil && reply.CompactStatus.Summary.Complete {
-				return *reply.CompactStatus
+			page, err := client.CompactStatus(ctx, peer, session, userauth.CompactStatusQuery{Operation: operation})
+			if err == nil && page.Summary.Complete {
+				return page
 			}
 			select {
 			case <-ctx.Done():
@@ -260,6 +260,6 @@ func verifyManualCompactUserNative(t *testing.T, ctx context.Context, source, se
 	if _, accepted := jobs.Record("rq4-quorum-unknown"); accepted {
 		t.Fatal("quorum-less original unexpectedly committed")
 	}
-	t.Log("scope: actual MYDCP User/CLI, shared three-voter SDK results, continuing management, non-admin denial, queued unreachable skip, quorum denial, original DB reopen and leadership rollback; lagging snapshot recovery is the separate SDK branch")
+	t.Log("scope: actual SFCP User/CLI, shared three-voter SDK results, continuing management, non-admin denial, queued unreachable skip, quorum denial, original DB reopen and leadership rollback; lagging snapshot recovery is the separate SDK branch")
 	return []*Runtime{second, third}
 }

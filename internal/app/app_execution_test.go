@@ -19,18 +19,18 @@ import (
 	"time"
 
 	"github.com/hashicorp/raft"
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/config"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/reconcile"
-	"github.com/jay94ks/mydcd/internal/tenancy"
-	"github.com/jay94ks/mydcd/internal/userauth"
-	"github.com/jay94ks/mydcd/internal/workload"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/config"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/tenancy"
+	"github.com/jay94ks/seafield/internal/userauth"
+	"github.com/jay94ks/seafield/internal/workload"
 	"gopkg.in/yaml.v3"
 )
 
@@ -61,6 +61,10 @@ func TestRealDeliveryAuthorityUncertaintyKeepsOriginalPartialInput(t *testing.T)
 	testRealAppExecution(t, "delivery-source-uncertainty")
 }
 
+func TestRealDeployStepExplicitReplay(t *testing.T) {
+	testRealAppExecution(t, "step-replay")
+}
+
 func TestRealRetirementExplicitOriginalReplay(t *testing.T) {
 	for _, mode := range []string{"retirement-replay", "retirement-replay-late"} {
 		t.Run(mode, func(t *testing.T) { testRealAppExecution(t, mode) })
@@ -68,7 +72,7 @@ func TestRealRetirementExplicitOriginalReplay(t *testing.T) {
 }
 
 func testRealAppExecution(t *testing.T, reportMode string) {
-	deliveryMetadata := reportMode == "delivery-metadata" || reportMode == "delivery-tenant-auth" || reportMode == "managed-pass-progress" || reportMode == "delivery-source-uncertainty" || strings.HasPrefix(reportMode, "retirement-replay")
+	deliveryMetadata := reportMode == "delivery-metadata" || reportMode == "delivery-tenant-auth" || reportMode == "managed-pass-progress" || reportMode == "delivery-source-uncertainty" || strings.HasPrefix(reportMode, "retirement-replay") || reportMode == "step-replay"
 	ctx, cancel := context.WithTimeout(context.Background(), 40*time.Second)
 	defer cancel()
 	root := t.TempDir()
@@ -83,14 +87,14 @@ func testRealAppExecution(t *testing.T, reportMode string) {
 	}
 	node, admin, proof := key("node"), key("admin"), key("proof")
 	clusterID := [32]byte{98}
-	peer := mydcp.Peer{ID: "node-a", Policy: mydcp.Policy{Key: mydcp.Identity(node.Public), Member: true, Read: true, Respond: true, Snapshot: true, Replicate: true}}
-	lookup := func(k mydcp.Identity) (mydcp.Peer, bool) {
+	peer := sfcp.Peer{ID: "node-a", Policy: sfcp.Policy{Key: sfcp.Identity(node.Public), Member: true, Read: true, Respond: true, Snapshot: true, Replicate: true}}
+	lookup := func(k sfcp.Identity) (sfcp.Peer, bool) {
 		if k == peer.Key {
 			return peer, true
 		}
-		return mydcp.Peer{ID: hex.EncodeToString(k[:]), Policy: mydcp.Policy{Key: k, UserAuth: true, Respond: true}}, true
+		return sfcp.Peer{ID: hex.EncodeToString(k[:]), Policy: sfcp.Policy{Key: k, UserAuth: true, Respond: true}}, true
 	}
-	mesh, e := mydcp.NewTransport(node, clusterID, lookup)
+	mesh, e := sfcp.NewTransport(node, clusterID, lookup)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -101,7 +105,7 @@ func testRealAppExecution(t *testing.T, reportMode string) {
 	policy := control.Policy{Cluster: clusterID, BootstrapKey: admin.Public, TrustRoot: node.Public, Genesis: config.Peer{ID: peer.ID, Key: node.Actor(), Endpoint: peer.Endpoint, Voter: true}}
 	options := cluster.Options{ID: peer.ID, Root: filepath.Join(root, "state"), Admin: admin.Actor(), Cluster: clusterID, Mesh: mesh, Bootstrap: true, Validate: policy.Validate, Reduce: policy.Reduce, AdmitModule: policy.AdmitModule, AdmitMutation: policy.AdmitAppMutation, ModuleID: policy.ID(), Servers: []raft.Server{{ID: raft.ServerID(peer.ID), Address: raft.ServerAddress(peer.Endpoint), Suffrage: raft.Voter}}}
 	options.AdmitModulePatch = policy.AdmitAppPatch
-	options.Resolve = func(id raft.ServerID, address raft.ServerAddress) (mydcp.Peer, bool) {
+	options.Resolve = func(id raft.ServerID, address raft.ServerAddress) (sfcp.Peer, bool) {
 		return peer, string(id) == peer.ID && string(address) == peer.Endpoint
 	}
 	options.CommandModule = func(method, caller string, input []byte, view cluster.View) (state.Command, error) {
@@ -113,7 +117,7 @@ func testRealAppExecution(t *testing.T, reportMode string) {
 	}
 	options.ReadModule = func(_ context.Context, method, caller string, input []byte, view cluster.View) (json.RawMessage, error) {
 		if method != "app-result" {
-			return nil, mydcp.ErrAdmission
+			return nil, sfcp.ErrAdmission
 		}
 		key, err := identity.ParseKey(caller)
 		if err != nil {
@@ -167,13 +171,13 @@ func testRealAppExecution(t *testing.T, reportMode string) {
 		}
 	}
 	_ = read()
-	clientMesh, e := mydcp.NewTransport(proof, clusterID, func(k mydcp.Identity) (mydcp.Peer, bool) { return peer, k == peer.Key })
+	clientMesh, e := sfcp.NewTransport(proof, clusterID, func(k sfcp.Identity) (sfcp.Peer, bool) { return peer, k == peer.Key })
 	if e != nil {
 		t.Fatal(e)
 	}
 	defer clientMesh.Close()
-	client := userauth.Client{Mesh: clientMesh, Self: proof, Cluster: clusterID, Peers: []mydcp.Peer{peer}}
-	memberMesh, e := mydcp.NewTransport(node, clusterID, func(k mydcp.Identity) (mydcp.Peer, bool) { return peer, k == peer.Key })
+	client := userauth.Client{Mesh: clientMesh, Self: proof, Cluster: clusterID, Peers: []sfcp.Peer{peer}}
+	memberMesh, e := sfcp.NewTransport(node, clusterID, func(k sfcp.Identity) (sfcp.Peer, bool) { return peer, k == peer.Key })
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -291,19 +295,19 @@ func testRealAppExecution(t *testing.T, reportMode string) {
 	}
 	userOp("tenant", "create-tenant", 0, control.TenantID{ID: "tenant"})
 	tenant, _ := catalog().Tenant("tenant")
-	userOp("nodes", "set-nodes", tenant.Revision, control.NodeAssignment{Tenant: "tenant", Nodes: []string{peer.ID}})
+	userOp("nodes", "set-nodes", tenant.Revision, control.NodeChangeTo("tenant", tenant.AllowedNodes, []string{peer.ID}))
 	for i, scope := range []string{"", "tenant"} {
 		limit := tenancy.NodeLimit{Tenant: scope, Node: peer.ID, Capacity: workload.Resources{CPU: 1e9, Memory: 256 << 20}, Networks: 2, MaxConsumers: 8}
 		userOp(fmt.Sprintf("limit%d", i), "set-node-quota", 0, limit)
 	}
-	document := []byte("name: app\nservices:\n web:\n  image: docker.io/library/php@sha256:" + strings.Repeat("a", 64) + "\n  cpus: 0.1\n  mem_limit: 16m\n  networks: {app: {ipv4_address: 10.86.0.10}}\n  x-mydc: {node: node-a}\nnetworks:\n app:\n  x-mydc: {mtu: 1280, pools: {node-a: {cidr: 10.86.0.0/24, gateway: 10.86.0.1}}}\n")
+	document := []byte("name: app\nservices:\n web:\n  image: docker.io/library/php@sha256:" + strings.Repeat("a", 64) + "\n  cpus: 0.1\n  mem_limit: 16m\n  networks: {app: {ipv4_address: 10.86.0.10}}\n  x-sfc: {node: node-a}\nnetworks:\n app:\n  x-sfc: {mtu: 1280, pools: {node-a: {cidr: 10.86.0.0/24, gateway: 10.86.0.1}}}\n")
 	{
 		resources, err := policy.Resources(read())
 		if err != nil {
 			t.Fatal(err)
 		}
-		userOp("management-network", "create-tun-network", resources.Networks.Revision(), tenancy.TUNDefinition{Tenant: "tenant", Name: "existing", Members: []tenancy.TUNNode{{Node: peer.ID, Pools: []tenancy.Subnet{{ID: "pool", Prefix: netip.MustParsePrefix("10.86.0.0/24"), Gateway: netip.MustParseAddr("10.86.0.1"), MTU: 1280}}, Addresses: []netip.Prefix{netip.MustParsePrefix("10.87.0.1/32")}}}})
-		document = bytes.Replace(document, []byte("networks:\n app:\n  x-mydc: {mtu: 1280, pools: {node-a: {cidr: 10.86.0.0/24, gateway: 10.86.0.1}}}\n"), []byte("networks:\n app: {external: true, name: existing}\n"), 1)
+		userOp("management-network", "create-tun-network", resources.Networks.Revision(), tenancy.TUNDefinition{Tenant: "tenant", Name: "existing", Members: []tenancy.TUNNode{{Node: peer.ID, Pools: []tenancy.Subnet{{ID: "pool", Prefix: netip.MustParsePrefix("10.86.0.0/24"), Gateway: netip.MustParseAddr("10.86.0.1"), MTU: 1280}}}}})
+		document = bytes.Replace(document, []byte("networks:\n app:\n  x-sfc: {mtu: 1280, pools: {node-a: {cidr: 10.86.0.0/24, gateway: 10.86.0.1}}}\n"), []byte("networks:\n app: {external: true, name: existing}\n"), 1)
 	}
 	if deliveryMetadata {
 		app, err := deployment.ParseApp(document)
@@ -311,7 +315,7 @@ func testRealAppExecution(t *testing.T, reportMode string) {
 			t.Fatal(err)
 		}
 		cd := nativeGitPolicy("https://example.test/repo.git")
-		app.MyDC.Delivery = &cd
+		app.Sfc.Delivery = &cd
 		document, err = yaml.Marshal(app)
 		if err != nil {
 			t.Fatal(err)
@@ -427,6 +431,10 @@ func testRealAppExecution(t *testing.T, reportMode string) {
 		var installation managedInstallation
 		installation.record.Root.Self.ID = peer.ID // reply routing, not authority
 		r := &Runtime{Identity: node, Mesh: mesh, engine: engine, controlPolicy: policy, installation: &installation, ctx: ctx}
+		if reportMode == "step-replay" {
+			verifyRealStepReplay(t, ctx, r, read, userOp, func() uint64 { return inventoryRevision("app") })
+			return
+		}
 		collected := false
 		for n := 0; n < 4; n++ {
 			changed, err := r.collectAppResults(ctx, cluster.View{State: read()}, apps())
@@ -532,7 +540,7 @@ func testRealAppExecution(t *testing.T, reportMode string) {
 			if _, err := client.AppDeliveryField(ctx, peer, managerSession, "tenant", q); err != nil {
 				t.Fatal("explicit current membership restore", err)
 			}
-			t.Log("actual MYDCP/User/Raft/bbolt CD manager own scope, foreign query denial, current revoke blocks old-session query/new mutation without changing app, implicit admin and explicit current restore; no native facts")
+			t.Log("actual SFCP/User/Raft/bbolt CD manager own scope, foreign query denial, current revoke blocks old-session query/new mutation without changing app, implicit admin and explicit current restore; no native facts")
 		}
 		if err := engine.Snapshot(ctx); err != nil {
 			t.Fatal(err)
@@ -616,7 +624,7 @@ func testRealAppExecution(t *testing.T, reportMode string) {
 		t.Fatal("delegation disabled on existing root")
 	}
 	_ = mesh.Close()
-	mesh, e = mydcp.NewTransport(node, clusterID, lookup)
+	mesh, e = sfcp.NewTransport(node, clusterID, lookup)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -669,7 +677,7 @@ func testRealAppExecution(t *testing.T, reportMode string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	userOp("manual-overlap-app", "create-tun-network", baseResources.Networks.Revision(), tenancy.TUNDefinition{Tenant: "tenant", Name: "overlap", Members: []tenancy.TUNNode{{Node: peer.ID, Pools: []tenancy.Subnet{{ID: "pool", Prefix: netip.MustParsePrefix("10.86.0.0/24"), Gateway: netip.MustParseAddr("10.86.0.1"), MTU: 1280}}, Addresses: []netip.Prefix{netip.MustParsePrefix("10.99.250.1/32")}}}}, state.ConditionFailed)
+	userOp("manual-overlap-app", "create-tun-network", baseResources.Networks.Revision(), tenancy.TUNDefinition{Tenant: "tenant", Name: "overlap", Members: []tenancy.TUNNode{{Node: peer.ID, Pools: []tenancy.Subnet{{ID: "pool", Prefix: netip.MustParsePrefix("10.86.0.0/24"), Gateway: netip.MustParseAddr("10.86.0.1"), MTU: 1280}}}}}, state.ConditionFailed)
 	globalLimit, _ := baseResources.Quotas.Limit("", peer.ID)
 	globalRevision := globalLimit.Revision
 	globalLimit.Revision = 0
@@ -738,7 +746,7 @@ func testRealAppExecution(t *testing.T, reportMode string) {
 		}
 		engine = nil
 		_ = mesh.Close()
-		mesh, err = mydcp.NewTransport(node, clusterID, lookup)
+		mesh, err = sfcp.NewTransport(node, clusterID, lookup)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -747,7 +755,7 @@ func testRealAppExecution(t *testing.T, reportMode string) {
 		}
 		open()
 		assertReceipts()
-		t.Log("512 signed member observations through real MYDCP/Raft/bbolt; bounded report collection, exact retained results, old expiry and Snapshot/same DB; native facts are fixtures")
+		t.Log("512 signed member observations through real SFCP/Raft/bbolt; bounded report collection, exact retained results, old expiry and Snapshot/same DB; native facts are fixtures")
 		return
 	}
 	// Logout revokes new user requests, while the accepted job keeps its frozen
@@ -761,10 +769,10 @@ func testRealAppExecution(t *testing.T, reportMode string) {
 		t.Fatal(e)
 	}
 	tenant, _ = catalog().Tenant("tenant")
-	userOp("untrust", "set-trust", tenant.Revision, control.TrustAssignment{Tenant: "tenant"})
+	userOp("untrust", "set-trust", tenant.Revision, control.TrustChange{Tenant: "tenant", Remove: tenant.ImageSources})
 	progress("send", task, nil, state.Forbidden)
 	tenant, _ = catalog().Tenant("tenant")
-	userOp("trust", "set-trust", tenant.Revision, control.TrustAssignment{Tenant: "tenant", Rules: []access.TrustRule{{Registry: "docker.io", Repository: "**"}}})
+	userOp("trust", "set-trust", tenant.Revision, control.TrustChange{Tenant: "tenant", Add: []access.TrustRule{{Registry: "docker.io", Repository: "**"}}})
 	progress("send", task, nil, state.Applied)
 	stage, _ = execution().Stage(task)
 	taskOriginal := *stage.Command
@@ -822,7 +830,7 @@ func testRealAppExecution(t *testing.T, reportMode string) {
 	}
 	// Native data is retained through node grant revocation, including addresses.
 	tenant, _ = catalog().Tenant("tenant")
-	userOp("revoke-placement", "set-nodes", tenant.Revision, control.NodeAssignment{Tenant: "tenant"})
+	userOp("revoke-placement", "set-nodes", tenant.Revision, control.NodeChangeTo("tenant", tenant.AllowedNodes, nil))
 	held, err := policy.ProjectResources(read())
 	if err != nil || held.Addresses.Count() != 1 {
 		t.Fatal("revoke lost original address", err)
@@ -843,7 +851,7 @@ func testRealAppExecution(t *testing.T, reportMode string) {
 	}
 	engine = nil
 	_ = mesh.Close()
-	mesh, e = mydcp.NewTransport(node, clusterID, lookup)
+	mesh, e = sfcp.NewTransport(node, clusterID, lookup)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -888,5 +896,5 @@ func testRealAppExecution(t *testing.T, reportMode string) {
 	invalid.RequestID = "forged-new-request"
 	invalid.Value = bytes.NewBufferString(taskOriginal.Value + " ").String()
 	apply(invalid, state.Forbidden)
-	t.Log("actual user/MYDCP -> signed member progress -> reused Execution/A1 exact delegation -> real Raft/bbolt/Unknown Snapshot/same DB/late original receipt -> Inventory claim; owner facts are fixtures, native projector/controller not enabled")
+	t.Log("actual user/SFCP -> signed member progress -> reused Execution/A1 exact delegation -> real Raft/bbolt/Unknown Snapshot/same DB/late original receipt -> Inventory claim; owner facts are fixtures, native projector/controller not enabled")
 }

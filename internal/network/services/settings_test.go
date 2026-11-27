@@ -8,7 +8,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/reconcile"
 	"github.com/miekg/dns"
 )
 
@@ -152,7 +152,7 @@ func settingsQuery(t *testing.T, f settingsFixture, at int64) (settingsFixture, 
 	t.Helper()
 	var h SettingsDNSUse
 	var e error
-	f.m, f.d.m, h, e = f.m.AcquireDNS(f.d.f.c, f.d.f.n, f.d.f.a, f.d.m, "first", "dns", f.d.origin, dnsWire("web.app.mydc.test.", dns.TypeA), f.d.clock(at))
+	f.m, f.d.m, h, e = f.m.AcquireDNS(f.d.f.c, f.d.f.n, f.d.f.a, f.d.m, "first", "dns", f.d.origin, dnsWire("web.app.sfc.test.", dns.TypeA), f.d.clock(at))
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -220,7 +220,7 @@ func TestSettingsSerialPortReplacementWaitsOriginalRequestAndPositiveNativeGone(
 	if _, _, e := f.m.PlanSwitch(f.d.f.c, f.d.f.n, f.d.f.a, f.key); e == nil {
 		t.Fatal("serial stop erased original user")
 	}
-	if _, _, _, e := f.m.AcquireDNS(f.d.f.c, f.d.f.n, f.d.f.a, f.d.m, "first", "dns", f.d.origin, dnsWire("web.app.mydc.test.", dns.TypeA), f.d.clock(201)); e == nil {
+	if _, _, _, e := f.m.AcquireDNS(f.d.f.c, f.d.f.n, f.d.f.a, f.d.m, "first", "dns", f.d.origin, dnsWire("web.app.sfc.test.", dns.TypeA), f.d.clock(201)); e == nil {
 		t.Fatal("serial drain admitted new old request")
 	}
 	var e error

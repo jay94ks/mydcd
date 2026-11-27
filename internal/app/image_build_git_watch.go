@@ -10,15 +10,15 @@ import (
 	"errors"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/imagebuild"
-	"github.com/jay94ks/mydcd/internal/mydcp"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/imagebuild"
+	"github.com/jay94ks/seafield/internal/sfcp"
 )
 
 func imageBuildGitWatchID(key string) [32]byte {
-	return sha256.Sum256([]byte("mydc-imagebuild-git-watch-1\x00" + key))
+	return sha256.Sum256([]byte("sfc-imagebuild-git-watch-1\x00" + key))
 }
 
 func imageBuildGitWatchCandidate(eligible map[string]control.ImageBuildContextRecord, next map[string]time.Time, now time.Time) (string, control.ImageBuildContextRecord) {
@@ -39,7 +39,7 @@ func imageBuildGitWatchCandidate(eligible map[string]control.ImageBuildContextRe
 func (r *Runtime) imageBuildGitWatchWork(ctx context.Context, tenant, id string) (control.ImageBuildGitWatchWork, error) {
 	view, err := r.currentView(ctx)
 	if err != nil || view.Local {
-		return control.ImageBuildGitWatchWork{}, errors.Join(mydcp.ErrAdmission, err)
+		return control.ImageBuildGitWatchWork{}, errors.Join(sfcp.ErrAdmission, err)
 	}
 	return r.controlPolicy.ImageBuildGitWatchWork(view.State, r.Identity.Public, tenant, id, time.Now().Unix())
 }
@@ -82,13 +82,13 @@ func (r *Runtime) observeImageBuildGit(ctx context.Context, tenant, id string) e
 		return err
 	}
 	if !result.Valid(work.Read) || result.Code == "OK" && !imagebuild.ValidGitCommit(result.Commit) {
-		return mydcp.ErrAdmission
+		return sfcp.ErrAdmission
 	}
 	// Refresh only the report CAS, never the fetched commit or its source
 	// scope. A changed context/policy/epoch discards this read-only result.
 	view, err := r.currentView(ctx)
 	if err != nil || view.Local {
-		return errors.Join(mydcp.ErrAdmission, err)
+		return errors.Join(sfcp.ErrAdmission, err)
 	}
 	fresh, err := r.controlPolicy.ImageBuildGitWatchWork(view.State, r.Identity.Public, tenant, id, time.Now().Unix())
 	if closedPolicy(err) {

@@ -2,7 +2,7 @@
 
 package volumes
 
-import "github.com/jay94ks/mydcd/internal/cluster/lifecycle"
+import "github.com/jay94ks/seafield/internal/cluster/lifecycle"
 
 // Activity preserves ambiguous starts and original unreturned bindings. Native
 // Volume bytes with no active consumer are retained data, not a live writer.

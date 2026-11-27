@@ -8,66 +8,103 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/observability"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/lifecycle"
+	"github.com/jay94ks/seafield/internal/observability"
+	"github.com/jay94ks/seafield/internal/sfcp"
 )
 
-func (c Client) NodeObservationPage(ctx context.Context, peer mydcp.Peer, session access.Session, method, tenant, node, after string) (Reply, error) {
-	if method != "node-summary" && method != "node-disks" && method != "node-tenant-usage" && method != "mesh-links" {
-		return Reply{}, access.ErrInvalid
-	}
-	return c.query(ctx, peer, session, Request{Method: method, Tenant: tenant, Node: node, After: after})
+// NodeObservationQuery selects one page of node-summary, node-disks or
+// mesh-links. An empty Tenant asks for the whole cluster (administrators);
+// Node narrows the page to one server.
+type NodeObservationQuery struct {
+	Tenant string `json:",omitempty"`
+	Node   string `json:",omitempty"`
+	After  string `json:",omitempty"`
 }
 
-func (s Service) nodeObservationQueryReply(ctx context.Context, view cluster.View, session access.Session, request Request) Reply {
+func (q NodeObservationQuery) Valid() bool {
+	return validObservationSelector(q.Tenant, q.Node, q.After)
+}
+
+// NodeTenantUsageQuery selects one page of a server's per-tenant usage.
+type NodeTenantUsageQuery struct {
+	Node  string
+	After string `json:",omitempty"`
+}
+
+func (q NodeTenantUsageQuery) Valid() bool {
+	return q.Node != "" && validObservationSelector("", q.Node, q.After)
+}
+
+func validObservationSelector(tenant, node, after string) bool {
+	return (tenant == "" || lifecycle.ValidID(tenant)) && (node == "" || lifecycle.ValidID(node)) && len(after) <= 512
+}
+
+func (c Client) NodeSummary(ctx context.Context, peer sfcp.Peer, session access.Session, q NodeObservationQuery) (control.NodeSummaryPage, error) {
+	return call(ctx, c, peer, session, NodeSummaryMethod, q)
+}
+
+func (c Client) NodeDisks(ctx context.Context, peer sfcp.Peer, session access.Session, q NodeObservationQuery) (control.NodeDisksPage, error) {
+	return call(ctx, c, peer, session, NodeDisksMethod, q)
+}
+
+func (c Client) NodeTenantUsage(ctx context.Context, peer sfcp.Peer, session access.Session, q NodeTenantUsageQuery) (control.NodeTenantPage, error) {
+	return call(ctx, c, peer, session, NodeTenantUsageMethod, q)
+}
+
+func (c Client) MeshLinks(ctx context.Context, peer sfcp.Peer, session access.Session, q NodeObservationQuery) (control.MeshLinksPage, error) {
+	return call(ctx, c, peer, session, MeshLinksMethod, q)
+}
+
+// Each observation page is authorized by its control.Policy reader: the whole
+// cluster needs ManageCluster, a tenant page Read (node-disks ManageVolumes)
+// on each server it shows.
+var (
+	NodeSummaryMethod = define(Method[NodeObservationQuery, control.NodeSummaryPage]{Name: "node-summary"}, true, func(ctx context.Context, s Service, view cluster.View, session access.Session, q NodeObservationQuery) (control.NodeSummaryPage, string) {
+		return observe(ctx, s, view, func(now int64, reports []observability.Report) (control.NodeSummaryPage, error) {
+			return s.Policy.NodeSummary(view.State, session, now, q.Tenant, q.Node, q.After, reports, !view.Local)
+		})
+	})
+	NodeDisksMethod = define(Method[NodeObservationQuery, control.NodeDisksPage]{Name: "node-disks"}, true, func(ctx context.Context, s Service, view cluster.View, session access.Session, q NodeObservationQuery) (control.NodeDisksPage, string) {
+		return observe(ctx, s, view, func(now int64, reports []observability.Report) (control.NodeDisksPage, error) {
+			return s.Policy.NodeDisks(view.State, session, now, q.Tenant, q.Node, q.After, reports)
+		})
+	})
+	NodeTenantUsageMethod = define(Method[NodeTenantUsageQuery, control.NodeTenantPage]{Name: "node-tenant-usage"}, true, func(ctx context.Context, s Service, view cluster.View, session access.Session, q NodeTenantUsageQuery) (control.NodeTenantPage, string) {
+		return observe(ctx, s, view, func(now int64, reports []observability.Report) (control.NodeTenantPage, error) {
+			return s.Policy.NodeTenantUsage(view.State, session, now, q.Node, q.After, reports)
+		})
+	})
+	MeshLinksMethod = define(Method[NodeObservationQuery, control.MeshLinksPage]{Name: "mesh-links"}, true, func(ctx context.Context, s Service, view cluster.View, session access.Session, q NodeObservationQuery) (control.MeshLinksPage, string) {
+		return observe(ctx, s, view, func(now int64, reports []observability.Report) (control.MeshLinksPage, error) {
+			return s.Policy.MeshLinks(view.State, session, now, q.Tenant, q.Node, q.After, reports)
+		})
+	})
+)
+
+// observe loads the local authenticated measurements and runs one page reader.
+func observe[R any](ctx context.Context, s Service, view cluster.View, read func(int64, []observability.Report) (R, error)) (R, string) {
+	var zero R
 	if s.NodeObservations == nil {
-		return Reply{Schema: 1, Code: "unavailable"}
+		return zero, "unavailable"
 	}
 	reports, err := s.NodeObservations(ctx, view)
 	if err != nil {
-		return Reply{Schema: 1, Code: "unavailable"}
+		return zero, "unavailable"
 	}
-	now := time.Now().Unix()
-	var reply Reply
-	switch request.Method {
-	case "node-summary":
-		var page control.NodeSummaryPage
-		page, err = s.Policy.NodeSummary(view.State, session, now, request.Tenant, request.Node, request.After, reports, !view.Local)
-		if err == nil {
-			reply = Reply{Schema: 1, Code: "ok", NodeSummary: &page}
-		}
-	case "node-disks":
-		var page control.NodeDisksPage
-		page, err = s.Policy.NodeDisks(view.State, session, now, request.Tenant, request.Node, request.After, reports)
-		if err == nil {
-			reply = Reply{Schema: 1, Code: "ok", NodeDisks: &page}
-		}
-	case "node-tenant-usage":
-		var page control.NodeTenantPage
-		page, err = s.Policy.NodeTenantUsage(view.State, session, now, request.Node, request.After, reports)
-		if err == nil {
-			reply = Reply{Schema: 1, Code: "ok", NodeTenantUsage: &page}
-		}
-	case "mesh-links":
-		var page control.MeshLinksPage
-		page, err = s.Policy.MeshLinks(view.State, session, now, request.Tenant, request.Node, request.After, reports)
-		if err == nil {
-			reply = Reply{Schema: 1, Code: "ok", MeshLinks: &page}
-		}
+	page, err := read(time.Now().Unix(), reports)
+	switch {
+	case err == nil:
+		return page, "ok"
+	case errors.Is(err, access.ErrDenied) || errors.Is(err, access.ErrInvalid):
+		return zero, "denied"
+	case errors.Is(err, access.ErrConflict):
+		return zero, "conflict"
 	}
-	if err == nil {
-		return reply
-	}
-	code := "unavailable"
-	if errors.Is(err, access.ErrDenied) || errors.Is(err, access.ErrInvalid) {
-		code = "denied"
-	} else if errors.Is(err, access.ErrConflict) {
-		code = "conflict"
-	}
-	return Reply{Schema: 1, Code: code}
+	return zero, "unavailable"
 }
 
 // Keep the callback typed at the ownership boundary: Runtime loads local

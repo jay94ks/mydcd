@@ -7,9 +7,9 @@ import (
 	"crypto/ed25519"
 	"encoding/json"
 	"fmt"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/mydcp"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/sfcp"
 	"os"
 	"path/filepath"
 	"sync"
@@ -21,7 +21,7 @@ import (
 
 type realNode struct {
 	identity      *identity.Identity
-	mesh          *mydcp.Transport
+	mesh          *sfcp.Transport
 	engine        *Engine
 	root, address string
 	options       Options
@@ -31,22 +31,22 @@ func TestRealBoundaryRaftQUICDurabilitySnapshotAndHandoff(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	fixtureID := func(i int) string {
-		if os.Getenv("MYDC_TEST_RQ6_CURRENT_VIEW_SDK") == "1" {
+		if os.Getenv("SFC_TEST_RQ6_CURRENT_VIEW_SDK") == "1" {
 			return fmt.Sprintf("node-%d", i+1)
 		}
 		return fmt.Sprint(i + 1)
 	}
 	nodes := make([]realNode, 4)
-	peers := map[mydcp.Identity]mydcp.Peer{}
-	byID := map[string]mydcp.Peer{}
+	peers := map[sfcp.Identity]sfcp.Peer{}
+	byID := map[string]sfcp.Peer{}
 	var mu sync.RWMutex
-	lookup := func(key mydcp.Identity) (mydcp.Peer, bool) {
+	lookup := func(key sfcp.Identity) (sfcp.Peer, bool) {
 		mu.RLock()
 		defer mu.RUnlock()
 		p, ok := peers[key]
 		return p, ok
 	}
-	resolve := func(id raft.ServerID, address raft.ServerAddress) (mydcp.Peer, bool) {
+	resolve := func(id raft.ServerID, address raft.ServerAddress) (sfcp.Peer, bool) {
 		mu.RLock()
 		defer mu.RUnlock()
 		p, ok := byID[string(id)]
@@ -60,13 +60,13 @@ func TestRealBoundaryRaftQUICDurabilitySnapshotAndHandoff(t *testing.T) {
 			t.Fatal(err)
 		}
 		n.root = filepath.Join(t.TempDir(), "state")
-		key := mydcp.Identity(n.identity.Public)
-		p := mydcp.Peer{ID: fixtureID(i), Policy: mydcp.Policy{Key: key, Member: true, Snapshot: true, Respond: true, Read: true, Manage: i == 0}}
+		key := sfcp.Identity(n.identity.Public)
+		p := sfcp.Peer{ID: fixtureID(i), Policy: sfcp.Policy{Key: key, Member: true, Snapshot: true, Respond: true, Read: true, Manage: i == 0}}
 		mu.Lock()
 		peers[key] = p
 		byID[p.ID] = p
 		mu.Unlock()
-		n.mesh, err = mydcp.NewTransport(n.identity, [32]byte{1}, lookup)
+		n.mesh, err = sfcp.NewTransport(n.identity, [32]byte{1}, lookup)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -101,7 +101,7 @@ func TestRealBoundaryRaftQUICDurabilitySnapshotAndHandoff(t *testing.T) {
 	for i := range nodes {
 		n := &nodes[i]
 		n.options = Options{ID: fixtureID(i), Root: n.root, Admin: nodes[0].identity.Actor(), Cluster: [32]byte{1}, Mesh: n.mesh, Resolve: resolve, Servers: servers, Bootstrap: i == 0}
-		if os.Getenv("MYDC_TEST_RQ6_CURRENT_VIEW_SDK") == "1" {
+		if os.Getenv("SFC_TEST_RQ6_CURRENT_VIEW_SDK") == "1" {
 			configureCurrentViewSDK(&n.options, nodes)
 		}
 		var err error
@@ -138,7 +138,7 @@ func TestRealBoundaryRaftQUICDurabilitySnapshotAndHandoff(t *testing.T) {
 		}
 		return false
 	})
-	if os.Getenv("MYDC_TEST_RQ6_CURRENT_VIEW_SDK") == "1" {
+	if os.Getenv("SFC_TEST_RQ6_CURRENT_VIEW_SDK") == "1" {
 		// Managed policy rejects the legacy native mutation below. This branch
 		// starts with its real signed enrollment in the same SDK fixture.
 		verifyCurrentViewSDK(t, ctx, nodes, leader, wait, lookup)
@@ -158,7 +158,7 @@ func TestRealBoundaryRaftQUICDurabilitySnapshotAndHandoff(t *testing.T) {
 		}
 		return true
 	})
-	if os.Getenv("MYDC_TEST_RQ4_COMPACT_SDK") == "1" {
+	if os.Getenv("SFC_TEST_RQ4_COMPACT_SDK") == "1" {
 		verifyManualCompactSDK(t, ctx, nodes, leader, wait, lookup)
 		return
 	}
@@ -198,7 +198,7 @@ func TestRealBoundaryRaftQUICDurabilitySnapshotAndHandoff(t *testing.T) {
 		t.Fatal(updated, err)
 	}
 	// Reopen the original source with its snapshot plus a newer durable suffix.
-	n.mesh, err = mydcp.NewTransport(n.identity, [32]byte{1}, lookup)
+	n.mesh, err = sfcp.NewTransport(n.identity, [32]byte{1}, lookup)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -247,7 +247,7 @@ func TestRealBoundaryRaftQUICDurabilitySnapshotAndHandoff(t *testing.T) {
 	if err = nodes[leader].engine.Snapshot(ctx); err != nil {
 		t.Fatal(err)
 	}
-	replica.mesh, err = mydcp.NewTransport(replica.identity, [32]byte{1}, lookup)
+	replica.mesh, err = sfcp.NewTransport(replica.identity, [32]byte{1}, lookup)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -270,7 +270,7 @@ func TestRealBoundaryRaftQUICDurabilitySnapshotAndHandoff(t *testing.T) {
 	// the sender after the answer arrives; both follow FSM publication.
 	wait("snapshot staging cleanup", func() bool {
 		for i := range nodes {
-			files, err := filepath.Glob(filepath.Join(nodes[i].root, "control", "staging", ".mydc-snapshot-*"))
+			files, err := filepath.Glob(filepath.Join(nodes[i].root, "control", "staging", ".sfc-snapshot-*"))
 			if err != nil || len(files) != 0 {
 				return false
 			}
@@ -304,13 +304,13 @@ func TestRealBoundaryRaftQUICDurabilitySnapshotAndHandoff(t *testing.T) {
 	request.Method = "submit"
 	request.Nonce = [16]byte{9}
 	body, _ := json.Marshal(request)
-	relay := signedRequest{Caller: mydcp.Identity(nodes[0].identity.Public), Body: body, Signature: ed25519.Sign(nodes[0].identity.Private, signingBytes([32]byte{1}, body)), Forwarded: true}
-	noSecond, _, err := exchange(ctx, nodes[0].mesh, target, relay, 4)
+	relay := signedRequest{Caller: sfcp.Identity(nodes[0].identity.Public), Body: body, Signature: ed25519.Sign(nodes[0].identity.Private, signingBytes([32]byte{1}, body)), Forwarded: true}
+	noSecond, _, err := exchange(ctx, nodes[0].mesh, target, relay, sfcp.KindRelay)
 	if err != nil || noSecond.Code != "not-leader" {
 		t.Fatal("second forwarding allowed", noSecond, err)
 	}
 	relay.Signature[0] ^= 1
-	if _, _, err = exchange(ctx, nodes[0].mesh, target, relay, 4); err == nil {
+	if _, _, err = exchange(ctx, nodes[0].mesh, target, relay, sfcp.KindRelay); err == nil {
 		t.Fatal("forged original signature accepted")
 	}
 	// A current non-voter cannot serve latest from its applied local state.

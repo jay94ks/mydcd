@@ -9,10 +9,10 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/nodestorage"
-	"github.com/jay94ks/mydcd/internal/observability"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/nodestorage"
+	"github.com/jay94ks/seafield/internal/observability"
 )
 
 func TestNodeObservationProjectionFiltersTenantBeforeHostAndFilesystemAggregation(t *testing.T) {
@@ -21,7 +21,7 @@ func TestNodeObservationProjectionFiltersTenantBeforeHostAndFilesystemAggregatio
 	f.session.Signature = ed25519.Sign(f.node, access.SessionBytes(f.session))
 	f.apply("observation-other-tenant", "create-tenant", 0, struct{ ID string }{"other"}, state.Applied)
 	public := [32]byte(f.node.Public().(ed25519.PublicKey))
-	f.apply("observation-storage-root", "add-node-storage", 0, nodestorage.Definition{Node: "node-a", Key: public, ID: "data", Path: "/srv/mydc-data", Tenants: []string{"tenant"}, MaxVolumes: 4}, state.Applied)
+	f.apply("observation-storage-root", "add-node-storage", 0, nodestorage.Definition{Node: "node-a", Key: public, ID: "data", Path: "/srv/sfc-data", Tenants: []string{"tenant"}}, state.Applied)
 	roots, err := f.p.NodeStorage(f.s)
 	if err != nil {
 		t.Fatal(err)
@@ -73,7 +73,7 @@ func TestNodeObservationProjectionFiltersTenantBeforeHostAndFilesystemAggregatio
 		}
 	}
 	disks, err := f.p.NodeDisks(f.s, reader, 10, "tenant", "node-a", "", reports)
-	if err != nil || len(disks.Disks) != 1 || disks.Disks[0].Device != "" || disks.Disks[0].Mount != "/srv/mydc-data" || len(disks.Disks[0].Purposes) != 1 || disks.Disks[0].Purposes[0] != "storage-root" {
+	if err != nil || len(disks.Disks) != 1 || disks.Disks[0].Device != "" || disks.Disks[0].Mount != "/srv/sfc-data" || len(disks.Disks[0].Purposes) != 1 || disks.Disks[0].Purposes[0] != "storage-root" {
 		t.Fatal("tenant disk source filtering happened after grouping", disks, err)
 	}
 	if _, err := f.p.NodeSummary(f.s, reader, 10, "tenant", "hidden-node", "", reports, true); !errors.Is(err, access.ErrDenied) {
@@ -89,5 +89,47 @@ func TestNodeObservationProjectionFiltersTenantBeforeHostAndFilesystemAggregatio
 	unknown, err := f.p.NodeSummary(f.s, reader, 10, "tenant", "", "", nil, true)
 	if err != nil || unknown.Nodes[0].Ready || unknown.Nodes[0].Usage.Containers != nil {
 		t.Fatal("missing sample fabricated zero/Ready", unknown, err)
+	}
+}
+
+func TestNodeBuildCapabilityComesFromAFreshHostReport(t *testing.T) {
+	f := newBackupCore(t)
+	f.session.Scopes[0].Actions = append(f.session.Scopes[0].Actions, access.ManageMembers)
+	f.session.Signature = ed25519.Sign(f.node, access.SessionBytes(f.session))
+	public := [32]byte(f.node.Public().(ed25519.PublicKey))
+	host := func(build *observability.Build) []observability.Report {
+		r := observability.Report{Kind: "node-observation", Schema: 1, Cluster: f.p.Cluster, Node: "node-a", Key: public, Index: f.s.Index(), At: 10000, Host: &observability.Host{Version: "1", CPUCapacity: 4e9, ModuleReady: true, Build: build}}
+		r.Signature = ed25519.Sign(f.node, observability.SigningBytes(r))
+		if !r.Valid() {
+			t.Fatal("signed host fixture")
+		}
+		return []observability.Report{r}
+	}
+	for _, c := range []struct {
+		reports []observability.Report
+		at      int64
+		want    NodeBuildView
+		refused bool
+	}{
+		{host(&observability.Build{Enabled: true}), 10, NodeBuildView{Enabled: true}, false},
+		{host(&observability.Build{Reason: "ENGINE_BUILD_OFF"}), 10, NodeBuildView{Reason: "ENGINE_BUILD_OFF"}, true},
+		{host(&observability.Build{Reason: "ENGINE_BUILD_OFF"}), 131, NodeBuildView{Reason: "UNKNOWN"}, false}, // stale
+		{host(nil), 10, NodeBuildView{Reason: "UNKNOWN"}, false},
+		{nil, 10, NodeBuildView{Reason: "UNKNOWN"}, false},
+	} {
+		page, err := f.p.NodeSummary(f.s, f.session, c.at, "", "", "", c.reports, true)
+		if err != nil || len(page.Nodes) != 1 || page.Nodes[0].Build != c.want {
+			t.Fatal("build view", c.want, page, err)
+		}
+		if err := f.p.CheckBuildNode(f.s, "node-a", c.reports, c.at); errors.Is(err, ErrBuildDisabled) != c.refused {
+			t.Fatal("build node check", c.want, err)
+		}
+	}
+	for _, bad := range []observability.Build{{Enabled: true, Reason: "WORKLOAD_OFF"}, {Reason: "elsewhere"}, {}} {
+		r := host(&observability.Build{Enabled: true})[0]
+		r.Host.Build = &bad
+		if r.Valid() {
+			t.Fatal("an invalid build fact passed", bad)
+		}
 	}
 }

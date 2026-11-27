@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/registryclient"
+	"github.com/jay94ks/seafield/internal/registryclient"
 	bkclient "github.com/moby/buildkit/client"
 )
 

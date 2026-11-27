@@ -6,10 +6,10 @@ import (
 	"crypto/ed25519"
 	"encoding/hex"
 	"encoding/json"
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/maintenance"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/maintenance"
 	"math"
 )
 
@@ -26,7 +26,7 @@ type CompactReport struct {
 func CompactReportBytes(r CompactReport) []byte {
 	r.Signature = nil
 	raw, _ := json.Marshal(r)
-	return append([]byte("mydc-raft-compact-report-1\x00"), raw...)
+	return append([]byte("sfc-raft-compact-report-1\x00"), raw...)
 }
 func (r CompactReport) Command() (state.Command, error) {
 	raw, err := json.Marshal(r)

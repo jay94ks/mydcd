@@ -11,12 +11,12 @@ import (
 	"os"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/reconcile"
-	"github.com/jay94ks/mydcd/internal/schema"
-	"github.com/jay94ks/mydcd/internal/storage"
-	"github.com/jay94ks/mydcd/internal/workload/volumes"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/storage"
+	"github.com/jay94ks/seafield/internal/workload/volumes"
 )
 
 func moveRestoreKey(b moveReceiveIntent) string {
@@ -39,7 +39,7 @@ func (r *Runtime) moveRestoreTarget(ctx context.Context, b moveReceiveIntent) (v
 func (r *Runtime) moveRestoreAuthority(b moveReceiveIntent) volumes.ColdAuthority {
 	return func(ctx context.Context, ready volumes.NativeReady, consumer volumes.Consumer) error {
 		if ready.Spec != b.Job.Target || ready.Generation != 1 || ready.Owner != b.Job.Binding.Target || consumer != b.Job.StagingConsumer() {
-			return mydcp.ErrAdmission
+			return sfcp.ErrAdmission
 		}
 		return (runtimeMoveReceiver{r}).Authorize(ctx, b, false)
 	}
@@ -148,7 +148,7 @@ func (r *Runtime) cancelMoveRestore(ctx context.Context, b moveReceiveIntent) er
 		}
 		for _, resource := range resources {
 			if resource.Present && resource != expected {
-				return mydcp.ErrAdmission
+				return sfcp.ErrAdmission
 			}
 		}
 		if row.State.Pending == nil && row.State.Applied.Present && row.State.Desired.Present {

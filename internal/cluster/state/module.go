@@ -72,6 +72,16 @@ func nodeShellUserOperation(c Command) bool {
 	return c.Kind == Module && c.Key == "control/node-shell" && strings.HasPrefix(c.Actor, "user/")
 }
 
+// catalogUserOperation: every user change to the access catalog names the
+// revision of the one record it changes (user, tenant, membership, …) in its
+// own Expected, and the reducer checks that. The catalog root revision only
+// says when anything in the catalog last changed, so a root read before
+// another user's unrelated change must not fail this one (R17 B2a). A root
+// from the future is still refused.
+func catalogUserOperation(c Command) bool {
+	return c.Kind == Module && c.Key == "control/access" && strings.HasPrefix(c.Actor, "user/")
+}
+
 func applyModule(before, candidate State, index uint64, c Command, validate Validator, reduce Reducer, admitPatch ModulePatchAuthorizer) (State, Result) {
 	n, r, _ := applyModuleStage(before, candidate, index, c, validate, reduce, admitPatch)
 	return n, r
@@ -93,7 +103,7 @@ func applyModuleStage(before, candidate State, index uint64, c Command, validate
 	if reduce == nil || !strings.HasPrefix(c.Key, "control/") || len(c.Key) <= len("control/") || len(c.Key) > 512 || !utf8.ValidString(c.Key) || c.Delete || c.Target != "" && !scopedAppReport(c) || c.Rights != 0 || len(c.Value) > 64<<10 {
 		return candidate, result, "command"
 	}
-	if c.Expected != old.Revision && (c.Kind != ModuleUpload && c.Kind != ModuleAppDown && !scopedAppReport(c) && !nodeShellUserOperation(c) || c.Expected > old.Revision) {
+	if c.Expected != old.Revision && (c.Kind != ModuleUpload && c.Kind != ModuleAppDown && !scopedAppReport(c) && !nodeShellUserOperation(c) && !catalogUserOperation(c) || c.Expected > old.Revision) {
 		result.Code = ConditionFailed
 		return candidate, result, "cas"
 	}
@@ -136,15 +146,11 @@ func applyModuleStage(before, candidate State, index uint64, c Command, validate
 		if object.Present && !original.Present {
 			object.Generation = index
 		}
-		candidate.objects[key] = object
+		candidate.putObject(key, object)
 	}
 	if validate != nil && validate(before, candidate, c) != nil {
 		for key := range writes {
-			if original, exists := before.objects[key]; exists {
-				candidate.objects[key] = original
-			} else {
-				delete(candidate.objects, key)
-			}
+			candidate.restoreObject(before, key)
 		}
 		return candidate, result, "validate"
 	}

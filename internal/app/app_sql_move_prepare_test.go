@@ -12,11 +12,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/engine"
-	"github.com/jay94ks/mydcd/internal/network"
-	"github.com/jay94ks/mydcd/internal/workload/volumes"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/engine"
+	"github.com/jay94ks/seafield/internal/network"
+	"github.com/jay94ks/seafield/internal/workload/volumes"
 	"github.com/moby/moby/client"
 	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
@@ -116,7 +116,7 @@ func pauseMoveTunnel(t *testing.T, ctx context.Context, manager *network.TunnelM
 // between the two negative observations. Both use the same accepted move.
 func armSQLMoveNativePreparation(t *testing.T, ctx context.Context, target *Runtime, source *engine.Client, original volumes.NativeReady, network, tlsKey string, releasePort func(string), read func() cluster.View, wait func(string, func() bool)) func(control.VolumeMove) {
 	t.Helper()
-	host := os.Getenv("MYDC_KERNEL_HOST_NETNS")
+	host := os.Getenv("SFC_KERNEL_HOST_NETNS")
 	current, err := os.Readlink("/proc/self/ns/net")
 	if err != nil || host == "" || current == host || target.tunnel == nil {
 		t.Fatal("SQL preparation fault requires the original private namespace/TUN", err)

@@ -6,7 +6,7 @@ import (
 	"bytes"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/secrets"
+	"github.com/jay94ks/seafield/internal/secrets"
 )
 
 // These are product-core counterexamples, authored for the final E7 batch.

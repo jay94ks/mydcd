@@ -12,14 +12,14 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/reconcile"
 	"golang.org/x/sys/unix"
 )
 
 // The S1 final native runner must supply a private mount namespace and its own
 // freshly created ext4 image/root. This test never formats/mounts user media.
 func TestNativeStorageDirectoryIdentityReplacementAndMountLoss(t *testing.T) {
-	root, owner, hostNS := os.Getenv("MYDC_STORAGE_TEST_ROOT"), os.Getenv("MYDC_STORAGE_TEST_OWNER"), os.Getenv("MYDC_STORAGE_HOST_MOUNT_NS")
+	root, owner, hostNS := os.Getenv("SFC_STORAGE_TEST_ROOT"), os.Getenv("SFC_STORAGE_TEST_OWNER"), os.Getenv("SFC_STORAGE_HOST_MOUNT_NS")
 	if root == "" || owner == "" || hostNS == "" {
 		t.Skip("requires S1 owned ext4/private mount namespace rollback fixture")
 	}
@@ -27,7 +27,7 @@ func TestNativeStorageDirectoryIdentityReplacementAndMountLoss(t *testing.T) {
 	if err != nil || ns == hostNS || os.Geteuid() != 0 {
 		t.Fatal("private privileged test namespace required", err)
 	}
-	marker, err := os.ReadFile(filepath.Join(root, ".mydc-storage-test-owner"))
+	marker, err := os.ReadFile(filepath.Join(root, ".sfc-storage-test-owner"))
 	if err != nil || string(marker) != owner {
 		t.Fatal("owned test filesystem marker required", err)
 	}

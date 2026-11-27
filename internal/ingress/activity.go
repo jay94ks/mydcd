@@ -2,7 +2,7 @@
 
 package ingress
 
-import "github.com/jay94ks/mydcd/internal/cluster/lifecycle"
+import "github.com/jay94ks/seafield/internal/cluster/lifecycle"
 
 func (m *Manager) Activity() (lifecycle.Activity, error) {
 	var activity lifecycle.Activity

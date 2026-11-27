@@ -6,12 +6,12 @@ import (
 	"context"
 	"net/http"
 
-	"github.com/jay94ks/mydcd/internal/web/mydc"
+	"github.com/jay94ks/seafield/internal/web/sfc"
 )
 
 // raftView: raft-status shaped for the screen (Unix seconds). suffrage is
-// voter unless mydcd says non-voter or pending (not installed yet); role
-// is mydcd's (leader/follower/candidate/non-voter/pending). Index and size
+// voter unless sfcd says non-voter or pending (not installed yet); role
+// is sfcd's (leader/follower/candidate/non-voter/pending). Index and size
 // fields are absent when the server did not report them.
 type raftView struct {
 	Leader             string           `json:"leader"`
@@ -53,7 +53,7 @@ type raftElection struct {
 	Reason string `json:"reason"`
 }
 
-func newRaftView(st mydc.RaftStatus) raftView {
+func newRaftView(st sfc.RaftStatus) raftView {
 	v := raftView{Leader: st.Leader, ObservedBy: st.ObservedBy, Term: st.Term, CommitIndex: st.CommitIndex, AppliedIndex: st.AppliedIndex,
 		ConfigurationIndex: st.ConfigurationIndex, Voters: st.Voters, Quorum: st.Quorum, RespondingVoters: st.RespondingVoters, Stale: st.Stale,
 		Servers: []raftServerView{}, Elections: []raftElection{}, ElectionsDropped: st.ElectionEventsDropped, ObservedAt: int64(st.ObservedAt / 1000)}
@@ -80,7 +80,7 @@ func newRaftView(st mydc.RaftStatus) raftView {
 
 // GET /raft → raftView (raft-status).
 func (s *Server) handleRaftStatus(w http.ResponseWriter, r *http.Request, ws *webSession) {
-	read(s, w, r, ws, func(ctx context.Context, c mydc.Conn) (raftView, error) {
+	read(s, w, r, ws, func(ctx context.Context, c sfc.Conn) (raftView, error) {
 		st, err := c.RaftStatus(ctx)
 		return newRaftView(st), err
 	})

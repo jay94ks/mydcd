@@ -49,16 +49,42 @@ jobs:
       - uses: docker/build-push-action@v6
         with:
           context: .
-          file: apps/mydc-web/Dockerfile
+          file: apps/sfc-web/Dockerfile
           platforms: linux/amd64,linux/arm64
           push: true
           sbom: true
           provenance: true
           tags: |
-            ghcr.io/jay94ks/mydc-web:${{ github.ref_name }}
+            ghcr.io/jay94ks/sfc-web:${{ github.ref_name }}
+
+  # The sfc-web cluster app image bundle per platform, signed with the
+  # release key. SFC_RELEASE_KEY is a repository Actions secret (hex Ed25519
+  # seed from tools/clusterapp-bundle keygen); only the signing step sees it.
+  web-bundle:
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        goarch: [amd64, arm64]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - name: Build and sign the bundle
+        env:
+          SFC_RELEASE_KEY: ${{ secrets.SFC_RELEASE_KEY }}
+        run: make webbundle GOARCH=${{ matrix.goarch }} VERSION=${GITHUB_REF_NAME}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: web-bundle-${{ matrix.goarch }}
+          path: dist/sfc-web-image_*.tar.gz
 
   publish:
-    needs: [binaries, image]
+    needs: [binaries, image, web-bundle]
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/download-artifact@v8

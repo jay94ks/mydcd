@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/jay94ks/mydcd/internal/ingress"
+	"github.com/jay94ks/seafield/internal/ingress"
 )
 
 // IngressRoutes expands the legacy single host/backend declaration without
@@ -62,10 +62,10 @@ func ingressHasService(i IngressDeclaration, service string) bool {
 }
 func validateIngressDeclaration(c Compose, i IngressDeclaration) error {
 	if i.Runtime.validate() != nil || !identifier(i.Node) || len(i.Listeners) < 1 || len(i.Listeners) > 16 || len(i.Routes) > 256 {
-		return inputError("INVALID_INGRESS", "x-mydc.ingress")
+		return inputError("INVALID_INGRESS", "x-sfc.ingress")
 	}
 	if len(i.Routes) > 0 && i.Host != "" {
-		return inputError("AMBIGUOUS_INGRESS_ROUTES", "x-mydc.ingress")
+		return inputError("AMBIGUOUS_INGRESS_ROUTES", "x-sfc.ingress")
 	}
 	routes := []ingress.Route{}
 	for _, r := range IngressRoutes(i) {
@@ -91,7 +91,7 @@ func validateIngressDeclaration(c Compose, i IngressDeclaration) error {
 			}
 		}
 		if _, err := ingress.NewTable(selected); err != nil {
-			return inputError("INVALID_INGRESS_ROUTE", "x-mydc.ingress")
+			return inputError("INVALID_INGRESS_ROUTE", "x-sfc.ingress")
 		}
 	}
 	return nil

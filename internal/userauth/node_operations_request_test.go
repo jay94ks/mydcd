@@ -4,37 +4,40 @@ package userauth
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/mydcp"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/sfcp"
 )
 
 func TestNodeOperationsRejectForeignSelectorsBeforeDispatch(t *testing.T) {
-	requests := []Request{
-		{Method: "node-drain-plan", NodeDrain: &control.NodeDrainQuery{Node: "node-a", Operation: "drain-a"}},
-		{Method: "node-drain-status", NodeDrain: &control.NodeDrainQuery{Node: "node-a", Operation: "drain-a"}},
-		{Method: "node-force-remove-plan", NodeForce: &control.NodeForceQuery{Node: "node-a", Operation: "remove-a"}},
-		{Method: "node-remove-plan", Node: "node-a"},
-		{Method: "node-demote-plan", Node: "node-a"},
-		{Method: "node-diagnostics", Node: "node-a"},
+	requests := map[string]string{
+		"node-drain-plan":        `{"Node":"node-a","Operation":"drain-a"}`,
+		"node-drain-status":      `{"Node":"node-a","Operation":"drain-a"}`,
+		"node-force-remove-plan": `{"Node":"node-a","Operation":"remove-a"}`,
+		"node-remove-plan":       `{"Node":"node-a"}`,
+		"node-demote-plan":       `{"Node":"node-a"}`,
+		"node-diagnostics":       `{"Node":"node-a"}`,
 	}
-	for _, request := range requests {
-		t.Run(request.Method, func(t *testing.T) {
-			if !request.validMethodFields() || !request.validQuerySelectors() {
+	for method, params := range requests {
+		t.Run(method, func(t *testing.T) {
+			request := Request{Schema: 1, Method: method, Params: json.RawMessage(params)}
+			if !request.validMethodFields() {
 				t.Fatal("valid node selector rejected")
 			}
 			for _, mutate := range []func(*Request){
 				func(r *Request) { r.Tenant = "foreign" },
-				func(r *Request) { r.App = "foreign" },
+				func(r *Request) { r.TargetUser = "foreign" },
 				func(r *Request) { r.After = "foreign" },
-				func(r *Request) { r.PublicRead = &control.PublicReadQuery{} },
 				func(r *Request) { r.Method = "whoami" },
+				func(r *Request) { r.Params = json.RawMessage(`{"Node":"node-a","Tenant":"foreign"}`) },
+				func(r *Request) { r.Params = json.RawMessage(`{"Node":"../node"}`) },
 			} {
 				bad := request
 				mutate(&bad)
-				if bad.validMethodFields() && bad.validQuerySelectors() {
+				if bad.validMethodFields() {
 					t.Fatal("foreign selector accepted", bad.Method)
 				}
 			}
@@ -63,7 +66,7 @@ func TestNodeOperationTypedClientsReachTransportAdmission(t *testing.T) {
 		},
 		func() error { _, err := client.NodeDiagnostics(ctx, peer, session, "node-a"); return err },
 	} {
-		if err := call(); !errors.Is(err, mydcp.ErrAdmission) {
+		if err := call(); !errors.Is(err, sfcp.ErrAdmission) {
 			t.Fatal("typed node query did not reach transport admission", err)
 		}
 	}

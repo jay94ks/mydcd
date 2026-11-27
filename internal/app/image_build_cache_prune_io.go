@@ -9,34 +9,34 @@ import (
 	"errors"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/imagebuild"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/schema"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/imagebuild"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/sfcp"
 )
 
 func (r *Runtime) imageBuildCachePruneWork(ctx context.Context, s imagebuild.NativeCachePruneSpec) (control.ImageBuildCachePruneWork, error) {
 	if !s.Valid() || s.Source.Cluster != r.controlPolicy.Cluster || s.Source.Scope.Root.Key != r.Identity.Public || r.ctx.Err() != nil {
-		return control.ImageBuildCachePruneWork{}, mydcp.ErrAdmission
+		return control.ImageBuildCachePruneWork{}, sfcp.ErrAdmission
 	}
 	q := control.ImageBuildCachePruneWorkQuery{Tenant: s.Source.Tenant, ID: s.ID, At: time.Now().Unix()}
 	raw, _ := json.Marshal(q)
 	reply, err := r.appCall(ctx, "image-build-cache-prune-work", raw)
 	if err != nil || reply.Local {
-		return control.ImageBuildCachePruneWork{}, mydcp.ErrAdmission
+		return control.ImageBuildCachePruneWork{}, sfcp.ErrAdmission
 	}
 	work, err := schema.Decode[control.ImageBuildCachePruneWork](reply.Data)
 	if err != nil {
-		return control.ImageBuildCachePruneWork{}, mydcp.ErrAdmission
+		return control.ImageBuildCachePruneWork{}, sfcp.ErrAdmission
 	}
 	granted, err := work.NativeGrant()
 	if err != nil || granted.Spec.Digest() != s.Digest() {
-		return control.ImageBuildCachePruneWork{}, mydcp.ErrAdmission
+		return control.ImageBuildCachePruneWork{}, sfcp.ErrAdmission
 	}
 	view, err := r.Engine().ReadAtLeast(ctx, work.Index)
 	if err != nil || view.State.ModuleEpoch() != work.Epoch {
-		return control.ImageBuildCachePruneWork{}, mydcp.ErrAdmission
+		return control.ImageBuildCachePruneWork{}, sfcp.ErrAdmission
 	}
 	q.At = time.Now().Unix()
 	current, err := r.controlPolicy.ImageBuildCachePruneWork(view.State, r.Identity.Public, q)
@@ -45,7 +45,7 @@ func (r *Runtime) imageBuildCachePruneWork(ctx context.Context, s imagebuild.Nat
 	}
 	grant, err := current.NativeGrant()
 	if err != nil || grant.Spec.Digest() != s.Digest() || grant.Revision < granted.Revision {
-		return control.ImageBuildCachePruneWork{}, mydcp.ErrAdmission
+		return control.ImageBuildCachePruneWork{}, sfcp.ErrAdmission
 	}
 	return current, nil
 }

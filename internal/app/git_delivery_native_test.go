@@ -18,17 +18,16 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/cluster/lifecycle"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/config"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/engine"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/userauth"
-	"github.com/jay94ks/mydcd/tests/gitfixture"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/lifecycle"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/engine"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/userauth"
+	"github.com/jay94ks/seafield/tests/gitfixture"
 	"github.com/moby/moby/client"
 	"gopkg.in/yaml.v3"
 )
@@ -45,7 +44,7 @@ func nativeGitServiceRevision(t *testing.T, raw []byte, revision string, policy 
 	}
 	if policy != nil {
 		p := *policy
-		app.MyDC.Delivery = &p
+		app.Sfc.Delivery = &p
 	}
 	service, found := app.Services[name]
 	if !found {
@@ -80,8 +79,8 @@ func prepareNativeGitDocument(t *testing.T, raw []byte, repository string) []byt
 	if service.Environment == nil {
 		service.Environment = deployment.Environment{}
 	}
-	service.Environment["MYDC_READINESS_FIXTURE"] = "1"
-	service.MyDC.Readiness = &deployment.Readiness{Kind: "http", Path: "/readyz", Port: 8080, Timeout: "1s"}
+	service.Environment["SFC_READINESS_FIXTURE"] = "1"
+	service.Sfc.Readiness = &deployment.Readiness{Kind: "http", Path: "/readyz", Port: 8080, Timeout: "1s"}
 	app.Services["endpoint"] = service
 	raw, err = yaml.Marshal(app)
 	if err != nil {
@@ -104,7 +103,7 @@ func nativeGitPolicy(repository string) deployment.DeliveryDeclaration {
 // Extends the already-owned source/managed two-control fixture, using its real
 // CLI/profile/user, original Managers, namespace/native and rollback. The Git
 // fixture is only a remote HTTPS server; no candidate/result is injected here.
-func verifyNativeGitDelivery(t *testing.T, ctx context.Context, owners *[2]*Runtime, root string, source *gitfixture.Fixture, original []byte, firstCommit string, policy control.Policy, read func() cluster.View, cli func(...string) []byte, change func(string, string, uint64, any), wait func(string, func() bool), lead func(int), restart func(int), user userauth.Client, session access.Session, peers []mydcp.Peer, registry string) map[string]any {
+func verifyNativeGitDelivery(t *testing.T, ctx context.Context, owners *[2]*Runtime, root string, source *gitfixture.Fixture, original []byte, firstCommit string, policy control.Policy, read func() cluster.View, cli func(...string) []byte, change func(string, string, uint64, any), wait func(string, func() bool), lead func(int), restart func(int), user userauth.Client, session access.Session, peers []sfcp.Peer, registry string) map[string]any {
 	t.Helper()
 	defer func() {
 		if !t.Failed() {
@@ -131,11 +130,7 @@ func verifyNativeGitDelivery(t *testing.T, ctx context.Context, owners *[2]*Runt
 		}
 	}()
 	key := deployment.ResourceKey("task", "tenant", "next", "endpoint")
-	var local config.NetworkLocal
-	if err := (*owners)[0].installation.config.Modules["network"].Decode(&local); err != nil {
-		t.Fatal(err)
-	}
-	docker, err := engine.Open(ctx, local.DockerSocket, (*owners)[0].owner)
+	docker, err := engine.Open(ctx, (*owners)[0].installation.config.EngineEndpoint(), (*owners)[0].owner)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -188,7 +183,7 @@ func verifyNativeGitDelivery(t *testing.T, ctx context.Context, owners *[2]*Runt
 	wait("actual HTTPS Git registration/candidate", func() bool { return candidate(firstCommit) })
 	_, d := delivery()
 	manualPolicy := d.Policy()
-	if os.Getenv("MYDC_TEST_RQ4_CD") == "1" {
+	if os.Getenv("SFC_TEST_RQ4_CD") == "1" {
 		return verifyCDCandidateDecisionNative(t, ctx, owners, source, original, manualPolicy, key, cli, wait, delivery, candidate, running, root, user, peers[0], change)
 	}
 	secondCommit := source.Commit(nativeGitRevision(t, original, "2", &manualPolicy))
@@ -356,13 +351,12 @@ func verifyNativeGitDelivery(t *testing.T, ctx context.Context, owners *[2]*Runt
 		t.Fatal(err)
 	}
 	tenant, _ := catalog.Tenant("tenant")
-	originalTrust := append([]access.TrustRule(nil), tenant.ImageSources...)
-	withdrawn := slices.DeleteFunc(append([]access.TrustRule(nil), originalTrust...), func(rule access.TrustRule) bool { return rule.Registry == registry })
+	withdrawn := slices.DeleteFunc(slices.Clone(tenant.ImageSources), func(rule access.TrustRule) bool { return rule.Registry != registry })
 	beforeTrust, err := (*owners)[0].workload.Status(ctx, key)
 	if err != nil {
 		t.Fatal(err)
 	}
-	change("git-withdraw-current-image-trust", "set-trust", tenant.Revision, control.TrustAssignment{Tenant: "tenant", Rules: withdrawn})
+	change("git-withdraw-current-image-trust", "set-trust", tenant.Revision, control.TrustChange{Tenant: "tenant", Remove: withdrawn})
 	fifthCommit := source.Commit(nativeGitRevision(t, original, "5", &automatic))
 	wait("current trust blocks the next cached-image source", func() bool {
 		_, d := delivery()
@@ -378,7 +372,7 @@ func verifyNativeGitDelivery(t *testing.T, ctx context.Context, owners *[2]*Runt
 		t.Fatal(err)
 	}
 	tenant, _ = catalog.Tenant("tenant")
-	change("git-restore-explicit-image-trust", "set-trust", tenant.Revision, control.TrustAssignment{Tenant: "tenant", Rules: originalTrust})
+	change("git-restore-explicit-image-trust", "set-trust", tenant.Revision, control.TrustChange{Tenant: "tenant", Add: withdrawn})
 	wait("restored current trust admits the fifth source", func() bool { return running(fifthCommit, "5") })
 	cli("cd", "override", "next", "services/endpoint/environment/REVISION", `"operator"`, "--tenant", "tenant", "--id", "git-field-override")
 	wait("explicit field override actual native value", func() bool {

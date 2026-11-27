@@ -6,10 +6,10 @@ import (
 	"context"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/mydcp"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/sfcp"
 )
 
 func (s Service) externalRegistryBindPlan(view cluster.View, q Request, session access.Session) Reply {
@@ -19,9 +19,9 @@ func (s Service) externalRegistryBindPlan(view cluster.View, q Request, session 
 	}
 	return Reply{Schema: 1, Code: "ok", Tenant: q.Tenant, ExternalRegistryBindPlan: &plan}
 }
-func (c Client) PlanExternalRegistryBind(ctx context.Context, peer mydcp.Peer, session access.Session, tenant string, q control.ExternalRegistryBindQuery) (control.ExternalRegistryBindPlan, error) {
+func (c Client) PlanExternalRegistryBind(ctx context.Context, peer sfcp.Peer, session access.Session, tenant string, q control.ExternalRegistryBindQuery) (control.ExternalRegistryBindPlan, error) {
 	if !q.Valid() || tenant == "" {
-		return control.ExternalRegistryBindPlan{}, mydcp.ErrAdmission
+		return control.ExternalRegistryBindPlan{}, sfcp.ErrAdmission
 	}
 	reply, err := c.query(ctx, peer, session, Request{Method: "external-registry-bind-plan", Tenant: tenant, ExternalRegistryBind: &q})
 	if err != nil {
@@ -29,7 +29,7 @@ func (c Client) PlanExternalRegistryBind(ctx context.Context, peer mydcp.Peer, s
 	}
 	plan := reply.ExternalRegistryBindPlan
 	if plan == nil || plan.Cluster != c.Cluster || !plan.Valid(session, tenant, q) {
-		return control.ExternalRegistryBindPlan{}, mydcp.ErrFrame
+		return control.ExternalRegistryBindPlan{}, sfcp.ErrFrame
 	}
 	return *plan, nil
 }

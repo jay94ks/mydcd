@@ -3,19 +3,22 @@
 package server
 
 import (
+	"context"
+	"io"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/certstore"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/web/mydc"
+	"github.com/jay94ks/seafield/internal/certstore"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/web/sfc"
 )
 
 func TestACMEAutoIssue(t *testing.T) {
 	f, _, ca, fake := acmeFixture(t)
 	acct := newAccount(t, f)
-	makeAutomation(t, f, "mydc-web", "a1b2c3d4-0000-4000-8000-0000000000c1", true, true)
+	makeAutomation(t, f, "sfc-web", "a1b2c3d4-0000-4000-8000-0000000000c1", true, true)
 
 	code, out := f.do("GET", "/api/v1/acme/auto", nil)
 	if code != 200 || out["enabled"] != false || out["revision"] != float64(0) || len(out["domains"].([]any)) != 1 {
@@ -39,12 +42,12 @@ func TestACMEAutoIssue(t *testing.T) {
 	}
 
 	var certs []certstore.PublicEntry
-	if err := withAdminConn(t, fake, func(c mydc.Conn) (err error) { certs, err = certAll(t.Context(), c); return }); err != nil {
+	if err := withAdminConn(t, fake, func(c sfc.Conn) (err error) { certs, err = certAll(t.Context(), c); return }); err != nil {
 		t.Fatal(err)
 	}
 	var scanAs func(tenant string, hosts ...string)
 	var iv *ingressView
-	if err := withAdminConn(t, fake, func(c mydc.Conn) (err error) { iv, err = ingressRead(t.Context(), c, control.IngressQuery{}); return }); err != nil {
+	if err := withAdminConn(t, fake, func(c sfc.Conn) (err error) { iv, err = ingressRead(t.Context(), c, control.IngressQuery{}); return }); err != nil {
 		t.Fatal(err)
 	}
 	if hs := acmeWatchedHosts(iv); len(hs) == 0 || hs[0].listen == "" {
@@ -58,7 +61,7 @@ func TestACMEAutoIssue(t *testing.T) {
 		for _, h := range hosts {
 			hs = append(hs, watchedHost{h, tenant, "php-shop", "node-a", "0.0.0.0:443"})
 		}
-		f.srv.acmeAutoScan(a, hs, certs, defs, time.Now())
+		f.srv.acmeAutoScan(a, hs, certs, defs, acmeAutoCluster{}, time.Now())
 		f.srv.WaitOrders()
 	}
 	scan("shop.example.com", "files.shop.example.com", "grafana.internal")
@@ -75,7 +78,7 @@ func TestACMEAutoIssue(t *testing.T) {
 	}
 	_, out = f.do("GET", "/api/v1/acme/auto", nil)
 	w := out["waiting"].([]any)
-	if len(w) != 1 || w[0].(map[string]any)["host"] != "grafana.internal" || w[0].(map[string]any)["reason"] != "no-domain" || w[0].(map[string]any)["app"] != "php-shop" {
+	if len(w) != 1 || w[0].(map[string]any)["host"] != "grafana.internal" || w[0].(map[string]any)["reason"] != "not-registered" || w[0].(map[string]any)["app"] != "php-shop" {
 		t.Fatalf("waiting: %v", out)
 	}
 	if d := out["domains"].([]any)[0].(map[string]any); d["enabled"] != true || !strings.Contains(mustString(d["tenants"]), "shop") {
@@ -134,5 +137,61 @@ func TestACMEAutoIssue(t *testing.T) {
 	fakeLogin(t, f, "alice")
 	if code, _ := f.do("GET", "/api/v1/acme/auto", nil); code != 403 {
 		t.Fatalf("alice: %d", code)
+	}
+}
+
+// A registered domain without a DNS provider issues through HTTP-01 when
+// the web responder is on and its address is set in the cluster.
+func TestACMEAutoIssueHTTP01(t *testing.T) {
+	f, _, ca, _ := acmeFixture(t)
+	acct := newAccount(t, f)
+	makeAutomation(t, f, "sfc-web", "a1b2c3d4-0000-4000-8000-0000000000c1", true, true)
+	if code, out := f.do("POST", "/api/v1/dns/domains", map[string]any{"domain": "other.org"}); code != 201 {
+		t.Fatalf("register: %d %v", code, out)
+	}
+	put := func(rev any, mode string) (int, map[string]any) {
+		return f.do("PUT", "/api/v1/acme/auto", map[string]any{"enabled": false, "account": acct, "keyTypes": []string{"ec256"}, "dualRsa": false,
+			"notifyAfterMinutes": 1, "domains": []any{map[string]any{"domain": "other.org", "enabled": true, "mode": mode}}, "revision": rev})
+	}
+	if code, out := put(0, "wildcard"); code != 422 {
+		t.Fatalf("wildcard without provider: %d %v", code, out)
+	}
+	if code, out := put(0, "per-host"); code != 200 || !strings.Contains(mustString(out["domains"]), `"domain":"other.org"`) {
+		t.Fatalf("put: %d %v", code, out)
+	}
+	h := f.srv.ACMEHandler()
+	ca.HTTPGet = func(_ context.Context, host, token string) (string, error) {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest("GET", "http://"+host+"/.well-known/acme-challenge/"+token, nil))
+		if rec.Code != 200 {
+			return "", io.ErrUnexpectedEOF
+		}
+		return rec.Body.String(), nil
+	}
+	scan := func(cl acmeAutoCluster, hosts ...string) map[string]any {
+		a, _ := f.store.GetACMEAuto()
+		defs, _ := f.store.ListACMECerts()
+		var hs []watchedHost
+		for _, h := range hosts {
+			hs = append(hs, watchedHost{h, "shop", "php-shop", "node-a", "0.0.0.0:443"})
+		}
+		f.srv.acmeAutoScan(a, hs, nil, defs, cl, time.Now())
+		f.srv.WaitOrders()
+		_, out := f.do("GET", "/api/v1/acme/auto", nil)
+		return out
+	}
+	cl := acmeAutoCluster{domains: []string{"other.org"}}
+	if out := scan(cl, "app.other.org", "x.unknown.net"); !strings.Contains(mustString(out["waiting"]), `"reason":"no-responder"`) || !strings.Contains(mustString(out["waiting"]), `"reason":"not-registered"`) {
+		t.Fatalf("responder off: %v", out["waiting"])
+	}
+	f.srv.opt.ACMEHTTP01 = true
+	if out := scan(cl, "app.other.org"); !strings.Contains(mustString(out["waiting"]), `"reason":"no-responder"`) {
+		t.Fatalf("responder address not set: %v", out["waiting"])
+	}
+	cl.responder = true
+	scan(cl, "app.other.org")
+	c, err := f.store.GetACMECert("app-other-org")
+	if err != nil || c.Fingerprint == "" || ca.Issued() != 1 {
+		t.Fatalf("HTTP-01 auto issue: %+v %v issued=%d", c, err, ca.Issued())
 	}
 }

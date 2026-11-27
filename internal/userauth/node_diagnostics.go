@@ -4,38 +4,47 @@ package userauth
 
 import (
 	"context"
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/cluster/lifecycle"
-	"github.com/jay94ks/mydcd/internal/mydcp"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/lifecycle"
+	"github.com/jay94ks/seafield/internal/sfcp"
 	"time"
 )
 
-func (c Client) NodeDiagnostics(ctx context.Context, peer mydcp.Peer, session access.Session, node string) (control.NodeDiagnosticsBundle, error) {
+// NodeQuery names the one server a per-node plan or bundle is about.
+type NodeQuery struct{ Node string }
+
+func (q NodeQuery) Valid() bool { return lifecycle.ValidID(q.Node) }
+
+func (c Client) NodeDiagnostics(ctx context.Context, peer sfcp.Peer, session access.Session, node string) (control.NodeDiagnosticsBundle, error) {
 	if !lifecycle.ValidID(node) {
 		return control.NodeDiagnosticsBundle{}, access.ErrInvalid
 	}
-	reply, err := c.query(ctx, peer, session, Request{Method: "node-diagnostics", Node: node})
+	bundle, err := call(ctx, c, peer, session, NodeDiagnosticsMethod, NodeQuery{Node: node})
 	if err != nil {
 		return control.NodeDiagnosticsBundle{}, err
 	}
-	if reply.NodeDiagnostics == nil || !reply.NodeDiagnostics.Valid(node) {
-		return control.NodeDiagnosticsBundle{}, mydcp.ErrAdmission
+	if !bundle.Valid(node) {
+		return control.NodeDiagnosticsBundle{}, sfcp.ErrAdmission
 	}
-	return *reply.NodeDiagnostics, nil
+	return bundle, nil
 }
-func (s Service) nodeDiagnosticsReply(ctx context.Context, view cluster.View, session access.Session, node string) Reply {
-	read, err := s.Policy.ReadNodeDiagnostics(view.State, session, time.Now().Unix(), node)
+
+var NodeDiagnosticsMethod = define(Method[NodeQuery, control.NodeDiagnosticsBundle]{Name: "node-diagnostics"}, true, func(ctx context.Context, s Service, view cluster.View, session access.Session, q NodeQuery) (control.NodeDiagnosticsBundle, string) {
+	if !s.manageCluster(view, session) {
+		return control.NodeDiagnosticsBundle{}, "denied"
+	}
+	read, err := s.Policy.ReadNodeDiagnostics(view.State, session, time.Now().Unix(), q.Node)
 	if err != nil {
-		return Reply{Schema: 1, Code: "denied"}
+		return control.NodeDiagnosticsBundle{}, "denied"
 	}
 	if s.NodeDiagnostics == nil {
-		return Reply{Schema: 1, Code: "unavailable"}
+		return control.NodeDiagnosticsBundle{}, "unavailable"
 	}
 	result, err := s.NodeDiagnostics(ctx, read)
-	if err != nil || !result.Valid(node) {
-		return Reply{Schema: 1, Code: "unavailable"}
+	if err != nil || !result.Valid(q.Node) {
+		return control.NodeDiagnosticsBundle{}, "unavailable"
 	}
-	return Reply{Schema: 1, Code: "ok", NodeDiagnostics: &result}
-}
+	return result, "ok"
+})

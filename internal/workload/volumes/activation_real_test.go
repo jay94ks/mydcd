@@ -15,21 +15,21 @@ import (
 	"time"
 
 	"github.com/hashicorp/raft"
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/app"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/config"
-	"github.com/jay94ks/mydcd/internal/engine"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/network"
-	"github.com/jay94ks/mydcd/internal/reconcile"
-	"github.com/jay94ks/mydcd/internal/userauth"
-	"github.com/jay94ks/mydcd/internal/workload"
-	"github.com/jay94ks/mydcd/internal/workload/volumes"
-	"github.com/jay94ks/mydcd/tests/enginefixture"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/app"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/config"
+	"github.com/jay94ks/seafield/internal/engine"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/network"
+	"github.com/jay94ks/seafield/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/userauth"
+	"github.com/jay94ks/seafield/internal/workload"
+	"github.com/jay94ks/seafield/internal/workload/volumes"
+	"github.com/jay94ks/seafield/tests/enginefixture"
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/client"
 )
@@ -43,8 +43,8 @@ func TestRealBoundaryWorkloadActivationSyncFailureBeforeNativeStart(t *testing.T
 }
 
 func testRealWorkloadManagedVolumes(t *testing.T, syncFault bool) {
-	tag, backend := os.Getenv("MYDC_DOCKER_TEST_OWNER"), os.Getenv("MYDC_DOCKER_TEST_BACKEND")
-	if tag == "" || backend == "" || os.Getenv("MYDC_DOCKER_TEST_CIDR") == "" || os.Geteuid() != 0 {
+	tag, backend := os.Getenv("SFC_DOCKER_TEST_OWNER"), os.Getenv("SFC_DOCKER_TEST_BACKEND")
+	if tag == "" || backend == "" || os.Getenv("SFC_DOCKER_TEST_CIDR") == "" || os.Geteuid() != 0 {
 		t.Skip("requires prebuilt backend/test binary and owned Docker rollback prestate")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
@@ -78,18 +78,18 @@ func testRealWorkloadManagedVolumes(t *testing.T, syncFault bool) {
 	}
 	clusterID := initialized.Installation.Root.Cluster
 	policy := control.Policy{Cluster: clusterID, BootstrapKey: adminKey.Public, TrustRoot: node.Identity.Public, Genesis: initialized.Installation.Genesis}
-	peer := mydcp.Peer{ID: cfg.Node.ID, Endpoint: address, Policy: mydcp.Policy{Key: mydcp.Identity(node.Identity.Public), Respond: true}}
+	peer := sfcp.Peer{ID: cfg.Node.ID, Endpoint: address, Policy: sfcp.Policy{Key: sfcp.Identity(node.Identity.Public), Respond: true}}
 	self, err := identity.Ephemeral()
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer clear(self.Private)
-	mesh, err := mydcp.NewTransport(self, clusterID, func(k mydcp.Identity) (mydcp.Peer, bool) { return peer, k == peer.Key })
+	mesh, err := sfcp.NewTransport(self, clusterID, func(k sfcp.Identity) (sfcp.Peer, bool) { return peer, k == peer.Key })
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer mesh.Close()
-	user := userauth.Client{Mesh: mesh, Self: self, Cluster: clusterID, Peers: []mydcp.Peer{peer}}
+	user := userauth.Client{Mesh: mesh, Self: self, Cluster: clusterID, Peers: []sfcp.Peer{peer}}
 	enrolled, err := user.Enroll(ctx, peer, control.Enrollment{Schema: 1, RequestID: "enroll-activation", User: access.User{ID: "admin", Username: "admin", Enabled: true, SystemAdmin: true, Credentials: []access.Credential{{ID: "key", Method: access.PrivateKey, PublicKey: adminKey.Public, Enabled: true}}}}, adminKey.Private)
 	if err != nil || enrolled.Result == nil || enrolled.Result.Code != state.Applied {
 		t.Fatal("enroll", err)
@@ -138,12 +138,12 @@ func testRealWorkloadManagedVolumes(t *testing.T, syncFault bool) {
 		t.Fatal(err)
 	}
 	tenant, _ := catalog.Tenant("tenant")
-	submit("grant", "set-nodes", tenant.Revision, control.NodeAssignment{Tenant: "tenant", Nodes: []string{cfg.Node.ID}})
+	submit("grant", "set-nodes", tenant.Revision, control.NodeChangeTo("tenant", tenant.AllowedNodes, []string{cfg.Node.ID}))
 	owner := engine.Owner(clusterID, node.Identity.Public)
-	manifest := map[string]any{"Owner": owner, "Root": root, "CIDR": os.Getenv("MYDC_DOCKER_TEST_CIDR"), "Tag": tag}
+	manifest := map[string]any{"Owner": owner, "Root": root, "CIDR": os.Getenv("SFC_DOCKER_TEST_CIDR"), "Tag": tag}
 	saveManifest := func() {
 		t.Helper()
-		if path := os.Getenv("MYDC_NATIVE_MANIFEST"); path != "" {
+		if path := os.Getenv("SFC_NATIVE_MANIFEST"); path != "" {
 			raw, _ := json.Marshal(manifest)
 			if err := os.WriteFile(path, raw, 0644); err != nil {
 				t.Fatal(err)
@@ -158,7 +158,7 @@ func testRealWorkloadManagedVolumes(t *testing.T, syncFault bool) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = cleanupClient.Close() })
-	filter := client.Filters{}.Add("label", "org.mydc.owner="+owner)
+	filter := client.Filters{}.Add("label", "org.sfc.owner="+owner)
 	before, err := cleanupClient.API.VolumeList(ctx, client.VolumeListOptions{Filters: filter})
 	if err != nil || len(before.Items) != 0 {
 		t.Fatal("owner not initially empty", err)
@@ -172,7 +172,7 @@ func testRealWorkloadManagedVolumes(t *testing.T, syncFault bool) {
 			return
 		}
 		for _, v := range items.Items {
-			if v.Labels["org.mydc.owner"] != owner || v.Labels["org.mydc.kind"] != "volume" {
+			if v.Labels["org.sfc.owner"] != owner || v.Labels["org.sfc.kind"] != "volume" {
 				t.Error("volume cleanup ownership")
 				continue
 			}
@@ -224,7 +224,7 @@ func testRealWorkloadManagedVolumes(t *testing.T, syncFault bool) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	process, err := workload.ResolveImageProcess(image, workload.ProcessOverrides{MountTargets: []string{"/data", "/logs"}, Environment: map[string]string{"MYDC_VOLUME_FIXTURE": "1", "MYDC_VOLUME_SECOND_FIXTURE": "1"}, Healthcheck: &container.HealthConfig{Test: []string{"CMD", "/backend", "--volume-probe"}, Interval: time.Second, Timeout: time.Second, Retries: 2}})
+	process, err := workload.ResolveImageProcess(image, workload.ProcessOverrides{MountTargets: []string{"/data", "/logs"}, Environment: map[string]string{"SFC_VOLUME_FIXTURE": "1", "SFC_VOLUME_SECOND_FIXTURE": "1"}, Healthcheck: &container.HealthConfig{Test: []string{"CMD", "/backend", "--volume-probe"}, Interval: time.Second, Timeout: time.Second, Retries: 2}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -252,7 +252,7 @@ func testRealWorkloadManagedVolumes(t *testing.T, syncFault bool) {
 		t.Fatal(err)
 	}
 	defer func() { _ = n.Close() }()
-	prefix := netip.MustParsePrefix(os.Getenv("MYDC_DOCKER_TEST_CIDR"))
+	prefix := netip.MustParsePrefix(os.Getenv("SFC_DOCKER_TEST_CIDR"))
 	bridgeKey, taskKey := "network/managed-volume", "workload/task/tenant/app/database"
 	bridge := network.BridgeSpec{Schema: 1, Network: "managed-volume", Owner: owner, MTU: 1280, Internal: true, Pools: []network.Pool{{ID: "managed-volume", Network: "managed-volume", Owner: owner, Prefix: prefix, Gateway: prefix.Addr().Next(), MTU: 1280}}}
 	if err = n.Desired(bridgeKey, 1, 1, &bridge, 4); err != nil {
@@ -284,7 +284,7 @@ func testRealWorkloadManagedVolumes(t *testing.T, syncFault bool) {
 		if allowed {
 			nodes = []string{cfg.Node.ID}
 		}
-		submit(id, "set-nodes", tenant.Revision, control.NodeAssignment{Tenant: "tenant", Nodes: nodes})
+		submit(id, "set-nodes", tenant.Revision, control.NodeChangeTo("tenant", tenant.AllowedNodes, nodes))
 	}
 	refsFor := func(resource reconcile.Resource, operation uint64) []volumes.Activation {
 		refs := []volumes.Activation{}

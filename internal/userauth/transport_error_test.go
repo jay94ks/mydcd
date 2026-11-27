@@ -12,7 +12,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/mydcp"
+	"github.com/jay94ks/seafield/internal/sfcp"
 )
 
 func TestTransportDiagnosticPreservesCauseAndDelivery(t *testing.T) {
@@ -21,12 +21,12 @@ func TestTransportDiagnosticPreservesCauseAndDelivery(t *testing.T) {
 		name  string
 	}{
 		{context.DeadlineExceeded, "deadline"}, {context.Canceled, "canceled"},
-		{os.ErrDeadlineExceeded, "io-deadline"}, {mydcp.ErrAdmission, "admission"},
-		{mydcp.ErrFrame, "frame"}, {mydcp.ErrBudget, "budget"},
-		{mydcp.ErrTruncated, "truncated"}, {io.ErrUnexpectedEOF, "unexpected-eof"},
+		{os.ErrDeadlineExceeded, "io-deadline"}, {sfcp.ErrAdmission, "admission"},
+		{sfcp.ErrFrame, "frame"}, {sfcp.ErrBudget, "budget"},
+		{sfcp.ErrTruncated, "truncated"}, {io.ErrUnexpectedEOF, "unexpected-eof"},
 		{io.EOF, "eof"}, {net.ErrClosed, "closed"}, {errors.New("private-value"), "other"},
 	} {
-		for _, phase := range []mydcp.Phase{mydcp.NotSent, mydcp.Unknown} {
+		for _, phase := range []sfcp.Phase{sfcp.NotSent, sfcp.Unknown} {
 			cause := fmt.Errorf("private-value: %w", tc.cause)
 			err := &Error{Code: "transport", Phase: phase, Cause: cause, stage: "receive"}
 			message := err.Error()
@@ -36,7 +36,7 @@ func TestTransportDiagnosticPreservesCauseAndDelivery(t *testing.T) {
 			}
 		}
 	}
-	if got := (&Error{Code: "denied", Phase: mydcp.Completed, Cause: errors.New("private-value"), stage: "receive"}).Error(); got != "user request: denied" {
+	if got := (&Error{Code: "denied", Phase: sfcp.Completed, Cause: errors.New("private-value"), stage: "receive"}).Error(); got != "user request: denied" {
 		t.Fatal("authorization outcome reclassified", got)
 	}
 }

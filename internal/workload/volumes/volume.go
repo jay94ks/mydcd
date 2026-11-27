@@ -16,8 +16,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/reconcile"
 )
 
 var ErrVolume = errors.New("volume ownership, pin or migration conflict")
@@ -53,13 +53,18 @@ func FixedNativeKey(s Scope) string {
 	return "fixed-volume/" + s.Tenant + "/" + s.ID + "/" + strconv.FormatUint(s.Generation, 10)
 }
 
+// EngineVolumeDriver is the Seafield engine's built-in volume driver. Fixed
+// (tenant) volumes are engine volumes of this driver named FixedNativeName;
+// the engine asks sfcd for the directory on Mount (purpose 35).
+const EngineVolumeDriver = "sfc"
+
 func FixedNativeName(s Scope) string {
 	if FixedNativeKey(s) == "" {
 		return ""
 	}
 	raw, _ := json.Marshal(s)
-	digest := sha256.Sum256(append([]byte("mydc-fixed-native-name-1\x00"), raw...))
-	return "mydc-fixed-" + hex.EncodeToString(digest[:])
+	digest := sha256.Sum256(append([]byte("sfc-fixed-native-name-1\x00"), raw...))
+	return "sfc-fixed-" + hex.EncodeToString(digest[:])
 }
 
 type Owner struct {
@@ -74,7 +79,39 @@ type Consumer struct {
 	Lease         reconcile.Lease
 	Owner         Owner
 	OwnerRevision uint64
+	// Runner and RunnerKey (hex) name the server that runs a remote consumer
+	// of a shared Volume (control/volume-shares): it reaches the data on
+	// Owner over SFCP VolumeFS and signs its own Gone. Both are empty for a
+	// consumer on Owner itself. They are set once, at Acquire.
+	Runner    string `json:",omitempty"`
+	RunnerKey string `json:",omitempty"`
 }
+
+// Remote reports whether c runs on another server than the Volume's owner.
+func (c Consumer) Remote() bool { return c.Runner != "" }
+
+// GoneKey is the key that signs c's Gone: the runner's for a remote
+// consumer, the owner's otherwise. The caller checks a runner key against
+// the current membership before trusting it.
+func (c Consumer) GoneKey() ([32]byte, bool) {
+	if !c.Remote() {
+		return c.Owner.Key, true
+	}
+	var k [32]byte
+	b, err := hex.DecodeString(c.RunnerKey)
+	if err != nil || len(b) != 32 || hex.EncodeToString(b) != c.RunnerKey || c.Runner == c.Owner.Node {
+		return k, false
+	}
+	copy(k[:], b)
+	return k, true
+}
+
+// Share modes (control/volume-shares) that change Acquire's writer rule.
+const (
+	ShareSingleWriter = "single-writer"
+	ShareShared       = "shared"
+)
+
 type Floor struct {
 	ID         string
 	Generation uint64
@@ -135,6 +172,11 @@ func validScope(s Scope) bool {
 func validOwner(o Owner) bool    { return identifier(o.Node) && o.Key != ([32]byte{}) && native(o.Native) }
 func sameNative(a, b Owner) bool { return a.Node == b.Node && a.Native == b.Native }
 func validConsumer(c Consumer, scope Scope) bool {
+	if c.Remote() || c.RunnerKey != "" {
+		if _, ok := c.GoneKey(); !ok || !identifier(c.Runner) {
+			return false
+		}
+	}
 	return identifier(c.ID) && c.Generation > 0 && c.Lease.Generation == scope.Generation && c.Lease.Token > 0 && validOwner(c.Owner) && c.OwnerRevision > 0
 }
 
@@ -229,6 +271,19 @@ func foreignConsumerConflict(p Consumer, id string, writable bool) bool {
 	return p.ID != id && (writable || p.Writable)
 }
 
+// shareConflict is the writer rule of a shared Volume: single-writer allows
+// one writer (local and remote together) beside any readers; shared allows
+// several writers.
+func shareConflict(mode string, p Consumer, id string, writable bool) bool {
+	switch mode {
+	case ShareShared:
+		return false
+	case ShareSingleWriter:
+		return p.ID != id && writable && p.Writable
+	}
+	return foreignConsumerConflict(p, id, writable)
+}
+
 func (s State) Retained() []Retained { return slices.Clone(s.d.Retained) }
 func (s State) RetainsData() bool    { return s.d.Retain && !s.Deleted() }
 func (s State) Moves() []Move {
@@ -296,9 +351,34 @@ func (s State) acquire(c access.Catalog, actor string, expected uint64, id strin
 	return s.acquireAuthorized(expected, id, taskGeneration, writable, allowed)
 }
 
+// AcquireShared is Acquire for a Volume with a current share record of
+// mode. runner is the server that runs the task: the owner itself (a local
+// consumer under the share's writer rule) or another server, which then
+// reaches the data over VolumeFS. The caller has checked the share record
+// against this exact Scope and runner's key against the membership.
+func (s State) AcquireShared(c access.Catalog, actor string, expected uint64, id string, taskGeneration uint64, writable bool, mode string, runner Owner) (State, Consumer, error) {
+	if mode != ShareSingleWriter && mode != ShareShared || runner.Node == "" || runner.Key == ([32]byte{}) {
+		return s, Consumer{}, ErrVolume
+	}
+	if c.Authorize(actor, s.d.Scope.Tenant, access.ManageVolumes, s.d.Owner.Node) != nil || c.Authorize(actor, s.d.Scope.Tenant, access.ManageVolumes, runner.Node) != nil {
+		return s, Consumer{}, access.ErrDenied
+	}
+	r := Consumer{}
+	if runner.Node != s.d.Owner.Node {
+		r.Runner, r.RunnerKey = runner.Node, hex.EncodeToString(runner.Key[:])
+	} else if runner.Key != s.d.Owner.Key {
+		return s, Consumer{}, ErrVolume
+	}
+	return s.acquireWith(expected, id, taskGeneration, writable, s.startAllowed(), mode, r)
+}
+
 func (s State) acquireAuthorized(expected uint64, id string, taskGeneration uint64, writable, allowed bool) (State, Consumer, error) {
+	return s.acquireWith(expected, id, taskGeneration, writable, allowed, "", Consumer{})
+}
+
+func (s State) acquireWith(expected uint64, id string, taskGeneration uint64, writable, allowed bool, mode string, runner Consumer) (State, Consumer, error) {
 	for _, p := range s.d.Consumers {
-		if p.ID == id && p.Generation == taskGeneration && p.Writable == writable {
+		if p.ID == id && p.Generation == taskGeneration && p.Writable == writable && p.Runner == runner.Runner && p.RunnerKey == runner.RunnerKey {
 			return s, p, nil
 		}
 	}
@@ -310,7 +390,7 @@ func (s State) acquireAuthorized(expected uint64, id string, taskGeneration uint
 			return s, Consumer{}, ErrVolume
 		}
 	}
-	if s.ConflictsWithForeignConsumer(id, writable) || slices.ContainsFunc(s.d.Consumers, func(p Consumer) bool { return p.ID == id }) {
+	if slices.ContainsFunc(s.d.Consumers, func(p Consumer) bool { return shareConflict(mode, p, id, writable) }) || slices.ContainsFunc(s.d.Consumers, func(p Consumer) bool { return p.ID == id }) {
 		return s, Consumer{}, ErrVolume
 	}
 	if len(s.d.Floors) >= maxRecords && !slices.ContainsFunc(s.d.Floors, func(f Floor) bool { return f.ID == id }) {
@@ -328,7 +408,7 @@ func (s State) acquireAuthorized(expected uint64, id string, taskGeneration uint
 	if e != nil {
 		return s, Consumer{}, e
 	}
-	p := Consumer{id, taskGeneration, writable, l, s.d.Owner, s.d.OwnerRevision}
+	p := Consumer{ID: id, Generation: taskGeneration, Writable: writable, Lease: l, Owner: s.d.Owner, OwnerRevision: s.d.OwnerRevision, Runner: runner.Runner, RunnerKey: runner.RunnerKey}
 	n.d.Consumers = append(n.d.Consumers, p)
 	n.d.Pins = pins.Checkpoint()
 	found := false
@@ -352,7 +432,7 @@ type Gone struct {
 	Signature           []byte
 }
 
-func GoneBytes(g Gone) []byte { g.Signature = nil; return signedBytes("mydc-volume-gone-1", g) }
+func GoneBytes(g Gone) []byte { g.Signature = nil; return signedBytes("sfc-volume-gone-1", g) }
 func signedBytes(domain string, v any) []byte {
 	b, _ := json.Marshal(v)
 	return append([]byte(domain+"\x00"), b...)
@@ -373,7 +453,8 @@ func (s State) Release(g Gone) (State, error) {
 // CloseMoveReader so the signed receipt and this return share one publication.
 func (s State) release(g Gone) (State, error) {
 	i := s.consumerIndex(g.Consumer)
-	if i < 0 || g.Scope != s.d.Scope || !g.Stopped || !g.MountsGone || !verify(g.Consumer.Owner.Key, GoneBytes(g), g.Signature) {
+	key, ok := g.Consumer.GoneKey()
+	if i < 0 || !ok || g.Scope != s.d.Scope || !g.Stopped || !g.MountsGone || !verify(key, GoneBytes(g), g.Signature) {
 		return s, ErrVolume
 	}
 	p, e := reconcile.RestoreLeases(s.d.Pins)

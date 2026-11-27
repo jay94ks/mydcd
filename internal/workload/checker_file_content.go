@@ -13,7 +13,7 @@ import (
 	"path"
 	"strings"
 
-	contract "github.com/jay94ks/mydcd/lifecycle/v1"
+	contract "github.com/jay94ks/seafield/lifecycle/v1"
 )
 
 var ErrProbeFileContent = errors.New("container file content unavailable or outside probe limits")

@@ -5,8 +5,8 @@ package userauth
 import (
 	"errors"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/deployment"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/deployment"
 )
 
 // Only a bounded symbolic code crosses the authenticated plan boundary. Paths,
@@ -39,7 +39,7 @@ func appPlanErrorReply(err error) Reply {
 }
 
 func appPlanInputCause(reply Reply) error {
-	if reply.Code == "invalid" && validInputCode(reply.InputCode) {
+	if reply.Code != "ok" && validInputCode(reply.InputCode) {
 		return &deployment.InputError{Code: reply.InputCode}
 	}
 	return nil

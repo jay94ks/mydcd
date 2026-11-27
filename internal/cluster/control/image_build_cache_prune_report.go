@@ -9,9 +9,9 @@ import (
 	"encoding/json"
 	"math"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/imagebuild"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/imagebuild"
 )
 
 // Digest names the original authorized maintenance, not its changing progress.
@@ -22,7 +22,7 @@ func (r ImageBuildCachePruneRecord) Digest() [32]byte {
 		SourceDigest [32]byte
 		Automatic    *ImageBuildCacheAutomaticReport `json:",omitempty"`
 	}{r.Origin, r.Source, r.SourceDigest, r.Automatic})
-	return sha256.Sum256(append([]byte("mydc-build-cache-prune-intent-1\x00"), raw...))
+	return sha256.Sum256(append([]byte("sfc-build-cache-prune-intent-1\x00"), raw...))
 }
 
 type ImageBuildCachePruneReport struct {
@@ -41,7 +41,7 @@ type ImageBuildCachePruneReport struct {
 func ImageBuildCachePruneReportBytes(r ImageBuildCachePruneReport) []byte {
 	r.Signature = nil
 	raw, _ := json.Marshal(r)
-	return append([]byte("mydc-build-cache-prune-report-1\x00"), raw...)
+	return append([]byte("sfc-build-cache-prune-report-1\x00"), raw...)
 }
 func (r ImageBuildCachePruneReport) valid(row ImageBuildCachePruneRecord, spec imagebuild.JobSpec, signature bool) bool {
 	q, err := row.Change()

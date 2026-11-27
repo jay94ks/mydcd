@@ -9,7 +9,7 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/jay94ks/mydcd/internal/cluster/lifecycle"
+	"github.com/jay94ks/seafield/internal/cluster/lifecycle"
 	bkclient "github.com/moby/buildkit/client"
 )
 
@@ -118,7 +118,7 @@ func (u CacheUsage) valid(cache [32]byte) bool {
 	return total == u.ReportedBytes
 }
 
-func (u CacheUsage) Digest() [32]byte { return digestJSON("mydc-imagebuild-cache-usage-1", u) }
+func (u CacheUsage) Digest() [32]byte { return digestJSON("sfc-imagebuild-cache-usage-1", u) }
 
 func (u CacheUsage) observer() ([32]byte, string) {
 	if u.Maintenance != nil {

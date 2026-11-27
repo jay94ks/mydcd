@@ -11,17 +11,17 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/engine"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/storage"
-	"github.com/jay94ks/mydcd/internal/workload"
-	checker "github.com/jay94ks/mydcd/internal/workload/lifecycle"
-	contract "github.com/jay94ks/mydcd/lifecycle/v1"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/engine"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/storage"
+	"github.com/jay94ks/seafield/internal/workload"
+	checker "github.com/jay94ks/seafield/internal/workload/lifecycle"
+	contract "github.com/jay94ks/seafield/lifecycle/v1"
 
 	"github.com/hashicorp/raft"
 )
@@ -35,8 +35,8 @@ func openEmptyTestEngine(t *testing.T, node *identity.Identity, clusterID [32]by
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { clear(admin.Private) })
-	self := mydcp.Peer{ID: "node-a", Policy: mydcp.Policy{Key: mydcp.Identity(node.Public), Member: true, Read: true, Respond: true, Snapshot: true, Replicate: true}}
-	mesh, err := mydcp.NewTransport(node, clusterID, func(k mydcp.Identity) (mydcp.Peer, bool) { return self, k == self.Key })
+	self := sfcp.Peer{ID: "node-a", Policy: sfcp.Policy{Key: sfcp.Identity(node.Public), Member: true, Read: true, Respond: true, Snapshot: true, Replicate: true}}
+	mesh, err := sfcp.NewTransport(node, clusterID, func(k sfcp.Identity) (sfcp.Peer, bool) { return self, k == self.Key })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -47,7 +47,7 @@ func openEmptyTestEngine(t *testing.T, node *identity.Identity, clusterID [32]by
 	self.Endpoint = mesh.Addr().String()
 	engine, err := cluster.Open(cluster.Options{ID: self.ID, Root: filepath.Join(t.TempDir(), "state"), Admin: admin.Actor(), Cluster: clusterID, Mesh: mesh, Bootstrap: true,
 		Servers: []raft.Server{{ID: raft.ServerID(self.ID), Address: raft.ServerAddress(self.Endpoint), Suffrage: raft.Voter}},
-		Resolve: func(id raft.ServerID, address raft.ServerAddress) (mydcp.Peer, bool) {
+		Resolve: func(id raft.ServerID, address raft.ServerAddress) (sfcp.Peer, bool) {
 			return self, string(id) == self.ID && string(address) == self.Endpoint
 		}})
 	if err != nil {

@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/web/seal"
+	"github.com/jay94ks/seafield/internal/web/seal"
 )
 
 func TestSealStatus(t *testing.T) {

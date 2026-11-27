@@ -11,16 +11,16 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/imagebuild"
-	"github.com/jay94ks/mydcd/internal/secrets"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/imagebuild"
+	"github.com/jay94ks/seafield/internal/secrets"
 )
 
 // These are approval/usage namespaces, never app/Task resources. Purpose and
 // the accepted job identity separate build mounts from app/source consumers.
 func ImageBuildSecretConsumer(spec imagebuild.JobSpec) string {
-	h := sha256.Sum256([]byte("mydc-imagebuild-secret-consumer-1\x00" + spec.Tenant + "\x00" + spec.ID))
+	h := sha256.Sum256([]byte("sfc-imagebuild-secret-consumer-1\x00" + spec.Tenant + "\x00" + spec.ID))
 	return "build-" + hex.EncodeToString(h[:24])
 }
 func ImageBuildSecretUses(spec imagebuild.JobSpec, session access.Session) map[string][]secrets.Use {
@@ -30,7 +30,7 @@ func ImageBuildSecretUses(spec imagebuild.JobSpec, session access.Session) map[s
 // ImageBuildSecretScope is the stable approval namespace shared by the build
 // plan and its CLI journal. It does not change with a context revision or job.
 func ImageBuildSecretScope(tenant, contextID string) string {
-	h := sha256.Sum256([]byte("mydc-imagebuild-secret-context-1\x00" + tenant + "\x00" + contextID))
+	h := sha256.Sum256([]byte("sfc-imagebuild-secret-context-1\x00" + tenant + "\x00" + contextID))
 	return "build-" + hex.EncodeToString(h[:24])
 }
 
@@ -239,7 +239,7 @@ func (p Policy) ImageBuildSecretInputs(s state.State, caller [32]byte, q ImageBu
 	if err != nil || len(raw) > 96<<10 {
 		return ImageBuildSecretInputs{}, access.ErrInvalid
 	}
-	return ImageBuildSecretInputs{Selection: q.Selection, Inputs: RegistryImageInputs{ReadSet: sha256.Sum256(append([]byte("mydc-imagebuild-secret-read-1\x00"), raw...)), Entries: entries}, Index: s.Index(), Epoch: s.ModuleEpoch()}, nil
+	return ImageBuildSecretInputs{Selection: q.Selection, Inputs: RegistryImageInputs{ReadSet: sha256.Sum256(append([]byte("sfc-imagebuild-secret-read-1\x00"), raw...)), Entries: entries}, Index: s.Index(), Epoch: s.ModuleEpoch()}, nil
 }
 
 func (p Policy) imageBuildApprovalUses(s state.State, session access.Session, at int64, origin *UserOperation, selection *AppApprovalSelection) (map[string][]secrets.Use, error) {
@@ -292,7 +292,7 @@ func (p Policy) admitImageBuildVaultPatch(s state.State, cmd state.Command, keys
 	}
 	count := 0
 	for key := range writes {
-		if key == VaultKey || strings.HasPrefix(key, VaultKey+"/part/") {
+		if key == VaultKey || strings.HasPrefix(key, VaultKey+"/") {
 			count++
 		}
 	}

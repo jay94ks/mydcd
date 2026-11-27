@@ -13,9 +13,9 @@ func TestProcessExitCleanAcceptsTheRequestedStopSignal(t *testing.T) {
 		want   bool
 	}{
 		{0, "", false, true},
-		{143, "SIGTERM", false, true},  // ended on the SIGTERM mydc sent
+		{143, "SIGTERM", false, true},  // ended on the SIGTERM sfcli sent
 		{131, "SIGQUIT", false, true},  // a configured stop signal
-		{143, "", false, false},        // SIGTERM that mydc did not send
+		{143, "", false, false},        // SIGTERM that sfcli did not send
 		{137, "SIGTERM", false, false}, // Docker's SIGKILL after the grace
 		{137, "SIGKILL", false, false}, // a kill is never a clean stop
 		{1, "SIGTERM", false, false},

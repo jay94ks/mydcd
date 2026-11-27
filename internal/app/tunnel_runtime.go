@@ -14,14 +14,14 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/lifecycle"
-	"github.com/jay94ks/mydcd/internal/desired"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/network"
-	"github.com/jay94ks/mydcd/internal/observability"
-	"github.com/jay94ks/mydcd/internal/reconcile"
-	"github.com/jay94ks/mydcd/internal/schema"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/lifecycle"
+	"github.com/jay94ks/seafield/internal/desired"
+	"github.com/jay94ks/seafield/internal/network"
+	"github.com/jay94ks/seafield/internal/observability"
+	"github.com/jay94ks/seafield/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/sfcp"
 )
 
 // One journal/FD owner, one isolated path/packet plane per logical network.
@@ -33,7 +33,7 @@ type tunnelRuntime struct {
 	routes    map[[32]byte]*tunnelInstance
 	closed    bool
 	// refusals is the last path refusal reason logged for each peer.
-	refusals map[mydcp.Identity]pathRefusal
+	refusals map[sfcp.Identity]pathRefusal
 }
 
 func journalTunnelNetwork(record reconcile.Record) (string, bool, error) {
@@ -68,6 +68,11 @@ func openTunnelRuntime(r *Runtime, path string) (*tunnelRuntime, error) {
 		return nil, err
 	}
 	t := &tunnelRuntime{r: r, manager: m, instances: map[[16]byte]*tunnelInstance{}}
+	if !r.historicalOwner {
+		if notes, err := m.ForeignDevices(); err == nil && len(notes) != 0 {
+			log.Printf("this server has sfc TUN devices that this node's journal did not make: %s. If they are left from an earlier cluster, remove them with ip link del", strings.Join(notes, ", "))
+		}
+	}
 	// Retained native journals share the current transport. Their serving
 	// planes are selected by this transport's single exact-owner dispatcher.
 	if r.historicalOwner {
@@ -77,11 +82,11 @@ func openTunnelRuntime(r *Runtime, path string) (*tunnelRuntime, error) {
 		_ = m.Close()
 		return nil, err
 	}
-	if err = r.Mesh.OnPacket(func(s *mydcp.Session, f mydcp.Frame) error {
+	if err = r.Mesh.OnPacket(func(s *sfcp.Session, f sfcp.Frame) error {
 		r.life.RLock()
 		defer r.life.RUnlock()
 		if r.closed || r.ctx.Err() != nil || len(f.Fields) < 2 || len(f.Fields[1].Value) != 16 {
-			return mydcp.ErrAdmission
+			return sfcp.ErrAdmission
 		}
 		var selected *tunnelInstance
 		for _, owner := range r.physicalOwners() {
@@ -98,7 +103,7 @@ func openTunnelRuntime(r *Runtime, path string) (*tunnelRuntime, error) {
 					continue
 				}
 				if selected != nil {
-					return mydcp.ErrAdmission
+					return sfcp.ErrAdmission
 				}
 				selected = instance
 			}
@@ -170,7 +175,7 @@ func (t *tunnelRuntime) packetInstances() []*tunnelInstance {
 	}
 	return out
 }
-func (t *tunnelRuntime) pathOwner(v cluster.View, s *mydcp.Session, scope []byte, mtu int) (*tunnelRuntime, error) {
+func (t *tunnelRuntime) pathOwner(v cluster.View, s *sfcp.Session, scope []byte, mtu int) (*tunnelRuntime, error) {
 	var selected *tunnelRuntime
 	var refused error = pathRefused("no local owner has a TUN runtime")
 	for _, owner := range t.r.physicalOwners() {
@@ -186,7 +191,7 @@ func (t *tunnelRuntime) pathOwner(v cluster.View, s *mydcp.Session, scope []byte
 			continue
 		}
 		if selected != nil {
-			return nil, mydcp.ErrAdmission
+			return nil, sfcp.ErrAdmission
 		}
 		selected = candidate
 	}
@@ -201,23 +206,23 @@ func (t *tunnelRuntime) pathOwner(v cluster.View, s *mydcp.Session, scope []byte
 }
 
 // pathRefusal is why this server refused a peer's TUN path control. It is
-// still mydcp.ErrAdmission to the peer; the reason is a fixed local string
+// still sfcp.ErrAdmission to the peer; the reason is a fixed local string
 // for this server's log.
 type pathRefusal string
 
 func pathRefused(reason string) error      { return pathRefusal(reason) }
 func (p pathRefusal) Error() string        { return "managed TUN path refused: " + string(p) }
-func (p pathRefusal) Is(target error) bool { return target == mydcp.ErrAdmission }
+func (p pathRefusal) Is(target error) bool { return target == sfcp.ErrAdmission }
 
 // logRefusal logs a refusal reason once per peer until it changes.
-func (t *tunnelRuntime) logRefusal(peer mydcp.Identity, err error) {
+func (t *tunnelRuntime) logRefusal(peer sfcp.Identity, err error) {
 	var reason pathRefusal
 	if !errors.As(err, &reason) {
 		return
 	}
 	t.mu.Lock()
 	if t.refusals == nil {
-		t.refusals = map[mydcp.Identity]pathRefusal{}
+		t.refusals = map[sfcp.Identity]pathRefusal{}
 	}
 	same := t.refusals[peer] == reason
 	t.refusals[peer] = reason
@@ -226,7 +231,7 @@ func (t *tunnelRuntime) logRefusal(peer mydcp.Identity, err error) {
 		log.Printf("managed TUN path from peer=%s refused: %s", hex.EncodeToString(peer[:]), reason)
 	}
 }
-func (t *tunnelRuntime) authorize(ctx context.Context, s *mydcp.Session, scope []byte, mtu int) error {
+func (t *tunnelRuntime) authorize(ctx context.Context, s *sfcp.Session, scope []byte, mtu int) error {
 	v, err := t.r.Engine().Read(ctx, false)
 	if err != nil {
 		return err
@@ -247,16 +252,16 @@ func (t *tunnelRuntime) scopedRemote(v cluster.View, view tunnelView, scope []by
 			continue
 		}
 		if selected != "" {
-			return "", [32]byte{}, mydcp.ErrAdmission
+			return "", [32]byte{}, sfcp.ErrAdmission
 		}
 		selected, original = remote, owner
 	}
 	if selected == "" {
-		return "", original, mydcp.ErrAdmission
+		return "", original, sfcp.ErrAdmission
 	}
 	return selected, original, nil
 }
-func (t *tunnelRuntime) authorizeLocal(v cluster.View, s *mydcp.Session, scope []byte, mtu int) error {
+func (t *tunnelRuntime) authorizeLocal(v cluster.View, s *sfcp.Session, scope []byte, mtu int) error {
 	r := t.r
 	peer := [32]byte(s.Peer().Key)
 	wire, err := r.localTunnelWireKey(v)
@@ -264,7 +269,7 @@ func (t *tunnelRuntime) authorizeLocal(v cluster.View, s *mydcp.Session, scope [
 		return pathRefused("this server's key is not its current work key")
 	}
 	if r.ctx.Err() != nil {
-		return mydcp.ErrAdmission
+		return sfcp.ErrAdmission
 	}
 	if bytes.Compare(peer[:], wire[:]) >= 0 {
 		return pathRefused("the peer key does not sort before this server's key (the other side starts the path)")
@@ -292,7 +297,7 @@ func (t *tunnelRuntime) authorizeLocal(v cluster.View, s *mydcp.Session, scope [
 	_, err = currentRoute(s, spec, mtu)
 	return err
 }
-func (t *tunnelRuntime) acceptPath(s *mydcp.Session, pair mydcp.PathPair) error {
+func (t *tunnelRuntime) acceptPath(s *sfcp.Session, pair sfcp.PathPair) error {
 	local, _ := pair.Samples()
 	ctx, cancel := context.WithTimeout(t.r.ctx, 5*time.Second)
 	defer cancel()
@@ -306,7 +311,7 @@ func (t *tunnelRuntime) acceptPath(s *mydcp.Session, pair mydcp.PathPair) error 
 	}
 	return selected.acceptPathLocal(v, s, pair)
 }
-func (t *tunnelRuntime) acceptPathLocal(v cluster.View, s *mydcp.Session, p mydcp.PathPair) error {
+func (t *tunnelRuntime) acceptPathLocal(v cluster.View, s *sfcp.Session, p sfcp.PathPair) error {
 	local, other := p.Samples()
 	var i *tunnelInstance
 	var original [32]byte
@@ -345,7 +350,7 @@ func (t *tunnelRuntime) acceptPathLocal(v cluster.View, s *mydcp.Session, p mydc
 	i.mu.Lock()
 	defer i.mu.Unlock()
 	if i.closed || t.r.ctx.Err() != nil {
-		return mydcp.ErrAdmission
+		return sfcp.ErrAdmission
 	}
 	prior, exists := i.paths[original]
 	oldLocal, oldRemote := prior.Path.Samples()

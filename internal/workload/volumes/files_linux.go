@@ -14,7 +14,7 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/jay94ks/mydcd/internal/access"
+	"github.com/jay94ks/seafield/internal/access"
 	"golang.org/x/sys/unix"
 )
 
@@ -110,7 +110,7 @@ func PutFileWithPublication(ctx context.Context, root *os.Root, name, operation 
 	}
 	defer staging.Close()
 	id := sha256.Sum256([]byte(operation))
-	tmp := ".mydc-file-" + hex.EncodeToString(id[:])
+	tmp := ".sfc-file-" + hex.EncodeToString(id[:])
 	fd, err := unix.Openat(int(staging.Fd()), tmp, unix.O_WRONLY|unix.O_CREAT|unix.O_EXCL|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0600)
 	if err != nil {
 		return FileResult{}, err
@@ -296,7 +296,7 @@ func ListFiles(ctx context.Context, root *os.Root, prefix, after string) ([]File
 				if seen > 100000 {
 					return ErrFileLimit
 				}
-				if strings.HasPrefix(entry.Name(), ".mydc-file-") {
+				if strings.HasPrefix(entry.Name(), ".sfc-file-") {
 					continue
 				}
 				name := path.Join(rel, entry.Name())
@@ -353,7 +353,7 @@ func RecoverPutFile(ctx context.Context, root *os.Root, receipt FilePublication)
 		return FileResult{}, ErrFilePath
 	}
 	expected := sha256.Sum256([]byte(receipt.Operation))
-	if receipt.Staging != ".mydc-file-"+hex.EncodeToString(expected[:]) {
+	if receipt.Staging != ".sfc-file-"+hex.EncodeToString(expected[:]) {
 		return FileResult{}, ErrFilePath
 	}
 	file, info, err := OpenFileData(root, receipt.Path, MaxFileBytes)

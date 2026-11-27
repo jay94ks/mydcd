@@ -1,0 +1,1068 @@
+[
+  {
+    "name": "app_cd",
+    "description": "Automatic deployment (CD) state of an app: candidate, pause, last sync.",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "app": {
+          "description": "app name",
+          "type": "string"
+        },
+        "t": {
+          "description": "workspace (tenant) ID",
+          "type": "string"
+        }
+      },
+      "required": [
+        "app",
+        "t"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "app_cd_history",
+    "description": "Automatic deployment history of an app.",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "after": {
+          "description": "page cursor from the previous page's next",
+          "type": "string"
+        },
+        "app": {
+          "description": "app name",
+          "type": "string"
+        },
+        "t": {
+          "description": "workspace (tenant) ID",
+          "type": "string"
+        }
+      },
+      "required": [
+        "app",
+        "t"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "app_cd_pause",
+    "description": "Pause an app's automatic deployment. Creates a proposal the person approves; nothing changes before that.",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "app": {
+          "description": "app name",
+          "type": "string"
+        },
+        "t": {
+          "description": "workspace (tenant) ID",
+          "type": "string"
+        }
+      },
+      "required": [
+        "app",
+        "t"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "app_cd_resume",
+    "description": "Resume an app's paused automatic deployment. Creates a proposal the person approves; nothing changes before that.",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "app": {
+          "description": "app name",
+          "type": "string"
+        },
+        "t": {
+          "description": "workspace (tenant) ID",
+          "type": "string"
+        }
+      },
+      "required": [
+        "app",
+        "t"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "app_cd_sync",
+    "description": "Deploy an app's automatic deployment candidate now. Creates a proposal the person approves; nothing changes before that.",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "app": {
+          "description": "app name",
+          "type": "string"
+        },
+        "t": {
+          "description": "workspace (tenant) ID",
+          "type": "string"
+        }
+      },
+      "required": [
+        "app",
+        "t"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "app_operation",
+    "description": "One app operation's progress and result.",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "app": {
+          "description": "app name",
+          "type": "string"
+        },
+        "id": {
+          "description": "ID",
+          "type": "string"
+        },
+        "t": {
+          "description": "workspace (tenant) ID",
+          "type": "string"
+        }
+      },
+      "required": [
+        "app",
+        "id",
+        "t"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "app_relocation_check",
+    "description": "Whether an app's tasks can move to other servers.",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "app": {
+          "description": "app name",
+          "type": "string"
+        },
+        "t": {
+          "description": "workspace (tenant) ID",
+          "type": "string"
+        }
+      },
+      "required": [
+        "app",
+        "t"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "app_revisions",
+    "description": "Version history of an app.",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "after": {
+          "description": "page cursor from the previous page's next",
+          "type": "string"
+        },
+        "app": {
+          "description": "app name",
+          "type": "string"
+        },
+        "t": {
+          "description": "workspace (tenant) ID",
+          "type": "string"
+        }
+      },
+      "required": [
+        "app",
+        "t"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "app_source",
+    "description": "The running app.yaml of an app (secret-like values masked).",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "app": {
+          "description": "app name",
+          "type": "string"
+        },
+        "t": {
+          "description": "workspace (tenant) ID",
+          "type": "string"
+        },
+        "version": {
+          "description": "app version (default: current)",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "app",
+        "t"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "app_stored_logs",
+    "description": "What each server's log store keeps for an app (or one service): container, task key, lines, size; includes containers that are gone.",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "app": {
+          "description": "app name",
+          "type": "string"
+        },
+        "service": {
+          "description": "service name",
+          "type": "string"
+        },
+        "t": {
+          "description": "workspace (tenant) ID",
+          "type": "string"
+        }
+      },
+      "required": [
+        "app",
+        "t"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "app_tasks",
+    "description": "Containers (tasks) of one app.",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "after": {
+          "description": "page cursor from the previous page's next",
+          "type": "string"
+        },
+        "app": {
+          "description": "app name",
+          "type": "string"
+        },
+        "t": {
+          "description": "workspace (tenant) ID",
+          "type": "string"
+        }
+      },
+      "required": [
+        "app",
+        "t"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "apps_list",
+    "description": "Apps in a workspace with deployment state and health.",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "after": {
+          "description": "page cursor from the previous page's next",
+          "type": "string"
+        },
+        "t": {
+          "description": "workspace (tenant) ID",
+          "type": "string"
+        }
+      },
+      "required": [
+        "t"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "builds_list",
+    "description": "Image builds of a workspace.",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "t": {
+          "description": "workspace (tenant) ID",
+          "type": "string"
+        }
+      },
+      "required": [
+        "t"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "cluster_firewall",
+    "description": "The cluster firewall every managed server applies under its own: default policy and shared rules (required ones no server can override).",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {},
+      "required": [],
+      "type": "object"
+    }
+  },
+  {
+    "name": "cluster_mesh",
+    "description": "Server-to-server network (mesh) links and their state.",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {},
+      "required": [],
+      "type": "object"
+    }
+  },
+  {
+    "name": "cluster_raft",
+    "description": "Control plane (Raft) status: leader, voters, health.",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {},
+      "required": [],
+      "type": "object"
+    }
+  },
+  {
+    "name": "dashboard_get",
+    "description": "Cluster dashboard summary: servers, apps, alerts.",
+    "core": true,
+    "schema": {
+      "additionalProperties": false,
+      "properties": {},
+      "required": [],
+      "type": "object"
+    }
+  },
+  {
+    "name": "events_list",
+    "description": "Recent cluster events, newest first.",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "limit": {
+          "description": "at most this many (default 50)",
+          "type": "integer"
+        },
+        "since": {
+          "description": "event cursor to read after",
+          "type": "string"
+        },
+        "tenant": {
+          "description": "workspace ID to narrow to",
+          "type": "string"
+        }
+      },
+      "required": [],
+      "type": "object"
+    }
+  },
+  {
+    "name": "incidents_get",
+    "description": "Read one incident: signals, timeline, candidates, assessment and any pending approval.",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "description": "ID",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "incidents_list",
+    "description": "List incidents (detected faults) the person can see, newest first, with the decision on each temporary action.",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "app": {
+          "description": "app name",
+          "type": "string"
+        },
+        "decision": {
+          "description": "pending, auto, approved, rejected, expired, none",
+          "type": "string"
+        },
+        "scope": {
+          "description": "app or cluster",
+          "type": "string"
+        },
+        "tenant": {
+          "description": "workspace",
+          "type": "string"
+        }
+      },
+      "required": [],
+      "type": "object"
+    }
+  },
+  {
+    "name": "lifecycles_list",
+    "description": "Lifecycle scripts of a workspace.",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "after": {
+          "description": "page cursor from the previous page's next",
+          "type": "string"
+        },
+        "t": {
+          "description": "workspace (tenant) ID",
+          "type": "string"
+        }
+      },
+      "required": [
+        "t"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "networks_list",
+    "description": "Networks of a workspace.",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "after": {
+          "description": "page cursor from the previous page's next",
+          "type": "string"
+        },
+        "t": {
+          "description": "workspace (tenant) ID",
+          "type": "string"
+        }
+      },
+      "required": [
+        "t"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "node_cordon",
+    "description": "Stop new placements on a server (running tasks stay). Creates a proposal the person approves; nothing changes before that.",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "node": {
+          "description": "server (node) name",
+          "type": "string"
+        },
+        "reason": {
+          "description": "why, shown with the operation",
+          "type": "string"
+        }
+      },
+      "required": [
+        "node"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "node_disks",
+    "description": "Disks of one server (size, used, mount).",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "node": {
+          "description": "server (node) name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "node"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "node_drain_plan",
+    "description": "Plan moving every task off a server: what moves where and what is blocked. Draining is high impact: a person does it on the server screen, never through a proposal.",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "node": {
+          "description": "server (node) name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "node"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "node_firewall",
+    "description": "One server's inbound firewall: whether sfcd controls it, policy, locked and operator rules.",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "node": {
+          "description": "server (node) name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "node"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "node_firewall_log",
+    "description": "Earlier firewall changes of one server, newest first.",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "before": {
+          "description": "only changes before this revision",
+          "type": "string"
+        },
+        "node": {
+          "description": "server (node) name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "node"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "node_image_prune",
+    "description": "Remove a server's unused images (from node_image_prune_plan). Creates a proposal the person approves; nothing changes before that.",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "node": {
+          "description": "server (node) name",
+          "type": "string"
+        },
+        "plan": {
+          "description": "plan value from node_image_prune_plan",
+          "type": "string"
+        }
+      },
+      "required": [
+        "node",
+        "plan"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "node_image_prune_plan",
+    "description": "Plan which unused images on a server can be removed and the space freed. Its plan value goes to node_image_prune.",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "node": {
+          "description": "server (node) name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "node"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "node_remove_plan",
+    "description": "What removing a server from the cluster would need and block.",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "node": {
+          "description": "server (node) name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "node"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "node_storage",
+    "description": "Storage roots of one server and their space.",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "after": {
+          "description": "page cursor from the previous page's next",
+          "type": "string"
+        },
+        "node": {
+          "description": "server (node) name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "node"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "node_tasks",
+    "description": "Containers (tasks) running on one server.",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "after": {
+          "description": "page cursor",
+          "type": "string"
+        },
+        "node": {
+          "description": "server (node) name",
+          "type": "string"
+        },
+        "tenant": {
+          "description": "workspace ID to narrow to",
+          "type": "string"
+        }
+      },
+      "required": [
+        "node"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "node_uncordon",
+    "description": "Allow new placements on a cordoned server again. Creates a proposal the person approves; nothing changes before that.",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "node": {
+          "description": "server (node) name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "node"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "nodes_list",
+    "description": "List cluster servers (nodes) with role, state, cordon and revision.",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "after": {
+          "description": "page cursor from the previous page's next",
+          "type": "string"
+        }
+      },
+      "required": [],
+      "type": "object"
+    }
+  },
+  {
+    "name": "nodes_summary",
+    "description": "Per-server CPU, memory and disk usage summary.",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "tenant": {
+          "description": "workspace (tenant) ID to narrow to",
+          "type": "string"
+        }
+      },
+      "required": [],
+      "type": "object"
+    }
+  },
+  {
+    "name": "ops_get",
+    "description": "Read one operation's state and result by op ID (after a proposal was approved).",
+    "core": true,
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "description": "ID",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "ops_list",
+    "description": "List the person's recent operations (changes sent from the web) with state.",
+    "core": true,
+    "schema": {
+      "additionalProperties": false,
+      "properties": {},
+      "required": [],
+      "type": "object"
+    }
+  },
+  {
+    "name": "registries_list",
+    "description": "Image registries of a workspace.",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "t": {
+          "description": "workspace (tenant) ID",
+          "type": "string"
+        }
+      },
+      "required": [
+        "t"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "resources_list",
+    "description": "Shared resources of a workspace (networks, volumes, vault, registries…).",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "after": {
+          "description": "page cursor from the previous page's next",
+          "type": "string"
+        },
+        "t": {
+          "description": "workspace (tenant) ID",
+          "type": "string"
+        }
+      },
+      "required": [
+        "t"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "routes_list",
+    "description": "External access routes of a workspace.",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "t": {
+          "description": "workspace (tenant) ID",
+          "type": "string"
+        }
+      },
+      "required": [
+        "t"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "standalone_list",
+    "description": "Single containers (standalone) of a workspace.",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "t": {
+          "description": "workspace (tenant) ID",
+          "type": "string"
+        }
+      },
+      "required": [
+        "t"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "task_detail",
+    "description": "One task's detail: state, restarts, last exit code, placement.",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "app": {
+          "description": "app name",
+          "type": "string"
+        },
+        "instance": {
+          "description": "instance (replica) name",
+          "type": "string"
+        },
+        "service": {
+          "description": "service name",
+          "type": "string"
+        },
+        "t": {
+          "description": "workspace (tenant) ID",
+          "type": "string"
+        }
+      },
+      "required": [
+        "app",
+        "service",
+        "t"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "task_history",
+    "description": "One task's recent state changes and exits.",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "app": {
+          "description": "app name",
+          "type": "string"
+        },
+        "instance": {
+          "description": "instance (replica) name",
+          "type": "string"
+        },
+        "service": {
+          "description": "service name",
+          "type": "string"
+        },
+        "t": {
+          "description": "workspace (tenant) ID",
+          "type": "string"
+        }
+      },
+      "required": [
+        "app",
+        "service",
+        "t"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "task_restart",
+    "description": "Restart one task of an app. Creates a proposal the person approves; nothing changes before that.",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "app": {
+          "description": "app name",
+          "type": "string"
+        },
+        "instance": {
+          "description": "instance (replica) name",
+          "type": "string"
+        },
+        "service": {
+          "description": "service name",
+          "type": "string"
+        },
+        "t": {
+          "description": "workspace (tenant) ID",
+          "type": "string"
+        }
+      },
+      "required": [
+        "app",
+        "instance",
+        "service",
+        "t"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "task_stats",
+    "description": "One task's CPU and memory samples.",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "app": {
+          "description": "app name",
+          "type": "string"
+        },
+        "instance": {
+          "description": "instance (replica) name",
+          "type": "string"
+        },
+        "service": {
+          "description": "service name",
+          "type": "string"
+        },
+        "t": {
+          "description": "workspace (tenant) ID",
+          "type": "string"
+        }
+      },
+      "required": [
+        "app",
+        "service",
+        "t"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "tasks_list",
+    "description": "All containers (tasks) of a workspace.",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "after": {
+          "description": "page cursor from the previous page's next",
+          "type": "string"
+        },
+        "t": {
+          "description": "workspace (tenant) ID",
+          "type": "string"
+        }
+      },
+      "required": [
+        "t"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "tenants_list",
+    "description": "List the workspaces (tenants) the person can see.",
+    "core": true,
+    "schema": {
+      "additionalProperties": false,
+      "properties": {},
+      "required": [],
+      "type": "object"
+    }
+  },
+  {
+    "name": "vault_list",
+    "description": "Secret vault entries of a workspace: paths, key names and access. Never values.",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "after": {
+          "description": "page cursor from the previous page's next",
+          "type": "string"
+        },
+        "t": {
+          "description": "workspace (tenant) ID",
+          "type": "string"
+        }
+      },
+      "required": [
+        "t"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "volume_backup",
+    "description": "Start a backup of one data store (volume). Creates a proposal the person approves; nothing changes before that.",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "app": {
+          "description": "app that owns the data store, if any",
+          "type": "string"
+        },
+        "name": {
+          "description": "resource name",
+          "type": "string"
+        },
+        "t": {
+          "description": "workspace (tenant) ID",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "t"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "volume_backups_list",
+    "description": "Backups of a workspace's data stores.",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "after": {
+          "description": "page cursor from the previous page's next",
+          "type": "string"
+        },
+        "t": {
+          "description": "workspace (tenant) ID",
+          "type": "string"
+        }
+      },
+      "required": [
+        "t"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "volume_get",
+    "description": "One data store (volume) with its backups and users.",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "description": "resource name",
+          "type": "string"
+        },
+        "t": {
+          "description": "workspace (tenant) ID",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "t"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "volumes_list",
+    "description": "Data stores (volumes) of a workspace with size and placement.",
+    "schema": {
+      "additionalProperties": false,
+      "properties": {
+        "after": {
+          "description": "page cursor from the previous page's next",
+          "type": "string"
+        },
+        "t": {
+          "description": "workspace (tenant) ID",
+          "type": "string"
+        }
+      },
+      "required": [
+        "t"
+      ],
+      "type": "object"
+    }
+  }
+]

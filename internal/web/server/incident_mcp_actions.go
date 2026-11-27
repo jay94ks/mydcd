@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/web/store"
+	"github.com/jay94ks/seafield/internal/web/store"
 )
 
 // MCP tools as incident candidates (W2.3a): change or notify tools set to
@@ -47,6 +47,9 @@ func (s *Server) mcpCandidates(in *store.Incident, gd incidentGuides) ([]store.I
 			}
 			if t.Auto != nil && len(t.Auto.Signals) > 0 && !slices.Contains(t.Auto.Signals, in.Signal) {
 				continue
+			}
+			if !aiAllows(mcpImpact(t)) {
+				continue // high: people act themselves (R19 3.5)
 			}
 			label := t.Title
 			if label == "" {
@@ -97,7 +100,7 @@ func actionFloor(a *store.IncidentAction) string {
 		return a.MCP.Floor
 	}
 	if def := incidentActionByID(a.ID); def != nil {
-		return def.Floor
+		return def.floor()
 	}
 	return impactHigh
 }
@@ -106,7 +109,8 @@ func actionReversible(a *store.IncidentAction) bool {
 	if a.MCP != nil {
 		return a.MCP.Revert != ""
 	}
-	return incidentActionReversible[a.ID]
+	def := incidentActionByID(a.ID)
+	return def != nil && webActions[def.Action].Reversible
 }
 
 // mcpAutoBlocked: why the MCP candidate may not run on its own now ("" =

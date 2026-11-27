@@ -8,20 +8,19 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/sha256"
-	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/registryclient"
-	"github.com/jay94ks/mydcd/internal/schema"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/registryclient"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/sfcp"
 )
 
-const imageContentChunk = 24 << 10
+const imageContentChunk = sfcp.ChunkSize
 const imageContentWindow = 8 << 20
 const imageContentSeconds = 900
 
@@ -66,15 +65,15 @@ type ImageContentSource struct {
 	Authorize func(context.Context) error
 }
 
-func imageContentReply(stream mydcp.Stream, frame mydcp.Frame, header [32]byte, r ImageContentReply) error {
+func imageContentReply(stream sfcp.Stream, frame sfcp.Frame, header [32]byte, r ImageContentReply) error {
 	r.Schema = 1
 	raw, err := json.Marshal(r)
 	if err != nil {
 		return err
 	}
-	return mydcp.WriteFrame(stream, mydcp.Frame{Purpose: mydcp.ImageContent, Kind: 2, Request: frame.Request, Fields: []mydcp.Field{{Tag: 1, Required: true, Value: raw}, {Tag: 2, Required: true, Value: header[:]}}})
+	return sfcp.WriteFrame(stream, sfcp.Frame{Purpose: sfcp.ImageContent, Kind: 2, Request: frame.Request, Fields: []sfcp.Field{{Tag: 1, Required: true, Value: raw}, {Tag: 2, Required: true, Value: header[:]}}})
 }
-func contentDeadline(stream mydcp.Stream, ctx context.Context) error {
+func contentDeadline(stream sfcp.Stream, ctx context.Context) error {
 	deadline := time.Now().Add(60 * time.Second)
 	if end, ok := ctx.Deadline(); ok && end.Before(deadline) {
 		deadline = end
@@ -84,29 +83,24 @@ func contentDeadline(stream mydcp.Stream, ctx context.Context) error {
 	}
 	return stream.SetDeadline(deadline)
 }
-func writeImageContent(stream mydcp.Stream, id uint64, header [32]byte, offset uint64, data []byte) error {
-	if len(data) == 0 || len(data) > imageContentChunk {
-		return mydcp.ErrFrame
-	}
-	var raw [8]byte
-	binary.LittleEndian.PutUint64(raw[:], offset)
-	return mydcp.WriteFrame(stream, mydcp.Frame{Purpose: mydcp.ImageContent, Kind: 4, Request: id, Fields: []mydcp.Field{{Tag: 1, Required: true, Value: raw[:]}, {Tag: 2, Required: true, Value: data}, {Tag: 3, Required: true, Value: header[:]}}})
+func writeImageContent(stream sfcp.Stream, id uint64, header [32]byte, offset uint64, data []byte) error {
+	return sfcp.WriteChunk(stream, sfcp.ImageContent, id, header, offset, data)
 }
 
-func (s Service) handleImageContent(base context.Context, conn *mydcp.Session, stream mydcp.Stream, frame mydcp.Frame) error {
-	if frame.Kind == 5 {
+func (s Service) handleImageContent(base context.Context, conn *sfcp.Session, stream sfcp.Stream, frame sfcp.Frame) error {
+	if frame.Kind == sfcp.KindImageSourceRead {
 		return s.handleImageBuildBaseContent(base, conn, stream, frame)
 	}
 	if frame.Kind != 1 && frame.Kind != 3 {
-		return mydcp.ErrFrame
+		return sfcp.ErrFrame
 	}
 	header := sha256.Sum256(frame.Fields[0].Value)
 	if !bytes.Equal(header[:], frame.Fields[1].Value) {
-		return mydcp.ErrFrame
+		return sfcp.ErrFrame
 	}
 	envelope, err := schema.Decode[Envelope](frame.Fields[0].Value)
 	if err != nil {
-		return mydcp.ErrFrame
+		return sfcp.ErrFrame
 	}
 	defer clear(frame.Fields[0].Value)
 	defer clear(envelope.Body)
@@ -175,14 +169,14 @@ func (s Service) handleImageContent(base context.Context, conn *mydcp.Session, s
 		if err := check(call); err != nil {
 			return err
 		}
-		return conn.Admit(frame, mydcp.ImageContent, false)
+		return conn.Admit(frame, sfcp.ImageContent, false)
 	}
 	return sendImageContent(ctx, stream, frame, header, source)
 }
 
 // sendImageContent is shared by the actual authenticated handler and transport
 // fault fixtures. It owns no alternate selection/authentication algorithm.
-func sendImageContent(ctx context.Context, stream mydcp.Stream, frame mydcp.Frame, header [32]byte, source ImageContentSource) error {
+func sendImageContent(ctx context.Context, stream sfcp.Stream, frame sfcp.Frame, header [32]byte, source ImageContentSource) error {
 	respond := func(code string) error {
 		return imageContentReply(stream, frame, header, ImageContentReply{Code: code})
 	}
@@ -196,7 +190,7 @@ func sendImageContent(ctx context.Context, stream mydcp.Stream, frame mydcp.Fram
 	})
 	if err != nil {
 		var failed *Error
-		if errors.As(err, &failed) && failed.Phase == mydcp.Completed {
+		if errors.As(err, &failed) && failed.Phase == sfcp.Completed {
 			return respond(failed.Code)
 		}
 		return err
@@ -215,7 +209,7 @@ func ReadImageContentSource(ctx context.Context, query registryclient.ContentQue
 		defer func() { failure = errors.Join(failure, source.Body.Close()) }()
 	}
 	if to == nil || source.Body == nil || source.Authorize == nil || !source.Info.Valid(query) {
-		return info, mydcp.ErrAdmission
+		return info, sfcp.ErrAdmission
 	}
 	if source.Lifetime != nil {
 		call, cancel := context.WithCancel(ctx)
@@ -235,7 +229,7 @@ func ReadImageContentSource(ctx context.Context, query registryclient.ContentQue
 }
 
 func consumeImageContent(ctx context.Context, source ImageContentSource, begin func() error, write func(int64, []byte) error) error {
-	failed := func(code string) error { return &Error{Code: code, Phase: mydcp.Completed} }
+	failed := func(code string) error { return &Error{Code: code, Phase: sfcp.Completed} }
 	closeBody := context.AfterFunc(ctx, func() { _ = source.Body.Close() })
 	defer closeBody()
 	if err := ctx.Err(); err != nil {
@@ -291,32 +285,32 @@ func consumeImageContent(ctx context.Context, source ImageContentSource, begin f
 
 // ReadImageContent performs one immutable read. Bytes are tentative until this
 // returns success; consumers must not publish a cache/file after a partial read.
-func (c Client) ReadImageContent(ctx context.Context, peer mydcp.Peer, session access.Session, tenant string, q registryclient.ContentQuery, to io.Writer) (registryclient.ContentInfo, error) {
+func (c Client) ReadImageContent(ctx context.Context, peer sfcp.Peer, session access.Session, tenant string, q registryclient.ContentQuery, to io.Writer) (registryclient.ContentInfo, error) {
 	if c.Verify(session) != nil || to == nil || !q.Valid() {
-		return registryclient.ContentInfo{}, mydcp.ErrAdmission
+		return registryclient.ContentInfo{}, sfcp.ErrAdmission
 	}
 	request := ImageContentRequest{Schema: 1, Tenant: tenant, Query: q, ExpiresAt: min(time.Now().Unix()+imageContentSeconds, session.ExpiresAt)}
 	if _, err := rand.Read(request.Nonce[:]); err != nil {
 		return registryclient.ContentInfo{}, err
 	}
-	return c.imageContentExchange(ctx, peer, request, 1, func(conn *mydcp.Session, body []byte) (Envelope, error) {
+	return c.imageContentExchange(ctx, peer, request, 1, func(conn *sfcp.Session, body []byte) (Envelope, error) {
 		return Envelope{Body: body, Session: &session, Signature: ed25519.Sign(c.Self.Private, access.RequestBytes(session, conn.PeerChallenge(), body))}, nil
 	}, nil, to)
 }
 
-func (c Client) imageContentExchange(base context.Context, peer mydcp.Peer, q ImageContentRequest, kind uint8, makeEnvelope func(*mydcp.Session, []byte) (Envelope, error), begin func(registryclient.ContentInfo) error, to io.Writer) (registryclient.ContentInfo, error) {
+func (c Client) imageContentExchange(base context.Context, peer sfcp.Peer, q ImageContentRequest, kind uint8, makeEnvelope func(*sfcp.Session, []byte) (Envelope, error), begin func(registryclient.ContentInfo) error, to io.Writer) (registryclient.ContentInfo, error) {
 	if !q.valid(time.Now().Unix()) {
-		return registryclient.ContentInfo{}, mydcp.ErrAdmission
+		return registryclient.ContentInfo{}, sfcp.ErrAdmission
 	}
 	return c.imageContentTransfer(base, peer, q, q.Query, q.ExpiresAt, kind, makeEnvelope, begin, to)
 }
 
 // Both user reads and accepted-build owner reads use the same framing,
 // tentative-byte, length/digest and final EOF checks. Their grants differ.
-func (c Client) imageContentTransfer(base context.Context, peer mydcp.Peer, request any, query registryclient.ContentQuery, expiresAt int64, kind uint8, makeEnvelope func(*mydcp.Session, []byte) (Envelope, error), begin func(registryclient.ContentInfo) error, to io.Writer) (registryclient.ContentInfo, error) {
+func (c Client) imageContentTransfer(base context.Context, peer sfcp.Peer, request any, query registryclient.ContentQuery, expiresAt int64, kind uint8, makeEnvelope func(*sfcp.Session, []byte) (Envelope, error), begin func(registryclient.ContentInfo) error, to io.Writer) (registryclient.ContentInfo, error) {
 	var info registryclient.ContentInfo
 	if c.Mesh == nil || c.Self == nil || c.Self.Public != [32]byte(c.Mesh.LocalKey()) || !query.Valid() || expiresAt <= time.Now().Unix() || to == nil {
-		return info, mydcp.ErrAdmission
+		return info, sfcp.ErrAdmission
 	}
 	ctx, cancel := context.WithDeadline(base, time.Unix(expiresAt, 0))
 	defer cancel()
@@ -324,7 +318,7 @@ func (c Client) imageContentTransfer(base context.Context, peer mydcp.Peer, requ
 	defer done()
 	conn, err := c.Mesh.Dial(setup, peer)
 	if err != nil {
-		return info, &Error{Code: "transport", Phase: mydcp.NotSent, Cause: err}
+		return info, &Error{Code: "transport", Phase: sfcp.NotSent, Cause: err}
 	}
 	body, err := json.Marshal(request)
 	if err != nil {
@@ -353,7 +347,7 @@ func (c Client) imageContentTransfer(base context.Context, peer mydcp.Peer, requ
 	if err = contentDeadline(stream, ctx); err != nil {
 		return info, err
 	}
-	if err = mydcp.WriteFrame(stream, mydcp.Frame{Purpose: mydcp.ImageContent, Kind: kind, Request: id, Fields: []mydcp.Field{{Tag: 1, Required: true, Value: raw}, {Tag: 2, Required: true, Value: header[:]}}}); err != nil {
+	if err = sfcp.WriteFrame(stream, sfcp.Frame{Purpose: sfcp.ImageContent, Kind: kind, Request: id, Fields: []sfcp.Field{{Tag: 1, Required: true, Value: raw}, {Tag: 2, Required: true, Value: header[:]}}}); err != nil {
 		return info, err
 	}
 	if err = stream.Close(); err != nil {
@@ -366,18 +360,18 @@ func (c Client) imageContentTransfer(base context.Context, peer mydcp.Peer, requ
 		if err = contentDeadline(stream, ctx); err != nil {
 			return info, err
 		}
-		frame, err := mydcp.ReadFrame(stream, 128<<10)
+		frame, err := sfcp.ReadFrame(stream, 128<<10)
 		if err != nil {
 			return info, err
 		}
-		if frame.Purpose != mydcp.ImageContent || frame.Request != id || conn.Admit(frame, mydcp.ImageContent, false) != nil {
-			return info, mydcp.ErrFrame
+		if frame.Purpose != sfcp.ImageContent || frame.Request != id || conn.Admit(frame, sfcp.ImageContent, false) != nil {
+			return info, sfcp.ErrFrame
 		}
 		if frame.Kind == 4 {
-			data := frame.Fields[1].Value
-			if !ready || !bytes.Equal(frame.Fields[2].Value, header[:]) || binary.LittleEndian.Uint64(frame.Fields[0].Value) != uint64(offset) || len(data) == 0 || len(data) > imageContentChunk || int64(len(data)) > info.Bytes-offset {
-				clear(data)
-				return info, mydcp.ErrFrame
+			data, err := sfcp.Chunk(frame, header, uint64(offset), uint64(max(info.Bytes-offset, 0)))
+			if !ready || err != nil {
+				clear(frame.Fields[1].Value)
+				return info, sfcp.ErrFrame
 			}
 			_, _ = hash.Write(data)
 			n, err := to.Write(data)
@@ -385,19 +379,19 @@ func (c Client) imageContentTransfer(base context.Context, peer mydcp.Peer, requ
 			if err != nil {
 				return info, err
 			}
-			if n != len(frame.Fields[1].Value) {
+			if n != len(data) {
 				return info, io.ErrShortWrite
 			}
 			offset += int64(n)
 			continue
 		}
 		if frame.Kind != 2 || !bytes.Equal(frame.Fields[1].Value, header[:]) {
-			return info, mydcp.ErrFrame
+			return info, sfcp.ErrFrame
 		}
 		reply, err := schema.Decode[ImageContentReply](frame.Fields[0].Value)
 		clear(frame.Fields[0].Value)
 		if err != nil || !reply.valid(query) {
-			return info, mydcp.ErrFrame
+			return info, sfcp.ErrFrame
 		}
 		if !ready && reply.Code == "ready" {
 			info = *reply.Info
@@ -410,49 +404,31 @@ func (c Client) imageContentTransfer(base context.Context, peer mydcp.Peer, requ
 			continue
 		}
 		if ready && reply.Code == "ready" {
-			return info, mydcp.ErrFrame
+			return info, sfcp.ErrFrame
 		}
 		if reply.Code != "ok" {
 			if streamEOF(stream) != nil {
-				return info, mydcp.ErrFrame
+				return info, sfcp.ErrFrame
 			}
-			return info, &Error{Code: reply.Code, Phase: mydcp.Completed}
+			return info, &Error{Code: reply.Code, Phase: sfcp.Completed}
 		}
 		if !ready || *reply.Info != info || offset != info.Bytes || "sha256:"+hex.EncodeToString(hash.Sum(nil)) != info.Digest || streamEOF(stream) != nil {
-			return info, mydcp.ErrFrame
+			return info, sfcp.ErrFrame
 		}
 		return info, nil
 	}
 }
 
-type imageContentRelayWriter struct {
-	ctx     context.Context
-	stream  mydcp.Stream
-	request uint64
-	header  [32]byte
-	offset  uint64
-}
-
-func (w *imageContentRelayWriter) Write(data []byte) (int, error) {
-	if err := contentDeadline(w.stream, w.ctx); err != nil {
-		return 0, err
-	}
-	if err := writeImageContent(w.stream, w.request, w.header, w.offset, data); err != nil {
-		return 0, err
-	}
-	w.offset += uint64(len(data))
-	return len(data), nil
-}
-func (s Service) forwardImageContent(ctx context.Context, stream mydcp.Stream, frame mydcp.Frame, header [32]byte, envelope Envelope, binding userBinding, q ImageContentRequest, owner [32]byte) error {
-	peer, ok := s.Mesh.Peer(mydcp.Identity(owner))
+func (s Service) forwardImageContent(ctx context.Context, stream sfcp.Stream, frame sfcp.Frame, header [32]byte, envelope Envelope, binding userBinding, q ImageContentRequest, owner [32]byte) error {
+	peer, ok := s.Mesh.Peer(sfcp.Identity(owner))
 	if !ok || !peer.Member {
 		return imageContentReply(stream, frame, header, ImageContentReply{Code: "unavailable"})
 	}
 	c := Client{Mesh: s.Mesh, Self: s.Self, Cluster: s.Policy.Cluster}
-	writer := &imageContentRelayWriter{ctx: ctx, stream: stream, request: frame.Request, header: header}
-	info, err := c.imageContentExchange(ctx, peer, q, 3, func(conn *mydcp.Session, body []byte) (Envelope, error) {
+	writer := &sfcp.ChunkWriter{Stream: stream, Purpose: sfcp.ImageContent, Request: frame.Request, Header: header, Check: func() error { return contentDeadline(stream, ctx) }}
+	info, err := c.imageContentExchange(ctx, peer, q, 3, func(conn *sfcp.Session, body []byte) (Envelope, error) {
 		if !bytes.Equal(body, envelope.Body) {
-			return Envelope{}, mydcp.ErrFrame
+			return Envelope{}, sfcp.ErrFrame
 		}
 		copy := envelope
 		copy.Relay = &Relay{Node: s.Self.Public, Target: owner, Caller: binding.key, Challenge: binding.challenge, Connection: conn.PeerChallenge()}
@@ -464,7 +440,7 @@ func (s Service) forwardImageContent(ctx context.Context, stream mydcp.Stream, f
 	if err != nil {
 		code := "unavailable"
 		var failure *Error
-		if errors.As(err, &failure) && failure.Phase == mydcp.Completed {
+		if errors.As(err, &failure) && failure.Phase == sfcp.Completed {
 			code = failure.Code
 		}
 		return imageContentReply(stream, frame, header, ImageContentReply{Code: code})

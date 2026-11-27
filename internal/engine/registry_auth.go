@@ -7,44 +7,44 @@ import (
 	"io"
 	"strings"
 
-	"github.com/jay94ks/mydcd/internal/registryclient"
-
-	"github.com/moby/moby/api/pkg/authconfig"
-	"github.com/moby/moby/api/types/registry"
+	"github.com/jay94ks/seafield/internal/registryclient"
 )
 
 // RegistryAuth is ephemeral request input, never a ContainerSpec or a journal
-// field. Zero means no explicit registry credential. Managed credentials use
-// Docker's exchange; explicit external input owns a scoped OCI client and CA.
-// Neither installs ambient config nor an anonymous auth retry callback.
+// field: the one source sfcd reads a pinned image from when the engine pulls
+// it (purpose 37). Zero means an anonymous read of the reference's own
+// registry. The engine never contacts a registry and receives no credential;
+// ImageWithAuth owns and closes the source.
 type RegistryAuth struct {
-	value, authority string
-	external         *registryclient.Access
-	observePull      func(registryclient.PullOutcome)
+	authority   string
+	source      *registryclient.Access
+	observePull func(registryclient.PullOutcome)
 }
 
 func (RegistryAuth) Format(s fmt.State, _ rune)   { _, _ = io.WriteString(s, "[redacted registry auth]") }
 func (RegistryAuth) MarshalJSON() ([]byte, error) { return nil, ErrOwnership }
+
+// NewRegistryAuth reads a cluster registry with a signed Task or build login.
+// The registry's own token exchange checks it; trust is the system's.
 func NewRegistryAuth(authority, username string, password []byte) (RegistryAuth, error) {
 	if authority == "" || strings.ContainsAny(authority, "/@?#\\ \t\r\n") || username == "" || len(password) == 0 {
 		return RegistryAuth{}, ErrOwnership
 	}
-	value, err := authconfig.Encode(registry.AuthConfig{ServerAddress: authority, Username: username, Password: string(password)})
+	a, err := registryclient.New(authority, []byte(username), password, nil)
 	if err != nil {
 		return RegistryAuth{}, ErrOwnership
 	}
-	return RegistryAuth{value: value, authority: authority}, nil
+	return RegistryAuth{authority: authority, source: a}, nil
 }
 
 // NewExternalRegistryAuth uses an isolated registry SDK client so tenant CA and
 // authentication never depend on daemon-wide trust or ambient credentials.
-// ImageWithAuth owns and closes this single-call private input.
 func NewExternalRegistryAuth(authority string, username, password, ca []byte) (RegistryAuth, error) {
 	a, err := registryclient.New(authority, username, password, ca)
 	if err != nil {
 		return RegistryAuth{}, err
 	}
-	return RegistryAuth{authority: authority, external: a}, nil
+	return RegistryAuth{authority: authority, source: a}, nil
 }
 
 // WithPullObserver attaches a diagnostic sink to this single-call input. It

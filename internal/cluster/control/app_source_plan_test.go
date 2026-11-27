@@ -8,17 +8,17 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/deployment"
-	checker "github.com/jay94ks/mydcd/internal/workload/lifecycle"
+	"github.com/jay94ks/seafield/internal/deployment"
+	checker "github.com/jay94ks/seafield/internal/workload/lifecycle"
 )
 
 func TestAppSourcePlanBindsExactDocumentScopeAndDeclaredLocks(t *testing.T) {
-	raw := []byte("name: demo\nx-mydc:\n  lifecycle:\n    scripts:\n      inline: {source: 'package checker'}\nservices:\n  web:\n    image: docker.io/library/php@sha256:" + strings.Repeat("a", 64) + "\n    x-mydc:\n      lifecycle:\n        checks: [{id: ready, phase: readiness, script: inline}]\n")
+	raw := []byte("name: demo\nx-sfc:\n  lifecycle:\n    scripts:\n      inline: {source: 'package checker'}\nservices:\n  web:\n    image: docker.io/library/php@sha256:" + strings.Repeat("a", 64) + "\n    x-sfc:\n      lifecycle:\n        checks: [{id: ready, phase: readiness, script: inline}]\n")
 	doc, err := deployment.ParseApp(raw)
 	if err != nil {
 		t.Fatal(err)
 	}
-	descriptor, err := doc.MyDC.Lifecycle.Scripts["inline"].Descriptor("tenant")
+	descriptor, err := doc.Sfc.Lifecycle.Scripts["inline"].Descriptor("tenant")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -13,10 +13,10 @@ import (
 
 	"github.com/moby/moby/client"
 
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/network/services"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/network/services"
 )
 
 func TestRealBoundaryManagedAppDNSCLIAndRetirement(t *testing.T) {
@@ -143,7 +143,7 @@ try:
   p=subprocess.run(['python3','-c',script,name],capture_output=True,text=True,timeout=8)
   print('actual glibc getaddrinfo',name,p.returncode,p.stdout,p.stderr,flush=True)
   assert p.returncode==0 and json.loads(p.stdout)==[sys.argv[2]]
- for name in ['web.app.mydc.test.','web']:
+ for name in ['web.app.sfc.test.','web']:
   with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
    jobs=[pool.submit(f,name) for f in [php_lookup,addrinfo_lookup]]
    for job in jobs:job.result()

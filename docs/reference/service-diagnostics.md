@@ -5,9 +5,9 @@
 ## 논리 서비스에 POST
 
 ```sh
-mydc --tenant shop service-call storefront api --port 8080 --path /approve \
+sfcli --tenant shop service-call storefront api --port 8080 --path /approve \
   --header Content-Type=application/json --body-file request.json
-mydc --tenant shop service-call storefront api --port 8443 --path /approve --scheme https
+sfcli --tenant shop service-call storefront api --port 8443 --path /approve --scheme https
 ```
 
 User Request는 다음 필드를 사용한다. `Schema`는1이며 `Nonce`는 SDK가 매 요청 생성하는 기존 32바이트 nonce다. 아래는 body가 UTF-8 `{}` 두 바이트인 예시다. 표시된 Nonce는 형식 설명용이며 실제 요청마다 새 값을 사용한다.
@@ -28,7 +28,7 @@ User Request는 다음 필드를 사용한다. `Schema`는1이며 `Nonce`는 SDK
 | `Port` |1–65535, 선택 Task의 컨테이너 포트 |
 | `Path` | 단일 `/`로 시작하는 상대 HTTP request URI, 최대4096바이트; 절대 URL/authority 금지 |
 | `Method` | `POST` |
-| `Headers` | `Content-Type`, `X-MyDC-*`만; 최대32개·총8KiB, 중복 대소문자/개행 금지 |
+| `Headers` | `Content-Type`, `X-SFC-*`만; 최대32개·총8KiB, 중복 대소문자/개행 금지 |
 | `Body` | 최대256KiB |
 | `TimeoutMS` |0이면10초, 명시1–30000ms |
 | `Scheme` | 생략/`http`, 또는 `https` |
@@ -39,7 +39,7 @@ HTTPS는 기본 OS 신뢰와 선택한 tenant의 **설치된 CA bundle**로 실�
 ```yaml
 service_cas:
   - tenant: shop
-    ca_file: /etc/mydc/shop-service-ca.pem
+    ca_file: /etc/sfc/shop-service-ca.pem
 ```
 
 `--insecure-skip-verify`는 해당 HTTPS 한 호출에만 적용되며 저장된 신뢰를 변경하지 않는다. TLS 인증서·handshake 오류와 HTTP 포트에 HTTPS를 사용한 오류는 `SERVICE_CALL_TLS`, TCP 연결 실패는 `SERVICE_CALL_REFUSED`다.
@@ -69,7 +69,7 @@ Body는 Go `[]byte`의 JSON base64 문자열이다. 응답 body 최대64KiB, hea
 ## read-only Git 연결 검사
 
 ```sh
-mydc --tenant shop cd probe storefront --repository https://git.example/team/app.git \
+sfcli --tenant shop cd probe storefront --repository https://git.example/team/app.git \
   --branch main --path app.yaml --credential git-read
 ```
 

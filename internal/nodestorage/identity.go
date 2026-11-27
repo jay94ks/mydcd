@@ -20,7 +20,6 @@ var ErrStorage = errors.New("node storage ownership, identity or revision confli
 var ErrUnsupported = errors.New("filesystem does not provide a supported stable directory identity")
 
 const maxRoots = 1024
-const maxVolumes = 256
 
 func identifier(s string) bool {
 	if len(s) < 1 || len(s) > 63 || s[0] < 'a' || s[0] > 'z' {
@@ -73,7 +72,7 @@ func (r Reference) Validate() error {
 
 func (r Reference) Digest() [32]byte {
 	raw, _ := json.Marshal(r)
-	return sha256.Sum256(append([]byte("mydc-storage-root-ref-1\x00"), raw...))
+	return sha256.Sum256(append([]byte("sfc-storage-root-ref-1\x00"), raw...))
 }
 
 // Directory binds an actual filesystem and exported inode generation, not just
@@ -121,7 +120,7 @@ type RootFact struct {
 func RootFactBytes(f RootFact) []byte {
 	f.Signature = nil
 	raw, _ := json.Marshal(f)
-	return append([]byte("mydc-storage-root-fact-1\x00"), raw...)
+	return append([]byte("sfc-storage-root-fact-1\x00"), raw...)
 }
 func (f RootFact) Verify() error {
 	if f.Schema != 1 || f.Root.Validate() != nil || f.Directory.Validate() != nil || !ed25519.Verify(ed25519.PublicKey(f.Root.Key[:]), RootFactBytes(f), f.Signature) {
@@ -145,7 +144,7 @@ type RootClosed struct {
 func RootClosedBytes(f RootClosed) []byte {
 	f.Signature = nil
 	raw, _ := json.Marshal(f)
-	return append([]byte("mydc-storage-root-closed-1\x00"), raw...)
+	return append([]byte("sfc-storage-root-closed-1\x00"), raw...)
 }
 func (f RootClosed) Verify() error {
 	if f.Schema != 1 || f.Root.Validate() != nil || !f.NoUsers || !f.NoPending || !ed25519.Verify(ed25519.PublicKey(f.Root.Key[:]), RootClosedBytes(f), f.Signature) {
@@ -181,7 +180,7 @@ func (s FixedSelection) Validate() error {
 func (s FixedSelection) Clone() FixedSelection { s.Root = ownFact(s.Root); return s }
 func (s FixedSelection) Digest() [32]byte {
 	raw, _ := json.Marshal(s)
-	return sha256.Sum256(append([]byte("mydc-fixed-selection-1\x00"), raw...))
+	return sha256.Sum256(append([]byte("sfc-fixed-selection-1\x00"), raw...))
 }
 func (s FixedSelection) FilesystemPath() string {
 	return path.Join(s.Root.Directory.FilesystemPath, strings.TrimPrefix(s.Path, s.Root.Root.Path+"/"))
@@ -212,7 +211,7 @@ func (d FixedDirectory) Clone() FixedDirectory {
 
 func (d FixedDirectory) Digest() [32]byte {
 	raw, _ := json.Marshal(d)
-	return sha256.Sum256(append([]byte("mydc-fixed-directory-1\x00"), raw...))
+	return sha256.Sum256(append([]byte("sfc-fixed-directory-1\x00"), raw...))
 }
 
 // Overlaps compares backing filesystem coordinates as well as exported inode

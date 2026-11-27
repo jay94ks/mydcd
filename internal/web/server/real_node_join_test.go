@@ -9,10 +9,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/cluster/membership"
+	"github.com/jay94ks/seafield/internal/cluster/membership"
 )
 
-// A server joins through the web on real mydcd: the invite and its
+// A server joins through the web on real sfcd: the invite and its
 // refusals, the invitation download and summary, then the joining node
 // starts with it, becomes ready and is promoted to a voter.
 func TestRealServerNodeJoin(t *testing.T) {
@@ -66,7 +66,7 @@ func TestRealServerNodeJoin(t *testing.T) {
 		}
 		raw, _ = io.ReadAll(resp.Body)
 		resp.Body.Close()
-		return resp.StatusCode == 200 && resp.Header.Get("Content-Disposition") == `attachment; filename="mydc-invitation-node-1.json"`
+		return resp.StatusCode == 200 && resp.Header.Get("Content-Disposition") == `attachment; filename="sfc-invitation-node-1.json"`
 	})
 	inv, err := membership.DecodeInvitation(raw)
 	if err != nil || inv.Target.ID != "node-1" || inv.JoinID != "join-node-1" || inv.Target.Voter {

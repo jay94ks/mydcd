@@ -15,7 +15,7 @@ import (
 	"os"
 	"sync"
 
-	"github.com/jay94ks/mydcd/internal/nodestorage"
+	"github.com/jay94ks/seafield/internal/nodestorage"
 	bolt "go.etcd.io/bbolt"
 	"golang.org/x/sys/unix"
 )
@@ -73,11 +73,11 @@ func openSpool(rootFD int, root nodestorage.Reference, db Transactions, create b
 		return nil, ErrInvalid
 	}
 	if create {
-		if err := unix.Mkdirat(rootFD, ".mydc-imagebuild", 0700); err != nil && !errors.Is(err, unix.EEXIST) {
+		if err := unix.Mkdirat(rootFD, ".sfc-imagebuild", 0700); err != nil && !errors.Is(err, unix.EEXIST) {
 			return nil, ErrStorage
 		}
 	}
-	fd, err := unix.Openat2(rootFD, ".mydc-imagebuild", &unix.OpenHow{Flags: unix.O_RDONLY | unix.O_DIRECTORY | unix.O_CLOEXEC, Resolve: unix.RESOLVE_BENEATH | unix.RESOLVE_NO_SYMLINKS | unix.RESOLVE_NO_MAGICLINKS | unix.RESOLVE_NO_XDEV})
+	fd, err := unix.Openat2(rootFD, ".sfc-imagebuild", &unix.OpenHow{Flags: unix.O_RDONLY | unix.O_DIRECTORY | unix.O_CLOEXEC, Resolve: unix.RESOLVE_BENEATH | unix.RESOLVE_NO_SYMLINKS | unix.RESOLVE_NO_MAGICLINKS | unix.RESOLVE_NO_XDEV})
 	if err != nil {
 		return nil, ErrStorage
 	}
@@ -784,5 +784,5 @@ func (s *Spool) ReclaimEvidence(scope UploadScope) ([32]byte, error) {
 	if err != nil || !header.Deleted || header.Deleting || s.readers[scope.Hash()] != 0 {
 		return [32]byte{}, ErrStorage
 	}
-	return digestJSON("mydc-imagebuild-native-reclaim-1", header), nil
+	return digestJSON("sfc-imagebuild-native-reclaim-1", header), nil
 }

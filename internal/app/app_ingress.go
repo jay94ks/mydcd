@@ -8,14 +8,15 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
+	"strings"
 
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/desired"
-	"github.com/jay94ks/mydcd/internal/ingress"
-	"github.com/jay94ks/mydcd/internal/schema"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/desired"
+	"github.com/jay94ks/seafield/internal/ingress"
+	"github.com/jay94ks/seafield/internal/schema"
 )
 
 func managedIngressID(key string, generation uint64, spec ingress.Spec) string {
@@ -34,7 +35,9 @@ func (r *Runtime) reconcileManagedIngress(v cluster.View, p control.ResourceProj
 		}
 	}
 	for _, key := range r.ingress.Keys() {
-		keys[key] = true
+		if !clusterAppIngressKey(key) {
+			keys[key] = true
+		}
 	}
 	for _, key := range desired.Sorted(keys) {
 		o := v.State.Object(key)
@@ -144,6 +147,9 @@ func ingressReplicaFacts(goal deployment.GoalCommand, execution deployment.Execu
 }
 
 func (d ingressDependencies) managedDependency(ctx context.Context, b ingress.BackendSpec) (string, uint64, bool, error) {
+	if strings.HasPrefix(b.Task, deployment.ClusterAppPrefix) {
+		return d.clusterAppDependency(ctx, b)
+	}
 	v, err := d.r.Engine().Read(ctx, false)
 	if err != nil {
 		return "", 0, false, err

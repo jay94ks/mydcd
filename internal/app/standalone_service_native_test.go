@@ -20,18 +20,18 @@ import (
 	"time"
 
 	cerrdefs "github.com/containerd/errdefs"
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/containerops"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/engine"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/schema"
-	"github.com/jay94ks/mydcd/internal/userauth"
-	"github.com/jay94ks/mydcd/internal/workload"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/containerops"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/engine"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/userauth"
+	"github.com/jay94ks/seafield/internal/workload"
 	"github.com/moby/moby/client"
 	"gopkg.in/yaml.v3"
 )
@@ -58,15 +58,15 @@ func TestRQ9RealStandaloneServiceRecreationAndOriginalRecovery(t *testing.T) {
 // This is intentionally a hook, not an independently launched fixture/root.
 // This fixture uses the Ingress listener -> service backend port 8080.
 // Direct Compose ports have separate fixed/dynamic TCP and UDP native tests.
-func prepareStandaloneServiceNative(t *testing.T, ctx context.Context, r *Runtime, root string, document []byte, user userauth.Client, peer mydcp.Peer, session access.Session, p control.Policy, read func() cluster.View, change func(string, string, uint64, any), wait func(string, func() bool), recreationOnly bool) func(*Runtime) {
+func prepareStandaloneServiceNative(t *testing.T, ctx context.Context, r *Runtime, root string, document []byte, user userauth.Client, peer sfcp.Peer, session access.Session, p control.Policy, read func() cluster.View, change func(string, string, uint64, any), wait func(string, func() bool), recreationOnly bool) func(*Runtime) {
 	t.Helper()
 	const name = "service-fields"
 	input, err := deployment.ParseApp(document)
-	if err != nil || len(input.Services) != 1 || input.MyDC.Ingress == nil || r.ingress == nil {
+	if err != nil || len(input.Services) != 1 || input.Sfc.Ingress == nil || r.ingress == nil {
 		t.Fatal("standalone service requires the original single-service/Ingress app input", err)
 	}
 	service, ok := input.Services["web"]
-	if !ok || len(service.Volumes) != 1 || len(service.Secrets) != 1 || len(service.MyDC.Sources) != 1 || service.Healthcheck == nil || service.MyDC.Readiness == nil || service.Environment["MYDC_PROJECTION_FILE"] == "" {
+	if !ok || len(service.Volumes) != 1 || len(service.Secrets) != 1 || len(service.Sfc.Sources) != 1 || service.Healthcheck == nil || service.Sfc.Readiness == nil || service.Environment["SFC_PROJECTION_FILE"] == "" {
 		t.Fatal("standalone service requires the original Volume/Secret/Group/health/readiness fields")
 	}
 	apps, err := p.Apps(read().State)
@@ -103,7 +103,7 @@ func prepareStandaloneServiceNative(t *testing.T, ctx context.Context, r *Runtim
 	var lastDiagnostic []byte
 	call := func(want int, files []*os.File, args ...string) []byte {
 		t.Helper()
-		out, diagnostic, e := runManagedCLICommand(ctx, os.Getenv("MYDC_TEST_CLI"), filepath.Join(root, "cli-home"), filepath.Join(root, "cli.yaml"), append([]string{"--tenant", "tenant"}, args...), files)
+		out, diagnostic, e := runManagedCLICommand(ctx, os.Getenv("SFC_TEST_CLI"), filepath.Join(root, "cli-home"), filepath.Join(root, "cli.yaml"), append([]string{"--tenant", "tenant"}, args...), files)
 		code := 0
 		if e != nil {
 			if exit, ok := e.(interface{ ExitCode() int }); ok {
@@ -157,15 +157,15 @@ func prepareStandaloneServiceNative(t *testing.T, ctx context.Context, r *Runtim
 		}
 	}
 	keep := true
-	input.Volumes["shared-fixed"] = deployment.ComposeVolume{Name: "data", External: true, MyDC: deployment.VolumeExtension{Driver: "local", Access: "single-writer", Retain: &keep, Quota: "observe"}}
+	input.Volumes["shared-fixed"] = deployment.ComposeVolume{Name: "data", External: true, Sfc: deployment.VolumeExtension{Driver: "local", Access: "single-writer", Retain: &keep, Quota: "observe"}}
 	service.Volumes = append(service.Volumes, deployment.Mount{Type: "volume", Source: "shared-fixed", Target: "/shared"})
 	// Keep all service storage/projection/readiness fields. Only workload-owned
 	// coordinates and explicit backend process/logging fixture inputs change.
-	input.Name, input.MyDC.Deployment = name, "standalone-service-deploy"
+	input.Name, input.Sfc.Deployment = name, "standalone-service-deploy"
 	entry, command := deployment.Arguments{"/backend"}, deployment.Arguments{}
 	service.Entrypoint, service.Command = &entry, &command
-	service.Environment["MYDC_OBSERVATION_FIXTURE"] = "1"
-	service.Environment["MYDC_STANDALONE_UPDATE"] = "initial"
+	service.Environment["SFC_OBSERVATION_FIXTURE"] = "1"
+	service.Environment["SFC_STANDALONE_UPDATE"] = "initial"
 	// Finite Docker exec and the serving Go process share this one cgroup.
 	service.Memory = "64m"
 	service.Logging = &workload.LogPolicy{Driver: "local", Options: map[string]string{"max-size": "16k", "max-file": "2", "compress": "false"}}
@@ -179,7 +179,7 @@ func prepareStandaloneServiceNative(t *testing.T, ctx context.Context, r *Runtim
 		// The original app's static reservation remains alive. One adjacent
 		// explicitly selected address belongs to the standalone Task.
 		address, e := netip.ParseAddr(attachment.IPv4)
-		prefix, pe := netip.ParsePrefix(os.Getenv("MYDC_DOCKER_TEST_CIDR"))
+		prefix, pe := netip.ParsePrefix(os.Getenv("SFC_DOCKER_TEST_CIDR"))
 		if e != nil || pe != nil || !prefix.Contains(address.Next()) {
 			t.Fatal("owned fixture address requires room for one standalone")
 		}
@@ -195,10 +195,10 @@ func prepareStandaloneServiceNative(t *testing.T, ctx context.Context, r *Runtim
 	if err = listener.Close(); err != nil {
 		t.Fatal(err)
 	}
-	input.MyDC.Ingress.Listeners = []deployment.ListenerDeclaration{{Address: address}}
-	input.MyDC.Ingress.Host = "app.test"
+	input.Sfc.Ingress.Listeners = []deployment.ListenerDeclaration{{Address: address}}
+	input.Sfc.Ingress.Host = "app.test"
 	file := write("standalone-service", input)
-	planArgs := []string{"standalone", "plan", name, "-f", file, "--mode", "entrypoint", "--lifetime", "fixed", "--restart", "no"}
+	planArgs := []string{"standalone", "run", name, "-f", file, "--mode", "entrypoint", "--lifetime", "fixed", "--restart", "no", "--dry-run"}
 	call(0, nil, planArgs...)
 	// A valid plan above is the positive control for the same request with the
 	// existing app's address. Denial must preserve its native and source pins.
@@ -214,7 +214,7 @@ func prepareStandaloneServiceNative(t *testing.T, ctx context.Context, r *Runtim
 	}
 	collision.Services["web"] = collidingService
 	collisionFile := write("standalone-service-address-conflict", collision)
-	call(1, nil, "standalone", "plan", name, "-f", collisionFile, "--mode", "entrypoint", "--lifetime", "fixed", "--restart", "no")
+	call(1, nil, "standalone", "run", name, "-f", collisionFile, "--mode", "entrypoint", "--lifetime", "fixed", "--restart", "no", "--dry-run")
 	unchangedApp()
 	up := func(operation, file string) []byte {
 		t.Helper()
@@ -229,14 +229,20 @@ func prepareStandaloneServiceNative(t *testing.T, ctx context.Context, r *Runtim
 			t.Fatal(err)
 		}
 		t.Log("standalone service original up", operation)
-		out := call(0, []*os.File{password}, "standalone", "up", name, "-f", file, "--mode", "entrypoint", "--lifetime", "fixed", "--restart", "no", "--operation", operation, "--no-input", "--group-password-fd", "tenant/group=3")
+		out := call(0, []*os.File{password}, "standalone", "run", name, "-f", file, "--mode", "entrypoint", "--lifetime", "fixed", "--restart", "no", "--id", operation, "--group-password-fd", "tenant/group=3")
 		intent, ie := userauth.LoadCompose(filepath.Join(root, "cli-home"), user, session, operation)
 		accepted, ae := userauth.LoadOperation(filepath.Join(root, "cli-home"), user, session, "standalone/"+operation+"/accept")
 		var begin control.AppBegin
 		if ie != nil || ae != nil || intent.Target == nil || !control.StandaloneCASAllowed(accepted.Operation.Change) || json.Unmarshal(accepted.Operation.Change.Payload, &begin) != nil || begin.Target == nil || *begin.Target != *intent.Target || accepted.Result == nil || accepted.Result.Code != state.Applied {
 			t.Fatal("standalone CLI lost original management Target/signature/receipt", ie, ae)
 		}
-		return out
+		_ = out
+		view, ve := user.AppOperation(ctx, peer, session, "tenant", control.AppOperationRequest{Standalone: name, ID: operation})
+		if ve != nil || view.AppOperation == nil {
+			t.Fatal("standalone run has no accepted operation", ve)
+		}
+		raw, _ := json.Marshal(view.AppOperation)
+		return raw
 	}
 	up("service-create", file)
 	page := func() control.StandaloneView {
@@ -312,7 +318,7 @@ func prepareStandaloneServiceNative(t *testing.T, ctx context.Context, r *Runtim
 		if !reflect.DeepEqual([]string(c.Entrypoint), []string{"/backend"}) || len(c.Cmd) != 0 || c.User != appInspect.Container.Config.User || c.WorkingDir != appInspect.Container.Config.WorkingDir || c.Healthcheck == nil || !reflect.DeepEqual(c.Healthcheck.Test, service.Healthcheck.Test) || n.Container.HostConfig.LogConfig.Type != "local" || !reflect.DeepEqual(n.Container.HostConfig.LogConfig.Config, service.Logging.Options) {
 			t.Fatal("standalone lost declared process/health/logging fields")
 		}
-		environment := "MYDC_STANDALONE_UPDATE=" + service.Environment["MYDC_STANDALONE_UPDATE"]
+		environment := "SFC_STANDALONE_UPDATE=" + service.Environment["SFC_STANDALONE_UPDATE"]
 		declaredEnvironment := false
 		for _, value := range c.Env {
 			declaredEnvironment = declaredEnvironment || value == environment
@@ -368,11 +374,11 @@ func prepareStandaloneServiceNative(t *testing.T, ctx context.Context, r *Runtim
 		if e != nil {
 			t.Fatal(e)
 		}
-		competitor.Name, competitor.MyDC.Deployment, competitor.MyDC.Ingress = "service-fixed-rival", "service-fixed-rival-deploy", nil
+		competitor.Name, competitor.Sfc.Deployment, competitor.Sfc.Ingress = "service-fixed-rival", "service-fixed-rival-deploy", nil
 		rivalService := competitor.Services["web"]
 		for alias, attachment := range rivalService.Networks {
 			a, e := netip.ParseAddr(attachment.IPv4)
-			prefix, pe := netip.ParsePrefix(os.Getenv("MYDC_DOCKER_TEST_CIDR"))
+			prefix, pe := netip.ParsePrefix(os.Getenv("SFC_DOCKER_TEST_CIDR"))
 			if e != nil || pe != nil || !prefix.Contains(a.Next()) {
 				t.Fatal("owned fixture needs a distinct address for the fixed writer rival")
 			}
@@ -381,7 +387,7 @@ func prepareStandaloneServiceNative(t *testing.T, ctx context.Context, r *Runtim
 		}
 		competitor.Services["web"] = rivalService
 		rivalFile := write("standalone-service-fixed-rival", competitor)
-		denial := call(1, nil, "standalone", "plan", competitor.Name, "-f", rivalFile, "--mode", "entrypoint", "--lifetime", "fixed", "--restart", "no")
+		denial := call(1, nil, "standalone", "run", competitor.Name, "-f", rivalFile, "--mode", "entrypoint", "--lifetime", "fixed", "--restart", "no", "--dry-run")
 		if !bytes.Contains(denial, []byte("VOLUME_WRITER_CONFLICT")) && !bytes.Contains(lastDiagnostic, []byte("VOLUME_WRITER_CONFLICT")) {
 			t.Fatal("competing standalone did not report the specific live Volume writer conflict")
 		}
@@ -396,7 +402,7 @@ func prepareStandaloneServiceNative(t *testing.T, ctx context.Context, r *Runtim
 		}
 		competitor.Services["web"] = rivalService
 		rivalFile = write("standalone-service-fixed-rival-positive", competitor)
-		call(0, nil, "standalone", "plan", competitor.Name, "-f", rivalFile, "--mode", "entrypoint", "--lifetime", "fixed", "--restart", "no")
+		call(0, nil, "standalone", "run", competitor.Name, "-f", rivalFile, "--mode", "entrypoint", "--lifetime", "fixed", "--restart", "no", "--dry-run")
 		registry, err := p.Volumes(read().State)
 		fixedVolume, exists := registry.Volume(fixed.ready.Spec.Scope)
 		if err != nil || !exists || len(fixedVolume.Consumers()) != 1 || fixedVolume.Consumers()[0] != fixedPin(initialBinding).Consumer {
@@ -429,7 +435,7 @@ func prepareStandaloneServiceNative(t *testing.T, ctx context.Context, r *Runtim
 		}
 		body, readErr := io.ReadAll(io.LimitReader(reply.Body, 4096))
 		_ = reply.Body.Close()
-		if readErr != nil || reply.StatusCode != status || path == "/ping" && string(body) != "mydc-boundary /ping" {
+		if readErr != nil || reply.StatusCode != status || path == "/ping" && string(body) != "sfc-boundary /ping" {
 			t.Fatal("standalone actual listener response", reply.StatusCode, readErr)
 		}
 	}
@@ -438,17 +444,18 @@ func prepareStandaloneServiceNative(t *testing.T, ctx context.Context, r *Runtim
 	if !recreationOnly {
 		for _, kind := range []string{"logs", "top", "stats", "inspect"} {
 			var observed struct{ Target containerops.Target }
-			if json.Unmarshal(call(0, nil, "standalone", kind, name, "--json"), &observed) != nil || observed.Target.NativeID != first.NativeID || observed.Target.Standalone != name {
+			if json.Unmarshal(call(0, nil, "standalone", kind, name), &observed) != nil || observed.Target.NativeID != first.NativeID || observed.Target.Standalone != name {
 				t.Fatal("standalone common CLI observation target", kind)
 			}
 		}
-		execArgs := []string{"standalone", "exec", name, "--operation", "service-exec", "--", "/backend", "--exec-args-fixture", "standalone service", "literal;$value"}
+		execArgs := []string{"standalone", "exec", name, "--id", "service-exec", "--", "/backend", "--exec-args-fixture", "standalone service", "literal;$value"}
 		output := call(0, nil, execArgs...)
 		if !bytes.Contains(output, []byte(`["standalone service","literal;$value"]`)) {
 			t.Fatal("standalone CLI exec did not preserve literal argv")
 		}
+		// Running exec again with the same --id reads the first exec's receipt.
 		var repeatedExec, execStatus containerops.ExecStatus
-		if json.Unmarshal(call(0, nil, execArgs...), &repeatedExec) != nil || json.Unmarshal(call(0, nil, "standalone", "exec-status", name, "--operation", "service-exec"), &execStatus) != nil || repeatedExec.Receipt.ExecID == "" || repeatedExec.Receipt.ExecID != execStatus.Receipt.ExecID || execStatus.Receipt.Phase != containerops.ExecFinished {
+		if json.Unmarshal(call(0, nil, execArgs...), &repeatedExec) != nil || json.Unmarshal(call(0, nil, execArgs...), &execStatus) != nil || repeatedExec.Receipt.ExecID == "" || repeatedExec.Receipt.ExecID != execStatus.Receipt.ExecID || execStatus.Receipt.Phase != containerops.ExecFinished {
 			t.Fatal("standalone exec replay did not preserve its original native exec receipt")
 		}
 		open := func(id string, spec containerops.SessionSpec) (*userauth.ContainerChannel, containerops.SessionIntent) {
@@ -569,10 +576,10 @@ func prepareStandaloneServiceNative(t *testing.T, ctx context.Context, r *Runtim
 		t.Fatal(e)
 	}
 	service = updatedInput.Services["web"]
-	service.Environment["MYDC_STANDALONE_UPDATE"] = "updated"
+	service.Environment["SFC_STANDALONE_UPDATE"] = "updated"
 	updatedInput.Services["web"] = service
 	updatedFile := write("standalone-service-updated", updatedInput)
-	call(0, nil, "standalone", "plan", name, "-f", updatedFile, "--mode", "entrypoint", "--lifetime", "fixed", "--restart", "no")
+	call(0, nil, "standalone", "run", name, "-f", updatedFile, "--mode", "entrypoint", "--lifetime", "fixed", "--restart", "no", "--dry-run")
 	var updateAccepted control.AppOperationView
 	if json.Unmarshal(up("service-update", updatedFile), &updateAccepted) != nil || !updateAccepted.Found || !updateAccepted.Current || updateAccepted.ID != "service-update" || updateAccepted.Operation == nil {
 		t.Fatal("same-node standalone update lost its accepted original operation")
@@ -644,8 +651,13 @@ func prepareStandaloneServiceNative(t *testing.T, ctx context.Context, r *Runtim
 	if old, exists := updatedInventory.Operation("service-create"); !found || !exists || old.Plan != initialSource.Plan || old.ID != "service-create" {
 		t.Fatal("same-node update erased the initial accepted operation history")
 	}
-	var updateReplay control.AppOperationView
-	if json.Unmarshal(call(0, nil, "standalone", "up", name, "-f", updatedFile, "--mode", "entrypoint", "--lifetime", "fixed", "--restart", "no", "--operation", "service-update", "--no-input"), &updateReplay) != nil || !updateReplay.Found || updateReplay.ID != updateAccepted.ID || updateReplay.Tenant != updateAccepted.Tenant || updateReplay.App != updateAccepted.App || updateReplay.Deployment != updateAccepted.Deployment || updateReplay.Operation == nil || updateReplay.Operation.Plan != updateAccepted.Operation.Plan || updateReplay.Operation.Submitter != updateAccepted.Operation.Submitter || updateReplay.Operation.Epoch != updateAccepted.Operation.Epoch {
+	call(0, nil, "standalone", "run", name, "-f", updatedFile, "--mode", "entrypoint", "--lifetime", "fixed", "--restart", "no", "--id", "service-update")
+	replayReply, replayErr := user.AppOperation(ctx, peer, session, "tenant", control.AppOperationRequest{Standalone: name, ID: "service-update"})
+	if replayErr != nil || replayReply.AppOperation == nil {
+		t.Fatal("same standalone update ID has no accepted operation", replayErr)
+	}
+	updateReplay := *replayReply.AppOperation
+	if !updateReplay.Found || updateReplay.ID != updateAccepted.ID || updateReplay.Tenant != updateAccepted.Tenant || updateReplay.App != updateAccepted.App || updateReplay.Deployment != updateAccepted.Deployment || updateReplay.Operation == nil || updateReplay.Operation.Plan != updateAccepted.Operation.Plan || updateReplay.Operation.Submitter != updateAccepted.Operation.Submitter || updateReplay.Operation.Epoch != updateAccepted.Operation.Epoch {
 		t.Fatal("same standalone update ID changed its original accepted operation")
 	}
 	if running() != updated {
@@ -665,7 +677,7 @@ func prepareStandaloneServiceNative(t *testing.T, ctx context.Context, r *Runtim
 	readLogs := func() containerops.Result {
 		t.Helper()
 		var result containerops.Result
-		if json.Unmarshal(call(0, nil, "standalone", "logs", name, "--json"), &result) != nil || result.Kind != "logs" || result.Target.Standalone != name {
+		if json.Unmarshal(call(0, nil, "standalone", "logs", name), &result) != nil || result.Kind != "logs" || result.Target.Standalone != name {
 			t.Fatal("standalone actual log JSON result")
 		}
 		return result
@@ -674,38 +686,25 @@ func prepareStandaloneServiceNative(t *testing.T, ctx context.Context, r *Runtim
 	if !bytes.Contains(beforeClearLogs.Stdout, []byte("rq9-service-update-before-clear")) && !bytes.Contains(beforeClearLogs.Stderr, []byte("rq9-service-update-before-clear")) {
 		t.Fatal("updated standalone did not expose the logs that explicit clear must remove")
 	}
-	var preview struct{ Plan control.AppLogClearPlan }
-	if json.Unmarshal(call(0, nil, "standalone", "logs-clear", name, "--preview"), &preview) != nil || preview.Plan.Container.NativeID != updated.NativeID || preview.Plan.Container.Standalone != name || preview.Plan.LogDriver != "local" {
-		t.Fatal("standalone common explicit log-clear impact plan")
-	}
-	accepted := call(0, nil, "standalone", "logs-clear", name, "--recreate", "--operation", "service-clear")
-	wait("standalone original log-clear completed", func() bool {
-		a, e := p.Apps(read().State)
-		s := a.LogClearStatus("tenant", scope, "service-clear")
-		return e == nil && s != nil && s.Status == "Succeeded" && len(s.NewContainers) == 1
-	})
-	t.Log("standalone original log-clear reached Succeeded with new native")
-	afterClear := running()
-	if afterClear.NativeID == updated.NativeID || inspect(afterClear) != volume {
-		t.Fatal("explicit standalone log recreation lost original retained Volume")
-	}
-	afterClearLogs := readLogs()
-	if bytes.Contains(afterClearLogs.Stdout, []byte("rq9-service-update-before-clear")) || bytes.Contains(afterClearLogs.Stderr, []byte("rq9-service-update-before-clear")) {
-		t.Fatal("standalone recreated native retained original logs")
-	}
-	repeated := call(0, nil, "standalone", "logs-clear", name, "--recreate", "--operation", "service-clear")
-	var original, replay map[string]json.RawMessage
-	if json.Unmarshal(accepted, &original) != nil || json.Unmarshal(repeated, &replay) != nil {
-		t.Fatal("standalone original log-clear receipt")
-	}
-	for _, field := range []string{"target", "request", "epoch", "root_revision", "expected_revision"} {
-		if len(original[field]) == 0 || !bytes.Equal(original[field], replay[field]) {
-			t.Fatal("standalone log-clear replay changed original intent", field)
+	// clear-logs clears each server's stored logs and leaves the container
+	// as it is (devel/proposals/seafield-log-clear.md): no plan, no
+	// recreate, no operation. Sending it again is the same request.
+	for range 2 {
+		var cleared struct {
+			Nodes []struct{ Node, Code string }
+		}
+		if raw := call(0, nil, "standalone", "clear-logs", name); json.Unmarshal(raw, &cleared) != nil || len(cleared.Nodes) == 0 {
+			t.Fatal("standalone log clear reply")
+		}
+		for _, n := range cleared.Nodes {
+			if n.Code != "ok" {
+				t.Fatal("standalone log clear server answer", n.Node, n.Code)
+			}
 		}
 	}
-	call(0, nil, "standalone", "logs-clear-status", name, "--operation", "service-clear")
-	if running() != afterClear {
-		t.Fatal("same standalone log-clear ID recreated a replacement")
+	afterClear := running()
+	if afterClear != updated || inspect(afterClear) != volume {
+		t.Fatal("standalone log clear touched the container or its Volume")
 	}
 	currentBinding, currentSource := binding()
 	_ = fixedPin(currentBinding)
@@ -725,7 +724,7 @@ func prepareStandaloneServiceNative(t *testing.T, ctx context.Context, r *Runtim
 		if running() != afterClear {
 			t.Fatal("ordinary app down adopted standalone")
 		}
-		call(0, nil, "standalone", "remove", name, "--operation", "service-remove")
+		call(0, nil, "standalone", "remove", name, "--id", "service-remove")
 		wait("standalone service original owned retirement", func() bool {
 			a, e := p.Apps(read().State)
 			inv, found := a.Inventory("tenant", scope)

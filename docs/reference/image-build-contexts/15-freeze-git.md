@@ -7,7 +7,7 @@ revision/데이터 계보를 검사한다. root 배치 가능성·pin·Git fetch
 
 ```sh
 # CLI에는 따로 결과 조회 명령이 없다. 게시 작업은 작업 ID로 확인한다.
-mydc op show save-editable-one
+sfcli op show save-editable-one
 ```
 
 | 경로 | 요청 | 완료 응답 |

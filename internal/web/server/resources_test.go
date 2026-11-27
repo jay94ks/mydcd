@@ -8,12 +8,12 @@ import (
 	"encoding/hex"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/web/mydc"
+	"github.com/jay94ks/seafield/internal/web/sfc"
 )
 
 func bobLogin(t *testing.T, f *fixture) {
 	t.Helper()
-	if code, out := keyLogin(f, "bob", mydc.FixtureKey("bob")); code != 200 {
+	if code, out := keyLogin(f, "bob", sfc.FixtureKey("bob")); code != 200 {
 		t.Fatalf("bob login: %d %v", code, out)
 	}
 }
@@ -89,7 +89,7 @@ func signedPayload(t *testing.T, f *fixture, opID string) []byte {
 	if err != nil {
 		t.Fatal(err)
 	}
-	op, err := mydc.DecodeOperation(o.Signed)
+	op, err := sfc.DecodeOperation(o.Signed)
 	if err != nil {
 		t.Fatal(err)
 	}

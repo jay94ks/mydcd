@@ -9,15 +9,16 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/hashicorp/raft"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/cluster/membership"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/config"
-	"github.com/jay94ks/mydcd/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/membership"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/config"
+	"github.com/jay94ks/seafield/internal/reconcile"
 )
 
 func (r *Runtime) memberPolicy() control.Policy {
@@ -89,6 +90,17 @@ func nativeHas(c cluster.InstalledConfiguration, target config.Peer) bool {
 	for _, server := range c.Configuration.Servers {
 		if string(server.ID) == target.ID {
 			return string(server.Address) == target.Endpoint && (server.Suffrage == raft.Voter && target.Voter || server.Suffrage == raft.Nonvoter && !target.Voter)
+		}
+	}
+	return false
+}
+
+// nativeNamed reports whether any server in c has id, whatever its
+// address or suffrage.
+func nativeNamed(c cluster.InstalledConfiguration, id string) bool {
+	for _, server := range c.Configuration.Servers {
+		if string(server.ID) == id {
+			return true
 		}
 	}
 	return false
@@ -172,6 +184,14 @@ func (r *Runtime) advanceMember(ctx context.Context, id string, joining bool) er
 	if err == nil && installed.Index > entry.BaseIndex && nativeHas(installed, target) {
 		return r.memberReport(ctx, view, control.MemberReport{Action: "observe", Node: id, Expected: entry.Revision, JobID: entry.Job.Pending.ID, ConfigurationIndex: installed.Index, Peer: target})
 	}
+	// A join whose result is unknown, and whose server is not in the
+	// committed configuration read behind a barrier, never happened: the
+	// add was conditioned on BaseIndex and is sent once. Settle it so the
+	// join can be retried or the invitation cancelled (else the name and
+	// every later membership change wait forever).
+	if err == nil && entry.Phase == membership.Invited && entry.Job.Pending.Phase == reconcile.RecoveryRequired && installed.Index >= entry.BaseIndex && !nativeNamed(installed, target.ID) {
+		return r.memberReport(ctx, view, control.MemberReport{Action: "absent", Node: id, Expected: entry.Revision, JobID: entry.Job.Pending.ID, ConfigurationIndex: installed.Index})
+	}
 	if entry.Job.Pending.Phase == reconcile.Dispatched {
 		if reportErr := r.memberReport(ctx, view, control.MemberReport{Action: "unknown", Node: id, Expected: entry.Revision, JobID: entry.Job.Pending.ID}); reportErr != nil {
 			return reportErr
@@ -205,6 +225,9 @@ func (r *Runtime) memberLoop() {
 		masterCtx, masterCancel := context.WithTimeout(r.ctx, 10*time.Second)
 		r.advanceCertificateMaster(masterCtx)
 		masterCancel()
+		vaultCtx, vaultCancel := context.WithTimeout(r.ctx, 30*time.Second)
+		r.advanceBuiltinVault(vaultCtx)
+		vaultCancel()
 		if !r.Engine().IsLeader() {
 			continue
 		}
@@ -213,11 +236,18 @@ func (r *Runtime) memberLoop() {
 		_, d, err := r.members(ctx, false)
 		if err == nil {
 			for _, entry := range d.Entries {
-				if entry.Job.Pending != nil && (entry.Phase == membership.Promoting || entry.Phase == membership.Demoting || entry.Job.Pending.Phase != reconcile.Prepared) {
+				if entry.Job.Pending != nil && (entry.Phase == membership.Promoting || entry.Phase == membership.Demoting || entry.Phase == membership.Moving || entry.Job.Pending.Phase != reconcile.Prepared) {
 					_ = r.advanceMember(ctx, entry.Peer.ID, false)
 				}
 				if ctx.Err() != nil {
 					break
+				}
+			}
+			for _, entry := range d.Entries {
+				if entry.Abort != nil && ctx.Err() == nil {
+					if err := r.advanceAbortJoin(ctx, entry.Peer.ID); err != nil {
+						log.Printf("membership: abort join of %s: %v", entry.Peer.ID, err)
+					}
 				}
 			}
 			if ctx.Err() == nil {
@@ -241,4 +271,39 @@ func (r *Runtime) memberLoop() {
 		}
 		cancel()
 	}
+}
+
+// advanceAbortJoin removes an aborting learner from Raft, then reports the
+// committed configuration without it so its entry and name are forgotten.
+func (r *Runtime) advanceAbortJoin(ctx context.Context, id string) error {
+	r.memberMu.Lock()
+	defer r.memberMu.Unlock()
+	view, d, err := r.members(ctx, true)
+	if err != nil {
+		return err
+	}
+	entry, ok := d.Entry(id)
+	if !ok || entry.Abort == nil {
+		return nil
+	}
+	installed, err := r.Engine().InstalledConfiguration(ctx, true)
+	if err != nil {
+		return err
+	}
+	if nativeNamed(installed, id) {
+		// The previous-index CAS keeps this to the configuration just read.
+		if err := r.Engine().RemoveMember(ctx, id, installed.Index); err != nil {
+			return err
+		}
+		if installed, err = r.Engine().InstalledConfiguration(ctx, true); err != nil {
+			return err
+		}
+		if nativeNamed(installed, id) {
+			return errors.New("still in the Raft configuration")
+		}
+	}
+	if installed.Index <= entry.NativeIndex {
+		return nil
+	}
+	return r.memberReport(ctx, view, control.MemberReport{Action: "join-aborted", Node: id, Expected: entry.Revision, ConfigurationIndex: installed.Index})
 }

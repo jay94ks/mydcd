@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/imagesource"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/imagesource"
 )
 
 func TestExternalRegistryCASRetainsRevocationAndReopensFromSameCheckpoint(t *testing.T) {
@@ -144,10 +144,7 @@ func TestExternalRegistryReducerPreservesCredentialActionCeiling(t *testing.T) {
 		t.Fatal(err)
 	}
 	u, _ := c.User("manager")
-	u.Credentials[0].Operations = []string{"put-external-registry"}
-	revision := u.Revision
-	u.Revision = 0
-	c, err = c.PutUser("admin", revision, u)
+	c, err = c.SetAccountScope("admin", u.Revision, access.AccountScope{User: "manager", Add: []string{"put-external-registry"}})
 	if err != nil {
 		t.Fatal(err)
 	}

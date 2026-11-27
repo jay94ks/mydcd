@@ -9,11 +9,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/tests/clusterfixture"
-	"github.com/jay94ks/mydcd/tests/vaultfixture"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/tests/clusterfixture"
+	"github.com/jay94ks/seafield/tests/vaultfixture"
 
 	dockerspec "github.com/moby/docker-image-spec/specs-go/v1"
 )
@@ -62,7 +62,7 @@ func realSecretApp(t *testing.T, c *clusterfixture.Cluster) string {
 	var cfg dockerspec.DockerOCIImage
 	cfg.Config.User, cfg.Config.Cmd = "10001:10001", []string{"/web"}
 	c.Nodes[1].Engine.Publish(cfg, image)
-	return "name: web\nservices:\n web:\n  image: " + image + "\n  cpus: 0.1\n  mem_limit: 16m\n  networks: {app: {}}\n  x-mydc:\n   node: node-1\n   secrets_from: [group/shop-db]\n   secret_env: [{source: db, name: DB_PASSWORD}]\nsecrets:\n db:\n  x-mydc: {key: DB_PASSWORD}\nnetworks:\n app: {external: true, name: lan}\n"
+	return "name: web\nservices:\n web:\n  image: " + image + "\n  cpus: 0.1\n  mem_limit: 16m\n  networks: {app: {}}\n  x-sfc:\n   node: node-1\n   secrets_from: [group/shop-db]\n   secret_env: [{source: db, name: DB_PASSWORD}]\nsecrets:\n db:\n  x-sfc: {key: DB_PASSWORD}\nnetworks:\n app: {external: true, name: lan}\n"
 }
 
 // A deploy that uses a Group with a password waits for its approval; the
@@ -122,7 +122,7 @@ func TestRealServerDeployGroupApproval(t *testing.T) {
 		app := out["items"].([]any)[0].(map[string]any)
 		return app["operation"].(map[string]any)["status"] == "Succeeded"
 	})
-	ids := c.Nodes[1].Engine.Containers(map[string]string{"org.mydc.key": "workload/task/shop/web/web"})
+	ids := c.Nodes[1].Engine.Containers(map[string]string{"org.sfc.key": "workload/task/shop/web/web"})
 	if len(ids) != 1 || !slices.Contains(c.Nodes[1].Engine.Env(ids[0]), "DB_PASSWORD=db-value-77aa") {
 		t.Fatalf("container env: %v", ids)
 	}

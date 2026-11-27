@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/observability"
+	"github.com/jay94ks/seafield/internal/observability"
 )
 
 // Consume the actual SDK/FSM observation, not an invented counter tuple. The

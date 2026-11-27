@@ -9,9 +9,9 @@ import (
 	"encoding/json"
 	"math"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/imagebuild"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/imagebuild"
 )
 
 // Observations consume an accepted Automatic context definition. They are not
@@ -99,7 +99,7 @@ func (p Policy) ImageBuildGitWatchWork(s state.State, caller [32]byte, tenant, i
 func ImageBuildGitObservationReportBytes(report ImageBuildGitObservationReport) []byte {
 	report.Signature = nil
 	raw, _ := json.Marshal(report)
-	return append([]byte("mydc-imagebuild-git-observation-1\x00"), raw...)
+	return append([]byte("sfc-imagebuild-git-observation-1\x00"), raw...)
 }
 
 func (report ImageBuildGitObservationReport) Command() (state.Command, error) {

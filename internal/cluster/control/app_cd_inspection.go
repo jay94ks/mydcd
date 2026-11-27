@@ -8,10 +8,10 @@ import (
 	"encoding/json"
 	"slices"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/lifecycle"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/deployment"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/lifecycle"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/deployment"
 )
 
 const maxCDHistory = 128
@@ -35,7 +35,7 @@ func cdHistoryIdentity(d deployment.Delivery, v deployment.DeliverySelection) [3
 		Artifact, Intent [32]byte
 		Commit           string
 	}{v.Artifact, v.Intent, v.Commit})
-	return sha256.Sum256(append([]byte("mydc-cd-history-intent-1\x00"), raw...))
+	return sha256.Sum256(append([]byte("sfc-cd-history-intent-1\x00"), raw...))
 }
 
 func captureCDHistory(entry, prior appEntry, at uint64) (appEntry, error) {
@@ -229,7 +229,7 @@ func (p Policy) AppDeliveryHistory(s state.State, session access.Session, at int
 		Catalog, Members  uint64
 		History           []AppCDHistoryRecord
 	}{session.User, tenant, q.App, s.Object(CatalogKey).Revision, s.Object(MembersKey).Revision, entry.CDHistory})
-	basis := sha256.Sum256(append([]byte("mydc-cd-history-page-1\x00"), basisBytes...))
+	basis := sha256.Sum256(append([]byte("sfc-cd-history-page-1\x00"), basisBytes...))
 	offset, err := taskCursor(after, basis)
 	if err != nil || uint64(offset) > uint64(len(entry.CDHistory)) {
 		return AppCDHistoryPage{}, access.ErrInvalid

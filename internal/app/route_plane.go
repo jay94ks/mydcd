@@ -10,14 +10,14 @@ import (
 	"errors"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/network"
-	"github.com/jay94ks/mydcd/internal/network/services"
-	"github.com/jay94ks/mydcd/internal/reconcile"
-	"github.com/jay94ks/mydcd/internal/schema"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/network"
+	"github.com/jay94ks/seafield/internal/network/services"
+	"github.com/jay94ks/seafield/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/sfcp"
 )
 
 func (t *tunnelRuntime) routeInstance(id [32]byte, name string) (*tunnelInstance, error) {
@@ -269,9 +269,9 @@ func (t *tunnelRuntime) reconcileRoutePlane(v cluster.View, projection control.R
 			if bytes.Compare(wire[:], peerWire[:]) > 0 {
 				return errTunnelPending
 			}
-			peer, known := r.Mesh.Peer(mydcp.Identity(peerWire))
+			peer, known := r.Mesh.Peer(sfcp.Identity(peerWire))
 			if !known || !peer.Member {
-				return mydcp.ErrAdmission
+				return sfcp.ErrAdmission
 			}
 			ctx, cancel := context.WithTimeout(r.ctx, 10*time.Second)
 			defer cancel()
@@ -336,7 +336,7 @@ func (t *tunnelRuntime) relayRoutePacket(destination [32]byte, token [16]byte, p
 			continue
 		}
 		if selected != nil {
-			return mydcp.ErrAdmission
+			return sfcp.ErrAdmission
 		}
 		selected = plane
 	}

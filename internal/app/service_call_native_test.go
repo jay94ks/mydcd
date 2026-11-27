@@ -16,15 +16,15 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/config"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/servicecall"
-	"github.com/jay94ks/mydcd/internal/userauth"
-	"github.com/jay94ks/mydcd/tests/gitfixture"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/config"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/servicecall"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/userauth"
+	"github.com/jay94ks/seafield/tests/gitfixture"
 )
 
 func TestRQ8ServiceCallHTTPSAndReadOnlyCDProbeNative(t *testing.T) {
@@ -33,11 +33,11 @@ func TestRQ8ServiceCallHTTPSAndReadOnlyCDProbeNative(t *testing.T) {
 
 // The existing owned image/network/CLI/Git/runtime and final down/rollback are
 // reused. No ready observation, candidate, native ID or source result is forged.
-func verifyManagedServiceDiagnostics(t *testing.T, ctx context.Context, r *Runtime, cfg config.Node, root string, user userauth.Client, peer mydcp.Peer, session access.Session, p control.Policy, read func() cluster.View, wait func(string, func() bool), change func(string, string, uint64, any), source *gitfixture.Fixture, original []byte, commit string) *Runtime {
+func verifyManagedServiceDiagnostics(t *testing.T, ctx context.Context, r *Runtime, cfg config.Node, root string, user userauth.Client, peer sfcp.Peer, session access.Session, p control.Policy, read func() cluster.View, wait func(string, func() bool), change func(string, string, uint64, any), source *gitfixture.Fixture, original []byte, commit string) *Runtime {
 	t.Helper()
-	q := servicecall.Request{App: "app", Service: "web", Port: 8080, Path: "/call", Method: "POST", Headers: map[string]string{"Content-Type": "application/octet-stream", "X-MyDC-Test": "native"}, Body: bytes.Repeat([]byte("q"), servicecall.MaxBody)}
+	q := servicecall.Request{App: "app", Service: "web", Port: 8080, Path: "/call", Method: "POST", Headers: map[string]string{"Content-Type": "application/octet-stream", "X-SFC-Test": "native"}, Body: bytes.Repeat([]byte("q"), servicecall.MaxBody)}
 	want := fmt.Sprintf("%d:%x", len(q.Body), sha256.Sum256(q.Body))
-	call := func(c userauth.Client, peer mydcp.Peer, q servicecall.Request, code string) servicecall.Result {
+	call := func(c userauth.Client, peer sfcp.Peer, q servicecall.Request, code string) servicecall.Result {
 		t.Helper()
 		result, err := c.CallService(ctx, peer, session, "tenant", q)
 		if err != nil || !result.Valid() || result.Code != code {
@@ -83,12 +83,12 @@ func verifyManagedServiceDiagnostics(t *testing.T, ctx context.Context, r *Runti
 	}
 	local := user
 	var err error
-	local.Mesh, err = mydcp.NewTransport(user.Self, user.Cluster, func(key mydcp.Identity) (mydcp.Peer, bool) { return unixPeer, key == unixPeer.Key })
+	local.Mesh, err = sfcp.NewTransport(user.Self, user.Cluster, func(key sfcp.Identity) (sfcp.Peer, bool) { return unixPeer, key == unixPeer.Key })
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer local.Mesh.Close()
-	local.Peers = []mydcp.Peer{unixPeer}
+	local.Peers = []sfcp.Peer{unixPeer}
 	call(local, unixPeer, q, "")
 	// Probe must not create/change an app CD source, candidate or active task.
 	fingerprint := func() [32]byte {
@@ -210,7 +210,7 @@ func verifyManagedServiceDiagnostics(t *testing.T, ctx context.Context, r *Runti
 	}
 	cli := func(args ...string) []byte {
 		t.Helper()
-		body, diagnostic, e := runManagedCLICommand(ctx, os.Getenv("MYDC_TEST_CLI"), filepath.Join(root, "cli-home"), filepath.Join(root, "cli.yaml"), append([]string{"--tenant", "tenant"}, args...), nil)
+		body, diagnostic, e := runManagedCLICommand(ctx, os.Getenv("SFC_TEST_CLI"), filepath.Join(root, "cli-home"), filepath.Join(root, "cli.yaml"), append([]string{"--tenant", "tenant"}, args...), nil)
 		if e != nil {
 			t.Fatal("diagnostics actual CLI", e, string(body), string(diagnostic))
 		}
@@ -242,7 +242,7 @@ func verifyManagedServiceDiagnostics(t *testing.T, ctx context.Context, r *Runti
 	}, func(provider *Runtime) {
 		verifyManagedNonVoterCDProbe(t, ctx, r, provider, user, peer, p, read, change, source, probe, commit, int64(len(original)), fingerprint)
 	})
-	target, ok := r.Mesh.Peer(mydcp.Identity(remote.Identity.Public))
+	target, ok := r.Mesh.Peer(sfcp.Identity(remote.Identity.Public))
 	if !ok {
 		t.Fatal("remote installed voter")
 	}
@@ -267,7 +267,7 @@ func secureHTTPS(q servicecall.Request) servicecall.Request {
 	return q
 }
 
-func verifyManagedServiceUnavailableAfterDown(t *testing.T, ctx context.Context, user userauth.Client, peer mydcp.Peer, session access.Session) {
+func verifyManagedServiceUnavailableAfterDown(t *testing.T, ctx context.Context, user userauth.Client, peer sfcp.Peer, session access.Session) {
 	t.Helper()
 	result, err := user.CallService(ctx, peer, session, "tenant", servicecall.Request{App: "app", Service: "web", Port: 8080, Path: "/call", Method: "POST"})
 	if err != nil || !result.Valid() || result.Code != servicecall.NoReadyTask || result.Task != "" || len(result.Body) != 0 {

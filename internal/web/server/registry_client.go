@@ -17,17 +17,17 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/jay94ks/mydcd/internal/registry"
-	"github.com/jay94ks/mydcd/internal/web/mydc"
+	"github.com/jay94ks/seafield/internal/registry"
+	"github.com/jay94ks/seafield/internal/web/sfc"
 )
 
 // The web as a registry client of a built-in registry (UI-88 upload, UI-89
-// layers, tag add). mydcd decides who may pull or push by issuing — or not
+// layers, tag add). sfcd decides who may pull or push by issuing — or not
 // — a short-lived credential scoped to one repository (registry-credential,
 // the same `docker login` the CLI uses); the web then speaks the standard
 // distribution API (token flow, blobs, manifests) with it. The credential
 // never leaves the daemon: it is not sent to the browser, stored, logged or
-// journaled. When the registry token runs out the client asks mydcd for a
+// journaled. When the registry token runs out the client asks sfcd for a
 // new credential, so a long push survives it while the login lasts.
 
 // Manifest media types the client accepts.
@@ -44,7 +44,7 @@ type regClient struct {
 	repo  string
 	scope string
 	hc    *http.Client
-	// login asks mydcd for a credential: username and secret (cleared by
+	// login asks sfcd for a credential: username and secret (cleared by
 	// the caller after use).
 	login func(ctx context.Context) (string, []byte, error)
 
@@ -52,7 +52,7 @@ type regClient struct {
 	token string // registry bearer token (memory only)
 }
 
-// registryClient asks mydcd for a credential (actions "pull" and/or "push")
+// registryClient asks sfcd for a credential (actions "pull" and/or "push")
 // and returns a client for repository.
 func (s *Server) registryClient(ctx context.Context, ws *webSession, tenant, id, repository string, actions ...string) (*regClient, error) {
 	actions = slices.Sorted(slices.Values(actions))
@@ -62,10 +62,10 @@ func (s *Server) registryClient(ctx context.Context, ws *webSession, tenant, id,
 	}
 	var authority string
 	login := func(ctx context.Context) (string, []byte, error) {
-		var cred mydc.RegistryCredential
-		err := ws.do(ctx, func(ctx context.Context, c mydc.Conn) error {
+		var cred sfc.RegistryCredential
+		err := ws.do(ctx, func(ctx context.Context, c sfc.Conn) error {
 			var err error
-			cred, err = c.RegistryCredential(ctx, tenant, mydc.RegistryCredentialRequest{ID: id, Repository: repo, Actions: actions})
+			cred, err = c.RegistryCredential(ctx, tenant, sfc.RegistryCredentialRequest{ID: id, Repository: repo, Actions: actions})
 			return err
 		})
 		if err != nil {

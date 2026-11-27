@@ -8,8 +8,8 @@ import (
 	"io/fs"
 	"path"
 
-	"github.com/jay94ks/mydcd/internal/schema"
-	contract "github.com/jay94ks/mydcd/lifecycle/v1"
+	"github.com/jay94ks/seafield/internal/schema"
+	contract "github.com/jay94ks/seafield/lifecycle/v1"
 )
 
 // Only these dependency-free actual product files are emitted into compiled
@@ -24,12 +24,12 @@ func trustedCompileSources() map[string][]byte {
 		out[path.Join(resolverGoPath, "src", checkerSDK, name)] = data
 	}
 	for name, data := range schema.CompilationSources() {
-		out[path.Join(resolverGoPath, "src/github.com/jay94ks/mydcd/internal/schema", name)] = data
+		out[path.Join(resolverGoPath, "src/github.com/jay94ks/seafield/internal/schema", name)] = data
 	}
 	files, _ := fs.ReadDir(compiledCoreSources, ".")
 	for _, file := range files {
 		data, _ := compiledCoreSources.ReadFile(file.Name())
-		out[path.Join(resolverGoPath, "src/github.com/jay94ks/mydcd/internal/workload/lifecycle", file.Name())] = bytes.Clone(data)
+		out[path.Join(resolverGoPath, "src/github.com/jay94ks/seafield/internal/workload/lifecycle", file.Name())] = bytes.Clone(data)
 	}
 	return out
 }

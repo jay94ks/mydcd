@@ -6,14 +6,16 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/sha256"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/lifecycle"
 	"reflect"
 	"time"
 	"unicode/utf8"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	checker "github.com/jay94ks/mydcd/internal/workload/lifecycle"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	checker "github.com/jay94ks/seafield/internal/workload/lifecycle"
 )
 
 type LifecycleStageResult struct {
@@ -51,12 +53,8 @@ func (r Request) lifecycleEditorRequest() bool {
 	return r.Method == "lifecycle-source-stage" || r.Method == "lifecycle-module-stage" || r.Method == "lifecycle-source-recover" || r.Method == "lifecycle-module-recover"
 }
 func (r Request) validLifecycleSourceFields() bool {
-	if r.Method == "lifecycle-source" {
-		want := Request{Schema: r.Schema, Method: r.Method, Nonce: r.Nonce, Tenant: r.Tenant, LifecycleSource: r.LifecycleSource}
-		return r.Tenant != "" && r.LifecycleSource != nil && r.LifecycleSource.Valid() && reflect.DeepEqual(r, want)
-	}
 	if !r.lifecycleEditorRequest() {
-		return r.LifecycleSource == nil
+		return false
 	}
 	module := r.Method == "lifecycle-module-stage" || r.Method == "lifecycle-module-recover"
 	recover := r.Method == "lifecycle-source-recover" || r.Method == "lifecycle-module-recover"
@@ -64,10 +62,10 @@ func (r Request) validLifecycleSourceFields() bool {
 	return r.Tenant != "" && (r.Node == "" && !recover || safeID(r.Node)) && r.CheckerSource != nil && r.CheckerSource.Validate() == nil && r.CheckerSource.Tenant == r.Tenant && r.CheckerUpload != nil && *r.CheckerUpload != ([32]byte{}) && (r.CheckerModule != nil) == module && (!module || moduleInput(*r.CheckerSource, *r.CheckerModule)) && reflect.DeepEqual(r, want)
 }
 
-func (c Client) stageLifecycle(ctx context.Context, peer mydcp.Peer, session access.Session, node, method string, d checker.SourceDescriptor, pin *checker.ModulePin, upload [32]byte, data []byte) (LifecycleStageResult, error) {
+func (c Client) stageLifecycle(ctx context.Context, peer sfcp.Peer, session access.Session, node, method string, d checker.SourceDescriptor, pin *checker.ModulePin, upload [32]byte, data []byte) (LifecycleStageResult, error) {
 	request := Request{Method: method, Tenant: d.Tenant, Node: node, CheckerSource: &d, CheckerModule: pin, CheckerUpload: &upload}
 	if c.Verify(session) != nil || !request.validLifecycleSourceFields() || c.Self == nil || session.Key != c.Self.Public {
-		return LifecycleStageResult{}, mydcp.ErrAdmission
+		return LifecycleStageResult{}, sfcp.ErrAdmission
 	}
 	recover := method == "lifecycle-source-recover" || method == "lifecycle-module-recover"
 	length, digest := d.Length, d.Digest
@@ -75,7 +73,7 @@ func (c Client) stageLifecycle(ctx context.Context, peer mydcp.Peer, session acc
 		length, digest = pin.Length, pin.Digest
 	}
 	if !recover && (uint64(len(data)) != length || sha256.Sum256(data) != digest) {
-		return LifecycleStageResult{}, mydcp.ErrAdmission
+		return LifecycleStageResult{}, sfcp.ErrAdmission
 	}
 	var reply Reply
 	var err error
@@ -84,7 +82,7 @@ func (c Client) stageLifecycle(ctx context.Context, peer mydcp.Peer, session acc
 		if e != nil {
 			return LifecycleStageResult{}, e
 		}
-		reply, _, err = c.exchange(ctx, peer, func(conn *mydcp.Session) (Envelope, error) {
+		reply, _, err = c.exchange(ctx, peer, func(conn *sfcp.Session) (Envelope, error) {
 			return Envelope{Body: body, Session: &session, Signature: ed25519.Sign(c.Self.Private, access.RequestBytes(session, conn.PeerChallenge(), body))}, nil
 		}, false)
 	} else {
@@ -98,24 +96,24 @@ func (c Client) stageLifecycle(ctx context.Context, peer mydcp.Peer, session acc
 	}
 	result := reply.LifecycleStage
 	if result == nil || !result.Valid(pin != nil) || result.Descriptor.ContentDigest() != d.ContentDigest() || result.Descriptor.Tenant != d.Tenant || result.Upload != upload || node != "" && result.Node != node || result.Source != nil && result.Source.Cluster != c.Cluster || result.Module != nil && (result.Module.Cluster != c.Cluster || result.Module.Module != *pin) {
-		return LifecycleStageResult{}, mydcp.ErrFrame
+		return LifecycleStageResult{}, sfcp.ErrFrame
 	}
 	return *result, nil
 }
-func (c Client) StageLifecycleSource(ctx context.Context, peer mydcp.Peer, session access.Session, node string, d checker.SourceDescriptor, upload [32]byte, data []byte) (LifecycleStageResult, error) {
+func (c Client) StageLifecycleSource(ctx context.Context, peer sfcp.Peer, session access.Session, node string, d checker.SourceDescriptor, upload [32]byte, data []byte) (LifecycleStageResult, error) {
 	return c.stageLifecycle(ctx, peer, session, node, "lifecycle-source-stage", d, nil, upload, data)
 }
-func (c Client) StageLifecycleModule(ctx context.Context, peer mydcp.Peer, session access.Session, node string, d checker.SourceDescriptor, upload [32]byte, module checker.ModuleArchive) (LifecycleStageResult, error) {
+func (c Client) StageLifecycleModule(ctx context.Context, peer sfcp.Peer, session access.Session, node string, d checker.SourceDescriptor, upload [32]byte, module checker.ModuleArchive) (LifecycleStageResult, error) {
 	return c.stageLifecycle(ctx, peer, session, node, "lifecycle-module-stage", d, &module.Pin, upload, module.ZIP)
 }
-func (c Client) RecoverLifecycleSource(ctx context.Context, peer mydcp.Peer, session access.Session, node string, d checker.SourceDescriptor, upload [32]byte) (LifecycleStageResult, error) {
+func (c Client) RecoverLifecycleSource(ctx context.Context, peer sfcp.Peer, session access.Session, node string, d checker.SourceDescriptor, upload [32]byte) (LifecycleStageResult, error) {
 	return c.stageLifecycle(ctx, peer, session, node, "lifecycle-source-recover", d, nil, upload, nil)
 }
-func (c Client) RecoverLifecycleModule(ctx context.Context, peer mydcp.Peer, session access.Session, node string, d checker.SourceDescriptor, upload [32]byte, pin checker.ModulePin) (LifecycleStageResult, error) {
+func (c Client) RecoverLifecycleModule(ctx context.Context, peer sfcp.Peer, session access.Session, node string, d checker.SourceDescriptor, upload [32]byte, pin checker.ModulePin) (LifecycleStageResult, error) {
 	return c.stageLifecycle(ctx, peer, session, node, "lifecycle-module-recover", d, &pin, upload, nil)
 }
 
-func (s Service) streamLifecycleSource(ctx context.Context, conn *mydcp.Session, stream mydcp.Stream, frame mydcp.Frame, header [32]byte, envelope Envelope, request Request, binding userBinding) error {
+func (s Service) streamLifecycleSource(ctx context.Context, conn *sfcp.Session, stream sfcp.Stream, frame sfcp.Frame, header [32]byte, envelope Envelope, request Request, binding userBinding) error {
 	inputDone := false
 	respond := func(reply Reply) error {
 		err := s.respond(stream, frame, header, reply)
@@ -175,12 +173,12 @@ func (s Service) streamLifecycleSource(ctx context.Context, conn *mydcp.Session,
 	}
 	inputDone = true
 	if selected.Owner != s.Self.Public {
-		peer, ok := s.Mesh.Peer(mydcp.Identity(selected.Owner))
+		peer, ok := s.Mesh.Peer(sfcp.Identity(selected.Owner))
 		if !ok || !peer.Member || peer.ID != selected.Node {
 			return respond(Reply{Schema: 1, Code: "unavailable"})
 		}
 		client := Client{Mesh: s.Mesh, Self: s.Self, Cluster: s.Policy.Cluster}
-		makeEnvelope := func(next *mydcp.Session) (Envelope, error) {
+		makeEnvelope := func(next *sfcp.Session) (Envelope, error) {
 			copy := envelope
 			copy.Relay = &Relay{Node: s.Self.Public, Target: selected.Owner, Caller: binding.key, Challenge: binding.challenge, Connection: next.PeerChallenge()}
 			copy.Relay.Signature = ed25519.Sign(s.Self.Private, RelayBytes(s.Policy.Cluster, copy))
@@ -230,24 +228,50 @@ func (s Service) streamLifecycleSource(ctx context.Context, conn *mydcp.Session,
 		}
 	}
 	if !result.Valid(module) {
-		return mydcp.ErrFrame
+		return sfcp.ErrFrame
 	}
 	return respond(Reply{Schema: 1, Code: "ok", Tenant: request.Tenant, LifecycleStage: &result})
 }
 
-func (c Client) LifecycleSourcePage(ctx context.Context, peer mydcp.Peer, session access.Session, tenant string, q control.LifecycleSourceQuery) (checker.SourcePage, error) {
-	if tenant == "" || !q.Valid() {
-		return checker.SourcePage{}, mydcp.ErrAdmission
+// LifecycleSourceQuery reads one page of a lifecycle script's source.
+type LifecycleSourceQuery struct {
+	Tenant string
+	Source control.LifecycleSourceQuery
+}
+
+func (q LifecycleSourceQuery) Valid() bool { return lifecycle.ValidID(q.Tenant) && q.Source.Valid() }
+
+// LifecycleSourceMethod needs ManageServices in the tenant (cleanup sessions
+// too) and the lifecycle-source operation.
+var LifecycleSourceMethod = define(Method[LifecycleSourceQuery, checker.SourcePage]{Name: "lifecycle-source"}, true, func(ctx context.Context, s Service, view cluster.View, session access.Session, q LifecycleSourceQuery) (checker.SourcePage, string) {
+	c, err := s.Policy.Catalog(view.State)
+	now := time.Now().Unix()
+	if err != nil || c.AuthorizeSessionCleanup(session, s.Policy.Cluster, s.Policy.Issuer(session.Issuer), now, q.Tenant, access.ManageServices) != nil || c.OperationAllowed(session, "lifecycle-source") != nil {
+		return checker.SourcePage{}, "denied"
 	}
-	reply, err := c.query(ctx, peer, session, Request{Method: "lifecycle-source", Tenant: tenant, LifecycleSource: &q})
+	if s.LifecycleSourceReader == nil {
+		return checker.SourcePage{}, "unavailable"
+	}
+	read, err := s.Policy.LifecycleSourceVersion(view.State, session, now, q.Tenant, q.Source)
+	if err != nil {
+		return checker.SourcePage{}, checkerArtifactFailure(err)
+	}
+	page, err := s.LifecycleSourceReader(ctx, read)
+	if err != nil {
+		return checker.SourcePage{}, checkerArtifactFailure(err)
+	}
+	return page, "ok"
+})
+
+func (c Client) LifecycleSourcePage(ctx context.Context, peer sfcp.Peer, session access.Session, tenant string, q control.LifecycleSourceQuery) (checker.SourcePage, error) {
+	page, err := call(ctx, c, peer, session, LifecycleSourceMethod, LifecycleSourceQuery{Tenant: tenant, Source: q})
 	if err != nil {
 		return checker.SourcePage{}, err
 	}
-	page := reply.LifecycleSource
-	if page == nil || !page.Valid() || page.Tenant != tenant || page.Name != q.Name || page.Revision != q.Revision || page.Offset != q.Offset {
-		return checker.SourcePage{}, mydcp.ErrFrame
+	if !page.Valid() || page.Tenant != tenant || page.Name != q.Name || page.Revision != q.Revision || page.Offset != q.Offset {
+		return checker.SourcePage{}, sfcp.ErrFrame
 	}
-	return *page, nil
+	return page, nil
 }
 
 type LifecycleSourceText struct {
@@ -256,7 +280,7 @@ type LifecycleSourceText struct {
 	Digest               [32]byte
 }
 
-func (c Client) LifecycleSource(ctx context.Context, peer mydcp.Peer, session access.Session, tenant, name string, revision uint64) (LifecycleSourceText, error) {
+func (c Client) LifecycleSource(ctx context.Context, peer sfcp.Peer, session access.Session, tenant, name string, revision uint64) (LifecycleSourceText, error) {
 	var data []byte
 	defer func() { clear(data) }()
 	var first checker.SourcePage
@@ -268,7 +292,7 @@ func (c Client) LifecycleSource(ctx context.Context, peer mydcp.Peer, session ac
 		if offset == 0 {
 			first = page
 		} else if page.Digest != first.Digest || page.Total != first.Total {
-			return LifecycleSourceText{}, mydcp.ErrFrame
+			return LifecycleSourceText{}, sfcp.ErrFrame
 		}
 		data = append(data, page.Data...)
 		if page.Next == 0 {
@@ -277,7 +301,7 @@ func (c Client) LifecycleSource(ctx context.Context, peer mydcp.Peer, session ac
 		offset = page.Next
 	}
 	if uint64(len(data)) != first.Total || sha256.Sum256(data) != first.Digest || !utf8.Valid(data) {
-		return LifecycleSourceText{}, mydcp.ErrFrame
+		return LifecycleSourceText{}, sfcp.ErrFrame
 	}
 	return LifecycleSourceText{Tenant: tenant, Name: name, Revision: revision, Digest: first.Digest, Source: string(data)}, nil
 }

@@ -23,7 +23,7 @@ import (
 var ErrArchive = errors.New("volume archive incomplete, inconsistent or unsupported")
 var ErrArchiveLimit = errors.New("volume archive budget exceeded")
 
-// ArchiveOptions is a node-approved file profile, not permission to read a
+// ArchiveOptions is a cluster-approved file profile, not permission to read a
 // source or start a writer. MaxBytes includes tar metadata, padding and footer.
 // Sparse placement/atime/ctime are not restored; logical contents and mtime are.
 type ArchiveOptions struct {

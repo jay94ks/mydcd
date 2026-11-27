@@ -18,10 +18,10 @@ import (
 	"time"
 
 	cerrdefs "github.com/containerd/errdefs"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/imagebuild"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/imagebuild"
 	"github.com/moby/moby/api/types/events"
 	"github.com/moby/moby/client"
 )
@@ -167,7 +167,7 @@ func (f *managedRegistryNative) verifyImageBuildCancelNative(t *testing.T, ctx c
 		t.Fatal("cancelled original daemon survived its accepted closure", err)
 	}
 	jobDigest := original.Run.Spec.Digest()
-	if _, err = os.Lstat(filepath.Join(spec.Root.Path, ".mydc-imagebuild", "jobs", hex.EncodeToString(jobDigest[:]))); !os.IsNotExist(err) {
+	if _, err = os.Lstat(filepath.Join(spec.Root.Path, ".sfc-imagebuild", "jobs", hex.EncodeToString(jobDigest[:]))); !os.IsNotExist(err) {
 		t.Fatal("cancelled original workspace was not removed", err)
 	}
 	if _, held, err = r.nodeRoots.RecordedPin(spec.Root, consumer); err != nil || held {

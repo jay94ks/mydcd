@@ -6,9 +6,9 @@ import (
 	"context"
 	"errors"
 
-	"github.com/jay94ks/mydcd/internal/cluster/lifecycle"
-	"github.com/jay94ks/mydcd/internal/reconcile"
-	"github.com/jay94ks/mydcd/internal/schema"
+	"github.com/jay94ks/seafield/internal/cluster/lifecycle"
+	"github.com/jay94ks/seafield/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/schema"
 	"github.com/moby/moby/client"
 )
 
@@ -173,7 +173,7 @@ func (r *Runtime) nodeLocalActivity(ctx context.Context) (lifecycle.Activity, er
 	// These read-only SDK inventories also catch owner-labelled native objects
 	// not represented by a terminal local journal. Error is unknown, not empty.
 	if r.docker != nil {
-		filters := client.Filters{}.Add("label", "org.mydc.owner="+r.docker.Owner)
+		filters := client.Filters{}.Add("label", "org.sfc.owner="+r.docker.Owner)
 		containers, err := r.docker.API.ContainerList(ctx, client.ContainerListOptions{All: true, Filters: filters})
 		if err != nil {
 			return activity, err

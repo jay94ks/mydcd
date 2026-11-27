@@ -7,7 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 
-	"github.com/jay94ks/mydcd/internal/access"
+	"github.com/jay94ks/seafield/internal/access"
 )
 
 // StandaloneScopeName is an internal workload identity, not the public name.
@@ -17,16 +17,16 @@ func StandaloneScopeName(tenant, name string) string {
 	if !identifier(tenant) || !identifier(name) {
 		return ""
 	}
-	d := sha256.Sum256([]byte("mydc-standalone-scope-1\x00" + tenant + "\x00" + name))
+	d := sha256.Sum256([]byte("sfc-standalone-scope-1\x00" + tenant + "\x00" + name))
 	return "standalone-" + hex.EncodeToString(d[:24])
 }
 
 func validateStandaloneInput(c Compose, name string) error {
-	if !identifier(name) || c.Name != "" && c.Name != name || len(c.Services) != 1 || c.MyDC.Delivery != nil {
+	if !identifier(name) || c.Name != "" && c.Name != name || len(c.Services) != 1 || c.Sfc.Delivery != nil {
 		return inputError("STANDALONE_SINGLE_SERVICE_REQUIRED", "services")
 	}
 	for id, s := range c.Services {
-		if len(s.DependsOn) != 0 || len(s.MyDC.Nodes) != 0 || s.MyDC.PerNode != 0 || s.MyDC.Instance != nil {
+		if len(s.DependsOn) != 0 || len(s.Sfc.Nodes) != 0 || s.Sfc.PerNode != 0 || s.Sfc.Instance != nil {
 			return inputError("STANDALONE_SERVICE_REFERENCE", "services."+id)
 		}
 	}

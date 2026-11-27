@@ -9,8 +9,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/observability"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/observability"
 )
 
 func TestMoveStoragePreflightUsesExactSignedTargetMeasurement(t *testing.T) {

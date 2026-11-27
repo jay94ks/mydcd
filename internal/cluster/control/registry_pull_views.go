@@ -8,10 +8,10 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/observability"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/observability"
 )
 
 // Pulls are actual latest owner measurements, not an image permission, a login
@@ -100,7 +100,7 @@ func (p Policy) RegistryPulls(s state.State, session access.Session, at int64, t
 		Scopes       []access.Scope
 		Rows         []RegistryPullView
 	}{p.Cluster, tenant, session.User, session.Scopes, rows})
-	root := sha256.Sum256(append([]byte("mydc-registry-pulls-page-1\x00"), raw...))
+	root := sha256.Sum256(append([]byte("sfc-registry-pulls-page-1\x00"), raw...))
 	start, end, err := observationPage(after, root, len(rows))
 	if err != nil {
 		return RegistryPullPage{}, err

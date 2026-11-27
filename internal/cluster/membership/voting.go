@@ -5,26 +5,79 @@ package membership
 import (
 	"encoding/json"
 
-	"github.com/jay94ks/mydcd/internal/cluster/lifecycle"
-	"github.com/jay94ks/mydcd/internal/config"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/cluster/lifecycle"
+	"github.com/jay94ks/seafield/internal/config"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/reconcile"
 )
 
 // VotingChange retains the original signed administrator request and the
-// already installed identity. Only suffrage changes: this is not a new join,
-// installation ACK, member key, or native identity.
+// already installed identity. Only suffrage, or only the endpoint, changes:
+// this is not a new join, installation ACK, member key, or native identity.
 type VotingChange struct {
 	Origin                                       json.RawMessage
 	Before                                       config.Peer
 	AcceptedRevision, PreviousNativeIndex, JobID uint64
+	// Endpoint is set when the change moves the server to a new endpoint
+	// (set-node-endpoint); its vote stays. Empty: the vote flips.
+	Endpoint string `json:",omitempty"`
+}
+
+// Target is the peer the change installs.
+func (v VotingChange) Target() config.Peer {
+	t := v.Before
+	if v.Endpoint != "" {
+		t.Endpoint = v.Endpoint
+	} else {
+		t.Voter = !t.Voter
+	}
+	return t
+}
+
+// pendingPhase is the entry's phase while the change is not yet settled.
+func (v VotingChange) pendingPhase() Phase {
+	switch {
+	case v.Endpoint != "":
+		return Moving
+	case v.Before.Voter:
+		return Demoting
+	}
+	return Promoting
 }
 
 func (d Directory) ChangeVote(id string, expected uint64, voter bool, origin json.RawMessage) (Directory, error) {
 	e, ok := d.Entry(id)
-	if !ok || !d.writable() || e.Revision != expected || !FullMember(e) || e.Job.Pending != nil || e.Peer.Voter == voter || len(origin) == 0 || len(origin) > 64<<10 || !json.Valid(origin) {
+	if !ok || e.Peer.Voter == voter {
 		return d, ErrMember
 	}
+	return d.changeInstalled(id, expected, "", origin)
+}
+
+// ChangeEndpoint moves a joined server's recorded endpoint (and with it the
+// address Raft and the mesh use to reach it) to endpoint, keeping its vote.
+// The leader installs the new address in Raft like a vote change; the entry
+// keeps the old endpoint until the installed configuration is observed.
+func (d Directory) ChangeEndpoint(id string, expected uint64, endpoint string, origin json.RawMessage) (Directory, error) {
+	e, ok := d.Entry(id)
+	if !ok || endpoint == "" || endpoint == e.Peer.Endpoint || config.ValidateCanonicalEndpoint(endpoint) != nil || e.Restore != nil {
+		return d, ErrMember
+	}
+	for _, other := range d.Entries {
+		if other.Peer.ID != id && !d.gone(other.Peer.ID) && (other.Peer.Endpoint == endpoint || other.Voting != nil && other.Voting.Target().Endpoint == endpoint) {
+			return d, ErrMember
+		}
+	}
+	return d.changeInstalled(id, expected, endpoint, origin)
+}
+
+// changeInstalled starts a vote flip (endpoint "") or an endpoint move of an
+// installed, settled full member.
+func (d Directory) changeInstalled(id string, expected uint64, endpoint string, origin json.RawMessage) (Directory, error) {
+	e, ok := d.Entry(id)
+	if !ok || !d.writable() || e.Revision != expected || !FullMember(e) || e.Job.Pending != nil || len(origin) == 0 || len(origin) > 64<<10 || !json.Valid(origin) {
+		return d, ErrMember
+	}
+	voter := e.Peer.Voter != (endpoint == "")
 	topology, err := d.Topology()
 	if err != nil {
 		return d, err
@@ -35,13 +88,15 @@ func (d Directory) ChangeVote(id string, expected uint64, voter bool, origin jso
 	if !exists || !present || node.Phase != lifecycle.Active || node.Pending != nil || installed.Key != key || installed.Voter != e.Peer.Voter {
 		return d, ErrMember
 	}
-	plan, err := d.PlanNodeChange(id, false)
-	if err != nil {
-		return d, err
-	}
-	for _, code := range plan.Blockers {
-		if !voter || code != "LAST_VOTER" && code != "QUORUM_LOSS" {
-			return d, ErrMember
+	if endpoint == "" {
+		plan, err := d.PlanNodeChange(id, false)
+		if err != nil {
+			return d, err
+		}
+		for _, code := range plan.Blockers {
+			if !voter || code != "LAST_VOTER" && code != "QUORUM_LOSS" {
+				return d, ErrMember
+			}
 		}
 	}
 	before := e.Peer
@@ -51,8 +106,8 @@ func (d Directory) ChangeVote(id string, expected uint64, voter bool, origin jso
 	if job == (reconcile.State{}) {
 		job = reconcile.State{Desired: reconcile.Desired{Revision: e.Revision, Resource: peerResource(before)}, Applied: peerResource(before), GenerationFloor: 1}
 	}
-	target := before
-	target.Voter = voter
+	change := VotingChange{Origin: append(json.RawMessage(nil), origin...), Before: before, AcceptedRevision: expected, PreviousNativeIndex: e.NativeIndex, Endpoint: endpoint}
+	target := change.Target()
 	job, err = reconcile.SetDesired(job, reconcile.Desired{Revision: d.Revision + 1, Resource: peerResource(target)})
 	if err != nil {
 		return d, err
@@ -61,22 +116,19 @@ func (d Directory) ChangeVote(id string, expected uint64, voter bool, origin jso
 	if err != nil || job.Pending == nil {
 		return d, ErrMember
 	}
-	e.Voting = &VotingChange{Origin: append(json.RawMessage(nil), origin...), Before: before, AcceptedRevision: expected, PreviousNativeIndex: e.NativeIndex, JobID: job.Pending.ID}
+	change.JobID = job.Pending.ID
+	e.Voting = &change
 	e.Job, e.Source, e.BaseIndex = job, [32]byte{}, 0
-	e.Phase = Demoting
-	if voter {
-		e.Phase = Promoting
-	}
+	e.Phase = change.pendingPhase()
 	return d.replace(e), nil
 }
 
 func (d Directory) validateVotingEntry(e Entry) (bool, error) {
 	v := e.Voting
-	if v == nil || len(v.Origin) == 0 || len(v.Origin) > 64<<10 || !json.Valid(v.Origin) || v.AcceptedRevision == 0 || v.AcceptedRevision >= e.Revision || !validPeer(v.Before) || v.Before.ID != e.Peer.ID || v.Before.Key != e.Peer.Key || v.Before.Endpoint != e.Peer.Endpoint || v.JobID == 0 || e.Job.LastID != v.JobID || e.Job.GenerationFloor != 1 || e.Job.Stopped || e.Job.Desired.Retiring != 0 || e.Job.Desired.Revision <= v.AcceptedRevision || e.Job.Desired.Revision > e.Revision {
+	if v == nil || len(v.Origin) == 0 || len(v.Origin) > 64<<10 || !json.Valid(v.Origin) || v.AcceptedRevision == 0 || v.AcceptedRevision >= e.Revision || !validPeer(v.Before) || v.Before.ID != e.Peer.ID || v.Before.Key != e.Peer.Key || v.Endpoint != "" && (v.Endpoint == v.Before.Endpoint || config.ValidateCanonicalEndpoint(v.Endpoint) != nil) || v.JobID == 0 || e.Job.LastID != v.JobID || e.Job.GenerationFloor != 1 || e.Job.Stopped || e.Job.Desired.Retiring != 0 || e.Job.Desired.Revision <= v.AcceptedRevision || e.Job.Desired.Revision > e.Revision {
 		return false, ErrMember
 	}
-	target := v.Before
-	target.Voter = !target.Voter
+	target := v.Target()
 	if e.Job.Desired.Resource != peerResource(target) {
 		return false, ErrMember
 	}
@@ -84,11 +136,7 @@ func (d Directory) validateVotingEntry(e Entry) (bool, error) {
 		return false, ErrMember
 	}
 	if pending := e.Job.Pending; pending != nil {
-		phase := Demoting
-		if target.Voter {
-			phase = Promoting
-		}
-		if e.Phase != phase || e.Peer != v.Before || e.NativeIndex != v.PreviousNativeIndex || pending.Kind != reconcile.Apply || pending.Target != peerResource(target) || e.Job.Applied != peerResource(v.Before) {
+		if e.Phase != v.pendingPhase() || e.Peer != v.Before || e.NativeIndex != v.PreviousNativeIndex || pending.Kind != reconcile.Apply || pending.Target != peerResource(target) || e.Job.Applied != peerResource(v.Before) {
 			return false, ErrMember
 		}
 		if pending.Phase == reconcile.Prepared {

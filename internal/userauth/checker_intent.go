@@ -15,12 +15,12 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cliprofile"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/config"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	checker "github.com/jay94ks/mydcd/internal/workload/lifecycle"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cliprofile"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/config"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	checker "github.com/jay94ks/seafield/internal/workload/lifecycle"
 )
 
 type CheckerProvider struct {
@@ -67,13 +67,13 @@ func ValidCheckerRequestID(id string) bool {
 }
 
 func checkerUploadID(i CheckerScriptIntent) [32]byte {
-	return sha256.Sum256(append([]byte("mydc-checker-upload-intent-1\x00"), i.Signature...))
+	return sha256.Sum256(append([]byte("sfc-checker-upload-intent-1\x00"), i.Signature...))
 }
 
 func checkerIntentBytes(i CheckerScriptIntent) []byte {
 	i.Data, i.Signature, i.Sequence, i.Fact, i.ModuleProgress = nil, nil, 0, nil, nil
 	raw, _ := json.Marshal(checkerScriptIntent(i))
-	return append([]byte("mydc-checker-script-intent-1\x00"), raw...)
+	return append([]byte("sfc-checker-script-intent-1\x00"), raw...)
 }
 
 func checkerProviderValid(p CheckerProvider) bool {
@@ -152,9 +152,9 @@ func LoadCheckerScript(home string, c Client, current access.Session, id string)
 // CheckerProviderPeer keeps the original node/key identity and uses only its
 // CURRENT trusted location. The original endpoint remains provenance; changing
 // a trusted address does not require rewriting an intent or reapproving a key.
-func CheckerProviderPeer(c Client, p CheckerProvider) (mydcp.Peer, error) {
+func CheckerProviderPeer(c Client, p CheckerProvider) (sfcp.Peer, error) {
 	if !checkerProviderValid(p) {
-		return mydcp.Peer{}, ErrPrivateState
+		return sfcp.Peer{}, ErrPrivateState
 	}
 	for _, peer := range c.Peers {
 		if peer.ID == p.Node && [32]byte(peer.Key) == p.Key {
@@ -164,14 +164,14 @@ func CheckerProviderPeer(c Client, p CheckerProvider) (mydcp.Peer, error) {
 			}
 		}
 	}
-	return mydcp.Peer{}, ErrPrivateState
+	return sfcp.Peer{}, ErrPrivateState
 }
 
-func StageCheckerScript(home string, c Client, current access.Session, id, name string, provider mydcp.Peer, d checker.SourceDescriptor, data []byte, expected uint64) (CheckerScriptIntent, error) {
+func StageCheckerScript(home string, c Client, current access.Session, id, name string, provider sfcp.Peer, d checker.SourceDescriptor, data []byte, expected uint64) (CheckerScriptIntent, error) {
 	return stageCheckerScript(home, c, current, id, name, provider, d, data, expected, nil)
 }
 
-func stageCheckerScript(home string, c Client, current access.Session, id, name string, provider mydcp.Peer, d checker.SourceDescriptor, data []byte, expected uint64, compose *CheckerComposeSource) (CheckerScriptIntent, error) {
+func stageCheckerScript(home string, c Client, current access.Session, id, name string, provider sfcp.Peer, d checker.SourceDescriptor, data []byte, expected uint64, compose *CheckerComposeSource) (CheckerScriptIntent, error) {
 	if c.Verify(current) != nil || c.Self == nil || d.Validate() != nil || uint64(len(data)) != d.Length {
 		return CheckerScriptIntent{}, ErrPrivateState
 	}
@@ -260,7 +260,7 @@ func CheckerRegistrationMatches(i CheckerScriptIntent, op control.UserOperation)
 // PrepareCheckerRegistration creates the FIRST management signature only after
 // staging/recovery produced a fact. The existing Prepare captures root/epoch
 // at this first signature; later recovery loads the immutable OperationRecord.
-func PrepareCheckerRegistration(ctx context.Context, c Client, target mydcp.Peer, current access.Session, i CheckerScriptIntent) (control.UserOperation, error) {
+func PrepareCheckerRegistration(ctx context.Context, c Client, target sfcp.Peer, current access.Session, i CheckerScriptIntent) (control.UserOperation, error) {
 	if i.Compose != nil || c.Verify(current) != nil || !validCheckerIntent(c, current.User, i) || i.Fact == nil || c.Self == nil {
 		return control.UserOperation{}, ErrPrivateState
 	}

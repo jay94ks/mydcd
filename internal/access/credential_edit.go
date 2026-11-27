@@ -23,14 +23,38 @@ func (u User) WithPrivateKeyOperations(id string, key [32]byte, operations []str
 	return u, nil
 }
 
+// WithPrivateKeyDisabled is the account's own disable-credential: one of
+// its private keys, or a single-use token (an invitation it has used).
 func (u User) WithPrivateKeyDisabled(id string) (User, error) {
 	u.Credentials = ownCredentials(u.Credentials)
 	for i, credential := range u.Credentials {
 		if credential.ID != id {
 			continue
 		}
-		if credential.Method != PrivateKey || !credential.Enabled {
+		if credential.Method != PrivateKey && !(credential.Method == Token && credential.OneTime) || !credential.Enabled {
 			return User{}, ErrInvalid
+		}
+		u.Credentials[i].Enabled = false
+		u.Revision = 0
+		if !validUser(u) || !slices.ContainsFunc(u.Credentials, func(c Credential) bool { return c.Enabled }) {
+			return User{}, ErrInvalid
+		}
+		return u, nil
+	}
+	return User{}, ErrInvalid
+}
+
+// WithCredentialDisabled turns off one enabled login method of any kind (a
+// system administrator's disable-credential). An administrator account keeps
+// at least one; an ordinary account may end with none (a revoked invitation).
+func (u User) WithCredentialDisabled(id string) (User, error) {
+	u.Credentials = ownCredentials(u.Credentials)
+	for i, credential := range u.Credentials {
+		if credential.ID != id {
+			continue
+		}
+		if !credential.Enabled {
+			return User{}, ErrConflict
 		}
 		u.Credentials[i].Enabled = false
 		u.Revision = 0
@@ -39,5 +63,5 @@ func (u User) WithPrivateKeyDisabled(id string) (User, error) {
 		}
 		return u, nil
 	}
-	return User{}, ErrInvalid
+	return User{}, ErrConflict
 }

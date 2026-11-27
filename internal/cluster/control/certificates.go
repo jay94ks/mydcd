@@ -13,11 +13,11 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/certstore"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/ingress"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/certstore"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/ingress"
 )
 
 const CertificatesKey = "control/certificates"
@@ -329,7 +329,7 @@ type CertificateExpiryReport struct {
 func CertificateExpiryBytes(r CertificateExpiryReport) []byte {
 	r.Signature = nil
 	raw, _ := json.Marshal(r)
-	return append([]byte("mydc-certificate-expiry-1\x00"), raw...)
+	return append([]byte("sfc-certificate-expiry-1\x00"), raw...)
 }
 func (r CertificateExpiryReport) Command() (state.Command, error) {
 	raw, err := json.Marshal(r)
@@ -383,3 +383,6 @@ func (p Policy) reduceCertificateExpiry(s state.State, cmd state.Command) (map[s
 	}
 	return writeCheckpoint(s, CertificatesKey, p.Cluster, p.TrustRoot, c.Revision, raw)
 }
+
+// certificatesBook is the CertificatesKey book (books.go).
+var certificatesBook = Book{Key: CertificatesKey, Reduce: Policy.reduceCertificates}

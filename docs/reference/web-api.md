@@ -1,8 +1,8 @@
-# mydc-web HTTP API (`/api/v1`)
+# sfc-web HTTP API (`/api/v1`)
 
-> 상태: **구현 중 (W1.2)**. 데몬은 `cmd/mydc-web`, 서버 코드는 `internal/web/server`, 자체 데이터는 `internal/web/store`(bbolt)다. mydcd와는 [client 인터페이스](../../internal/web/mydc/client.go)로만 이야기하며, method마다 real/mock 상태는 [상태표](../../apps/mydc-web/CLUSTER_METHODS.md)를 따른다. mock 상태 method에 기대는 끝점은 가짜 어댑터에서만 동작한다. 화면·데이터 원칙은 web-ui-plan.
+> 상태: **구현 중 (W1.2)**. 데몬은 `cmd/sfc-web`, 서버 코드는 `internal/web/server`, 자체 데이터는 `internal/web/store`(bbolt)다. sfcd와는 [client 인터페이스](../../internal/web/sfc/client.go)로만 이야기하며, method마다 real/mock 상태는 [상태표](../../apps/sfc-web/CLUSTER_METHODS.md)를 따른다. mock 상태 method에 기대는 끝점은 가짜 어댑터에서만 동작한다. 화면·데이터 원칙은 web-ui-plan.
 
-웹 앱은 자기 관리 권한이 없다. 모든 조회·변경은 로그인한 사용자 자신의 MYDCP 세션으로 실행되고, 권한 판단은 매번 mydcd가 한다.
+웹 앱은 자기 관리 권한이 없다. 모든 조회·변경은 로그인한 사용자 자신의 SFCP 세션으로 실행되고, 권한 판단은 매번 sfcd가 한다.
 
 ## 절 목록
 
@@ -10,7 +10,7 @@
 
 | 절 | 파일 |
 |---|---|
-| mydcd와 mydc-web의 책임 경계 | [web-api/01-mydcd-mydc-web.md](web-api/01-mydcd-mydc-web.md) |
+| sfcd와 sfc-web의 책임 경계 | [web-api/01-sfcd-sfc-web.md](web-api/01-sfcd-sfc-web.md) |
 | 공통 규칙 | [web-api/02-section.md](web-api/02-section.md) |
 | 로그인 | [web-api/03-section.md](web-api/03-section.md) |
 | 작업(operation) | [web-api/04-operation.md](web-api/04-operation.md) |
@@ -18,8 +18,8 @@
 | 배포 (app.yaml 업로드 → up) | [web-api/06-app-yaml-up.md](web-api/06-app-yaml-up.md) |
 | 이미지 신뢰 출처 | [web-api/07-ui-82-req-45.md](web-api/07-ui-82-req-45.md) |
 | 내장 저장소 (UI-80) | [web-api/08-ui-80.md](web-api/08-ui-80.md) |
-| 외부 이미지 저장소 로그인 (mydcd 실제 계약, REQ-17) | [web-api/09-mydcd-req-17.md](web-api/09-mydcd-req-17.md) |
-| 이미지 빌드 (mydcd 실제 계약) | [web-api/10-mydcd.md](web-api/10-mydcd.md) |
+| 외부 이미지 저장소 로그인 (sfcd 실제 계약, REQ-17) | [web-api/09-sfcd-req-17.md](web-api/09-sfcd-req-17.md) |
+| 이미지 빌드 (sfcd 실제 계약) | [web-api/10-sfcd.md](web-api/10-sfcd.md) |
 | 자동 배포 (UI-40~43) | [web-api/11-ui-40-43.md](web-api/11-ui-40-43.md) |
 | 클러스터 내부 웹훅 호출 | [web-api/12-req-24-mock.md](web-api/12-req-24-mock.md) |
 | 장애 대응 (REQ-9·11 mock) | [web-api/13-req-9-11-mock.md](web-api/13-req-9-11-mock.md) |
@@ -40,6 +40,7 @@
 | 원장 교체 (rotate-ledger, 시스템 관리자) | [web-api/28-rotate-ledger.md](web-api/28-rotate-ledger.md) |
 | 작업 공간 종료 (UI-22, 시스템 관리자) | [web-api/29-ui-22.md](web-api/29-ui-22.md) |
 | 작업 공간 간 연결 (UI-53) | [web-api/30-ui-53.md](web-api/30-ui-53.md) |
+| 가상 브릿지 (UI-5D) | [web-api/46-ui-5d.md](web-api/46-ui-5d.md) |
 | 망 변경·폐기 (UI-50·51) | [web-api/31-ui-50-51.md](web-api/31-ui-50-51.md) |
 | 데이터 저장소 백업·복원·용량·삭제 (UI-60·62·63) | [web-api/32-ui-60-62-63.md](web-api/32-ui-60-62-63.md) |
 | 데이터 저장소 옮기기 (UI-64) | [web-api/33-ui-64.md](web-api/33-ui-64.md) |
@@ -54,4 +55,15 @@
 | 외부 접속 (UI-5A~5C, REQ-22) | [web-api/42-ui-5a-5c-req-22.md](web-api/42-ui-5a-5c-req-22.md) |
 | 웹훅 (UI-BB·UI-44, W2.3b) | [web-api/43-ui-bb-ui-44-w2-3b.md](web-api/43-ui-bb-ui-44-w2-3b.md) |
 | 공급자 진단 로그 (UI-C1, 시스템 관리자) | [web-api/45-provider-log.md](web-api/45-provider-log.md) |
+| 관리 변경 (UI-A1) | [web-api/46-management-change.md](web-api/46-management-change.md) |
+| 클러스터 앱 경로 (UI-5E, 시스템 관리자) | [web-api/47-cluster-app-routes.md](web-api/47-cluster-app-routes.md) |
+| 최근 로그인 (내 계정) | [web-api/48-own-logins.md](web-api/48-own-logins.md) |
+| 열린 세션 (내 계정) | [web-api/49-own-sessions.md](web-api/49-own-sessions.md) |
+| 네트워크 DNS 이름 | [web-api/50-network-dns-names.md](web-api/50-network-dns-names.md) |
+| 초대 링크 | [web-api/51-invite-links.md](web-api/51-invite-links.md) |
+| 변경 되돌리기 (UI-A4) | [web-api/52-ops-revert.md](web-api/52-ops-revert.md) |
+| 지운 것 되살리기 (UI-A5) | [web-api/53-ops-trash.md](web-api/53-ops-trash.md) |
+| VPS 관리 (UI-12B) | [web-api/54-vps.md](web-api/54-vps.md) |
+| 서버의 실제 주소 목록 (게이트웨이 설정) | [web-api/55-node-local-addresses.md](web-api/55-node-local-addresses.md) |
+| 실시간 반영 (WebSocket) | [web-api/56-live.md](web-api/56-live.md) |
 | 아직 없는 것 (다음 단계) | [web-api/44-section.md](web-api/44-section.md) |

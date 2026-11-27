@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/network"
-	"github.com/jay94ks/mydcd/internal/tenancy"
+	"github.com/jay94ks/seafield/internal/network"
+	"github.com/jay94ks/seafield/internal/tenancy"
 )
 
 func verifyDNSOwnerRecreatedBridge(t *testing.T, ctx context.Context, old *DNSOwner, n *network.Manager, policy DNSOwnerPolicy, bridge network.BridgeSpec, bridgeKey string, allocation network.Allocation, closed *ReferenceClose, native string, key ed25519.PrivateKey, publish func(DNSOwnerPolicy)) (*DNSOwner, DNSOwnerPolicy) {

@@ -6,10 +6,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/access"
+	"github.com/jay94ks/seafield/internal/access"
 )
 
-// access.Credential's MarshalJSON only keeps mydcd's stored bytes; the view
+// access.Credential's MarshalJSON only keeps sfcd's stored bytes; the view
 // is camelCase, keys hex, and an empty VolumeFiles (deny all) stays [] while
 // nil (no ceiling) is left out.
 func TestCamelCredentialRows(t *testing.T) {

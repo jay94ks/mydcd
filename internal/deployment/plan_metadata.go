@@ -16,7 +16,7 @@ func validPlanTaskMetadata(d blueprintRecord) bool {
 	}
 	var envServices []string
 	for _, name := range mapKeys(d.Input.Services) {
-		if len(d.Input.Services[name].MyDC.SecretEnv) != 0 {
+		if len(d.Input.Services[name].Sfc.SecretEnv) != 0 {
 			envServices = append(envServices, name)
 		}
 	}
@@ -33,8 +33,8 @@ func validPlanTaskMetadata(d blueprintRecord) bool {
 		if name == "" {
 			name = alias
 		}
-		node, present := d.Nodes[v.MyDC.Node]
-		if !ok || !identifier(alias) || !fixedVolumePolicy(v) || !ref.Valid() || ref.Scope.Cluster != d.Cluster || ref.Scope.Tenant != d.Tenant || ref.Scope.ID != name || !present || node.Key != ref.Owner.Key || ref.Owner.Node != v.MyDC.Node {
+		node, present := d.Nodes[v.Sfc.Node]
+		if !ok || !identifier(alias) || !fixedVolumePolicy(v) || !ref.Valid() || ref.Scope.Cluster != d.Cluster || ref.Scope.Tenant != d.Tenant || ref.Scope.ID != name || !present || node.Key != ref.Owner.Key || ref.Owner.Node != v.Sfc.Node {
 			return false
 		}
 		if old, exists := seen[ref.Scope.Key()]; exists && old != ref {
@@ -66,7 +66,7 @@ func validPlanTaskMetadata(d blueprintRecord) bool {
 			return false
 		}
 		instance, identityErr := TaskInstanceForKey(d.Tenant, d.App, step.Key, frozen)
-		if identityErr != nil || pending[instance.ResourceID()] != instance || frozen.MyDC.Node != step.Node || d.Nodes[step.Node].Key != step.Owner {
+		if identityErr != nil || pending[instance.ResourceID()] != instance || frozen.Sfc.Node != step.Node || d.Nodes[step.Node].Key != step.Owner {
 			return false
 		}
 		delete(pending, instance.ResourceID())

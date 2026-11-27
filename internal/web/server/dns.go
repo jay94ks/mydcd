@@ -16,14 +16,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/web/dns"
-	"github.com/jay94ks/mydcd/internal/web/mydc"
-	"github.com/jay94ks/mydcd/internal/web/seal"
-	"github.com/jay94ks/mydcd/internal/web/store"
+	"github.com/jay94ks/seafield/internal/web/dns"
+	"github.com/jay94ks/seafield/internal/web/seal"
+	"github.com/jay94ks/seafield/internal/web/sfc"
+	"github.com/jay94ks/seafield/internal/web/store"
 )
 
 // External DNS (UI-54~56, devel/design/web-dns-plan.md). The web app calls
-// the DNS provider itself; mydcd is asked only who the user is and which
+// the DNS provider itself; sfcd is asked only who the user is and which
 // workspaces they manage. Provider tokens live in sealed files.
 
 func dnsSecretName(id string) string { return "dns-" + id }
@@ -69,9 +69,9 @@ type dnsAccess struct {
 func (s *Server) dnsAccess(w http.ResponseWriter, r *http.Request, ws *webSession) (*dnsAccess, bool) {
 	ctx, cancel := s.callCtx(r)
 	defer cancel()
-	var who mydc.Whoami
-	var tenants []mydc.TenantView
-	err := ws.do(ctx, func(ctx context.Context, c mydc.Conn) error {
+	var who sfc.Whoami
+	var tenants []sfc.TenantView
+	err := ws.do(ctx, func(ctx context.Context, c sfc.Conn) error {
 		var err error
 		if who, err = c.Whoami(ctx); err != nil {
 			return err
@@ -86,7 +86,7 @@ func (s *Server) dnsAccess(w http.ResponseWriter, r *http.Request, ws *webSessio
 	a := &dnsAccess{admin: who.User.SystemAdmin, manages: map[string]bool{}, member: map[string]bool{}}
 	for _, t := range tenants {
 		a.member[t.ID] = true
-		if t.Role == mydc.RoleManager {
+		if t.Role == sfc.RoleManager {
 			a.manages[t.ID] = true
 		}
 	}
@@ -137,7 +137,8 @@ func (s *Server) dnsProvider(w http.ResponseWriter, p *store.DNSProvider) (dns.P
 func (s *Server) loadDomain(w http.ResponseWriter, r *http.Request) (*store.DNSDomain, *store.DNSProvider, bool) {
 	d, err := s.opt.Store.GetDNSDomain(r.PathValue("domain"))
 	if errors.Is(err, store.ErrNotFound) {
-		writeError(w, http.StatusNotFound, "missing", "no such domain")
+		// a registered domain without a provider, or no such domain
+		writeError(w, http.StatusConflict, "no-provider", "no DNS provider is attached to this domain")
 		return nil, nil, false
 	}
 	if err != nil {
@@ -365,12 +366,32 @@ func (s *Server) handleDNSRenameProvider(w http.ResponseWriter, r *http.Request,
 	writeJSON(w, http.StatusOK, map[string]any{"provider": p})
 }
 
-// DELETE /dns/providers/{id}: refused while a domain uses it.
+// DELETE /dns/providers/{id}: the domains that used it keep their place in
+// the cluster list and only lose the provider (and the web's marks).
 func (s *Server) handleDNSDeleteProvider(w http.ResponseWriter, r *http.Request, ws *webSession) {
 	if !s.requireAdmin(w, r, ws) {
 		return
 	}
 	id := r.PathValue("id")
+	if _, err := s.opt.Store.GetDNSProvider(id); errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "missing", "no such provider connection")
+		return
+	}
+	ds, err := s.opt.Store.ListDNSDomains()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal", err.Error())
+		return
+	}
+	for _, d := range ds {
+		if d.Provider != id {
+			continue
+		}
+		if err := s.opt.Store.DeleteDNSDomain(d.Domain); err != nil && !errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusInternalServerError, "internal", err.Error())
+			return
+		}
+		s.audit(ws, "", "dns", "delete-domain", d.Domain, nil, nil)
+	}
 	switch err := s.opt.Store.DeleteDNSProvider(id); {
 	case errors.Is(err, store.ErrNotFound):
 		writeError(w, http.StatusNotFound, "missing", "no such provider connection")
@@ -409,61 +430,26 @@ func (s *Server) handleDNSProviderDomains(w http.ResponseWriter, r *http.Request
 	}
 	type row struct {
 		dns.Domain
-		Connected bool `json:"connected"`
+		Connected  bool  `json:"connected"`            // this connection is attached
+		Registered *bool `json:"registered,omitempty"` // in the cluster domain list (absent: not readable)
 	}
+	ctx, cancel = s.callCtx(r)
+	reg := registeredDomains(ctx, ws)
+	cancel()
 	out := []row{}
 	for _, d := range ds {
-		_, err := s.opt.Store.GetDNSDomain(d.Name)
-		out = append(out, row{d, err == nil})
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": out})
-}
-
-// ---- domains ----
-
-type domainView struct {
-	*store.DNSDomain
-	ProviderName string   `json:"providerName"`
-	Vendor       string   `json:"vendor"`
-	MyNames      []string `json:"myNames,omitempty"` // non-admin: names the caller may write
-}
-
-// GET /dns/domains: administrators see all, others the domains with an
-// assignment to one of their workspaces (and only those assignments).
-func (s *Server) handleDNSDomains(w http.ResponseWriter, r *http.Request, ws *webSession) {
-	a, ok := s.dnsAccess(w, r, ws)
-	if !ok {
-		return
-	}
-	ds, err := s.opt.Store.ListDNSDomains()
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal", err.Error())
-		return
-	}
-	out := []domainView{}
-	for _, d := range ds {
-		v := domainView{DNSDomain: d}
-		if p, err := s.opt.Store.GetDNSProvider(d.Provider); err == nil {
-			v.ProviderName, v.Vendor = p.Name, p.Vendor
-		}
-		if !a.admin {
-			if _, tenants := a.ranges(d, false); len(tenants) == 0 {
-				continue
-			}
-			cp := *d
-			cp.Assignments = nil
-			for _, as := range d.Assignments {
-				if a.member[as.Tenant] {
-					cp.Assignments = append(cp.Assignments, as)
-				}
-			}
-			v.DNSDomain = &cp
-			v.MyNames, _ = a.ranges(d, true)
+		c, err := s.opt.Store.GetDNSDomain(d.Name)
+		v := row{Domain: d, Connected: err == nil && c.Provider == p.ID}
+		if reg != nil {
+			b := reg[d.Name]
+			v.Registered = &b
 		}
 		out = append(out, v)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"items": out})
 }
+
+// ---- domains ----
 
 func checkAssignments(as []store.DNSAssignment) error {
 	seen := map[string]bool{}
@@ -482,81 +468,6 @@ func checkAssignments(as []store.DNSAssignment) error {
 		}
 	}
 	return nil
-}
-
-// POST /dns/domains {domain, provider, defaultTtl?, assignments?}
-func (s *Server) handleDNSAddDomain(w http.ResponseWriter, r *http.Request, ws *webSession) {
-	var req struct {
-		Domain      string                `json:"domain"`
-		Provider    string                `json:"provider"`
-		DefaultTTL  int                   `json:"defaultTtl"`
-		Assignments []store.DNSAssignment `json:"assignments"`
-	}
-	if !readJSON(w, r, &req) {
-		return
-	}
-	if !s.requireAdmin(w, r, ws) {
-		return
-	}
-	req.Domain = strings.ToLower(strings.TrimSuffix(strings.TrimSpace(req.Domain), "."))
-	if req.Domain == "" || len(req.Domain) > 253 || strings.ContainsAny(req.Domain, " /\x00") {
-		writeError(w, http.StatusUnprocessableEntity, "invalid", "domain is required")
-		return
-	}
-	if err := checkAssignments(req.Assignments); err != nil {
-		writeError(w, http.StatusUnprocessableEntity, "invalid", err.Error())
-		return
-	}
-	p, err := s.opt.Store.GetDNSProvider(req.Provider)
-	if err != nil {
-		writeError(w, http.StatusNotFound, "missing", "no such provider connection")
-		return
-	}
-	prov, ok := s.dnsProvider(w, p)
-	if !ok {
-		return
-	}
-	caps := prov.Capabilities()
-	if req.DefaultTTL == 0 {
-		req.DefaultTTL = 3600
-	}
-	if req.DefaultTTL < caps.MinTTL || req.DefaultTTL > 86400*7 {
-		writeError(w, http.StatusUnprocessableEntity, "invalid", "defaultTtl is outside what the provider accepts")
-		return
-	}
-	ctx, cancel := s.dnsCtx(r)
-	defer cancel()
-	ds, err := prov.ListDomains(ctx)
-	if err != nil {
-		writeDNSError(w, err)
-		return
-	}
-	i := slices.IndexFunc(ds, func(d dns.Domain) bool { return d.Name == req.Domain })
-	if i < 0 {
-		writeError(w, http.StatusNotFound, "missing", "the provider account has no such domain")
-		return
-	}
-	if !ds[i].HasZone {
-		writeError(w, http.StatusConflict, "zone-elsewhere", "this domain's DNS is not served by this provider")
-		return
-	}
-	if _, err := prov.GetZone(ctx, req.Domain); err != nil {
-		writeDNSError(w, err)
-		return
-	}
-	d := &store.DNSDomain{Domain: req.Domain, Provider: p.ID, DefaultTTL: req.DefaultTTL, Assignments: req.Assignments, AddedBy: ws.user.Username, AddedAt: s.now()}
-	if d.Assignments == nil {
-		d.Assignments = []store.DNSAssignment{}
-	}
-	if err := s.opt.Store.CreateDNSDomain(d); errors.Is(err, store.ErrConflict) {
-		writeError(w, http.StatusConflict, "exists", "this domain is already connected")
-		return
-	} else if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal", err.Error())
-		return
-	}
-	s.audit(ws, "", "dns", "add-domain", d.Domain, nil, d)
-	writeJSON(w, http.StatusCreated, map[string]any{"domain": d})
 }
 
 // PUT /dns/domains/{domain} {defaultTtl, assignments}
@@ -597,30 +508,13 @@ func (s *Server) handleDNSUpdateDomain(w http.ResponseWriter, r *http.Request, w
 	writeJSON(w, http.StatusOK, map[string]any{"domain": d})
 }
 
-// DELETE /dns/domains/{domain}: disconnect. Records at the provider stay.
-func (s *Server) handleDNSDeleteDomain(w http.ResponseWriter, r *http.Request, ws *webSession) {
-	if !s.requireAdmin(w, r, ws) {
-		return
-	}
-	dom := r.PathValue("domain")
-	if err := s.opt.Store.DeleteDNSDomain(dom); errors.Is(err, store.ErrNotFound) {
-		writeError(w, http.StatusNotFound, "missing", "no such domain")
-		return
-	} else if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal", err.Error())
-		return
-	}
-	s.audit(ws, "", "dns", "delete-domain", dom, nil, nil)
-	w.WriteHeader(http.StatusNoContent)
-}
-
 // ---- records ----
 
 type recordView struct {
 	dns.RRSet
 	Fingerprint string            `json:"fingerprint"`
 	Managed     *store.DNSManaged `json:"managed,omitempty"`
-	Outside     bool              `json:"outside"`  // not a name MyDC manages (admin view)
+	Outside     bool              `json:"outside"`  // not a name Seafield Cluster manages (admin view)
 	Writable    bool              `json:"writable"` // the caller may change it
 }
 
@@ -686,7 +580,7 @@ func (s *Server) handleDNSRecords(w http.ResponseWriter, r *http.Request, ws *we
 type dnsChangeReq struct {
 	Upsert []dns.RRSet `json:"upsert"`
 	Delete []dns.Key   `json:"delete"`
-	// Outside must be true to change a record MyDC did not make and no
+	// Outside must be true to change a record Seafield Cluster did not make and no
 	// workspace is assigned (administrators only; the confirm dialog).
 	Outside bool   `json:"outside"`
 	Tenant  string `json:"tenant"` // optional: the workspace the change is for
@@ -700,7 +594,7 @@ type plannedChange struct {
 	After       *dns.RRSet `json:"after"`
 	Fingerprint string     `json:"fingerprint"` // of Before; apply must see the same
 	Tenant      string     `json:"tenant,omitempty"`
-	Outside     bool       `json:"outside,omitempty"` // a record MyDC does not manage (stays unmarked)
+	Outside     bool       `json:"outside,omitempty"` // a record Seafield Cluster does not manage (stays unmarked)
 }
 
 // planDNS checks a change request against the caller's range and the zone
@@ -733,7 +627,7 @@ func (s *Server) planDNS(w http.ResponseWriter, a *dnsAccess, d *store.DNSDomain
 			}
 		} else if managed[k.String()] == nil && !dns.InRange(k.Name, assigned) {
 			if !req.Outside {
-				writeError(w, http.StatusConflict, "outside", k.Name+" "+k.Type+" is not managed by MyDC; confirm to change it")
+				writeError(w, http.StatusConflict, "outside", k.Name+" "+k.Type+" is not managed by Seafield Cluster; confirm to change it")
 				return false
 			}
 			outside = true

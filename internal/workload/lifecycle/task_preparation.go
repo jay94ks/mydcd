@@ -11,8 +11,8 @@ import (
 	"errors"
 	"slices"
 
-	"github.com/jay94ks/mydcd/internal/schema"
-	"github.com/jay94ks/mydcd/internal/storage"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/storage"
 )
 
 const preparationPrefix = sourcePrefix + "task-preparation/"
@@ -39,7 +39,7 @@ func TaskCompileID(clusterID, use [32]byte) string {
 		Schema       uint8
 		Cluster, Use [32]byte
 	}{1, clusterID, use})
-	hash := sha256.Sum256(append([]byte("mydc-checker-task-preparation-1\x00"), raw...))
+	hash := sha256.Sum256(append([]byte("sfc-checker-task-preparation-1\x00"), raw...))
 	return hex.EncodeToString(hash[:])
 }
 func (p TaskPreparation) ID() string { return TaskCompileID(p.Cluster, p.Use) }

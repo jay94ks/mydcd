@@ -193,7 +193,7 @@ func TestBindPeerRequiresExactHeldDirectoryAndRejectsSymlinks(t *testing.T) {
 }
 
 func TestBindPeerInheritedListenerUsesResponderIdentity(t *testing.T) {
-	const childEnv = "MYDC_BIND_PEER_OWNED_CHILD"
+	const childEnv = "SFC_BIND_PEER_OWNED_CHILD"
 	if os.Getenv(childEnv) == "1" {
 		file := os.NewFile(3, "owned-inherited-engine-listener")
 		listener, err := net.FileListener(file)

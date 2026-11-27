@@ -11,12 +11,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/engine"
-	"github.com/jay94ks/mydcd/internal/network"
-	"github.com/jay94ks/mydcd/internal/nodestorage"
-	"github.com/jay94ks/mydcd/internal/tenancy"
-	"github.com/jay94ks/mydcd/internal/workload/volumes"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/engine"
+	"github.com/jay94ks/seafield/internal/network"
+	"github.com/jay94ks/seafield/internal/nodestorage"
+	"github.com/jay94ks/seafield/internal/tenancy"
+	"github.com/jay94ks/seafield/internal/workload/volumes"
 )
 
 // Signed identities here are simulated inputs to the real planning/Binding
@@ -26,7 +26,7 @@ func fixedAppFixture(t *testing.T) (*fixture, Compose, PlanningContext, volumes.
 	f := makeFixture(t)
 	input := smallCompose(t)
 	keep := true
-	input.Volumes["mysql-data"] = ComposeVolume{Name: "registered-data", External: true, MyDC: VolumeExtension{Driver: "local", Access: "single-writer", Retain: &keep, Quota: "observe"}}
+	input.Volumes["mysql-data"] = ComposeVolume{Name: "registered-data", External: true, Sfc: VolumeExtension{Driver: "local", Access: "single-writer", Retain: &keep, Quota: "observe"}}
 	scope := volumes.Scope{Cluster: f.cluster, Tenant: "tenant", ID: "registered-data", Generation: 3}
 	rootRef := nodestorage.Reference{Cluster: f.cluster, Node: "node-b", Key: public(f.nb), ID: "disk", Generation: 2, Path: "/owned-test-disk"}
 	directory := nodestorage.Directory{Filesystem: "ext4", FilesystemPath: "/", UUID: [16]byte{1}, HandleType: 1, Handle: bytes.Repeat([]byte{2}, 8), Inode: 2, DeviceMajor: 8, DeviceMinor: 1, Boot: [32]byte{3}, Namespace: [32]byte{4}, MountID: 5}
@@ -153,11 +153,11 @@ func TestFixedAppRejectsMissingUnpermittedRetargetedAndMutableReferences(t *test
 				ctx.FixedVolumes = nil
 			case "node":
 				service := input.Services["db"]
-				service.MyDC.Node = "node-a"
+				service.Sfc.Node = "node-a"
 				input.Services["db"] = service
 			case "uid":
 				v := input.Volumes["mysql-data"]
-				v.MyDC.UID = 10001
+				v.Sfc.UID = 10001
 				input.Volumes["mysql-data"] = v
 			case "alias-writer":
 				input.Volumes["duplicate"] = input.Volumes["mysql-data"]
@@ -185,7 +185,7 @@ func TestFixedAppReadOnlyAliasesShareOneOriginalVolumeWithoutWriterBypass(t *tes
 	input.Volumes["duplicate"] = input.Volumes["mysql-data"]
 	service := input.Services["db"]
 	service.Secrets = nil
-	service.MyDC.Sources = nil
+	service.Sfc.Sources = nil
 	service.Volumes = append(Mounts(nil), service.Volumes...)
 	service.Volumes[0].ReadOnly = true
 	input.Services["db"] = service
@@ -214,7 +214,7 @@ func TestFixedAppReadOnlyAliasesShareOneOriginalVolumeWithoutWriterBypass(t *tes
 
 func TestParsedAppNamedNetworkAndFixedVolumeCreateOnlyAppConsumers(t *testing.T) {
 	f, _, ctx, ready := fixedAppFixture(t)
-	document := "name: php-mysql\nservices:\n  db:\n    image: docker.io/library/mysql@sha256:" + strings.Repeat("a", 64) + "\n    command: [mysqld]\n    networks: {app: {ipv4_address: 10.240.20.10}}\n    volumes: [database:/data]\n    x-mydc: {node: node-b}\nnetworks:\n  app: {name: shared-lan}\nvolumes:\n  database: {external: true, name: registered-data}\n"
+	document := "name: php-mysql\nservices:\n  db:\n    image: docker.io/library/mysql@sha256:" + strings.Repeat("a", 64) + "\n    command: [mysqld]\n    networks: {app: {ipv4_address: 10.240.20.10}}\n    volumes: [database:/data]\n    x-sfc: {node: node-b}\nnetworks:\n  app: {name: shared-lan}\nvolumes:\n  database: {external: true, name: registered-data}\n"
 	input, err := ParseApp([]byte(document))
 	if err != nil {
 		t.Fatal(err)
@@ -245,5 +245,75 @@ func TestParsedAppNamedNetworkAndFixedVolumeCreateOnlyAppConsumers(t *testing.T)
 	}
 	if ctx.Current[source].Generation != 17 || ctx.Volumes[ready.Spec.Scope.Key()].Revision() != before {
 		t.Fatal("planning mutated management state")
+	}
+}
+
+// With a volume-shares record for the exact registration, a service on
+// another server may mount the fixed Volume: it becomes a remote consumer
+// (runner = its server, data stays on the owner). Without the record, or
+// with one of another generation, the plan still refuses.
+func TestSharedFixedVolumeOnAnotherServer(t *testing.T) {
+	f, input, ctx, ready := fixedAppFixture(t)
+	web := input.Services["web"]
+	web.Volumes = append(web.Volumes, Mount{Type: "volume", Source: "mysql-data", Target: "/srv/data", ReadOnly: true})
+	input.Services["web"] = web
+	if _, err := Compile(input, f.c, ctx); err == nil {
+		t.Fatal("unshared fixed volume used on two servers")
+	}
+	stale := ready.Spec.Scope
+	stale.Generation++
+	ctx.Shares = map[string]VolumeShare{ready.Spec.Scope.Key(): {Scope: stale, Mode: volumes.ShareSingleWriter}}
+	if _, err := Compile(input, f.c, ctx); err == nil {
+		t.Fatal("share of another generation applied")
+	}
+	ctx.Shares = map[string]VolumeShare{ready.Spec.Scope.Key(): {Scope: ready.Spec.Scope, Mode: volumes.ShareSingleWriter}}
+	b, err := Compile(input, f.c, ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	needs, err := b.Inputs("web", "web", 11, public(private(31)))
+	if err != nil || needs.Use.Node != "node-a" || needs.FixedVolumes[ready.Spec.Scope.Key()].Share != volumes.ShareSingleWriter {
+		t.Fatalf("remote needs %+v %v", needs.Use, err)
+	}
+	f.approveAll(needs)
+	mode := func(s volumes.Scope) string {
+		if s == ready.Spec.Scope {
+			return volumes.ShareSingleWriter
+		}
+		return ""
+	}
+	if _, err := f.bindings.Reserve(f.bindings.Revision(), f.c, f.trees, f.a, f.v, []Needs{needs}, 100, nil); err == nil {
+		t.Fatal("reserved a remote consumer without a current share")
+	}
+	r, err := f.bindings.Reserve(f.bindings.Revision(), f.c, f.trees, f.a, f.v, []Needs{needs}, 100, mode)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pin := r.Bindings[0].Pins()[0].Consumer
+	if !pin.Remote() || pin.Runner != "node-a" || pin.Owner != ready.Owner || pin.Writable {
+		t.Fatalf("remote pin %+v", pin)
+	}
+	raw, err := r.Bindings[0].Encode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := DecodeBinding(raw); err != nil {
+		t.Fatal("remote binding does not decode", err)
+	}
+
+	// The Task recipe on node-a carries the remote mount with node-b's
+	// current key as the home; no local fixed mount.
+	bound := r.Bindings[0]
+	netID := PoolID("tenant", "php-mysql", "app", "node-a")
+	owner := engine.Owner(f.cluster, public(f.na))
+	bridge := network.BridgeSpec{Schema: 1, Network: netID, Owner: owner, MTU: 1280, Internal: true, Pools: []network.Pool{{ID: "pool", Network: netID, Owner: owner, Prefix: netip.MustParsePrefix("10.240.10.0/24"), Gateway: netip.MustParseAddr("10.240.10.1"), MTU: 1280}}}
+	projection := projectionReference(bound)
+	material := TaskMaterial{Binding: bound, Projection: &projection, Volumes: []volumes.NativeReady{ready}, Network: ObjectRef{ResourceKey("bridge", "tenant", "php-mysql", "app/node-a"), 10, 10}, Bridge: bridge}
+	_, task, err := b.taskRecipe("web", material, owner)
+	if err != nil || len(task.Volumes) != 0 || len(task.RemoteVolumes) != 1 {
+		t.Fatalf("remote task recipe %v %+v", err, task.RemoteVolumes)
+	}
+	if rv := task.RemoteVolumes[0]; rv.Scope != ready.Spec.Scope || rv.Consumer != pin || rv.Home != public(f.nb) || rv.Target != "/srv/data" {
+		t.Fatalf("remote mount %+v", rv)
 	}
 }

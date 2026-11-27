@@ -8,9 +8,9 @@ import (
 	"encoding/hex"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/cluster/membership"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/config"
+	"github.com/jay94ks/seafield/internal/cluster/membership"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/config"
 )
 
 func TestInstalledAckRelayRequiresCurrentControlAndTargetProof(t *testing.T) {
@@ -26,7 +26,7 @@ func TestInstalledAckRelayRequiresCurrentControlAndTargetProof(t *testing.T) {
 	target := config.Peer{ID: "target", Key: hex.EncodeToString(b.Public().(ed25519.PublicKey)), Endpoint: "127.0.0.1:8002"}
 	p := Policy{Cluster: [32]byte{71}, BootstrapKey: [32]byte{72}, TrustRoot: public(a), Genesis: genesis}
 	d, _ := membership.New(p.Cluster, genesis)
-	d, _ = d.Invite(target, "join-target")
+	d, _ = d.Invite(target, "join-target", nil)
 	entry, _ := d.Entry(target.ID)
 	d, err := d.Dispatch(target.ID, entry.Revision, entry.Job.Pending.ID, 1, public(a))
 	if err != nil {

@@ -47,7 +47,7 @@ func (a GitAccess) valid(required bool) bool {
 
 type gitAuth struct{ access GitAccess }
 
-func (gitAuth) Name() string   { return "mydc-git-basic" }
+func (gitAuth) Name() string   { return "sfc-git-basic" }
 func (gitAuth) String() string { return "[redacted Git authentication]" }
 func (a gitAuth) SetAuth(r *http.Request) {
 	r.SetBasicAuth(string(a.access.Username), string(a.access.Password))

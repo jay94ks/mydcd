@@ -4,7 +4,7 @@ package deployment
 
 import (
 	"encoding/hex"
-	"github.com/jay94ks/mydcd/internal/access"
+	"github.com/jay94ks/seafield/internal/access"
 	"strings"
 	"unicode/utf8"
 )

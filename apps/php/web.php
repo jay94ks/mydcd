@@ -7,7 +7,7 @@ $requestStarted = hrtime(true);
 // Credentials come only from the engine's read-only Secret projection.
 function timing(string $stage, int $started, ?PDOException $failure = null): void {
     $ms = (hrtime(true) - $started) / 1000000;
-    if (getenv('MYDC_DNS_TIMING') === '1' && ($ms >= 100 || $failure !== null)) {
+    if (getenv('SFC_DNS_TIMING') === '1' && ($ms >= 100 || $failure !== null)) {
         $event = ['event' => 'app-stage', 'stage' => $stage, 'elapsed_ms' => round($ms, 3), 'pid' => getmypid(),
                   'request_started' => $GLOBALS['requestStarted']];
         if ($failure !== null) {
@@ -20,7 +20,7 @@ function timing(string $stage, int $started, ?PDOException $failure = null): voi
 }
 
 function sqlProgress(string $stage): void {
-    if (getenv('MYDC_DNS_TIMING') === '1') {
+    if (getenv('SFC_DNS_TIMING') === '1') {
         error_log(json_encode(['event' => 'sql-progress', 'stage' => $stage, 'pid' => getmypid(),
             'request_started' => $GLOBALS['requestStarted'],
             'method' => in_array($_SERVER['REQUEST_METHOD'] ?? '', ['GET', 'POST', 'PUT', 'DELETE'], true) ? $_SERVER['REQUEST_METHOD'] : 'other',
@@ -40,7 +40,7 @@ function database(): PDO {
     }
     $started = hrtime(true);
     try {
-        $pdo = new PDO("mysql:host={$host};port=3306;dbname=mydc;charset=utf8mb4", 'mydc', $password,
+        $pdo = new PDO("mysql:host={$host};port=3306;dbname=sfc;charset=utf8mb4", 'sfc', $password,
             [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::ATTR_TIMEOUT => 2,
              PDO::ATTR_EMULATE_PREPARES => false]);
     } catch (PDOException $failure) {
@@ -55,15 +55,15 @@ try {
     // Explicit DNS-only boundary input; the normal SQL scenario never sets it.
     // This consumes libc/search in the same PHP HTTP/CLI runtime, without
     // hiding a SQL failure as Ready or requiring a MySQL image initialization.
-    if (getenv('MYDC_DNS_FIXTURE') === '1') {
+    if (getenv('SFC_DNS_FIXTURE') === '1') {
         $host = getenv('DB_HOST');
         $address = gethostbyname($host);
-        if ($address !== getenv('MYDC_DNS_EXPECTED')) {
+        if ($address !== getenv('SFC_DNS_EXPECTED')) {
             http_response_code(503);
             if (PHP_SAPI === 'cli') { exit(1); }
         }
         header('Content-Type: application/json');
-        echo json_encode(['driver' => 'dns', 'ready' => $address === getenv('MYDC_DNS_EXPECTED'),
+        echo json_encode(['driver' => 'dns', 'ready' => $address === getenv('SFC_DNS_EXPECTED'),
             'db_host' => $host, 'db_address' => $address]);
         exit(0);
     }

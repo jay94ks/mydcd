@@ -107,5 +107,5 @@ func gitCommit(id string) bool {
 }
 func deliverySourceID(p DeliveryDeclaration) [32]byte {
 	raw, _ := json.Marshal(p.Source)
-	return sha256.Sum256(append([]byte("mydc-delivery-source-1\x00"), raw...))
+	return sha256.Sum256(append([]byte("sfc-delivery-source-1\x00"), raw...))
 }

@@ -8,8 +8,8 @@
     "Ref": "refs/tags/v1.8.0"
   },
   "source": "existing verified Go module cache; no fetch or version update",
-  "change": "followers report their commit index in AppendEntries responses; the leader wakes replication on commit advance and skips empty AppendEntries the follower does not need; separate HeartbeatInterval; PeerConnectionLost starts an election or re-checks the lease when the transport loses a peer; PeerConnected makes the leader heartbeat a follower whose connection came back",
-  "patch_sha256": "d1174d83b4f1d94b13245790f8cd74acac8b2ec0bfcfbeb548622feadde684ff",
+  "change": "followers report their commit index in AppendEntries responses; the leader wakes replication on commit advance and skips empty AppendEntries the follower does not need; separate HeartbeatInterval; PeerConnectionLost starts an election or re-checks the lease when the transport loses a peer; PeerConnected makes the leader heartbeat a follower whose connection came back; Raft requests are checked against the sender's role: a known non-voter cannot send AppendEntries/InstallSnapshot while the receiver follows or is another leader (unless they carry a configuration that makes it a voter) or raise a term with RequestVote, and TimeoutNow is accepted only from the current leader",
+  "patch_sha256": "59d42501ff504447b4fa188d609bd24b776f3eeef1ef5ebf11290e12a1e82885",
   "files": [
     {
       "path": ".github/CODEOWNERS",
@@ -84,7 +84,7 @@
     {
       "path": "api.go",
       "upstream_sha256": "98ea2895695e050fccc1c9693b5c670ddf75d11fdbe26677db310fca7e4e86cf",
-      "local_sha256": "8891e2d738c59aadc5695eac39a2a5cd00d83797d1b6f1bfd7269f704f1a3fce"
+      "local_sha256": "3740d202c5e56f2f637fa01d39f5ebad92951355d55c8e54f666c9a20d4e9a66"
     },
     {
       "path": "bench/bench.go",
@@ -274,12 +274,12 @@
     {
       "path": "raft.go",
       "upstream_sha256": "a7b9f4f414719149d9a94c54de7bd2a2f566b1f194a447999d41d57853b7ae38",
-      "local_sha256": "9050222f37709e8401f11343adee11a4e3e2d01f57ea5c0a67a6ee4c6686dd4d"
+      "local_sha256": "219fa6b5d17dbe6a276529674605287600a8b8eb61015e64ca25c8caf4685368"
     },
     {
       "path": "raft_test.go",
       "upstream_sha256": "33d02fbb915164a24d1387e087ffe4d4f5c52d8861e73cbe828152fb3edfdb15",
-      "local_sha256": "33d02fbb915164a24d1387e087ffe4d4f5c52d8861e73cbe828152fb3edfdb15"
+      "local_sha256": "efc1b3ae0b4dd9c5c665f5591ef5f61957b9d82c1d3c4906479c20595decc383"
     },
     {
       "path": "replication.go",

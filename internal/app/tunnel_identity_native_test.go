@@ -13,14 +13,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/bootstrap"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/config"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/network/services"
-	"github.com/jay94ks/mydcd/internal/tenancy"
+	"github.com/jay94ks/seafield/internal/bootstrap"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/network/services"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/tenancy"
 )
 
 func TestRQ12ManagedTUNCurrentKeysKeepOriginalNativeTraffic(t *testing.T) {
@@ -36,7 +35,7 @@ func prepareTrafficIdentityRotations(t *testing.T, ctx context.Context, a *Runti
 	t.Helper()
 	return func(probe func()) {
 		t.Helper()
-		cfg, err := config.LoadNode(nodeConfig)
+		cfg, err := loadTestNode(nodeConfig)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -80,23 +79,23 @@ func prepareTrafficIdentityRotations(t *testing.T, ctx context.Context, a *Runti
 				record, err := bootstrap.Read(cfg)
 				return err == nil && record.Root.Self.Key == next && next != old.Public && !d.MemberKey(old.Public) && d.WorkKey(next)
 			})
-			remote, known := a.Mesh.Peer(mydcp.Identity(next))
+			remote, known := a.Mesh.Peer(sfcp.Identity(next))
 			if !known || !remote.Member {
 				t.Fatal("current peer directory missing installed replacement")
 			}
-			if _, known := a.Mesh.Peer(mydcp.Identity(old.Public)); known {
+			if _, known := a.Mesh.Peer(sfcp.Identity(old.Public)); known {
 				t.Fatal("old node key remained a transport fallback")
 			}
 			wait("positive current-key authenticated RPC before old-key rejection", func() bool {
 				reply, err := cluster.CallManagement(ctx, a.Mesh, a.commandIdentity(), p.Cluster, remote, cluster.ManagementRequest{Method: "status", Latest: false})
 				return err == nil && reply.Node == "node-b"
 			})
-			source, known := a.Mesh.Peer(mydcp.Identity(a.Identity.Public))
+			source, known := a.Mesh.Peer(sfcp.Identity(a.Identity.Public))
 			if !known {
 				t.Fatal("current source peer required")
 			}
 			source.Endpoint = "192.0.2.1:44101"
-			obsolete, err := mydcp.NewTransport(old, p.Cluster, func(key mydcp.Identity) (mydcp.Peer, bool) { return source, key == source.Key })
+			obsolete, err := sfcp.NewTransport(old, p.Cluster, func(key sfcp.Identity) (sfcp.Peer, bool) { return source, key == source.Key })
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -15,12 +15,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/schema"
-	"github.com/jay94ks/mydcd/internal/servicecall"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/servicecall"
+	"github.com/jay94ks/seafield/internal/sfcp"
 )
 
 // The real SDK, authenticated Unix/QUIC, ordered input and EOF are exercised.
@@ -30,19 +30,19 @@ func TestServiceCallActualUserWireBoundsDigestEOFAndProbe(t *testing.T) {
 		for _, mode := range []string{"full", "empty", "corrupt", "short", "extra", "lost-result", "probe", "probe-redirect"} {
 			t.Run(network+"/"+mode, func(t *testing.T) {
 				_, c, session, node := journalFixture(t)
-				root, err := os.MkdirTemp("", "mydc-service-call-wire-")
+				root, err := os.MkdirTemp("", "sfc-service-call-wire-")
 				if err != nil {
 					t.Fatal(err)
 				}
 				defer os.RemoveAll(root)
 				peer := c.Peers[0]
-				lookup := func(key mydcp.Identity) (mydcp.Peer, bool) {
-					if key == mydcp.Identity(c.Self.Public) {
-						return mydcp.Peer{ID: "user", Policy: mydcp.Policy{Key: key, UserAuth: true}}, true
+				lookup := func(key sfcp.Identity) (sfcp.Peer, bool) {
+					if key == sfcp.Identity(c.Self.Public) {
+						return sfcp.Peer{ID: "user", Policy: sfcp.Policy{Key: key, UserAuth: true}}, true
 					}
 					return peer, key == peer.Key
 				}
-				server, err := mydcp.NewTransport(node, c.Cluster, lookup)
+				server, err := sfcp.NewTransport(node, c.Cluster, lookup)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -55,7 +55,7 @@ func TestServiceCallActualUserWireBoundsDigestEOFAndProbe(t *testing.T) {
 					}
 					peer.Endpoint = server.Addr().String()
 				}
-				mesh, err := mydcp.NewTransport(c.Self, c.Cluster, lookup)
+				mesh, err := sfcp.NewTransport(c.Self, c.Cluster, lookup)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -65,7 +65,7 @@ func TestServiceCallActualUserWireBoundsDigestEOFAndProbe(t *testing.T) {
 				completed := make(chan error, 1)
 				effects := 0
 				var probeRequests atomic.Int32
-				err = server.OnManagement(mydcp.User, func(ctx context.Context, conn *mydcp.Session, stream mydcp.Stream, frame mydcp.Frame) error {
+				err = server.OnManagement(sfcp.User, func(ctx context.Context, conn *sfcp.Session, stream sfcp.Stream, frame sfcp.Frame) error {
 					cause := func() error {
 						envelope, e := schema.Decode[Envelope](frame.Fields[0].Value)
 						if e != nil {
@@ -73,7 +73,7 @@ func TestServiceCallActualUserWireBoundsDigestEOFAndProbe(t *testing.T) {
 						}
 						q, e := schema.Decode[Request](envelope.Body)
 						if e != nil || !q.validMethodFields() || !q.validQuerySelectors() {
-							return mydcp.ErrFrame
+							return sfcp.ErrFrame
 						}
 						if _, e = binding.binding(conn, frame.Kind, envelope); e != nil {
 							return e
@@ -82,7 +82,7 @@ func TestServiceCallActualUserWireBoundsDigestEOFAndProbe(t *testing.T) {
 						if mode == "probe" || mode == "probe-redirect" {
 							probeRequests.Add(1)
 							if q.Method != "cd-probe" || q.CDProbe == nil {
-								return mydcp.ErrFrame
+								return sfcp.ErrFrame
 							}
 							if e = streamEOF(stream); e != nil {
 								return e
@@ -94,7 +94,7 @@ func TestServiceCallActualUserWireBoundsDigestEOFAndProbe(t *testing.T) {
 							return binding.respond(stream, frame, digest, Reply{Schema: 1, Code: "ok", CDProbe: &result})
 						}
 						if q.Method != "service-call" || q.ServiceCall == nil || q.ServiceInput == nil {
-							return mydcp.ErrFrame
+							return sfcp.ErrFrame
 						}
 						if e = binding.respond(stream, frame, digest, Reply{Schema: 1, Code: "continue"}); e != nil {
 							return e
@@ -102,7 +102,7 @@ func TestServiceCallActualUserWireBoundsDigestEOFAndProbe(t *testing.T) {
 						var body []byte
 						if q.ServiceInput.Length == 0 {
 							if q.ServiceInput.Digest != sha256.Sum256(nil) {
-								return mydcp.ErrFrame
+								return sfcp.ErrFrame
 							}
 							e = streamEOF(stream)
 						} else {
@@ -137,11 +137,11 @@ func TestServiceCallActualUserWireBoundsDigestEOFAndProbe(t *testing.T) {
 					// an unintended redirect produces a second observable request.
 					alternate := peer
 					alternate.ID = "other-provider"
-					c.Peers = []mydcp.Peer{peer, alternate}
+					c.Peers = []sfcp.Peer{peer, alternate}
 					got, e := c.ProbeCD(ctx, peer, session, "tenant", deployment.GitProbeRequest{App: "shop", Repository: "https://git.example/repo.git", Branch: "main", Path: "app.yaml", Credential: "installed"})
 					if mode == "probe-redirect" {
 						var refused *Error
-						if !errors.As(e, &refused) || refused.Code != "not-leader" || refused.Phase != mydcp.Completed || got.Commit != "" || got.Size != 0 || probeRequests.Load() != 1 {
+						if !errors.As(e, &refused) || refused.Code != "not-leader" || refused.Phase != sfcp.Completed || got.Commit != "" || got.Size != 0 || probeRequests.Load() != 1 {
 							t.Fatal("Git profile query left its original provider", got, e, probeRequests.Load())
 						}
 					} else if e != nil || got.Size != 42 || got.Node != "node" {
@@ -170,7 +170,7 @@ func TestServiceCallActualUserWireBoundsDigestEOFAndProbe(t *testing.T) {
 						if e != nil {
 							t.Fatal(e)
 						}
-						_, failure = c.serviceCallExchange(ctx, peer, body, 1, func(conn *mydcp.Session) (Envelope, error) {
+						_, failure = c.serviceCallExchange(ctx, peer, body, 1, func(conn *sfcp.Session) (Envelope, error) {
 							return Envelope{Body: raw, Session: &session, Signature: ed25519.Sign(c.Self.Private, access.RequestBytes(session, conn.PeerChallenge(), raw))}, nil
 						})
 					} else {
@@ -212,7 +212,7 @@ func TestServiceCallRelayBindsExactTaskAndReadShapes(t *testing.T) {
 	if !request.validMethodFields() || !request.validQuerySelectors() {
 		t.Fatal("valid request")
 	}
-	for _, change := range []func(*Request){func(r *Request) { r.After = "cursor" }, func(r *Request) { r.Node = "node" }, func(r *Request) { r.App = "foreign" }, func(r *Request) { r.CDProbe = &deployment.GitProbeRequest{} }, func(r *Request) { r.Method = "catalog" }} {
+	for _, change := range []func(*Request){func(r *Request) { r.After = "cursor" }, func(r *Request) { r.Node = "node" }, func(r *Request) { r.TargetUser = "foreign" }, func(r *Request) { r.CDProbe = &deployment.GitProbeRequest{} }, func(r *Request) { r.Method = "catalog" }} {
 		bad := request
 		change(&bad)
 		if bad.validMethodFields() && bad.validQuerySelectors() {
@@ -243,11 +243,8 @@ func TestServiceCallAndRQ7ReadSelectorsRemainDisjoint(t *testing.T) {
 	call := servicecall.Request{App: "shop", Service: "api", Port: 8080, Path: "/", Method: "POST"}
 	input := ServiceCallInput{Digest: sha256.Sum256(nil)}
 	probe := deployment.GitProbeRequest{App: "shop", Repository: "https://git.example/repo.git", Branch: "main", Path: "app.yaml"}
-	ingress := control.IngressQuery{Tenant: "tenant", Node: "node-a", Part: "mappings"}
 	requests := []Request{
 		{Method: "tenant-storage", Tenant: "tenant", Node: "node-a", After: "cursor"},
-		{Method: "certificates", Certificate: &control.CertificateQuery{}},
-		{Method: "ingresses", Tenant: "tenant", Ingress: &ingress},
 		{Method: "service-call", Tenant: "tenant", ServiceCall: &call, ServiceInput: &input},
 		{Method: "cd-probe", Tenant: "tenant", CDProbe: &probe},
 	}
@@ -259,11 +256,10 @@ func TestServiceCallAndRQ7ReadSelectorsRemainDisjoint(t *testing.T) {
 			changes := []func(*Request){
 				func(r *Request) { r.ServiceCall = &call; r.ServiceInput = &input },
 				func(r *Request) { r.CDProbe = &probe },
-				func(r *Request) { r.Certificate = &control.CertificateQuery{} },
-				func(r *Request) { r.Ingress = &ingress },
+				func(r *Request) { r.Params = json.RawMessage("{}") },
 			}
 			for i, change := range changes {
-				if i == 0 && original.Method == "service-call" || i == 1 && original.Method == "cd-probe" || i == 2 && original.Method == "certificates" || i == 3 && original.Method == "ingresses" {
+				if i == 0 && original.Method == "service-call" || i == 1 && original.Method == "cd-probe" {
 					continue
 				}
 				bad := original
@@ -282,11 +278,9 @@ func TestRQ8QueryAdmissionPreservesRQ7ReadMethods(t *testing.T) {
 	// transport admission boundary, rather than fail as unsupported methods.
 	for _, request := range []Request{
 		{Method: "tenant-storage", Tenant: "tenant"},
-		{Method: "certificates", Certificate: &control.CertificateQuery{}},
-		{Method: "ingresses", Tenant: "tenant", Ingress: &control.IngressQuery{Tenant: "tenant", Part: "mappings"}},
 		{Method: "cd-probe", Tenant: "tenant", CDProbe: &deployment.GitProbeRequest{App: "shop", Repository: "https://git.example/repo.git", Branch: "main", Path: "app.yaml"}},
 	} {
-		if _, err := client.query(context.Background(), client.Peers[0], session, request); !errors.Is(err, mydcp.ErrAdmission) {
+		if _, err := client.query(context.Background(), client.Peers[0], session, request); !errors.Is(err, sfcp.ErrAdmission) {
 			t.Fatal("query did not reach transport admission", request.Method, err)
 		}
 	}

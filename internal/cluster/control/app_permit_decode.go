@@ -7,8 +7,8 @@ import (
 	"maps"
 	"sync/atomic"
 
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/config"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/config"
 )
 
 // Only read-only runtime/permit/planning/projection/validation paths may borrow

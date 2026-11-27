@@ -5,16 +5,16 @@
 ## 사용자 명령과 메시지
 
 ```sh
-mydc --tenant shop events --limit 50
-mydc --tenant shop events --app website --kind task-restarted
-mydc --tenant shop events --since '이전 응답 Cursor' --limit 50
-mydc events --all --kind quorum-degraded
-mydc --tenant shop events -f
+sfcli --tenant shop events --limit 50
+sfcli --tenant shop events --app website --kind task-restarted
+sfcli --tenant shop events --since '이전 응답 Cursor' --limit 50
+sfcli events --all --kind quorum-degraded
+sfcli --tenant shop events -f
 ```
 
 명시하지 않은 tenant는 현재 CLI profile의 tenant다. `--all`은 전체 tenant 및 cluster/node 이벤트를 읽는 시스템 관리자용 선택이며 `--app`과 함께 쓰지 않는다. `-f`는 Ctrl-C까지 새 이벤트를 계속 읽는다. `--node`는 대상 노드 또는 기록한 source 노드, `--kind`는 정확한 종류 하나다. 읽기에 작업 ID·동작 사유를 붙이지 않는다. `events --help`는 접속·wallet 없이 볼 수 있다.
 
-Unix `/var/run/mydc.sock`과 네트워크 MYDCP의 같은 User purpose/kind1·Session/challenge 서명 요청을 사용한다. 평문 Unix JSON/HTTP가 아니다. body 예시는 다음과 같다. 공통 nonce·서명 envelope는 [Unix API](unix-sockets.md)를 따른다.
+Unix `/run/sfcdp.sock`과 네트워크 SFCP의 같은 User purpose/kind1·Session/challenge 서명 요청을 사용한다. 평문 Unix JSON/HTTP가 아니다. body 예시는 다음과 같다. 공통 nonce·서명 envelope는 [Unix API](unix-sockets.md)를 따른다.
 
 ```json
 {"Schema":1,"Method":"events","Nonce":[1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"Tenant":"shop","Events":{"Tenant":"shop","App":"website","Kind":"task-restarted","After":"이전 Cursor","Limit":50}}
@@ -77,12 +77,14 @@ ID/cursor/시간은 설명용 값이다. 실제 `ID`는 source key·stream·순�
 | `task-restart-requested`, `node-cordoned`, `node-uncordoned` | 해당 사용자 관리 변경의 수락. restart-requested는 실제 restart 완료가 아님 |
 | `event-source-gap` | Docker stream 중단·신원/보존 누락, committed outbox/snapshot 누락, SDK 관측 유실 등. 완전한 이력 대신 명시 누락 처리 |
 | `cert-expiring`, `cert-expired`, `ingress-certificate-missing` | 현재 host/route 인증서의 만료 임박·만료·공급 실패. 개인키 없이 지문/host 범위와 필요한 잔여 초를 관측 |
+| `cluster-firewall-changed` | [클러스터 방화벽](node-firewall.md#클러스터-방화벽) 변경(scope `cluster`). Actor·Operation·revision 전후·Reason에 변경 요약, OperatorReason에 변경 사유 |
+| `node-firewall-changed`, `node-firewall-failed` | 대상 서버가 적용한(또는 적용하지 못한) [방화벽](node-firewall.md) 변경. Actor·Operation·revision 전후(FromVersion/ToVersion)·Reason에 변경 요약 |
 | `ingress-blocked`, `ingress-unblocked` | 원 사용자 block/extend/unblock의 확정 전이. 실제 owner 설치 완료와 구분 |
 | `ingress-backends-empty`, `ingress-backends-restored`, `ingress-listener-down`, `ingress-listener-up`, `ingress-source-rejected-spike` | 실제 backend health/listener 수명 및 source gate의 유한 계수. [Ingress 종류·scope·기준](ingress-management.md#이벤트) |
 
 종료/재시작 최근 내역은 `compose inspect --history N`에도 같은 이벤트 ID·원 native·generation/revision으로 제공한다. `HistoryIncomplete:true`이면 수집 누락/이력 접근 실패가 있으며 빈 History를 완전한 이력으로 해석하지 않는다. 스크립트 검사 pass는 실제 컨테이너 종료·Volume fence를 대신하지 않는다. SDK가 종료 이유를 알려 주지 않은 경우 `exit`/`restart`로 보존하고 원인 정보를 지어내지 않는다.
 
-`oom`은 별도 Docker oom 사실로, `node-restart`는 저장된 원 native의 OS boot ID 변경과 새 boot 시각 이후의 start로 구분한다. mydcd 재시작·인증서 변경만으로 노드 재부팅을 추정하지 않는다. `health`/`user`는 같은 원 native·세대의 실제 Stop/Start sent 제어 기록이 남아 있을 때 연결한다. 아직 보내지 않은 요청이나 과거 terminal 제어로 무관한 종료를 분류하지 않는다. 로그 정리의 원 recreate/native 목록은 `log-clear`를 연결한다. 확정된 OOM·OS boot 원인은 작업 표시 metadata로 덮어쓰지 않는다.
+`oom`은 별도 Docker oom 사실로, `node-restart`는 저장된 원 native의 OS boot ID 변경과 새 boot 시각 이후의 start로 구분한다. sfcd 재시작·인증서 변경만으로 노드 재부팅을 추정하지 않는다. `health`/`user`는 같은 원 native·세대의 실제 Stop/Start sent 제어 기록이 남아 있을 때 연결한다. 아직 보내지 않은 요청이나 과거 terminal 제어로 무관한 종료를 분류하지 않는다. 로그 정리의 원 recreate/native 목록은 `log-clear`를 연결한다. 확정된 OOM·OS boot 원인은 작업 표시 metadata로 덮어쓰지 않는다.
 
 ## 권한·cursor·보존
 
@@ -98,7 +100,7 @@ ID/cursor/시간은 설명용 값이다. 실제 `ID`는 source key·stream·순�
 
 관리 전이 이벤트는 pure before/after projection으로 allowlist 필드만 만들고 FSM checkpoint와 같은 transaction의 private outbox에 기록한다. outbox는 최대512개/8MiB이며 snapshot의 관리 상태에는 넣지 않는다. 누락/손상은 별도 진단 실패로 표시하고 기존 관리 변경 성공을 다른 변경으로 대체하지 않는다. diagnostic journal의 metadata가 손상된 경우 원 bytes를 보존하고 이벤트 조회를 unavailable로 처리하며, 이를 이유로 기존 관리 엔진 기동을 막지 않는다.
 
-현재 설치 멤버 간에는 기존 MYDCP Observation report의 `Kind:"node-events"` signed batch를 전달한다. Batch는 Schema1·Cluster/Key/Node/Stream·Floor/Last/At·최대8 Records·Signature, 최대32KiB다. Record는 Schema1·Cluster/SourceKey/SourceNode/Stream/Sequence/Tag/Event/Signature다. Key는 고정32 byte array, Stream은16 byte array, Signature는 Go JSON byte slice의 base64다. 서명 domain은 각각 `mydc-diagnostic-event-batch-1\0`, `mydc-diagnostic-event-1\0`이고 Signature를 nil로 한 JSON을 붙여 Ed25519로 검증한다.
+현재 설치 멤버 간에는 SFCP Observation report kind18(`KindEventBatch`)로 signed batch를 전달한다. 본문의 `Kind:"node-events"`는 남아 있지만 받는 쪽은 frame kind로 나눈다. Batch는 Schema1·Cluster/Key/Node/Stream·Floor/Last/At·최대8 Records·Signature, 최대32KiB다. Record는 Schema1·Cluster/SourceKey/SourceNode/Stream/Sequence/Tag/Event/Signature다. Key는 고정32 byte array, Stream은16 byte array, Signature는 Go JSON byte slice의 base64다. 서명 domain은 각각 `sfc-diagnostic-event-batch-1\0`, `sfc-diagnostic-event-1\0`이고 Signature를 nil로 한 JSON을 붙여 Ed25519로 검증한다.
 
 member Management read `event-receipt`는 `{Key:[32]byte,Stream:[16]byte}`를 받아 `{Schema:1,Query:{Key,Stream},Last:uint64}`로 durable source prefix를 알려 준다. caller key와 Query.Key가 같아야 하며 일반 User method가 아니다. batch source는 현재 멤버 key/node와 일치해야 한다. observer는 원 source의 연속 순번·중복·retention floor를 검사하고 같은 committed Authority를 중복 발행하지 않는다. 배치 거부는 일부 prefix 저장/ACK 증가를 만들지 않는다.
 

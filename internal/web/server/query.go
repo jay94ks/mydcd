@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/jay94ks/mydcd/internal/web/mydc"
+	"github.com/jay94ks/seafield/internal/web/sfc"
 )
 
 // listPage is the common list response:
@@ -21,11 +21,11 @@ type listPage struct {
 
 // read runs fn on the session's connection and writes its value with
 // camelJSON, or the mapped error.
-func read[T any](s *Server, w http.ResponseWriter, r *http.Request, ws *webSession, fn func(context.Context, mydc.Conn) (T, error)) {
+func read[T any](s *Server, w http.ResponseWriter, r *http.Request, ws *webSession, fn func(context.Context, sfc.Conn) (T, error)) {
 	ctx, cancel := s.callCtx(r)
 	defer cancel()
 	var v T
-	err := ws.do(ctx, func(ctx context.Context, c mydc.Conn) error {
+	err := ws.do(ctx, func(ctx context.Context, c sfc.Conn) error {
 		var err error
 		v, err = fn(ctx, c)
 		return err
@@ -37,9 +37,9 @@ func read[T any](s *Server, w http.ResponseWriter, r *http.Request, ws *webSessi
 	writeJSON(w, http.StatusOK, camel{v})
 }
 
-// readPage is read for paged mydcd methods.
-func readPage[T any](s *Server, w http.ResponseWriter, r *http.Request, ws *webSession, fn func(context.Context, mydc.Conn, string) (mydc.Page[T], error)) {
-	read(s, w, r, ws, func(ctx context.Context, c mydc.Conn) (listPage, error) {
+// readPage is read for paged sfcd methods.
+func readPage[T any](s *Server, w http.ResponseWriter, r *http.Request, ws *webSession, fn func(context.Context, sfc.Conn, string) (sfc.Page[T], error)) {
+	read(s, w, r, ws, func(ctx context.Context, c sfc.Conn) (listPage, error) {
 		p, err := fn(ctx, c, r.URL.Query().Get("after"))
 		if err != nil {
 			return listPage{}, err
@@ -49,8 +49,8 @@ func readPage[T any](s *Server, w http.ResponseWriter, r *http.Request, ws *webS
 }
 
 // readList is read for unpaged list methods.
-func readList[T any](s *Server, w http.ResponseWriter, r *http.Request, ws *webSession, fn func(context.Context, mydc.Conn) ([]T, error)) {
-	read(s, w, r, ws, func(ctx context.Context, c mydc.Conn) (listPage, error) {
+func readList[T any](s *Server, w http.ResponseWriter, r *http.Request, ws *webSession, fn func(context.Context, sfc.Conn) ([]T, error)) {
+	read(s, w, r, ws, func(ctx context.Context, c sfc.Conn) (listPage, error) {
 		items, err := fn(ctx, c)
 		if err != nil {
 			return listPage{}, err

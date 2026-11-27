@@ -11,9 +11,9 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/ingress"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/ingress"
 )
 
 // Original user signatures, reducers, checkpoints, session checks and public
@@ -80,7 +80,7 @@ func TestIngressHistoryFiltersCurrentNodeAuthorityAndKeepsOriginalRows(t *testin
 		t.Fatal(err)
 	}
 	tenant, _ := catalog.Tenant("tenant")
-	f.apply("admin", "set-nodes", tenant.Revision, NodeAssignment{Tenant: "tenant", Nodes: []string{}}, state.Applied)
+	f.apply("admin", "set-nodes", tenant.Revision, NodeChangeTo("tenant", tenant.AllowedNodes, nil), state.Applied)
 	policy, err := f.p.Current(f.s)
 	if err != nil {
 		t.Fatal("current policy after node allocation revocation", err)
@@ -153,7 +153,7 @@ func TestIngressHistoryCursorBindsCurrentActorSessionCatalogAndScope(t *testing.
 	}
 	catalog, _ := f.p.Catalog(f.s)
 	tenant, _ := catalog.Tenant("tenant")
-	f.apply("admin", "set-nodes", tenant.Revision, NodeAssignment{Tenant: "tenant", Nodes: []string{}}, state.Applied)
+	f.apply("admin", "set-nodes", tenant.Revision, NodeChangeTo("tenant", tenant.AllowedNodes, nil), state.Applied)
 	if _, err := f.p.IngressPage(f.s, manager, 2, q); !errors.Is(err, access.ErrInvalid) {
 		t.Fatal("cursor survived a changed current catalog authority", err)
 	}

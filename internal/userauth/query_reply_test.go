@@ -3,15 +3,13 @@
 package userauth
 
 import (
-	"encoding/json"
 	"fmt"
-	"reflect"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/state"
 )
 
 // Deliberately invalid checkpoint payloads isolate whoami's root metadata from
@@ -36,35 +34,11 @@ func TestQueryReplyWhoamiUsesOriginalViewWithoutLoadingPages(t *testing.T) {
 	}
 	original := cluster.View{State: current}
 	svc := Service{Policy: control.Policy{Cluster: [32]byte{1}}}
-	assemble := func(view cluster.View) Reply {
-		reply := Reply{Schema: 1, Code: "ok"}
-		request := Request{Method: "whoami"}
-		session := access.Session{}
-		catalog := access.Catalog{}
-		reply = svc.registryQueryReply(view, session, request, reply)
-		reply = svc.lifecycleQueryReply(view, session, request, reply)
-		reply = svc.storageQueryReply(view, catalog, session, request, reply)
-		reply = svc.resourcesQueryReply(view, catalog, session, request, reply)
-		reply = svc.volumesQueryReply(view, catalog, session, request, reply)
-		reply = svc.vaultQueryReply(view, catalog, session, request, reply)
-		return svc.appsQueryReply(view, catalog, session, request, reply)
-	}
-	reply := assemble(original)
-	raw, err := json.Marshal(reply)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var got map[string]any
-	if err = json.Unmarshal(raw, &got); err != nil {
-		t.Fatal(err)
-	}
-	want := map[string]any{"Schema": float64(1), "Code": "ok", "RootRevision": float64(0)}
-	names := []string{"RegistriesRootRevision", "LifecycleRootRevision", "NodeStorageRootRevision", "ResourcesRootRevision", "VolumesRootRevision", "VaultRootRevision", "AppsRootRevision", "ExternalRegistriesRootRevision"}
-	for i, name := range names {
-		want[name] = float64(original.State.Object(keys[i]).Revision)
-	}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("whoami JSON shape/root mismatch: got %s want %v", raw, want)
+	roots := rootsOf(original)
+	for _, key := range keys {
+		if roots[key] != original.State.Object(key).Revision || roots[key] == 0 {
+			t.Fatal("whoami root mismatch", key, roots[key])
+		}
 	}
 	command := state.Command{Kind: state.Module, Actor: "fixture-admin", Epoch: 1, RequestID: "later", Key: control.RegistriesKey, Expected: current.Object(control.RegistriesKey).Revision, Value: "fixture"}
 	later, result, err := state.ApplyReduced(current, current.Index()+1, command, nil, func(state.State, state.Command) (map[string][]byte, state.Code) {
@@ -73,7 +47,7 @@ func TestQueryReplyWhoamiUsesOriginalViewWithoutLoadingPages(t *testing.T) {
 	if err != nil || result.Code != state.Applied {
 		t.Fatal(result, err)
 	}
-	if assemble(original).RegistriesRootRevision != reply.RegistriesRootRevision || assemble(cluster.View{State: later}).RegistriesRootRevision == reply.RegistriesRootRevision {
+	if rootsOf(original)[control.RegistriesKey] != roots[control.RegistriesKey] || rootsOf(cluster.View{State: later})[control.RegistriesKey] == roots[control.RegistriesKey] {
 		t.Fatal("query assembly mixed committed views")
 	}
 	for _, tc := range []struct {
@@ -83,17 +57,8 @@ func TestQueryReplyWhoamiUsesOriginalViewWithoutLoadingPages(t *testing.T) {
 		{"registries", func(r Request) Reply {
 			return svc.registryQueryReply(original, access.Session{}, r, Reply{Schema: 1, Code: "ok"})
 		}},
-		{"lifecycles", func(r Request) Reply {
-			return svc.lifecycleQueryReply(original, access.Session{}, r, Reply{Schema: 1, Code: "ok"})
-		}},
 		{"node-storage", func(r Request) Reply {
 			return svc.storageQueryReply(original, access.Catalog{}, access.Session{}, r, Reply{Schema: 1, Code: "ok"})
-		}},
-		{"resources", func(r Request) Reply {
-			return svc.resourcesQueryReply(original, access.Catalog{}, access.Session{}, r, Reply{Schema: 1, Code: "ok"})
-		}},
-		{"volumes", func(r Request) Reply {
-			return svc.volumesQueryReply(original, access.Catalog{}, access.Session{}, r, Reply{Schema: 1, Code: "ok"})
 		}},
 		{"vault", func(r Request) Reply {
 			return svc.vaultQueryReply(original, access.Catalog{}, access.Session{}, r, Reply{Schema: 1, Code: "ok"})

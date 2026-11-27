@@ -23,7 +23,7 @@ import (
 // DNS algorithms are the product core, with fixture authority/origin/clock.
 // Native owner provenance and Settings are deliberately outside this test.
 func TestRealBoundaryDNSLibcSearchOrdering(t *testing.T) {
-	host := os.Getenv("MYDC_KERNEL_HOST_NETNS")
+	host := os.Getenv("SFC_KERNEL_HOST_NETNS")
 	ns, err := os.Readlink("/proc/self/ns/net")
 	if host == "" || os.Geteuid() != 0 {
 		t.Skip("prebuilt binary in explicit private network/mount namespace only")
@@ -122,7 +122,7 @@ func TestRealBoundaryDNSLibcSearchOrdering(t *testing.T) {
 	for _, ndots := range []int{0, 1} {
 		func() {
 			path := filepath.Join(t.TempDir(), "resolv.conf")
-			data := fmt.Sprintf("nameserver 127.0.0.1\nsearch app.mydc.test\noptions timeout:1 attempts:1 ndots:%d\n", ndots)
+			data := fmt.Sprintf("nameserver 127.0.0.1\nsearch app.sfc.test\noptions timeout:1 attempts:1 ndots:%d\n", ndots)
 			if err := os.WriteFile(path, []byte(data), 0600); err != nil {
 				t.Fatal(err)
 			}
@@ -135,7 +135,7 @@ func TestRealBoundaryDNSLibcSearchOrdering(t *testing.T) {
 				}
 			}()
 			at := time.Now()
-			out, err := exec.CommandContext(ctx, "/usr/bin/php8.3", "-n", "-r", `echo json_encode([gethostbyname("db.app.mydc.test."),gethostbyname("db")]);`).CombinedOutput()
+			out, err := exec.CommandContext(ctx, "/usr/bin/php8.3", "-n", "-r", `echo json_encode([gethostbyname("db.app.sfc.test."),gethostbyname("db")]);`).CombinedOutput()
 			var result []string
 			if err != nil || json.Unmarshal(out, &result) != nil || len(result) != 2 || result[0] != allocation.Address.String() {
 				t.Fatal("actual PHP FQDN resolver", ndots, string(out), err)

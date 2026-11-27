@@ -10,10 +10,10 @@ import (
 	"io"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/registryclient"
-	"github.com/jay94ks/mydcd/internal/schema"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/registryclient"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/sfcp"
 )
 
 type ImageBuildBaseContentRequest struct {
@@ -29,14 +29,14 @@ func (q ImageBuildBaseContentRequest) valid(now int64) bool {
 
 // This is an authenticated member execution lane for an already accepted
 // job, not a node CLI operation or a fresh user/session authorization.
-func (s Service) handleImageBuildBaseContent(base context.Context, conn *mydcp.Session, stream mydcp.Stream, frame mydcp.Frame) error {
+func (s Service) handleImageBuildBaseContent(base context.Context, conn *sfcp.Session, stream sfcp.Stream, frame sfcp.Frame) error {
 	header := sha256.Sum256(frame.Fields[0].Value)
 	if !bytes.Equal(header[:], frame.Fields[1].Value) {
-		return mydcp.ErrFrame
+		return sfcp.ErrFrame
 	}
 	envelope, err := schema.Decode[Envelope](frame.Fields[0].Value)
 	if err != nil {
-		return mydcp.ErrFrame
+		return sfcp.ErrFrame
 	}
 	defer clear(frame.Fields[0].Value)
 	defer clear(envelope.Body)
@@ -47,7 +47,7 @@ func (s Service) handleImageBuildBaseContent(base context.Context, conn *mydcp.S
 		return imageContentReply(stream, frame, header, ImageContentReply{Code: code})
 	}
 	q, err := schema.Decode[ImageBuildBaseContentRequest](envelope.Body)
-	if err != nil || !q.valid(time.Now().Unix()) || conn.RemoteAddr().Network() == "unix" || envelope.Session != nil || envelope.Relay != nil || len(envelope.Signature) != 0 || q.Read.Read.Builder != [32]byte(conn.Peer().Key) || conn.Admit(frame, mydcp.ImageContent, false) != nil {
+	if err != nil || !q.valid(time.Now().Unix()) || conn.RemoteAddr().Network() == "unix" || envelope.Session != nil || envelope.Relay != nil || len(envelope.Signature) != 0 || q.Read.Read.Builder != [32]byte(conn.Peer().Key) || conn.Admit(frame, sfcp.ImageContent, false) != nil {
 		return respond("denied")
 	}
 	ctx, cancel := context.WithDeadline(base, time.Unix(q.ExpiresAt, 0))
@@ -90,20 +90,20 @@ func (s Service) handleImageBuildBaseContent(base context.Context, conn *mydcp.S
 		if err := check(call); err != nil {
 			return err
 		}
-		return conn.Admit(frame, mydcp.ImageContent, false)
+		return conn.Admit(frame, sfcp.ImageContent, false)
 	}
 	return sendImageContent(ctx, stream, frame, header, source)
 }
 
-func (c Client) ReadImageBuildBaseContent(ctx context.Context, owner mydcp.Peer, read control.ImageBuildBaseContentRead, to io.Writer) (registryclient.ContentInfo, error) {
+func (c Client) ReadImageBuildBaseContent(ctx context.Context, owner sfcp.Peer, read control.ImageBuildBaseContentRead, to io.Writer) (registryclient.ContentInfo, error) {
 	q := ImageBuildBaseContentRequest{Schema: 1, Read: read, ExpiresAt: time.Now().Unix() + imageContentSeconds}
 	if _, err := rand.Read(q.Nonce[:]); err != nil {
 		return registryclient.ContentInfo{}, err
 	}
 	if c.Self == nil || c.Self.Public != read.Read.Builder || c.Cluster != read.Read.Cluster || !owner.Member || [32]byte(owner.Key) != read.Read.Target.Owner || !q.valid(time.Now().Unix()) {
-		return registryclient.ContentInfo{}, mydcp.ErrAdmission
+		return registryclient.ContentInfo{}, sfcp.ErrAdmission
 	}
-	return c.imageContentTransfer(ctx, owner, q, q.Read.Query.Selected(), q.ExpiresAt, 5, func(_ *mydcp.Session, body []byte) (Envelope, error) {
+	return c.imageContentTransfer(ctx, owner, q, q.Read.Query.Selected(), q.ExpiresAt, sfcp.KindImageSourceRead, func(_ *sfcp.Session, body []byte) (Envelope, error) {
 		return Envelope{Body: body}, nil
 	}, nil, to)
 }

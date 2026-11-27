@@ -3,9 +3,9 @@
 package control
 
 import (
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/secrets"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/secrets"
 )
 
 type VaultWritePermitRequest struct {
@@ -56,11 +56,15 @@ func (p Policy) VaultWritePermit(s state.State, caller [32]byte, q VaultWritePer
 		return VaultWritePermit{}, access.ErrDenied
 	}
 	observer, ok := tree.WriteProfile(w.Request.Profile)
-	if !ok || !observer.Enabled || observer.Mode == "local-file" || observer.Key != caller || w.Request.Kind == secrets.ValueWrite && !observer.Values || w.Request.Kind == secrets.VerifierWrite && !observer.Verifiers {
+	if !ok || !observer.Enabled || observer.Mode == "local-file" || w.Request.Kind == secrets.ValueWrite && !observer.Values || w.Request.Kind == secrets.VerifierWrite && !observer.Verifiers {
 		return VaultWritePermit{}, access.ErrDenied
 	}
-	key, err := p.nodeOwner(s, observer.Node)
-	if err != nil || key != caller {
+	if observer.Builtin() {
+		// Any current voter seals and stores a builtin value.
+		if !members.VoterKey(caller) {
+			return VaultWritePermit{}, access.ErrDenied
+		}
+	} else if key, err := p.nodeOwner(s, observer.Node); observer.Key != caller || err != nil || key != caller {
 		return VaultWritePermit{}, access.ErrDenied
 	}
 	if q.Mode == "execute" {

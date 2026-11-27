@@ -3,9 +3,9 @@
 package services
 
 import (
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/network"
-	"github.com/jay94ks/mydcd/internal/tenancy"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/network"
+	"github.com/jay94ks/seafield/internal/tenancy"
 )
 
 // packetTuple uses the same authoritative allocation incarnations as DNS and
@@ -24,7 +24,7 @@ func packetTuple(a Authority, sender [32]byte, packet []byte) (RouteTuple, netwo
 }
 
 // BorrowPacket is the actual IP input boundary of the existing flow algorithm.
-// The owner must authenticate sender from its exact local Bridge or MYDCP peer,
+// The owner must authenticate sender from its exact local Bridge or SFCP peer,
 // persist this returned core AND the opposite owner's pin before forwarding.
 // A parser call cannot supply either native provenance or durable publication.
 func (m RouteRuntime) BorrowPacket(c access.Catalog, n tenancy.Networks, a Authority, peer RouteNativeProof, peerBoot, sender [32]byte, packet []byte, now Clock) (RouteRuntime, RouteFlow, error) {

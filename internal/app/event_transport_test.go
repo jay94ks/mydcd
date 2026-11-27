@@ -9,20 +9,20 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/eventlog"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/userauth"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/eventlog"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/userauth"
 )
 
-// Real two-voter MYDCP/Raft/DB boundary with synthetic diagnostic source
+// Real two-voter SFCP/Raft/DB boundary with synthetic diagnostic source
 // facts. This does not stand in for the separate actual Docker/OS sources.
 func TestRQ4TwoNodeEventTransportCurrentPermissionAndGap(t *testing.T) {
 	testRealManagedJoin(t, false, "events")
 }
 
-func verifyTwoNodeEventBoundary(t *testing.T, ctx context.Context, receiver, source *Runtime, client userauth.Client, admin access.Session, target mydcp.Peer, submit func(string, string, uint64, any), wait func(string, func() bool)) {
+func verifyTwoNodeEventBoundary(t *testing.T, ctx context.Context, receiver, source *Runtime, client userauth.Client, admin access.Session, target sfcp.Peer, submit func(string, string, uint64, any), wait func(string, func() bool)) {
 	t.Helper()
 	for _, tenant := range []string{"first", "second"} {
 		submit("event-create-"+tenant, "create-tenant", 0, control.TenantID{ID: tenant})
@@ -35,7 +35,7 @@ func verifyTwoNodeEventBoundary(t *testing.T, ctx context.Context, receiver, sou
 			t.Fatal(err)
 		}
 		record, _ := catalog.Tenant(tenant)
-		submit("event-nodes-"+tenant, "set-nodes", record.Revision, control.NodeAssignment{Tenant: tenant, Nodes: []string{"node-b"}})
+		submit("event-nodes-"+tenant, "set-nodes", record.Revision, control.NodeChangeTo(tenant, record.AllowedNodes, []string{"node-b"}))
 	}
 	submit("event-reader", "put-user", 0, access.User{ID: "event-reader", Username: "event-reader", Enabled: true, Credentials: []access.Credential{{ID: "key", Method: access.PrivateKey, PublicKey: client.Self.Public, Enabled: true}}})
 	submit("event-reader-membership", "set-membership", 0, access.Membership{Tenant: "first", User: "event-reader", Role: access.Viewer, Enabled: true})
@@ -89,7 +89,7 @@ func verifyTwoNodeEventBoundary(t *testing.T, ctx context.Context, receiver, sou
 		t.Fatal(err)
 	}
 	raw, _ := json.Marshal(batch)
-	if err = receiver.storeEventBatch(ctx, mydcp.Identity(receiver.Identity.Public), raw); err == nil {
+	if err = receiver.storeEventBatch(ctx, sfcp.Identity(receiver.Identity.Public), raw); err == nil {
 		t.Fatal("valid batch borrowed another connection identity")
 	}
 	// An actual observer gap is delivered over the same member path and makes
@@ -122,7 +122,7 @@ func verifyTwoNodeEventBoundary(t *testing.T, ctx context.Context, receiver, sou
 	account.Enabled = false
 	revision := account.Revision
 	account.Revision = 0
-	submit("event-revoke-reader", "put-user", revision, account)
+	submit("event-revoke-reader", "put-user", revision, access.User{ID: account.ID, Username: account.Username})
 	wait("event reader revocation is effective on the actual API", func() bool {
 		_, err := client.EventsPage(ctx, target, reader, eventlog.Query{Tenant: "first", After: page.Cursor})
 		var code *userauth.Error

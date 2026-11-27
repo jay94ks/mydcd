@@ -10,10 +10,10 @@ import (
 	"math"
 	"slices"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/ingress"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/ingress"
 )
 
 type NodeGatewaysChange struct {
@@ -40,7 +40,7 @@ type NodeGatewaysEvidence struct {
 func NodeGatewaysEvidenceBytes(e NodeGatewaysEvidence) []byte {
 	e.Signature = nil
 	raw, _ := json.Marshal(e)
-	return append([]byte("mydc-node-gateways-1\x00"), raw...)
+	return append([]byte("sfc-node-gateways-1\x00"), raw...)
 }
 func MergeNodeGateways(previous ingress.GatewayConfiguration, external, local *ingress.Gateway) ingress.GatewayConfiguration {
 	if external != nil {
@@ -63,6 +63,9 @@ type NodeGatewaysView struct {
 	Revision, AppliedRevision uint64
 	Configuration             ingress.GatewayConfiguration
 	Error                     string `json:",omitempty"`
+	// LocalAddresses are the server's own interface addresses, read on it
+	// for this reply only (never stored): what a gateway can listen on.
+	LocalAddresses []ingress.LocalAddress `json:",omitempty"`
 }
 type IngressBalanceChange struct {
 	Tenant, App, Route string
@@ -492,6 +495,12 @@ func validIngressHistoryScope(h IngressHistoryRecord) bool {
 			return false
 		}
 		tenant = q.Tenant
+	case "put-cluster-app-route", "remove-cluster-app-route":
+		var q ClusterAppRouteSelection
+		if json.Unmarshal(h.Origin.Change.Payload, &q) != nil {
+			return false
+		}
+		app = deployment.ClusterAppPrefix + q.App
 	case "ingress-block", "ingress-unblock", "ingress-block-extend":
 		var block ingress.Block
 		if json.Unmarshal(h.Detail, &block) != nil || !block.Valid() {

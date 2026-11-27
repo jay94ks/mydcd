@@ -1,13 +1,13 @@
-# Contributing to MyDC
+# Contributing to Seafield Cluster
 
-Thanks for your interest in MyDC. This guide explains how to report problems, propose changes and send pull
+Thanks for your interest in Seafield Cluster. This guide explains how to report problems, propose changes and send pull
 requests. 한국어로 써도 괜찮습니다 — issues and pull requests may be written in English or Korean.
 
 ## Before you start
 
-- Search [existing issues](https://github.com/jay94ks/mydcd/issues) first.
+- Search [existing issues](https://github.com/jay94ks/seafield/issues) first.
 - For anything larger than a small fix (a new feature, a new file format field, a protocol change), open a
-  feature request and agree on the direction before writing code. MyDC is in its MVP stage and keeps its scope
+  feature request and agree on the direction before writing code. Seafield Cluster is in its MVP stage and keeps its scope
   small on purpose.
 - Security problems go through [SECURITY.md](SECURITY.md), never a public issue.
 
@@ -16,17 +16,17 @@ requests. 한국어로 써도 괜찮습니다 — issues and pull requests may b
 Requirements: Linux, Go 1.27, Node.js 22, and Docker Engine 28.0+ for tests that touch Docker.
 
 ```sh
-git clone https://github.com/jay94ks/mydcd.git
-cd mydcd
+git clone https://github.com/jay94ks/seafield.git
+cd sfcd
 make            # build all binaries into bin/
 make test       # go test ./... with the race-free defaults used in CI
 make lint       # gofmt, go vet, SPDX header and link checks
 ```
 
-The web UI lives in `apps/mydc-web/web` (React + TypeScript + Vite):
+The web UI lives in `apps/sfc-web/web` (React + TypeScript + Vite):
 
 ```sh
-cd apps/mydc-web/web
+cd apps/sfc-web/web
 npm ci
 npm run dev     # local dev server
 npm test
@@ -36,7 +36,7 @@ npm test
 
 | Path | Contents |
 |---|---|
-| `cmd/` | Entry points of `mydcd`, `mydc`, `mydc-web` |
+| `cmd/` | Entry points of `sfcd`, `sfcli`, `sfc-web` |
 | `internal/` | Product code |
 | `lifecycle/v1` | Go SDK for lifecycle check scripts |
 | `apps/` | Container images: the web UI daemon, the lifecycle compiler, sample apps |
@@ -46,13 +46,13 @@ npm test
 
 ## Design rules
 
-These keep MyDC predictable. Pull requests that break them will be asked to change.
+These keep Seafield Cluster predictable. Pull requests that break them will be asked to change.
 
-- **Authorization belongs to `mydcd`.** The CLI and the web UI never make permission decisions themselves.
+- **Authorization belongs to `sfcd`.** The CLI and the web UI never make permission decisions themselves.
 - **State transitions are deterministic.** Reducers and validators do not read clocks, randomness, the network or
   the OS. External effects (Docker and so on) are kept apart from committing state.
 - **Raft only for what every server must agree on.** Liveness renewals, progress, metrics and logs travel over
-  MYDCP and stay in memory.
+  SFCP and stay in memory.
 - **Operations are settled by ID.** When a result is unknown after a timeout, the client asks about or resumes the
   same operation ID. It never retries under a new ID.
 - **Fix causes, not symptoms.** Do not raise timeouts or limits, or ignore errors, to make a failure go away.
@@ -75,7 +75,7 @@ These keep MyDC predictable. Pull requests that break them will be asked to chan
 6. Sign off every commit (Developer Certificate of Origin, see below): `git commit -s`.
 7. Fill in the pull request template. CI must be green before review.
 
-How changes land: MyDC is developed in a separate upstream repository and published here. A maintainer applies an
+How changes land: Seafield Cluster is developed in a separate upstream repository and published here. A maintainer applies an
 accepted pull request upstream, and it appears here in the next sync with credit to you in the commit trailer and
 the release notes. Your pull request is then closed with a link to that sync.
 

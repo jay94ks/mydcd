@@ -5,9 +5,9 @@ package userauth
 import (
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
 )
 
 // Query assembly runs only after the handler's admission and user authorization.
@@ -35,24 +35,6 @@ func (s Service) registryQueryReply(view cluster.View, session access.Session, r
 			reply.RegistriesRevision = book.Revision
 			reply.Registries, reply.RegistriesNext, err = s.Policy.RegistryPage(view.State, session, time.Now().Unix(), request.Tenant, request.After)
 			if err != nil {
-				reply = Reply{Schema: 1, Code: "denied"}
-			}
-		}
-	}
-
-	return reply
-}
-
-func (s Service) lifecycleQueryReply(view cluster.View, session access.Session, request Request, reply Reply) Reply {
-	reply.LifecycleRootRevision = view.State.Object(control.LifecycleKey).Revision
-	if request.Method == "lifecycles" {
-		book, e := s.Policy.Lifecycles(view.State)
-		if e != nil {
-			reply = Reply{Schema: 1, Code: "unavailable"}
-		} else {
-			reply.LifecycleRevision = book.Revision()
-			reply.Lifecycles, reply.LifecyclesNext, e = s.Policy.LifecyclePage(view.State, session, time.Now().Unix(), request.Tenant, request.After)
-			if e != nil {
 				reply = Reply{Schema: 1, Code: "denied"}
 			}
 		}
@@ -91,53 +73,6 @@ func (s Service) storageQueryReply(view cluster.View, catalog access.Catalog, se
 	return reply
 }
 
-func (s Service) resourcesQueryReply(view cluster.View, catalog access.Catalog, session access.Session, request Request, reply Reply) Reply {
-	reply.ResourcesRootRevision = view.State.Object(control.ResourcesKey).Revision
-	if request.Method == "resources" {
-		if projection, err := s.Policy.ProjectResources(view.State); err == nil {
-			resources := projection.Resources
-			reply.ResourcesViewIndex = view.State.Index()
-			reply.ResourceRevision = resources.Revision
-			reply.NetworkRevision, reply.QuotaRevision = resources.Networks.Revision(), resources.Quotas.Revision()
-			if projection.NetworkAuthority != nil {
-				reply.Resources, reply.ResourcesNext, err = resources.Page(catalog, session.User, request.Tenant, request.After, *projection.NetworkAuthority)
-			} else {
-				reply.Resources, reply.ResourcesNext, err = resources.Page(catalog, session.User, request.Tenant, request.After)
-			}
-			if err != nil {
-				reply = Reply{Schema: 1, Code: "denied"}
-			}
-		} else {
-			reply = Reply{Schema: 1, Code: "unavailable"}
-		}
-	}
-
-	return reply
-}
-
-func (s Service) volumesQueryReply(view cluster.View, catalog access.Catalog, session access.Session, request Request, reply Reply) Reply {
-	reply.VolumesRootRevision = view.State.Object(control.VolumesKey).Revision
-	if request.Method == "volumes" || request.Method == "volume-backups" || request.Method == "volume-restores" {
-		if v, err := s.Policy.Volumes(view.State); err == nil {
-			reply.VolumeRevision = v.Revision
-			if request.Method == "volume-restores" {
-				reply.VolumeRestores, reply.VolumeRestoresNext, err = v.RestorePage(catalog, session.User, request.Tenant, request.After)
-			} else if request.Method == "volume-backups" {
-				reply.VolumeBackups, reply.VolumeBackupsNext, err = v.BackupPage(catalog, session.User, request.Tenant, request.After)
-			} else {
-				reply.Volumes, reply.VolumesNext, err = v.Page(catalog, session.User, request.Tenant, request.After)
-			}
-			if err != nil {
-				reply = Reply{Schema: 1, Code: "denied"}
-			}
-		} else {
-			reply = Reply{Schema: 1, Code: "unavailable"}
-		}
-	}
-
-	return reply
-}
-
 func (s Service) vaultQueryReply(view cluster.View, catalog access.Catalog, session access.Session, request Request, reply Reply) Reply {
 	reply.VaultRootRevision = view.State.Object(control.VaultKey).Revision
 	if request.Method == "vault" {
@@ -161,34 +96,32 @@ func (s Service) vaultQueryReply(view cluster.View, catalog access.Catalog, sess
 
 func (s Service) appsQueryReply(view cluster.View, catalog access.Catalog, session access.Session, request Request, reply Reply) Reply {
 	reply.AppsRootRevision = view.State.Object(control.AppsKey).Revision
-	if request.Method != "whoami" {
-		if apps, err := s.Policy.Apps(view.State); err == nil {
-			reply.AppRevision = apps.Revision
-			if request.Method == "apps" {
-				reply.Apps, reply.AppsNext, err = apps.ObservedPage(catalog, session.User, request.Tenant, request.After, uint64(time.Now().Unix()))
-				if err == nil {
-					for i := range reply.Apps {
-						if err = s.Policy.ObserveAppReplicaHealth(view.State, apps, &reply.Apps[i], uint64(time.Now().Unix())); err != nil {
-							break
-						}
-						s.Policy.ObserveAppCD(view.State, apps, catalog, &reply.Apps[i], uint64(time.Now().Unix()))
+	if apps, err := s.Policy.Apps(view.State); err == nil {
+		reply.AppRevision = apps.Revision
+		if request.Method == "apps" {
+			reply.Apps, reply.AppsNext, err = apps.ObservedPage(catalog, session.User, request.Tenant, request.After, uint64(time.Now().Unix()))
+			if err == nil {
+				for i := range reply.Apps {
+					if err = s.Policy.ObserveAppReplicaHealth(view.State, apps, &reply.Apps[i], uint64(time.Now().Unix())); err != nil {
+						break
 					}
+					s.Policy.ObserveAppCD(view.State, apps, catalog, &reply.Apps[i], uint64(time.Now().Unix()))
 				}
-			} else if request.Method == "app-operation" {
-				var operation control.AppOperationView
-				operation, err = apps.Operation(catalog, session.User, request.Tenant, *request.AppOperation)
-				if err == nil {
-					reply.AppOperation = &operation
-				}
-			} else {
-				reply.Uploads, reply.UploadsNext, err = apps.Uploads(catalog, session.User, request.Tenant, request.After)
 			}
-			if err != nil {
-				reply = Reply{Schema: 1, Code: "denied"}
+		} else if request.Method == "app-operation" {
+			var operation control.AppOperationView
+			operation, err = apps.Operation(catalog, session.User, request.Tenant, *request.AppOperation)
+			if err == nil {
+				reply.AppOperation = &operation
 			}
 		} else {
-			reply = Reply{Schema: 1, Code: "unavailable"}
+			reply.Uploads, reply.UploadsNext, err = apps.Uploads(catalog, session.User, request.Tenant, request.After)
 		}
+		if err != nil {
+			reply = Reply{Schema: 1, Code: "denied"}
+		}
+	} else {
+		reply = Reply{Schema: 1, Code: "unavailable"}
 	}
 
 	return reply

@@ -8,7 +8,7 @@ import (
 )
 
 // A second compaction while one runs is refused (the rest of the
-// compaction screens run on real mydcd: TestRealServerNodeViews).
+// compaction screens run on real sfcd: TestRealServerNodeViews).
 func TestRaftCompact(t *testing.T) {
 	f, fake := newFakeFixture(t)
 	fakeLogin(t, f, "admin")

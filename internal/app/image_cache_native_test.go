@@ -13,13 +13,13 @@ import (
 	"time"
 
 	cerrdefs "github.com/containerd/errdefs"
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/containerops"
-	"github.com/jay94ks/mydcd/internal/imagecache"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/userauth"
-	"github.com/jay94ks/mydcd/tests/enginefixture"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/containerops"
+	"github.com/jay94ks/seafield/internal/imagecache"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/userauth"
+	"github.com/jay94ks/seafield/tests/enginefixture"
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/client"
 )
@@ -28,7 +28,7 @@ import (
 // adds one prebuilt, uniquely labeled image and one never-started container.
 // The imported image is the only deletion selection. Existing fixture cleanup
 // checks exact labels/IDs even on failure; no ambient image prune is performed.
-func verifyImageCacheUserNative(t *testing.T, ctx context.Context, r *Runtime, root string, c userauth.Client, peer mydcp.Peer, session access.Session) {
+func verifyImageCacheUserNative(t *testing.T, ctx context.Context, r *Runtime, root string, c userauth.Client, peer sfcp.Peer, session access.Session) {
 	t.Helper()
 	original, err := c.ObserveContainer(ctx, peer, session, "tenant", containerops.Query{Schema: 1, Selection: containerops.Selection{App: "app", Service: "web"}, Kind: "inspect", MaxBytes: containerops.MaxOutput})
 	if err != nil || original.Container == nil || original.Container.Detail == nil {
@@ -41,9 +41,9 @@ func verifyImageCacheUserNative(t *testing.T, ctx context.Context, r *Runtime, r
 	}
 	hash := sha256.Sum256([]byte(root))
 	tag := "rq4-cache-" + hex.EncodeToString(hash[:8])
-	f := enginefixture.OpenPrepared(t, ctx, r.docker.Owner+"/cache-fixture", tag, nil, os.Getenv("MYDC_DOCKER_TEST_BACKEND"))
-	name := "mydc-" + tag
-	created, err := f.Client.API.ContainerCreate(ctx, client.ContainerCreateOptions{Name: name, Config: &container.Config{Image: f.Image, Cmd: []string{"/backend"}, Labels: map[string]string{"org.mydc.owner": f.Client.Owner, "org.mydc.kind": "container"}}, HostConfig: &container.HostConfig{NetworkMode: "none"}})
+	f := enginefixture.OpenPrepared(t, ctx, r.docker.Owner+"/cache-fixture", tag, nil, os.Getenv("SFC_DOCKER_TEST_BACKEND"))
+	name := "sfc-" + tag
+	created, err := f.Client.API.ContainerCreate(ctx, client.ContainerCreateOptions{Name: name, Config: &container.Config{Image: f.Image, Cmd: []string{"/backend"}, Labels: map[string]string{"org.sfc.owner": f.Client.Owner, "org.sfc.kind": "container"}}, HostConfig: &container.HostConfig{NetworkMode: "none"}})
 	if err != nil {
 		t.Fatal("owned stopped cache consumer", err)
 	}
@@ -56,7 +56,7 @@ func verifyImageCacheUserNative(t *testing.T, ctx context.Context, r *Runtime, r
 	}
 	run := func(args ...string) []byte {
 		t.Helper()
-		out, diag, err := runManagedCLICommand(ctx, os.Getenv("MYDC_TEST_CLI"), filepath.Join(root, "cli-home"), filepath.Join(root, "cli.yaml"), args, nil)
+		out, diag, err := runManagedCLICommand(ctx, os.Getenv("SFC_TEST_CLI"), filepath.Join(root, "cli-home"), filepath.Join(root, "cli.yaml"), args, nil)
 		if err != nil {
 			t.Fatal("actual cache CLI", args, err, string(diag))
 		}

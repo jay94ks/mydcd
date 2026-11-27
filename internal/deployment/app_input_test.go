@@ -13,7 +13,7 @@ import (
 )
 
 func appInputDocument() string {
-	return "name: php-mysql\nx-mydc: {}\nservices:\n  web:\n    image: docker.io/library/php@sha256:" + strings.Repeat("a", 64) + "\n    command: []\n    environment: {MODE: app}\n    networks: {app: {ipv4_address: 10.240.10.10}}\n    x-mydc: {node: node-a}\nnetworks:\n  app: {name: shared-lan}\n"
+	return "name: php-mysql\nx-sfc: {}\nservices:\n  web:\n    image: docker.io/library/php@sha256:" + strings.Repeat("a", 64) + "\n    command: []\n    environment: {MODE: app}\n    networks: {app: {ipv4_address: 10.240.10.10}}\n    x-sfc: {node: node-a}\nnetworks:\n  app: {name: shared-lan}\n"
 }
 
 func TestAppInputSeparatesManagementBeforeNormalization(t *testing.T) {
@@ -27,14 +27,14 @@ func TestAppInputSeparatesManagementBeforeNormalization(t *testing.T) {
 	}
 	for _, field := range []string{"nodes: {}", "nodes: null", "vault: {}", "vault: null", "routing: {}", "registries: []"} {
 		t.Run(field, func(t *testing.T) {
-			bad := strings.Replace(raw, "x-mydc: {}", "x-mydc: {"+field+"}", 1)
+			bad := strings.Replace(raw, "x-sfc: {}", "x-sfc: {"+field+"}", 1)
 			_, err := ParseApp([]byte(bad))
 			if err == nil || !strings.Contains(err.Error(), "CLUSTER_SETTING_IN_APP") {
 				t.Fatal("management field not rejected before normalization", err)
 			}
 		})
 	}
-	for _, field := range []string{"driver: bridge", "driver: ''", "x-mydc: {}", "x-mydc: null", "external: false", "external: null"} {
+	for _, field := range []string{"driver: bridge", "driver: ''", "x-sfc: {}", "x-sfc: null", "external: false", "external: null"} {
 		t.Run(field, func(t *testing.T) {
 			bad := strings.Replace(raw, "name: shared-lan}", "name: shared-lan, "+field+"}", 1)
 			if _, err := ParseApp([]byte(bad)); err == nil {
@@ -145,7 +145,7 @@ func TestAppInputCompilesCurrentNamedSourceAndPreservesFrozenLegacy(t *testing.T
 		t.Fatal(err)
 	}
 	inline.d.InputKind = "app"
-	c2.MyDC.Tenant, c2.MyDC.Deployment = inline.d.Tenant, inline.d.Deployment
+	c2.Sfc.Tenant, c2.Sfc.Deployment = inline.d.Tenant, inline.d.Deployment
 	inline.d.Input = c2
 	inlineRaw, err := inline.Encode()
 	if err != nil {
@@ -235,13 +235,13 @@ func TestAppInputDeliveryUsesSameContractAndRestoresOriginalCheckpoint(t *testin
 		t.Fatal(err)
 	}
 	model := old.d.Input
-	model.MyDC.Delivery = &DeliveryDeclaration{}
+	model.Sfc.Delivery = &DeliveryDeclaration{}
 	if model.normalize() != nil {
 		t.Fatal("fixture policy")
 	}
 	candidate := deliveryCandidate{Artifact: deliveryArtifact{Kind: "file", Digest: sha256.Sum256(oldRaw), Body: oldRaw}, Plan: old.d, PolicyRevision: 1, InventoryRevision: inv.Revision()}
 	candidate.ID = candidateID(candidate)
-	frozen := Delivery{deliveryRecord{Schema: 1, Revision: 1, PolicyRevision: 1, Principal: ctx.Actor, Policy: *model.MyDC.Delivery, Inventory: inv.d, CatalogFloor: f.c.Revision(), NetworkFloor: oldCtx.Networks.Revision(), Candidate: &candidate}}
+	frozen := Delivery{deliveryRecord{Schema: 1, Revision: 1, PolicyRevision: 1, Principal: ctx.Actor, Policy: *model.Sfc.Delivery, Inventory: inv.d, CatalogFloor: f.c.Revision(), NetworkFloor: oldCtx.Networks.Revision(), Candidate: &candidate}}
 	historical, err := frozen.Encode()
 	if err != nil {
 		t.Fatal("historical checkpoint", err)

@@ -11,7 +11,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/network"
+	"github.com/jay94ks/seafield/internal/network"
 	"github.com/moby/moby/api/types/container"
 	dockernet "github.com/moby/moby/api/types/network"
 )
@@ -123,7 +123,7 @@ func TestPublishedPortsDockerSDKOptionsAndExactInspection(t *testing.T) {
 		t.Fatal("Docker default host address rejected")
 	}
 	for name, mutate := range map[string]func(*startFixture){
-		"owner": func(f *startFixture) { f.native.Config.Labels["org.mydc.owner"] = "foreign" },
+		"owner": func(f *startFixture) { f.native.Config.Labels["org.sfc.owner"] = "foreign" },
 		"range": func(f *startFixture) {
 			p := dockernet.MustParsePort("9000/tcp")
 			f.native.NetworkSettings.Ports[p][0].HostPort = "19011"

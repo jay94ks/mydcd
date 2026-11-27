@@ -5,19 +5,19 @@
 이 경로는 RQ6 마지막 검증 전이다. 아래 형식은 현재 구현 계약이며 실제 연동 완료 근거는 HISTORY와 남은 마일스톤에서 구분한다.
 
 ```sh
-mydc --tenant payments image list private team/app
-mydc --tenant payments image delete private team/app:stable --dry-run
-mydc --tenant payments image delete private team/app:stable --id image-delete-42
-mydc op show image-delete-42
+sfcli --tenant payments image list private team/app
+sfcli --tenant payments image delete private team/app:stable --dry-run
+sfcli --tenant payments image delete private team/app:stable --id image-delete-42
+sfcli op show image-delete-42
 
-mydc --tenant payments registry gc private --id image-gc-43
+sfcli --tenant payments registry gc private --id image-gc-43
 ```
 
 `image delete`의 두 번째 인자는 `REPOSITORY:TAG` 또는 `REPOSITORY@DIGEST`다. CLI는 먼저 목록에서 지금 digest를 읽어 expected digest로 고정하고, `--dry-run`이면 계획만 보여 준다. 같은 `--id`로 다시 실행하면 저장된 원 요청을 이어 보낸다.
 
 ## User 메시지와 서명 action
 
-Unix와 네트워크 MYDCP의 기존 User envelope·로그인·request proof·유한 EOF 계약을 사용한다. 다른 selector·Node·After는 허용하지 않는다.
+Unix와 네트워크 SFCP의 기존 User envelope·로그인·request proof·유한 EOF 계약을 사용한다. 다른 selector·Node·After는 허용하지 않는다.
 
 | Method | 입력 | Reply의 고유 필드 |
 |---|---|---|
@@ -92,8 +92,8 @@ registry stop/정의 교체·drain은 원 작업이 정산될 때까지 수락�
 ## 외부 registry 삭제
 
 ```sh
-mydc --tenant payments image delete company team/app@sha256:<digest> --external --dry-run
-mydc --tenant payments image delete company team/app@sha256:<digest> --external --id external-delete-44
+sfcli --tenant payments image delete company team/app@sha256:<digest> --external --dry-run
+sfcli --tenant payments image delete company team/app@sha256:<digest> --external --id external-delete-44
 ```
 
 기존 source reader의 실제 SecretFetch/승인·tenant CA·정확한 authority를 사용한다. 외부 서버에는 SDK의 `push,pull,delete` 범위로 인증하며 원 자격을 사용자에게 반환하지 않는다. SDK 기본 retry를 끄고 동일 target의 DELETE 전송을 한 번으로 제한한다. 실제 전송 직전에 현재 사용자 동작 허가·source specificity/read-set·공통 이미지 참조를 재검사하고 원 Sent fact를 동기 저장한다. 전체 호출은 최대60초이며 그 전에 만료되는 호출 context도 따른다.
@@ -101,7 +101,7 @@ mydc --tenant payments image delete company team/app@sha256:<digest> --external 
 - 원 DELETE의 HTTP 200/202는 OK, 같은 원 요청의 404 응답은 ALREADY_ABSENT다. 401/403은 DENIED, 405/501은 UNSUPPORTED다. 서버 body·헤더·원 credential은 결과에 넣지 않는다.
 - generic OCI DELETE에는 mutable tag와 expected digest를 원자적으로 비교하는 계약이 없다. 외부 tag-only 삭제는 UNSUPPORTED다. 태그 요청을 digest 삭제로 바꾸어 다른 태그까지 제거하지 않는다. 외부 digest 삭제의 alias/retention 동작은 해당 서버의 OCI 정책을 따른다.
 - DELETE 전송 뒤 응답 유실·timeout·모호한 서버 오류는 unknown이다. 이후 GET/HEAD의 404, source 재등록, 새 작업 ID로 원 성공을 만들어내지 않는다. 확인된 원 HTTP 응답을 저장했다면 권한 회수 뒤에도 그 원 결과만 보고한다. 저장된 결과 없이 Sent만 남은 원 작업은 다시 전송하지 않으며 자동 정산되지 않는다.
-- unknown의 이미지 fence는 source 이름·tenant를 바꾸어 우회할 수 없다. 외부 publisher의 작업은 MyDC가 잠그지 못하므로 동일 digest가 나중에 재게시될 가능성을 포함해 재전송을 금지한다.
+- unknown의 이미지 fence는 source 이름·tenant를 바꾸어 우회할 수 없다. 외부 publisher의 작업은 Sfc가 잠그지 못하므로 동일 digest가 나중에 재게시될 가능성을 포함해 재전송을 금지한다.
 - 자격 reader의 수명과 원격 이미지 효과는 구분한다. 실제 로컬 Secret/HTTP I/O가 join되면 source reader는 원 서명 closure로 사용 참조를 반환할 수 있고 Closed에 원 증거를 보존한다. 이 반환이 remote unknown을 정산하지 않으며 pending 이미지 target·원 job·node/원장 보존은 계속 유지한다. 같은 source의 다른 이미지를 위한 자격 회전을 원격 결과 유실 때문에 영구 봉쇄하지 않는다.
 
 
@@ -110,12 +110,12 @@ mydc --tenant payments image delete company team/app@sha256:<digest> --external 
 한 번의 `prune-registry-images` 사용자 작업이 고정된 목록의 항목들과 선택 GC를 소유한다. 항목별로 새 사용자 작업을 만들지 않는다. 기존 `ManageRegistry`·credential 동작 제한·사용자 승인·tenant/원 registry CAS를 적용하며, GC를 선택하면 `gc-registry` 동작 허가도 필요하다.
 
 ```sh
-mydc --tenant payments registry prune private --repository team/app --keep 3 \
+sfcli --tenant payments registry prune private --repository team/app --keep 3 \
   --exclude-tag 'release-*' --gc --dry-run
 # 목록을 검토한 뒤 실행한다. 명령은 같은 목록을 다시 보여 주고 묻는다.
-mydc --tenant payments registry prune private --repository team/app --keep 3 \
+sfcli --tenant payments registry prune private --repository team/app --keep 3 \
   --exclude-tag 'release-*' --gc --id prune-45
-mydc op show prune-45
+sfcli op show prune-45
 ```
 
 | 조건 필드 | 형식·선택 |
@@ -141,7 +141,7 @@ mydc op show prune-45
 
 `Part`는 preview에서 `items` 또는 `retained`다. 첫 요청에는 Fact/After가 없고, 후속 페이지는 첫 응답의 Fact와 원 Conditions를 그대로 보낸다. section을 바꿀 때 After를 비운다. preview Fact는 발행부터600초 유효하며 대상 run/source·조건이 달라지면 거부한다. 일반 `registry-maintenance-plan`은 일괄 action의 우회 입력으로 사용할 수 없다.
 
-Plan은 기존 maintenance 계획 형식이며 `Action:prune-registry-images`다. `Change.Prune:{Conditions,Fact}`가 추가되고 `Repository/Reference/Digest`는 비운다. Fact는 `{Schema:1,Cluster,Owner,Target,Conditions,Preview,Tenant,Registry,External,Items,Retained,ImageBytes,EstimatedReclaimedBytes,EstimateKnown,Live,At,Signature,Public}`다. At은 Unix 초, Signature는 Ed25519 byte의 JSON base64, 각 지문/키는32바이트 배열이다. 원 owner가 `mydc-registry-prune-fact-1\x00` domain과 Signature=nil인 JSON에 서명한다. Target은 Operation/Prune를 비운 원 Change 지문, Conditions는 정규 조건 지문, Preview는 전체 원 선택 지문, Public은 공개 Items/Retained 투영의 별도 지문이다.
+Plan은 기존 maintenance 계획 형식이며 `Action:prune-registry-images`다. `Change.Prune:{Conditions,Fact}`가 추가되고 `Repository/Reference/Digest`는 비운다. Fact는 `{Schema:1,Cluster,Owner,Target,Conditions,Preview,Tenant,Registry,External,Items,Retained,ImageBytes,EstimatedReclaimedBytes,EstimateKnown,Live,At,Signature,Public}`다. At은 Unix 초, Signature는 Ed25519 byte의 JSON base64, 각 지문/키는32바이트 배열이다. 원 owner가 `sfc-registry-prune-fact-1\x00` domain과 Signature=nil인 JSON에 서명한다. Target은 Operation/Prune를 비운 원 Change 지문, Conditions는 정규 조건 지문, Preview는 전체 원 선택 지문, Public은 공개 Items/Retained 투영의 별도 지문이다.
 
 Page는 `{Schema:1,Root,Part,Total,Processed,Rows?,Retained?,Next}`다. 한 페이지에 최대8행이다. preview Root는 Preview 지문이고 Processed는0이다. `Rows`는 `{ID,Image,Aliases,AliasDigest}`로 [공개 ImageMetadata](registry-images.md)에 별칭 수와 별칭 집합 SHA-256을 붙인다. 수천 개 별칭을 한 wire 행에 넣지 않는다. 보존 행은 `{Image,Code}`이며 `IMAGE_IN_USE`, `PROTECTED`, `EXCLUDED_TAG`, `RECENT`, `UPLOAD_TIME_UNKNOWN`, `TOO_RECENT`, `UNTAGGED_EXCLUDED`, `MANIFEST_DEPENDENCY`, `REPOSITORY_FILTER` 중 사유를 남긴다.
 

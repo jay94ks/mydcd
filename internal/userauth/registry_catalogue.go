@@ -7,11 +7,11 @@ import (
 	"errors"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/registryclient"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/registryclient"
+	"github.com/jay94ks/seafield/internal/sfcp"
 )
 
 func (s Service) registryCatalog(ctx context.Context, view cluster.View, q Request, session access.Session) Reply {
@@ -43,9 +43,9 @@ func (s Service) registryCatalog(ctx context.Context, view cluster.View, q Reque
 	}
 	return Reply{Schema: 1, Code: "ok", Tenant: q.Tenant, RegistryCatalog: &result}
 }
-func (c Client) RegistryCatalogue(ctx context.Context, peer mydcp.Peer, session access.Session, tenant string, q control.RegistryCatalogueQuery, after string) (control.RegistryCatalogueResult, error) {
+func (c Client) RegistryCatalogue(ctx context.Context, peer sfcp.Peer, session access.Session, tenant string, q control.RegistryCatalogueQuery, after string) (control.RegistryCatalogueResult, error) {
 	if _, _, err := registryclient.CatalogueCursor(after); err != nil || !q.Valid() || tenant == "" {
-		return control.RegistryCatalogueResult{}, mydcp.ErrAdmission
+		return control.RegistryCatalogueResult{}, sfcp.ErrAdmission
 	}
 	reply, err := c.query(ctx, peer, session, Request{Method: "registry-catalog", Tenant: tenant, RegistryCatalog: &q, After: after})
 	if err != nil {
@@ -53,7 +53,7 @@ func (c Client) RegistryCatalogue(ctx context.Context, peer mydcp.Peer, session 
 	}
 	result := reply.RegistryCatalog
 	if result == nil || reply.Tenant != tenant || !result.ValidQuery(q, after) {
-		return control.RegistryCatalogueResult{}, mydcp.ErrFrame
+		return control.RegistryCatalogueResult{}, sfcp.ErrFrame
 	}
 	return *result, nil
 }

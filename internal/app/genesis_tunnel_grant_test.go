@@ -10,11 +10,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/tenancy"
-	"github.com/jay94ks/mydcd/internal/workload"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/tenancy"
+	"github.com/jay94ks/seafield/internal/workload"
 )
 
 // A cluster built with init, join and promote: both servers, the genesis
@@ -44,7 +44,7 @@ func TestGenesisAndJoinedNodesGrantManagedTunnel(t *testing.T) {
 	view, _ := m.Nodes[0].Engine().Read(ctx, false)
 	catalog, _ := m.Policy.Catalog(view.State)
 	tenant, _ := catalog.Tenant("shop")
-	m.Change(0, "nodes", "set-nodes", tenant.Revision, control.NodeAssignment{Tenant: "shop", Nodes: []string{"node-0", "node-1"}})
+	m.Change(0, "nodes", "set-nodes", tenant.Revision, control.NodeChangeTo("shop", tenant.AllowedNodes, []string{"node-0", "node-1"}))
 	for _, node := range []string{"node-0", "node-1"} {
 		for _, scope := range []string{"", "shop"} {
 			m.Change(0, "quota-"+node+"-"+scope, "set-node-quota", 0, tenancy.NodeLimit{Tenant: scope, Node: node, Capacity: workload.Resources{CPU: 1e9, Memory: 256 << 20}, Networks: 2, MaxConsumers: 8, PacketQueuePackets: 64, PacketQueueBytes: 128 << 10})
@@ -56,8 +56,8 @@ func TestGenesisAndJoinedNodesGrantManagedTunnel(t *testing.T) {
 		return []tenancy.Subnet{{ID: "main", Prefix: p, Gateway: p.Addr().Next(), MTU: 1280}}
 	}
 	m.Change(0, "net", "create-tun-network", r.Networks.Revision(), tenancy.TUNDefinition{Tenant: "shop", Name: "shop-net", Members: []tenancy.TUNNode{
-		{Node: "node-0", Pools: pool("10.241.10.0/24"), Addresses: []netip.Prefix{netip.MustParsePrefix("10.241.30.1/32")}},
-		{Node: "node-1", Pools: pool("10.241.20.0/24"), Addresses: []netip.Prefix{netip.MustParsePrefix("10.241.30.2/32")}},
+		{Node: "node-0", Pools: pool("10.241.10.0/24")},
+		{Node: "node-1", Pools: pool("10.241.20.0/24")},
 	}})
 	time.Sleep(time.Second) // let node-1 apply the network
 	for i, n := range m.Nodes {
@@ -86,7 +86,7 @@ func TestGenesisAndJoinedNodesGrantManagedTunnel(t *testing.T) {
 
 func TestPathRefusalIsAdmission(t *testing.T) {
 	err := pathRefused("why")
-	if !errors.Is(err, mydcp.ErrAdmission) || err.Error() != "managed TUN path refused: why" {
+	if !errors.Is(err, sfcp.ErrAdmission) || err.Error() != "managed TUN path refused: why" {
 		t.Fatal(err)
 	}
 }

@@ -5,10 +5,10 @@ package app
 import (
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/tenancy"
+	"github.com/jay94ks/seafield/internal/tenancy"
 )
 
-func TestSystemNetworkStepFollowsNodeAppsAndWorkRole(t *testing.T) {
+func TestSystemNetworkStepFollowsClusterAppsAndWorkRole(t *testing.T) {
 	n, err := tenancy.New([32]byte{1})
 	if err != nil {
 		t.Fatal(err)
@@ -44,5 +44,21 @@ func TestSystemNetworkStepFollowsNodeAppsAndWorkRole(t *testing.T) {
 	// node-b stops while it is not a work server any more
 	if got, _ := systemNetworkStep(used, []string{"node-b"}, "node-b", false, false); got != "use" {
 		t.Fatalf("off: %q", got)
+	}
+}
+
+// A server claims a cluster app only as a member of the system network.
+// The runner rules themselves are tenancy's and control's
+// (TestClusterAppRunsOnOneServer, TestClusterAppRunsOnOneServerInTheCluster).
+func TestClusterAppStepWaitsForMembership(t *testing.T) {
+	n, err := tenancy.New([32]byte{1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n, err = n.SetSystemUse("node-a", true); err != nil {
+		t.Fatal(err)
+	}
+	if step, runner := clusterAppStep(n, []string{"node-a"}, "node-a", "web"); step != "" || runner != "" {
+		t.Fatalf("not a member yet: %q %q", step, runner)
 	}
 }

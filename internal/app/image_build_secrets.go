@@ -5,15 +5,15 @@ package app
 import (
 	"context"
 	"encoding/json"
-	"github.com/jay94ks/mydcd/internal/containerops"
+	"github.com/jay94ks/seafield/internal/containerops"
 	"io"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/imagebuild"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/schema"
-	"github.com/jay94ks/mydcd/internal/secrets"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/imagebuild"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/secrets"
+	"github.com/jay94ks/seafield/internal/sfcp"
 )
 
 func (r *Runtime) imageBuildSecretInputs(ctx context.Context, spec imagebuild.JobSpec) (control.ImageBuildSecretInputs, error) {
@@ -26,16 +26,16 @@ func (r *Runtime) imageBuildSecretInputs(ctx context.Context, spec imagebuild.Jo
 	}
 	work, err := schema.Decode[control.ImageBuildSecretInputs](reply.Data)
 	if err != nil || reply.Local || work.Selection != selection || work.Index == 0 || work.Epoch == 0 || work.Inputs.ReadSet == ([32]byte{}) || len(work.Inputs.Entries) > len(spec.Context.Secrets) {
-		return control.ImageBuildSecretInputs{}, mydcp.ErrAdmission
+		return control.ImageBuildSecretInputs{}, sfcp.ErrAdmission
 	}
 	view, err := r.Engine().ReadAtLeast(ctx, work.Index)
 	if err != nil || view.State.ModuleEpoch() != work.Epoch {
-		return control.ImageBuildSecretInputs{}, mydcp.ErrAdmission
+		return control.ImageBuildSecretInputs{}, sfcp.ErrAdmission
 	}
 	q.At = time.Now().Unix()
 	current, err := r.controlPolicy.ImageBuildSecretInputs(view.State, r.Identity.Public, q)
 	if err != nil || current.Inputs.ReadSet != work.Inputs.ReadSet {
-		return control.ImageBuildSecretInputs{}, mydcp.ErrAdmission
+		return control.ImageBuildSecretInputs{}, sfcp.ErrAdmission
 	}
 	return work, nil
 }
@@ -50,7 +50,7 @@ func (r *Runtime) stageImageBuildSecrets(ctx context.Context, spec imagebuild.Jo
 	r.inputLife.RLock()
 	defer r.inputLife.RUnlock()
 	if native == nil || logs == nil || r.ctx.Err() != nil {
-		return nil, mydcp.ErrAdmission
+		return nil, sfcp.ErrAdmission
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -76,7 +76,7 @@ func (r *Runtime) stageImageBuildSecrets(ctx context.Context, spec imagebuild.Jo
 			return nil, err
 		}
 		if secrets.ValidateFetched(secrets.UsePlan{Leaves: []secrets.Leaf{input.Leaf}}, []secrets.Fetched{v}, 128<<10) != nil {
-			return nil, mydcp.ErrAdmission
+			return nil, sfcp.ErrAdmission
 		}
 	}
 	var values []imagebuild.SecretValue
@@ -88,18 +88,18 @@ func (r *Runtime) stageImageBuildSecrets(ctx context.Context, spec imagebuild.Jo
 			}
 			data, exists := fetched[i].Values[ref.Key]
 			if !exists {
-				return nil, mydcp.ErrAdmission
+				return nil, sfcp.ErrAdmission
 			}
 			values = append(values, imagebuild.SecretValue{Reference: ref, Value: data})
 			found = true
 		}
 		if !found {
-			return nil, mydcp.ErrAdmission
+			return nil, sfcp.ErrAdmission
 		}
 	}
 	latest, err := r.imageBuildSecretInputs(ctx, spec)
 	if err != nil || latest.Inputs.ReadSet != work.Inputs.ReadSet {
-		return nil, mydcp.ErrAdmission
+		return nil, sfcp.ErrAdmission
 	}
 	var masks []containerops.RedactionValue
 	for _, value := range values {

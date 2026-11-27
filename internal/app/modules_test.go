@@ -7,15 +7,15 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/desired"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/ingress"
-	"github.com/jay94ks/mydcd/internal/network"
-	"github.com/jay94ks/mydcd/internal/schema"
-	"github.com/jay94ks/mydcd/internal/workload"
-	"github.com/jay94ks/mydcd/tests/enginefixture"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/desired"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/ingress"
+	"github.com/jay94ks/seafield/internal/network"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/workload"
+	"github.com/jay94ks/seafield/tests/enginefixture"
 	"io"
 	"net"
 	"net/http"
@@ -40,16 +40,16 @@ func TestRealBoundaryDaemonIngressNetworkReferences(t *testing.T) {
 	testDaemonDesiredDocker(t, false, true)
 }
 func testDaemonDesiredDocker(t *testing.T, quorum, withIngress bool) {
-	tag := os.Getenv("MYDC_DOCKER_TEST_OWNER")
+	tag := os.Getenv("SFC_DOCKER_TEST_OWNER")
 	if tag == "" {
 		t.Skip("requires docs/testing/system-rollback.md prestate and explicit fixture owner")
 	}
-	clusterBytes, err := hex.DecodeString(os.Getenv("MYDC_MODULE_TEST_CLUSTER"))
+	clusterBytes, err := hex.DecodeString(os.Getenv("SFC_MODULE_TEST_CLUSTER"))
 	if err != nil || len(clusterBytes) != 32 {
 		t.Fatal("explicit test cluster required", err)
 	}
 	clusterID := [32]byte(clusterBytes)
-	prefix, err := netip.ParsePrefix(os.Getenv("MYDC_DOCKER_TEST_CIDR"))
+	prefix, err := netip.ParsePrefix(os.Getenv("SFC_DOCKER_TEST_CIDR"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -61,7 +61,7 @@ func testDaemonDesiredDocker(t *testing.T, quorum, withIngress bool) {
 		t.Fatal(err)
 	}
 	bin := filepath.Join(root, "bin")
-	build := exec.CommandContext(ctx, "go", "build", "-p", "2", "-o", bin+string(os.PathSeparator), "./cmd/mydc", "./cmd/mydcd")
+	build := exec.CommandContext(ctx, "go", "build", "-p", "2", "-o", bin+string(os.PathSeparator), "./cmd/sfcli", "./cmd/sfcd")
 	build.Dir = workspace
 	if out, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("products: %v %s", err, out)
@@ -105,7 +105,7 @@ func testDaemonDesiredDocker(t *testing.T, quorum, withIngress bool) {
 			bootstrap = "true"
 		}
 		if i == 0 {
-			networkModule = "{enabled: true, docker_socket: 'unix:///var/run/docker.sock'}"
+			networkModule = "{enabled: true}"
 			workloadModule = "{enabled: true}"
 			if withIngress {
 				ingressModule = "{enabled: true}"
@@ -162,7 +162,7 @@ func testDaemonDesiredDocker(t *testing.T, quorum, withIngress bool) {
 		if e != nil {
 			t.Fatal(e)
 		}
-		cmd := exec.CommandContext(ctx, filepath.Join(bin, "mydcd"), "--config", configs[i], "run")
+		cmd := exec.CommandContext(ctx, filepath.Join(bin, "sfcd"), append(append([]string{"--config", configs[i]}, sfcdEngineFlags(configs[i])...), "run")...)
 		cmd.Stdout = log
 		cmd.Stderr = log
 		if e = cmd.Start(); e != nil {
@@ -181,7 +181,7 @@ func testDaemonDesiredDocker(t *testing.T, quorum, withIngress bool) {
 		defer stop()
 		argv := []string{"--config", clientFile, "--peer", peer, "--timeout", "3s"}
 		argv = append(argv, args...)
-		cmd := exec.CommandContext(call, filepath.Join(bin, "mydc"), argv...)
+		cmd := exec.CommandContext(call, filepath.Join(bin, "sfc"), argv...)
 		out, e := cmd.Output()
 		var reply cluster.ManagementReply
 		if len(out) > 0 {
@@ -234,7 +234,7 @@ func testDaemonDesiredDocker(t *testing.T, quorum, withIngress bool) {
 		if remove {
 			action = []string{"command", "--request", fmt.Sprintf("module-%d", sequence), "--expected", fmt.Sprint(expected), "delete", key}
 		}
-		cmd := exec.CommandContext(ctx, filepath.Join(bin, "mydc"), append([]string{"--config", clientFile}, action...)...)
+		cmd := exec.CommandContext(ctx, filepath.Join(bin, "sfc"), append([]string{"--config", clientFile}, action...)...)
 		command, e := cmd.Output()
 		if e != nil {
 			t.Fatal("encode command", e)
@@ -305,7 +305,7 @@ func testDaemonDesiredDocker(t *testing.T, quorum, withIngress bool) {
 		}
 		defer reply.Body.Close()
 		b, e := io.ReadAll(reply.Body)
-		return e == nil && string(b) == "mydc-boundary /ping"
+		return e == nil && string(b) == "sfc-boundary /ping"
 	}
 	wait("container HTTP", response)
 	var ingressSpec ingress.Spec
@@ -322,7 +322,7 @@ func testDaemonDesiredDocker(t *testing.T, quorum, withIngress bool) {
 		}
 		defer res.Body.Close()
 		b, e := io.ReadAll(res.Body)
-		return e == nil && res.StatusCode == 200 && string(b) == "mydc-boundary /ping"
+		return e == nil && res.StatusCode == 200 && string(b) == "sfc-boundary /ping"
 	}
 	if withIngress {
 		ln, e := net.Listen("tcp4", "127.0.0.1:0")
@@ -498,7 +498,7 @@ func testDaemonDesiredDocker(t *testing.T, quorum, withIngress bool) {
 	}
 	bridgeRelease := submit(bridgeKey, bridgeReleased, bridgeDrain.Revision, false, state.Applied)
 	submit(bridgeKey, nil, bridgeRelease.Revision, true, state.Applied)
-	filters := client.Filters{}.Add("label", "org.mydc.owner="+owner)
+	filters := client.Filters{}.Add("label", "org.sfc.owner="+owner)
 	containers, e := fixture.Client.API.ContainerList(ctx, client.ContainerListOptions{All: true, Filters: filters})
 	if e != nil || len(containers.Items) != 0 {
 		t.Fatal("product retained native containers", e)

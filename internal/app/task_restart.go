@@ -10,15 +10,16 @@ import (
 	"errors"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/reconcile"
-	"github.com/jay94ks/mydcd/internal/schema"
-	"github.com/jay94ks/mydcd/internal/storage"
-	checker "github.com/jay94ks/mydcd/internal/workload/lifecycle"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/storage"
+	checker "github.com/jay94ks/seafield/internal/workload/lifecycle"
 )
 
 const taskRestartPrefix = "app/task-restart/"
@@ -73,13 +74,13 @@ func (r *Runtime) taskRestartPermit(ctx context.Context, row control.TaskRestart
 	}
 	permit, err := schema.Decode[control.TaskRestartPermit](reply.Data)
 	if err != nil || reply.Local || permit.Index == 0 || reply.CommandIndex < permit.Index {
-		return false, mydcp.ErrAdmission
+		return false, sfcp.ErrAdmission
 	}
 	return permit.Allowed, nil
 }
 func (r *Runtime) taskRestartRead(key string, input []byte, v cluster.View) ([]byte, error) {
 	if v.Local {
-		return nil, mydcp.ErrAdmission
+		return nil, sfcp.ErrAdmission
 	}
 	caller, err := identity.ParseKey(key)
 	if err != nil {
@@ -90,8 +91,8 @@ func (r *Runtime) taskRestartRead(key string, input []byte, v cluster.View) ([]b
 		return nil, err
 	}
 	now := time.Now().Unix()
-	if q.At != 0 && (q.At > now || now-q.At > 30) {
-		return nil, mydcp.ErrAdmission
+	if q.At != 0 && (!access.Recent(q.At, now, 30)) {
+		return nil, sfcp.ErrAdmission
 	}
 	permit, err := r.controlPolicy.TaskRestartPermit(v.State, caller, q)
 	if err != nil {
@@ -163,7 +164,7 @@ func (r *Runtime) advanceTaskRestarts(ctx context.Context, apps control.Apps) er
 				return err
 			}
 			if !ok {
-				return mydcp.ErrAdmission
+				return sfcp.ErrAdmission
 			}
 			return nil
 		})

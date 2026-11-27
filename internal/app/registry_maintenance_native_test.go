@@ -17,13 +17,13 @@ import (
 
 	v1 "github.com/google/go-containerregistry/pkg/v1"
 
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/registryclient"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/registryclient"
 )
 
 // These extensions run only in the existing explicitly enabled native fixture,
-// with its real user CLI, MYDCP/Raft, retained Volume, registry owner and rollback.
+// with its real user CLI, SFCP/Raft, retained Volume, registry owner and rollback.
 // They do not replace that fixture with a simulated ready fact or fake store.
 func (f *managedRegistryNative) maintenanceNativeWait(t *testing.T, ctx context.Context, p control.Policy, read func() cluster.View, id, state, code string) control.RegistryMaintenanceRecord {
 	t.Helper()

@@ -11,12 +11,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/membership"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/config"
-	"github.com/jay94ks/mydcd/internal/imagebuild"
-	"github.com/jay94ks/mydcd/internal/nodestorage"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/membership"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/config"
+	"github.com/jay94ks/seafield/internal/imagebuild"
+	"github.com/jay94ks/seafield/internal/nodestorage"
 )
 
 func TestTenantStorageScopePagingAndCurrentAuthority(t *testing.T) {
@@ -27,9 +27,9 @@ func TestTenantStorageScopePagingAndCurrentAuthority(t *testing.T) {
 	f.sessions["admin"] = admin
 	f.apply("admin", "create-tenant", 0, TenantID{ID: "payments"}, state.Applied)
 	for i := 0; i < 10; i++ {
-		f.apply("admin", "add-node-storage", 0, nodestorage.Definition{Node: "node-a", ID: fmt.Sprintf("ssd%02d", i), Path: fmt.Sprintf("/mnt/ssd%02d", i), MaxVolumes: 1, Tenants: []string{"tenant"}}, state.Applied)
+		f.apply("admin", "add-node-storage", 0, nodestorage.Definition{Node: "node-a", ID: fmt.Sprintf("ssd%02d", i), Path: fmt.Sprintf("/mnt/ssd%02d", i), Tenants: []string{"tenant"}}, state.Applied)
 	}
-	f.apply("admin", "add-node-storage", 0, nodestorage.Definition{Node: "node-a", ID: "payments-only", Path: "/mnt/payments-private", MaxVolumes: 1, Tenants: []string{"payments"}}, state.Applied)
+	f.apply("admin", "add-node-storage", 0, nodestorage.Definition{Node: "node-a", ID: "payments-only", Path: "/mnt/payments-private", Tenants: []string{"payments"}}, state.Applied)
 	page, err := f.p.TenantStoragePage(f.s, f.sessions["manager"], 2, "tenant", "", "")
 	if err != nil || len(page.Items) != 8 || page.Next == "" {
 		t.Fatal("first permitted page", page, err)
@@ -125,7 +125,7 @@ func TestTenantStorageSelectedReferenceFeedsBuildPolicyAndPreservesRootFences(t 
 		}
 		directory = next
 	}
-	advance(directory.Invite(peer, "tenant-storage-node-b"))
+	advance(directory.Invite(peer, "tenant-storage-node-b", nil))
 	entry, _ := directory.Entry(peer.ID)
 	advance(directory.Dispatch(peer.ID, entry.Revision, entry.Job.Pending.ID, 1, f.p.TrustRoot))
 	entry, _ = directory.Entry(peer.ID)
@@ -144,8 +144,8 @@ func TestTenantStorageSelectedReferenceFeedsBuildPolicyAndPreservesRootFences(t 
 		t.Fatal(err)
 	}
 	tenant, _ := users.Tenant("tenant")
-	f.apply("admin", "set-nodes", tenant.Revision, NodeAssignment{Tenant: "tenant", Nodes: []string{"node-a", "node-b"}}, state.Applied)
-	f.apply("admin", "add-node-storage", 0, nodestorage.Definition{Node: "node-b", ID: "ssd", Path: "/mnt/ssd", MaxVolumes: 2, Tenants: []string{"tenant"}}, state.Applied)
+	f.apply("admin", "set-nodes", tenant.Revision, NodeChangeTo("tenant", tenant.AllowedNodes, []string{"node-a", "node-b"}), state.Applied)
+	f.apply("admin", "add-node-storage", 0, nodestorage.Definition{Node: "node-b", ID: "ssd", Path: "/mnt/ssd", Tenants: []string{"tenant"}}, state.Applied)
 	roots, err := f.p.NodeStorage(f.s)
 	if err != nil {
 		t.Fatal(err)
@@ -179,11 +179,11 @@ func TestTenantStorageSelectedReferenceFeedsBuildPolicyAndPreservesRootFences(t 
 		t.Fatal(err)
 	}
 	tenant, _ = users.Tenant("tenant")
-	f.apply("admin", "set-nodes", tenant.Revision, NodeAssignment{Tenant: "tenant", Nodes: []string{"node-a"}}, state.Applied)
+	f.apply("admin", "set-nodes", tenant.Revision, NodeChangeTo("tenant", tenant.AllowedNodes, []string{"node-a"}), state.Applied)
 	f.apply("manager", "set-image-build-policy", policy.Revision, ImageBuildPolicyPut{Spec: spec}, state.Forbidden)
 	users, _ = f.p.Catalog(f.s)
 	tenant, _ = users.Tenant("tenant")
-	f.apply("admin", "set-nodes", tenant.Revision, NodeAssignment{Tenant: "tenant", Nodes: []string{"node-a", "node-b"}}, state.Applied)
+	f.apply("admin", "set-nodes", tenant.Revision, NodeChangeTo("tenant", tenant.AllowedNodes, []string{"node-a", "node-b"}), state.Applied)
 	forged := spec.Own()
 	forged.Nodes[1].Root.Generation++
 	f.apply("manager", "set-image-build-policy", policy.Revision, ImageBuildPolicyPut{Spec: forged}, state.Forbidden)
@@ -192,11 +192,11 @@ func TestTenantStorageSelectedReferenceFeedsBuildPolicyAndPreservesRootFences(t 
 	f.apply("manager", "set-image-build-policy", policy.Revision, ImageBuildPolicyPut{Spec: forged}, state.Forbidden)
 	roots, _ = f.p.NodeStorage(f.s)
 	root, _ = roots.Root("node-b", "ssd")
-	f.apply("admin", "set-node-storage-policy", root.Revision, NodeStoragePolicy{Node: "node-b", ID: "ssd", MaxVolumes: 2}, state.Applied)
+	f.apply("admin", "set-node-storage-policy", root.Revision, NodeStoragePolicy{Node: "node-b", ID: "ssd", RemoveTenants: []string{"tenant"}}, state.Applied)
 	f.apply("manager", "set-image-build-policy", policy.Revision, ImageBuildPolicyPut{Spec: spec}, state.Forbidden)
 	roots, _ = f.p.NodeStorage(f.s)
 	root, _ = roots.Root("node-b", "ssd")
-	f.apply("admin", "set-node-storage-policy", root.Revision, NodeStoragePolicy{Node: "node-b", ID: "ssd", MaxVolumes: 2, Tenants: []string{"tenant"}}, state.Applied)
+	f.apply("admin", "set-node-storage-policy", root.Revision, NodeStoragePolicy{Node: "node-b", ID: "ssd", AddTenants: []string{"tenant"}}, state.Applied)
 	roots, _ = f.p.NodeStorage(f.s)
 	root, _ = roots.Root("node-b", "ssd")
 	f.apply("admin", "drain-node-storage", root.Revision, NodeStorageSelection{Node: "node-b", ID: "ssd"}, state.Applied)

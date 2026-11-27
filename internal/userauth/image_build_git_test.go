@@ -13,11 +13,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/imagebuild"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/nodestorage"
-	"github.com/jay94ks/mydcd/internal/schema"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/imagebuild"
+	"github.com/jay94ks/seafield/internal/nodestorage"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/sfcp"
 )
 
 // Real Client/frame/binding/EOF paths; shared permission/native archive facts
@@ -29,31 +29,31 @@ func TestGitSaveActualUserWireKeepsUserProofAndRejectsChangedOwnerEvidence(t *te
 				_, client, session, node := journalFixture(t)
 				readResult := strings.HasPrefix(mode, "result-")
 				mode = strings.TrimPrefix(mode, "result-")
-				dir, err := os.MkdirTemp("", "mydc-git-wire-")
+				dir, err := os.MkdirTemp("", "sfc-git-wire-")
 				if err != nil {
 					t.Fatal(err)
 				}
 				defer os.RemoveAll(dir)
 				peer := client.Peers[0]
-				lookup := func(key mydcp.Identity) (mydcp.Peer, bool) {
-					if key == mydcp.Identity(client.Self.Public) {
-						return mydcp.Peer{ID: "user", Policy: mydcp.Policy{Key: key, UserAuth: true}}, true
+				lookup := func(key sfcp.Identity) (sfcp.Peer, bool) {
+					if key == sfcp.Identity(client.Self.Public) {
+						return sfcp.Peer{ID: "user", Policy: sfcp.Policy{Key: key, UserAuth: true}}, true
 					}
 					return peer, key == peer.Key
 				}
-				server, err := mydcp.NewTransport(node, client.Cluster, lookup)
+				server, err := sfcp.NewTransport(node, client.Cluster, lookup)
 				if err != nil {
 					t.Fatal(err)
 				}
 				defer server.Close()
 				now := uint64(time.Now().Unix())
-				plan := imagebuild.GitSavePlan{Schema: 1, Tenant: "tenant", Context: "source", ID: "save-one", Creator: session.User, Root: nodestorage.Reference{Cluster: client.Cluster, Node: "node", Key: node.Public, ID: "data", Generation: 1, Path: "/srv/mydc"}, ContextRevision: 1, PolicyRevision: 1, Dockerfile: "Dockerfile", ExpandedLimit: 1 << 20, Commit: strings.Repeat("a", 40), Tree: [32]byte{7}, CreatedAt: now, ExpiresAt: now + 600}
+				plan := imagebuild.GitSavePlan{Schema: 1, Tenant: "tenant", Context: "source", ID: "save-one", Creator: session.User, Root: nodestorage.Reference{Cluster: client.Cluster, Node: "node", Key: node.Public, ID: "data", Generation: 1, Path: "/srv/sfc"}, ContextRevision: 1, PolicyRevision: 1, Dockerfile: "Dockerfile", ExpandedLimit: 1 << 20, Commit: strings.Repeat("a", 40), Tree: [32]byte{7}, CreatedAt: now, ExpiresAt: now + 600}
 				if readResult {
 					plan.CreatedAt, plan.ExpiresAt = now-600, now-1
 				}
 				binding := Service{Self: node, Mesh: server, Policy: control.Policy{Cluster: client.Cluster}}
 				done := make(chan error, 1)
-				if err := server.OnManagement(mydcp.User, func(ctx context.Context, conn *mydcp.Session, stream mydcp.Stream, frame mydcp.Frame) error {
+				if err := server.OnManagement(sfcp.User, func(ctx context.Context, conn *sfcp.Session, stream sfcp.Stream, frame sfcp.Frame) error {
 					serve := func() error {
 						envelope, err := schema.Decode[Envelope](frame.Fields[0].Value)
 						if err != nil {
@@ -61,7 +61,7 @@ func TestGitSaveActualUserWireKeepsUserProofAndRejectsChangedOwnerEvidence(t *te
 						}
 						request, err := schema.Decode[Request](envelope.Body)
 						if err != nil || !request.validMethodFields() || !request.validQuerySelectors() || request.Method != "save-build-git" || request.ImageBuildGit == nil || request.ImageBuildGit.Plan != plan || request.ImageBuildGit.Result != readResult || request.ImageBuildGit.Authorize(session, time.Now().Unix()) != nil {
-							return mydcp.ErrFrame
+							return sfcp.ErrFrame
 						}
 						if _, err := binding.binding(conn, frame.Kind, envelope); err != nil {
 							return err
@@ -109,7 +109,7 @@ func TestGitSaveActualUserWireKeepsUserProofAndRejectsChangedOwnerEvidence(t *te
 					}
 					peer.Endpoint = server.Addr().String()
 				}
-				mesh, err := mydcp.NewTransport(client.Self, client.Cluster, lookup)
+				mesh, err := sfcp.NewTransport(client.Self, client.Cluster, lookup)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -153,7 +153,7 @@ func TestGitSaveActualUserWireKeepsUserProofAndRejectsChangedOwnerEvidence(t *te
 func TestGitSaveUserRequestCannotCarryForeignSelectors(t *testing.T) {
 	_, c, s, node := journalFixture(t)
 	now := uint64(time.Now().Unix())
-	q := imagebuild.GitSaveRequest{Plan: imagebuild.GitSavePlan{Schema: 1, Tenant: "tenant", Context: "source", ID: "save", Creator: s.User, Root: nodestorage.Reference{Cluster: c.Cluster, Node: "node", Key: node.Public, ID: "data", Generation: 1, Path: "/srv/mydc"}, ContextRevision: 1, PolicyRevision: 1, Dockerfile: "Dockerfile", ExpandedLimit: 1 << 20, Commit: strings.Repeat("a", 40), Tree: [32]byte{7}, CreatedAt: now, ExpiresAt: now + 600}}
+	q := imagebuild.GitSaveRequest{Plan: imagebuild.GitSavePlan{Schema: 1, Tenant: "tenant", Context: "source", ID: "save", Creator: s.User, Root: nodestorage.Reference{Cluster: c.Cluster, Node: "node", Key: node.Public, ID: "data", Generation: 1, Path: "/srv/sfc"}, ContextRevision: 1, PolicyRevision: 1, Dockerfile: "Dockerfile", ExpandedLimit: 1 << 20, Commit: strings.Repeat("a", 40), Tree: [32]byte{7}, CreatedAt: now, ExpiresAt: now + 600}}
 	r := Request{Schema: 1, Method: "save-build-git", Tenant: "tenant", Nonce: [32]byte{1}, ImageBuildGit: &q}
 	if !r.validMethodFields() {
 		t.Fatal("valid fixed source request rejected")

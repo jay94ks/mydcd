@@ -121,7 +121,8 @@ func (s *Store) GetMCPServer(name string) (*MCPServer, error) {
 }
 
 // CreateMCPServer stores a new server; ErrConflict when the name is taken.
-func (s *Store) CreateMCPServer(m *MCPServer) error {
+func (s *Store) CreateMCPServer(m *MCPServer) (err error) {
+	defer func() { s.changed(err, Change{Kind: "mcp-server", ID: m.Name}) }()
 	return s.db.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket(bucketMCPServers)
 		if b.Get([]byte(m.Name)) != nil {
@@ -149,6 +150,7 @@ func (s *Store) UpdateMCPServer(name string, expected uint64, fn func(m *MCPServ
 		m.Revision++
 		return putJSON(b, []byte(name), &m)
 	})
+	s.changed(err, Change{Kind: "mcp-server", ID: name})
 	if err != nil {
 		return nil, err
 	}
@@ -173,7 +175,8 @@ func (s *Store) ListMCPServers() ([]*MCPServer, error) {
 
 // DeleteMCPServer removes a server and takes it out of the current
 // guidelines' mcpServers (older versions stay as they were).
-func (s *Store) DeleteMCPServer(name string) error {
+func (s *Store) DeleteMCPServer(name string) (err error) {
+	defer func() { s.changed(err, Change{Kind: "mcp-server", ID: name, Deleted: true}) }()
 	return s.db.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket(bucketMCPServers)
 		if b.Get([]byte(name)) == nil {

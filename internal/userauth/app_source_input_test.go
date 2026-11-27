@@ -10,8 +10,8 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/deployment"
-	checker "github.com/jay94ks/mydcd/internal/workload/lifecycle"
+	"github.com/jay94ks/seafield/internal/deployment"
+	checker "github.com/jay94ks/seafield/internal/workload/lifecycle"
 )
 
 func TestAppSourceInputCarriesFactsBeyondMetadataFrameWithoutChangingDocument(t *testing.T) {

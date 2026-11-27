@@ -9,8 +9,8 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/network"
-	"github.com/jay94ks/mydcd/internal/workload"
+	"github.com/jay94ks/seafield/internal/network"
+	"github.com/jay94ks/seafield/internal/workload"
 )
 
 func logicalFixture(t *testing.T) (fixture, Quotas, TUNDefinition) {
@@ -31,8 +31,8 @@ func logicalFixture(t *testing.T) (fixture, Quotas, TUNDefinition) {
 		}
 	}
 	d := TUNDefinition{Tenant: "first", Name: "services", Members: []TUNNode{
-		{Node: "node-a", Owner: public(f.a), Pools: definition("first", "unused", "node-a", "10.71.1.0/24", f.a).Pools, Addresses: []netip.Prefix{netip.MustParsePrefix("10.72.0.1/32")}},
-		{Node: "node-b", Owner: public(f.b), Pools: definition("first", "unused", "node-b", "10.71.2.0/24", f.b).Pools, Addresses: []netip.Prefix{netip.MustParsePrefix("10.72.0.2/32")}},
+		{Node: "node-a", Owner: public(f.a), Pools: definition("first", "unused", "node-a", "10.71.1.0/24", f.a).Pools},
+		{Node: "node-b", Owner: public(f.b), Pools: definition("first", "unused", "node-b", "10.71.2.0/24", f.b).Pools},
 	}}
 	return f, q, d
 }
@@ -186,19 +186,18 @@ func TestP0LogicalNetworkRejectsCounterexamplesWithoutPartialReservation(t *test
 	f, q, d := logicalFixture(t)
 	before := snapshotBytes(t, f.n)
 	cases := map[string]func(*TUNDefinition){
-		"duplicate-node":          func(v *TUNDefinition) { v.Members[1].Node = "node-a" },
-		"duplicate-owner":         func(v *TUNDefinition) { v.Members[1].Owner = v.Members[0].Owner },
-		"unknown-node":            func(v *TUNDefinition) { v.Members[1].Node = "node-c" },
-		"missing-owner":           func(v *TUNDefinition) { v.Members[1].Owner = [32]byte{} },
-		"cross-node-cidr":         func(v *TUNDefinition) { v.Members[1].Pools = slices.Clone(v.Members[0].Pools) },
-		"duplicate-host":          func(v *TUNDefinition) { v.Members[1].Addresses = slices.Clone(v.Members[0].Addresses) },
-		"host-inside-local-pool":  func(v *TUNDefinition) { v.Members[0].Addresses[0] = netip.MustParsePrefix("10.71.1.9/32") },
-		"host-inside-remote-pool": func(v *TUNDefinition) { v.Members[0].Addresses[0] = netip.MustParsePrefix("10.71.2.9/32") },
-		"host-with-subnet-mask":   func(v *TUNDefinition) { v.Members[0].Addresses[0] = netip.MustParsePrefix("10.72.0.1/24") },
-		"missing-host-family":     func(v *TUNDefinition) { v.Members[0].Addresses[0] = netip.MustParsePrefix("fd01::1/128") },
-		"mtu-disagreement":        func(v *TUNDefinition) { v.Members[1].Pools[0].MTU = 1400 },
-		"empty-members":           func(v *TUNDefinition) { v.Members = nil },
-		"empty-pool":              func(v *TUNDefinition) { v.Members[1].Pools = nil },
+		"duplicate-node":  func(v *TUNDefinition) { v.Members[1].Node = "node-a" },
+		"duplicate-owner": func(v *TUNDefinition) { v.Members[1].Owner = v.Members[0].Owner },
+		"unknown-node":    func(v *TUNDefinition) { v.Members[1].Node = "node-c" },
+		"missing-owner":   func(v *TUNDefinition) { v.Members[1].Owner = [32]byte{} },
+		"cross-node-cidr": func(v *TUNDefinition) { v.Members[1].Pools = slices.Clone(v.Members[0].Pools) },
+		"named-tunnel":    func(v *TUNDefinition) { v.Members[0].Addresses = []netip.Prefix{netip.MustParsePrefix("10.72.0.1/32")} },
+		"other-server-tunnel": func(v *TUNDefinition) {
+			v.Members[0].Addresses = []netip.Prefix{netip.MustParsePrefix("10.254.0.2/32")}
+		},
+		"mtu-disagreement": func(v *TUNDefinition) { v.Members[1].Pools[0].MTU = 1400 },
+		"empty-members":    func(v *TUNDefinition) { v.Members = nil },
+		"empty-pool":       func(v *TUNDefinition) { v.Members[1].Pools = nil },
 	}
 	for name, mutate := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -241,7 +240,7 @@ func TestP0LogicalNetworkGlobalHostReservationAndLegacyBytes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, cidr := range []string{"10.72.0.0/24", "10.71.1.0/24"} {
+	for _, cidr := range []string{"10.254.240.0/24", "10.71.1.0/24"} {
 		if _, err := next.Create(f.c, "admin", next.Revision(), definition("third", "overlap", "node-a", cidr, f.a)); err == nil {
 			t.Fatal("later plain network reused a reserved host/pool", cidr)
 		}

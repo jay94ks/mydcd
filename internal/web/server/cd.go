@@ -10,15 +10,15 @@ import (
 	"net/http"
 	"slices"
 
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/schema"
-	"github.com/jay94ks/mydcd/internal/web/mydc"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/web/sfc"
 )
 
 // CD (UI-40..43 '자동 배포' tab): the apps row's CD view, the CD actions of
-// `mydc cd`, the policy and the field overrides of `mydc cd override`.
-// mydcd plans, fetches sources and judges permissions; the web only builds
+// `sfcli cd`, the policy and the field overrides of `sfcli cd override`.
+// sfcd plans, fetches sources and judges permissions; the web only builds
 // the same signed changes the CLI builds:
 //   - every action's Expected is the row's CD revision (cd.revision);
 //   - sync/recover/configure also carry the execution intent target the
@@ -30,23 +30,23 @@ import (
 //     app-cd-field and the override's own revision (0 for a new one).
 
 // cdRow is the app's CD view; 404 not-cd when the app is not a CD app.
-func cdRow(ctx context.Context, c mydc.Conn, tenant, app string) (mydc.AppView, *mydc.AppCD, error) {
+func cdRow(ctx context.Context, c sfc.Conn, tenant, app string) (sfc.AppView, *sfc.AppCD, error) {
 	apps, err := allApps(ctx, c, tenant)
 	if err != nil {
-		return mydc.AppView{}, nil, err
+		return sfc.AppView{}, nil, err
 	}
 	for _, a := range apps {
 		if a.App == app && a.CD != nil {
 			return a, a.CD, nil
 		}
 	}
-	return mydc.AppView{}, nil, &httpErr{http.StatusNotFound, "not-cd", "no such app with automatic deployment"}
+	return sfc.AppView{}, nil, &httpErr{http.StatusNotFound, "not-cd", "no such app with automatic deployment"}
 }
 
 // GET /t/{t}/apps/{app}/cd → {app, deployment, health, operation, cd}: the
 // row's CD view (the same object as apps[].cd).
 func (s *Server) handleCD(w http.ResponseWriter, r *http.Request, ws *webSession) {
-	read(s, w, r, ws, func(ctx context.Context, c mydc.Conn) (map[string]any, error) {
+	read(s, w, r, ws, func(ctx context.Context, c sfc.Conn) (map[string]any, error) {
 		a, cd, err := cdRow(ctx, c, r.PathValue("t"), r.PathValue("app"))
 		if err != nil {
 			return nil, err
@@ -73,8 +73,8 @@ func (s *Server) handleCD(w http.ResponseWriter, r *http.Request, ws *webSession
 }
 
 var cdActions = map[string]string{
-	"sync": mydc.ActionSyncApp, "recover": mydc.ActionRecoverApp, "replan": mydc.ActionReplanApp,
-	"pause": mydc.ActionPauseAppCD, "resume": mydc.ActionResumeAppCD, "abandon": mydc.ActionAbandonAppSync,
+	"sync": sfc.ActionSyncApp, "recover": sfc.ActionRecoverApp, "replan": sfc.ActionReplanApp,
+	"pause": sfc.ActionPauseAppCD, "resume": sfc.ActionResumeAppCD, "abandon": sfc.ActionAbandonAppSync,
 }
 
 // POST /t/{t}/apps/{app}/cd/{sync|recover|replan|pause|resume|abandon}
@@ -98,7 +98,7 @@ func (s *Server) cdAction(w http.ResponseWriter, r *http.Request, ws *webSession
 		return
 	}
 	tenant, app := r.PathValue("t"), r.PathValue("app")
-	choose := action == mydc.ActionSyncApp || action == mydc.ActionRecoverApp
+	choose := action == sfc.ActionSyncApp || action == sfc.ActionRecoverApp
 	if choose && req.Operation == "" {
 		req.Operation = "sync-" + req.OpID
 	}
@@ -106,7 +106,7 @@ func (s *Server) cdAction(w http.ResponseWriter, r *http.Request, ws *webSession
 		Action string
 		Req    any
 	}{action, req}
-	s.sharedCreate(w, r, ws, req.OpID, body, func(ctx context.Context, c mydc.Conn, _ mydc.Session) (string, any, uint64, string, error) {
+	s.sharedCreate(w, r, ws, req.OpID, body, func(ctx context.Context, c sfc.Conn, _ sfc.Session) (string, any, uint64, string, error) {
 		if choose && deployment.ResourceKey("task", "tenant", app, req.Operation) == "" {
 			return "", nil, 0, "", invalid("operation: lowercase letters, digits and -, starting with a letter, at most 63")
 		}
@@ -136,7 +136,7 @@ func (s *Server) cdAction(w http.ResponseWriter, r *http.Request, ws *webSession
 
 // cdTarget sets the execution intent target unless expected selects
 // strict revision CAS (as the CLI's freezeCDTarget).
-func cdTarget(q *control.AppCDChange, cd *mydc.AppCD, expected uint64) error {
+func cdTarget(q *control.AppCDChange, cd *sfc.AppCD, expected uint64) error {
 	if expected != 0 {
 		return nil
 	}
@@ -163,7 +163,7 @@ func (s *Server) handleCDPolicy(w http.ResponseWriter, r *http.Request, ws *webS
 		return
 	}
 	tenant, app := r.PathValue("t"), r.PathValue("app")
-	s.sharedCreate(w, r, ws, req.OpID, req, func(ctx context.Context, c mydc.Conn, _ mydc.Session) (string, any, uint64, string, error) {
+	s.sharedCreate(w, r, ws, req.OpID, req, func(ctx context.Context, c sfc.Conn, _ sfc.Session) (string, any, uint64, string, error) {
 		policy, err := cdPolicy(req.Policy)
 		if err != nil {
 			return "", nil, 0, "", invalid("policy: not a valid CD policy object (at most 32 KiB, known fields only)")
@@ -176,12 +176,12 @@ func (s *Server) handleCDPolicy(w http.ResponseWriter, r *http.Request, ws *webS
 		if err := cdTarget(&q, cd, req.Expected); err != nil {
 			return "", nil, 0, "", err
 		}
-		return mydc.ActionConfigureAppCD, q, expectedOr(req.Expected, cd.Revision), "app/" + app, nil
+		return sfc.ActionConfigureAppCD, q, expectedOr(req.Expected, cd.Revision), "app/" + app, nil
 	})
 }
 
 // cdPolicy reads the camelCase policy (field names match the Go names
-// case-insensitively), then checks its canonical form as mydc cd configure
+// case-insensitively), then checks its canonical form as sfcli cd configure
 // checks a policy file.
 func cdPolicy(raw json.RawMessage) (deployment.DeliveryDeclaration, error) {
 	var p deployment.DeliveryDeclaration
@@ -214,7 +214,7 @@ func (s *Server) handleCDField(w http.ResponseWriter, r *http.Request, ws *webSe
 		s.writeOpOutcome(w, ws, nil, 0, err)
 		return
 	}
-	read(s, w, r, ws, func(ctx context.Context, c mydc.Conn) (mydc.AppCDField, error) {
+	read(s, w, r, ws, func(ctx context.Context, c sfc.Conn) (sfc.AppCDField, error) {
 		return c.AppDeliveryField(ctx, r.PathValue("t"), control.AppCDFieldRequest{App: r.PathValue("app"), Path: path})
 	})
 }
@@ -235,16 +235,16 @@ func (s *Server) handleCDOverride(w http.ResponseWriter, r *http.Request, ws *we
 		return
 	}
 	release := r.Method == http.MethodDelete
-	action := mydc.ActionOverrideApp
+	action := sfc.ActionOverrideApp
 	if release {
-		action = mydc.ActionReleaseOverride
+		action = sfc.ActionReleaseOverride
 	}
 	tenant, app := r.PathValue("t"), r.PathValue("app")
 	body := struct {
 		Action string
 		Req    any
 	}{action, req}
-	s.sharedCreate(w, r, ws, req.OpID, body, func(ctx context.Context, c mydc.Conn, _ mydc.Session) (string, any, uint64, string, error) {
+	s.sharedCreate(w, r, ws, req.OpID, body, func(ctx context.Context, c sfc.Conn, _ sfc.Session) (string, any, uint64, string, error) {
 		if err := cdPath(req.Path); err != nil {
 			return "", nil, 0, "", err
 		}

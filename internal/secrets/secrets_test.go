@@ -7,10 +7,11 @@ import (
 	"crypto/ed25519"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/access"
+	"github.com/jay94ks/seafield/internal/access"
 )
 
 type fixture struct {
@@ -267,13 +268,33 @@ func TestSecretTreeMovesReorderCyclesAndPendingSnapshot(t *testing.T) {
 		t.Fatal("move ancestor path stale")
 	}
 	root, _ := f.t.Object("root")
-	reverse := append([]string(nil), root.Entries...)
-	for i, j := 0, len(reverse)-1; i < j; i, j = i+1, j-1 {
-		reverse[i], reverse[j] = reverse[j], reverse[i]
+	if len(root.Entries) < 2 {
+		t.Fatal("root needs two entries to reorder", root.Entries)
 	}
-	n, err = f.t.Reorder(f.c, "alice", "root", root.Revision, reverse)
+	last := root.Entries[len(root.Entries)-1]
+	want := append([]string{last}, root.Entries[:len(root.Entries)-1]...)
+	n, err = f.t.Reorder(f.c, "alice", "root", root.Revision, last, "")
 	f.t = mustTree(t, n, err)
 	root, _ = f.t.Object("root")
+	if !slices.Equal(root.Entries, want) {
+		t.Fatal("entry not moved to the front", root.Entries, want)
+	}
+	// The same move again, an unknown entry, or a stale revision is refused.
+	if _, err = f.t.Reorder(f.c, "alice", "root", root.Revision, last, ""); err != access.ErrConflict {
+		t.Fatal("no-op move accepted", err)
+	}
+	if _, err = f.t.Reorder(f.c, "alice", "root", root.Revision, "missing", ""); err != access.ErrConflict {
+		t.Fatal("unknown entry moved", err)
+	}
+	if _, err = f.t.Reorder(f.c, "alice", "root", root.Revision-1, want[1], ""); err != access.ErrConflict {
+		t.Fatal("stale reorder accepted", err)
+	}
+	n, err = f.t.Reorder(f.c, "alice", "root", root.Revision, last, want[len(want)-1])
+	f.t = mustTree(t, n, err)
+	root, _ = f.t.Object("root")
+	if root.Entries[len(root.Entries)-1] != last {
+		t.Fatal("entry not moved after the last", root.Entries)
+	}
 	n, err = f.t.BeginPasswordChange(f.c, "alice", "root", "root-change", root.Revision)
 	f.t = mustTree(t, n, err)
 	if _, err = DecodeTree(encodedTree(t, f.t)); err != nil {
@@ -328,7 +349,7 @@ func TestSecretApprovalPayloadBindingIssuerAndScope(t *testing.T) {
 	p := plan(t, f, web(f))
 	a := signed(f, p.Required[0])
 	var top map[string]json.RawMessage
-	if json.Unmarshal(ApprovalBytes(a)[len("mydc-secret-group-approval-1\x00"):], &top) != nil || len(top) != 3 || top["approved_at"] == nil || top["fact"] == nil || top["target"] == nil {
+	if json.Unmarshal(ApprovalBytes(a)[len("sfc-secret-group-approval-1\x00"):], &top) != nil || len(top) != 3 || top["approved_at"] == nil || top["fact"] == nil || top["target"] == nil {
 		t.Fatal("approval payload not exactly three fields")
 	}
 	for _, mutate := range []func(*Approval){func(a *Approval) { a.Payload.Fact = "other" }, func(a *Approval) { a.Payload.Target.Cluster = [32]byte{1} }, func(a *Approval) { a.Payload.Target.RequesterKey = [32]byte{} }, func(a *Approval) { a.Payload.Target.Path[0].PolicyRevision++ }, func(a *Approval) { a.Payload.Target.UserPolicy++ }, func(a *Approval) { a.Payload.Target.MembershipPolicy++ }, func(a *Approval) { a.Payload.Target.IssuerPolicy++ }, func(a *Approval) { a.Payload.ApprovedAt = 101 }} {
@@ -511,5 +532,40 @@ func TestSecretSnapshotsAndMergeRejectMalformedInputsWithoutValues(t *testing.T)
 				t.Fatal("private material diagnostic", output)
 			}
 		}
+	}
+}
+
+// ChangeACL sends only the change: a listed name cannot be added again, an
+// unlisted one cannot be removed, and an empty change is refused.
+func TestChangeACLAppliesOnlyTheDelta(t *testing.T) {
+	f := makeFixture(t)
+	o, _ := f.t.Object("defaults")
+	n, err := f.t.ChangeACL(f.c, "alice", o.ID, o.Revision, ACL{Users: []string{"bob", "alice"}, Services: []string{"web"}}, ACL{})
+	f.t = mustTree(t, n, err)
+	o, _ = f.t.Object("defaults")
+	if !slices.Equal(o.ACL.Users, []string{"alice", "bob"}) || !slices.Equal(o.ACL.Services, []string{"web"}) {
+		t.Fatal("added names", o.ACL)
+	}
+	for _, c := range []struct {
+		add, remove ACL
+		want        error
+	}{
+		{ACL{Users: []string{"bob"}}, ACL{}, access.ErrConflict},
+		{ACL{}, ACL{DenyUsers: []string{"bob"}}, access.ErrConflict},
+		{ACL{}, ACL{}, ErrPolicy},
+		{ACL{Services: []string{"api"}}, ACL{Services: []string{"api"}}, ErrPolicy},
+	} {
+		if _, err := f.t.ChangeACL(f.c, "alice", o.ID, o.Revision, c.add, c.remove); err != c.want {
+			t.Fatal("delta", c, err)
+		}
+	}
+	if _, err := f.t.ChangeACL(f.c, "alice", o.ID, o.Revision-1, ACL{DenyUsers: []string{"eve"}}, ACL{}); err != access.ErrConflict {
+		t.Fatal("stale revision", err)
+	}
+	n, err = f.t.ChangeACL(f.c, "alice", o.ID, o.Revision, ACL{DenyUsers: []string{"eve"}}, ACL{Users: []string{"bob"}})
+	f.t = mustTree(t, n, err)
+	o, _ = f.t.Object("defaults")
+	if !slices.Equal(o.ACL.Users, []string{"alice"}) || !slices.Equal(o.ACL.DenyUsers, []string{"eve"}) || !slices.Equal(o.ACL.Services, []string{"web"}) {
+		t.Fatal("other names changed", o.ACL)
 	}
 }

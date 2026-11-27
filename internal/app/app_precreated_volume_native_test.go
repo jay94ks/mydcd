@@ -10,11 +10,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/userauth"
-	"github.com/jay94ks/mydcd/internal/workload/volumes"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/userauth"
+	"github.com/jay94ks/seafield/internal/workload/volumes"
 	"github.com/moby/moby/client"
 )
 
@@ -22,7 +22,7 @@ func TestRealBoundaryManagedAppConsumesCLICreatedVolume(t *testing.T) {
 	runManagedAppOwner(t, true, true, true, true, managedAppPrecreatedVolume, true, true)
 }
 
-func prepareManagedPrecreatedVolume(t *testing.T, ctx context.Context, owner **Runtime, root string, user userauth.Client, peer mydcp.Peer, p control.Policy, read func() cluster.View, capacity ...uint64) func() {
+func prepareManagedPrecreatedVolume(t *testing.T, ctx context.Context, owner **Runtime, root string, user userauth.Client, peer sfcp.Peer, p control.Policy, read func() cluster.View, capacity ...uint64) func() {
 	t.Helper()
 	home, profile := filepath.Join(root, "precreate-home"), filepath.Join(root, "precreate.yaml")
 	if err := os.Mkdir(home, 0700); err != nil {
@@ -34,7 +34,7 @@ func prepareManagedPrecreatedVolume(t *testing.T, ctx context.Context, owner **R
 	}
 	cli := func(args ...string) {
 		t.Helper()
-		cmd := nativeCLICmd(ctx, os.Getenv("MYDC_TEST_CLI"), home, profile, args...)
+		cmd := nativeCLICmd(ctx, os.Getenv("SFC_TEST_CLI"), home, profile, args...)
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatal("precreate CLI", args, err, string(out))
 		}

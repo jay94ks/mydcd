@@ -8,9 +8,9 @@ import (
 	"encoding/json"
 	"math"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/imagecache"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/imagecache"
 )
 
 type ImageCacheReport struct {
@@ -25,7 +25,7 @@ type ImageCacheReport struct {
 func ImageCacheReportBytes(r ImageCacheReport) []byte {
 	r.Signature = nil
 	raw, _ := json.Marshal(r)
-	return append([]byte("mydc-image-cache-report-1\x00"), raw...)
+	return append([]byte("sfc-image-cache-report-1\x00"), raw...)
 }
 func (r ImageCacheReport) Command() (state.Command, error) {
 	raw, err := json.Marshal(r)

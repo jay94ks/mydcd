@@ -12,11 +12,11 @@ import (
 	"testing"
 
 	"github.com/hashicorp/raft"
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/mydcp"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/sfcp"
 )
 
 func TestDeliveryReadAuthorityFailureDoesNotDispatchPolicyCleanupForUncertainty(t *testing.T) {
@@ -28,7 +28,7 @@ func TestDeliveryReadAuthorityFailureDoesNotDispatchPolicyCleanupForUncertainty(
 		{raft.ErrNotLeader, true}, {raft.ErrLeadershipLost, true},
 		{raft.ErrRaftShutdown, true}, {raft.ErrEnqueueTimeout, true},
 		{cluster.ErrRecovering, true}, {errNoAppLeader, true},
-		{errAppLeaderPeerUnavailable, true}, {mydcp.ErrAdmission, false},
+		{errAppLeaderPeerUnavailable, true}, {sfcp.ErrAdmission, false},
 		{&cluster.ManagementError{Code: "not-leader"}, true},
 		{&cluster.ManagementError{Code: "unavailable"}, true},
 		{&cluster.ManagementError{Code: "unknown"}, true},
@@ -46,12 +46,12 @@ func TestDeliveryReadAuthorityFailureDoesNotDispatchPolicyCleanupForUncertainty(
 			t.Fatal("read uncertainty became cleanup or definitive rejection lost", tc.err, calls, err)
 		}
 	}
-	if !errors.Is(errAppLeaderPeerUnavailable, mydcp.ErrAdmission) {
+	if !errors.Is(errAppLeaderPeerUnavailable, sfcp.ErrAdmission) {
 		t.Fatal("qualified transport failure lost admission compatibility")
 	}
 }
 
-// Actual N1/MYDCP/Raft/bbolt metadata, using the existing fixture. The source
+// Actual N1/SFCP/Raft/bbolt metadata, using the existing fixture. The source
 // bytes and authority errors are injected; no Git/Docker readiness is claimed.
 func verifyRealDeliveryAuthorityUncertainty(t *testing.T, ctx context.Context, r *Runtime, pause func(uint64)) {
 	t.Helper()

@@ -11,11 +11,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/web/mydc"
-	"github.com/jay94ks/mydcd/internal/web/seal"
+	"github.com/jay94ks/seafield/internal/web/seal"
+	"github.com/jay94ks/seafield/internal/web/sfc"
 )
 
-func incidentFixture(t *testing.T) (*fixture, *mydc.Fake, *atomic.Int64) {
+func incidentFixture(t *testing.T) (*fixture, *sfc.Fake, *atomic.Int64) {
 	t.Helper()
 	f, fake := newFakeFixture(t)
 	var clock atomic.Int64
@@ -71,7 +71,7 @@ func TestIncidentPolicy(t *testing.T) {
 	if code, out := f.do("PUT", "/api/v1/incidents/policy", put); code != 422 || errCode(out) != "automation-missing" {
 		t.Fatalf("without automation: %d %v", code, out)
 	}
-	makeAutomation(t, f, "mydc-autofix", "a1b2c3d4-0000-4000-8000-0000000000c1", true, true)
+	makeAutomation(t, f, "sfc-autofix", "a1b2c3d4-0000-4000-8000-0000000000c1", true, true)
 	put["actions"] = map[string]any{"prune-images": "allow"}
 	if code, out := f.do("PUT", "/api/v1/incidents/policy", put); code != 422 || errCode(out) != "floor" {
 		t.Fatalf("medium action allowed: %d %v", code, out)
@@ -147,7 +147,7 @@ func TestIncidentWatcherRules(t *testing.T) {
 	f, fake, clock := incidentFixture(t)
 	ctx := context.Background()
 	fakeLogin(t, f, "admin")
-	makeAutomation(t, f, "mydc-autofix", "a1b2c3d4-0000-4000-8000-0000000000c1", true, true)
+	makeAutomation(t, f, "sfc-autofix", "a1b2c3d4-0000-4000-8000-0000000000c1", true, true)
 
 	// Off: nothing is read.
 	f.srv.watchOnce(ctx)
@@ -163,12 +163,12 @@ func TestIncidentWatcherRules(t *testing.T) {
 	// php-shop's web task restarts three times in ten minutes.
 	now := clock.Load()
 	for i := int64(3); i > 0; i-- {
-		fake.AddEvent(mydc.FixtureEvent{Time: now - i*60, Scope: "app", Tenant: "shop", App: "php-shop", Node: "node-a", Kind: "task-restarted", Target: "shop/php-shop/web/1", Detail: "exit 1"})
+		fake.AddEvent(sfc.FixtureEvent{Time: now - i*60, Scope: "app", Tenant: "shop", App: "php-shop", Node: "node-a", Kind: "task-restarted", Target: "shop/php-shop/web/1", Detail: "exit 1"})
 	}
 	// node-c drops; a tunnel goes down; node-b's disk fills.
-	fake.AddEvent(mydc.FixtureEvent{Time: now - 30, Scope: "cluster", Node: "node-c", Kind: "node-unreachable", Target: "node-c"})
-	fake.AddEvent(mydc.FixtureEvent{Time: now - 20, Scope: "cluster", Node: "node-c", Kind: "tunnel-down", Target: "node-a/node-c"})
-	fake.AddEvent(mydc.FixtureEvent{Time: now - 10, Scope: "node", Node: "node-b", Kind: "node-resource-low", Target: "node-b:/srv/mydc-ssd", Detail: "disk 93%"})
+	fake.AddEvent(sfc.FixtureEvent{Time: now - 30, Scope: "cluster", Node: "node-c", Kind: "node-unreachable", Target: "node-c"})
+	fake.AddEvent(sfc.FixtureEvent{Time: now - 20, Scope: "cluster", Node: "node-c", Kind: "tunnel-down", Target: "node-a/node-c"})
+	fake.AddEvent(sfc.FixtureEvent{Time: now - 10, Scope: "node", Node: "node-b", Kind: "node-resource-low", Target: "node-b:/srv/sfc-ssd", Detail: "disk 93%"})
 	f.srv.watchOnce(ctx)
 	_, out := f.do("GET", "/api/v1/incidents", nil)
 	if out["watcher"].(map[string]any)["state"] != "running" {
@@ -180,13 +180,13 @@ func TestIncidentWatcherRules(t *testing.T) {
 	if node == nil || decisionOf(node) != "auto" || node["state"] != "mitigating" || node["impact"] != "low" {
 		t.Fatalf("node incident: %v", out)
 	}
-	var cordon *mydc.JournalEntry
+	var cordon *sfc.JournalEntry
 	for _, e := range fake.Journal() {
-		if e.Action == mydc.ActionCordonNode {
+		if e.Action == sfc.ActionCordonNode {
 			cordon = &e
 		}
 	}
-	if cordon == nil || cordon.User != "u-mydc-autofix" || cordon.Reason == nil || cordon.Reason.Incident != node["id"] {
+	if cordon == nil || cordon.User != "u-sfc-autofix" || cordon.Reason == nil || cordon.Reason.Incident != node["id"] {
 		t.Fatalf("cordon op: %+v", cordon)
 	}
 	// The tunnel: no action can be built → handed to people.
@@ -199,7 +199,7 @@ func TestIncidentWatcherRules(t *testing.T) {
 	f.srv.watchOnce(ctx)
 	reconnects := 0
 	for _, e := range fake.Journal() {
-		if e.Action == mydc.ActionReconnectTunnel && e.User == "u-mydc-autofix" {
+		if e.Action == sfc.ActionReconnectTunnel && e.User == "u-sfc-autofix" {
 			reconnects++
 		}
 	}
@@ -240,7 +240,7 @@ func TestIncidentWatcherRules(t *testing.T) {
 		t.Fatalf("stale basis: %d %v", code, out)
 	}
 	// A new signal on the same app joins the open incident.
-	fake.AddEvent(mydc.FixtureEvent{Time: now, Scope: "app", Tenant: "shop", App: "php-shop", Node: "node-a", Kind: "task-restarted", Target: "shop/php-shop/web/1"})
+	fake.AddEvent(sfc.FixtureEvent{Time: now, Scope: "app", Tenant: "shop", App: "php-shop", Node: "node-a", Kind: "task-restarted", Target: "shop/php-shop/web/1"})
 	f.srv.watchOnce(ctx)
 	if _, out := f.do("GET", "/api/v1/incidents?scope=app", nil); out["total"] != float64(1) {
 		t.Fatalf("second signal opened another incident: %v", out)
@@ -259,7 +259,7 @@ func TestIncidentWatcherRules(t *testing.T) {
 	}
 	restarts := 0
 	for _, e := range fake.Journal() {
-		if e.Action == mydc.ActionRestartTask && e.User == "u-alice" && e.Reason != nil && e.Reason.Incident == id {
+		if e.Action == sfc.ActionRestartTask && e.User == "u-alice" && e.Reason != nil && e.Reason.Incident == id {
 			restarts++
 		}
 	}
@@ -295,7 +295,7 @@ func TestIncidentWatcherRules(t *testing.T) {
 	}
 	now = clock.Load()
 	for i := int64(3); i > 0; i-- {
-		fake.AddEvent(mydc.FixtureEvent{Time: now - i*10, Scope: "app", Tenant: "shop", App: "php-shop", Node: "node-a", Kind: "task-restarted", Target: "shop/php-shop/web/1"})
+		fake.AddEvent(sfc.FixtureEvent{Time: now - i*10, Scope: "app", Tenant: "shop", App: "php-shop", Node: "node-a", Kind: "task-restarted", Target: "shop/php-shop/web/1"})
 	}
 	f.srv.watchOnce(ctx)
 	_, out = f.do("GET", "/api/v1/incidents?decision=auto", nil)
@@ -305,7 +305,7 @@ func TestIncidentWatcherRules(t *testing.T) {
 	auto := out["items"].([]any)[0].(map[string]any)
 	n := 0
 	for _, e := range fake.Journal() {
-		if e.Action == mydc.ActionRestartTask && e.User == "u-mydc-autofix" && e.Reason != nil && e.Reason.Reason == "autofix" {
+		if e.Action == sfc.ActionRestartTask && e.User == "u-sfc-autofix" && e.Reason != nil && e.Reason.Reason == "autofix" {
 			n++
 		}
 	}
@@ -313,7 +313,7 @@ func TestIncidentWatcherRules(t *testing.T) {
 		t.Fatalf("auto restart: %d %v", n, auto)
 	}
 	// Signals go on after the action: handed to people, not repeated.
-	fake.AddEvent(mydc.FixtureEvent{Time: now + 60, Scope: "app", Tenant: "shop", App: "php-shop", Node: "node-a", Kind: "task-restarted", Target: "shop/php-shop/web/1"})
+	fake.AddEvent(sfc.FixtureEvent{Time: now + 60, Scope: "app", Tenant: "shop", App: "php-shop", Node: "node-a", Kind: "task-restarted", Target: "shop/php-shop/web/1"})
 	clock.Add(11 * 60)
 	f.srv.watchOnce(ctx)
 	if _, det := f.do("GET", "/api/v1/incidents/"+auto["id"].(string), nil); det["state"] != "open" {
@@ -339,12 +339,12 @@ func TestIncidentWatcherRules(t *testing.T) {
 // watchFirst, the watcher has been reading for 31 minutes before the CD
 // deploy (with preDeploy app signals in between); the clock is then 2
 // minutes after the deploy.
-func cdRollbackSetup(t *testing.T, f *fixture, fake *mydc.Fake, clock *atomic.Int64, watchFirst bool, preDeploy int) {
+func cdRollbackSetup(t *testing.T, f *fixture, fake *sfc.Fake, clock *atomic.Int64, watchFirst bool, preDeploy int) {
 	t.Helper()
 	ctx := context.Background()
 	fake.SetClock(f.srv.now)
 	fakeLogin(t, f, "admin")
-	makeAutomation(t, f, "mydc-autofix", "a1b2c3d4-0000-4000-8000-0000000000e1", true, true)
+	makeAutomation(t, f, "sfc-autofix", "a1b2c3d4-0000-4000-8000-0000000000e1", true, true)
 	if code, out := f.do("PUT", "/api/v1/incidents/policy", map[string]any{"revision": 0, "level": "auto-low", "ratePerHour": 5,
 		"approvers": map[string]any{"label": "관리자", "deadlineMinutes": 30}, "quiet": []string{}, "newAppDefault": "suggest"}); code != 200 {
 		t.Fatalf("policy: %d %v", code, out)
@@ -353,7 +353,7 @@ func cdRollbackSetup(t *testing.T, f *fixture, fake *mydc.Fake, clock *atomic.In
 		f.srv.watchOnce(ctx)
 		clock.Add(11 * 60)
 		for i := 0; i < preDeploy; i++ {
-			fake.AddEvent(mydc.FixtureEvent{Time: clock.Load() - 5, Scope: "app", Tenant: "shop", App: "php-shop", Node: "node-a", Kind: "task-restarted", Target: "shop/php-shop/web/1"})
+			fake.AddEvent(sfc.FixtureEvent{Time: clock.Load() - 5, Scope: "app", Tenant: "shop", App: "php-shop", Node: "node-a", Kind: "task-restarted", Target: "shop/php-shop/web/1"})
 		}
 		f.srv.watchOnce(ctx)
 		clock.Add(20 * 60)
@@ -383,7 +383,7 @@ func cdRollbackSetup(t *testing.T, f *fixture, fake *mydc.Fake, clock *atomic.In
 	// The crash loop starts after the deploy.
 	now := clock.Add(120)
 	for i := int64(3); i > 0; i-- {
-		fake.AddEvent(mydc.FixtureEvent{Time: now - i*10, Scope: "app", Tenant: "shop", App: "php-shop", Node: "node-a", Kind: "task-restarted", Target: "shop/php-shop/web/1"})
+		fake.AddEvent(sfc.FixtureEvent{Time: now - i*10, Scope: "app", Tenant: "shop", App: "php-shop", Node: "node-a", Kind: "task-restarted", Target: "shop/php-shop/web/1"})
 	}
 	f.srv.watchOnce(ctx)
 	fakeLogin(t, f, "alice")
@@ -399,7 +399,7 @@ func TestIncidentCDRollback(t *testing.T) {
 	}
 	pauses := 0
 	for _, e := range fake.Journal() {
-		if e.User == "u-mydc-autofix" && e.Action == mydc.ActionPauseAppCD {
+		if e.User == "u-sfc-autofix" && e.Action == sfc.ActionPauseAppCD {
 			pauses++
 		}
 	}

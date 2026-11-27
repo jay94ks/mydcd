@@ -3,11 +3,11 @@
 전역 옵션은 명령 앞에 둔다. `--peer ID`는 지정 peer, 생략하면 설정 첫 peer 하나를 사용한다. 실패 시 다음 peer로 자동 재전송하지 않는다. 조회는 기본 최신/과반수 barrier이며 `--local`은 해당 노드의 로컬 committed view다. 출력은 JSON이며 바이너리 Value는 base64다.
 
 ```sh
-build/mydc --config CLIENT.yaml status
-build/mydc --config CLIENT.yaml --local get network/example
-build/mydc --config CLIENT.yaml command --request request-1 --epoch 1 --expected 0 set network/example spec.json > request.bin
-build/mydc --config CLIENT.yaml submit request.bin
-build/mydc --config CLIENT.yaml result request.bin
+build/sfc --config CLIENT.yaml status
+build/sfc --config CLIENT.yaml --local get network/example
+build/sfc --config CLIENT.yaml command --request request-1 --epoch 1 --expected 0 set network/example spec.json > request.bin
+build/sfc --config CLIENT.yaml submit request.bin
+build/sfc --config CLIENT.yaml result request.bin
 ```
 
 `command`는 설정의 신원으로 정규 명령 파일만 생성하며 전송하지 않는다. action은 `set KEY VALUEFILE`, `delete KEY`, `grant PUBLIC_KEY`, `rotate PUBLIC_KEY`다. grant는 `--rights`의 network=1/workload=2/ingress=4/admin=8 비트, expected는 객체/정책 CAS revision이다. 요청 ID는 명시하며 actor당 ledger가 차면 관리자가 epoch을 전환한다. 모듈 spec의 문법/의미는 각 모듈 계약을 따른다.

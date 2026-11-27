@@ -8,10 +8,10 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/imagebuild"
-	"github.com/jay94ks/mydcd/internal/secrets"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/imagebuild"
+	"github.com/jay94ks/seafield/internal/secrets"
 )
 
 func buildSecretFixture(t *testing.T) (*nodeStorageFixture, ImageBuildJobPlan) {
@@ -140,7 +140,7 @@ func TestBuildSecretReservationProviderPermitAndClosureAreOneOriginalLifetime(t 
 	u.Enabled = false
 	revision := u.Revision
 	u.Revision = 0
-	c, err = c.PutUser("admin", revision, u)
+	c, err = c.PutUser("admin", revision, accountFields(u))
 	if err != nil {
 		t.Fatal(err)
 	}

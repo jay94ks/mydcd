@@ -59,7 +59,7 @@ func tmpfsProbe() bool {
 }
 
 func volumePaths() []string {
-	if os.Getenv("MYDC_VOLUME_SECOND_FIXTURE") == "1" {
+	if os.Getenv("SFC_VOLUME_SECOND_FIXTURE") == "1" {
 		return []string{"/data", "/logs"}
 	}
 	return []string{"/data"}
@@ -84,9 +84,9 @@ func main() {
 	if execFixture(os.Args) {
 		return
 	}
-	if os.Getenv("MYDC_OBSERVATION_FIXTURE") == "1" {
-		fmt.Fprintln(os.Stdout, "mydc-observation-stdout")
-		fmt.Fprintln(os.Stderr, "mydc-observation-stderr")
+	if os.Getenv("SFC_OBSERVATION_FIXTURE") == "1" {
+		fmt.Fprintln(os.Stdout, "sfc-observation-stdout")
+		fmt.Fprintln(os.Stderr, "sfc-observation-stderr")
 		http.HandleFunc("/logburst", func(w http.ResponseWriter, r *http.Request) {
 			marker := r.URL.Query().Get("marker")
 			if r.Method != http.MethodPost || len(marker) < 1 || len(marker) > 64 || strings.ContainsAny(marker, "\x00\r\n ") {
@@ -129,7 +129,7 @@ func main() {
 			os.Exit(0)
 		}()
 	}
-	if os.Getenv("MYDC_DNS_FIXTURE") == "1" {
+	if os.Getenv("SFC_DNS_FIXTURE") == "1" {
 		http.HandleFunc("/dns-query", dnsQuery)
 		http.HandleFunc("/identity", func(w http.ResponseWriter, r *http.Request) {
 			hostname, err := os.Hostname()
@@ -217,13 +217,13 @@ func main() {
 		return
 	}
 	if len(os.Args) == 2 && os.Args[1] == "--projection-probe" {
-		path := os.Getenv("MYDC_PROJECTION_FILE")
+		path := os.Getenv("SFC_PROJECTION_FILE")
 		data, err := os.ReadFile(path)
 		if err != nil || !bytes.Equal(data, []byte("private-db-value")) {
 			os.Exit(1)
 		}
 		clear(data)
-		if os.Getenv("MYDC_SECRET_LOG_FIXTURE") == "1" && os.Getenv("MYDC_SECRET_ENV_VALUE") != "private-db-value" {
+		if os.Getenv("SFC_SECRET_LOG_FIXTURE") == "1" && os.Getenv("SFC_SECRET_ENV_VALUE") != "private-db-value" {
 			os.Exit(1)
 		}
 		// The owner could chmod a writable bind. A read-only mount must reject
@@ -248,10 +248,10 @@ func main() {
 	}
 	if len(os.Args) == 2 && os.Args[1] == "--volume-readonly-probe" {
 		for _, dir := range volumePaths() {
-			file, err := os.OpenFile(filepath.Join(dir, ".mydc-readonly-probe"), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+			file, err := os.OpenFile(filepath.Join(dir, ".sfc-readonly-probe"), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
 			if err == nil {
 				_ = file.Close()
-				_ = os.Remove(filepath.Join(dir, ".mydc-readonly-probe"))
+				_ = os.Remove(filepath.Join(dir, ".sfc-readonly-probe"))
 				os.Exit(1)
 			}
 			if !errors.Is(err, syscall.EROFS) {
@@ -260,7 +260,7 @@ func main() {
 		}
 		return
 	}
-	if os.Getenv("MYDC_PUBLISHED_PORTS_FIXTURE") == "1" {
+	if os.Getenv("SFC_PUBLISHED_PORTS_FIXTURE") == "1" {
 		closeListeners, err := startRouteEchoListeners()
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
@@ -268,7 +268,7 @@ func main() {
 		}
 		defer closeListeners()
 	}
-	if os.Getenv("MYDC_VOLUME_FIXTURE") == "1" {
+	if os.Getenv("SFC_VOLUME_FIXTURE") == "1" {
 		for _, dir := range volumePaths() {
 			data, err := os.ReadFile(filepath.Join(dir, "marker"))
 			if os.IsNotExist(err) {
@@ -284,13 +284,13 @@ func main() {
 
 	}
 	registerMoveFixture()
-	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, "mydc-boundary "+r.URL.RequestURI()) })
+	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, "sfc-boundary "+r.URL.RequestURI()) })
 	http.HandleFunc("/slow", func(w http.ResponseWriter, r *http.Request) { <-r.Context().Done() })
-	http.HandleFunc("/ping", func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, "mydc-boundary "+r.URL.RequestURI()) })
-	if tenant := os.Getenv("MYDC_TENANT_FIXTURE"); tenant != "" {
+	http.HandleFunc("/ping", func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, "sfc-boundary "+r.URL.RequestURI()) })
+	if tenant := os.Getenv("SFC_TENANT_FIXTURE"); tenant != "" {
 		http.HandleFunc("/tenant", func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, tenant) })
 	}
-	if os.Getenv("MYDC_READINESS_FIXTURE") == "1" {
+	if os.Getenv("SFC_READINESS_FIXTURE") == "1" {
 		var ready atomic.Bool
 		ready.Store(true)
 		http.HandleFunc("/readiness-state", func(w http.ResponseWriter, r *http.Request) {
@@ -305,7 +305,7 @@ func main() {
 			w.WriteHeader(http.StatusOK)
 		})
 	}
-	if os.Getenv("MYDC_TMPFS_FIXTURE") == "1" {
+	if os.Getenv("SFC_TMPFS_FIXTURE") == "1" {
 		http.HandleFunc("/tmpfs-state", func(w http.ResponseWriter, r *http.Request) {
 			const marker = "/scratch/original-marker"
 			if r.URL.Query().Get("write") == "1" {
@@ -332,7 +332,7 @@ func main() {
 		<-r.Context().Done()
 	})
 	http.HandleFunc("/upgrade", func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Upgrade") != "mydc-echo" {
+		if r.Header.Get("Upgrade") != "sfc-echo" {
 			http.Error(w, "upgrade required", 426)
 			return
 		}
@@ -341,11 +341,11 @@ func main() {
 			return
 		}
 		defer c.Close()
-		fmt.Fprint(rw, "HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: mydc-echo\r\n\r\n")
+		fmt.Fprint(rw, "HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: sfc-echo\r\n\r\n")
 		rw.Flush()
 		io.Copy(c, rw)
 	})
-	if os.Getenv("MYDC_SERVICE_CALL_FIXTURE") == "1" {
+	if os.Getenv("SFC_SERVICE_CALL_FIXTURE") == "1" {
 		closeFixture, err := startServiceCallFixture()
 		if err != nil {
 			panic(err)
@@ -353,7 +353,7 @@ func main() {
 		defer closeFixture()
 	}
 	s := http.Server{Addr: ":8080", ReadHeaderTimeout: 5 * time.Second, MaxHeaderBytes: 16 << 10}
-	if os.Getenv("MYDC_GRACEFUL_FIXTURE") == "1" {
+	if os.Getenv("SFC_GRACEFUL_FIXTURE") == "1" {
 		ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 		defer stop()
 		done := make(chan error, 1)

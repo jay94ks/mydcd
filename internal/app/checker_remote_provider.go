@@ -10,15 +10,15 @@ import (
 	"errors"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/schema"
-	"github.com/jay94ks/mydcd/internal/storage"
-	"github.com/jay94ks/mydcd/internal/workload"
-	checker "github.com/jay94ks/mydcd/internal/workload/lifecycle"
-	contract "github.com/jay94ks/mydcd/lifecycle/v1"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/storage"
+	"github.com/jay94ks/seafield/internal/workload"
+	checker "github.com/jay94ks/seafield/internal/workload/lifecycle"
+	contract "github.com/jay94ks/seafield/lifecycle/v1"
 )
 
 const checkerRemotePrefix = "checker/remote/"
@@ -215,7 +215,7 @@ func (r *Runtime) checkerRemotePermit(ctx context.Context, q control.CheckerProb
 	}
 	permit, err := schema.Decode[control.CheckerProbePermit](data)
 	if err != nil || permit.Schema != 1 || permit.Index == 0 {
-		return empty, program, policy, mydcp.ErrAdmission
+		return empty, program, policy, sfcp.ErrAdmission
 	}
 	if !leader {
 		v, err = r.Engine().ReadAtLeast(ctx, permit.Index)
@@ -231,7 +231,7 @@ func (r *Runtime) checkerRemotePermit(ctx context.Context, q control.CheckerProb
 		a, b := permit, local
 		a.Index, b.Index = 0, 0
 		if err != nil || a != b {
-			return empty, program, policy, mydcp.ErrAdmission
+			return empty, program, policy, sfcp.ErrAdmission
 		}
 	}
 	goal, err := schema.Decode[deployment.GoalCommand]([]byte(v.State.Object(q.Task.Key).Value))
@@ -240,7 +240,7 @@ func (r *Runtime) checkerRemotePermit(ctx context.Context, q control.CheckerProb
 	}
 	service, err := schema.Decode[deployment.ComposeService](goal.Config)
 	if err != nil || service.LifecycleProgram == nil || service.LifecycleProgram.Program != permit.Program {
-		return empty, program, policy, mydcp.ErrAdmission
+		return empty, program, policy, sfcp.ErrAdmission
 	}
 	book, err := r.controlPolicy.Lifecycles(v.State)
 	if err != nil {
@@ -248,32 +248,32 @@ func (r *Runtime) checkerRemotePermit(ctx context.Context, q control.CheckerProb
 	}
 	policy, ok := book.Policy(q.Run.Request.Tenant, 0)
 	if !ok || policy.Revision != permit.PolicyRevision {
-		return empty, program, policy, mydcp.ErrAdmission
+		return empty, program, policy, sfcp.ErrAdmission
 	}
 	return permit, service.LifecycleProgram.Clone(), policy, nil
 }
 
 func (r *Runtime) serveCheckerProbes() error {
-	return r.Mesh.OnCheckerProbe(func(ctx context.Context, s *mydcp.Session, wire mydcp.CheckerProbeRequest) (mydcp.CheckerProbeHandler, error) {
+	return r.Mesh.OnCheckerProbe(func(ctx context.Context, s *sfcp.Session, wire sfcp.CheckerProbeRequest) (sfcp.CheckerProbeHandler, error) {
 		q, err := schema.Decode[control.CheckerProbeRequest](wire.Metadata)
 		if err != nil || wire.Digest != q.Payload {
-			return mydcp.CheckerProbeHandler{}, mydcp.ErrAdmission
+			return sfcp.CheckerProbeHandler{}, sfcp.ErrAdmission
 		}
 		q.At = 0
 		owner, p, err := r.checkerRemoteOriginal(q)
 		if err != nil || !r.resourceCaller(ctx, [32]byte(s.Peer().Key), p.Consumer) || !r.acceptsResourceKey(ctx, p.Provider) {
-			return mydcp.CheckerProbeHandler{}, mydcp.ErrAdmission
+			return sfcp.CheckerProbeHandler{}, sfcp.ErrAdmission
 		}
 		if wire.Action == "run" {
 			if wire.ExpiresAt != q.DeadlineUnixMilli {
-				return mydcp.CheckerProbeHandler{}, mydcp.ErrAdmission
+				return sfcp.CheckerProbeHandler{}, sfcp.ErrAdmission
 			}
 			permit, _, _, err := owner.checkerRemotePermit(ctx, q)
 			if err != nil || permit.Consumer != p.Consumer || permit.Provider != p.Provider {
-				return mydcp.CheckerProbeHandler{}, mydcp.ErrAdmission
+				return sfcp.CheckerProbeHandler{}, sfcp.ErrAdmission
 			}
 		}
-		return mydcp.CheckerProbeHandler{Lifetime: owner.ctx, Execute: func(ctx context.Context, body []byte) (mydcp.CheckerProbeResult, error) {
+		return sfcp.CheckerProbeHandler{Lifetime: owner.ctx, Execute: func(ctx context.Context, body []byte) (sfcp.CheckerProbeResult, error) {
 			return owner.executeCheckerRemote(ctx, p, wire.Action, body)
 		}}, nil
 	})
@@ -281,91 +281,91 @@ func (r *Runtime) serveCheckerProbes() error {
 
 // The provider serializes only native calls, independently of its own source
 // checker flow. Two nodes inspecting each other never hold checkerRunMu here.
-func (r *Runtime) executeCheckerRemote(ctx context.Context, original checkerRemoteCall, action string, body []byte) (mydcp.CheckerProbeResult, error) {
+func (r *Runtime) executeCheckerRemote(ctx context.Context, original checkerRemoteCall, action string, body []byte) (sfcp.CheckerProbeResult, error) {
 	if ctx == nil || r.Identity == nil || original.validate(r.controlPolicy.Cluster, r.Identity.Public) != nil {
-		return mydcp.CheckerProbeResult{}, checker.ErrContract
+		return sfcp.CheckerProbeResult{}, checker.ErrContract
 	}
 	if !r.life.TryRLock() {
-		return mydcp.CheckerProbeResult{}, checker.ErrPending
+		return sfcp.CheckerProbeResult{}, checker.ErrPending
 	}
 	defer r.life.RUnlock()
 	if r.closed || r.ctx.Err() != nil || r.workload == nil {
-		return mydcp.CheckerProbeResult{}, checker.ErrPending
+		return sfcp.CheckerProbeResult{}, checker.ErrPending
 	}
 	r.checkerRemoteMu.Lock()
 	defer r.checkerRemoteMu.Unlock()
 	if err := ctx.Err(); err != nil {
-		return mydcp.CheckerProbeResult{}, err
+		return sfcp.CheckerProbeResult{}, err
 	}
 	if err := r.checkerRemoteIndex(); err != nil {
-		return mydcp.CheckerProbeResult{}, err
+		return sfcp.CheckerProbeResult{}, err
 	}
 	raw, err := r.reports.GetBounded(original.key(), checkerRemoteRowBytes)
 	if err == nil {
 		p, err := schema.Decode[checkerRemoteCall](raw)
 		if err != nil || p.validate(r.controlPolicy.Cluster, r.Identity.Public) != nil || p.Header != original.Header || p.Consumer != original.Consumer {
-			return mydcp.CheckerProbeResult{}, checker.ErrContract
+			return sfcp.CheckerProbeResult{}, checker.ErrContract
 		}
 		// Even a duplicate run request can ONLY observe its original call.
 		return r.recoverCheckerRemote(ctx, &p)
 	}
 	if !errors.Is(err, storage.ErrMissing) {
-		return mydcp.CheckerProbeResult{}, err
+		return sfcp.CheckerProbeResult{}, err
 	}
 	if _, known := r.checkerRemoteSizes[original.key()]; known {
-		return mydcp.CheckerProbeResult{}, checker.ErrContract
+		return sfcp.CheckerProbeResult{}, checker.ErrContract
 	}
 	if action == "recover" {
 		// A positive no-effect tombstone wins the race against a delayed run.
 		// Missing alone never becomes closure while that run could still arrive.
 		original.Phase = "closed"
 		if err = r.saveCheckerRemote(original); err != nil {
-			return mydcp.CheckerProbeResult{}, err
+			return sfcp.CheckerProbeResult{}, err
 		}
-		return mydcp.CheckerProbeResult{Closed: true}, nil
+		return sfcp.CheckerProbeResult{Closed: true}, nil
 	}
 	if action != "run" {
-		return mydcp.CheckerProbeResult{}, mydcp.ErrAdmission
+		return sfcp.CheckerProbeResult{}, sfcp.ErrAdmission
 	}
 	if sha256.Sum256(body) != original.Query.Payload {
-		return mydcp.CheckerProbeResult{}, mydcp.ErrAdmission
+		return sfcp.CheckerProbeResult{}, sfcp.ErrAdmission
 	}
 	call, err := schema.Decode[checker.ProbeCall](body)
 	if err != nil {
-		return mydcp.CheckerProbeResult{}, err
+		return sfcp.CheckerProbeResult{}, err
 	}
 	permit, program, policy, err := r.checkerRemotePermit(ctx, original.Query)
 	if err != nil || permit.Consumer != original.Consumer || permit.Provider != original.Provider || !permit.Matches(original.Query, call) || len(r.Identity.Certificate.Certificate) == 0 {
-		return mydcp.CheckerProbeResult{}, mydcp.ErrAdmission
+		return sfcp.CheckerProbeResult{}, sfcp.ErrAdmission
 	}
 	boot := sha256.Sum256(r.Identity.Certificate.Certificate[0])
 	if permit.Target.OwnerBoot != hex.EncodeToString(boot[:]) {
-		return mydcp.CheckerProbeResult{}, mydcp.ErrAdmission
+		return sfcp.CheckerProbeResult{}, sfcp.ErrAdmission
 	}
 	normal, err := program.ValidateAppProbeCall(original.Query.Run, original.Query.Stop, policy, call)
 	if err != nil {
-		return mydcp.CheckerProbeResult{}, err
+		return sfcp.CheckerProbeResult{}, err
 	}
 	if err = r.saveCheckerRemote(original); err != nil {
-		return mydcp.CheckerProbeResult{}, err
+		return sfcp.CheckerProbeResult{}, err
 	}
 	original.Phase = "dispatched"
 	if err = r.saveCheckerRemote(original); err != nil {
-		return mydcp.CheckerProbeResult{}, err
+		return sfcp.CheckerProbeResult{}, err
 	}
 	authorize := func(ctx context.Context) error {
 		latest, _, _, err := r.checkerRemotePermit(ctx, original.Query)
 		before, after := permit, latest
 		before.Index, after.Index = 0, 0
 		if err != nil || before != after || !latest.Matches(original.Query, call) {
-			return mydcp.ErrAdmission
+			return sfcp.ErrAdmission
 		}
 		return nil
 	}
 	lease, effectErr := r.workload.BorrowReadProbe(ctx, permit.Target.TaskKey, permit.Target.Generation, permit.Target.Revision, permit.Target.NativeID, original.Query.Run.Request.RunID, original.Call)
 	reply := checker.ProbeReply{Schema: 1, Binding: call.Binding, Sequence: call.Sequence, Kind: call.Kind, Failed: true}
 	if effectErr == nil && lease.Target.Status.StartedAt != permit.Target.StartedAt {
-		effectErr = mydcp.ErrAdmission
+		effectErr = sfcp.ErrAdmission
 	}
 	if effectErr == nil {
 		probe := checkerRemoteLease{manager: r.workload, request: original.Query.Run.Request, lease: lease, authorize: authorize, save: func(next workload.ProbeExecReceipt) error { return r.saveCheckerRemoteExec(&original, next) }}
@@ -375,50 +375,50 @@ func (r *Runtime) executeCheckerRemote(ctx context.Context, original checkerRemo
 	// exact I/O pin may now be returned, even if native exec is still unknown.
 	cleanup := r.workload.ReturnReadCall(context.Background(), original.Query.Run.Request, original.Query.Service, original.Call)
 	if cleanup != nil {
-		return mydcp.CheckerProbeResult{}, cleanup
+		return sfcp.CheckerProbeResult{}, cleanup
 	}
 	if !r.checkerRemoteReady {
-		return mydcp.CheckerProbeResult{}, checker.ErrPending
+		return sfcp.CheckerProbeResult{}, checker.ErrPending
 	}
 	if original.Execution != nil && !original.Execution.Terminal() {
-		return mydcp.CheckerProbeResult{Closed: false}, nil
+		return sfcp.CheckerProbeResult{Closed: false}, nil
 	}
 	if effectErr != nil {
 		reply = checker.ProbeReply{Schema: 1, Binding: call.Binding, Sequence: call.Sequence, Kind: call.Kind, Failed: true}
 	}
 	original.Phase = "closed"
 	if err = r.saveCheckerRemote(original); err != nil {
-		return mydcp.CheckerProbeResult{}, err
+		return sfcp.CheckerProbeResult{}, err
 	}
 	if err = authorize(ctx); err != nil {
-		return mydcp.CheckerProbeResult{Closed: true}, nil
+		return sfcp.CheckerProbeResult{Closed: true}, nil
 	}
 	data, err := json.Marshal(reply)
-	return mydcp.CheckerProbeResult{Closed: true, Data: data}, err
+	return sfcp.CheckerProbeResult{Closed: true, Data: data}, err
 }
 
-func (r *Runtime) recoverCheckerRemote(ctx context.Context, p *checkerRemoteCall) (mydcp.CheckerProbeResult, error) {
+func (r *Runtime) recoverCheckerRemote(ctx context.Context, p *checkerRemoteCall) (sfcp.CheckerProbeResult, error) {
 	if p.Phase == "closed" {
-		return mydcp.CheckerProbeResult{Closed: true}, nil
+		return sfcp.CheckerProbeResult{Closed: true}, nil
 	}
 	if err := r.workload.ReturnReadCall(ctx, p.Query.Run.Request, p.Query.Service, p.Call); err != nil {
-		return mydcp.CheckerProbeResult{}, err
+		return sfcp.CheckerProbeResult{}, err
 	}
 	if p.Execution != nil && !p.Execution.Terminal() {
 		err := r.workload.RecoverProbeExec(ctx, p.Query.Run.Request, *p.Execution, func(next workload.ProbeExecReceipt) error { return r.saveCheckerRemoteExec(p, next) })
 		if errors.Is(err, workload.ErrProbeExecPending) {
-			return mydcp.CheckerProbeResult{Closed: false}, nil
+			return sfcp.CheckerProbeResult{Closed: false}, nil
 		}
 		if err != nil {
-			return mydcp.CheckerProbeResult{}, err
+			return sfcp.CheckerProbeResult{}, err
 		}
 	}
 	p.Phase = "closed"
 	if err := r.saveCheckerRemote(*p); err != nil {
-		return mydcp.CheckerProbeResult{}, err
+		return sfcp.CheckerProbeResult{}, err
 	}
 	// Recovery proves closure only, never resurrects discarded private output.
-	return mydcp.CheckerProbeResult{Closed: true}, nil
+	return sfcp.CheckerProbeResult{Closed: true}, nil
 }
 
 // Thin binding to the SAME native SDK adapters used by local ServiceProbe;

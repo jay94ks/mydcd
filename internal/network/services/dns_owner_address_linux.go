@@ -7,7 +7,7 @@ import (
 	"crypto/ed25519"
 	"errors"
 
-	"github.com/jay94ks/mydcd/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/reconcile"
 )
 
 // collectRetiredDNS requires effects and mu. Query handlers retain the SAME

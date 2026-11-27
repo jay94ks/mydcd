@@ -9,8 +9,8 @@ import (
 	"os"
 	"syscall"
 
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/reconcile"
 )
 
 func restoreArtifactConsumer(b control.VolumeRestoreBinding) string {

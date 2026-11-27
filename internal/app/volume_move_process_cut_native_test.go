@@ -16,13 +16,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/config"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/reconcile"
-	"github.com/jay94ks/mydcd/internal/schema"
-	"github.com/jay94ks/mydcd/internal/workload/volumes"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/workload/volumes"
 	"github.com/moby/moby/client"
 	"gopkg.in/yaml.v3"
 )
@@ -40,7 +39,7 @@ type moveProcessCutEvidence struct {
 }
 
 func moveProcessCutData() []byte {
-	data := make([]byte, 2*mydcp.VolumeChunkSize+4096)
+	data := make([]byte, 2*sfcp.VolumeChunkSize+4096)
 	for i := range data {
 		data[i] = byte(i % 251)
 	}
@@ -106,14 +105,14 @@ func writeMoveCrashJSON(file string, value any) error {
 }
 
 func TestManagedVolumeMoveProcessCutWorker(t *testing.T) {
-	file, directory := os.Getenv("MYDC_MOVE_CRASH_CONFIG"), os.Getenv("MYDC_MOVE_CRASH_DIRECTORY")
+	file, directory := os.Getenv("SFC_MOVE_CRASH_CONFIG"), os.Getenv("SFC_MOVE_CRASH_DIRECTORY")
 	if file == "" && directory == "" {
 		t.Skip("owned receive process-cut parent required")
 	}
 	if !filepath.IsAbs(file) || !filepath.IsAbs(directory) {
 		t.Fatal("absolute original worker inputs required")
 	}
-	cfg, err := config.LoadNode(file)
+	cfg, err := loadTestNode(file)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -183,7 +182,7 @@ func TestManagedVolumeMoveProcessCutWorker(t *testing.T) {
 			return fail(err)
 		}
 		intent, err := schema.Decode[moveReceiveIntent](raw)
-		if err != nil || intent.Job.Digest() != job.Digest() || progress.Binding != intent.digest() || progress.Offset != mydcp.VolumeChunkSize || progress.Offset >= intent.Manifest.Bytes {
+		if err != nil || intent.Job.Digest() != job.Digest() || progress.Binding != intent.digest() || progress.Offset != sfcp.VolumeChunkSize || progress.Offset >= intent.Manifest.Bytes {
 			return fail(errors.New("first durable non-final original chunk required"))
 		}
 		paused = true
@@ -270,7 +269,7 @@ func runMoveReceiverProcessCut(t *testing.T, ctx context.Context, target *Runtim
 	if err = os.WriteFile(configFile, raw, 0600); err != nil {
 		t.Fatal(err)
 	}
-	loaded, err := config.LoadNode(configFile)
+	loaded, err := loadTestNode(configFile)
 	if err != nil || loaded.Node != originalConfig.Node {
 		t.Fatal("child must use original validated node configuration", err)
 	}
@@ -290,7 +289,7 @@ func runMoveReceiverProcessCut(t *testing.T, ctx context.Context, target *Runtim
 		}
 		defer log.Close()
 		child := exec.CommandContext(ctx, self, "-test.run=^TestManagedVolumeMoveProcessCutWorker$", "-test.v", "-test.timeout=160s")
-		child.Env = append(os.Environ(), "MYDC_MOVE_CRASH_CONFIG="+configFile, "MYDC_MOVE_CRASH_DIRECTORY="+directory)
+		child.Env = append(os.Environ(), "SFC_MOVE_CRASH_CONFIG="+configFile, "SFC_MOVE_CRASH_DIRECTORY="+directory)
 		child.Stdout, child.Stderr = log, log
 		if err = child.Start(); err != nil {
 			t.Fatal(err)
@@ -358,7 +357,7 @@ func runMoveReceiverProcessCut(t *testing.T, ctx context.Context, target *Runtim
 		})
 		// Actual authenticated management remains available beside the paused
 		// file worker; it is not a local replica or replacement control path.
-		out, diagnostic, err := runManagedCLICommand(ctx, os.Getenv("MYDC_TEST_CLI"), filepath.Join(root, "cli-home"), filepath.Join(root, "cli.yaml"), []string{"--tenant", job.Binding.Scope.Tenant, "volume", "show", job.Binding.Scope.App + "/" + job.Binding.Scope.ID}, nil)
+		out, diagnostic, err := runManagedCLICommand(ctx, os.Getenv("SFC_TEST_CLI"), filepath.Join(root, "cli-home"), filepath.Join(root, "cli.yaml"), []string{"--tenant", job.Binding.Scope.Tenant, "volume", "show", job.Binding.Scope.App + "/" + job.Binding.Scope.ID}, nil)
 		if err != nil {
 			t.Fatal("management during paused actual transfer", err, string(diagnostic), string(out))
 		}
@@ -387,7 +386,7 @@ func runMoveReceiverProcessCut(t *testing.T, ctx context.Context, target *Runtim
 		}
 		inspectMoveProcessCutRecord(t, artifactPath, evidence, false)
 	})
-	t.Log("actual original target Runtime child -> current Group approval/normal MYDCP receive -> durable non-final offset before ACK/management still available -> explicit SIGKILL and Wait -> actual original DB/Apply/checkpoint/inode/prefix -> same DB/key normal Runtime resume")
+	t.Log("actual original target Runtime child -> current Group approval/normal SFCP receive -> durable non-final offset before ACK/management still available -> explicit SIGKILL and Wait -> actual original DB/Apply/checkpoint/inode/prefix -> same DB/key normal Runtime resume")
 	return target, evidence
 }
 
@@ -419,7 +418,7 @@ func inspectMoveProcessCutRecord(t *testing.T, path string, evidence *moveProces
 	}
 	raw, err := backupRead(directory, "progress.json", 4096)
 	progress, decodeErr := schema.Decode[moveReceiveProgress](raw)
-	if err != nil || decodeErr != nil || progress != checkpoint.Progress || progress.Offset == 0 || progress.Offset%mydcp.VolumeChunkSize != 0 || !allowTail && progress.Offset != mydcp.VolumeChunkSize || progress.Offset >= checkpoint.Intent.Manifest.Bytes {
+	if err != nil || decodeErr != nil || progress != checkpoint.Progress || progress.Offset == 0 || progress.Offset%sfcp.VolumeChunkSize != 0 || !allowTail && progress.Offset != sfcp.VolumeChunkSize || progress.Offset >= checkpoint.Intent.Manifest.Bytes {
 		t.Fatal("SIGKILL lost original durable non-final offset/prefix", err, decodeErr)
 	}
 	file, err := directory.Open("archive.tar")
@@ -432,7 +431,7 @@ func inspectMoveProcessCutRecord(t *testing.T, path string, evidence *moveProces
 		t.Fatal(err)
 	}
 	stat, ok := info.Sys().(*syscall.Stat_t)
-	if !ok || uint64(stat.Dev) != progress.Device || stat.Ino != progress.Inode || info.Size() < int64(progress.Offset) || info.Size() > int64(min(checkpoint.Intent.Manifest.Bytes, progress.Offset+mydcp.VolumeChunkSize)) || !allowTail && info.Size() != int64(progress.Offset) {
+	if !ok || uint64(stat.Dev) != progress.Device || stat.Ino != progress.Inode || info.Size() < int64(progress.Offset) || info.Size() > int64(min(checkpoint.Intent.Manifest.Bytes, progress.Offset+sfcp.VolumeChunkSize)) || !allowTail && info.Size() != int64(progress.Offset) {
 		t.Fatal("SIGKILL replaced original receive file/inode/size")
 	}
 	hash := sha256.New()

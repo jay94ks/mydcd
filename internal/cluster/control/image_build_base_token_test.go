@@ -5,8 +5,8 @@ package control
 import (
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/registryclient"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/registryclient"
 )
 
 func TestBuildTokenRequiresSignedBeginReservationAndCurrentOriginalScope(t *testing.T) {

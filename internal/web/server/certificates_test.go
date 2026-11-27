@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/web/mydc"
+	"github.com/jay94ks/seafield/internal/web/sfc"
 )
 
 func certRow(t *testing.T, items []any, name, state string) map[string]any {
@@ -97,12 +97,12 @@ func TestCertificates(t *testing.T) {
 
 	// check and put
 	now := time.Now()
-	chain, key, err := mydc.NewTestCertificate([]string{"files.shop.example.com"}, now.Add(-time.Hour), now.Add(90*24*time.Hour))
+	chain, key, err := sfc.NewTestCertificate([]string{"files.shop.example.com"}, now.Add(-time.Hour), now.Add(90*24*time.Hour))
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, otherKey, _ := mydc.NewTestCertificate([]string{"x.example.com"}, now.Add(-time.Hour), now.Add(time.Hour))
-	oldChain, oldKey, _ := mydc.NewTestCertificate([]string{"old.example.com"}, now.Add(-48*time.Hour), now.Add(-time.Hour))
+	_, otherKey, _ := sfc.NewTestCertificate([]string{"x.example.com"}, now.Add(-time.Hour), now.Add(time.Hour))
+	oldChain, oldKey, _ := sfc.NewTestCertificate([]string{"old.example.com"}, now.Add(-48*time.Hour), now.Add(-time.Hour))
 	code, out = f.do("POST", "/api/v1/certificates/check", map[string]any{"chain": string(chain)})
 	if code != 200 || out["names"].([]any)[0] != "files.shop.example.com" || len(out["links"].([]any)) != 1 || out["invalid"] != nil {
 		t.Fatalf("check: %d %v", code, out)

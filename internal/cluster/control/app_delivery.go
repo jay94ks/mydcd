@@ -10,9 +10,9 @@ import (
 	"math"
 	"slices"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/deployment"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/deployment"
 )
 
 // AppDeliveryInput is a read-only source transfer held by one registered fetch
@@ -42,7 +42,7 @@ type AppDeliveryProgress struct {
 func AppDeliveryProgressBytes(r AppDeliveryProgress) []byte {
 	r.Signature = nil
 	b, _ := json.Marshal(r)
-	return append([]byte("mydc-app-delivery-progress-1\x00"), b...)
+	return append([]byte("sfc-app-delivery-progress-1\x00"), b...)
 }
 func (r AppDeliveryProgress) Command() (state.Command, error) {
 	target := ""
@@ -468,7 +468,7 @@ func appDeliverySourceTarget(a Apps, entry appEntry) [32]byte {
 		}
 	}
 	raw, _ := json.Marshal(target)
-	return sha256.Sum256(append([]byte("mydc-app-delivery-source-target-1\x00"), raw...))
+	return sha256.Sum256(append([]byte("sfc-app-delivery-source-target-1\x00"), raw...))
 }
 
 func (a Apps) Delivery(tenant, app string) (deployment.Delivery, bool) {

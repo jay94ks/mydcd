@@ -20,23 +20,22 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/config"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/engine"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/network"
-	"github.com/jay94ks/mydcd/internal/reconcile"
-	"github.com/jay94ks/mydcd/internal/secrets"
-	"github.com/jay94ks/mydcd/internal/userauth"
-	"github.com/jay94ks/mydcd/internal/workload"
-	checker "github.com/jay94ks/mydcd/internal/workload/lifecycle"
-	"github.com/jay94ks/mydcd/tests/gitfixture"
-	"github.com/jay94ks/mydcd/tests/registryfixture"
-	"github.com/jay94ks/mydcd/tests/vaultfixture"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/engine"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/network"
+	"github.com/jay94ks/seafield/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/secrets"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/userauth"
+	"github.com/jay94ks/seafield/internal/workload"
+	checker "github.com/jay94ks/seafield/internal/workload/lifecycle"
+	"github.com/jay94ks/seafield/tests/gitfixture"
+	"github.com/jay94ks/seafield/tests/registryfixture"
+	"github.com/jay94ks/seafield/tests/vaultfixture"
 	"github.com/moby/moby/client"
 	"github.com/quic-go/quic-go/http3"
 	"golang.org/x/net/http2"
@@ -46,7 +45,7 @@ import (
 // This scenario supplies real application inputs, never fake native readiness
 // or a second orchestrator. Every effect is submitted through the prebuilt CLI
 // and performed by the same product Runtime/daemon and their private Engines.
-func testManagedTwoNodeSQL(t *testing.T, ctx context.Context, a *Runtime, root, products string, configs, sockets [2]string, manifest string, user userauth.Client, source mydcp.Peer, session access.Session, read func() cluster.View, change func(string, string, uint64, any), wait func(string, func() bool), stopB, startB func(), cutB func(func()), vault *vaultfixture.Vault, gitSource *gitfixture.Fixture, withRestore, withDNS, dnsOnly bool, moveSQL ...bool) {
+func testManagedTwoNodeSQL(t *testing.T, ctx context.Context, a *Runtime, root, products string, configs, sockets [2]string, manifest string, user userauth.Client, source sfcp.Peer, session access.Session, read func() cluster.View, change func(string, string, uint64, any), wait func(string, func() bool), stopB, startB func(), cutB func(func()), vault *vaultfixture.Vault, gitSource *gitfixture.Fixture, withRestore, withDNS, dnsOnly bool, moveSQL ...bool) {
 	t.Helper()
 	phaseStarted := time.Now()
 	phase := func(label string) {
@@ -59,7 +58,7 @@ func testManagedTwoNodeSQL(t *testing.T, ctx context.Context, a *Runtime, root, 
 	if vault == nil {
 		t.Fatal("explicit real protected provider required")
 	}
-	registry := registryfixture.OpenCached(t, "192.0.2.1:0", os.Getenv("MYDC_SQL_IMAGE_CACHE"))
+	registry := registryfixture.OpenCached(t, "192.0.2.1:0", os.Getenv("SFC_SQL_IMAGE_CACHE"))
 	phase("cached Registry inputs verified")
 	policy := a.controlPolicy
 	catalog, err := policy.Catalog(read().State)
@@ -67,11 +66,11 @@ func testManagedTwoNodeSQL(t *testing.T, ctx context.Context, a *Runtime, root, 
 		t.Fatal(err)
 	}
 	tenant, _ := catalog.Tenant("tenant")
-	change("sql-image-trust", "set-trust", tenant.Revision, control.TrustAssignment{Tenant: "tenant", Rules: append(tenant.ImageSources, access.TrustRule{Registry: registry.Registry, Repository: "php"}, access.TrustRule{Registry: registry.Registry, Repository: "mysql"})})
+	change("sql-image-trust", "set-trust", tenant.Revision, control.TrustChange{Tenant: "tenant", Add: []access.TrustRule{access.TrustRule{Registry: registry.Registry, Repository: "php"}, access.TrustRule{Registry: registry.Registry, Repository: "mysql"}}})
 	public := sqlPublicFixture{Images: registry.Configs}
 	var docker [2]*engine.Client
 	for n := range configs {
-		cfg, err := config.LoadNode(configs[n])
+		cfg, err := loadTestNode(configs[n])
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -99,7 +98,7 @@ func testManagedTwoNodeSQL(t *testing.T, ctx context.Context, a *Runtime, root, 
 		t.Fatal(err)
 	}
 	clear(remoteIdentity.Private)
-	remote := mydcp.Peer{ID: "node-b", Endpoint: "192.0.2.2:44101", Policy: mydcp.Policy{Key: mydcp.Identity(remoteIdentity.Public), Member: true, Read: true, Respond: true}}
+	remote := sfcp.Peer{ID: "node-b", Endpoint: "192.0.2.2:44101", Policy: sfcp.Policy{Key: sfcp.Identity(remoteIdentity.Public), Member: true, Read: true, Respond: true}}
 	observeB := func(key string) (ModuleObservation, error) {
 		reply, e := cluster.CallManagement(ctx, a.Mesh, a.Identity, user.Cluster, remote, cluster.ManagementRequest{Method: "observe", Key: key, Latest: false})
 		var v ModuleObservation
@@ -132,7 +131,7 @@ func testManagedTwoNodeSQL(t *testing.T, ctx context.Context, a *Runtime, root, 
 	phase("protected SQL input ready")
 
 	document := fmt.Sprintf(`name: app
-x-mydc:
+x-sfc:
  ingress:
   node: node-b
   host: app.test
@@ -156,7 +155,7 @@ services:
   healthcheck: {test: [CMD, /usr/bin/php8.3, -n, -d, extension=pdo, -d, extension=mysqlnd, -d, extension=pdo_mysql, /app/web.php], interval: 1s, timeout: 3s, retries: 3}
   depends_on: {db: {condition: service_healthy}}
   networks: {app: {ipv4_address: 198.19.80.2}}
-  x-mydc: {node: node-a, secrets_from: [group/common], ready: {http: /readyz, port: 8080}}
+  x-sfc: {node: node-a, secrets_from: [group/common], ready: {http: /readyz, port: 8080}}
  db:
   image: %s
   user: '10001:10001'
@@ -169,13 +168,13 @@ services:
    - {source: password, target: /run/secrets/db-password, uid: '10001', gid: '10001', mode: '0400'}
    - {source: root-password, target: /run/secrets/db-root-password, uid: '10001', gid: '10001', mode: '0400'}
   volumes: [data:/var/lib/mysql]
-  tmpfs: ['/tmp:size=16m,mode=1777', '/run/mydc:size=4m,uid=10001,gid=10001,mode=0700']
-  healthcheck: {test: [CMD, /mydc-mysql, --health], interval: 1s, timeout: 3s, retries: 30, start_period: 30s}
+  tmpfs: ['/tmp:size=16m,mode=1777', '/run/sfc:size=4m,uid=10001,gid=10001,mode=0700']
+  healthcheck: {test: [CMD, /sfc-mysql, --health], interval: 1s, timeout: 3s, retries: 30, start_period: 30s}
   networks: {app: {ipv4_address: 198.19.80.18}}
-  x-mydc: {node: node-b, secrets_from: [group/common, group/db-admin]}
+  x-sfc: {node: node-b, secrets_from: [group/common, group/db-admin]}
 networks:
  app:
-  x-mydc:
+  x-sfc:
    mtu: 1280
    pools:
     node-a: {cidr: 198.19.80.0/28, gateway: 198.19.80.1}
@@ -183,26 +182,26 @@ networks:
    tunnel_addresses: {node-a: 198.19.81.1/32, node-b: 198.19.81.2/32}
 volumes:
  data:
-  x-mydc: {node: node-b, uid: 10001, gid: 10001, mode: '0750'}
+  x-sfc: {node: node-b, uid: 10001, gid: 10001, mode: '0750'}
 secrets:
  password:
-  x-mydc: {key: DB_PASSWORD}
+  x-sfc: {key: DB_PASSWORD}
  root-password:
-  x-mydc: {key: MYSQL_ROOT_PASSWORD}
+  x-sfc: {key: MYSQL_ROOT_PASSWORD}
 `, registry.References["php"], registry.References["mysql"])
 	if withDNS {
-		document = strings.Replace(document, "DB_HOST: '198.19.80.18'", "DB_HOST: 'db', MYDC_DNS_TIMING: '1'", 1)
+		document = strings.Replace(document, "DB_HOST: '198.19.80.18'", "DB_HOST: 'db', SFC_DNS_TIMING: '1'", 1)
 		document = strings.Replace(document, "ready: {http: /readyz, port: 8080}", "ready: {http: /readyz, port: 8080, timeout: 3s}", 1)
 		// Three PHP HTTP workers (A/AAAA), exec health, and the original wire
 		// observer can exceed four in-flight queries. This is an explicit
 		// normal-input budget; owner enforcement and low-limit tests stay intact.
-		document = strings.Replace(document, "   mtu: 1280", "   mtu: 1280\n   dns: {enabled: true, zone: app.mydc.test, ttl_seconds: 1, negative_ttl_seconds: 1, transports: [udp, tcp], limits: {cache_entries: 4, queries_inflight: 16, tcp_connections: 2, request_timeout_ms: 1500}}", 1)
+		document = strings.Replace(document, "   mtu: 1280", "   mtu: 1280\n   dns: {enabled: true, zone: app.sfc.test, ttl_seconds: 1, negative_ttl_seconds: 1, transports: [udp, tcp], limits: {cache_entries: 4, queries_inflight: 16, tcp_connections: 2, request_timeout_ms: 1500}}", 1)
 	}
 	if dnsOnly {
-		document = strings.Replace(document, "environment: {DB_HOST: 'db', MYDC_DNS_TIMING: '1'}", "environment: {DB_HOST: 'db', MYDC_DNS_TIMING: '1', MYDC_DNS_FIXTURE: '1', MYDC_DNS_EXPECTED: '198.19.80.18'}", 1)
+		document = strings.Replace(document, "environment: {DB_HOST: 'db', SFC_DNS_TIMING: '1'}", "environment: {DB_HOST: 'db', SFC_DNS_TIMING: '1', SFC_DNS_FIXTURE: '1', SFC_DNS_EXPECTED: '198.19.80.18'}", 1)
 		document = strings.Replace(document, "  depends_on: {db: {condition: service_healthy}}\n", "", 1)
-		document = strings.Replace(document, "  image: "+registry.References["mysql"], "  image: "+registry.References["php"]+"\n  environment: {DB_HOST: 'web', MYDC_DNS_FIXTURE: '1', MYDC_DNS_EXPECTED: '198.19.80.2'}", 1)
-		document = strings.Replace(document, "{test: [CMD, /mydc-mysql, --health], interval: 1s, timeout: 3s, retries: 30, start_period: 30s}", "{test: [CMD, /usr/bin/php8.3, -n, /app/web.php], interval: 1s, timeout: 3s, retries: 3}", 1)
+		document = strings.Replace(document, "  image: "+registry.References["mysql"], "  image: "+registry.References["php"]+"\n  environment: {DB_HOST: 'web', SFC_DNS_FIXTURE: '1', SFC_DNS_EXPECTED: '198.19.80.2'}", 1)
+		document = strings.Replace(document, "{test: [CMD, /sfc-mysql, --health], interval: 1s, timeout: 3s, retries: 30, start_period: 30s}", "{test: [CMD, /usr/bin/php8.3, -n, /app/web.php], interval: 1s, timeout: 3s, retries: 3}", 1)
 	}
 	if withDNS && !dnsOnly {
 		document = strings.Replace(document, "environment: {DB_HOST: 'db',", "environment: {PHP_CLI_SERVER_WORKERS: '2', DB_HOST: 'db',", 1)
@@ -215,7 +214,7 @@ secrets:
 		change("sql-lifecycle-policy", "set-lifecycle-policy", 0, checker.TenantPolicy{
 			Tenant: "tenant", Enabled: true,
 			Execution: checker.ExecutionPolicy{MaxConcurrent: 1, TimeoutMS: 5000, NanoCPU: 100000000, MemoryBytes: 32 << 20, MaxPIDs: 16, OutputBytes: 4096, ProbeBytes: 4096, Capabilities: []string{"dependency"}},
-			Resolver:  checker.ResolverPolicy{AllowPackages: []string{"context", "github.com/jay94ks/mydcd/lifecycle/v1"}, SourceCacheBytes: 1 << 20},
+			Resolver:  checker.ResolverPolicy{AllowPackages: []string{"context", "github.com/jay94ks/seafield/lifecycle/v1"}, SourceCacheBytes: 1 << 20},
 		})
 		app, err := deployment.ParseApp(input)
 		if err != nil {
@@ -223,10 +222,10 @@ secrets:
 		}
 		cd := nativeGitPolicy(gitSource.Repository())
 		cd.Sync.Mode = "automatic"
-		app.MyDC.Delivery = &cd
+		app.Sfc.Delivery = &cd
 		db := app.Services["db"]
 		retries := uint32(1)
-		db.MyDC.Lifecycle = &deployment.ServiceLifecycle{Checks: []deployment.LifecycleCheck{{
+		db.Sfc.Lifecycle = &deployment.ServiceLifecycle{Checks: []deployment.LifecycleCheck{{
 			ID: "sql-running", Phase: "liveness", Interval: "1s", Timeout: "3s", Retries: &retries,
 			LifecycleTemplate: deployment.LifecycleTemplate{Builtin: "docker_health"},
 			Actions:           &checker.ActionPolicy{OnDead: checker.StartContainer},
@@ -236,7 +235,7 @@ secrets:
 		if web.Environment == nil {
 			web.Environment = map[string]string{}
 		}
-		web.Environment["MYDC_CD_REVISION"] = "1"
+		web.Environment["SFC_CD_REVISION"] = "1"
 		app.Services["web"] = web
 		input, err = yaml.Marshal(app)
 		if err != nil {
@@ -262,7 +261,7 @@ secrets:
 	}
 	cli := func(fds []*os.File, args ...string) []byte {
 		t.Helper()
-		out, diagnostic, err := runManagedCLICommand(ctx, filepath.Join(products, "mydc"), home, profile, args, fds)
+		out, diagnostic, err := runManagedCLICommand(ctx, filepath.Join(products, "sfc"), home, profile, args, fds)
 		if err != nil {
 			t.Fatal("prebuilt SQL CLI", args, err, string(diagnostic), string(out))
 		}
@@ -365,7 +364,7 @@ secrets:
 		stop()
 		for n, c := range docker {
 			logs, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-			rows, err := c.API.ContainerList(logs, client.ContainerListOptions{All: true, Filters: client.Filters{}.Add("label", "org.mydc.owner="+c.Owner)})
+			rows, err := c.API.ContainerList(logs, client.ContainerListOptions{All: true, Filters: client.Filters{}.Add("label", "org.sfc.owner="+c.Owner)})
 			if err == nil {
 				for _, row := range rows.Items {
 					r, e := c.API.ContainerLogs(logs, row.ID, client.ContainerLogsOptions{ShowStdout: true, ShowStderr: true, Tail: "80"})
@@ -404,7 +403,7 @@ secrets:
 				}
 			}
 			for n, c := range docker {
-				rows, e := c.API.ContainerList(ctx, client.ContainerListOptions{All: true, Filters: client.Filters{}.Add("label", "org.mydc.owner="+c.Owner)})
+				rows, e := c.API.ContainerList(ctx, client.ContainerListOptions{All: true, Filters: client.Filters{}.Add("label", "org.sfc.owner="+c.Owner)})
 				if e != nil {
 					t.Fatal("owned Engine readiness read", n, e)
 				}
@@ -528,7 +527,7 @@ secrets:
 		for _, route := range routes {
 			if route.Dst == "default" || route.Dst == "0.0.0.0/0" {
 				// Managed nat-unprotected bridges use Docker's original local
-				// gateway. MyDC overlay routes still never grant a default.
+				// gateway. Seafield Cluster overlay routes still never grant a default.
 				defaults++
 				if !managed || defaults != 1 || route.Gateway != gateway || route.Dev != device {
 					t.Fatal("Task default differs from original Docker bridge", n, route)
@@ -682,10 +681,10 @@ secrets:
 		rejectSQLMoveOverlappingCIDR(t, ctx, a, user, source, session, docker[1], read)
 		stageMove := func(id, plan string) {
 			t.Helper()
-			out, diagnostic, err := runManagedCLICommand(ctx, filepath.Join(products, "mydc"), home, profile, []string{"--tenant", "tenant", "volume", "move", "--plan", plan}, nil)
+			out, diagnostic, err := runManagedCLICommand(ctx, filepath.Join(products, "sfc"), home, profile, []string{"--tenant", "tenant", "volume", "move", "--plan", plan}, nil)
 			exit, exited := err.(*exec.ExitError)
 			// The move is accepted, then stops for the Group passwords; the
-			// saved operation continues it with 'mydc op resume ID'.
+			// saved operation continues it with 'sfcli op resume ID'.
 			if !exited || exit.ExitCode() != 2 || !bytes.Contains(diagnostic, []byte("approval needed")) || !bytes.Contains(diagnostic, []byte("op resume "+id)) {
 				t.Fatal("original move must be accepted and await explicit Group input before native faults", err, string(diagnostic), string(out))
 			}
@@ -767,7 +766,7 @@ secrets:
 			t.Fatal(err)
 		}
 		web := app.Services["web"]
-		web.Environment["MYDC_CD_REVISION"] = "2"
+		web.Environment["SFC_CD_REVISION"] = "2"
 		app.Services["web"] = web
 		next, err := yaml.Marshal(app)
 		if err != nil {
@@ -1011,11 +1010,11 @@ secrets:
 	if err != nil {
 		t.Fatal(err)
 	}
-	if b, e := os.ReadFile(filepath.Join(got.Volume.Mountpoint, ".mydc-app-initialized")); !dnsOnly && (e != nil || string(b) != "1\n") {
+	if b, e := os.ReadFile(filepath.Join(got.Volume.Mountpoint, ".sfc-app-initialized")); !dnsOnly && (e != nil || string(b) != "1\n") {
 		t.Fatal("retained real SQL datadir", e)
 	}
 	for _, c := range docker {
-		rows, e := c.API.ContainerList(ctx, client.ContainerListOptions{All: true, Filters: client.Filters{}.Add("label", "org.mydc.owner="+c.Owner)})
+		rows, e := c.API.ContainerList(ctx, client.ContainerListOptions{All: true, Filters: client.Filters{}.Add("label", "org.sfc.owner="+c.Owner)})
 		if e != nil || len(rows.Items) != 0 {
 			t.Fatal("original owned SQL Task not removed", e)
 		}
@@ -1026,7 +1025,7 @@ secrets:
 	t.Log("same original remote DB/container ID/TUN pin restart preserved SQL rows; CLI down closed original Ingress/Task/input and returned app network borrows/Bindings while keeping management sources; explicit DNS disable settled its own instances before separate fixture cleanup; retained datadir awaits explicit fixture deletion")
 }
 
-func prepareSQLSecrets(t *testing.T, ctx context.Context, provider *Runtime, user userauth.Client, peer mydcp.Peer, session access.Session, read func() cluster.View, change func(string, string, uint64, any)) {
+func prepareSQLSecrets(t *testing.T, ctx context.Context, provider *Runtime, user userauth.Client, peer sfcp.Peer, session access.Session, read func() cluster.View, change func(string, string, uint64, any)) {
 	t.Helper()
 	current := func() control.Vault {
 		v, e := provider.controlPolicy.Vault(read().State)

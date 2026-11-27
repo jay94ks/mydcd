@@ -17,7 +17,7 @@ import (
 
 	oci "github.com/google/go-containerregistry/pkg/registry"
 	v1 "github.com/google/go-containerregistry/pkg/v1"
-	"github.com/jay94ks/mydcd/internal/storage"
+	"github.com/jay94ks/seafield/internal/storage"
 	"golang.org/x/sys/unix"
 )
 
@@ -352,6 +352,14 @@ func hashFile(ctx context.Context, f *os.File, size int64, digest string) error 
 }
 
 func (b *Blobs) Get(ctx context.Context, repo string, h v1.Hash) (io.ReadCloser, error) {
+	return b.GetFrom(ctx, repo, h, 0)
+}
+
+// GetFrom is Get starting offset bytes in, for a reader that resumes an
+// interrupted copy. The whole stored file is still checked against its
+// digest first; the reader checks the digest of everything it received.
+// offset may equal the size (nothing left to read).
+func (b *Blobs) GetFrom(ctx context.Context, repo string, h v1.Hash, offset int64) (io.ReadCloser, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.enter(ctx, true) != nil {
@@ -365,9 +373,17 @@ func (b *Blobs) Get(ctx context.Context, repo string, h v1.Hash) (io.ReadCloser,
 	if err != nil {
 		return nil, err
 	}
+	if offset < 0 || offset > v.Size {
+		_ = f.Close()
+		return nil, ErrOffset
+	}
 	if err = hashFile(ctx, f, v.Size, v.Digest); err != nil {
 		_ = f.Close()
 		return nil, err
+	}
+	if _, err = f.Seek(offset, io.SeekStart); err != nil {
+		_ = f.Close()
+		return nil, ErrStorage
 	}
 	b.readers++
 	return &blobReader{file: f, owner: b}, nil

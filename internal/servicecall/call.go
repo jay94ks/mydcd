@@ -19,8 +19,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/cluster/lifecycle"
-	"github.com/jay94ks/mydcd/internal/containerops"
+	"github.com/jay94ks/seafield/internal/cluster/lifecycle"
+	"github.com/jay94ks/seafield/internal/containerops"
 	"golang.org/x/net/http/httpguts"
 )
 
@@ -62,7 +62,7 @@ func (q Request) Valid() bool {
 	seen := map[string]bool{}
 	for key, value := range q.Headers {
 		name := http.CanonicalHeaderKey(key)
-		if !httpguts.ValidHeaderFieldName(key) || !httpguts.ValidHeaderFieldValue(value) || name != "Content-Type" && (!strings.HasPrefix(name, "X-Mydc-") || len(name) == len("X-Mydc-")) || seen[name] {
+		if !httpguts.ValidHeaderFieldName(key) || !httpguts.ValidHeaderFieldValue(value) || name != "Content-Type" && (!strings.HasPrefix(name, "X-Sfc-") || len(name) == len("X-Sfc-")) || seen[name] {
 			return false
 		}
 		seen[name] = true

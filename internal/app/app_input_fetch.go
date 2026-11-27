@@ -8,11 +8,11 @@ import (
 	"encoding/json"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/schema"
-	"github.com/jay94ks/mydcd/internal/secrets"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/secrets"
+	"github.com/jay94ks/seafield/internal/sfcp"
 )
 
 type appInputFetchResponse struct {
@@ -36,7 +36,7 @@ func encodeAppInputFetchResponse(readSet [32]byte, value secrets.Fetched) ([]byt
 	}
 	if len(body) > (128<<10)-48 {
 		clear(body)
-		return nil, mydcp.ErrBudget
+		return nil, sfcp.ErrBudget
 	}
 	return body, nil
 }
@@ -50,7 +50,7 @@ func decodeAppInputFetchResponse(raw []byte) (appInputFetchResponse, error) {
 		for _, v := range response.Value.Values {
 			clear(v)
 		}
-		return appInputFetchResponse{}, mydcp.ErrFrame
+		return appInputFetchResponse{}, sfcp.ErrFrame
 	}
 	return response, nil
 }
@@ -63,7 +63,7 @@ func (r *Runtime) appInputFetchPermit(ctx context.Context, q control.AppInputFet
 		return control.AppInputFetchPermit{}, err
 	}
 	p, err := schema.Decode[control.AppInputFetchPermit](reply.Data)
-	if err != nil || p.Schema != 1 || p.ReadSet != q.ReadSet || p.CommandIndex < q.MinimumIndex || p.Realm != q.Realm || p.Leaf.Secret != q.Secret || !r.acceptsResourceOwner(ctx, p.Provider.Node, p.Provider.Key) {
+	if err != nil || p.Schema != 1 || p.ReadSet != q.ReadSet || p.CommandIndex < q.MinimumIndex || p.Realm != q.Realm || p.Leaf.Secret != q.Secret || p.Provider.Builtin() != (p.Builtin != nil) || !p.Provider.Builtin() && !r.acceptsResourceOwner(ctx, p.Provider.Node, p.Provider.Key) {
 		return control.AppInputFetchPermit{}, deployment.ErrInputs
 	}
 	return p, nil
@@ -79,12 +79,17 @@ func (r *Runtime) readAppInputLeaf(ctx context.Context, q control.AppInputFetch)
 		r.life.RUnlock()
 		return secrets.Fetched{}, secrets.ErrProvider
 	}
-	backend := r.vaultBackends[vaultBackendKey(permit.Realm, permit.Leaf.Reference.Profile)]
-	if backend == nil || !backend.config.Values || (backend.config.Mode == "local-file") != (permit.Provider.Mode == "local-file") {
-		r.life.RUnlock()
-		return secrets.Fetched{}, secrets.ErrProvider
+	var value secrets.Fetched
+	if permit.Provider.Builtin() {
+		value, err = r.openBuiltinLeaf(permit)
+	} else {
+		backend := r.vaultBackends[vaultBackendKey(permit.Realm, permit.Leaf.Reference.Profile)]
+		if backend == nil || !backend.config.Values || (backend.config.Mode == "local-file") != (permit.Provider.Mode == "local-file") {
+			r.life.RUnlock()
+			return secrets.Fetched{}, secrets.ErrProvider
+		}
+		value, err = backend.provider.Fetch(ctx, permit.Leaf.Secret, permit.Leaf.Reference)
 	}
-	value, err := backend.provider.Fetch(ctx, permit.Leaf.Secret, permit.Leaf.Reference)
 	r.life.RUnlock()
 	good := false
 	defer func() {
@@ -111,10 +116,10 @@ func (r *Runtime) readAppInputLeaf(ctx context.Context, q control.AppInputFetch)
 }
 
 func (r *Runtime) serveAppInputFetch() error {
-	return r.Mesh.OnSecretFetch(func(ctx context.Context, s *mydcp.Session, body []byte) ([]byte, error) {
+	return r.Mesh.OnSecretFetch(func(ctx context.Context, s *sfcp.Session, body []byte) ([]byte, error) {
 		q, err := schema.Decode[control.AppInputFetch](body)
 		if err != nil || q.Consumer != [32]byte(s.Peer().Key) {
-			return nil, mydcp.ErrAdmission
+			return nil, sfcp.ErrAdmission
 		}
 		ctx, cancel := context.WithCancel(ctx)
 		defer cancel()
@@ -134,13 +139,21 @@ func (r *Runtime) serveAppInputFetch() error {
 }
 
 func (r *Runtime) fetchAppInputLeaf(ctx context.Context, q control.AppInputFetch, profile secrets.WriteProfile) (secrets.Fetched, error) {
+	if profile.Builtin() {
+		return r.fetchBuiltinLeaf(ctx, q)
+	}
 	if r.acceptsResourceOwner(ctx, profile.Node, profile.Key) {
 		return r.readAppInputLeaf(ctx, q)
 	}
 	peer, ok := r.resourcePeer(ctx, profile.Node, profile.Key)
 	if !ok || !peer.Member || peer.ID != profile.Node {
-		return secrets.Fetched{}, mydcp.ErrAdmission
+		return secrets.Fetched{}, sfcp.ErrAdmission
 	}
+	return r.fetchAppInputFrom(ctx, q, peer)
+}
+
+// fetchAppInputFrom asks one member to read the leaf for this consumer.
+func (r *Runtime) fetchAppInputFrom(ctx context.Context, q control.AppInputFetch, peer sfcp.Peer) (secrets.Fetched, error) {
 	s, err := r.Mesh.Dial(ctx, peer)
 	if err != nil {
 		return secrets.Fetched{}, err
@@ -157,7 +170,7 @@ func (r *Runtime) fetchAppInputLeaf(ctx context.Context, q control.AppInputFetch
 		for _, v := range response.Value.Values {
 			clear(v)
 		}
-		return secrets.Fetched{}, mydcp.ErrAdmission
+		return secrets.Fetched{}, sfcp.ErrAdmission
 	}
 	return response.Value, nil
 }

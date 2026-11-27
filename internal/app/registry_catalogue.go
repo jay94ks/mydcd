@@ -9,11 +9,11 @@ import (
 	oci "github.com/google/go-containerregistry/pkg/registry"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/registryclient"
-	"github.com/jay94ks/mydcd/internal/schema"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/registryclient"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/sfcp"
 )
 
 func (r *Runtime) registryCatalogueOwner(ctx context.Context, read control.RegistryCatalogueRead) (control.RegistryCatalogueResult, error) {
@@ -23,11 +23,11 @@ func (r *Runtime) registryCatalogueOwner(ctx context.Context, read control.Regis
 	defer stop()
 	view, err := r.currentView(ctx)
 	if err != nil {
-		return control.RegistryCatalogueResult{}, mydcp.ErrAdmission
+		return control.RegistryCatalogueResult{}, sfcp.ErrAdmission
 	}
 	current, err := r.controlPolicy.CurrentRegistryCatalogue(view.State, read, time.Now().Unix())
 	if err != nil || current.Target.Owner != r.Identity.Public {
-		return control.RegistryCatalogueResult{}, mydcp.ErrAdmission
+		return control.RegistryCatalogueResult{}, sfcp.ErrAdmission
 	}
 	var page registryclient.CataloguePage
 	if run := current.Target.Managed; run != nil {
@@ -47,7 +47,7 @@ func (r *Runtime) registryCatalogueOwner(ctx context.Context, read control.Regis
 	} else {
 		work, cause := r.externalRegistryWork(ctx, *current.Target.External)
 		if cause != nil || work.Inputs.ReadSet != current.Target.ReadSet {
-			return control.RegistryCatalogueResult{}, mydcp.ErrAdmission
+			return control.RegistryCatalogueResult{}, sfcp.ErrAdmission
 		}
 		release, cause := r.acquireExternalReader(work)
 		if cause != nil {
@@ -75,15 +75,15 @@ func (r *Runtime) registryCatalogueOwner(ctx context.Context, read control.Regis
 	}
 	latest, cause := r.currentView(ctx)
 	if cause != nil {
-		return control.RegistryCatalogueResult{}, mydcp.ErrAdmission
+		return control.RegistryCatalogueResult{}, sfcp.ErrAdmission
 	}
 	current, cause = r.controlPolicy.CurrentRegistryCatalogue(latest.State, read, time.Now().Unix())
 	if cause != nil {
-		return control.RegistryCatalogueResult{}, mydcp.ErrAdmission
+		return control.RegistryCatalogueResult{}, sfcp.ErrAdmission
 	}
 	result := control.RegistryCatalogueResult{Kind: read.Query.Kind, ID: read.Query.ID, Page: page}
 	if !result.Valid(current) {
-		return control.RegistryCatalogueResult{}, mydcp.ErrAdmission
+		return control.RegistryCatalogueResult{}, sfcp.ErrAdmission
 	}
 	return result, nil
 }
@@ -91,7 +91,7 @@ func (r *Runtime) registryCatalogueOwner(ctx context.Context, read control.Regis
 func (r *Runtime) registryCatalogue(ctx context.Context, read control.RegistryCatalogueRead) (control.RegistryCatalogueResult, error) {
 	view, err := r.currentView(ctx)
 	if err != nil {
-		return control.RegistryCatalogueResult{}, mydcp.ErrAdmission
+		return control.RegistryCatalogueResult{}, sfcp.ErrAdmission
 	}
 	current, err := r.controlPolicy.CurrentRegistryCatalogue(view.State, read, time.Now().Unix())
 	if err != nil {
@@ -100,18 +100,18 @@ func (r *Runtime) registryCatalogue(ctx context.Context, read control.RegistryCa
 	if current.Target.Owner == r.Identity.Public {
 		return r.registryCatalogueOwner(ctx, current)
 	}
-	peer, ok := r.Mesh.Peer(mydcp.Identity(current.Target.Owner))
+	peer, ok := r.Mesh.Peer(sfcp.Identity(current.Target.Owner))
 	if !ok || !peer.Member {
-		return control.RegistryCatalogueResult{}, mydcp.ErrAdmission
+		return control.RegistryCatalogueResult{}, sfcp.ErrAdmission
 	}
 	body, _ := json.Marshal(current)
 	reply, err := cluster.CallManagement(ctx, r.Mesh, r.Identity, r.controlPolicy.Cluster, peer, cluster.ManagementRequest{Method: "registry-catalog-owner", Input: body})
 	if err != nil || reply.Code != "ok" {
-		return control.RegistryCatalogueResult{}, mydcp.ErrAdmission
+		return control.RegistryCatalogueResult{}, sfcp.ErrAdmission
 	}
 	result, err := schema.Decode[control.RegistryCatalogueResult](reply.Data)
 	if err != nil || !result.Valid(current) {
-		return control.RegistryCatalogueResult{}, mydcp.ErrAdmission
+		return control.RegistryCatalogueResult{}, sfcp.ErrAdmission
 	}
 	return result, nil
 }

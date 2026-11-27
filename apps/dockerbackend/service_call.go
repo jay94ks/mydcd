@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jay94ks/mydcd/tests/servicecallfixture"
+	"github.com/jay94ks/seafield/tests/servicecallfixture"
 )
 
 func readServiceCallFixtureBody(w http.ResponseWriter, r *http.Request) ([]byte, bool) {

@@ -125,6 +125,9 @@ func TestIngressSettings(t *testing.T) {
 	if code != 200 || gw["source"] != "file" || gw["revision"] != float64(0) {
 		t.Fatalf("gateways before: %d %v", code, gw)
 	}
+	if local := fmt.Sprint(gw["localAddresses"]); !strings.Contains(local, "cidr:203.0.113.21/24") || !strings.Contains(local, "iface:eth0") || !strings.Contains(local, "scope:public") || !strings.Contains(local, "address:192.168.1.101") {
+		t.Fatalf("server's own addresses: %v", gw["localAddresses"])
+	}
 	// listeners must sit on the side's addresses and ports
 	if code, out := f.do("PUT", "/api/v1/nodes/node-a/gateways", map[string]any{"opId": op(),
 		"external": map[string]any{"enabled": true, "address": "203.0.113.21", "ports": []int{443},
@@ -142,7 +145,7 @@ func TestIngressSettings(t *testing.T) {
 		!strings.Contains(fmt.Sprint(gw["external"]), "id:pub") {
 		t.Fatalf("gateways after: %v", gw)
 	}
-	// a stale revision is refused by mydcd
+	// a stale revision is refused by sfcd
 	code, out = f.do("PUT", "/api/v1/nodes/node-a/gateways", map[string]any{"opId": op(), "revision": 0, "external": ext})
 	if opState(t, code, out) == "applied" {
 		t.Fatalf("stale gateways: %v", out)

@@ -6,12 +6,12 @@ import (
 	"context"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/registryclient"
-	"github.com/jay94ks/mydcd/internal/schema"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/registryclient"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/sfcp"
 )
 
 func (s Service) externalRegistryProbe(ctx context.Context, view cluster.View, q Request, session access.Session) Reply {
@@ -42,9 +42,9 @@ func (s Service) externalRegistryProbe(ctx context.Context, view cluster.View, q
 	return Reply{Schema: 1, Code: "ok", Tenant: q.Tenant, ExternalRegistryProbe: &result}
 }
 
-func (c Client) ProbeExternalRegistry(ctx context.Context, peer mydcp.Peer, session access.Session, tenant string, q control.ExternalRegistryProbeQuery) (control.ExternalRegistryProbeResult, error) {
+func (c Client) ProbeExternalRegistry(ctx context.Context, peer sfcp.Peer, session access.Session, tenant string, q control.ExternalRegistryProbeQuery) (control.ExternalRegistryProbeResult, error) {
 	if tenant == "" || !q.Valid() {
-		return control.ExternalRegistryProbeResult{}, mydcp.ErrAdmission
+		return control.ExternalRegistryProbeResult{}, sfcp.ErrAdmission
 	}
 	reply, err := c.query(ctx, peer, session, Request{Method: "registry-login-test", Tenant: tenant, ExternalRegistryProbe: &q})
 	if err != nil {
@@ -52,7 +52,7 @@ func (c Client) ProbeExternalRegistry(ctx context.Context, peer mydcp.Peer, sess
 	}
 	result := reply.ExternalRegistryProbe
 	if result == nil || reply.Tenant != tenant || result.Selection.Tenant != tenant || result.Selection.ID != q.ID || result.Selection.Generation == 0 {
-		return control.ExternalRegistryProbeResult{}, mydcp.ErrFrame
+		return control.ExternalRegistryProbeResult{}, sfcp.ErrFrame
 	}
 	image := q.Image
 	if image != "" {
@@ -60,12 +60,12 @@ func (c Client) ProbeExternalRegistry(ctx context.Context, peer mydcp.Peer, sess
 		// the source policy rather than accepting a different raw spelling.
 		image, _, _, err = registryclient.Normalize(image)
 		if err != nil {
-			return control.ExternalRegistryProbeResult{}, mydcp.ErrFrame
+			return control.ExternalRegistryProbeResult{}, sfcp.ErrFrame
 		}
 	}
 	read := control.ExternalRegistryProbeRead{Session: session, Selection: result.Selection, Image: image}
 	if !result.Valid(read) {
-		return control.ExternalRegistryProbeResult{}, mydcp.ErrFrame
+		return control.ExternalRegistryProbeResult{}, sfcp.ErrFrame
 	}
 	return *result, nil
 }

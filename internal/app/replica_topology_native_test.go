@@ -17,17 +17,16 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/config"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/engine"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/network"
-	"github.com/jay94ks/mydcd/internal/network/services"
-	"github.com/jay94ks/mydcd/internal/tenancy"
-	"github.com/jay94ks/mydcd/tests/registryfixture"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/engine"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/network"
+	"github.com/jay94ks/seafield/internal/network/services"
+	"github.com/jay94ks/seafield/internal/tenancy"
+	"github.com/jay94ks/seafield/tests/registryfixture"
 	"github.com/miekg/dns"
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/client"
@@ -38,27 +37,27 @@ import (
 // every workload transition uses the normal CLI/FSM/Runtime, never fake facts.
 func testManagedReplicaTopology(t *testing.T, ctx context.Context, a *Runtime, root, products string, configs, sockets [2]string, read func() cluster.View, change func(string, string, uint64, any), wait func(string, func() bool), stopB, startB func()) {
 	t.Helper()
-	phase := os.Getenv("MYDC_TEST_RQ5_TOPOLOGY_PHASE")
+	phase := os.Getenv("SFC_TEST_RQ5_TOPOLOGY_PHASE")
 	if phase != "" && phase != "changes" && phase != "rolling" {
 		t.Fatal("unknown RQ5 topology verification phase")
 	}
 	p := a.controlPolicy
-	backend := os.Getenv("MYDC_DOCKER_TEST_BACKEND")
+	backend := os.Getenv("SFC_DOCKER_TEST_BACKEND")
 	if !filepath.IsAbs(backend) {
 		t.Fatal("prebuilt static backend required")
 	}
-	registry := registryfixture.OpenPreparedAt(t, backend, container.Config{Cmd: []string{"/backend"}, Env: []string{"MYDC_DNS_FIXTURE=1", "MYDC_READINESS_FIXTURE=1"}, User: "10001:10001", Labels: map[string]string{"org.mydc.test.owner": os.Getenv("MYDC_KERNEL_TEST_OWNER")}}, "192.0.2.1:0")
+	registry := registryfixture.OpenPreparedAt(t, backend, container.Config{Cmd: []string{"/backend"}, Env: []string{"SFC_DNS_FIXTURE=1", "SFC_READINESS_FIXTURE=1"}, User: "10001:10001", Labels: map[string]string{"org.sfc.test.owner": os.Getenv("SFC_KERNEL_TEST_OWNER")}}, "192.0.2.1:0")
 	catalog, err := p.Catalog(read().State)
 	if err != nil {
 		t.Fatal(err)
 	}
 	tenant, _ := catalog.Tenant("tenant")
-	change("replicas/trust", "set-trust", tenant.Revision, control.TrustAssignment{Tenant: "tenant", Rules: append(tenant.ImageSources, access.TrustRule{Registry: registry.Registry, Repository: "fixture"})})
+	change("replicas/trust", "set-trust", tenant.Revision, control.TrustChange{Tenant: "tenant", Add: []access.TrustRule{access.TrustRule{Registry: registry.Registry, Repository: "fixture"}}})
 	var docker [2]*engine.Client
 	var owners [2][32]byte
 	public := sqlPublicFixture{Images: map[string]string{registry.Reference: registry.ConfigDigest}}
 	for n, path := range configs {
-		cfg, err := config.LoadNode(path)
+		cfg, err := loadTestNode(path)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -88,10 +87,10 @@ func testManagedReplicaTopology(t *testing.T, ctx context.Context, a *Runtime, r
 	}
 	definition := tenancy.TUNDefinition{Tenant: "tenant", Name: "replica-lan", GatewayMode: network.ManagedGatewayMode}
 	for n, node := range []string{"node-a", "node-b"} {
-		definition.Members = append(definition.Members, tenancy.TUNNode{Node: node, Pools: []tenancy.Subnet{{ID: "pool", Prefix: netip.MustParsePrefix(fmt.Sprintf("198.19.88.%d/28", n*16)), Gateway: netip.MustParseAddr(fmt.Sprintf("198.19.88.%d", n*16+1)), MTU: 1280}}, Addresses: []netip.Prefix{netip.MustParsePrefix(fmt.Sprintf("198.19.89.%d/32", n+1))}})
+		definition.Members = append(definition.Members, tenancy.TUNNode{Node: node, Pools: []tenancy.Subnet{{ID: "pool", Prefix: netip.MustParsePrefix(fmt.Sprintf("198.19.88.%d/28", n*16)), Gateway: netip.MustParseAddr(fmt.Sprintf("198.19.88.%d", n*16+1)), MTU: 1280}}})
 	}
 	change("replicas/network", "create-tun-network", 0, definition)
-	policy := services.ManagedDNSDefinition{Schema: 1, Tenant: "tenant", Network: "replica-lan", Policy: services.ManagedDNSPolicy{Enabled: true, Zone: "replicas.mydc.test.", TTL: 1, NegativeTTL: 1, Transports: []string{"udp", "tcp"}, Upstreams: []netip.AddrPort{}, MaxQueries: 8, MaxCacheEntries: 8, MaxResponseBytes: 4096, MaxConnections: 8, RequestTimeoutMS: 1000}}
+	policy := services.ManagedDNSDefinition{Schema: 1, Tenant: "tenant", Network: "replica-lan", Policy: services.ManagedDNSPolicy{Enabled: true, Zone: "replicas.sfc.test.", TTL: 1, NegativeTTL: 1, Transports: []string{"udp", "tcp"}, Upstreams: []netip.AddrPort{}, MaxQueries: 8, MaxCacheEntries: 8, MaxResponseBytes: 4096, MaxConnections: 8, RequestTimeoutMS: 1000}}
 	change("replicas/dns", "configure-network-dns", 0, policy)
 	profile, home, file := filepath.Join(root, "replicas-client.yaml"), filepath.Join(root, "replicas-home"), filepath.Join(root, "replicas-app.yaml")
 	if err := os.Mkdir(home, 0700); err != nil {
@@ -102,7 +101,7 @@ func testManagedReplicaTopology(t *testing.T, ctx context.Context, a *Runtime, r
 	}
 	call := func(wantSuccess bool, args ...string) []byte {
 		t.Helper()
-		body, diagnostic, err := runManagedCLICommand(ctx, filepath.Join(products, "mydc"), home, profile, args, nil)
+		body, diagnostic, err := runManagedCLICommand(ctx, filepath.Join(products, "sfc"), home, profile, args, nil)
 		if (err == nil) != wantSuccess {
 			t.Fatal("replica CLI", args, err, string(diagnostic), string(body))
 		}
@@ -111,7 +110,7 @@ func testManagedReplicaTopology(t *testing.T, ctx context.Context, a *Runtime, r
 	call(true, "wallet", "init")
 	call(true, "login", "--username", "admin", "--method", "private-key", "--key-file", filepath.Join(root, "admin/key.pem"))
 	document := fmt.Sprintf(`name: app
-x-mydc:
+x-sfc:
  ingress:
   node: node-a
   host: app.test
@@ -127,7 +126,7 @@ services:
   mem_limit: 32m
   environment: {REVISION: '1'}
   networks: {lan: {}}
-  x-mydc: {nodes: [node-a, node-b], per_node: 1, ready: {http: /readyz, port: 8080}}
+  x-sfc: {nodes: [node-a, node-b], per_node: 1, ready: {http: /readyz, port: 8080}}
  utility:
   image: %s
   command: [/backend]
@@ -135,7 +134,7 @@ services:
   cpus: 0.1
   mem_limit: 32m
   networks: {lan: {ipv4_address: '198.19.88.20'}}
-  x-mydc: {node: node-b, ready: {http: /readyz, port: 8080}}
+  x-sfc: {node: node-b, ready: {http: /readyz, port: 8080}}
 networks:
  lan: {external: true, name: replica-lan}
 `, registry.Reference, registry.Reference)
@@ -275,7 +274,7 @@ networks:
 	}
 	query := func() ([]string, error) {
 		q := new(dns.Msg)
-		q.SetQuestion("web.app.replicas.mydc.test.", dns.TypeA)
+		q.SetQuestion("web.app.replicas.sfc.test.", dns.TypeA)
 		wire, err := q.Pack()
 		if err != nil {
 			return nil, err
@@ -344,7 +343,7 @@ networks:
 		utilityKey := deployment.ResourceKey("task", "tenant", "app", "utility")
 		oldUtility, _ := execution().Stage(utilityKey)
 		utility := model.Services["utility"]
-		utility.MyDC.Node = "node-a"
+		utility.Sfc.Node = "node-a"
 		attachment := utility.Networks["lan"]
 		attachment.IPv4 = "198.19.88.6"
 		utility.Networks["lan"] = attachment
@@ -406,7 +405,7 @@ networks:
 	// readiness port fails first. node-b must keep its actual version-2 native.
 	web = model.Services["web"]
 	web.Environment["REVISION"] = "3"
-	web.MyDC.Readiness = &deployment.Readiness{Kind: "http", Path: "/readyz", Port: 8081}
+	web.Sfc.Readiness = &deployment.Readiness{Kind: "http", Path: "/readyz", Port: 8081}
 	model.Services["web"] = web
 	write(model)
 	up("replicas-rolling-fail")

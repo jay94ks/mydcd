@@ -11,18 +11,19 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/ingress"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/userauth"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/ingress"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/userauth"
 )
 
 func TestRQ13RealIngressOperationsCLIAndOriginalRecovery(t *testing.T) {
@@ -31,9 +32,9 @@ func TestRQ13RealIngressOperationsCLIAndOriginalRecovery(t *testing.T) {
 
 // Reuses the existing private Engine/managed app/CLI/rollback and same-DB
 // recovery. This hook neither deploys an extra proxy nor constructs observations.
-func prepareIngressOperationsNative(t *testing.T, ctx context.Context, r *Runtime, root string, user userauth.Client, peer mydcp.Peer, session access.Session, p control.Policy, read func() cluster.View, change func(string, string, uint64, any), wait func(string, func() bool)) func(*Runtime) {
+func prepareIngressOperationsNative(t *testing.T, ctx context.Context, r *Runtime, root string, user userauth.Client, peer sfcp.Peer, session access.Session, p control.Policy, read func() cluster.View, change func(string, string, uint64, any), wait func(string, func() bool)) func(*Runtime) {
 	t.Helper()
-	cli := &fixedAppNativeFixture{home: filepath.Join(root, "cli-home"), profile: filepath.Join(root, "cli.yaml"), binary: os.Getenv("MYDC_TEST_CLI")}
+	cli := &fixedAppNativeFixture{home: filepath.Join(root, "cli-home"), profile: filepath.Join(root, "cli.yaml"), binary: os.Getenv("SFC_TEST_CLI")}
 	call := func(want int, args ...string) map[string]json.RawMessage { return cli.cli(t, ctx, want, args...) }
 	write := func(name string, payload any) string {
 		t.Helper()
@@ -95,6 +96,13 @@ func prepareIngressOperationsNative(t *testing.T, ctx context.Context, r *Runtim
 		page := gatewayPage()
 		return len(page.NodeGateways) == 1 && page.NodeGateways[0].Source == "cluster" && page.NodeGateways[0].Revision == 1 && page.NodeGateways[0].AppliedRevision == 1 && page.NodeGateways[0].Error == ""
 	})
+	// The owner reads its own interfaces into the reply; the gateway's
+	// address is among them.
+	if local := gatewayPage().NodeGateways[0].LocalAddresses; !slices.ContainsFunc(local, func(a ingress.LocalAddress) bool {
+		return a.Prefix.Addr() == endpoint.Addr() && a.Interface != "" && a.Scope != ""
+	}) {
+		t.Fatal("owner did not report its gateway address among its own addresses", endpoint, local)
+	}
 	connection, err := (&net.Dialer{}).DialContext(ctx, "tcp", address)
 	if err != nil {
 		t.Fatal("configured gateway did not open actual listener", err)

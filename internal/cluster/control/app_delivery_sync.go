@@ -10,9 +10,9 @@ import (
 	"math"
 	"slices"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/deployment"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/deployment"
 )
 
 type AppDeliveryChoice struct {
@@ -46,7 +46,7 @@ type appExecutionIdentity struct {
 
 func appRegistrationDigest(origin UserOperation) [32]byte {
 	raw, _ := json.Marshal(origin)
-	return sha256.Sum256(append([]byte("mydc-app-registration-1\x00"), raw...))
+	return sha256.Sum256(append([]byte("sfc-app-registration-1\x00"), raw...))
 }
 func (sync AppDeliverySync) verify(origin UserOperation, scope deployment.AppScope) error {
 	if sync.Local != nil && sync.Local.verify(origin, scope, nil) != nil {
@@ -125,7 +125,7 @@ func (entry appEntry) downTarget() [32]byte {
 		Origin UserOperation
 		Sync   AppDeliverySync
 	}{entry.Origin, *entry.Sync})
-	return sha256.Sum256(append([]byte("mydc-app-cd-down-target-1\x00"), raw...))
+	return sha256.Sum256(append([]byte("sfc-app-cd-down-target-1\x00"), raw...))
 }
 func syncFromChoice(choice AppDeliveryChoice, selected deployment.DeliverySelection, epoch uint64, user *UserOperation, member *AppDeliveryProgress) *AppDeliverySync {
 	return &AppDeliverySync{Choice: choice, Plan: selected.Plan, Intent: selected.Intent, Artifact: selected.Artifact, Epoch: epoch, User: user, Member: member}

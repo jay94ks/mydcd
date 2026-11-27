@@ -12,9 +12,9 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/deployment"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/deployment"
 
 	"gopkg.in/yaml.v3"
 )
@@ -48,9 +48,9 @@ func localControlFixture(t *testing.T) (*backupCoreFixture, []byte) {
 		service.Networks[name] = attachment
 	}
 	service.Volumes, service.Secrets = nil, nil
-	service.MyDC.Sources, service.MyDC.SecretEnv, service.MyDC.Lifecycle = nil, nil, nil
+	service.Sfc.Sources, service.Sfc.SecretEnv, service.Sfc.Lifecycle = nil, nil, nil
 	service.LifecycleProgram, service.LifecycleSources, service.FixedVolumes = nil, nil, nil
-	input := deployment.Compose{Name: "source-app", MyDC: deployment.AppExtension{Schema: 1, Tenant: "tenant", Deployment: "deploy"}, Services: map[string]deployment.ComposeService{"worker": service}, Networks: record.Input.Networks}
+	input := deployment.Compose{Name: "source-app", Sfc: deployment.AppExtension{Schema: 1, Tenant: "tenant", Deployment: "deploy"}, Services: map[string]deployment.ComposeService{"worker": service}, Networks: record.Input.Networks}
 	body, err := yaml.Marshal(input)
 	if err != nil {
 		t.Fatal(err)

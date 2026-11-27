@@ -7,9 +7,9 @@ import (
 	"encoding/json"
 	"os"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/secrets"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/secrets"
 )
 
 // SecretWriteIntent contains only public original metadata and signed facts.
@@ -22,8 +22,11 @@ type SecretWriteIntent struct {
 	Request             secrets.WriteRequest
 	Epoch, ExpectedTree uint64
 	Attempted           bool
-	Sequence            uint64
-	Pending             *secrets.WriteObservation `json:",omitempty"`
+	// Writer is the voter a builtin write sent its values to. It is set
+	// with Attempted and never changes: only that voter holds what it sealed.
+	Writer   [32]byte `json:",omitempty"`
+	Sequence uint64
+	Pending  *secrets.WriteObservation `json:",omitempty"`
 }
 
 func secretWriteRoot(home string, c Client, user string, create bool) (*os.Root, error) {
@@ -115,9 +118,12 @@ func ReplaceSecretWrite(home string, c Client, session access.Session, old, next
 	if c.Verify(session) != nil || !validSecretIntent(c, session, next) || old.Attempted && !next.Attempted || next.Sequence < old.Sequence {
 		return ErrPrivateState
 	}
+	if old.Writer != ([32]byte{}) && next.Writer != old.Writer || next.Writer != ([32]byte{}) && !next.Attempted {
+		return ErrPrivateState
+	}
 	left, right := old, next
-	left.Attempted, left.Sequence, left.Pending = false, 0, nil
-	right.Attempted, right.Sequence, right.Pending = false, 0, nil
+	left.Attempted, left.Sequence, left.Pending, left.Writer = false, 0, nil, [32]byte{}
+	right.Attempted, right.Sequence, right.Pending, right.Writer = false, 0, nil, [32]byte{}
 	if !samePublic(left, right) {
 		return ErrPrivateState
 	}

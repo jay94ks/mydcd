@@ -5,7 +5,7 @@ package server
 import (
 	"net/http"
 
-	"github.com/jay94ks/mydcd/internal/web/seal"
+	"github.com/jay94ks/seafield/internal/web/seal"
 )
 
 // handleSealStatus tells the UI whether sealed storage works. Features that

@@ -11,16 +11,16 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"slices"
 	"strings"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/config"
-	"github.com/jay94ks/mydcd/internal/workload/volumes"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/config"
+	"github.com/jay94ks/seafield/internal/workload/volumes"
 )
 
 const CatalogKey = "control/access"
-const catalogPartSize = 32 << 10
 
 var ErrCatalog = errors.New("invalid committed control catalog")
 
@@ -41,7 +41,7 @@ type Policy struct {
 // ID binds the activated checkpoint/reducer policy into the engine's root
 // identity. A restart cannot silently disable the reducer or change its anchor.
 func (p Policy) ID() [32]byte {
-	b := append([]byte("mydc-access-catalog-policy-1\x00"), p.Cluster[:]...)
+	b := append([]byte("sfc-access-catalog-policy-1\x00"), p.Cluster[:]...)
 	b = append(b, p.BootstrapKey[:]...)
 
 	b = append(b, []byte("/managed-root-1/")...)
@@ -60,13 +60,37 @@ type Change struct {
 }
 
 type TenantID struct{ ID string }
-type NodeAssignment struct {
+
+// NodeChange adds and removes servers a tenant may use (set-nodes).
+// Expected is the tenant revision.
+type NodeChange struct {
 	Tenant string
-	Nodes  []string
+	Add    []string `json:",omitempty"`
+	Remove []string `json:",omitempty"`
 }
-type TrustAssignment struct {
+
+// NodeChangeTo is the change that turns the servers a tenant has into want.
+func NodeChangeTo(tenant string, have, want []string) NodeChange {
+	c := NodeChange{Tenant: tenant}
+	for _, n := range want {
+		if !slices.Contains(have, n) && !slices.Contains(c.Add, n) {
+			c.Add = append(c.Add, n)
+		}
+	}
+	for _, n := range have {
+		if !slices.Contains(want, n) {
+			c.Remove = append(c.Remove, n)
+		}
+	}
+	return c
+}
+
+// TrustChange adds and removes a tenant's image trust rules (set-trust).
+// Expected is the tenant revision.
+type TrustChange struct {
 	Tenant string
-	Rules  []access.TrustRule
+	Add    []access.TrustRule `json:",omitempty"`
+	Remove []access.TrustRule `json:",omitempty"`
 }
 type SessionRevocation struct{ User, Session string }
 
@@ -91,19 +115,18 @@ func canonical(raw []byte, target any) error {
 	return nil
 }
 
-// Catalog verifies the complete checkpoint, then consumes the same access core
-// as the early mocks. An absent root is a blank, unconsumed bootstrap anchor.
+// Catalog reads the catalog rows and checks them against their head. An
+// absent head is a blank, unconsumed bootstrap anchor.
 func (p Policy) Catalog(s state.State) (access.Catalog, error) {
-	raw, revision, err := readCheckpoint(s, CatalogKey, p.Cluster, p.BootstrapKey)
+	if p.Cluster == ([32]byte{}) || p.BootstrapKey == ([32]byte{}) {
+		return access.Catalog{}, ErrCatalog
+	}
+	c, found, err := p.storedCatalog(s)
 	if err != nil {
 		return access.Catalog{}, err
 	}
-	if raw == nil {
+	if !found {
 		return access.New(p.BootstrapKey)
-	}
-	c, err := access.Decode(raw)
-	if err != nil || c.Revision() != revision {
-		return access.Catalog{}, ErrCatalog
 	}
 	if c.NodeCLI().DisableNodeCLIOperation {
 		c, err = p.nodeKeyContext(s, c)
@@ -225,11 +248,7 @@ func (p Policy) validateStage(before, after state.State, command state.Command) 
 	return "", nil
 }
 func (p Policy) checkpoint(s state.State, c access.Catalog) (map[string][]byte, state.Code) {
-	raw, err := c.Encode()
-	if err != nil {
-		return nil, state.Invalid
-	}
-	writes, code := writeCheckpoint(s, CatalogKey, p.Cluster, p.BootstrapKey, c.Revision(), raw)
+	writes, code := p.catalogRowWrites(s, c)
 	if code != state.Applied || !s.Object(ResourcesKey).Present {
 		return writes, code
 	}
@@ -272,72 +291,17 @@ func currentUserKey(c access.Catalog, id string, key [32]byte) bool {
 // user key admission use the original authenticated Command.Actor, never a
 // user/role string copied unchecked from Change.Payload.
 func (p Policy) Reduce(s state.State, command state.Command) (map[string][]byte, state.Code) {
-	if command.Key == CertificatesKey {
-		return p.reduceCertificates(s, command)
-	}
-	if command.Key == IngressManagementKey {
-		return p.reduceIngressManagement(s, command)
-	}
-	if command.Key == ImageBuildKey {
-		return p.reduceImageBuilds(s, command)
-	}
-	if command.Key == RegistryMaintenanceKey {
-		return p.reduceRegistryMaintenance(s, command)
-	}
-	if command.Key == ImageCacheKey {
-		return p.reduceImageCache(s, command)
-	}
-	if command.Key == NodeShellKey {
-		return p.reduceNodeShell(s, command)
-	}
-	if command.Key == TunnelReconnectKey {
-		return p.reduceTunnelReconnect(s, command)
-	}
-	if command.Key == CompactKey {
-		return p.reduceCompactions(s, command)
-	}
-	if command.Kind == state.ModuleReport && command.Key == CatalogKey {
-		return p.reduceTenantRetirementReport(s, command)
-	}
-	if command.Key == ExternalRegistriesKey {
-		return p.reduceExternalRegistries(s, command)
-	}
-	if (command.Kind == state.Module || command.Kind == state.ModuleReport) && command.Key == RegistriesKey {
-		return p.reduceRegistries(s, command)
-	}
-	if command.Key == LifecycleKey {
-		return p.reduceLifecycle(s, command)
-	}
-	if (command.Kind == state.Module || command.Kind == state.ModuleReport) && command.Key == NodeStorageKey {
-		return p.reduceNodeStorage(s, command)
-	}
-	if command.Kind == state.Module && command.Key == VaultKey {
-		if strings.HasPrefix(command.Actor, "node/") {
-			return p.reduceVaultApproval(s, command)
-		}
-		return p.reduceVault(s, command)
-	}
-	if (command.Kind == state.Module || command.Kind == state.ModuleReport || command.Kind == state.ModuleUpload || command.Kind == state.ModuleAppDown) && command.Key == AppsKey {
-		return p.reduceApps(s, command)
-	}
-	if (command.Kind == state.Module || command.Kind == state.ModuleReport) && command.Key == VolumesKey {
-		return p.reduceVolumes(s, command)
+	if book, ok := bookFor(command.Key); ok {
+		return book.Reduce(p, s, command)
 	}
 	if command.Kind == state.ModuleWindow {
 		return p.reduceStorage(s, command)
 	}
-	if command.Kind == state.ModuleReport && command.Key == ResourcesKey && strings.HasPrefix(command.Actor, "node/") {
-		return p.reduceSystemNetworkReport(s, command)
-	}
-	if command.Kind == state.Module && command.Key == ResourcesKey {
-		return p.reduceResources(s, command)
-	}
-	if command.Kind == state.Module && command.Key == MembersKey {
-		return p.reduceMembers(s, command)
-	}
-	if command.Kind != state.Module || command.Key != CatalogKey {
-		return nil, state.Invalid
-	}
+	return nil, state.Invalid
+}
+
+// reduceCatalog applies a Module command on the access catalog (CatalogKey).
+func (p Policy) reduceCatalog(s state.State, command state.Command) (map[string][]byte, state.Code) {
 	current, err := p.Current(s)
 	if err != nil {
 		return nil, state.Invalid
@@ -475,18 +439,18 @@ func (p Policy) applyChange(s state.State, c access.Catalog, change Change, key 
 			c, err = c.FinishTenantRetirement(change.Principal, selection.Tenant, selection.Operation, change.Expected, targets)
 		}
 	case "set-nodes":
-		var v NodeAssignment
+		var v NodeChange
 		if canonical(change.Payload, &v) != nil {
 			return nil, state.Invalid
 		}
-
-		for _, id := range v.Nodes {
+		// Only an added server must exist now; a server that left the
+		// cluster can still be removed from the list.
+		for _, id := range v.Add {
 			if _, e := p.nodeOwner(s, id); e != nil {
 				return nil, state.Forbidden
 			}
 		}
-
-		c, err = c.SetNodes(change.Principal, v.Tenant, change.Expected, v.Nodes)
+		c, err = c.ChangeNodes(change.Principal, v.Tenant, change.Expected, v.Add, v.Remove)
 	case "set-membership":
 		var v access.Membership
 		if canonical(change.Payload, &v) != nil {
@@ -494,11 +458,11 @@ func (p Policy) applyChange(s state.State, c access.Catalog, change Change, key 
 		}
 		c, err = c.SetMembership(change.Principal, change.Expected, v)
 	case "set-trust":
-		var v TrustAssignment
+		var v TrustChange
 		if canonical(change.Payload, &v) != nil {
 			return nil, state.Invalid
 		}
-		c, err = c.SetTrust(change.Principal, v.Tenant, change.Expected, v.Rules)
+		c, err = c.ChangeTrust(change.Principal, v.Tenant, change.Expected, v.Add, v.Remove)
 	case "revoke-session":
 		var v SessionRevocation
 		if canonical(change.Payload, &v) != nil {
@@ -538,3 +502,6 @@ func (p Policy) applyChange(s state.State, c access.Catalog, change Change, key 
 	}
 	return writes, code
 }
+
+// catalogBook is the CatalogKey book (books.go).
+var catalogBook = Book{Key: CatalogKey, Reduce: byKind(map[state.CommandKind]reducer{state.ModuleReport: Policy.reduceTenantRetirementReport, state.Module: Policy.reduceCatalog})}

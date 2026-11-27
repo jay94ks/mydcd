@@ -14,11 +14,11 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/reconcile"
-	"github.com/jay94ks/mydcd/internal/schema"
-	"github.com/jay94ks/mydcd/internal/workload/volumes"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/workload/volumes"
 )
 
 type receiveFake struct {
@@ -32,23 +32,23 @@ func (f *receiveFake) Authorize(ctx context.Context, _ moveReceiveIntent, cleanu
 		return err
 	}
 	if f.deny && !cleanup {
-		return mydcp.ErrAdmission
+		return sfcp.ErrAdmission
 	}
 	return nil
 }
-func (f *receiveFake) Transfer(ctx context.Context, _ moveReceiveIntent, offset uint64, prefix [32]byte, sink mydcp.VolumeSink) error {
+func (f *receiveFake) Transfer(ctx context.Context, _ moveReceiveIntent, offset uint64, prefix [32]byte, sink sfcp.VolumeSink) error {
 	f.requests = append(f.requests, offset)
 	if sha256.Sum256(f.data[:offset]) != prefix {
-		return mydcp.ErrFrame
+		return sfcp.ErrFrame
 	}
 	for offset < uint64(len(f.data)) {
-		end := min(offset+mydcp.VolumeChunkSize, uint64(len(f.data)))
+		end := min(offset+sfcp.VolumeChunkSize, uint64(len(f.data)))
 		next, err := sink.WriteChunk(ctx, offset, f.data[offset:end])
 		if err != nil {
 			return err
 		}
 		if next != end {
-			return mydcp.ErrFrame
+			return sfcp.ErrFrame
 		}
 		offset = next
 		if f.loseACK {
@@ -316,7 +316,7 @@ func TestMoveReceiveRejectsChangedOriginalFileOrPrefix(t *testing.T) {
 				if err := os.Rename(filePath, filePath+"-original"); err != nil {
 					t.Fatal(err)
 				}
-				if err := os.WriteFile(filePath, f.data[:mydcp.VolumeChunkSize], 0600); err != nil {
+				if err := os.WriteFile(filePath, f.data[:sfcp.VolumeChunkSize], 0600); err != nil {
 					t.Fatal(err)
 				}
 			} else {
@@ -326,7 +326,7 @@ func TestMoveReceiveRejectsChangedOriginalFileOrPrefix(t *testing.T) {
 				}
 				offset := int64(0)
 				if change == "tail" {
-					offset = mydcp.VolumeChunkSize
+					offset = sfcp.VolumeChunkSize
 				}
 				_, err = file.WriteAt([]byte{0xff}, offset)
 				_ = file.Close()

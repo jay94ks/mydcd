@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"strconv"
 
-	"github.com/jay94ks/mydcd/internal/engine"
+	"github.com/jay94ks/seafield/internal/engine"
 	"github.com/moby/moby/client"
 	bolt "go.etcd.io/bbolt"
 	"golang.org/x/sys/unix"
@@ -32,7 +32,7 @@ func (d NativeCachePruneDaemon) valid(r NativeCachePruneRecord) bool {
 type NativeCachePruneAuthority func(context.Context, NativeCachePruneSpec, bool) (NativeCachePruneGrant, error)
 
 func cachePruneWorkspaceNames(s NativeCachePruneSpec) [2]string {
-	job := ".mydc-imagebuild/cache-maintenance/" + hex.EncodeToString(s.Intent[:])
+	job := ".sfc-imagebuild/cache-maintenance/" + hex.EncodeToString(s.Intent[:])
 	return [2]string{job, job + "/output"}
 }
 func planCachePrune(s NativeCachePruneSpec, owner string) (engine.Identity, client.ContainerCreateOptions, error) {
@@ -57,7 +57,7 @@ func planCachePrune(s NativeCachePruneSpec, owner string) (engine.Identity, clie
 	names := cachePruneWorkspaceNames(s)
 	opts.Name, opts.Config.Labels = id.Name, maps.Clone(id.Labels)
 	opts.Config.WorkingDir = "/"
-	opts.Config.Entrypoint[3] = "mydc-cache-prune"
+	opts.Config.Entrypoint[3] = "sfc-cache-prune"
 	limits := s.Limits()
 	opts.Config.Entrypoint[4] = strconv.FormatUint(s.At+limits.Seconds, 10)
 	if s.Automatic != nil {
@@ -185,7 +185,7 @@ func (n *NativeJobs) PrepareCachePruneWorkspace(ctx context.Context, s NativeCac
 			return err
 		}
 	}
-	if err := ensureNativeParent(int(root.Fd()), ".mydc-imagebuild/cache-maintenance"); err != nil {
+	if err := ensureNativeParent(int(root.Fd()), ".sfc-imagebuild/cache-maintenance"); err != nil {
 		return err
 	}
 	names := cachePruneWorkspaceNames(s)

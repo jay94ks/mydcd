@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// Package provlog keeps mydc-web's diagnostic log of calls to outside
+// Package provlog keeps sfc-web's diagnostic log of calls to outside
 // providers (DNS vendors, ACME certificate authorities). Every HTTP request
 // a provider adapter makes is one entry with a short, redacted summary of
 // the request and the response, so a run on the real cluster can be handed

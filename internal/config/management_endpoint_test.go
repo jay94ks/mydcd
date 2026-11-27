@@ -12,7 +12,7 @@ import (
 func TestU0ClientManagementEndpointsDoNotChangeNodePeerContract(t *testing.T) {
 	root := t.TempDir()
 	file := filepath.Join(root, "client.yaml")
-	for _, endpoint := range []string{"unix:///var/run/mydc.sock", "mydcp://127.0.0.1:7443", "127.0.0.1:7443"} {
+	for _, endpoint := range []string{"unix:///run/sfcdp.sock", "sfcp://127.0.0.1:7443", "127.0.0.1:7443"} {
 		body := fmt.Sprintf("version: 1\nauth: user\ncluster: '%064x'\npeers:\n  - {id: node, key: '%064x', endpoint: '%s'}\n", 1, 2, endpoint)
 		if err := os.WriteFile(file, []byte(body), 0600); err != nil {
 			t.Fatal(err)
@@ -22,7 +22,7 @@ func TestU0ClientManagementEndpointsDoNotChangeNodePeerContract(t *testing.T) {
 			t.Fatal(endpoint, err)
 		}
 		want := endpoint
-		if endpoint == "mydcp://127.0.0.1:7443" {
+		if endpoint == "sfcp://127.0.0.1:7443" {
 			want = "127.0.0.1:7443"
 		}
 		if client.Peers[0].Endpoint != want {
@@ -32,7 +32,7 @@ func TestU0ClientManagementEndpointsDoNotChangeNodePeerContract(t *testing.T) {
 			t.Fatal("node Raft/packet peer accepted a management URI", endpoint)
 		}
 	}
-	for _, endpoint := range []string{"unix:///tmp/../mydc.sock", "unix://host/tmp/mydc.sock", "unix:///var/run/mydc.sock?query=1"} {
+	for _, endpoint := range []string{"unix:///tmp/../sfcdp.sock", "unix://host/tmp/sfcdp.sock", "unix:///run/sfcdp.sock?query=1"} {
 		body := fmt.Sprintf("version: 1\nauth: user\ncluster: '%064x'\npeers:\n  - {id: node, key: '%064x', endpoint: '%s'}\n", 1, 2, endpoint)
 		if err := os.WriteFile(file, []byte(body), 0600); err != nil {
 			t.Fatal(err)

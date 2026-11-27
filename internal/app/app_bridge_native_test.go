@@ -20,25 +20,25 @@ import (
 	"time"
 
 	"github.com/hashicorp/raft"
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/config"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/engine"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/network"
-	"github.com/jay94ks/mydcd/internal/reconcile"
-	"github.com/jay94ks/mydcd/internal/registry"
-	"github.com/jay94ks/mydcd/internal/tenancy"
-	"github.com/jay94ks/mydcd/internal/userauth"
-	"github.com/jay94ks/mydcd/internal/workload"
-	"github.com/jay94ks/mydcd/tests/gitfixture"
-	"github.com/jay94ks/mydcd/tests/registryfixture"
-	"github.com/jay94ks/mydcd/tests/servicecallfixture"
-	"github.com/jay94ks/mydcd/tests/vaultfixture"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/config"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/engine"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/network"
+	"github.com/jay94ks/seafield/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/registry"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/tenancy"
+	"github.com/jay94ks/seafield/internal/userauth"
+	"github.com/jay94ks/seafield/internal/workload"
+	"github.com/jay94ks/seafield/tests/gitfixture"
+	"github.com/jay94ks/seafield/tests/registryfixture"
+	"github.com/jay94ks/seafield/tests/servicecallfixture"
+	"github.com/jay94ks/seafield/tests/vaultfixture"
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/client"
 	"gopkg.in/yaml.v3"
@@ -170,7 +170,7 @@ func runManagedAppOwnerWithVolumeFileRead(t *testing.T, withWorkload, withVolume
 	if orderedSecrets && (!withWorkload || !withVolume || !withSecret || !withRetirement || !withCLI || !withRemoteInputs) {
 		t.Fatal("ordered Secret scenario requires real CLI, remote Vault, Task/Volume and original retirement")
 	}
-	tag, cidr, manifest := os.Getenv("MYDC_DOCKER_TEST_OWNER"), os.Getenv("MYDC_DOCKER_TEST_CIDR"), os.Getenv("MYDC_NATIVE_MANIFEST")
+	tag, cidr, manifest := os.Getenv("SFC_DOCKER_TEST_OWNER"), os.Getenv("SFC_DOCKER_TEST_CIDR"), os.Getenv("SFC_NATIVE_MANIFEST")
 	if tag == "" || cidr == "" || manifest == "" || os.Geteuid() != 0 {
 		t.Skip("requires prebuilt binary and owned native rollback baseline")
 	}
@@ -212,24 +212,24 @@ func runManagedAppOwnerWithVolumeFileRead(t *testing.T, withWorkload, withVolume
 	}
 	if withRegistry {
 		budget = 4 * time.Minute
-		if os.Getenv("MYDC_TEST_RQ6_REMAINING") == "prune-nonempty" {
+		if os.Getenv("SFC_TEST_RQ6_REMAINING") == "prune-nonempty" {
 			// This scope must observe the seed's real issued push token expire
 			// before deletion. The ordinary fixture envelope is shorter than
 			// that contractual lease. Preserve the token and per-call limits.
 			budget += time.Duration(registry.MaxGrantSeconds) * time.Second
 		}
-		if os.Getenv("MYDC_TEST_RQ6_IMAGE_BUILD") == "1" {
+		if os.Getenv("SFC_TEST_RQ6_IMAGE_BUILD") == "1" {
 			// Existing registry/app recovery plus five finite 180s source
 			// builds, their results and metadata cleanup. Product limits stay
 			// fixed; no failed attempt caused an increase to this envelope.
 			budget = 21 * time.Minute
-			if os.Getenv("MYDC_TEST_RQ6_LARGE_CONTEXT") == "1" {
+			if os.Getenv("SFC_TEST_RQ6_LARGE_CONTEXT") == "1" {
 				// Explicit 100MB transfer through thousands of separately
 				// signed small operations, original replay and reclamation.
 				budget += 8 * time.Minute
 			}
 		}
-		if os.Getenv("MYDC_TEST_RQ6_LARGE_REGISTRY") == "1" {
+		if os.Getenv("SFC_TEST_RQ6_LARGE_REGISTRY") == "1" {
 			// The explicit streaming push/read/GC runs independently of the
 			// source build opt-in and retains the product's per-call limits.
 			budget += 4 * time.Minute
@@ -256,6 +256,13 @@ func runManagedAppOwnerWithVolumeFileRead(t *testing.T, withWorkload, withVolume
 	if rq9Case || scenario == managedAppIngressOperations {
 		budget = 5 * time.Minute // finite extra user paths, original managed rollback
 	}
+	if rq9Case && withCLI {
+		// The CLI app setup also waits past the 30s unlinked observation
+		// window to see the linked owner keep it live, and the shell case
+		// retires six standalones and recovers the daemon (about 8 min measured
+		// in the cloud before the final retirement).
+		budget += 5 * time.Minute
+	}
 	if scenario == managedAppStandaloneFixed {
 		budget = 8 * time.Minute // fixed no/always/on-failure, same DB, three native controls and both original retirements
 	}
@@ -273,7 +280,7 @@ func runManagedAppOwnerWithVolumeFileRead(t *testing.T, withWorkload, withVolume
 	root := t.TempDir()
 	if withIngress || withRemoteInputs || scenario == managedAppFixedVolume || withCheckers || withRegistry || loggingCase || sessionCase || decisionCD || externalAppCase || rq9Case {
 		var e error
-		root, e = os.MkdirTemp("", "mydc-managed-ingress-")
+		root, e = os.MkdirTemp("", "sfc-managed-ingress-")
 		if e != nil {
 			t.Fatal(e)
 		}
@@ -297,7 +304,7 @@ func runManagedAppOwnerWithVolumeFileRead(t *testing.T, withWorkload, withVolume
 	address := socket.LocalAddr().String()
 	_ = socket.Close()
 	cfgPath := filepath.Join(root, "node.yaml")
-	document := fmt.Sprintf("version: 1\nnode:\n id: node-a\n listen: %q\n state_dir: %q\n identity_dir: %q\nmodules:\n network: {enabled: true, docker_socket: 'unix:///var/run/docker.sock'}\n workload: {enabled: false}\n ingress: {enabled: false}\n", address, filepath.Join(root, "state"), filepath.Join(root, "identity"))
+	document := fmt.Sprintf("version: 1\nnode:\n id: node-a\n listen: %q\n state_dir: %q\n identity_dir: %q\nmodules:\n network: {enabled: true}\n workload: {enabled: false}\n ingress: {enabled: false}\n", address, filepath.Join(root, "state"), filepath.Join(root, "identity"))
 	if withWorkload {
 		document = strings.Replace(document, "workload: {enabled: false}", "workload: {enabled: true}", 1)
 	}
@@ -355,7 +362,7 @@ func runManagedAppOwnerWithVolumeFileRead(t *testing.T, withWorkload, withVolume
 	if err = os.WriteFile(cfgPath, []byte(document), 0600); err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := config.LoadNode(cfgPath)
+	cfg, err := loadTestNode(cfgPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -391,7 +398,7 @@ func runManagedAppOwnerWithVolumeFileRead(t *testing.T, withWorkload, withVolume
 			cfg.GitCredentials = append(cfg.GitCredentials, bad)
 		}
 	}
-	if privateRegistry != nil && os.Getenv("MYDC_TEST_RQ6_IMAGE_BUILD") == "1" {
+	if privateRegistry != nil && os.Getenv("SFC_TEST_RQ6_IMAGE_BUILD") == "1" {
 		privateRegistry.buildGit = gitfixture.Open(t)
 		cfg.GitCredentials = append(cfg.GitCredentials, privateRegistry.buildGit.Credential(root, "tenant", "build-git"))
 	}
@@ -400,7 +407,7 @@ func runManagedAppOwnerWithVolumeFileRead(t *testing.T, withWorkload, withVolume
 		vault = vaultfixture.Open(t)
 		if !withRemoteInputs {
 			var providerLifetime []time.Duration
-			if withRegistry && os.Getenv("MYDC_TEST_RQ6_IMAGE_BUILD") == "1" {
+			if withRegistry && os.Getenv("SFC_TEST_RQ6_IMAGE_BUILD") == "1" {
 				// The finite build scenario includes genuine push-lease waits.
 				// Its initial provider input must cover that same envelope;
 				// ordinary app fixtures retain their five-minute credential.
@@ -433,14 +440,14 @@ func runManagedAppOwnerWithVolumeFileRead(t *testing.T, withWorkload, withVolume
 	}
 	// Persist public ownership before a command can cause native creation.
 	public := map[string]any{"Owner": owner, "Key": key, "CIDR": cidr, "Root": root, "Tag": tag, "Cluster": clusterID, "NodeKey": runtime.Identity.Public}
-	if withRegistry && os.Getenv("MYDC_TEST_RQ6_IMAGE_BUILD") == "1" {
+	if withRegistry && os.Getenv("SFC_TEST_RQ6_IMAGE_BUILD") == "1" {
 		public["ProviderCredentialLifetimeSeconds"] = uint64(budget / time.Second)
 	}
 	if withCheckers {
 		public["LifecycleChecker"] = true
 		public["CompiledChecker"] = compiledCheckers
 		public["RemoteChecker"] = remoteCheckers
-		public["CompilerImage"] = os.Getenv("MYDC_LIFECYCLE_COMPILER_IMAGE")
+		public["CompilerImage"] = os.Getenv("SFC_LIFECYCLE_COMPILER_IMAGE")
 	}
 	saveManifest := func() {
 		t.Helper()
@@ -483,7 +490,7 @@ func runManagedAppOwnerWithVolumeFileRead(t *testing.T, withWorkload, withVolume
 				if replacement == owner {
 					continue
 				}
-				remaining, err := c.API.ContainerList(clean, client.ContainerListOptions{All: true, Filters: client.Filters{}.Add("label", "org.mydc.owner="+replacement)})
+				remaining, err := c.API.ContainerList(clean, client.ContainerListOptions{All: true, Filters: client.Filters{}.Add("label", "org.sfc.owner="+replacement)})
 				if err != nil || len(remaining.Items) != 0 {
 					t.Error("replacement Task remains; preserving original native recovery pins", err)
 					return
@@ -495,7 +502,7 @@ func runManagedAppOwnerWithVolumeFileRead(t *testing.T, withWorkload, withVolume
 		}
 		if withWorkload {
 			cleanupManagedTaskVolumes(t, clean, c, cfg, manager, public)
-			remaining, inspectErr := c.API.ContainerList(clean, client.ContainerListOptions{All: true, Filters: client.Filters{}.Add("label", "org.mydc.owner="+owner)})
+			remaining, inspectErr := c.API.ContainerList(clean, client.ContainerListOptions{All: true, Filters: client.Filters{}.Add("label", "org.sfc.owner="+owner)})
 			if inspectErr != nil || len(remaining.Items) != 0 {
 				// A failed Task cleanup is not terminal native evidence. Keep
 				// its original Bridge pins instead of returning them underneath
@@ -561,7 +568,7 @@ func runManagedAppOwnerWithVolumeFileRead(t *testing.T, withWorkload, withVolume
 		if e != nil {
 			t.Error("fixture journal cleanup", e)
 		}
-		rows, listErr := c.API.NetworkList(clean, client.NetworkListOptions{Filters: client.Filters{}.Add("label", "org.mydc.owner="+owner)})
+		rows, listErr := c.API.NetworkList(clean, client.NetworkListOptions{Filters: client.Filters{}.Add("label", "org.sfc.owner="+owner)})
 		if listErr != nil {
 			t.Error(listErr)
 			return
@@ -582,18 +589,18 @@ func runManagedAppOwnerWithVolumeFileRead(t *testing.T, withWorkload, withVolume
 	if _, err = runtime.InstallConfiguration(ctx); err != nil {
 		t.Fatal(err)
 	}
-	peer := mydcp.Peer{ID: cfg.Node.ID, Endpoint: address, Policy: mydcp.Policy{Key: mydcp.Identity(runtime.Identity.Public), Respond: true, Read: true, Member: true}}
+	peer := sfcp.Peer{ID: cfg.Node.ID, Endpoint: address, Policy: sfcp.Policy{Key: sfcp.Identity(runtime.Identity.Public), Respond: true, Read: true, Member: true}}
 	proof, err := identity.Ephemeral()
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer clear(proof.Private)
-	mesh, err := mydcp.NewTransport(proof, clusterID, func(k mydcp.Identity) (mydcp.Peer, bool) { return peer, k == peer.Key })
+	mesh, err := sfcp.NewTransport(proof, clusterID, func(k sfcp.Identity) (sfcp.Peer, bool) { return peer, k == peer.Key })
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer mesh.Close()
-	user := userauth.Client{Mesh: mesh, Self: proof, Cluster: clusterID, Peers: []mydcp.Peer{peer}}
+	user := userauth.Client{Mesh: mesh, Self: proof, Cluster: clusterID, Peers: []sfcp.Peer{peer}}
 	enrolled, err := user.Enroll(ctx, peer, control.Enrollment{Schema: 1, RequestID: "enroll-bridge", User: access.User{ID: "admin", Username: "admin", Enabled: true, SystemAdmin: true, Credentials: []access.Credential{{ID: "key", Method: access.PrivateKey, PublicKey: adminKey.Public, Enabled: true}}}}, adminKey.Private)
 	if err != nil || enrolled.Result == nil || enrolled.Result.Code != state.Applied {
 		t.Fatal("enroll", err)
@@ -645,7 +652,7 @@ func runManagedAppOwnerWithVolumeFileRead(t *testing.T, withWorkload, withVolume
 			// its user relay is ready. Wait only on an authenticated read before
 			// preparing the one immutable mutation; never retry that submission.
 			for {
-				_, e = user.Query(ctx, peer, session, "whoami", "")
+				_, e = user.Whoami(ctx, peer, session)
 				if e == nil {
 					break
 				}
@@ -672,14 +679,14 @@ func runManagedAppOwnerWithVolumeFileRead(t *testing.T, withWorkload, withVolume
 	change("tenant", "create-tenant", 0, control.TenantID{ID: "tenant"})
 	catalog, _ := policy.Catalog(read().State)
 	tenant, _ := catalog.Tenant("tenant")
-	change("nodes", "set-nodes", tenant.Revision, control.NodeAssignment{Tenant: "tenant", Nodes: []string{"node-a"}})
+	change("nodes", "set-nodes", tenant.Revision, control.NodeChangeTo("tenant", tenant.AllowedNodes, []string{"node-a"}))
 	var registry *registryfixture.Fixture
 	if withWorkload {
-		backend := os.Getenv("MYDC_DOCKER_TEST_BACKEND")
+		backend := os.Getenv("SFC_DOCKER_TEST_BACKEND")
 		if backend == "" {
 			t.Fatal("user-prebuilt backend required")
 		}
-		imageConfig := container.Config{Cmd: []string{"/backend"}, User: "10001:10001", Labels: map[string]string{"org.mydc.test.owner": tag}}
+		imageConfig := container.Config{Cmd: []string{"/backend"}, User: "10001:10001", Labels: map[string]string{"org.sfc.test.owner": tag}}
 		if withVolume {
 			imageConfig.Volumes = map[string]struct{}{"/data": {}}
 		}
@@ -688,7 +695,7 @@ func runManagedAppOwnerWithVolumeFileRead(t *testing.T, withWorkload, withVolume
 		saveManifest()
 		catalog, _ = policy.Catalog(read().State)
 		tenant, _ = catalog.Tenant("tenant")
-		change("registry-trust", "set-trust", tenant.Revision, control.TrustAssignment{Tenant: "tenant", Rules: append(tenant.ImageSources, access.TrustRule{Registry: registry.Registry, Repository: "fixture"})})
+		change("registry-trust", "set-trust", tenant.Revision, control.TrustChange{Tenant: "tenant", Add: []access.TrustRule{access.TrustRule{Registry: registry.Registry, Repository: "fixture"}}})
 	}
 	for i, scope := range []string{"", "tenant"} {
 		capacity := workload.Resources{CPU: 1e9, Memory: 256 << 20}
@@ -702,7 +709,7 @@ func runManagedAppOwnerWithVolumeFileRead(t *testing.T, withWorkload, withVolume
 		if withCheckers {
 			capacity = workload.Resources{CPU: 2e9, Memory: 1 << 30}
 		}
-		if withRegistry && os.Getenv("MYDC_TEST_RQ6_IMAGE_BUILD") == "1" {
+		if withRegistry && os.Getenv("SFC_TEST_RQ6_IMAGE_BUILD") == "1" {
 			// Initial fixture reservation for a 512MiB builder plus registry;
 			// this is not a policy change in response to a failed execution.
 			capacity.Memory = 1 << 30
@@ -710,7 +717,7 @@ func runManagedAppOwnerWithVolumeFileRead(t *testing.T, withWorkload, withVolume
 		if rq9Case {
 			maxConsumers = max(maxConsumers, 16)
 		} // app plus bounded standalone quota fixture
-		change(fmt.Sprintf("limit-%d", i), "set-node-quota", 0, tenancy.NodeLimit{Tenant: scope, Node: "node-a", Capacity: capacity, Networks: 2, MaxConsumers: maxConsumers, MaxIngressInstances: 2, MaxIngressListeners: 4, MaxIngressRequests: 4, MaxIngressConnections: 16, IngressBufferBytes: 256 << 10})
+		change(fmt.Sprintf("limit-%d", i), "set-node-quota", 0, tenancy.NodeLimit{Tenant: scope, Node: "node-a", Capacity: capacity, Networks: 2, MaxConsumers: maxConsumers, PacketQueuePackets: 128, PacketQueueBytes: 256 << 10, MaxIngressInstances: 2, MaxIngressListeners: 4, MaxIngressRequests: 4, MaxIngressConnections: 16, IngressBufferBytes: 256 << 10})
 	}
 	if withRemoteInputs {
 		dockerEndpoint := ""
@@ -726,8 +733,8 @@ func runManagedAppOwnerWithVolumeFileRead(t *testing.T, withWorkload, withVolume
 	}
 	if withSecret {
 		if withRemoteInputs {
-			remotePeer, _ := runtime.Mesh.Peer(mydcp.Identity(remoteProvider.Identity.Public))
-			privateMesh, e := mydcp.NewTransport(proof, clusterID, func(key mydcp.Identity) (mydcp.Peer, bool) {
+			remotePeer, _ := runtime.Mesh.Peer(sfcp.Identity(remoteProvider.Identity.Public))
+			privateMesh, e := sfcp.NewTransport(proof, clusterID, func(key sfcp.Identity) (sfcp.Peer, bool) {
 				if key == remotePeer.Key {
 					return remotePeer, true
 				}
@@ -737,7 +744,7 @@ func runManagedAppOwnerWithVolumeFileRead(t *testing.T, withWorkload, withVolume
 				t.Fatal(e)
 			}
 			defer privateMesh.Close()
-			remoteUser := userauth.Client{Mesh: privateMesh, Self: proof, Cluster: clusterID, Peers: []mydcp.Peer{peer, remotePeer}}
+			remoteUser := userauth.Client{Mesh: privateMesh, Self: proof, Cluster: clusterID, Peers: []sfcp.Peer{peer, remotePeer}}
 			if orderedSecrets {
 				prepareManagedAppSecretScenario(t, ctx, remoteProvider, remoteUser, remotePeer, session, policy, read, change, runtime, managedAppOrderedSecrets)
 			} else {
@@ -781,7 +788,7 @@ func runManagedAppOwnerWithVolumeFileRead(t *testing.T, withWorkload, withVolume
 	if externalAppCase {
 		externalApp = prepareExternalRegistryAppNative(t, ctx, runtime, root, user, peer, session, policy, read, change, registry, public, saveManifest)
 	}
-	remainingRQ6 := os.Getenv("MYDC_TEST_RQ6_REMAINING")
+	remainingRQ6 := os.Getenv("SFC_TEST_RQ6_REMAINING")
 	if privateRegistry != nil && remainingRQ6 == "prune-follower" {
 		handoffControl = prepareManagedHandoffControl(t, ctx, root, runtime, user, peer, session, policy, read, change)
 		privateRegistry.verifyRegistryPruneFollowerNative(t, ctx, runtime, handoffControl, user, peer, policy, read, change)
@@ -793,26 +800,26 @@ func runManagedAppOwnerWithVolumeFileRead(t *testing.T, withWorkload, withVolume
 		return
 	}
 	prefix := netip.MustParsePrefix(cidr)
-	compose := []byte("name: app\nx-mydc: {}\nservices:\n web:\n  image: docker.io/library/php@sha256:" + strings.Repeat("a", 64) + "\n  cpus: 0.1\n  mem_limit: 16m\n  networks: {app: {ipv4_address: " + prefix.Addr().Next().Next().String() + "}}\n  x-mydc: {node: node-a}\nnetworks:\n app:\n  x-mydc: {mtu: 1280, pools: {node-a: {cidr: " + cidr + ", gateway: " + prefix.Addr().Next().String() + "}}}\n")
+	compose := []byte("name: app\nx-sfc: {}\nservices:\n web:\n  image: docker.io/library/php@sha256:" + strings.Repeat("a", 64) + "\n  cpus: 0.1\n  mem_limit: 16m\n  networks: {app: {ipv4_address: " + prefix.Addr().Next().Next().String() + "}}\n  x-sfc: {node: node-a}\nnetworks:\n app:\n  x-sfc: {mtu: 1280, pools: {node-a: {cidr: " + cidr + ", gateway: " + prefix.Addr().Next().String() + "}}}\n")
 	if withWorkload {
 		compose = []byte(strings.Replace(string(compose), "docker.io/library/php@sha256:"+strings.Repeat("a", 64), registry.Reference, 1))
-		compose = []byte(strings.Replace(string(compose), "  x-mydc: {node: node-a}", "  environment: {MYDC_VOLUME_FIXTURE: \"1\", MYDC_READINESS_FIXTURE: \"1\"}\n  volumes: [data:/data]\n  healthcheck: {test: [CMD, /backend, --volume-probe], interval: 1s, timeout: 1s, retries: 2}\n  x-mydc: {node: node-a, ready: {http: /readyz, port: 8080}}", 1))
-		compose = append(compose, []byte("volumes:\n data:\n  x-mydc: {node: node-a, uid: 10001, gid: 10001, mode: \"0750\"}\n")...)
+		compose = []byte(strings.Replace(string(compose), "  x-sfc: {node: node-a}", "  environment: {SFC_VOLUME_FIXTURE: \"1\", SFC_READINESS_FIXTURE: \"1\"}\n  volumes: [data:/data]\n  healthcheck: {test: [CMD, /backend, --volume-probe], interval: 1s, timeout: 1s, retries: 2}\n  x-sfc: {node: node-a, ready: {http: /readyz, port: 8080}}", 1))
+		compose = append(compose, []byte("volumes:\n data:\n  x-sfc: {node: node-a, uid: 10001, gid: 10001, mode: \"0750\"}\n")...)
 		if volumeMove {
-			compose = []byte(strings.Replace(string(compose), "MYDC_VOLUME_FIXTURE: \"1\", ", "MYDC_GRACEFUL_FIXTURE: \"1\", MYDC_VOLUME_FIXTURE: \"1\", ", 1))
+			compose = []byte(strings.Replace(string(compose), "SFC_VOLUME_FIXTURE: \"1\", ", "SFC_GRACEFUL_FIXTURE: \"1\", SFC_VOLUME_FIXTURE: \"1\", ", 1))
 		}
 		if scenario == managedAppVolumeMoveReverse || scenario == managedAppVolumeMoveAuto {
-			compose = []byte(strings.Replace(string(compose), "MYDC_VOLUME_FIXTURE: \"1\", ", "MYDC_MOVE_FIXTURE: \"1\", MYDC_VOLUME_FIXTURE: \"1\", ", 1))
+			compose = []byte(strings.Replace(string(compose), "SFC_VOLUME_FIXTURE: \"1\", ", "SFC_MOVE_FIXTURE: \"1\", SFC_VOLUME_FIXTURE: \"1\", ", 1))
 		}
 		if !withVolume {
-			compose = []byte(strings.Replace(string(compose), "MYDC_VOLUME_FIXTURE: \"1\", ", "", 1))
+			compose = []byte(strings.Replace(string(compose), "SFC_VOLUME_FIXTURE: \"1\", ", "", 1))
 			compose = []byte(strings.Replace(string(compose), "  volumes: [data:/data]\n", "", 1))
 			compose = []byte(strings.Replace(string(compose), "--volume-probe", "--probe", 1))
 			compose = compose[:strings.Index(string(compose), "\nvolumes:")+1]
 		}
 	}
 	if scenario == managedAppContainerObserve || loggingCase || sessionCase {
-		compose = []byte(strings.Replace(string(compose), "MYDC_READINESS_FIXTURE: \"1\"", "MYDC_READINESS_FIXTURE: \"1\", MYDC_OBSERVATION_FIXTURE: \"1\"", 1))
+		compose = []byte(strings.Replace(string(compose), "SFC_READINESS_FIXTURE: \"1\"", "SFC_READINESS_FIXTURE: \"1\", SFC_OBSERVATION_FIXTURE: \"1\"", 1))
 	}
 	if sessionCase {
 		// The original backend and a concurrent Go exec share the cgroup.
@@ -841,10 +848,10 @@ func runManagedAppOwnerWithVolumeFileRead(t *testing.T, withWorkload, withVolume
 	}
 	if withSecret {
 		compose = []byte(strings.Replace(string(compose), "  volumes: [data:/data]", "  volumes: [data:/data]\n  secrets: [{source: password, target: /run/secrets/db-password, uid: '10001', gid: '10001', mode: '0400'}]", 1))
-		compose = []byte(strings.Replace(string(compose), "MYDC_VOLUME_FIXTURE: \"1\",", "MYDC_VOLUME_FIXTURE: \"1\", MYDC_PROJECTION_FILE: /run/secrets/db-password,", 1))
+		compose = []byte(strings.Replace(string(compose), "SFC_VOLUME_FIXTURE: \"1\",", "SFC_VOLUME_FIXTURE: \"1\", SFC_PROJECTION_FILE: /run/secrets/db-password,", 1))
 		compose = []byte(strings.Replace(string(compose), "--volume-probe", "--projection-probe", 1))
 		compose = []byte(strings.Replace(string(compose), "{node: node-a, ready:", "{node: node-a, secrets_from: [data], ready:", 1))
-		compose = append(compose, []byte("secrets:\n password:\n  x-mydc: {key: DB_PASSWORD}\n")...)
+		compose = append(compose, []byte("secrets:\n password:\n  x-sfc: {key: DB_PASSWORD}\n")...)
 	}
 	if withIngress && identityCase {
 		prepareIdentityCertificate(t, ctx, runtime, user, peer, session, change)
@@ -852,14 +859,14 @@ func runManagedAppOwnerWithVolumeFileRead(t *testing.T, withWorkload, withVolume
 		prepareIngressCertificate(t, ctx, user, peer, session, change)
 	}
 	if withIngress {
-		compose = []byte(strings.Replace(string(compose), "x-mydc: {}", ingressYAML, 1))
+		compose = []byte(strings.Replace(string(compose), "x-sfc: {}", ingressYAML, 1))
 	}
 	if scenario == managedAppTenantIsolation {
-		compose = []byte(strings.Replace(string(compose), "MYDC_READINESS_FIXTURE: \"1\"", "MYDC_READINESS_FIXTURE: \"1\", MYDC_TENANT_FIXTURE: tenant", 1))
+		compose = []byte(strings.Replace(string(compose), "SFC_READINESS_FIXTURE: \"1\"", "SFC_READINESS_FIXTURE: \"1\", SFC_TENANT_FIXTURE: tenant", 1))
 	}
 	if withDNS {
-		compose = []byte(strings.Replace(string(compose), "MYDC_READINESS_FIXTURE: \"1\"", "MYDC_READINESS_FIXTURE: \"1\", MYDC_DNS_FIXTURE: \"1\"", 1))
-		compose = []byte(strings.Replace(string(compose), "x-mydc: {mtu: 1280, pools:", "x-mydc: {mtu: 1280, dns: {enabled: true, zone: app.mydc.test, ttl_seconds: 1, negative_ttl_seconds: 1, transports: [udp, tcp], limits: {cache_entries: 4, queries_inflight: 4, tcp_connections: 2, request_timeout_ms: 2000}}, pools:", 1))
+		compose = []byte(strings.Replace(string(compose), "SFC_READINESS_FIXTURE: \"1\"", "SFC_READINESS_FIXTURE: \"1\", SFC_DNS_FIXTURE: \"1\"", 1))
+		compose = []byte(strings.Replace(string(compose), "x-sfc: {mtu: 1280, pools:", "x-sfc: {mtu: 1280, dns: {enabled: true, zone: app.sfc.test, ttl_seconds: 1, negative_ttl_seconds: 1, transports: [udp, tcp], limits: {cache_entries: 4, queries_inflight: 4, tcp_connections: 2, request_timeout_ms: 2000}}, pools:", 1))
 	}
 	var orderedAudit *managedSecretAudit
 	var groups []string
@@ -880,7 +887,7 @@ func runManagedAppOwnerWithVolumeFileRead(t *testing.T, withWorkload, withVolume
 		}
 		if withDNS || scenario == managedAppSecondLifecycle {
 			declared := parsed.Networks["app"]
-			declared.MyDC.TunnelAddresses = map[string]string{"node-a": "198.18.254.1/32"}
+			declared.Sfc.TunnelAddresses = map[string]string{"node-a": "198.18.254.1/32"}
 			parsed.Networks["app"] = declared
 			legacy, err := yaml.Marshal(parsed)
 			if err != nil {
@@ -896,7 +903,7 @@ func runManagedAppOwnerWithVolumeFileRead(t *testing.T, withWorkload, withVolume
 			if err != nil {
 				t.Fatal(err)
 			}
-			managementInput = []byte(fmt.Sprintf("schema: 1\ntenant: tenant\nchanges:\n - id: shared-services\n   action: create-tun-network\n   expected: 0\n   payload:\n    Tenant: tenant\n    Name: shared-services\n    Members:\n     - Node: node-a\n       Pools:\n        - {ID: pool, Prefix: %s, Gateway: %s, MTU: 1280}\n       Addresses: [198.18.254.1/32]\n", cidr, prefix.Addr().Next()))
+			managementInput = []byte(fmt.Sprintf("schema: 1\ntenant: tenant\nchanges:\n - id: shared-services\n   action: create-tun-network\n   expected: 0\n   payload:\n    Tenant: tenant\n    Name: shared-services\n    Members:\n     - Node: node-a\n       Pools:\n        - {ID: pool, Prefix: %s, Gateway: %s, MTU: 1280}\n", cidr, prefix.Addr().Next()))
 		}
 	}
 	if diagnostics {
@@ -908,7 +915,7 @@ func runManagedAppOwnerWithVolumeFileRead(t *testing.T, withWorkload, withVolume
 		if service.Environment == nil {
 			service.Environment = deployment.Environment{}
 		}
-		service.Environment["MYDC_SERVICE_CALL_FIXTURE"] = "1"
+		service.Environment["SFC_SERVICE_CALL_FIXTURE"] = "1"
 		input.Services["web"] = service
 		compose, err = yaml.Marshal(input)
 		if err != nil {
@@ -933,7 +940,7 @@ func runManagedAppOwnerWithVolumeFileRead(t *testing.T, withWorkload, withVolume
 			if localCD {
 				policy.Sync.Prune = true
 			}
-			input.MyDC.Delivery = &policy
+			input.Sfc.Delivery = &policy
 			compose, err = yaml.Marshal(input)
 			if err != nil {
 				t.Fatal(err)
@@ -1187,11 +1194,11 @@ func runManagedAppOwnerWithVolumeFileRead(t *testing.T, withWorkload, withVolume
 			moveApprover := remoteProvider.Identity.Public
 			approveMove := func(origin control.UserOperation) {
 				t.Helper()
-				remotePeer, ok := runtime.Mesh.Peer(mydcp.Identity(moveApprover))
+				remotePeer, ok := runtime.Mesh.Peer(sfcp.Identity(moveApprover))
 				if !ok {
 					t.Fatal("move approver member")
 				}
-				privateMesh, err := mydcp.NewTransport(proof, clusterID, func(k mydcp.Identity) (mydcp.Peer, bool) {
+				privateMesh, err := sfcp.NewTransport(proof, clusterID, func(k sfcp.Identity) (sfcp.Peer, bool) {
 					if k == remotePeer.Key {
 						return remotePeer, true
 					}
@@ -1201,7 +1208,7 @@ func runManagedAppOwnerWithVolumeFileRead(t *testing.T, withWorkload, withVolume
 					t.Fatal(err)
 				}
 				defer privateMesh.Close()
-				requester := userauth.Client{Mesh: privateMesh, Self: proof, Cluster: clusterID, Peers: []mydcp.Peer{peer, remotePeer}}
+				requester := userauth.Client{Mesh: privateMesh, Self: proof, Cluster: clusterID, Peers: []sfcp.Peer{peer, remotePeer}}
 				query := control.VaultApprovalPlanRequest{Realm: "tenant", ID: "move-target-groups", Origin: &origin}
 				forged := origin
 				forged.RequestID = "unaccepted-move"
@@ -1448,7 +1455,7 @@ func runManagedAppOwnerWithVolumeFileRead(t *testing.T, withWorkload, withVolume
 				}
 				latest := verifyManagedContainerLogging(t, ctx, &runtime, cfg, root, user, peer, session, policy, read, wait, loggingStopFault, remote, loggingCD)
 				cliChecks[0] = func() {
-					output, diagnostic, err := runManagedCLICommand(ctx, os.Getenv("MYDC_TEST_CLI"), filepath.Join(root, "cli-home"), filepath.Join(root, "cli.yaml"), []string{"compose", "wait", "-p", "app", "--tenant", "tenant", "--operation", latest}, nil)
+					output, diagnostic, err := runManagedCLICommand(ctx, os.Getenv("SFC_TEST_CLI"), filepath.Join(root, "cli-home"), filepath.Join(root, "cli.yaml"), []string{"compose", "wait", "-p", "app", "--tenant", "tenant", "--operation", latest}, nil)
 					if err != nil {
 						t.Fatal("current post-clear rollout health", err, string(diagnostic), string(output))
 					}
@@ -1504,7 +1511,7 @@ func runManagedAppOwnerWithVolumeFileRead(t *testing.T, withWorkload, withVolume
 						saveManifest()
 						t.Log("original CD retirement graph", lastRetirement)
 					}
-					if path := os.Getenv("MYDC_NATIVE_STACKS"); filepath.IsAbs(path) && time.Since(unchangedSince) >= 10*time.Second {
+					if path := os.Getenv("SFC_NATIVE_STACKS"); filepath.IsAbs(path) && time.Since(unchangedSince) >= 10*time.Second {
 						file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
 						if err != nil {
 							t.Fatal("original stall stack output", err)
@@ -1650,13 +1657,13 @@ func runManagedAppOwnerWithVolumeFileRead(t *testing.T, withWorkload, withVolume
 	if _, err = runtime.network.Acquire(ctx, key, "third", source.Generation); err == nil {
 		t.Fatal("consumer shrink lost admission limit")
 	}
-	nodeMesh, err := mydcp.NewTransport(runtime.Identity, clusterID, func(k mydcp.Identity) (mydcp.Peer, bool) { return peer, k == peer.Key })
+	nodeMesh, err := sfcp.NewTransport(runtime.Identity, clusterID, func(k sfcp.Identity) (sfcp.Peer, bool) { return peer, k == peer.Key })
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer nodeMesh.Close()
 	request, _ := json.Marshal(control.NativeRequest{Source: deployment.ObjectRef{Key: key, Generation: source.Generation, Revision: source.Revision}})
-	call := func(m *mydcp.Transport, self *identity.Identity, method string, input []byte) (cluster.ManagementReply, error) {
+	call := func(m *sfcp.Transport, self *identity.Identity, method string, input []byte) (cluster.ManagementReply, error) {
 		return cluster.CallManagement(ctx, m, self, clusterID, peer, cluster.ManagementRequest{Method: method, Latest: true, Input: input})
 	}
 	permitReply, err := call(nodeMesh, runtime.Identity, "app-native-permit", request)
@@ -1697,7 +1704,7 @@ func runManagedAppOwnerWithVolumeFileRead(t *testing.T, withWorkload, withVolume
 	}
 	catalog, _ = policy.Catalog(read().State)
 	tenant, _ = catalog.Tenant("tenant")
-	change("revoke-node", "set-nodes", tenant.Revision, control.NodeAssignment{Tenant: "tenant", Nodes: nil})
+	change("revoke-node", "set-nodes", tenant.Revision, control.NodeChangeTo("tenant", tenant.AllowedNodes, nil))
 	denied, denyErr := call(nodeMesh, runtime.Identity, "app-native-permit", request)
 	if denyErr == nil && denied.Code == "ok" {
 		t.Fatal("revoked node got new activation authority")
@@ -1710,7 +1717,7 @@ func runManagedAppOwnerWithVolumeFileRead(t *testing.T, withWorkload, withVolume
 	} else if execution, _ := a.Execution("tenant", "app"); execution.Status() == "Succeeded" {
 		t.Fatal("unsupported task marked whole app succeeded")
 	}
-	t.Log("actual managed Runtime -> accepted user app -> exact Prepare/Send/Goal/Collect -> SDK/kernel Bridge -> signed observation; live consumer shrink; member-only fresh MYDCP permit/result; Snapshot/same DB/native ID/pins; revoked activation retains original resource; task pending")
+	t.Log("actual managed Runtime -> accepted user app -> exact Prepare/Send/Goal/Collect -> SDK/kernel Bridge -> signed observation; live consumer shrink; member-only fresh SFCP permit/result; Snapshot/same DB/native ID/pins; revoked activation retains original resource; task pending")
 }
 
 func containsBridgeKey(keys []string, key string) bool {

@@ -9,11 +9,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/identity"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/identity"
 )
 
-// The server screens on two real mydcd nodes: summary, Raft status, disks,
+// The server screens on two real sfcd nodes: summary, Raft status, disks,
 // mesh links and a Raft compaction, and that a workspace manager sees none
 // of the cluster-wide ones.
 func TestRealServerNodeViews(t *testing.T) {
@@ -90,6 +90,10 @@ func TestRealServerNodeViews(t *testing.T) {
 	if code != 200 || len(disks) == 0 || disks[0].(map[string]any)["fsType"] == nil || disks[0].(map[string]any)["observedAt"].(float64) > 1e11 {
 		t.Fatalf("node disks: %d %v", code, out)
 	}
+	// the device inventory of the server; the system disk holds "/"
+	if devices, _ := out["devices"].(map[string]any); devices == nil || devices["node"] != "node-0" {
+		t.Fatalf("node devices: %v", out)
+	}
 	c.Wait("mesh link observed", func() bool {
 		_, out = f.do("GET", "/api/v1/mesh", nil)
 		items, _ := out["items"].([]any)
@@ -111,7 +115,7 @@ func TestRealServerNodeViews(t *testing.T) {
 		t.Fatalf("plan: %d %v", code, out)
 	}
 	plan := out["plan"]
-	// mydcd does not say whether a server it will not plan exists
+	// sfcd does not say whether a server it will not plan exists
 	if code, out := f.do("GET", "/api/v1/raft/compact/plan?mode=keep&nodes=node-z", nil); code != 403 {
 		t.Fatalf("plan for an unknown server: %d %v", code, out)
 	}

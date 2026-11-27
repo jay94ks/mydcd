@@ -8,8 +8,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/state"
 	"slices"
 	"testing"
 )
@@ -59,7 +59,7 @@ func TestFileGrantListUsesOriginalFolderGrantReducerAndCurrentAccount(t *testing
 	f := newBackupCore(t)
 	own := addPublicFileGrantUser(t, f, "delegate")
 	other := addPublicFileGrantUser(t, f, "other")
-	g := access.VolumeFileFolderGrant{Tenant: "tenant", App: "app", Volume: "data", Prefix: "mydc-web-backups/", User: own.User}
+	g := access.VolumeFileFolderGrant{Tenant: "tenant", App: "app", Volume: "data", Prefix: "sfc-web-backups/", User: own.User}
 	setPublicFileGrant(t, f, "grant-folder", g, false)
 	c, _ := f.p.Catalog(f.s)
 	stored := c.VolumeFileGrants("tenant", own.User, "app", "data")
@@ -91,7 +91,7 @@ func TestFileGrantListUsesOriginalFolderGrantReducerAndCurrentAccount(t *testing
 	user.Enabled = false
 	expected := user.Revision
 	user.Revision = 0
-	f.apply("disable-delegate", "put-user", expected, user, state.Applied)
+	f.apply("disable-delegate", "put-user", expected, accountFields(user), state.Applied)
 	page = readPublicFileGrants(t, f, f.session, q, "")
 	if len(page.Rows) != 1 || page.Rows[0].FileGrant.AccountEnabled || page.Rows[0].FileGrant.Revision != stored[0].Revision {
 		t.Fatal("account mutation replaced or hid folder grant", page)
@@ -152,10 +152,7 @@ func TestCredentialFileCeilingIsNotListedAsAnIssuedFolderGrant(t *testing.T) {
 	own := addPublicFileGrantUser(t, f, "delegate")
 	c, _ := f.p.Catalog(f.s)
 	user, _ := c.User(own.User)
-	user.Credentials[0].VolumeFiles = []access.VolumeFileGrant{{Tenant: "tenant", App: "app", Volume: "data", Prefix: "credential-only/", Operations: []string{"volume-file-get"}}}
-	expected := user.Revision
-	user.Revision = 0
-	f.apply("credential-ceiling", "put-user", expected, user, state.Applied)
+	f.apply("credential-ceiling", "add-credential", user.Revision, access.CredentialAddition{User: own.User, Credential: access.CredentialKey{ID: "limited", Method: access.PrivateKey, PublicKey: [32]byte{201}}, Operations: []string{"volume-file-get"}, VolumeFiles: []access.VolumeFileGrant{{Tenant: "tenant", App: "app", Volume: "data", Prefix: "credential-only/", Operations: []string{"volume-file-get"}}}}, state.Applied)
 	page := readPublicFileGrants(t, f, f.session, PublicReadQuery{}, "")
 	if len(page.Rows) != 0 || page.Total != 0 {
 		t.Fatal("credential ceiling masqueraded as grant/revoke state", page)

@@ -10,7 +10,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// The app.yaml forms of a few x-mydc values (devel/design/cli-and-formats.md,
+// The app.yaml forms of a few x-sfc values (devel/design/cli-and-formats.md,
 // app.yaml). Only the yaml shape is written here: the Go fields and their
 // JSON (plans, stored artifacts) stay the same.
 

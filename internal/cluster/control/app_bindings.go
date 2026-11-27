@@ -11,11 +11,12 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/secrets"
-	"github.com/jay94ks/mydcd/internal/workload/volumes"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/membership"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/secrets"
+	"github.com/jay94ks/seafield/internal/workload/volumes"
 )
 
 // AppBindingSource preserves the ORIGINAL task and accepted delegation even
@@ -67,7 +68,7 @@ func (p Policy) AdmitAppPatch(s state.State, cmd state.Command, keys []string) b
 				return false
 			}
 			for _, key := range keys {
-				if key != ResourcesKey && !strings.HasPrefix(key, ResourcesKey+"/part/") {
+				if key != ResourcesKey && !strings.HasPrefix(key, ResourcesKey+"/") {
 					return false
 				}
 			}
@@ -90,7 +91,7 @@ func (p Policy) AdmitAppPatch(s state.State, cmd state.Command, keys []string) b
 			evidence = tenantRetirementEvidenceKey(selection.Tenant, selection.Operation)
 		}
 		for _, key := range keys {
-			if key != ResourcesKey && !strings.HasPrefix(key, ResourcesKey+"/part/") && !(evidence != "" && (key == evidence || strings.HasPrefix(key, evidence+"/part/"))) && !checkpointPatchKey(shellWrites, NodeShellKey, key) {
+			if key != ResourcesKey && !strings.HasPrefix(key, ResourcesKey+"/") && !(evidence != "" && (key == evidence || strings.HasPrefix(key, evidence+"/"))) && !checkpointPatchKey(shellWrites, NodeShellKey, key) {
 				return false
 			}
 		}
@@ -102,7 +103,7 @@ func (p Policy) AdmitAppPatch(s state.State, cmd state.Command, keys []string) b
 			return false
 		}
 		for _, key := range keys {
-			if key != ResourcesKey && !strings.HasPrefix(key, ResourcesKey+"/part/") {
+			if key != ResourcesKey && !strings.HasPrefix(key, ResourcesKey+"/") {
 				return false
 			}
 		}
@@ -114,8 +115,8 @@ func (p Policy) AdmitAppPatch(s state.State, cmd state.Command, keys []string) b
 			return false
 		}
 		for _, key := range keys {
-			resource := key == ResourcesKey || strings.HasPrefix(key, ResourcesKey+"/part/")
-			volume := report.Action != "drain" && (key == VolumesKey || strings.HasPrefix(key, VolumesKey+"/part/"))
+			resource := key == ResourcesKey || strings.HasPrefix(key, ResourcesKey+"/")
+			volume := report.Action != "drain" && (key == VolumesKey || strings.HasPrefix(key, VolumesKey+"/"))
 			if !resource && !volume {
 				return false
 			}
@@ -435,7 +436,11 @@ func (p Policy) reduceAppBinding(s state.State, r AppProgress, a Apps, entry app
 				return nil, state.ConditionFailed
 			}
 		}
-		result, err = a.bindings.Reserve(a.bindings.Revision(), c, vault.Trees, vault.Approvals, volumeStates(registry), []deployment.Needs{n}, int64(r.At))
+		shares, err := p.VolumeShares(s)
+		if err != nil {
+			return nil, state.Invalid
+		}
+		result, err = a.bindings.Reserve(a.bindings.Revision(), c, vault.Trees, vault.Approvals, volumeStates(registry), []deployment.Needs{n}, int64(r.At), shares.mode)
 		if err != nil {
 			return nil, state.ConditionFailed
 		}
@@ -599,6 +604,9 @@ func (p Policy) inputProfiles(s state.State, tree secrets.Tree, plan secrets.Use
 	var profiles []secrets.WriteProfile
 	seen := map[string]bool{}
 	for _, leaf := range plan.Leaves {
+		if leaf.Reference.Profile == secrets.BuiltinProfile && !builtinHeld(members, tree, leaf.Reference) {
+			return nil, access.ErrDenied
+		}
 		if seen[leaf.Reference.Profile] {
 			continue
 		}
@@ -606,6 +614,10 @@ func (p Policy) inputProfiles(s state.State, tree secrets.Tree, plan secrets.Use
 		profile, ok := tree.WriteProfile(leaf.Reference.Profile)
 		if !ok || !profile.Enabled || !profile.Values {
 			return nil, access.ErrDenied
+		}
+		if profile.Builtin() {
+			profiles = append(profiles, profile)
+			continue
 		}
 		entry, exists := members.Entry(profile.Node)
 		// Keep the original profile in the read-set. Only its exact node's
@@ -829,4 +841,19 @@ func (p Policy) AppInputClosure(s state.State, caller [32]byte, request AppBindi
 		return AppBindingSource{}, access.ErrDenied
 	}
 	return source, nil
+}
+
+// builtinHeld is true when a published builtin revision has a holder that is
+// a current voter: someone can still serve it.
+func builtinHeld(members membership.Directory, tree secrets.Tree, r secrets.Reference) bool {
+	h, ok := tree.BuiltinHolding(secrets.ValueWrite, r.Object, r.Revision)
+	if !ok {
+		return false
+	}
+	for _, v := range h.Holders {
+		if members.VoterKey(v) {
+			return true
+		}
+	}
+	return false
 }

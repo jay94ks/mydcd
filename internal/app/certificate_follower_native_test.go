@@ -9,18 +9,18 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/certstore"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/schema"
-	"github.com/jay94ks/mydcd/internal/userauth"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/certstore"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/userauth"
 )
 
 // Reuses the existing joined node-b and the original user session. Only a
 // requester transport is added; no issuer, owner, DB or native app moves.
-func rq7FollowerCertificateClient(t *testing.T, ctx context.Context, a, b *Runtime, original userauth.Client, source mydcp.Peer, p control.Policy) (userauth.Client, mydcp.Peer) {
+func rq7FollowerCertificateClient(t *testing.T, ctx context.Context, a, b *Runtime, original userauth.Client, source sfcp.Peer, p control.Policy) (userauth.Client, sfcp.Peer) {
 	t.Helper()
 	if b.Engine().IsLeader() {
 		t.Fatal("second native owner unexpectedly became leader")
@@ -39,11 +39,11 @@ func rq7FollowerCertificateClient(t *testing.T, ctx context.Context, a, b *Runti
 			nonvoter = !member.Peer.Voter
 		}
 	}
-	provider, ok := a.Mesh.Peer(mydcp.Identity(b.Identity.Public))
+	provider, ok := a.Mesh.Peer(sfcp.Identity(b.Identity.Public))
 	if !nonvoter || !ok || !provider.Member || !provider.Respond || !members.WorkKey(b.Identity.Public) {
 		t.Fatal("existing second native provider is not the installed non-voter")
 	}
-	mesh, err := mydcp.NewTransport(original.Self, original.Cluster, func(key mydcp.Identity) (mydcp.Peer, bool) {
+	mesh, err := sfcp.NewTransport(original.Self, original.Cluster, func(key sfcp.Identity) (sfcp.Peer, bool) {
 		if key == source.Key {
 			return source, true
 		}
@@ -54,11 +54,11 @@ func rq7FollowerCertificateClient(t *testing.T, ctx context.Context, a, b *Runti
 	}
 	t.Cleanup(func() { _ = mesh.Close() })
 	client := original
-	client.Mesh, client.Peers = mesh, []mydcp.Peer{source, provider}
+	client.Mesh, client.Peers = mesh, []sfcp.Peer{source, provider}
 	return client, provider
 }
 
-func rq7PrepareFollowerCertificate(t *testing.T, ctx context.Context, a, b *Runtime, user userauth.Client, provider mydcp.Peer, session access.Session, request string, material certstore.Material) certstore.Certificate {
+func rq7PrepareFollowerCertificate(t *testing.T, ctx context.Context, a, b *Runtime, user userauth.Client, provider sfcp.Peer, session access.Session, request string, material certstore.Material) certstore.Certificate {
 	t.Helper()
 	v, err := user.WriteCertificate(ctx, provider, session, userauth.CertificateInput{Request: request, Chain: material.Chain, Key: material.Key})
 	if err != nil || v.Sealer != b.Identity.Public {
@@ -95,7 +95,7 @@ func rq7FollowerCertificateMaterialBoundary(t *testing.T, ctx context.Context, a
 		t.Fatal("original installed consumer selection missing", err)
 	}
 	// Only voters answer: node-b sealed the upload but holds no master key.
-	follower, ok := a.Mesh.Peer(mydcp.Identity(b.Identity.Public))
+	follower, ok := a.Mesh.Peer(sfcp.Identity(b.Identity.Public))
 	if !ok {
 		t.Fatal("follower is not pinned")
 	}
@@ -109,11 +109,11 @@ func rq7FollowerCertificateMaterialBoundary(t *testing.T, ctx context.Context, a
 		t.Fatal("non-voter answered a certificate key read")
 	}
 	// The consumer's own identity asks the voter (node-a) over real TLS.
-	voter, ok := a.Mesh.Peer(mydcp.Identity(a.Identity.Public))
+	voter, ok := a.Mesh.Peer(sfcp.Identity(a.Identity.Public))
 	if !ok {
 		t.Fatal("voter is not pinned")
 	}
-	client, err := mydcp.NewTransport(a.Identity, p.Cluster, func(key mydcp.Identity) (mydcp.Peer, bool) { return a.Mesh.Peer(key) })
+	client, err := sfcp.NewTransport(a.Identity, p.Cluster, func(key sfcp.Identity) (sfcp.Peer, bool) { return a.Mesh.Peer(key) })
 	if err != nil {
 		t.Fatal(err)
 	}

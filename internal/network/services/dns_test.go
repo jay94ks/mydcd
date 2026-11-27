@@ -12,8 +12,8 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/network"
-	"github.com/jay94ks/mydcd/internal/tenancy"
+	"github.com/jay94ks/seafield/internal/network"
+	"github.com/jay94ks/seafield/internal/tenancy"
 	"github.com/miekg/dns"
 )
 
@@ -72,11 +72,11 @@ func newDNSFixture(t *testing.T) dnsFixture {
 			origin = alloc
 		}
 	}
-	m, e := NewDNSManager(f.n.Cluster(), pub(f.key), []string{"mydc.test."}, 8, 8)
+	m, e := NewDNSManager(f.n.Cluster(), pub(f.key), []string{"sfc.test."}, 8, 8)
 	if e != nil {
 		t.Fatal(e)
 	}
-	cfg := DNSConfig{Tenant: "first", ID: "dns", Network: "lan", Pool: "pool", Source: 100, Serial: 1, Enabled: true, Reverse: true, Zone: "app.mydc.test.", ClientZone: "clients.app.mydc.test.", TTL: 30, NegativeTTL: 5, QuerySeconds: 2, MaxQueries: 2, MaxCacheEntries: 2, MaxResponseBytes: 4096, Members: []string{"remote"}, Names: []DNSName{{"web", "web-four", 2}, {"web", "web-six", 3}, {"deep.child", "web-four", 2}}, Upstreams: []netip.AddrPort{netip.MustParseAddrPort("9.9.9.9:53")}}
+	cfg := DNSConfig{Tenant: "first", ID: "dns", Network: "lan", Pool: "pool", Source: 100, Serial: 1, Enabled: true, Reverse: true, Zone: "app.sfc.test.", ClientZone: "clients.app.sfc.test.", TTL: 30, NegativeTTL: 5, QuerySeconds: 2, MaxQueries: 2, MaxCacheEntries: 2, MaxResponseBytes: 4096, Members: []string{"remote"}, Names: []DNSName{{"web", "web-four", 2}, {"web", "web-six", 3}, {"deep.child", "web-four", 2}}, Upstreams: []netip.AddrPort{netip.MustParseAddrPort("9.9.9.9:53")}}
 	return dnsFixture{f, m, cfg, origin}
 }
 func (d dnsFixture) clock(at int64) Clock {
@@ -157,7 +157,7 @@ func TestDNSProjectionCommittedAddressesTwoOwnersAndRecordKinds(t *testing.T) {
 		kind  uint16
 		count int
 		code  int
-	}{{"WEB.App.MYDC.test.", dns.TypeA, 1, dns.RcodeSuccess}, {"web.app.mydc.test.", dns.TypeAAAA, 1, dns.RcodeSuccess}, {"10.0.42.10.in-addr.arpa.", dns.TypePTR, 0, dns.RcodeNameError}, {"app.mydc.test.", dns.TypeSOA, 1, dns.RcodeSuccess}, {"app.mydc.test.", dns.TypeNS, 1, dns.RcodeSuccess}, {"ns.app.mydc.test.", dns.TypeA, 2, dns.RcodeSuccess}, {"ns.app.mydc.test.", dns.TypeAAAA, 1, dns.RcodeSuccess}, {"child.app.mydc.test.", dns.TypeA, 0, dns.RcodeSuccess}, {"web.app.mydc.test.", dns.TypeMX, 0, dns.RcodeSuccess}, {"missing.app.mydc.test.", dns.TypeA, 0, dns.RcodeNameError}} {
+	}{{"WEB.App.SFC.test.", dns.TypeA, 1, dns.RcodeSuccess}, {"web.app.sfc.test.", dns.TypeAAAA, 1, dns.RcodeSuccess}, {"10.0.42.10.in-addr.arpa.", dns.TypePTR, 0, dns.RcodeNameError}, {"app.sfc.test.", dns.TypeSOA, 1, dns.RcodeSuccess}, {"app.sfc.test.", dns.TypeNS, 1, dns.RcodeSuccess}, {"ns.app.sfc.test.", dns.TypeA, 2, dns.RcodeSuccess}, {"ns.app.sfc.test.", dns.TypeAAAA, 1, dns.RcodeSuccess}, {"child.app.sfc.test.", dns.TypeA, 0, dns.RcodeSuccess}, {"web.app.sfc.test.", dns.TypeMX, 0, dns.RcodeSuccess}, {"missing.app.sfc.test.", dns.TypeA, 0, dns.RcodeNameError}} {
 		var out DNSResult
 		d, out = askDNS(t, d, item.name, item.kind, 200)
 		if out.Response == nil || !out.Response.Authoritative || out.Response.Rcode != item.code || len(out.Response.Answer) != item.count || out.Forward != nil {
@@ -171,7 +171,7 @@ func TestDNSProjectionCommittedAddressesTwoOwnersAndRecordKinds(t *testing.T) {
 	// remote A/AAAA and server RRsets; its local reverse scope is different.
 	remote := d
 	var e error
-	remote.m, e = NewDNSManager(d.f.n.Cluster(), pub(private(32)), []string{"mydc.test."}, 8, 8)
+	remote.m, e = NewDNSManager(d.f.n.Cluster(), pub(private(32)), []string{"sfc.test."}, 8, 8)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -184,8 +184,8 @@ func TestDNSProjectionCommittedAddressesTwoOwnersAndRecordKinds(t *testing.T) {
 	if len(result.Response.Answer) != 2 {
 		t.Fatal("remote reverse aliases missing", result.Response)
 	}
-	_, a := askDNS(t, d, "ns.app.mydc.test.", dns.TypeA, 200)
-	_, b := askDNS(t, remote, "ns.app.mydc.test.", dns.TypeA, 200)
+	_, a := askDNS(t, d, "ns.app.sfc.test.", dns.TypeA, 200)
+	_, b := askDNS(t, remote, "ns.app.sfc.test.", dns.TypeA, 200)
 	if fmt.Sprint(a.Response.Answer) != fmt.Sprint(b.Response.Answer) {
 		t.Fatal("same zone differs by serving node")
 	}
@@ -196,7 +196,7 @@ func TestDNSProjectionCommittedAddressesTwoOwnersAndRecordKinds(t *testing.T) {
 func TestDNSProjectionRejectsForeignMissingGenerationsAndClientNamespace(t *testing.T) {
 	d := newDNSFixture(t)
 	before := encodeDNS(t, d.m)
-	for _, mutate := range []func(*DNSConfig){func(c *DNSConfig) { c.Names = []DNSName{{"stolen", "private", 4}} }, func(c *DNSConfig) { c.Names[0].Generation++ }, func(c *DNSConfig) { c.Names[0].Endpoint = "missing" }, func(c *DNSConfig) { c.Names[0].Name = "spoof.clients.app.mydc.test." }, func(c *DNSConfig) { c.Names[0].Name = "outside.example." }, func(c *DNSConfig) { c.Names = append(c.Names, c.Names[0]) }, func(c *DNSConfig) { c.Upstreams = []netip.AddrPort{netip.MustParseAddrPort("10.42.0.1:53")} }, func(c *DNSConfig) { c.Members = []string{"private"} }, func(c *DNSConfig) { c.Source = 0 }} {
+	for _, mutate := range []func(*DNSConfig){func(c *DNSConfig) { c.Names = []DNSName{{"stolen", "private", 4}} }, func(c *DNSConfig) { c.Names[0].Generation++ }, func(c *DNSConfig) { c.Names[0].Endpoint = "missing" }, func(c *DNSConfig) { c.Names[0].Name = "spoof.clients.app.sfc.test." }, func(c *DNSConfig) { c.Names[0].Name = "outside.example." }, func(c *DNSConfig) { c.Names = append(c.Names, c.Names[0]) }, func(c *DNSConfig) { c.Upstreams = []netip.AddrPort{netip.MustParseAddrPort("10.42.0.1:53")} }, func(c *DNSConfig) { c.Members = []string{"private"} }, func(c *DNSConfig) { c.Source = 0 }} {
 		cfg := ownDNSConfig(d.cfg)
 		mutate(&cfg)
 		q, e := d.m.Prepare(d.f.c, d.f.n, d.f.a, "admin", 0, cfg)
@@ -228,7 +228,7 @@ func TestDNSViewCASStagesFullCandidateAndRechecksAddressBeforePublish(t *testing
 	if e != nil {
 		t.Fatal(e)
 	}
-	_, out := askDNS(t, d, "web.app.mydc.test.", dns.TypeA, 200)
+	_, out := askDNS(t, d, "web.app.sfc.test.", dns.TypeA, 200)
 	if len(out.Response.Answer) != 1 {
 		t.Fatal("pending source replaced LKG")
 	}
@@ -263,7 +263,7 @@ func TestDNSViewOldRequestPinsAndHoldStartAfterLastCompletion(t *testing.T) {
 	d.cfg.QuerySeconds = 60
 	d = publishDNS(t, d, d.cfg, 190)
 	old := d.m.current["first/dns"]
-	d, h, raw := startDNS(t, d, "web.app.mydc.test.", dns.TypeA, 219)
+	d, h, raw := startDNS(t, d, "web.app.sfc.test.", dns.TypeA, 219)
 	cfg := ownDNSConfig(d.cfg)
 	cfg.Source++
 	cfg.Serial++
@@ -273,7 +273,7 @@ func TestDNSViewOldRequestPinsAndHoldStartAfterLastCompletion(t *testing.T) {
 	if e != nil || len(out.Response.Answer) != 1 {
 		t.Fatal("old query lost original view", e)
 	}
-	if _, e = d.m.Answer(d.f.c, d.f.n, d.f.a, h, dnsWire("different.app.mydc.test.", dns.TypeA), d.clock(250)); e == nil {
+	if _, e = d.m.Answer(d.f.c, d.f.n, d.f.a, h, dnsWire("different.app.sfc.test.", dns.TypeA), d.clock(250)); e == nil {
 		t.Fatal("old pin accepted a new request")
 	}
 	alloc, _ := d.f.a.book.Allocation("web-four")
@@ -306,7 +306,7 @@ func TestDNSViewOldRequestPinsAndHoldStartAfterLastCompletion(t *testing.T) {
 func TestDNSViewRecoveryPreservesOriginalQueriesAndRejectsErasure(t *testing.T) {
 	d := newDNSFixture(t)
 	d = publishDNS(t, d, d.cfg, 190)
-	d, h, _ := startDNS(t, d, "web.app.mydc.test.", dns.TypeA, 200)
+	d, h, _ := startDNS(t, d, "web.app.sfc.test.", dns.TypeA, 200)
 	cfg := ownDNSConfig(d.cfg)
 	cfg.Source++
 	cfg.Serial++
@@ -342,7 +342,7 @@ func TestDNSViewRecoveryPreservesOriginalQueriesAndRejectsErasure(t *testing.T) 
 func TestDNSForwardScopeInternalPrivacyAndConfiguredPeer(t *testing.T) {
 	d := newDNSFixture(t)
 	d = publishDNS(t, d, d.cfg, 190)
-	for _, name := range []string{"secret.second.mydc.test.", "0.43.10.in-addr.arpa.", "missing.app.mydc.test."} {
+	for _, name := range []string{"secret.second.sfc.test.", "0.43.10.in-addr.arpa.", "missing.app.sfc.test."} {
 		var out DNSResult
 		d, out = askDNS(t, d, name, dns.TypeA, 200)
 		if out.Forward != nil || out.Response == nil {
@@ -350,7 +350,7 @@ func TestDNSForwardScopeInternalPrivacyAndConfiguredPeer(t *testing.T) {
 		}
 	}
 	foreign, _ := d.f.a.book.Allocation("private")
-	if _, _, e := d.m.Acquire(d.f.c, d.f.n, d.f.a, "first", "dns", foreign, dnsWire("web.app.mydc.test.", dns.TypeA), d.clock(200)); e == nil {
+	if _, _, e := d.m.Acquire(d.f.c, d.f.n, d.f.a, "first", "dns", foreign, dnsWire("web.app.sfc.test.", dns.TypeA), d.clock(200)); e == nil {
 		t.Fatal("foreign tenant source entered view")
 	}
 	d, h, raw := startDNS(t, d, "public.example.", dns.TypeA, 200)
@@ -395,7 +395,7 @@ func TestDNSForwardRejectsWrongQuestionPrivateCNAMEAndExpiredWork(t *testing.T) 
 	base.SetReply(q)
 	base.Answer = []dns.RR{&dns.A{Hdr: header("public.example.", dns.TypeA, 60), A: net.IPv4(192, 0, 2, 9)}}
 	for _, mutate := range []func(*dns.Msg){func(m *dns.Msg) { m.Id++ }, func(m *dns.Msg) { m.Question[0].Name = "wrong.example." }, func(m *dns.Msg) { m.Truncated = true }, func(m *dns.Msg) {
-		m.Answer = []dns.RR{&dns.CNAME{Hdr: header("public.example.", dns.TypeCNAME, 60), Target: "secret.mydc.test."}}
+		m.Answer = []dns.RR{&dns.CNAME{Hdr: header("public.example.", dns.TypeCNAME, 60), Target: "secret.sfc.test."}}
 	}, func(m *dns.Msg) {
 		m.Answer = append(m.Answer, &dns.A{Hdr: header("unrelated.example.", dns.TypeA, 60), A: net.IPv4(192, 0, 2, 8)})
 	}, func(m *dns.Msg) {
@@ -430,7 +430,7 @@ func TestDNSSerialIsSharedAcrossSkippedUpdatesAndWrap(t *testing.T) {
 	cfg.Source = 200
 	cfg.Serial = 0
 	d = publishDNS(t, d, cfg, 200)
-	_, out := askDNS(t, d, "app.mydc.test.", dns.TypeSOA, 201)
+	_, out := askDNS(t, d, "app.sfc.test.", dns.TypeSOA, 201)
 	if out.Response.Answer[0].(*dns.SOA).Serial != 0 || !SerialAfter(0, ^uint32(0)) || SerialAfter(1<<31, 0) {
 		t.Fatal("serial sequence space")
 	}
@@ -447,7 +447,7 @@ func TestDNSSerialIsSharedAcrossSkippedUpdatesAndWrap(t *testing.T) {
 	cfg.Source = 900
 	cfg.Serial = 9
 	other = publishDNS(t, other, cfg, 200)
-	_, out = askDNS(t, other, "app.mydc.test.", dns.TypeSOA, 201)
+	_, out = askDNS(t, other, "app.sfc.test.", dns.TypeSOA, 201)
 	if out.Response.Answer[0].(*dns.SOA).Serial != 9 {
 		t.Fatal("node-local serial counter")
 	}
@@ -467,13 +467,13 @@ func TestDNSBudgetTruncationAndQueryCapacityHoldOldUsers(t *testing.T) {
 		d.cfg.Names = append(d.cfg.Names, DNSName{"many", endpoint, uint64(i)})
 	}
 	d = publishDNS(t, d, d.cfg, 190)
-	d, h, raw := startDNS(t, d, "many.app.mydc.test.", dns.TypeA, 200)
+	d, h, raw := startDNS(t, d, "many.app.sfc.test.", dns.TypeA, 200)
 	out, e := d.m.Answer(d.f.c, d.f.n, d.f.a, h, raw, d.clock(200))
 	wire, _ := out.Response.Pack()
 	if e != nil || !out.Response.Truncated || len(wire) > 512 {
 		t.Fatal("response budget ignored", len(wire), e)
 	}
-	d, _, _ = startDNS(t, d, "app.mydc.test.", dns.TypeSOA, 200)
+	d, _, _ = startDNS(t, d, "app.sfc.test.", dns.TypeSOA, 200)
 	if _, _, e = d.m.Acquire(d.f.c, d.f.n, d.f.a, "first", "dns", d.origin, raw, d.clock(200)); !errors.Is(e, ErrDNSQueryCapacity) || !errors.Is(e, ErrProtocol) {
 		t.Fatal("query capacity exceeded")
 	}
@@ -590,7 +590,7 @@ func TestDNSNegativeCacheUsesSOAMinimumAndNoCrossTenantHit(t *testing.T) {
 	other.cfg.Pool = "pool"
 	other.cfg.Members = nil
 	other.cfg.Names = []DNSName{{"secret", "private", 4}}
-	other.cfg.Zone = "other.mydc.test."
+	other.cfg.Zone = "other.sfc.test."
 	other.cfg.ClientZone = ""
 	other.origin, _ = d.f.a.book.Allocation("private")
 	other = publishDNS(t, other, other.cfg, 201)
@@ -700,7 +700,7 @@ func TestDNSCacheBoundedEvictionAndUncertainClocks(t *testing.T) {
 func TestDNSPublishCannotUseStaleTimeBeforeLastActiveCompletion(t *testing.T) {
 	d := newDNSFixture(t)
 	d = publishDNS(t, d, d.cfg, 190)
-	d, _ = askDNS(t, d, "web.app.mydc.test.", dns.TypeA, 230)
+	d, _ = askDNS(t, d, "web.app.sfc.test.", dns.TypeA, 230)
 	var e error
 	d.m, e = DecodeDNSManager(encodeDNS(t, d.m))
 	if e != nil {

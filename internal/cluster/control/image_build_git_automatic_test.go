@@ -9,10 +9,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/imagebuild"
-	"github.com/jay94ks/mydcd/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/imagebuild"
+	"github.com/jay94ks/seafield/internal/reconcile"
 )
 
 func automaticGitReportFixture(t *testing.T, f *nodeStorageFixture, spec imagebuild.ContextSpec, at int64) (ImageBuildAutomaticGitReport, ImageBuildJobPlan) {
@@ -146,11 +146,7 @@ func TestAutomaticGitRejectsUnsignedReboundAndChangedIntentWithoutPartialPublica
 	forged := original
 	forged.Signature = ed25519.Sign(f.manager, ImageBuildAutomaticGitReportBytes(forged))
 	applyAutomaticGitReport(t, f, forged, state.Forbidden)
-	users, _ := f.p.Catalog(f.s)
-	u, _ := users.User("manager")
-	expected := u.Revision
-	u.Revision, u.Enabled = 0, false
-	f.apply("admin", "put-user", expected, u, state.Applied)
+	f.changeAccount("manager", func(u *access.User) { u.Enabled = false })
 	original.RootRevision = f.s.Object(ImageBuildKey).Revision
 	original.Signature = ed25519.Sign(f.node, ImageBuildAutomaticGitReportBytes(original))
 	applyAutomaticGitReport(t, f, original, state.Forbidden)

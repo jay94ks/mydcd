@@ -9,18 +9,18 @@ import (
 	"net/netip"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/engine"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/tenancy"
-	"github.com/jay94ks/mydcd/internal/userauth"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/engine"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/tenancy"
+	"github.com/jay94ks/seafield/internal/userauth"
 	"github.com/moby/moby/client"
 )
 
-func rejectSQLMoveOverlappingCIDR(t *testing.T, ctx context.Context, a *Runtime, user userauth.Client, peer mydcp.Peer, session access.Session, source *engine.Client, read func() cluster.View) {
+func rejectSQLMoveOverlappingCIDR(t *testing.T, ctx context.Context, a *Runtime, user userauth.Client, peer sfcp.Peer, session access.Session, source *engine.Client, read func() cluster.View) {
 	t.Helper()
 	before := read()
 	resources, err := a.controlPolicy.Resources(before.State)
@@ -35,7 +35,7 @@ func rejectSQLMoveOverlappingCIDR(t *testing.T, ctx context.Context, a *Runtime,
 	if !found || len(original.Pools) != 1 {
 		t.Fatal("original managed SQL CIDR required")
 	}
-	definition := tenancy.TUNDefinition{Tenant: "tenant", Name: "sql-overlap-rejected", Members: []tenancy.TUNNode{{Node: original.Node, Owner: original.Owner, Pools: append([]tenancy.Subnet(nil), original.Pools...), Addresses: []netip.Prefix{netip.MustParsePrefix("198.19.81.250/32")}}}}
+	definition := tenancy.TUNDefinition{Tenant: "tenant", Name: "sql-overlap-rejected", Members: []tenancy.TUNNode{{Node: original.Node, Owner: original.Owner, Pools: append([]tenancy.Subnet(nil), original.Pools...)}}}
 	// Prove current placement, quota, syntax and CAS are sufficient with only
 	// the conflicting subnet changed. This candidate performs no I/O/commit.
 	valid := definition

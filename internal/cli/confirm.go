@@ -14,12 +14,12 @@ var (
 	// ErrDeclined means the person answered no. Nothing was sent.
 	ErrDeclined = errors.New("cancelled; nothing was changed")
 	// ErrNeedsConfirmation means no one can answer the question: input is
-	// not a terminal or MYDC_NONINTERACTIVE=1 is set, and -y was not.
+	// not a terminal or SFC_NONINTERACTIVE=1 is set, and -y was not.
 	ErrNeedsConfirmation = errors.New("this change needs confirmation; run it in a terminal or pass -y")
 )
 
 // Prompter asks y/N before a change. Interactive is true when In and Out are
-// a terminal. Yes is -y; NoInput is MYDC_NONINTERACTIVE=1.
+// a terminal. Yes is -y; NoInput is SFC_NONINTERACTIVE=1.
 type Prompter struct {
 	In          io.Reader
 	Out         io.Writer

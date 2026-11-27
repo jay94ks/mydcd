@@ -5,22 +5,22 @@ package deployment
 import (
 	"reflect"
 
-	"github.com/jay94ks/mydcd/internal/access"
+	"github.com/jay94ks/seafield/internal/access"
 	"gopkg.in/yaml.v3"
 )
 
 func appFields(root *yaml.Node) error {
-	if x := nodeField(root, "x-mydc"); x != nil {
+	if x := nodeField(root, "x-sfc"); x != nil {
 		for _, field := range []string{"nodes", "vault", "routing", "registries"} {
 			if nodeField(x, field) != nil {
-				return inputError("CLUSTER_SETTING_IN_APP", "x-mydc."+field)
+				return inputError("CLUSTER_SETTING_IN_APP", "x-sfc."+field)
 			}
 		}
 	}
 	if networks := nodeField(root, "networks"); networks != nil && networks.Kind == yaml.MappingNode {
 		for i := 0; i < len(networks.Content); i += 2 {
 			alias, n := networks.Content[i].Value, networks.Content[i+1]
-			for _, field := range []string{"driver", "x-mydc"} {
+			for _, field := range []string{"driver", "x-sfc"} {
 				if nodeField(n, field) != nil {
 					return inputError("CLUSTER_SETTING_IN_APP", "networks."+alias+"."+field)
 				}
@@ -43,16 +43,16 @@ func (c Compose) validateApp(standalone bool) error {
 	if err := c.validate(); err != nil {
 		return err
 	}
-	if len(c.MyDC.Nodes) != 0 || c.MyDC.Vault != nil || c.MyDC.Routing != nil || len(c.MyDC.Registries) != 0 {
-		return inputError("CLUSTER_SETTING_IN_APP", "x-mydc")
+	if len(c.Sfc.Nodes) != 0 || c.Sfc.Vault != nil || c.Sfc.Routing != nil || len(c.Sfc.Registries) != 0 {
+		return inputError("CLUSTER_SETTING_IN_APP", "x-sfc")
 	}
 	for alias, n := range c.Networks {
-		if !n.External || n.Driver != "" || !reflect.DeepEqual(n.MyDC, NetworkExtension{}) {
+		if !n.External || n.Driver != "" || !reflect.DeepEqual(n.Sfc, NetworkExtension{}) {
 			return inputError("MANAGED_NETWORK_REFERENCE_REQUIRED", "networks."+alias)
 		}
 	}
 	for name, s := range c.Services {
-		if len(s.FixedVolumes) != 0 || s.LifecycleSources != nil || s.LifecycleProgram != nil || s.MyDC.Instance != nil {
+		if len(s.FixedVolumes) != 0 || s.LifecycleSources != nil || s.LifecycleProgram != nil || s.Sfc.Instance != nil {
 			return inputError("RESERVED_TASK_METADATA", name)
 		}
 	}

@@ -9,15 +9,15 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/cluster/lifecycle"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/engine"
-	"github.com/jay94ks/mydcd/internal/imagebuild"
-	"github.com/jay94ks/mydcd/internal/reconcile"
-	"github.com/jay94ks/mydcd/internal/schema"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/lifecycle"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/engine"
+	"github.com/jay94ks/seafield/internal/imagebuild"
+	"github.com/jay94ks/seafield/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/schema"
 	"github.com/moby/moby/client"
 )
 
@@ -261,13 +261,13 @@ func (r *Runtime) tenantLocalActivity(ctx context.Context, tenant string, retire
 	// Inventory SDK objects even when a local journal is already terminal.
 	// List errors are Unknown; objects from another tenant are left untouched.
 	if r.docker != nil {
-		filters := client.Filters{}.Add("label", "org.mydc.owner="+r.docker.Owner)
+		filters := client.Filters{}.Add("label", "org.sfc.owner="+r.docker.Owner)
 		containers, err := r.docker.API.ContainerList(ctx, client.ContainerListOptions{All: true, Filters: filters})
 		if err != nil {
 			return activity, err
 		}
 		for _, container := range containers.Items {
-			if tenantResourceKey(container.Labels["org.mydc.key"], tenant, original) {
+			if tenantResourceKey(container.Labels["org.sfc.key"], tenant, original) {
 				activity.Resources++
 			}
 		}
@@ -276,7 +276,7 @@ func (r *Runtime) tenantLocalActivity(ctx context.Context, tenant string, retire
 			return activity, err
 		}
 		for _, network := range networks.Items {
-			if tenantResourceKey(network.Labels["org.mydc.key"], tenant, original) {
+			if tenantResourceKey(network.Labels["org.sfc.key"], tenant, original) {
 				activity.Resources++
 			}
 		}

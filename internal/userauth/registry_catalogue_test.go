@@ -3,7 +3,7 @@
 package userauth
 
 import (
-	"github.com/jay94ks/mydcd/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/control"
 	"testing"
 )
 
@@ -13,7 +13,7 @@ func TestRegistryCatalogueRequestRequiresExactReadSelection(t *testing.T) {
 		t.Fatal("valid catalogue query")
 	}
 	for _, change := range []func(*Request){
-		func(r *Request) { r.Tenant = "" }, func(r *Request) { r.Node = "node-a" }, func(r *Request) { r.After = "invalid" }, func(r *Request) { r.RegistryCatalog = nil }, func(r *Request) { r.App = "app" }, func(r *Request) {
+		func(r *Request) { r.Tenant = "" }, func(r *Request) { r.Node = "node-a" }, func(r *Request) { r.After = "invalid" }, func(r *Request) { r.RegistryCatalog = nil }, func(r *Request) { r.TargetUser = "app" }, func(r *Request) {
 			r.RegistryCatalog = &control.RegistryCatalogueQuery{Kind: "external", ID: "source", Repository: "../escape"}
 		},
 	} {

@@ -9,11 +9,11 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	checker "github.com/jay94ks/mydcd/internal/workload/lifecycle"
-	"github.com/jay94ks/mydcd/internal/workload/volumes"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/deployment"
+	checker "github.com/jay94ks/seafield/internal/workload/lifecycle"
+	"github.com/jay94ks/seafield/internal/workload/volumes"
 )
 
 const AppsKey = "control/apps"
@@ -48,7 +48,7 @@ type AppDown struct {
 }
 
 func appDownTarget(origin UserOperation) [32]byte {
-	return sha256.Sum256(append([]byte("mydc-app-down-target-1\x00"), OperationBytes(origin)...))
+	return sha256.Sum256(append([]byte("sfc-app-down-target-1\x00"), OperationBytes(origin)...))
 }
 
 type appEntry struct {
@@ -445,6 +445,12 @@ func (p Policy) authorizeApp(c access.Catalog, op UserOperation) error {
 			return access.ErrInvalid
 		}
 		tenant, cleanup = v.Tenant, true
+	case "resume-app-step":
+		var v AppStepReplay
+		if canonical(op.Change.Payload, &v) != nil {
+			return access.ErrInvalid
+		}
+		tenant, cleanup = v.Tenant, true
 	default:
 		return access.ErrInvalid
 	}
@@ -543,6 +549,11 @@ func (p Policy) appPlanningFromApps(s state.State, actor, tenant string, apps Ap
 		}
 	}
 	ctx.FixedVolumes = map[string]volumes.NativeReady{}
+	shares, err := p.VolumeShares(s)
+	if err != nil {
+		return ctx, err
+	}
+	ctx.Shares = shares.planning(tenant)
 	for key, entry := range v.entries {
 		if entry.State.Scope().Tenant == tenant {
 			ctx.Volumes[key] = entry.State
@@ -626,6 +637,8 @@ func (p Policy) reduceApps(s state.State, cmd state.Command) (map[string][]byte,
 		return p.beginAppLogClear(s, a, c, op)
 	case "resume-app-retirement":
 		return p.reduceAppRetirementReplay(s, a, op)
+	case "resume-app-step":
+		return p.reduceAppStepReplay(s, a, op)
 	case "override-app", "release-app-override":
 		return p.reduceAppOverride(s, a, op)
 	case "sync-app", "recover-app", "replan-app", "configure-app-cd", "pause-app-cd", "resume-app-cd", "abandon-app-sync":
@@ -1011,3 +1024,6 @@ func (a Apps) Quiescent() bool {
 	}
 	return true
 }
+
+// appsBook is the AppsKey book (books.go).
+var appsBook = Book{Key: AppsKey, Reduce: byKind(map[state.CommandKind]reducer{state.Module: Policy.reduceApps, state.ModuleReport: Policy.reduceApps, state.ModuleUpload: Policy.reduceApps, state.ModuleAppDown: Policy.reduceApps})}

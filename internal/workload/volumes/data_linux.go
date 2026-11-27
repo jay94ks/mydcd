@@ -10,7 +10,7 @@ import (
 	"strconv"
 	"syscall"
 
-	"github.com/jay94ks/mydcd/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/reconcile"
 	"github.com/moby/moby/client"
 	"golang.org/x/sys/unix"
 )
@@ -18,7 +18,7 @@ import (
 // OpenWriterData is the native filesystem boundary for embedded services.
 // It requires the original shared writable consumer and a positively recorded
 // local A3 lease. Neither argument authenticates a shared grant: the service
-// must obtain its current MYDCP permit and sync the SAME Gate checkpoint before
+// must obtain its current SFCP permit and sync the SAME Gate checkpoint before
 // starting, then close/join every data user before Return or shared Release.
 // Closing this root closes only descriptors; it never returns any reference.
 func (m *NativeManager) OpenWriterData(ctx context.Context, ready NativeReady, consumer Consumer, lease NativeLease) (*os.Root, error) {

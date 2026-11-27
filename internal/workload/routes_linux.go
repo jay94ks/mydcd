@@ -11,8 +11,8 @@ import (
 	"reflect"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/engine"
-	"github.com/jay94ks/mydcd/internal/network"
+	"github.com/jay94ks/seafield/internal/engine"
+	"github.com/jay94ks/seafield/internal/network"
 	"github.com/moby/moby/api/types/container"
 	"github.com/vishvananda/netlink"
 	"github.com/vishvananda/netns"

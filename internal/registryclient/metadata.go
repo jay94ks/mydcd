@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/jay94ks/mydcd/internal/access"
+	"github.com/jay94ks/seafield/internal/access"
 
 	"github.com/distribution/reference"
 	"github.com/google/go-containerregistry/pkg/name"

@@ -12,15 +12,15 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/ingress"
-	"github.com/jay94ks/mydcd/internal/web/mydc"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/ingress"
+	"github.com/jay94ks/seafield/internal/web/sfc"
 )
 
 // Ingress settings (UI-5A/5B, REQ-62~65 real shape): gateways of a server,
 // a route's balance, draining an app's instances, and the change history.
-// The changes go to mydcd as actions (mydcd checks who may and what is
-// valid); the history is read from mydcd each time.
+// The changes go to sfcd as actions (sfcd checks who may and what is
+// valid); the history is read from sfcd each time.
 
 type listenerReq struct {
 	ID      string `json:"id"`
@@ -39,7 +39,7 @@ type gatewayReq struct {
 	Listeners *[]listenerReq `json:"listeners"`
 }
 
-// gateway: the request side as mydcd's ingress.Gateway. Listeners left out
+// gateway: the request side as sfcd's ingress.Gateway. Listeners left out
 // keep the side's current ones (cur).
 func (g *gatewayReq) gateway(local bool, cur ingress.Gateway) (*ingress.Gateway, string) {
 	if g == nil {
@@ -121,18 +121,23 @@ func gatewayConfigShape(c ingress.GatewayConfiguration) map[string]any {
 	return map[string]any{"external": gatewaySideShape(c.External, false), "local": gatewaySideShape(c.Local, true)}
 }
 
-// nodeGatewaysShape: mydcd's NodeGatewaysView (target and applied revision).
+// nodeGatewaysShape: sfcd's NodeGatewaysView (target and applied revision).
 func nodeGatewaysShape(v control.NodeGatewaysView) map[string]any {
 	out := gatewayConfigShape(v.Configuration)
 	out["source"], out["revision"], out["appliedRevision"] = v.Source, v.Revision, v.AppliedRevision
 	if v.Error != "" {
 		out["error"] = v.Error
 	}
+	local := []map[string]any{}
+	for _, a := range v.LocalAddresses {
+		local = append(local, map[string]any{"iface": a.Interface, "address": a.Prefix.Addr().String(), "cidr": a.Prefix.String(), "scope": a.Scope})
+	}
+	out["localAddresses"] = local
 	return out
 }
 
 // nodeGateways: Part gateways for one server (system administrator).
-func nodeGateways(ctx context.Context, c mydc.Conn, node string) (control.NodeGatewaysView, error) {
+func nodeGateways(ctx context.Context, c sfc.Conn, node string) (control.NodeGatewaysView, error) {
 	p, err := c.QueryIngresses(ctx, control.IngressQuery{Node: node, Part: "gateways"})
 	if err != nil {
 		return control.NodeGatewaysView{}, err
@@ -152,7 +157,7 @@ func (s *Server) handleGetGateways(w http.ResponseWriter, r *http.Request, ws *w
 		writeError(w, http.StatusBadRequest, "bad-request", "node: a name")
 		return
 	}
-	read(s, w, r, ws, func(ctx context.Context, c mydc.Conn) (map[string]any, error) {
+	read(s, w, r, ws, func(ctx context.Context, c sfc.Conn) (map[string]any, error) {
 		v, err := nodeGateways(ctx, c, node)
 		if err != nil {
 			return nil, err
@@ -163,7 +168,7 @@ func (s *Server) handleGetGateways(w http.ResponseWriter, r *http.Request, ws *w
 
 // PUT /nodes/{n}/gateways {opId, revision?, external?, local?} → {op}
 // (set-node-gateways, control.NodeGatewaysChange without Evidence: the
-// client's Prepare asks mydcd for it). Expected = the node's gateway record
+// client's Prepare asks sfcd for it). Expected = the node's gateway record
 // revision (0 before the first cluster setting), default the current one.
 func (s *Server) handlePutGateways(w http.ResponseWriter, r *http.Request, ws *webSession) {
 	var req struct {
@@ -192,7 +197,7 @@ func (s *Server) handlePutGateways(w http.ResponseWriter, r *http.Request, ws *w
 		writeError(w, http.StatusUnprocessableEntity, "invalid", msg)
 		return
 	}
-	s.sharedCreate(w, r, ws, req.OpID, req, func(ctx context.Context, c mydc.Conn, _ mydc.Session) (string, any, uint64, string, error) {
+	s.sharedCreate(w, r, ws, req.OpID, req, func(ctx context.Context, c sfc.Conn, _ sfc.Session) (string, any, uint64, string, error) {
 		cur, err := nodeGateways(ctx, c, node)
 		if err != nil {
 			return "", nil, 0, "", err
@@ -207,7 +212,7 @@ func (s *Server) handlePutGateways(w http.ResponseWriter, r *http.Request, ws *w
 		if req.Revision != nil {
 			expected = *req.Revision
 		}
-		return mydc.ActionSetNodeGateways, q, expected, "node/" + node + "/gateways", nil
+		return sfc.ActionSetNodeGateways, q, expected, "node/" + node + "/gateways", nil
 	})
 }
 
@@ -241,12 +246,12 @@ type balanceReq struct {
 	Fallback         string                  `json:"fallback"`
 }
 
-// balance: the request as mydcd's ingress.Balance (balanceShape's inverse).
-// Each rule is one condition; mydcd's Validate is the last word.
+// balance: the request as sfcd's ingress.Balance (balanceShape's inverse).
+// Each rule is one condition; sfcd's Validate is the last word.
 func (b *balanceReq) balance() (ingress.Balance, string) {
 	out := ingress.Balance{Method: b.Method, Key: b.HashKey, SlowStartSeconds: b.SlowStartSeconds, Retry: b.Retry, Weights: b.Weights, Fallback: b.Fallback}
 	if b.PerTaskLimit != 0 {
-		return out, "balance.perTaskLimit: mydcd has no per-task limit"
+		return out, "balance.perTaskLimit: sfcd has no per-task limit"
 	}
 	if b.Locality {
 		out.Locality = "same-node"
@@ -352,7 +357,7 @@ func (s *Server) handlePutIngressBalance(w http.ResponseWriter, r *http.Request,
 		return
 	}
 	tenant, app := r.PathValue("t"), r.PathValue("app")
-	s.sharedCreate(w, r, ws, req.OpID, req, func(ctx context.Context, c mydc.Conn, _ mydc.Session) (string, any, uint64, string, error) {
+	s.sharedCreate(w, r, ws, req.OpID, req, func(ctx context.Context, c sfc.Conn, _ sfc.Session) (string, any, uint64, string, error) {
 		expected := uint64(0)
 		if req.Revision != nil {
 			expected = *req.Revision
@@ -373,17 +378,17 @@ func (s *Server) handlePutIngressBalance(w http.ResponseWriter, r *http.Request,
 				return "", nil, 0, "", invalid("route: not a route of this app")
 			}
 		}
-		return mydc.ActionSetIngressBalance, control.IngressBalanceChange{Tenant: tenant, App: app, Route: req.Route, Balance: b}, expected,
+		return sfc.ActionSetIngressBalance, control.IngressBalanceChange{Tenant: tenant, App: app, Route: req.Route, Balance: b}, expected,
 			"app/" + app + "/ingress/" + req.Route, nil
 	})
 }
 
 // drainRevision: the revision of the (tenant, app, node) drain record.
-// mydcd does not show records by key (a mapping's DrainRevision is the
+// sfcd does not show records by key (a mapping's DrainRevision is the
 // record that wins there, app-wide or the node's), so it is the number of
 // accepted drain/undrain changes of exactly that key in the history, which
-// mydcd never trims (it refuses changes when full).
-func drainRevision(ctx context.Context, c mydc.Conn, tenant, app, node string) (uint64, error) {
+// sfcd never trims (it refuses changes when full).
+func drainRevision(ctx context.Context, c sfc.Conn, tenant, app, node string) (uint64, error) {
 	q := control.IngressQuery{Tenant: tenant, App: app, Part: "history"}
 	n := uint64(0)
 	for range ingressHistoryPages {
@@ -392,7 +397,7 @@ func drainRevision(ctx context.Context, c mydc.Conn, tenant, app, node string) (
 			return 0, err
 		}
 		for _, h := range p.History {
-			if (h.Action == mydc.ActionDrainIngress || h.Action == mydc.ActionUndrainIngress) && h.Tenant == tenant && h.App == app && h.Node == node {
+			if (h.Action == sfc.ActionDrainIngress || h.Action == sfc.ActionUndrainIngress) && h.Tenant == tenant && h.App == app && h.Node == node {
 				n++
 			}
 		}
@@ -421,12 +426,12 @@ func (s *Server) handleIngressDrain(w http.ResponseWriter, r *http.Request, ws *
 		writeError(w, http.StatusUnprocessableEntity, "invalid", "node: a name; drainSeconds: 0 (30) to 3600")
 		return
 	}
-	action := mydc.ActionDrainIngress
+	action := sfc.ActionDrainIngress
 	if r.Method == http.MethodDelete {
-		action, req.DrainSeconds = mydc.ActionUndrainIngress, 0
+		action, req.DrainSeconds = sfc.ActionUndrainIngress, 0
 	}
 	tenant, app := r.PathValue("t"), r.PathValue("app")
-	s.sharedCreate(w, r, ws, req.OpID, req, func(ctx context.Context, c mydc.Conn, _ mydc.Session) (string, any, uint64, string, error) {
+	s.sharedCreate(w, r, ws, req.OpID, req, func(ctx context.Context, c sfc.Conn, _ sfc.Session) (string, any, uint64, string, error) {
 		expected := uint64(0)
 		if req.Revision != nil {
 			expected = *req.Revision
@@ -444,9 +449,9 @@ func (s *Server) handleIngressDrain(w http.ResponseWriter, r *http.Request, ws *
 // page).
 const ingressHistoryPages = 64
 
-var ingressActionWord = map[string]string{mydc.ActionSetNodeGateways: "게이트웨이 설정", mydc.ActionSetIngressBalance: "분배 방식 변경",
-	mydc.ActionDrainIngress: "비우기", mydc.ActionUndrainIngress: "비우기 해제", mydc.ActionIngressBlock: "긴급 차단",
-	mydc.ActionIngressUnblock: "차단 해제", mydc.ActionIngressBlockExtend: "차단 연장", "set-ingress-host-policy": "호스트 정책 변경"}
+var ingressActionWord = map[string]string{sfc.ActionSetNodeGateways: "게이트웨이 설정", sfc.ActionSetIngressBalance: "분배 방식 변경",
+	sfc.ActionDrainIngress: "비우기", sfc.ActionUndrainIngress: "비우기 해제", sfc.ActionIngressBlock: "긴급 차단",
+	sfc.ActionIngressUnblock: "차단 해제", sfc.ActionIngressBlockExtend: "차단 연장", "set-ingress-host-policy": "호스트 정책 변경"}
 
 // historyValue: a history Detail / Previous as the screens show it.
 func historyValue(action string, raw []byte) any {
@@ -454,17 +459,17 @@ func historyValue(action string, raw []byte) any {
 		return nil
 	}
 	switch action {
-	case mydc.ActionSetNodeGateways:
+	case sfc.ActionSetNodeGateways:
 		var c ingress.GatewayConfiguration
 		if json.Unmarshal(raw, &c) == nil {
 			return gatewayConfigShape(c)
 		}
-	case mydc.ActionSetIngressBalance:
+	case sfc.ActionSetIngressBalance:
 		var b ingress.Balance
 		if json.Unmarshal(raw, &b) == nil {
 			return balanceShape(&b)
 		}
-	case mydc.ActionDrainIngress, mydc.ActionUndrainIngress:
+	case sfc.ActionDrainIngress, sfc.ActionUndrainIngress:
 		var d struct {
 			Draining, LastMapping  bool
 			DrainSeconds, Deadline uint64
@@ -487,7 +492,7 @@ func historyValue(action string, raw []byte) any {
 	return nil
 }
 
-// camelValue lower-cases the first letter of mydcd's JSON keys.
+// camelValue lower-cases the first letter of sfcd's JSON keys.
 func camelValue(v any) any {
 	switch x := v.(type) {
 	case map[string]any:
@@ -528,7 +533,7 @@ func ingressHistoryView(e control.IngressHistoryView, names map[string]string) m
 	if p := historyValue(e.Action, e.Previous); p != nil {
 		v["previous"] = p
 	}
-	if e.Action == mydc.ActionSetIngressBalance {
+	if e.Action == sfc.ActionSetIngressBalance {
 		var now, before ingress.Balance
 		if json.Unmarshal(e.Detail, &now) == nil {
 			from := "앱 선언"
@@ -548,9 +553,9 @@ func methodOr(m string) string {
 	return m
 }
 
-// GET /ingress/history?tenant=&app=&node=&after= → {items, next}: mydcd's
+// GET /ingress/history?tenant=&app=&node=&after= → {items, next}: sfcd's
 // page (newest first, 8 rows). Without a tenant it is the system
-// administrator's whole history (mydcd decides).
+// administrator's whole history (sfcd decides).
 func (s *Server) handleIngressHistory(w http.ResponseWriter, r *http.Request, ws *webSession) {
 	qs := r.URL.Query()
 	tenant, app, node, after := qs.Get("tenant"), qs.Get("app"), qs.Get("node"), qs.Get("after")
@@ -559,7 +564,7 @@ func (s *Server) handleIngressHistory(w http.ResponseWriter, r *http.Request, ws
 		writeError(w, http.StatusBadRequest, "bad-request", "tenant, app inside it, node, after")
 		return
 	}
-	read(s, w, r, ws, func(ctx context.Context, c mydc.Conn) (map[string]any, error) {
+	read(s, w, r, ws, func(ctx context.Context, c sfc.Conn) (map[string]any, error) {
 		p, err := c.QueryIngresses(ctx, control.IngressQuery{Tenant: tenant, App: app, Node: node, Part: "history", After: after})
 		if err != nil {
 			return nil, err
@@ -575,7 +580,7 @@ func (s *Server) handleIngressHistory(w http.ResponseWriter, r *http.Request, ws
 
 // balanceHistory: the app's balance changes on the newest history pages,
 // newest first ({at, what, by, route}).
-func balanceHistory(ctx context.Context, c mydc.Conn, tenant, app string) ([]map[string]any, error) {
+func balanceHistory(ctx context.Context, c sfc.Conn, tenant, app string) ([]map[string]any, error) {
 	q := control.IngressQuery{Tenant: tenant, App: app, Part: "history"}
 	out := []map[string]any{}
 	names := usernames(ctx, c)
@@ -585,7 +590,7 @@ func balanceHistory(ctx context.Context, c mydc.Conn, tenant, app string) ([]map
 			return nil, err
 		}
 		for _, e := range p.History {
-			if e.Action == mydc.ActionSetIngressBalance {
+			if e.Action == sfc.ActionSetIngressBalance {
 				v := ingressHistoryView(e, names)
 				out = append(out, map[string]any{"at": v["at"], "what": v["what"], "by": v["by"], "route": e.Route})
 			}

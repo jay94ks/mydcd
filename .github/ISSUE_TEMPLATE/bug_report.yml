@@ -30,8 +30,8 @@ body:
   - type: input
     id: version
     attributes:
-      label: MyDC version
-      description: Output of `mydc --version` and `mydcd --version`.
+      label: Seafield Cluster version
+      description: Output of `sfcli --version` and `sfcd --version`.
     validations:
       required: true
   - type: textarea
@@ -47,5 +47,5 @@ body:
     id: logs
     attributes:
       label: Relevant logs
-      description: mydcd logs around the failure. This is rendered as code.
+      description: sfcd logs around the failure. This is rendered as code.
       render: shell

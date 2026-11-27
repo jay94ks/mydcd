@@ -16,23 +16,23 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/registryclient"
-	"github.com/jay94ks/mydcd/internal/web/mydc"
-	"github.com/jay94ks/mydcd/internal/web/store"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/registryclient"
+	"github.com/jay94ks/seafield/internal/web/sfc"
+	"github.com/jay94ks/seafield/internal/web/store"
 )
 
-// Registry images in mydcd's real REQ-18 contract (UI-84 '이미지 목록',
+// Registry images in sfcd's real REQ-18 contract (UI-84 '이미지 목록',
 // UI-8A '정리'; docs/reference/registry-images.md, registry-maintenance.md,
 // image-usages.md): `registry-catalog` pages, `image-usages`,
 // `registry-maintenance-plan` → delete-registry-image / gc-registry,
 // `registry-prune-preview` → prune-registry-images, and
 // `registry-maintenance-status` / `registry-prune-results` for progress.
-// mydcd lists, judges use and permissions, and removes; Applied is only
+// sfcd lists, judges use and permissions, and removes; Applied is only
 // the job's acceptance. The web only
 //   - keeps a short in-memory cache of catalogue pages (imageCacheTTL) so
 //     the tab does not walk the registry on every open; a cached page is
-//     served only after mydcd confirms the caller still reads the
+//     served only after sfcd confirms the caller still reads the
 //     workspace;
 //   - adds what only the web knows: apps archived by '내리기' (web bbolt)
 //     still name images, so usage lists them and prune keeps their digests
@@ -48,8 +48,8 @@ const (
 	maxProtected   = 256
 )
 
-// imageCacheKey includes the user: a page mydcd answered for one user is
-// never handed to another, so each user's first read asks mydcd.
+// imageCacheKey includes the user: a page sfcd answered for one user is
+// never handed to another, so each user's first read asks sfcd.
 type imageCacheKey struct{ user, tenant, kind, registry, repository, after string }
 
 type imageCacheEntry struct {
@@ -128,7 +128,7 @@ type registryImageView struct {
 	MediaType     string `json:"mediaType"`
 	ManifestBytes int64  `json:"manifestBytes"`
 	ImageBytes    int64  `json:"imageBytes"`
-	UploadedAt    string `json:"uploadedAt,omitempty"` // only when mydcd knows it
+	UploadedAt    string `json:"uploadedAt,omitempty"` // only when sfcd knows it
 }
 
 func viewImage(m registryclient.ImageMetadata) registryImageView {
@@ -172,8 +172,8 @@ func (s *Server) viewCatalogue(p control.RegistryCatalogueResult, cachedAt time.
 // repository the page lists repositories; with it the repository's tag and
 // digest rows (several tags may name one digest). external=1 reads the
 // external source {id} through its bound reader. A page read in the last
-// 10 minutes comes from the web's memory (cachedAt says when mydcd
-// answered); refresh=1 reads mydcd now. Changes sent through this web drop
+// 10 minutes comes from the web's memory (cachedAt says when sfcd
+// answered); refresh=1 reads sfcd now. Changes sent through this web drop
 // the registry's cached pages.
 func (s *Server) handleRegistryImages(w http.ResponseWriter, r *http.Request, ws *webSession) {
 	tenant, id := r.PathValue("t"), r.PathValue("id")
@@ -186,7 +186,7 @@ func (s *Server) handleRegistryImages(w http.ResponseWriter, r *http.Request, ws
 	}
 	if r.URL.Query().Get("refresh") != "1" {
 		if e, ok := s.images.get(k, s.now()); ok {
-			// mydcd still decides who reads: no access, no cached rows.
+			// sfcd still decides who reads: no access, no cached rows.
 			if !s.requireRole(w, r, ws, tenant, false) {
 				return
 			}
@@ -194,7 +194,7 @@ func (s *Server) handleRegistryImages(w http.ResponseWriter, r *http.Request, ws
 			return
 		}
 	}
-	read(s, w, r, ws, func(ctx context.Context, c mydc.Conn) (registryCatalogueView, error) {
+	read(s, w, r, ws, func(ctx context.Context, c sfc.Conn) (registryCatalogueView, error) {
 		p, err := c.RegistryCatalogue(ctx, tenant, q, k.after)
 		if err != nil {
 			return registryCatalogueView{}, err
@@ -299,8 +299,8 @@ type imageUseView struct {
 
 // imageUses reads every `image-usages` page for one ref (again from the
 // start once when the rows change between pages).
-func imageUses(ctx context.Context, c mydc.Conn, tenant, ref string) ([]control.ImageUsage, bool, error) {
-	var me *mydc.Error
+func imageUses(ctx context.Context, c sfc.Conn, tenant, ref string) ([]control.ImageUsage, bool, error) {
+	var me *sfc.Error
 	for try := 0; ; try++ {
 		var out []control.ImageUsage
 		after, more := "", false
@@ -322,14 +322,14 @@ func imageUses(ctx context.Context, c mydc.Conn, tenant, ref string) ([]control.
 		if err == nil {
 			return out, more, nil
 		}
-		if try > 0 || !errors.As(err, &me) || me.Code != mydc.CodeConflict {
+		if try > 0 || !errors.As(err, &me) || me.Code != sfc.CodeConflict {
 			return nil, false, err
 		}
 	}
 }
 
 // usageOf is who uses ref, with the archived apps naming it.
-func (s *Server) usageOf(ctx context.Context, c mydc.Conn, tenant, ref string, arch []archivedImage) (imageUseView, error) {
+func (s *Server) usageOf(ctx context.Context, c sfc.Conn, tenant, ref string, arch []archivedImage) (imageUseView, error) {
 	rows, more, err := imageUses(ctx, c, tenant, ref)
 	if err != nil {
 		return imageUseView{}, err
@@ -367,7 +367,7 @@ func (s *Server) handleImageUsage(w http.ResponseWriter, r *http.Request, ws *we
 		writeError(w, http.StatusInternalServerError, "internal", err.Error())
 		return
 	}
-	read(s, w, r, ws, func(ctx context.Context, c mydc.Conn) (map[string]any, error) {
+	read(s, w, r, ws, func(ctx context.Context, c sfc.Conn) (map[string]any, error) {
 		items := make([]imageUseView, 0, len(req.Refs))
 		for _, ref := range req.Refs {
 			v, err := s.usageOf(ctx, c, tenant, ref, arch)
@@ -382,8 +382,8 @@ func (s *Server) handleImageUsage(w http.ResponseWriter, r *http.Request, ws *we
 
 // protectedDigests: digests archived apps still name (prune keeps them).
 // A pinned ref gives its digest; a tag is resolved with image-resolve on
-// the user's session (a ref mydcd cannot resolve protects nothing).
-func (s *Server) protectedDigests(ctx context.Context, c mydc.Conn, tenant string) ([]string, error) {
+// the user's session (a ref sfcd cannot resolve protects nothing).
+func (s *Server) protectedDigests(ctx context.Context, c sfc.Conn, tenant string) ([]string, error) {
 	arch, err := s.archivedImages(tenant)
 	if err != nil {
 		return nil, err
@@ -416,15 +416,15 @@ func (s *Server) protectedDigests(ctx context.Context, c mydc.Conn, tenant strin
 
 func webOperation(opID string) string { return "web-" + opID }
 
-// maintenancePlan asks mydcd for the plan and fills the web job's stable
+// maintenancePlan asks sfcd for the plan and fills the web job's stable
 // operation ID; InUse refuses a delete before anything is sent.
-func maintenanceChange(ctx context.Context, c mydc.Conn, tenant, opID string, q control.RegistryMaintenanceQuery) (any, uint64, error) {
+func maintenanceChange(ctx context.Context, c sfc.Conn, tenant, opID string, q control.RegistryMaintenanceQuery) (any, uint64, error) {
 	if !q.Valid(true) {
 		return nil, 0, invalid("repository, reference (a tag or the digest) and digest (sha256:<64 hex>)")
 	}
 	plan, err := c.PlanRegistryMaintenance(ctx, tenant, q)
-	var me *mydc.Error
-	if errors.As(err, &me) && me.Code == mydc.CodeConflict {
+	var me *sfc.Error
+	if errors.As(err, &me) && me.Code == sfc.CodeConflict {
 		return nil, 0, &httpErr{http.StatusConflict, "busy", "the registry has a pending job or is not serving; try again when it settles"}
 	}
 	if err != nil {
@@ -457,10 +457,10 @@ func (s *Server) handleDeleteRegistryImage(w http.ResponseWriter, r *http.Reques
 	}
 	tenant, id := r.PathValue("t"), r.PathValue("id")
 	defer s.images.drop(tenant, id)
-	s.sharedCreate(w, r, ws, req.OpID, req, func(ctx context.Context, c mydc.Conn, _ mydc.Session) (string, any, uint64, string, error) {
-		q := control.RegistryMaintenanceQuery{Action: mydc.ActionDeleteRegistryImage, ID: id, Repository: req.Repository, Reference: req.Reference, Digest: req.Digest, External: req.External}
+	s.sharedCreate(w, r, ws, req.OpID, req, func(ctx context.Context, c sfc.Conn, _ sfc.Session) (string, any, uint64, string, error) {
+		q := control.RegistryMaintenanceQuery{Action: sfc.ActionDeleteRegistryImage, ID: id, Repository: req.Repository, Reference: req.Reference, Digest: req.Digest, External: req.External}
 		p, exp, err := maintenanceChange(ctx, c, tenant, req.OpID, q)
-		return mydc.ActionDeleteRegistryImage, p, exp, "registry/" + id, err
+		return sfc.ActionDeleteRegistryImage, p, exp, "registry/" + id, err
 	})
 }
 
@@ -475,9 +475,9 @@ func (s *Server) handleRegistryGC(w http.ResponseWriter, r *http.Request, ws *we
 	}
 	tenant, id := r.PathValue("t"), r.PathValue("id")
 	defer s.images.drop(tenant, id)
-	s.sharedCreate(w, r, ws, req.OpID, req, func(ctx context.Context, c mydc.Conn, _ mydc.Session) (string, any, uint64, string, error) {
-		p, exp, err := maintenanceChange(ctx, c, tenant, req.OpID, control.RegistryMaintenanceQuery{Action: mydc.ActionGCRegistry, ID: id})
-		return mydc.ActionGCRegistry, p, exp, "registry/" + id, err
+	s.sharedCreate(w, r, ws, req.OpID, req, func(ctx context.Context, c sfc.Conn, _ sfc.Session) (string, any, uint64, string, error) {
+		p, exp, err := maintenanceChange(ctx, c, tenant, req.OpID, control.RegistryMaintenanceQuery{Action: sfc.ActionGCRegistry, ID: id})
+		return sfc.ActionGCRegistry, p, exp, "registry/" + id, err
 	})
 }
 
@@ -541,7 +541,7 @@ func (s *Server) handleMaintenanceStatus(w http.ResponseWriter, r *http.Request,
 		writeError(w, http.StatusUnprocessableEntity, "invalid", "operation")
 		return
 	}
-	read(s, w, r, ws, func(ctx context.Context, c mydc.Conn) (maintenanceStatusView, error) {
+	read(s, w, r, ws, func(ctx context.Context, c sfc.Conn) (maintenanceStatusView, error) {
 		st, err := c.RegistryMaintenanceStatus(ctx, tenant, opn)
 		if err != nil {
 			return maintenanceStatusView{}, err
@@ -557,7 +557,7 @@ func unixRFC(v int64) string { return rfc3339(time.Unix(v, 0)) }
 // --- prune ---
 
 // pruneConditions: the browser's rule (before in Unix seconds, 0 = none);
-// lists are sorted and deduplicated here, as mydcd wants them.
+// lists are sorted and deduplicated here, as sfcd wants them.
 type pruneConditions struct {
 	Repositories            []string `json:"repositories"`
 	KeepRecentPerRepository uint32   `json:"keepRecentPerRepository"`
@@ -595,7 +595,7 @@ func webConditions(c registryclient.PruneConditions) pruneConditions {
 	return pruneConditions{tagsOf(c.Repositories), c.KeepRecentPerRepository, int64(c.Before / 1000), tagsOf(c.ExcludeTags), c.IncludeUntagged, tagsOf(c.ProtectedDigests), c.GC}
 }
 
-// The preview token is the owner-signed Fact, passed back verbatim; mydcd
+// The preview token is the owner-signed Fact, passed back verbatim; sfcd
 // checks its signature and age, so the browser cannot change it.
 func previewToken(f control.RegistryPruneFact) string {
 	raw, _ := json.Marshal(f)
@@ -686,7 +686,7 @@ func (s *Server) handlePrunePreview(w http.ResponseWriter, r *http.Request, ws *
 	if req.Part == "" {
 		req.Part = "items"
 	}
-	read(s, w, r, ws, func(ctx context.Context, c mydc.Conn) (prunePageView, error) {
+	read(s, w, r, ws, func(ctx context.Context, c sfc.Conn) (prunePageView, error) {
 		q := control.RegistryPruneQuery{ID: id, Part: req.Part, External: req.External}
 		if req.Preview == "" {
 			protected, err := s.protectedDigests(ctx, c, tenant)
@@ -726,8 +726,8 @@ func (s *Server) handlePrunePreview(w http.ResponseWriter, r *http.Request, ws *
 }
 
 func pruneErr(err error) error {
-	var me *mydc.Error
-	if errors.As(err, &me) && me.Code == mydc.CodeConflict {
+	var me *sfc.Error
+	if errors.As(err, &me) && me.Code == sfc.CodeConflict {
 		return &httpErr{http.StatusConflict, "preview-expired", "the preview no longer matches the registry or is older than 10 minutes; preview again"}
 	}
 	return err
@@ -750,7 +750,7 @@ func (s *Server) handlePrune(w http.ResponseWriter, r *http.Request, ws *webSess
 	}
 	tenant, id := r.PathValue("t"), r.PathValue("id")
 	defer s.images.drop(tenant, id)
-	s.sharedCreate(w, r, ws, req.OpID, req, func(ctx context.Context, c mydc.Conn, _ mydc.Session) (string, any, uint64, string, error) {
+	s.sharedCreate(w, r, ws, req.OpID, req, func(ctx context.Context, c sfc.Conn, _ sfc.Session) (string, any, uint64, string, error) {
 		f, err := readPreviewToken(req.Preview)
 		if err != nil {
 			return "", nil, 0, "", err
@@ -779,7 +779,7 @@ func (s *Server) handlePruneResults(w http.ResponseWriter, r *http.Request, ws *
 		writeError(w, http.StatusUnprocessableEntity, "invalid", "operation")
 		return
 	}
-	read(s, w, r, ws, func(ctx context.Context, c mydc.Conn) (prunePageView, error) {
+	read(s, w, r, ws, func(ctx context.Context, c sfc.Conn) (prunePageView, error) {
 		v, err := c.RegistryPrune(ctx, tenant, q, r.URL.Query().Get("after"), true)
 		if err != nil {
 			return prunePageView{}, err

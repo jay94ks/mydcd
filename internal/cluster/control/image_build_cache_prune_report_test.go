@@ -7,8 +7,8 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/imagebuild"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/imagebuild"
 )
 
 func cachePruneReportFixture(t *testing.T, f *nodeStorageFixture, r ImageBuildCachePruneReport, want state.Code) ImageBuildCachePruneReport {
@@ -93,15 +93,7 @@ func TestCachePruneReportsRetainUnknownBudgetUntilOriginalClosureAfterRevocation
 	if err != nil || len(rows) != 1 {
 		t.Fatal("unknown released budget", rows, err)
 	}
-	c, err := f.p.Catalog(f.s)
-	if err != nil {
-		t.Fatal(err)
-	}
-	u, _ := c.User("manager")
-	revision := u.Revision
-	u.Revision = 0
-	u.Credentials[0].Operations = []string{"put-build-context"}
-	f.apply("admin", "put-user", revision, u, state.Applied)
+	f.limitAccount("manager", "put-build-context")
 	work, err = f.p.ImageBuildCachePruneWork(f.s, plan.Spec.Scope.Root.Key, ImageBuildCachePruneWorkQuery{Tenant: "tenant", ID: "clear", At: 7})
 	if err != nil || work.Allowed || work.Blocked != "PERMISSION_REVOKED" {
 		t.Fatal("revoked original still executes", work.Blocked, err)

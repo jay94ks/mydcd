@@ -9,9 +9,9 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/eventlog"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/eventlog"
 )
 
 func TestEventAccessUsesCurrentTenantPermissionAndTargetNotControlLocation(t *testing.T) {
@@ -72,7 +72,7 @@ func TestEventAccessUsesCurrentTenantPermissionAndTargetNotControlLocation(t *te
 	user.Enabled = false
 	revision := user.Revision
 	user.Revision = 0
-	f.apply("event-revoke-reader", "put-user", revision, user, state.Applied)
+	f.apply("event-revoke-reader", "put-user", revision, accountFields(user), state.Applied)
 	if _, err = f.p.EventAccess(f.s, reader, 10, eventlog.Query{Tenant: "other"}); !errors.Is(err, access.ErrDenied) {
 		t.Fatal("cursor read bypassed account revocation", err)
 	}

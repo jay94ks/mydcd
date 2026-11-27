@@ -8,14 +8,14 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/jay94ks/mydcd/internal/cluster/lifecycle"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/engine"
-	"github.com/jay94ks/mydcd/internal/ingress"
-	"github.com/jay94ks/mydcd/internal/network"
-	"github.com/jay94ks/mydcd/internal/schema"
-	"github.com/jay94ks/mydcd/internal/tenancy"
-	"github.com/jay94ks/mydcd/internal/workload"
+	"github.com/jay94ks/seafield/internal/cluster/lifecycle"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/engine"
+	"github.com/jay94ks/seafield/internal/ingress"
+	"github.com/jay94ks/seafield/internal/network"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/tenancy"
+	"github.com/jay94ks/seafield/internal/workload"
 )
 
 // GoalResources describes already-committed declaration space, not native
@@ -93,7 +93,7 @@ func DecodeGoalResources(cluster [32]byte, key string, o state.Object) (GoalReso
 		var need workload.Resources
 		if g.Kind == "task" {
 			var s ComposeService
-			if json.Unmarshal(g.Config, &s) != nil || s.MyDC.Node != g.Node {
+			if json.Unmarshal(g.Config, &s) != nil || s.Sfc.Node != g.Node {
 				return out, ErrInputs
 			}
 			if _, err := TaskInstanceForKey(g.Tenant, g.App, key, s); err != nil {

@@ -10,11 +10,11 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	registry "github.com/jay94ks/mydcd/internal/registry"
-	"github.com/jay94ks/mydcd/internal/tenancy"
-	"github.com/jay94ks/mydcd/internal/workload/volumes"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	registry "github.com/jay94ks/seafield/internal/registry"
+	"github.com/jay94ks/seafield/internal/tenancy"
+	"github.com/jay94ks/seafield/internal/workload/volumes"
 )
 
 const RegistriesKey = "control/registries"
@@ -89,7 +89,7 @@ func registryConsumer(cluster [32]byte, tenant, id string) string {
 		Cluster    [32]byte
 		Tenant, ID string
 	}{cluster, tenant, id})
-	hash := sha256.Sum256(append([]byte("mydc-registry-volume-consumer-1\x00"), raw...))
+	hash := sha256.Sum256(append([]byte("sfc-registry-volume-consumer-1\x00"), raw...))
 	return "registry-" + hex.EncodeToString(hash[:24])
 }
 
@@ -496,3 +496,6 @@ func (p Policy) RegistryPage(s state.State, session access.Session, now int64, t
 	}
 	return rows, "", nil
 }
+
+// registriesBook is the RegistriesKey book (books.go).
+var registriesBook = Book{Key: RegistriesKey, Reduce: byKind(map[state.CommandKind]reducer{state.Module: Policy.reduceRegistries, state.ModuleReport: Policy.reduceRegistries})}

@@ -5,23 +5,25 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"maps"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/schema"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/sfcp"
 )
 
 // Health renewals stay out of Raft (devel/refactor/14-raft-liveness.md). An
 // owner whose stage facts are unchanged sends the re-signed observation to the
-// leader over MyDCP; the leader keeps the last renewal in memory and records
+// leader over SFCP; the leader keeps the last renewal in memory and records
 // an expiry in Raft only when renewals stop.
 //
 // A changed fact is reported at once, so renewals only prove the owner's loop
 // still runs. While the owner and the leader stay connected (same leader, same
-// term, no gap in the MYDCP connection since the last renewal) both sides use
+// term, no gap in the SFCP connection since the last renewal) both sides use
 // AppObservationLinkedMaxAge instead of AppObservationMaxAge: the owner renews
 // every 150s instead of every 15s, and the leader expires after 300s instead
 // of 30s. Any break falls back to the short window on both sides. The cost:
@@ -86,7 +88,7 @@ func (r *Runtime) renewAppObservation(ctx context.Context, report control.AppPro
 	}
 	link, _ := r.leaderLink()
 	raw, _ := json.Marshal(report)
-	if _, err = r.appCall(ctx, "app-observation-renew", raw); err != nil {
+	if err = r.sendAppRenewal(ctx, raw); err != nil {
 		// No Raft fallback on purpose: a lost renewal only lets the leader
 		// expire the stage once, and the owner's next pass revives it with a
 		// fresh observe.
@@ -101,15 +103,52 @@ func (r *Runtime) renewAppObservation(ctx context.Context, report control.AppPro
 	return true, nil
 }
 
-// admitObservationRenewal is the leader side of app-observation-renew.
+// sendAppRenewal hands a renewal to the leader as an Observation report
+// (KindAppRenewal), or admits it here when this node leads. A renewal is a
+// liveness signal, so it never goes through a signed Management read.
+func (r *Runtime) sendAppRenewal(ctx context.Context, raw []byte) error {
+	if r.Engine().IsLeader() {
+		v, err := r.currentView(ctx)
+		if err != nil {
+			return err
+		}
+		_, err = r.admitObservationRenewal(raw, v)
+		return err
+	}
+	peer, err := r.leaderPeer(ctx)
+	if err != nil {
+		return err
+	}
+	session, err := r.Mesh.Dial(ctx, peer)
+	if err != nil {
+		return err
+	}
+	return session.Report(ctx, sfcp.KindAppRenewal, raw)
+}
+
+// receiveAppRenewal is the leader side of a KindAppRenewal report. The
+// renewal is checked on a latest view; any other node refuses it.
+func (r *Runtime) receiveAppRenewal(ctx context.Context, _ *sfcp.Session, raw []byte) error {
+	if !r.Engine().IsLeader() {
+		return sfcp.ErrAdmission
+	}
+	v, err := r.currentView(ctx)
+	if err != nil {
+		return err
+	}
+	_, err = r.admitObservationRenewal(raw, v)
+	return err
+}
+
+// admitObservationRenewal checks and remembers a renewal on the leader.
 func (r *Runtime) admitObservationRenewal(input []byte, v cluster.View) (json.RawMessage, error) {
 	report, err := schema.Decode[control.AppProgress](input)
 	if err != nil || v.Local || !r.Engine().IsLeader() {
-		return nil, mydcp.ErrAdmission
+		return nil, sfcp.ErrAdmission
 	}
 	now := uint64(time.Now().Unix())
-	if report.At > now || now-report.At > control.AppObservationMaxAge {
-		return nil, mydcp.ErrAdmission
+	if !access.Recent(report.At, now, control.AppObservationMaxAge) {
+		return nil, sfcp.ErrAdmission
 	}
 	base, err := r.controlPolicy.CheckObservationRenewal(v.State, report, now)
 	if err != nil {
@@ -142,7 +181,8 @@ func (r *Runtime) expireAppObservations(ctx context.Context, v cluster.View, app
 	if r.leaderSince == 0 {
 		r.leaderSince = now
 	}
-	since, seen := r.leaderSince, r.renewSeen
+	// admitObservationRenewal writes the map under renewMu; read a copy.
+	since, seen := r.leaderSince, maps.Clone(r.renewSeen)
 	r.renewMu.Unlock()
 	for _, app := range apps.Records() {
 		e, ok := apps.Execution(app.Tenant, app.App)

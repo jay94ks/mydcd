@@ -11,14 +11,14 @@ import (
 	"errors"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/imagebuild"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/reconcile"
-	"github.com/jay94ks/mydcd/internal/schema"
-	"github.com/jay94ks/mydcd/internal/storage"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/imagebuild"
+	"github.com/jay94ks/seafield/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/storage"
 )
 
 type imageBuildReclaimLocal struct {
@@ -51,7 +51,7 @@ func (r *Runtime) imageBuildArtifactWork(ctx context.Context, u control.ImageBui
 	}
 	work, err := schema.Decode[control.ImageBuildArtifactWork](reply.Data)
 	if err != nil || work.Schema != 1 || work.Cluster != r.controlPolicy.Cluster || work.Upload.Scope != u.Scope || work.Upload.Scope.Root.Key != r.Identity.Public || work.Root.Reference(work.Cluster) != u.Scope.Root || work.Index == 0 || work.Epoch == 0 {
-		return control.ImageBuildArtifactWork{}, mydcp.ErrAdmission
+		return control.ImageBuildArtifactWork{}, sfcp.ErrAdmission
 	}
 	return work, nil
 }
@@ -74,7 +74,7 @@ func (r *Runtime) reclaimImageBuild(ctx context.Context, u control.ImageBuildUpl
 	r.life.RLock()
 	defer r.life.RUnlock()
 	if r.closed || r.ctx.Err() != nil || r.nodeRoots == nil || r.reports == nil {
-		return mydcp.ErrAdmission
+		return sfcp.ErrAdmission
 	}
 	r.imageBuildMu.Lock()
 	defer r.imageBuildMu.Unlock()
@@ -155,7 +155,7 @@ func (r *Runtime) reclaimImageBuild(ctx context.Context, u control.ImageBuildUpl
 				Scope         imagebuild.UploadScope
 				NeverBorrowed bool
 			}{u.Scope, true})
-			local.Native = sha256.Sum256(append([]byte("mydc-imagebuild-unstarted-1\x00"), proof...))
+			local.Native = sha256.Sum256(append([]byte("sfc-imagebuild-unstarted-1\x00"), proof...))
 		}
 		if err := r.saveImageBuildReclaim(local); err != nil {
 			return err
@@ -193,7 +193,7 @@ func (r *Runtime) reclaimImageBuild(ctx context.Context, u control.ImageBuildUpl
 			Lease   reconcile.Lease
 			Started bool
 		}{local.Native, local.Lease, local.Started})
-		fact := imagebuild.ReclaimReceipt{Schema: 1, Scope: u.Scope.Hash(), Version: local.Version, Native: sha256.Sum256(append([]byte("mydc-imagebuild-closure-1\x00"), evidence...)), At: uint64(time.Now().Unix())}
+		fact := imagebuild.ReclaimReceipt{Schema: 1, Scope: u.Scope.Hash(), Version: local.Version, Native: sha256.Sum256(append([]byte("sfc-imagebuild-closure-1\x00"), evidence...)), At: uint64(time.Now().Unix())}
 		fact.Signature = ed25519.Sign(r.Identity.Private, imagebuild.ReclaimReceiptBytes(fact))
 		local.Receipt = &fact
 		if err := r.saveImageBuildReclaim(local); err != nil {

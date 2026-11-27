@@ -100,11 +100,11 @@ func TestRestrictedLastIndependentAdminCannotLockNodeCLIPolicy(t *testing.T) {
 	admin, _ := c.User("admin")
 	admin.Credentials[0].Operations = []string{"restart-task"}
 	admin.Revision = 0
-	if _, err = c.PutUser("admin", c.users["admin"].Revision, admin); !errors.Is(err, ErrDenied) {
+	if _, err = c.replaceUser(c.users["admin"].Revision, admin); !errors.Is(err, ErrDenied) {
 		t.Fatal("last recovery administrator was removed by operation ceiling", err)
 	}
 	admin.Credentials[0].Operations = []string{"put-user"}
-	if _, err = c.PutUser("admin", c.users["admin"].Revision, admin); err != nil {
+	if _, err = c.replaceUser(c.users["admin"].Revision, admin); err != nil {
 		t.Fatal("an independent key able to restore account policy remains recoverable", err)
 	}
 }

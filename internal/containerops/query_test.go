@@ -115,3 +115,14 @@ func TestObservationStatsRequireTwoMonotonicSamples(t *testing.T) {
 		t.Fatal("overflow became valid total")
 	}
 }
+
+// A cluster app container is not a Task: no container action selects it.
+func TestTargetNeverSelectsAClusterAppContainer(t *testing.T) {
+	target := Target{Cluster: [32]byte{1}, Owner: [32]byte{2}, Binding: [32]byte{3}, Tenant: "tenant", App: "app", Service: "web", Node: "node-a", Instance: ClusterAppKeyPrefix + "web", Generation: 1, Revision: 1}
+	if target.Valid() {
+		t.Fatal("a cluster app container was selected")
+	}
+	if (Selection{App: "app", Service: "web", Instance: ClusterAppKeyPrefix + "web"}).Matches(target) {
+		t.Fatal("a selection matched a cluster app container")
+	}
+}

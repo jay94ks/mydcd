@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/web/provlog"
+	"github.com/jay94ks/seafield/internal/web/provlog"
 )
 
 func providerLogFixture(t *testing.T) (*fixture, *provlog.Log, func(time.Duration)) {
@@ -160,7 +160,7 @@ func TestProviderLogStream(t *testing.T) {
 	if ev, id := next(); ev != "entry" || id != "2" && id != "1" {
 		t.Fatalf("backlog: %s %s", ev, id)
 	} else if id != "2" || first.Seq != 2 {
-		// seq 1 is the diag-enable note (provider mydc-web), filtered out
+		// seq 1 is the diag-enable note (provider sfc-web), filtered out
 		t.Fatalf("backlog entry seq %s, first %d", id, first.Seq)
 	}
 	l.Add(provlog.Entry{Provider: "dns:hostinger", Op: "Apply"})

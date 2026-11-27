@@ -10,7 +10,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/nodestorage"
+	"github.com/jay94ks/seafield/internal/nodestorage"
 )
 
 func testScope(length int64, digest [32]byte) (UploadScope, ed25519.PrivateKey) {
@@ -18,7 +18,7 @@ func testScope(length int64, digest [32]byte) (UploadScope, ed25519.PrivateKey) 
 	var owner [32]byte
 	copy(owner[:], key.Public().(ed25519.PublicKey))
 	cluster := [32]byte{2}
-	return UploadScope{Schema: 1, Cluster: cluster, Tenant: "tenant-a", Context: "app-source", Upload: "upload-one", Creator: "alice", Root: nodestorage.Reference{Cluster: cluster, Node: "node-a", Key: owner, ID: "data", Generation: 1, Path: "/srv/mydc"}, ContextRevision: 1, PolicyRevision: 1, Length: length, Digest: digest, Dockerfile: "Dockerfile", ExpandedLimit: 1 << 30, ExpiresAt: 1000}, key
+	return UploadScope{Schema: 1, Cluster: cluster, Tenant: "tenant-a", Context: "app-source", Upload: "upload-one", Creator: "alice", Root: nodestorage.Reference{Cluster: cluster, Node: "node-a", Key: owner, ID: "data", Generation: 1, Path: "/srv/sfc"}, ContextRevision: 1, PolicyRevision: 1, Length: length, Digest: digest, Dockerfile: "Dockerfile", ExpandedLimit: 1 << 30, ExpiresAt: 1000}, key
 }
 
 func TestUploadOriginalScopeCASAndCreator(t *testing.T) {

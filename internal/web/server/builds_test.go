@@ -405,7 +405,7 @@ func TestBuildDraft(t *testing.T) {
 	res, _ = f.hc.Get(f.http.URL + base + "/file?version=" + fmt.Sprint(before+1) + "&path=bin/run.sh")
 	body, _ = io.ReadAll(res.Body)
 	res.Body.Close()
-	if res.StatusCode != 200 || string(body) != "#!/bin/sh\necho hi\n" || res.Header.Get("X-MyDC-Executable") != "1" {
+	if res.StatusCode != 200 || string(body) != "#!/bin/sh\necho hi\n" || res.Header.Get("X-SFC-Executable") != "1" {
 		t.Fatalf("version file: %d %q %v", res.StatusCode, body, res.Header)
 	}
 	assertNowhere(t, f, big[:200])
@@ -417,7 +417,7 @@ func TestBuildDraft(t *testing.T) {
 	zw.Close()
 	req, _ := http.NewRequest("PUT", f.http.URL+"/api/v1/t/shop/build-contexts/worker/zip?opId="+op(), bytes.NewReader(zb.Bytes()))
 	req.Header.Set("Content-Type", "application/zip")
-	req.Header.Set("X-MyDC-Web", "1")
+	req.Header.Set("X-SFC-Web", "1")
 	res, err = f.hc.Do(req)
 	if err != nil {
 		t.Fatal(err)
@@ -430,7 +430,7 @@ func TestBuildDraft(t *testing.T) {
 	// the same opId again: the same op, no second version
 	req, _ = http.NewRequest("PUT", req.URL.String(), bytes.NewReader(zb.Bytes()))
 	req.Header.Set("Content-Type", "application/zip")
-	req.Header.Set("X-MyDC-Web", "1")
+	req.Header.Set("X-SFC-Web", "1")
 	if res, err = f.hc.Do(req); err != nil {
 		t.Fatal(err)
 	}

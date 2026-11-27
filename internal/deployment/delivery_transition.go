@@ -12,8 +12,8 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/state"
 )
 
 type DeliveryTransitionMode string
@@ -43,14 +43,14 @@ type deliveryTransitionSummary struct {
 }
 
 func transitionRetirementID(id string) string {
-	sum := sha256.Sum256([]byte("mydc-delivery-retire-1\x00" + id))
+	sum := sha256.Sum256([]byte("sfc-delivery-retire-1\x00" + id))
 	return "cd-" + strings.ToLower(base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(sum[:]))
 }
 
 // The same opaque retirement identity is used for plain and CD recreation.
 // It is derived from the accepted user operation, never a new retry identity.
 func RecreationRetirementID(id string) string {
-	sum := sha256.Sum256([]byte("mydc-container-recreate-1\x00" + id))
+	sum := sha256.Sum256([]byte("sfc-container-recreate-1\x00" + id))
 	return "recreate-" + hex.EncodeToString(sum[:24])
 }
 func (d Delivery) usedTransitionID(id string) bool {

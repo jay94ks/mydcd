@@ -7,7 +7,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/engine"
+	"github.com/jay94ks/seafield/internal/engine"
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/client"
 	"golang.org/x/sys/unix"
@@ -21,7 +21,7 @@ type ProcessExit struct {
 	Code                  int
 	OOM, Error            bool
 	Status                string
-	// StopSignal is the signal mydc sent to stop this process, when it did.
+	// StopSignal is the signal sfcli sent to stop this process, when it did.
 	// A process that ends on that signal (exit 128+n) stopped as asked.
 	StopSignal string `json:",omitempty"`
 }
@@ -33,7 +33,7 @@ func (e ProcessExit) valid() bool {
 }
 
 // Clean means the process exited by itself with 0, or ended on the stop
-// signal mydc sent (for example 143 after SIGTERM) before its grace ran out.
+// signal sfcli sent (for example 143 after SIGTERM) before its grace ran out.
 // SIGKILL, including Docker's kill after the grace, OOM and errors are not.
 func (e ProcessExit) Clean() bool {
 	if !e.valid() || e.OOM || e.Error || e.Status != "exited" {

@@ -10,16 +10,16 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/cluster/lifecycle"
-	"github.com/jay94ks/mydcd/internal/cluster/membership"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/userauth"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/lifecycle"
+	"github.com/jay94ks/seafield/internal/cluster/membership"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/userauth"
 )
 
-// This actual SDK/MYDCP/FSM boundary uses the shared join fixture with native
+// This actual SDK/SFCP/FSM boundary uses the shared join fixture with native
 // workload/network modules disabled. Owner proofs must come from the runtime;
 // the test supplies no fabricated zero counts or readiness signatures. Full
 // service/flow/writer retirement remains the resource-bearing E6 input.
@@ -41,14 +41,14 @@ func verifyRuntimeNodeLifecycle(t *testing.T, ctx context.Context, controls []*R
 		}
 		return nil, membership.Directory{}, false
 	}
-	selectPeer := func(runtime *Runtime) mydcp.Peer {
+	selectPeer := func(runtime *Runtime) sfcp.Peer {
 		for _, peer := range user.Peers {
 			if [32]byte(peer.Key) == runtime.Identity.Public {
 				return peer
 			}
 		}
 		t.Fatal("missing original trusted peer")
-		return mydcp.Peer{}
+		return sfcp.Peer{}
 	}
 	wait("actual N3 runtime prefix", func() bool {
 		_, d, found := current()
@@ -81,8 +81,10 @@ func verifyRuntimeNodeLifecycle(t *testing.T, ctx context.Context, controls []*R
 	})
 	leaderBefore, d, _ = current()
 	entry, _ = d.Entry(demotedID)
-	if _, err = user.Login(ctx, selectPeer(demoted), "admin", admin); err == nil {
-		t.Fatal("demoted node minted a new user grant")
+	// The demoted node no longer issues sessions; it relays the login to the
+	// leader, which issues it.
+	if relayed, err := user.Login(ctx, selectPeer(demoted), "admin", admin); err != nil || relayed.Issuer != leaderBefore.Identity.Public || relayed.Issuer == demoted.Identity.Public {
+		t.Fatal("demoted node must relay login to the leader, not mint a grant", err)
 	}
 	submit("restore-installed-voter", "promote-node", entry.Revision, control.NodeSelection{ID: demotedID})
 	wait("actual re-promotion uses original installed key", func() bool {
@@ -192,7 +194,7 @@ func verifyRuntimeNodeLifecycle(t *testing.T, ctx context.Context, controls []*R
 	if err != nil || recoverySession.User != session.User || recoverySession.Issuer != controls[0].Identity.Public || recoverySession.Approval == nil {
 		t.Fatal("active follower recovery login with credentials kept at that issuer", err)
 	}
-	if _, err = user.Query(ctx, activePeer, excludedGrant, "whoami", ""); err == nil {
+	if _, err = user.Whoami(ctx, activePeer, excludedGrant); err == nil {
 		t.Fatal("excluded issuer's old grant admitted a new request")
 	}
 	retained, err := user.Result(ctx, activePeer, recoverySession, originalReceipt)

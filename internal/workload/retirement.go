@@ -9,9 +9,9 @@ import (
 	"errors"
 
 	cerrdefs "github.com/containerd/errdefs"
-	"github.com/jay94ks/mydcd/internal/engine"
-	"github.com/jay94ks/mydcd/internal/reconcile"
-	"github.com/jay94ks/mydcd/internal/schema"
+	"github.com/jay94ks/seafield/internal/engine"
+	"github.com/jay94ks/seafield/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/schema"
 	"github.com/moby/moby/client"
 )
 
@@ -45,7 +45,7 @@ func (d *DockerDriver) Retire(ctx context.Context, key string, op reconcile.Oper
 	if len(receipt) > 0 {
 		proof, err = schema.Decode[containerRetirement](receipt)
 		decoded, decodeErr := hex.DecodeString(proof.NativeID)
-		if err != nil || proof.Schema != 1 || decodeErr != nil || len(decoded) != 32 || hex.EncodeToString(decoded) != proof.NativeID || proof.Name != id.Name || proof.SpecDigest != id.Labels["org.mydc.spec"] {
+		if err != nil || proof.Schema != 1 || decodeErr != nil || len(decoded) != 32 || hex.EncodeToString(decoded) != proof.NativeID || proof.Name != id.Name || proof.SpecDigest != id.Labels["org.sfc.spec"] {
 			return false, reconcile.ErrOperation
 		}
 	}
@@ -58,7 +58,7 @@ func (d *DockerDriver) Retire(ctx context.Context, key string, op reconcile.Oper
 		}
 		// This exact native was positively observed and synced by the original
 		// Start. Retain that fact even if it disappeared before retirement.
-		proof = containerRetirement{Schema: 1, NativeID: start.Native, Name: id.Name, SpecDigest: id.Labels["org.mydc.spec"]}
+		proof = containerRetirement{Schema: 1, NativeID: start.Native, Name: id.Name, SpecDigest: id.Labels["org.sfc.spec"]}
 		raw, _ := json.Marshal(proof)
 		if err = save(raw); err != nil {
 			return false, err
@@ -109,7 +109,7 @@ func (d *DockerDriver) Retire(ctx context.Context, key string, op reconcile.Oper
 		return false, engine.ErrOwnership
 	}
 	if proof.NativeID == "" {
-		proof = containerRetirement{Schema: 1, NativeID: got.Container.ID, Name: id.Name, SpecDigest: id.Labels["org.mydc.spec"]}
+		proof = containerRetirement{Schema: 1, NativeID: got.Container.ID, Name: id.Name, SpecDigest: id.Labels["org.sfc.spec"]}
 		raw, _ := json.Marshal(proof)
 		if err = save(raw); err != nil {
 			return false, err

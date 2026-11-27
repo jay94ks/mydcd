@@ -7,9 +7,9 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/deployment"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/deployment"
 
 	"gopkg.in/yaml.v3"
 )
@@ -94,7 +94,7 @@ func testDeliverySemanticController(t *testing.T, nodeCLIDisabled bool) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	input.MyDC.Delivery = &policy
+	input.Sfc.Delivery = &policy
 	web := input.Services["web"]
 	web.Environment = map[string]string{"NEXT": "1"}
 	input.Services["web"] = web

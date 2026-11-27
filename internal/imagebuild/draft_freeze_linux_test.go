@@ -12,7 +12,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/reconcile"
 	bolt "go.etcd.io/bbolt"
 	"golang.org/x/sys/unix"
 )
@@ -55,7 +55,7 @@ func TestFrozenDraftUsesOneOriginalArchiveAndExistingReaderReclaimFence(t *testi
 	if err != nil || !matchesGenerated(imported, original, plan) || imported.Inode != original.Inode {
 		t.Fatal("archive was copied/replaced", imported, err)
 	}
-	name := filepath.Join(plan.Scope.Root.Path, ".mydc-imagebuild", string(store.key), freezeName(plan))
+	name := filepath.Join(plan.Scope.Root.Path, ".sfc-imagebuild", string(store.key), freezeName(plan))
 	if _, err := os.Stat(name); !errors.Is(err, os.ErrNotExist) {
 		t.Fatal("original archive was not handed to Spool", err)
 	}
@@ -170,7 +170,7 @@ func TestFrozenDraftDoesNotOverwriteForeignDestination(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	destination := filepath.Join(scope.Root.Path, ".mydc-imagebuild", scopeName(scope)+".zip")
+	destination := filepath.Join(scope.Root.Path, ".sfc-imagebuild", scopeName(scope)+".zip")
 	if err := os.WriteFile(destination, []byte("foreign original"), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -188,7 +188,7 @@ func TestFrozenDraftDoesNotOverwriteForeignDestination(t *testing.T) {
 
 func TestFrozenDraftPartialArchiveIsRetainedWithoutTruncateOrRebuild(t *testing.T) {
 	store, spool, plan := frozenDraftFixture(t)
-	name := filepath.Join(plan.Scope.Root.Path, ".mydc-imagebuild", string(store.key), freezeName(plan))
+	name := filepath.Join(plan.Scope.Root.Path, ".sfc-imagebuild", string(store.key), freezeName(plan))
 	if err := os.WriteFile(name, []byte("partial ZIP"), 0600); err != nil {
 		t.Fatal(err)
 	}

@@ -21,7 +21,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/schema"
+	"github.com/jay94ks/seafield/internal/schema"
 )
 
 const MaxCompileDiagnosticBytes = 64 << 10
@@ -222,7 +222,7 @@ func ExecuteCompileBatch(ctx context.Context, environment CompileEnvironment) (r
 		}
 		args := append([]string(nil), compileFlags...)
 		binary := filepath.Join(work, "checker.cli")
-		args = append(args, "-o", binary, "github.com/jay94ks/mydcd/checkercli")
+		args = append(args, "-o", binary, "github.com/jay94ks/seafield/checkercli")
 		command := exec.CommandContext(ctx, filepath.Join(environment.GoRoot, "bin/go"), args...)
 		command.Dir, command.Env = work, compilerEnvironment(environment, batch, work)
 		diagnostic := &compileDiagnostic{remaining: MaxCompileDiagnosticBytes}

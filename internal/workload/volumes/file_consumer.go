@@ -2,7 +2,7 @@
 
 package volumes
 
-import "github.com/jay94ks/mydcd/internal/access"
+import "github.com/jay94ks/seafield/internal/access"
 
 // AcquireFile uses the same exclusive writer/readers/floors as app mounts and
 // Volume moves. A delegated file account gets no generic ManageVolumes grant.

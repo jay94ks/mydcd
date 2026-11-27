@@ -15,16 +15,16 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/config"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/userauth"
-	"github.com/jay94ks/mydcd/tests/gitfixture"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/config"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/userauth"
+	"github.com/jay94ks/seafield/tests/gitfixture"
 	"gopkg.in/yaml.v3"
 )
 
@@ -34,11 +34,11 @@ func TestRQ5CDLocalServicesHistoryAndSourceNative(t *testing.T) {
 
 // Extends the owned CLI/Git/Docker fixture. All candidates, accepted documents,
 // operation receipts and native results are produced by the ordinary engine.
-func verifyManagedCDLocalServices(t *testing.T, ctx context.Context, runtime **Runtime, cfg config.Node, root string, user userauth.Client, peer mydcp.Peer, session access.Session, p control.Policy, read func() cluster.View, wait func(string, func() bool), source *gitfixture.Fixture, original []byte, first string) {
+func verifyManagedCDLocalServices(t *testing.T, ctx context.Context, runtime **Runtime, cfg config.Node, root string, user userauth.Client, peer sfcp.Peer, session access.Session, p control.Policy, read func() cluster.View, wait func(string, func() bool), source *gitfixture.Fixture, original []byte, first string) {
 	t.Helper()
 	call := func(want int, args ...string) []byte {
 		t.Helper()
-		body, diagnostic, err := runManagedCLICommand(ctx, os.Getenv("MYDC_TEST_CLI"), filepath.Join(root, "cli-home"), filepath.Join(root, "cli.yaml"), append([]string{"--tenant", "tenant"}, args...), nil)
+		body, diagnostic, err := runManagedCLICommand(ctx, os.Getenv("SFC_TEST_CLI"), filepath.Join(root, "cli-home"), filepath.Join(root, "cli.yaml"), append([]string{"--tenant", "tenant"}, args...), nil)
 		code := 0
 		if err != nil {
 			if exited, ok := err.(interface{ ExitCode() int }); ok {
@@ -116,8 +116,8 @@ func verifyManagedCDLocalServices(t *testing.T, ctx context.Context, runtime **R
 	// The source fixture image declares VOLUME /data. The added stateless
 	// service covers it explicitly instead of creating an anonymous Volume.
 	service.Tmpfs = append(service.Tmpfs, "/data:size=4m,uid=10001,gid=10001,mode=0750")
-	service.MyDC.Sources, service.MyDC.SecretEnv, service.MyDC.Lifecycle = nil, nil, nil
-	service.Environment = deployment.Environment{"MYDC_READINESS_FIXTURE": "1", "REVISION": "local"}
+	service.Sfc.Sources, service.Sfc.SecretEnv, service.Sfc.Lifecycle = nil, nil, nil
+	service.Environment = deployment.Environment{"SFC_READINESS_FIXTURE": "1", "REVISION": "local"}
 	service.Healthcheck = &deployment.Healthcheck{Test: []string{"CMD", "/backend", "--probe"}, Interval: "1s", Timeout: "1s", Retries: 2}
 	for alias, attachment := range service.Networks {
 		attachment.Aliases = nil
@@ -128,12 +128,12 @@ func verifyManagedCDLocalServices(t *testing.T, ctx context.Context, runtime **R
 		}
 		service.Networks[alias] = attachment
 	}
-	local := deployment.Compose{Name: "app", MyDC: deployment.AppExtension{Schema: 1, Tenant: "tenant", Deployment: "app"}, Services: map[string]deployment.ComposeService{"worker": service}, Networks: model.Networks}
+	local := deployment.Compose{Name: "app", Sfc: deployment.AppExtension{Schema: 1, Tenant: "tenant", Deployment: "app"}, Services: map[string]deployment.ComposeService{"worker": service}, Networks: model.Networks}
 	body, err := yaml.Marshal(local)
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Exercise real multipart input and raw output beyond one MYDCP record.
+	// Exercise real multipart input and raw output beyond one SFCP record.
 	body = append([]byte("# "+strings.Repeat("local-source-padding", 1800)+"\n"), body...)
 	path := filepath.Join(root, "local-services.yaml")
 	if err := os.WriteFile(path, body, 0600); err != nil {
@@ -287,7 +287,7 @@ func verifyManagedCDLocalServices(t *testing.T, ctx context.Context, runtime **R
 // Real user login and management RPCs exercise the same author grant used by
 // CLI edits. Only input staging precedes revocation; no second native rollout
 // is manufactured just to check that the revoked author cannot start one.
-func verifyCDLocalAuthorRevocation(t *testing.T, ctx context.Context, root string, admin userauth.Client, peer mydcp.Peer, session access.Session, p control.Policy, read func() cluster.View, body []byte, cli func(int, ...string) []byte, native func() string) {
+func verifyCDLocalAuthorRevocation(t *testing.T, ctx context.Context, root string, admin userauth.Client, peer sfcp.Peer, session access.Session, p control.Policy, read func() cluster.View, body []byte, cli func(int, ...string) []byte, native func() string) {
 	t.Helper()
 	home := filepath.Join(root, "rq5-author-journals")
 	if err := os.MkdirAll(home, 0700); err != nil {

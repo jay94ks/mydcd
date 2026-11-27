@@ -19,10 +19,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/web/acme"
-	"github.com/jay94ks/mydcd/internal/web/dns"
-	"github.com/jay94ks/mydcd/internal/web/provlog"
-	"github.com/jay94ks/mydcd/internal/web/store"
+	"github.com/jay94ks/seafield/internal/certstore"
+	"github.com/jay94ks/seafield/internal/web/acme"
+	"github.com/jay94ks/seafield/internal/web/dns"
+	"github.com/jay94ks/seafield/internal/web/provlog"
+	"github.com/jay94ks/seafield/internal/web/store"
 )
 
 // Certificate automation (UI-57~59, devel/design/web-acme-plan.md). ACME
@@ -198,18 +199,26 @@ func (s *Server) runOrder(ctx context.Context, c *store.ACMECert, o *store.ACMEO
 		s.acmeAfterFailure(c, o)
 	}
 
+	// HTTP-01 names must lie under a registered cluster domain: ingress
+	// forwards the challenge path only for those hosts. Checked before
+	// the CA is asked, so a miss does not spend its rate limit.
+	var domains []string
+	var domErr error
 	if ws == nil {
-		// put-certificate is signed by a mydcd session. Automatic renewal
+		// put-certificate is signed by a sfcd session. Automatic renewal
 		// signs as the web's automation account; check it can
 		// log in before asking the CA for a certificate whose key would be
-		// lost. The store step logs in again (mydcd closes idle
+		// lost. The store step logs in again (sfcd closes idle
 		// connections long before propagation ends).
 		as, err := s.automationLogin(ctx, "acme-renew")
 		if err != nil {
 			fail("preflight", "renew-account", errors.New("automatic renewal signs as the web automation account, which could not log in: "+automationErrorCode(err)))
 			return
 		}
+		domains, domErr = s.orderDomains(ctx, as)
 		as.conn.Close()
+	} else {
+		domains, domErr = s.orderDomains(ctx, ws)
 	}
 	acct, ca, key, err := s.acmeOpen(c.Account)
 	if err != nil {
@@ -245,6 +254,13 @@ func (s *Server) runOrder(ctx context.Context, c *store.ACMECert, o *store.ACMEO
 			return
 		}
 		method[n] = m
+		if m == acme.HTTP01 && domErr == nil && !slices.ContainsFunc(domains, func(d string) bool { return certstore.DomainCovers(d, n) }) {
+			fail("preflight", "not-registered", fmt.Errorf("%s is not under a registered cluster domain (sfcli domain add); ingress forwards HTTP-01 only for those hosts", n))
+			return
+		}
+		if m == acme.HTTP01 && domErr != nil {
+			s.log.Warn("acme: cluster domain list not readable; HTTP-01 name not checked", "cert", c.Name, "name", n, "err", domErr)
+		}
 		fq := acme.ChallengeName(n)
 		if m != acme.DNS01 || byTXT[fq] != nil {
 			continue
@@ -690,7 +706,7 @@ func (s *Server) handleACMECerts(w http.ResponseWriter, r *http.Request, ws *web
 	for _, c := range cs {
 		out = append(out, s.certView(c))
 	}
-	// The store is reached through the caller's own mydcd session.
+	// The store is reached through the caller's own sfcd session.
 	writeJSON(w, http.StatusOK, map[string]any{"items": out, "certStore": true})
 }
 
@@ -807,7 +823,40 @@ func (s *Server) handleACMECert(w http.ResponseWriter, r *http.Request, ws *webS
 		return
 	}
 	orders, _ := s.opt.Store.ListACMEOrders(c.Name, 20)
-	writeJSON(w, http.StatusOK, map[string]any{"certificate": s.certView(c), "orders": orders})
+	ctx, cancel := s.callCtx(r)
+	methods, reasons := s.certMethods(ctx, ws, c.Names)
+	cancel()
+	writeJSON(w, http.StatusOK, map[string]any{"certificate": s.certView(c), "orders": orders, "methods": methods, "methodReasons": reasons})
+}
+
+// certMethods says how each name would be validated now: "dns-01",
+// "http-01", or nil with a reason (no-domain: neither method is possible;
+// not-registered: HTTP-01 but not under a registered cluster domain). A
+// domain list that cannot be read leaves HTTP-01 names unchecked.
+func (s *Server) certMethods(ctx context.Context, ws *webSession, names []string) (map[string]any, map[string]string) {
+	methods, reasons := map[string]any{}, map[string]string{}
+	var domains []string
+	var domErr error
+	read := false
+	for _, n := range names {
+		m, err := s.acmeMethod(n)
+		if err != nil {
+			methods[n], reasons[n] = nil, "no-domain"
+			continue
+		}
+		if m == acme.HTTP01 {
+			if !read {
+				domains, domErr = s.orderDomains(ctx, ws)
+				read = true
+			}
+			if domErr == nil && !slices.ContainsFunc(domains, func(d string) bool { return certstore.DomainCovers(d, n) }) {
+				methods[n], reasons[n] = nil, "not-registered"
+				continue
+			}
+		}
+		methods[n] = m
+	}
+	return methods, reasons
 }
 
 // PUT /acme/certs/{name} {autoRenew, keyTypes}
@@ -916,12 +965,20 @@ func (s *Server) handleACMEChain(w http.ResponseWriter, r *http.Request, ws *web
 // POST /acme/certs/{name}/revoke {confirm:"<name>"}: cannot be undone.
 func (s *Server) handleACMERevoke(w http.ResponseWriter, r *http.Request, ws *webSession) {
 	var req struct {
-		Confirm string `json:"confirm"`
+		Confirm string            `json:"confirm"`
+		Reason  acme.RevokeReason `json:"reason"`
 	}
 	if !readJSON(w, r, &req) {
 		return
 	}
 	if !s.requireAdmin(w, r, ws) {
+		return
+	}
+	if req.Reason == "" {
+		req.Reason = "unspecified"
+	}
+	if _, ok := acme.RevokeReasons[req.Reason]; !ok {
+		writeError(w, http.StatusUnprocessableEntity, "invalid", "reason: keyCompromise, superseded, cessationOfOperation or unspecified")
 		return
 	}
 	c, ok := s.loadCert(w, r)
@@ -943,7 +1000,7 @@ func (s *Server) handleACMERevoke(w http.ResponseWriter, r *http.Request, ws *we
 		return
 	}
 	ctx, cancel := s.dnsCtx(r)
-	err = ca.Revoke(ctx, key, acct.URL, chain[0])
+	err = ca.Revoke(ctx, key, acct.URL, chain[0], req.Reason)
 	cancel()
 	if err != nil {
 		writeError(w, http.StatusBadGateway, "ca-revoke", err.Error())
@@ -952,7 +1009,7 @@ func (s *Server) handleACMERevoke(w http.ResponseWriter, r *http.Request, ws *we
 	before := c.Fingerprint
 	c.AutoRenew = false
 	_ = s.opt.Store.PutACMECert(c)
-	s.audit(ws, "", "acme", "revoke", c.Name, map[string]any{"fingerprint": before}, map[string]any{"revoked": true})
+	s.audit(ws, "", "acme", "revoke", c.Name, map[string]any{"fingerprint": before}, map[string]any{"revoked": true, "reason": req.Reason})
 	writeJSON(w, http.StatusOK, map[string]any{"certificate": s.certView(c), "revoked": before})
 }
 

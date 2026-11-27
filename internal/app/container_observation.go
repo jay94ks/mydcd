@@ -9,12 +9,12 @@ import (
 	"errors"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/containerops"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/schema"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/containerops"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/sfcp"
 )
 
 func (r *Runtime) containerReadPermit(ctx context.Context, read control.ContainerRead) error {
@@ -28,40 +28,61 @@ func (r *Runtime) containerReadPermit(ctx context.Context, read control.Containe
 	}
 	index, err := schema.Decode[uint64](reply.Data)
 	if err != nil || index == 0 || reply.Local || reply.RaftIndex == 0 || reply.CommandIndex < index {
-		return mydcp.ErrAdmission
+		return sfcp.ErrAdmission
 	}
 	return nil
 }
+
+// localContainerReadPermit checks a logs read against this node's own
+// applied state: container logs live only in this node's log store, so the
+// owning node decides (R18 E6, Jay 2026-11-28), with no leader read.
+func (r *Runtime) localContainerReadPermit(ctx context.Context, read control.ContainerRead) error {
+	view, err := r.Engine().Read(ctx, false)
+	if err != nil {
+		return err
+	}
+	_, err = r.controlPolicy.ContainerReadPermit(view.State, r.Identity.Public, read, time.Now().Unix())
+	return err
+}
+
+// readPermit is the permit an observation of this kind takes.
+func (r *Runtime) readPermit(ctx context.Context, read control.ContainerRead) error {
+	if read.Query.Kind == "logs" {
+		return r.localContainerReadPermit(ctx, read)
+	}
+	return r.containerReadPermit(ctx, read)
+}
+
 func (r *Runtime) observeContainer(ctx context.Context, read control.ContainerRead) (containerops.Result, error) {
 	var result containerops.Result
 	if read.Target.Owner != r.Identity.Public {
 		owner, ok := r.nativeOwner(read.Target.Owner)
 		if !ok || !r.acceptsResourceOwner(ctx, read.Target.Node, read.Target.Owner) {
-			return result, mydcp.ErrAdmission
+			return result, sfcp.ErrAdmission
 		}
 		return owner.observeContainer(ctx, read)
 	}
 	if read.Target.Owner != r.Identity.Public || !read.Target.Valid() || read.Query.Validate() != nil {
-		return result, mydcp.ErrAdmission
+		return result, sfcp.ErrAdmission
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	stop := context.AfterFunc(r.ctx, cancel)
 	defer stop()
-	if err := r.containerReadPermit(ctx, read); err != nil {
+	if err := r.readPermit(ctx, read); err != nil {
 		return result, err
 	}
 	r.life.RLock()
 	if r.closed || r.workload == nil {
 		r.life.RUnlock()
-		return result, mydcp.ErrAdmission
+		return result, sfcp.ErrAdmission
 	}
 	result, err := r.observeContainerPage(ctx, read)
 	r.life.RUnlock()
 	if err != nil {
 		return result, err
 	}
-	if err = r.containerReadPermit(ctx, read); err != nil {
+	if err = r.readPermit(ctx, read); err != nil {
 		return containerops.Result{}, err
 	}
 	return result, nil
@@ -138,7 +159,7 @@ func (r *Runtime) observeContainerPage(ctx context.Context, read control.Contain
 		target := read.Target
 		target.NativeID, target.StartedAt = current.Status.NativeID, current.Status.StartedAt
 		if !target.Matches(read.Target) {
-			return result, mydcp.ErrAdmission
+			return result, sfcp.ErrAdmission
 		}
 		result, err = r.logPages.Next(read.Session.User, target, read.Query, time.Now().Unix())
 		if errors.Is(err, containerops.ErrLogCursorExpired) {
@@ -170,9 +191,9 @@ func (r *Runtime) containerObservation(ctx context.Context, read control.Contain
 	if read.Target.Owner == r.Identity.Public {
 		return r.observeContainer(ctx, read)
 	}
-	peer, ok := r.Mesh.Peer(mydcp.Identity(read.Target.Owner))
+	peer, ok := r.Mesh.Peer(sfcp.Identity(read.Target.Owner))
 	if !ok || !peer.Member || peer.ID != read.Target.Node {
-		return containerops.Result{}, mydcp.ErrAdmission
+		return containerops.Result{}, sfcp.ErrAdmission
 	}
 	raw, err := json.Marshal(read)
 	if err != nil {
@@ -184,7 +205,7 @@ func (r *Runtime) containerObservation(ctx context.Context, read control.Contain
 	}
 	result, err := schema.Decode[containerops.Result](reply.Data)
 	if err != nil || result.Validate(read.Query, read.Target) != nil {
-		return containerops.Result{}, mydcp.ErrAdmission
+		return containerops.Result{}, sfcp.ErrAdmission
 	}
 	return result, nil
 }
@@ -196,7 +217,7 @@ func (r *Runtime) containerReadModule(ctx context.Context, method, key string, i
 	}
 	if method == "container-read-permit" {
 		if v.Local {
-			return nil, mydcp.ErrAdmission
+			return nil, sfcp.ErrAdmission
 		}
 		// The member transport binds key; the provider must be the exact owner.
 		caller, err := identity.ParseKey(key)
@@ -210,9 +231,9 @@ func (r *Runtime) containerReadModule(ctx context.Context, method, key string, i
 		return json.Marshal(index)
 	}
 	caller, err := identity.ParseKey(key)
-	peer, ok := r.Mesh.Peer(mydcp.Identity(caller))
+	peer, ok := r.Mesh.Peer(sfcp.Identity(caller))
 	if err != nil || !ok || !peer.Member {
-		return nil, mydcp.ErrAdmission
+		return nil, sfcp.ErrAdmission
 	}
 	result, err := r.observeContainer(ctx, read)
 	if err != nil {

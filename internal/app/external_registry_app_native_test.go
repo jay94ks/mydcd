@@ -20,17 +20,17 @@ import (
 	"testing"
 
 	cerrdefs "github.com/containerd/errdefs"
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/containerops"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/imagesource"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/observability"
-	"github.com/jay94ks/mydcd/internal/registryclient"
-	"github.com/jay94ks/mydcd/internal/userauth"
-	"github.com/jay94ks/mydcd/tests/registryfixture"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/containerops"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/imagesource"
+	"github.com/jay94ks/seafield/internal/observability"
+	"github.com/jay94ks/seafield/internal/registryclient"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/userauth"
+	"github.com/jay94ks/seafield/tests/registryfixture"
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/client"
 )
@@ -45,7 +45,7 @@ type externalRegistryAppNative struct {
 	cli                     *managedRegistryNative
 	remote                  *registryfixture.Fixture
 	user                    userauth.Client
-	peer                    mydcp.Peer
+	peer                    sfcp.Peer
 	session                 access.Session
 	root, reference, config string
 	manifest, nativeImage   string
@@ -60,18 +60,18 @@ type externalRegistryAppNative struct {
 	authorized, blobs       int64
 }
 
-func prepareExternalRegistryAppNative(t *testing.T, ctx context.Context, r *Runtime, root string, user userauth.Client, peer mydcp.Peer, session access.Session, p control.Policy, read func() cluster.View, change func(string, string, uint64, any), source *registryfixture.Fixture, public map[string]any, save func()) *externalRegistryAppNative {
+func prepareExternalRegistryAppNative(t *testing.T, ctx context.Context, r *Runtime, root string, user userauth.Client, peer sfcp.Peer, session access.Session, p control.Policy, read func() cluster.View, change func(string, string, uint64, any), source *registryfixture.Fixture, public map[string]any, save func()) *externalRegistryAppNative {
 	t.Helper()
 	const usernameA, passwordA = "owned-app-reader-a", "private-rq6-app-registry-a"
 	const usernameB, passwordB = "owned-app-reader-b", "private-rq6-app-registry-b"
-	maintenance := os.Getenv("MYDC_TEST_RQ6_REMAINING") == "external-maintenance"
+	maintenance := os.Getenv("SFC_TEST_RQ6_REMAINING") == "external-maintenance"
 	credentials := map[string]registryfixture.BasicCredential{"fixture": {Username: usernameA, Password: passwordA}, "second": {Username: usernameB, Password: passwordB}}
 	if maintenance {
 		credentials["fixture"] = registryfixture.BasicCredential{Username: usernameA, Password: passwordA, DeleteStatus: 202}
 		credentials["second"] = registryfixture.BasicCredential{Username: usernameB, Password: passwordB, DeleteStatus: 403}
 		credentials["unsupported"] = registryfixture.BasicCredential{Username: usernameB, Password: passwordB} // default DELETE 405
 	}
-	remote := registryfixture.OpenPrivatePrepared(t, os.Getenv("MYDC_DOCKER_TEST_BACKEND"), container.Config{Cmd: []string{"/backend"}, User: "10001:10001", Volumes: map[string]struct{}{"/data": {}}, Labels: map[string]string{"org.mydc.test.owner": public["Tag"].(string)}}, credentials)
+	remote := registryfixture.OpenPrivatePrepared(t, os.Getenv("SFC_DOCKER_TEST_BACKEND"), container.Config{Cmd: []string{"/backend"}, User: "10001:10001", Volumes: map[string]struct{}{"/data": {}}, Labels: map[string]string{"org.sfc.test.owner": public["Tag"].(string)}}, credentials)
 	f := &externalRegistryAppNative{remote: remote, user: user, peer: peer, session: session, root: root, reference: remote.Reference, config: remote.ConfigDigest, values: [][]byte{[]byte(usernameA), []byte(passwordA), []byte(usernameB), []byte(passwordB), remote.Certificate, []byte("private-native-group-password")}}
 	_, f.manifest, _ = strings.Cut(remote.Reference, "@")
 	f.public, f.save = public, save
@@ -90,11 +90,11 @@ func prepareExternalRegistryAppNative(t *testing.T, ctx context.Context, r *Runt
 		t.Fatal(err)
 	}
 	tenant, _ := users.Tenant("tenant")
-	trust := append(tenant.ImageSources, access.TrustRule{Registry: remote.Registry, Repository: "fixture"}, access.TrustRule{Registry: remote.Registry, Repository: "second"})
+	trust := []access.TrustRule{{Registry: remote.Registry, Repository: "fixture"}, {Registry: remote.Registry, Repository: "second"}}
 	if maintenance {
 		trust = append(trust, access.TrustRule{Registry: remote.Registry, Repository: "unsupported"})
 	}
-	change("external-app-trust", "set-trust", tenant.Revision, control.TrustAssignment{Tenant: "tenant", Rules: trust})
+	change("external-app-trust", "set-trust", tenant.Revision, control.TrustChange{Tenant: "tenant", Add: trust})
 	// A closed, previously owned numeric endpoint exercises connection refusal,
 	// separately from a reachable registry's repository-specific HTTP 401.
 	listener, err := net.Listen("tcp4", "127.0.0.1:0")
@@ -297,8 +297,8 @@ func (f *externalRegistryAppNative) checkRunning(t *testing.T, ctx context.Conte
 	// A new app has a distinct, otherwise valid plan and correct Group password.
 	// It must fail before any new Binding/native Task, rather than borrowing the
 	// accepted app's grant or falling back to anonymous/ambient credentials.
-	address := netip.MustParsePrefix(os.Getenv("MYDC_DOCKER_TEST_CIDR")).Addr().Next().Next().Next()
-	document := fmt.Sprintf("name: after-revoke\nservices:\n web:\n  image: %s\n  cpus: 0.1\n  mem_limit: 16m\n  networks: {app: {ipv4_address: %s}}\n  x-mydc: {node: node-a}\nnetworks:\n app: {external: true, name: shared-services}\n", f.reference, address)
+	address := netip.MustParsePrefix(os.Getenv("SFC_DOCKER_TEST_CIDR")).Addr().Next().Next().Next()
+	document := fmt.Sprintf("name: after-revoke\nservices:\n web:\n  image: %s\n  cpus: 0.1\n  mem_limit: 16m\n  networks: {app: {ipv4_address: %s}}\n  x-sfc: {node: node-a}\nnetworks:\n app: {external: true, name: shared-services}\n", f.reference, address)
 	file := filepath.Join(f.root, "after-revoke.yaml")
 	if err := os.WriteFile(file, []byte(document), 0600); err != nil {
 		t.Fatal(err)

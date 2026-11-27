@@ -3,11 +3,11 @@
 package control
 
 import (
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/network"
-	"github.com/jay94ks/mydcd/internal/network/services"
-	"github.com/jay94ks/mydcd/internal/tenancy"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/network"
+	"github.com/jay94ks/seafield/internal/network/services"
+	"github.com/jay94ks/seafield/internal/tenancy"
 )
 
 type RouteWorkRequest struct {
@@ -57,7 +57,7 @@ func (p Policy) ProjectRouteWork(s state.State, caller [32]byte, request RouteWo
 	return projection, work, err
 }
 
-// RouteTransportAllowed grants only the coarse MYDCP PathControl/Packet
+// RouteTransportAllowed grants only the coarse SFCP PathControl/Packet
 // purpose for a currently approved original owner pair. Path scope, native
 // readiness and every packet/flow still pass their existing owner gates.
 func (p Policy) RouteTransportAllowed(s state.State, local, remote [32]byte) bool {

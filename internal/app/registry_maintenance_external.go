@@ -7,9 +7,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/registryclient"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/registryclient"
+	"github.com/jay94ks/seafield/internal/sfcp"
 )
 
 func (r *Runtime) runExternalRegistryMaintenance(ctx context.Context, work control.RegistryMaintenanceWork, local registryMaintenanceReceipt) {
@@ -21,7 +21,7 @@ func (r *Runtime) runExternalRegistryMaintenance(ctx context.Context, work contr
 		return
 	}
 	if local.Sent {
-		// The remote OCI API has no MyDC operation receipt. A later 404 cannot
+		// The remote OCI API has no Seafield Cluster operation receipt. A later 404 cannot
 		// distinguish the original effect from another writer's delete/re-push.
 		// Preserve the original pending target/fence and never issue DELETE again.
 		// The source reader may independently close after its real local I/O join;
@@ -67,15 +67,15 @@ func (r *Runtime) runExternalRegistryMaintenance(ctx context.Context, work contr
 			return err
 		}
 		if fresh.State != "running" || fresh.Change.DigestValue() != local.Target {
-			return mydcp.ErrAdmission
+			return sfcp.ErrAdmission
 		}
 		if !fresh.Allowed {
 			beforeCode = "DENIED"
-			return mydcp.ErrAdmission
+			return sfcp.ErrAdmission
 		}
 		if fresh.InUse {
 			beforeCode = "IMAGE_IN_USE"
-			return mydcp.ErrAdmission
+			return sfcp.ErrAdmission
 		}
 		// No external network mutation can precede this synchronous local fact.
 		local.Sent = true

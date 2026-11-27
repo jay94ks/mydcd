@@ -3,10 +3,10 @@
 package control
 
 import (
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/lifecycle"
-	"github.com/jay94ks/mydcd/internal/cluster/membership"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/lifecycle"
+	"github.com/jay94ks/seafield/internal/cluster/membership"
+	"github.com/jay94ks/seafield/internal/cluster/state"
 )
 
 func (p Policy) validateNodeOrigins(d membership.Directory) error {
@@ -45,12 +45,29 @@ func (p Policy) validateNodeOrigins(d membership.Directory) error {
 	}
 
 	for _, entry := range d.Entries {
+		if entry.Abort != nil {
+			var op UserOperation
+			var q NodeSelection
+			if canonical(entry.Abort, &op) != nil || op.VerifyOriginal(p.Cluster) != nil || op.Change.Action != "abort-node-join" || canonical(op.Change.Payload, &q) != nil || q.ID != entry.Peer.ID || op.Change.Expected+1 != entry.Revision {
+				return ErrCatalog
+			}
+		}
 		if entry.Voting == nil {
 			continue
 		}
 		var op UserOperation
+		if canonical(entry.Voting.Origin, &op) != nil || op.VerifyOriginal(p.Cluster) != nil || op.Change.Expected != entry.Voting.AcceptedRevision {
+			return ErrCatalog
+		}
+		if entry.Voting.Endpoint != "" {
+			var q NodeEndpointChange
+			if op.Change.Action != "set-node-endpoint" || canonical(op.Change.Payload, &q) != nil || q.ID != entry.Peer.ID || q.Endpoint != entry.Voting.Endpoint {
+				return ErrCatalog
+			}
+			continue
+		}
 		var q NodeSelection
-		if canonical(entry.Voting.Origin, &op) != nil || op.VerifyOriginal(p.Cluster) != nil || canonical(op.Change.Payload, &q) != nil || q.ID != entry.Peer.ID || op.Change.Expected != entry.Voting.AcceptedRevision || op.Change.Action != "promote-node" && op.Change.Action != "demote-node" || (op.Change.Action == "demote-node") != entry.Voting.Before.Voter {
+		if canonical(op.Change.Payload, &q) != nil || q.ID != entry.Peer.ID || op.Change.Action != "promote-node" && op.Change.Action != "demote-node" || (op.Change.Action == "demote-node") != entry.Voting.Before.Voter {
 			return ErrCatalog
 		}
 	}

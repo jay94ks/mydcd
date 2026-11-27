@@ -10,16 +10,16 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/web/mydc"
-	"github.com/jay94ks/mydcd/internal/web/store"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/web/sfc"
+	"github.com/jay94ks/seafield/internal/web/store"
 )
 
 // Files in a tenant volume (REQ-28, docs/reference/volume-files.md). Every
 // list/get/put/delete is a signed volume-file op of the session user
 // (volume_file_jobs.go): the op holds the path, size and digest, never the
-// content, which goes on its own purpose18 stream. mydcd checks the path,
+// content, which goes on its own purpose18 stream. sfcd checks the path,
 // the capacity and who may touch it (tenant manager, or a
 // volume-file-grant on a path prefix).
 
@@ -36,8 +36,8 @@ func (s *Server) handleVolumeFiles(w http.ResponseWriter, r *http.Request, ws *w
 	defer cancel()
 	var items []vfEntry
 	var next string
-	err := ws.do(ctx, func(ctx context.Context, c mydc.Conn) error {
-		lq := control.VolumeFileQuery{Volume: volume, Path: q.Get("prefix"), Method: mydc.ActionListVolumeFiles, After: q.Get("after")}
+	err := ws.do(ctx, func(ctx context.Context, c sfc.Conn) error {
+		lq := control.VolumeFileQuery{Volume: volume, Path: q.Get("prefix"), Method: sfc.ActionListVolumeFiles, After: q.Get("after")}
 		res, err := s.runVolumeFile(ctx, c, ws, vfJob{tenant: tenant, q: lq, o: newVolumeFileOp(ws, "", tenant, lq, nil)})
 		if err != nil {
 			return volumeFileErr(err)
@@ -62,8 +62,8 @@ func (s *Server) handleVolumeFiles(w http.ResponseWriter, r *http.Request, ws *w
 }
 
 // GET /t/{t}/volumes/{name}/file?path= → the file's bytes (attachment,
-// never rendered, at most 64 MiB), X-MyDC-Digest = its SHA-256. The bytes
-// are sent only after their length and digest match mydcd's reply.
+// never rendered, at most 64 MiB), X-SFC-Digest = its SHA-256. The bytes
+// are sent only after their length and digest match sfcd's reply.
 func (s *Server) handleVolumeFileGet(w http.ResponseWriter, r *http.Request, ws *webSession) {
 	path := r.URL.Query().Get("path")
 	if path == "" {
@@ -73,7 +73,7 @@ func (s *Server) handleVolumeFileGet(w http.ResponseWriter, r *http.Request, ws 
 	ctx, cancel := s.callCtx(r)
 	defer cancel()
 	var res vfResult
-	err := ws.do(ctx, func(ctx context.Context, c mydc.Conn) error {
+	err := ws.do(ctx, func(ctx context.Context, c sfc.Conn) error {
 		var err error
 		res, err = s.volumeFileGet(ctx, c, ws, r.PathValue("t"), r.PathValue("name"), path, maxVolumeFileWeb, nil)
 		if err != nil {
@@ -92,7 +92,7 @@ func (s *Server) handleVolumeFileGet(w http.ResponseWriter, r *http.Request, ws 
 	h.Set("X-Content-Type-Options", "nosniff")
 	h.Set("Content-Security-Policy", "sandbox")
 	h.Set("Cache-Control", "no-store")
-	h.Set("X-MyDC-Digest", "sha256:"+hex.EncodeToString(res.reply.Result.Digest[:]))
+	h.Set("X-SFC-Digest", "sha256:"+hex.EncodeToString(res.reply.Result.Digest[:]))
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(res.data)
 }
@@ -114,7 +114,7 @@ func (s *Server) handlePutVolumeFile(w http.ResponseWriter, r *http.Request, ws 
 		writeError(w, http.StatusUnprocessableEntity, "invalid", "path: a file path in the volume")
 		return
 	}
-	pq := control.VolumeFileQuery{Volume: r.PathValue("name"), Path: path, Method: mydc.ActionPutVolumeFile, Size: int64(len(data)),
+	pq := control.VolumeFileQuery{Volume: r.PathValue("name"), Path: path, Method: sfc.ActionPutVolumeFile, Size: int64(len(data)),
 		MaxBytes: maxVolumeFileWeb, Digest: sha256.Sum256(data), Overwrite: q.Get("overwrite") == "1"}
 	s.volumeFileWrite(w, r, ws, q.Get("opId"), pq, data)
 }
@@ -132,7 +132,7 @@ func (s *Server) handleDeleteVolumeFile(w http.ResponseWriter, r *http.Request, 
 		writeError(w, http.StatusUnprocessableEntity, "invalid", "path: a file path in the volume")
 		return
 	}
-	s.volumeFileWrite(w, r, ws, req.OpID, control.VolumeFileQuery{Volume: r.PathValue("name"), Path: req.Path, Method: mydc.ActionDeleteVolumeFile}, nil)
+	s.volumeFileWrite(w, r, ws, req.OpID, control.VolumeFileQuery{Volume: r.PathValue("name"), Path: req.Path, Method: sfc.ActionDeleteVolumeFile}, nil)
 }
 
 // volumeFileWrite runs a put or delete under the person's opId.
@@ -156,7 +156,7 @@ func (s *Server) volumeFileWrite(w http.ResponseWriter, r *http.Request, ws *web
 	ctx, cancel := s.callCtx(r)
 	defer cancel()
 	var res vfResult
-	err := ws.do(ctx, func(ctx context.Context, c mydc.Conn) error {
+	err := ws.do(ctx, func(ctx context.Context, c sfc.Conn) error {
 		var err error
 		res, err = s.runVolumeFile(ctx, c, ws, vfJob{tenant: tenant, q: q, body: body, o: o})
 		if err != nil {
@@ -187,7 +187,7 @@ func (s *Server) writeVolumeFileError(w http.ResponseWriter, ws *webSession, err
 // POST /t/{t}/volumes/{name}/file-grants {opId, prefix, user} →
 // volume-file-grant; DELETE the same → volume-file-revoke. prefix ends with
 // "/"; user is the account's user ID (an automation account), who must be
-// a member of the workspace (mydcd refuses otherwise). Expected is the
+// a member of the workspace (sfcd refuses otherwise). Expected is the
 // access catalog revision of the tenant members read (Page.Collection =
 // TenantMembersRevision; Page.Revision is the tenant's own).
 func (s *Server) handleVolumeFileGrant(w http.ResponseWriter, r *http.Request, ws *webSession) {
@@ -199,12 +199,12 @@ func (s *Server) handleVolumeFileGrant(w http.ResponseWriter, r *http.Request, w
 	if !readJSON(w, r, &req) {
 		return
 	}
-	action := mydc.ActionGrantVolumeFiles
+	action := sfc.ActionGrantVolumeFiles
 	if r.Method == http.MethodDelete {
-		action = mydc.ActionRevokeVolumeFileGrant
+		action = sfc.ActionRevokeVolumeFileGrant
 	}
 	tenant, volume := r.PathValue("t"), r.PathValue("name")
-	s.sharedCreate(w, r, ws, req.OpID, actionBody{action, req}, func(ctx context.Context, c mydc.Conn, _ mydc.Session) (string, any, uint64, string, error) {
+	s.sharedCreate(w, r, ws, req.OpID, actionBody{action, req}, func(ctx context.Context, c sfc.Conn, _ sfc.Session) (string, any, uint64, string, error) {
 		if len(req.Prefix) < 2 || req.Prefix[len(req.Prefix)-1] != '/' || req.User == "" {
 			return "", nil, 0, "", invalid("prefix: a folder ending with /, user: the account's user ID")
 		}

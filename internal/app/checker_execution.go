@@ -12,15 +12,15 @@ import (
 	"time"
 
 	"github.com/hashicorp/raft"
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/cluster/membership"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/workload"
-	checker "github.com/jay94ks/mydcd/internal/workload/lifecycle"
-	contract "github.com/jay94ks/mydcd/lifecycle/v1"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/membership"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/workload"
+	checker "github.com/jay94ks/seafield/internal/workload/lifecycle"
+	contract "github.com/jay94ks/seafield/lifecycle/v1"
 )
 
 // Local diagnostic metadata is not a result, grant, or control receipt. It
@@ -58,7 +58,7 @@ func checkerAuthorityErrorCode(err error) string {
 		{raft.ErrNotLeader, "not-leader"}, {raft.ErrLeadershipLost, "leadership-lost"},
 		{raft.ErrRaftShutdown, "shutdown"}, {cluster.ErrRecovering, "recovering"},
 		{errNoAppLeader, "no-leader"}, {errAppLeaderPeerUnavailable, "management-transport"}, {access.ErrDenied, "denied"},
-		{mydcp.ErrAdmission, "admission"}, {checker.ErrPreparation, "preparation"},
+		{sfcp.ErrAdmission, "admission"}, {checker.ErrPreparation, "preparation"},
 		{checker.ErrReference, "source-reference"},
 	} {
 		if errors.Is(err, item.err) {

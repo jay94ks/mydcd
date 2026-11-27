@@ -9,13 +9,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/config"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/reconcile"
-	"github.com/jay94ks/mydcd/internal/schema"
-	"github.com/jay94ks/mydcd/internal/workload/volumes"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/workload/volumes"
 )
 
 // The product publishes immutable progress records by tmp->rename. A live
@@ -52,7 +51,7 @@ func observeSQLReceiveProgress(directory *os.Root, intent moveReceiveIntent, rea
 
 func sqlMoveArtifactPath(t *testing.T, nodeConfig string) string {
 	t.Helper()
-	cfg, err := config.LoadNode(nodeConfig)
+	cfg, err := loadTestNode(nodeConfig)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,7 +108,7 @@ func cutSQLReverseReceive(t *testing.T, a *Runtime, nodeConfig string, selection
 		if readErr != nil {
 			t.Fatal("SQL receiver original progress binding", readErr)
 		}
-		return p, published && p.Offset > 0 && p.Offset < intent.Manifest.Bytes && p.Offset%mydcp.VolumeChunkSize == 0
+		return p, published && p.Offset > 0 && p.Offset < intent.Manifest.Bytes && p.Offset%sfcp.VolumeChunkSize == 0
 	}
 	var observed moveReceiveIntent
 	var nextDiagnostic time.Time

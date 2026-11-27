@@ -24,13 +24,13 @@ type SessionApproval struct {
 func IssuedSessionDigest(s Session) [32]byte {
 	s.Approval = nil
 	b, _ := json.Marshal(s)
-	return sha256.Sum256(append([]byte("mydc-issued-user-session-1\x00"), b...))
+	return sha256.Sum256(append([]byte("sfc-issued-user-session-1\x00"), b...))
 }
 
 func SessionApprovalBytes(a SessionApproval) []byte {
 	a.Signature = nil
 	b, _ := json.Marshal(a)
-	return append([]byte("mydc-user-session-approval-1\x00"), b...)
+	return append([]byte("sfc-user-session-approval-1\x00"), b...)
 }
 
 // VerifyBinding is safe for a client without a catalog. It verifies the

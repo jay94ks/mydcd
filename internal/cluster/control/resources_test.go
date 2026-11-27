@@ -5,14 +5,15 @@ package control
 import (
 	"encoding/hex"
 	"fmt"
+	"maps"
 	"reflect"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/config"
-	"github.com/jay94ks/mydcd/internal/tenancy"
-	"github.com/jay94ks/mydcd/internal/workload"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/config"
+	"github.com/jay94ks/seafield/internal/tenancy"
+	"github.com/jay94ks/seafield/internal/workload"
 )
 
 func TestResourceCheckpointLargeTypedRestoreAndTenantAuthority(t *testing.T) {
@@ -142,7 +143,8 @@ func TestResourceCheckpointLargeTypedRestoreAndTenantAuthority(t *testing.T) {
 		t.Fatal("tenant-scoped page count", count)
 	}
 	// Changing one fragment without its root/other fragment revision is rejected.
-	partial := map[string][]byte{ResourcesKey: writes[ResourcesKey], partKey(ResourcesKey, 0): writes[partKey(ResourcesKey, 0)]}
+	partial := maps.Clone(writes)
+	partial[recordPart(t, writes, ResourcesKey)] = nil
 	_, rejected = apply(s, ResourcesKey, "partial", partial)
 	if rejected.Code != state.Invalid {
 		t.Fatal("mixed resource checkpoint revisions accepted", rejected)

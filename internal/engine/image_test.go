@@ -25,7 +25,7 @@ import (
 )
 
 func TestRealBoundaryRegistryDigestPull(t *testing.T) {
-	owner := os.Getenv("MYDC_REGISTRY_TEST_OWNER")
+	owner := os.Getenv("SFC_REGISTRY_TEST_OWNER")
 	if owner == "" {
 		t.Skip("requires explicit owner and docs/testing/r5-final.md registry rollback prestate")
 	}
@@ -58,7 +58,7 @@ func TestRealBoundaryRegistryDigestPull(t *testing.T) {
 	}
 	config, err := json.Marshal(map[string]any{
 		"architecture": runtime.GOARCH, "os": "linux",
-		"config": map[string]any{"Labels": map[string]string{"org.mydc.test.owner": owner}},
+		"config": map[string]any{"Labels": map[string]string{"org.sfc.test.owner": owner}},
 		"rootfs": map[string]any{"type": "layers", "diff_ids": []string{digest(layer.Bytes())}},
 	})
 	if err != nil {
@@ -120,7 +120,7 @@ func TestRealBoundaryRegistryDigestPull(t *testing.T) {
 		defer stop()
 		im, e := c.API.ImageInspect(clean, ref)
 		if !cerrdefs.IsNotFound(e) {
-			if e != nil || im.Config == nil || im.Config.Labels["org.mydc.test.owner"] != owner {
+			if e != nil || im.Config == nil || im.Config.Labels["org.sfc.test.owner"] != owner {
 				t.Error("rollback exact image owner", e)
 				return
 			}
@@ -141,7 +141,7 @@ func TestRealBoundaryRegistryDigestPull(t *testing.T) {
 		t.Fatal("mutable tag accepted", err)
 	}
 	im, err := c.Image(ctx, ref, true)
-	if err != nil || im.ID == "" || im.Config == nil || im.Config.Labels["org.mydc.test.owner"] != owner || !slices.Contains(im.RepoDigests, ref) || !slices.Equal(im.RootFS.Layers, []string{digest(layer.Bytes())}) {
+	if err != nil || im.ID == "" || im.Config == nil || im.Config.Labels["org.sfc.test.owner"] != owner || !slices.Contains(im.RepoDigests, ref) || !slices.Equal(im.RootFS.Layers, []string{digest(layer.Bytes())}) {
 		t.Fatal("actual digest pull/inspect", im.ID, err)
 	}
 	if manifests.Load() == 0 || configs.Load() == 0 || layers.Load() == 0 {

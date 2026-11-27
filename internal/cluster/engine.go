@@ -10,10 +10,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/jay94ks/mydcd/internal/cluster/lifecycle"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/storage"
+	"github.com/jay94ks/seafield/internal/cluster/lifecycle"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/storage"
 	"io"
 	"log"
 	"path/filepath"
@@ -35,7 +35,7 @@ type Options struct {
 	Prepared             func(*Engine)
 	ID, Root, Admin      string
 	Cluster              [32]byte
-	Mesh                 *mydcp.Transport
+	Mesh                 *sfcp.Transport
 	Resolve              PeerResolver
 	Servers              []raft.Server
 	Bootstrap            bool
@@ -85,7 +85,7 @@ type Engine struct {
 	done             chan struct{}
 	id               string
 	cluster          [32]byte
-	mesh             *mydcp.Transport
+	mesh             *sfcp.Transport
 	resolve          PeerResolver
 	fatal            chan error
 	readModule       func(context.Context, string, string, []byte, View) (json.RawMessage, error)
@@ -217,7 +217,7 @@ func Open(o Options) (*Engine, error) {
 	// sends none. CommitTimeout is now only the local re-check for a wake-up
 	// that could not be delivered.
 	//
-	// Failure detection is the MYDCP connection's job: QUIC PINGs every 1s
+	// Failure detection is the SFCP connection's job: QUIC PINGs every 1s
 	// and closes after 3s of silence, and OnPeerLost below turns that into
 	// an election on a follower (after a random wait up to ElectionTimeout/2)
 	// or a lease re-check on the leader. A Raft heartbeat therefore only goes
@@ -258,11 +258,25 @@ func Open(o Options) (*Engine, error) {
 			return nil, err
 		}
 	}
+	if !hasState {
+		// A pending `sfcd restore` plan makes the first Raft state.
+		if hasState, err = e.runRestorePlan(o); err != nil {
+			return nil, err
+		}
+	} else if err = e.finishRestorePlan(o); err != nil {
+		return nil, err
+	}
 	if o.Bootstrap && !hasState {
 		if len(o.Servers) == 0 {
 			return nil, errors.New("bootstrap requires an explicit voting configuration")
 		}
 		if err = raft.BootstrapCluster(cfg, e.log, e.log, snapshots, e.transport, raft.Configuration{Servers: o.Servers}); err != nil {
+			return nil, err
+		}
+	}
+	if hasState {
+		// A pending `sfcd recover` plan runs before Raft sees its state.
+		if err = e.runRecoveryPlan(o); err != nil {
 			return nil, err
 		}
 	}
@@ -276,12 +290,12 @@ func Open(o Options) (*Engine, error) {
 	if err = e.observeRaft(); err != nil {
 		return nil, err
 	}
-	// A lost MYDCP connection is the fast failure signal (see the timers above).
+	// A lost SFCP connection is the fast failure signal (see the timers above).
 	r := e.raft
-	o.Mesh.OnPeerLost(func(p mydcp.Peer) { r.PeerConnectionLost(raft.ServerID(p.ID)) })
+	o.Mesh.OnPeerLost(func(p sfcp.Peer) { r.PeerConnectionLost(raft.ServerID(p.ID)) })
 	// A member that comes back (restart) gets a heartbeat from the leader at
 	// once instead of after HeartbeatInterval (10s), so it learns its leader.
-	o.Mesh.OnPeerConnected(func(p mydcp.Peer) { r.PeerConnected(raft.ServerID(p.ID)) })
+	o.Mesh.OnPeerConnected(func(p sfcp.Peer) { r.PeerConnected(raft.ServerID(p.ID)) })
 	e.wg.Add(1)
 	go func() {
 		defer e.wg.Done()
@@ -304,10 +318,10 @@ func (e *Engine) IsLeader() bool                              { return e.raft.St
 
 // LeaderPeer resolves only the currently known leader's approved ID/address.
 // It does not establish quorum or authorize any forwarded user operation.
-func (e *Engine) LeaderPeer() (mydcp.Peer, bool) {
+func (e *Engine) LeaderPeer() (sfcp.Peer, bool) {
 	address, id := e.Leader()
 	if id == "" || address == "" {
-		return mydcp.Peer{}, false
+		return sfcp.Peer{}, false
 	}
 	peer, ok := e.resolve(id, address)
 	return peer, ok && peer.Member

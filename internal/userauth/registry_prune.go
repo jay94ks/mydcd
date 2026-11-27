@@ -7,11 +7,11 @@ import (
 	"errors"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/registryclient"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/registryclient"
+	"github.com/jay94ks/seafield/internal/sfcp"
 )
 
 func (s Service) registryPruneQuery(ctx context.Context, view cluster.View, q Request, session access.Session) Reply {
@@ -53,9 +53,9 @@ func registryPruneError(err error) Reply {
 	}
 	return Reply{Schema: 1, Code: code}
 }
-func (c Client) RegistryPrune(ctx context.Context, peer mydcp.Peer, session access.Session, tenant string, q control.RegistryPruneQuery, after string, results bool) (control.RegistryPruneView, error) {
+func (c Client) RegistryPrune(ctx context.Context, peer sfcp.Peer, session access.Session, tenant string, q control.RegistryPruneQuery, after string, results bool) (control.RegistryPruneView, error) {
 	if tenant == "" || !q.Valid(results) {
-		return control.RegistryPruneView{}, mydcp.ErrAdmission
+		return control.RegistryPruneView{}, sfcp.ErrAdmission
 	}
 	if _, _, err := registryclient.CatalogueCursor(after); err != nil {
 		return control.RegistryPruneView{}, err
@@ -69,7 +69,7 @@ func (c Client) RegistryPrune(ctx context.Context, peer mydcp.Peer, session acce
 		return control.RegistryPruneView{}, err
 	}
 	if reply.Tenant != tenant || reply.RegistryPrune == nil || !reply.RegistryPrune.ValidQuery(c.Cluster, tenant, q, after, results) {
-		return control.RegistryPruneView{}, mydcp.ErrFrame
+		return control.RegistryPruneView{}, sfcp.ErrFrame
 	}
 	return *reply.RegistryPrune, nil
 }

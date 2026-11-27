@@ -11,7 +11,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/reconcile"
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -61,7 +61,7 @@ func TestDraftLifetimeRetirementKeepsMetadataNewLifetimeAndOriginalConsumer(t *t
 	if err := spool.RetireDraft(ctx, grant, lease); err != nil {
 		t.Fatal(err)
 	}
-	name := filepath.Join(grant.Scope.Root.Path, ".mydc-imagebuild", string(store.key))
+	name := filepath.Join(grant.Scope.Root.Path, ".sfc-imagebuild", string(store.key))
 	if _, err := os.Stat(name); !os.IsNotExist(err) {
 		t.Fatal("old private namespace not removed", err)
 	}
@@ -157,7 +157,7 @@ func TestDraftLifetimeRetirementPreservesPreparedArchiveUntilIndependentSettleme
 	if err := spool.RetireDraft(ctx, g, reconcile.Lease{Generation: store.scope.Root.Generation, Token: 7}); !errors.Is(err, ErrUsed) {
 		t.Fatal("prepared source deleted before its archive settlement", err)
 	}
-	name := filepath.Join(g.Scope.Root.Path, ".mydc-imagebuild", string(store.key), freezeName(plan))
+	name := filepath.Join(g.Scope.Root.Path, ".sfc-imagebuild", string(store.key), freezeName(plan))
 	if info, err := os.Stat(name); err != nil || info.Size() == 0 {
 		t.Fatal("prepared original source lost", info, err)
 	}
@@ -170,7 +170,7 @@ func TestDraftLifetimeRetirementResumesOriginalAcrossEveryCommitBoundary(t *test
 	for _, failAt := range []int{1, 2, 3} {
 		t.Run(map[int]string{1: "intent", 2: "unlink", 3: "return"}[failAt], func(t *testing.T) {
 			store, spool, grant, lease := draftRetirementFixture(t)
-			name := filepath.Join(grant.Scope.Root.Path, ".mydc-imagebuild", string(store.key))
+			name := filepath.Join(grant.Scope.Root.Path, ".sfc-imagebuild", string(store.key))
 			if err := store.Close(); err != nil {
 				t.Fatal(err)
 			}
@@ -208,7 +208,7 @@ func TestDraftLifetimeRetirementRejectsCurrentFutureOrReplacedData(t *testing.T)
 	for _, cause := range []string{"current", "generation", "missing", "replacement"} {
 		t.Run(cause, func(t *testing.T) {
 			store, spool, grant, lease := draftRetirementFixture(t)
-			name := filepath.Join(grant.Scope.Root.Path, ".mydc-imagebuild", string(store.key))
+			name := filepath.Join(grant.Scope.Root.Path, ".sfc-imagebuild", string(store.key))
 			if err := store.Close(); err != nil {
 				t.Fatal(err)
 			}

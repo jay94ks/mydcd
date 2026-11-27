@@ -6,11 +6,10 @@ import (
 	"context"
 	"errors"
 	"io"
-	"strconv"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/containerops"
-	"github.com/jay94ks/mydcd/internal/engine"
+	"github.com/jay94ks/seafield/internal/containerops"
+	"github.com/jay94ks/seafield/internal/engine"
 	"github.com/moby/moby/api/pkg/stdcopy"
 	"github.com/moby/moby/client"
 )
@@ -61,10 +60,6 @@ func (m *Manager) FollowContainerLogs(ctx context.Context, target containerops.T
 		return err
 	}
 	defer destroyLogValues(values)
-	api, err := m.driver.Engine.StreamingAPI()
-	if err != nil {
-		return err
-	}
 	inspected, err := m.driver.Engine.API.ContainerInspect(ctx, target.NativeID, client.ContainerInspectOptions{})
 	if err != nil || inspected.Container.Config == nil || inspected.Container.ID != target.NativeID {
 		return errors.Join(engine.ErrOwnership, err)
@@ -74,7 +69,7 @@ func (m *Manager) FollowContainerLogs(ctx context.Context, target containerops.T
 	if err = emit(containerops.SessionRecord{Kind: "sample", Sample: &meta}); err != nil {
 		return err
 	}
-	logs, err := api.ContainerLogs(ctx, target.NativeID, client.ContainerLogsOptions{Follow: true, ShowStdout: q.Stdout, ShowStderr: q.Stderr, Tail: strconv.Itoa(q.Tail), Since: q.Since, Timestamps: q.Timestamps})
+	logs, err := m.containerLogs(ctx, target.NativeID, q, tty, true)
 	if err != nil {
 		return err
 	}

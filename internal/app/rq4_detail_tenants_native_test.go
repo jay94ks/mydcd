@@ -9,10 +9,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/containerops"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/userauth"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/containerops"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/userauth"
 	"github.com/moby/moby/client"
 )
 
@@ -20,13 +20,13 @@ import (
 // Each viewer must obtain its own native detail/check/exit record, never the
 // other tenant's records. Native effects are limited to these two exact Tasks.
 func TestRQ4TwoTenantNativeDetailsChecksAndExitHistory(t *testing.T) {
-	if os.Geteuid() != 0 || os.Getenv("MYDC_NATIVE_MANIFEST") == "" || !filepath.IsAbs(os.Getenv("MYDC_DOCKER_TEST_BACKEND")) || os.Getenv("MYDC_DOCKER_TEST_CIDR") == "" {
+	if os.Geteuid() != 0 || os.Getenv("SFC_NATIVE_MANIFEST") == "" || !filepath.IsAbs(os.Getenv("SFC_DOCKER_TEST_BACKEND")) || os.Getenv("SFC_DOCKER_TEST_CIDR") == "" {
 		t.Skip("requires owned native rollback baseline and prepared backend")
 	}
 	testRealManagedJoin(t, false, "details-native")
 }
 
-func verifyTwoTenantDetailsNative(t *testing.T, ctx context.Context, runtimes []*Runtime, user userauth.Client, peer mydcp.Peer, readers []access.Session, wait func(string, func() bool)) {
+func verifyTwoTenantDetailsNative(t *testing.T, ctx context.Context, runtimes []*Runtime, user userauth.Client, peer sfcp.Peer, readers []access.Session, wait func(string, func() bool)) {
 	t.Helper()
 	query := containerops.Query{Schema: 1, Kind: "inspect", Selection: containerops.Selection{App: "app", Service: "web"}, MaxBytes: containerops.MaxOutput, HistoryLimit: 20}
 	for i, tenant := range []string{"first", "second"} {

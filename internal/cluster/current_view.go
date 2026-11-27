@@ -5,8 +5,8 @@ package cluster
 import (
 	"context"
 
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/mydcp"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/sfcp"
 )
 
 // CurrentView obtains a quorum barrier without moving an installed native
@@ -17,23 +17,23 @@ import (
 //
 // This establishes freshness, not user/native authority. Consumers still check
 // current membership, session, epoch and the exact original target on this view.
-func CurrentView(ctx context.Context, engine *Engine, mesh *mydcp.Transport, self *identity.Identity, cluster [32]byte) (View, error) {
+func CurrentView(ctx context.Context, engine *Engine, mesh *sfcp.Transport, self *identity.Identity, cluster [32]byte) (View, error) {
 	if engine == nil {
-		return View{}, mydcp.ErrAdmission
+		return View{}, sfcp.ErrAdmission
 	}
 	if engine.IsLeader() {
 		return engine.Read(ctx, true)
 	}
 	peer, ok := engine.LeaderPeer()
-	if !ok || mesh == nil || self == nil || peer.Key == mydcp.Identity(self.Public) {
-		return View{}, mydcp.ErrAdmission
+	if !ok || mesh == nil || self == nil || peer.Key == sfcp.Identity(self.Public) {
+		return View{}, sfcp.ErrAdmission
 	}
 	barrier, err := CallManagement(ctx, mesh, self, cluster, peer, ManagementRequest{Method: "status", Latest: true})
 	if err != nil {
 		return View{}, err
 	}
 	if barrier.Local || barrier.Node != peer.ID || barrier.RaftIndex == 0 || barrier.AppliedTerm == 0 {
-		return View{}, mydcp.ErrAdmission
+		return View{}, sfcp.ErrAdmission
 	}
 	for {
 		// Subscribe before reading: configuration/barrier publication can

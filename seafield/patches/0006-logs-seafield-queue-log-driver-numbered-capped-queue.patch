@@ -1,0 +1,775 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: seafield <seafield@invalid>
+Date: Fri, 27 Nov 2026 08:14:12 +0000
+Subject: [PATCH 06/20] logs: seafield-queue log driver, numbered capped queue
+ read and acked by sfcd
+
+
+diff --git a/daemon/command/daemon.go b/daemon/command/daemon.go
+index 723bd1a..7ec2bb5 100644
+--- a/daemon/command/daemon.go
++++ b/daemon/command/daemon.go
+@@ -36,6 +36,7 @@
+ 	dopts "github.com/moby/moby/v2/daemon/pkg/opts"
+ 	"github.com/moby/moby/v2/daemon/pkg/plugin"
+ 	"github.com/moby/moby/v2/daemon/seafield/eventfeed"
++	"github.com/moby/moby/v2/daemon/seafield/logqueue"
+ 	"github.com/moby/moby/v2/daemon/seafield/monitor"
+ 	apiserver "github.com/moby/moby/v2/daemon/server"
+ 	"github.com/moby/moby/v2/daemon/server/middleware"
+@@ -304,6 +305,7 @@ func (cli *daemonCLI) start(ctx context.Context) (retErr error) {
+ 	}
+ 	eventfeed.Attach(feed)
+ 	defer feed.Close()
++	logqueue.Root = cli.Config.Root
+ 
+ 	d, err := daemon.NewDaemon(ctx, cli.Config, pluginStore, cli.authzMiddleware, cli.containerdDialer)
+ 	if err != nil {
+@@ -854,6 +856,13 @@ func buildRouters(opts routerOptions) []router.Router {
+ 		network.NewRouter(opts.daemon, opts.cluster),
+ 		debugrouter.NewRouter(),
+ 		eventfeed.NewRouter(opts.feed),
++		logqueue.NewRouter(func(name string) (string, error) {
++			c, err := opts.daemon.GetContainer(name)
++			if err != nil {
++				return "", err
++			}
++			return c.ID, nil
++		}),
+ 	}
+ 
+ 	if opts.builder.backend != nil {
+diff --git a/daemon/seafield/logqueue/driver.go b/daemon/seafield/logqueue/driver.go
+new file mode 100644
+index 0000000..dbcd6ef
+--- /dev/null
++++ b/daemon/seafield/logqueue/driver.go
+@@ -0,0 +1,104 @@
++// SPDX-License-Identifier: Apache-2.0
++
++package logqueue
++
++import (
++	"fmt"
++	"path/filepath"
++	"sync"
++
++	units "github.com/docker/go-units"
++	"github.com/moby/moby/v2/daemon/logger"
++)
++
++// Name is the log driver name.
++const Name = "seafield-queue"
++
++// Root is the engine data root; queues live in
++// <Root>/containers/<id>/seafield-logs so they go away with the container.
++// The engine sets it before starting containers.
++var Root string
++
++var (
++	liveMu sync.Mutex
++	live   = map[string]*Queue{}
++)
++
++func init() {
++	if err := logger.RegisterLogDriver(Name, newDriver); err != nil {
++		panic(err)
++	}
++	if err := logger.RegisterLogOptValidator(Name, validate); err != nil {
++		panic(err)
++	}
++}
++
++func validate(cfg map[string]string) error {
++	for k, v := range cfg {
++		switch k {
++		case "max-size":
++			if n, err := units.RAMInBytes(v); err != nil || n < minSegment {
++				return fmt.Errorf("%s: max-size must be at least 256k, got %q", Name, v)
++			}
++		default:
++			return fmt.Errorf("unknown log opt '%s' for %s log driver", k, Name)
++		}
++	}
++	return nil
++}
++
++// Dir is where the queue of container id lives.
++func Dir(id string) string { return filepath.Join(Root, "containers", id, "seafield-logs") }
++
++type driver struct {
++	id string
++	q  *Queue
++}
++
++func newDriver(info logger.Info) (logger.Logger, error) {
++	if Root == "" {
++		return nil, fmt.Errorf("%s: engine root not set", Name)
++	}
++	var size int64
++	if v := info.Config["max-size"]; v != "" {
++		var err error
++		if size, err = units.RAMInBytes(v); err != nil {
++			return nil, err
++		}
++	}
++	q, err := Open(Dir(info.ContainerID), size)
++	if err != nil {
++		return nil, err
++	}
++	liveMu.Lock()
++	live[info.ContainerID] = q
++	liveMu.Unlock()
++	return &driver{id: info.ContainerID, q: q}, nil
++}
++
++func (d *driver) Name() string { return Name }
++
++func (d *driver) Log(m *logger.Message) error {
++	partial := m.PLogMetaData != nil && !m.PLogMetaData.Last
++	err := d.q.Append(m.Timestamp, m.Source, partial, m.Line)
++	if err == nil {
++		logger.PutMessage(m)
++	}
++	return err
++}
++
++func (d *driver) Close() error {
++	liveMu.Lock()
++	if live[d.id] == d.q {
++		delete(live, d.id)
++	}
++	liveMu.Unlock()
++	return d.q.Close()
++}
++
++// lookup returns the open queue of a running container, or nil.
++func lookup(id string) *Queue {
++	liveMu.Lock()
++	defer liveMu.Unlock()
++	return live[id]
++}
+diff --git a/daemon/seafield/logqueue/queue.go b/daemon/seafield/logqueue/queue.go
+new file mode 100644
+index 0000000..f964bd4
+--- /dev/null
++++ b/daemon/seafield/logqueue/queue.go
+@@ -0,0 +1,346 @@
++// SPDX-License-Identifier: Apache-2.0
++
++// Package logqueue is the Seafield log driver "seafield-queue".
++//
++// The engine does not keep container logs for itself. Each line goes into a
++// per-container queue on disk with a number; sfcd reads the queue and
++// acknowledges what it stored, and the engine then deletes that part. The
++// queue has a size cap: when sfcd is away long enough for it to fill, the
++// oldest lines are dropped and a reader is told exactly which numbers are
++// gone. Writing never blocks the container.
++package logqueue
++
++import (
++	"encoding/binary"
++	"errors"
++	"fmt"
++	"io"
++	"os"
++	"path/filepath"
++	"slices"
++	"strconv"
++	"strings"
++	"sync"
++	"time"
++)
++
++// Line is one stored log line.
++type Line struct {
++	Seq     uint64    `json:"seq"`
++	Time    time.Time `json:"time"`
++	Stream  string    `json:"stream"` // stdout or stderr
++	Partial bool      `json:"partial,omitempty"`
++	Data    []byte    `json:"data"`
++}
++
++// Gap is a range of numbers that is no longer in the queue.
++type Gap struct {
++	From uint64 `json:"from"`
++	To   uint64 `json:"to"`
++}
++
++const (
++	headerSize     = 8 + 8 + 1 + 1 + 4
++	maxLine        = 1 << 20
++	minSegment     = 256 << 10
++	defaultMaxSize = 64 << 20
++	segSuffix      = ".seg"
++)
++
++// segment file names are the first seq they hold, zero padded.
++func segName(first uint64) string { return fmt.Sprintf("%020d%s", first, segSuffix) }
++
++// Queue is the on-disk queue of one container.
++type Queue struct {
++	dir     string
++	maxSize int64
++	segSize int64
++
++	mu     sync.Mutex
++	segs   []uint64 // first seq of each segment, ascending
++	sizes  []int64
++	cur    *os.File
++	next   uint64
++	notify chan struct{}
++	closed bool
++}
++
++// Open opens or creates the queue in dir, continuing its numbers.
++func Open(dir string, maxSize int64) (*Queue, error) {
++	if maxSize <= 0 {
++		maxSize = defaultMaxSize
++	}
++	if err := os.MkdirAll(dir, 0o700); err != nil {
++		return nil, err
++	}
++	q := &Queue{dir: dir, maxSize: maxSize, segSize: max(maxSize/8, minSegment), next: 1, notify: make(chan struct{})}
++	if err := q.scan(); err != nil {
++		return nil, err
++	}
++	return q, nil
++}
++
++func (q *Queue) scan() error {
++	ents, err := os.ReadDir(q.dir)
++	if err != nil {
++		return err
++	}
++	for _, e := range ents {
++		n, ok := strings.CutSuffix(e.Name(), segSuffix)
++		if !ok {
++			continue
++		}
++		first, err := strconv.ParseUint(n, 10, 64)
++		if err != nil {
++			continue
++		}
++		info, err := e.Info()
++		if err != nil {
++			return err
++		}
++		q.segs = append(q.segs, first)
++		q.sizes = append(q.sizes, info.Size())
++	}
++	if len(q.segs) == 0 {
++		return nil
++	}
++	// continue after the last whole record of the last segment
++	last := len(q.segs) - 1
++	q.next = q.segs[last]
++	f, err := os.OpenFile(filepath.Join(q.dir, segName(q.segs[last])), os.O_RDWR, 0)
++	if err != nil {
++		return err
++	}
++	var off int64
++	for {
++		l, n, err := readLine(f, off)
++		if err != nil {
++			break
++		}
++		q.next = l.Seq + 1
++		off += n
++	}
++	// drop a torn tail from a crash
++	if err = f.Truncate(off); err != nil {
++		f.Close()
++		return err
++	}
++	if _, err = f.Seek(off, io.SeekStart); err != nil {
++		f.Close()
++		return err
++	}
++	q.sizes[last] = off
++	q.cur = f
++	return nil
++}
++
++// Append stores one line. It never waits for a reader.
++func (q *Queue) Append(t time.Time, stream string, partial bool, data []byte) error {
++	if len(data) > maxLine {
++		data = data[:maxLine]
++	}
++	q.mu.Lock()
++	defer q.mu.Unlock()
++	if q.closed {
++		return errors.New("logqueue: closed")
++	}
++	if q.cur == nil || q.sizes[len(q.sizes)-1] >= q.segSize {
++		if err := q.rotate(); err != nil {
++			return err
++		}
++	}
++	var h [headerSize]byte
++	binary.BigEndian.PutUint64(h[0:], q.next)
++	binary.BigEndian.PutUint64(h[8:], uint64(t.UnixNano()))
++	if stream == "stderr" {
++		h[16] = 2
++	} else {
++		h[16] = 1
++	}
++	if partial {
++		h[17] = 1
++	}
++	binary.BigEndian.PutUint32(h[18:], uint32(len(data)))
++	if _, err := q.cur.Write(append(h[:], data...)); err != nil {
++		return err
++	}
++	q.sizes[len(q.sizes)-1] += int64(headerSize + len(data))
++	q.next++
++	q.trimLocked()
++	close(q.notify)
++	q.notify = make(chan struct{})
++	return nil
++}
++
++func (q *Queue) rotate() error {
++	if q.cur != nil {
++		if err := q.cur.Close(); err != nil {
++			return err
++		}
++	}
++	f, err := os.OpenFile(filepath.Join(q.dir, segName(q.next)), os.O_CREATE|os.O_EXCL|os.O_WRONLY|os.O_APPEND, 0o600)
++	if err != nil {
++		return err
++	}
++	q.cur = f
++	q.segs = append(q.segs, q.next)
++	q.sizes = append(q.sizes, 0)
++	return nil
++}
++
++// trimLocked drops the oldest segments while the queue is over its cap.
++// The segment being written is never dropped.
++func (q *Queue) trimLocked() {
++	var total int64
++	for _, s := range q.sizes {
++		total += s
++	}
++	for total > q.maxSize && len(q.segs) > 1 {
++		_ = os.Remove(filepath.Join(q.dir, segName(q.segs[0])))
++		total -= q.sizes[0]
++		q.segs, q.sizes = q.segs[1:], q.sizes[1:]
++	}
++}
++
++// Ack deletes every whole segment whose lines are all numbered <= upto.
++func (q *Queue) Ack(upto uint64) {
++	q.mu.Lock()
++	defer q.mu.Unlock()
++	for len(q.segs) > 1 && q.segs[1]-1 <= upto {
++		_ = os.Remove(filepath.Join(q.dir, segName(q.segs[0])))
++		q.segs, q.sizes = q.segs[1:], q.sizes[1:]
++	}
++}
++
++// Read returns up to limit lines numbered after `after`, a Gap when some of
++// the numbers right after `after` are gone, and a channel closed on the next
++// Append.
++func (q *Queue) Read(after uint64, limit int) ([]Line, *Gap, <-chan struct{}, error) {
++	q.mu.Lock()
++	segs := slices.Clone(q.segs)
++	next := q.next
++	changed := q.notify
++	q.mu.Unlock()
++	return readDir(q.dir, segs, next, after, limit, changed)
++}
++
++// Close closes the segment being written.
++func (q *Queue) Close() error {
++	q.mu.Lock()
++	defer q.mu.Unlock()
++	q.closed = true
++	close(q.notify)
++	q.notify = make(chan struct{})
++	if q.cur == nil {
++		return nil
++	}
++	err := q.cur.Close()
++	q.cur = nil
++	return err
++}
++
++// ReadDir reads a queue directory that no writer has open (a stopped
++// container).
++func ReadDir(dir string, after uint64, limit int) ([]Line, *Gap, error) {
++	q, err := Open(dir, 0)
++	if err != nil {
++		return nil, nil, err
++	}
++	defer q.Close()
++	lines, gap, _, err := q.Read(after, limit)
++	return lines, gap, err
++}
++
++func readDir(dir string, segs []uint64, next, after uint64, limit int, changed <-chan struct{}) ([]Line, *Gap, <-chan struct{}, error) {
++	var gap *Gap
++	if len(segs) == 0 {
++		if next > after+1 {
++			gap = &Gap{From: after + 1, To: next - 1}
++		}
++		return nil, gap, changed, nil
++	}
++	if segs[0] > after+1 {
++		gap = &Gap{From: after + 1, To: segs[0] - 1}
++	}
++	// the segment that holds after+1
++	i := 0
++	for j, first := range segs {
++		if first <= after+1 {
++			i = j
++		}
++	}
++	var out []Line
++	for ; i < len(segs) && len(out) < limit; i++ {
++		f, err := os.Open(filepath.Join(dir, segName(segs[i])))
++		if errors.Is(err, os.ErrNotExist) {
++			// dropped or acknowledged meanwhile
++			if len(out) == 0 {
++				return readGone(dir, after, limit, changed)
++			}
++			break
++		}
++		if err != nil {
++			return nil, nil, nil, err
++		}
++		var off int64
++		for len(out) < limit {
++			l, n, err := readLine(f, off)
++			if err != nil {
++				break // end of what is written so far
++			}
++			off += n
++			if l.Seq > after {
++				out = append(out, l)
++			}
++		}
++		f.Close()
++	}
++	return out, gap, changed, nil
++}
++
++// readGone re-reads the directory after a segment vanished under a reader.
++func readGone(dir string, after uint64, limit int, changed <-chan struct{}) ([]Line, *Gap, <-chan struct{}, error) {
++	ents, err := os.ReadDir(dir)
++	if err != nil {
++		return nil, nil, nil, err
++	}
++	var segs []uint64
++	for _, e := range ents {
++		if n, ok := strings.CutSuffix(e.Name(), segSuffix); ok {
++			if first, err := strconv.ParseUint(n, 10, 64); err == nil {
++				segs = append(segs, first)
++			}
++		}
++	}
++	slices.Sort(segs)
++	if len(segs) == 0 {
++		return nil, nil, changed, nil
++	}
++	return readDir(dir, segs, 0, after, limit, changed)
++}
++
++func readLine(f *os.File, off int64) (Line, int64, error) {
++	var h [headerSize]byte
++	if _, err := f.ReadAt(h[:], off); err != nil {
++		return Line{}, 0, err
++	}
++	n := binary.BigEndian.Uint32(h[18:])
++	if n > maxLine {
++		return Line{}, 0, errors.New("logqueue: corrupt record")
++	}
++	data := make([]byte, n)
++	if _, err := f.ReadAt(data, off+headerSize); err != nil {
++		return Line{}, 0, err
++	}
++	l := Line{
++		Seq:     binary.BigEndian.Uint64(h[0:]),
++		Time:    time.Unix(0, int64(binary.BigEndian.Uint64(h[8:]))).UTC(),
++		Stream:  "stdout",
++		Partial: h[17] == 1,
++		Data:    data,
++	}
++	if h[16] == 2 {
++		l.Stream = "stderr"
++	}
++	return l, int64(headerSize) + int64(n), nil
++}
+diff --git a/daemon/seafield/logqueue/queue_test.go b/daemon/seafield/logqueue/queue_test.go
+new file mode 100644
+index 0000000..30d2b05
+--- /dev/null
++++ b/daemon/seafield/logqueue/queue_test.go
+@@ -0,0 +1,130 @@
++// SPDX-License-Identifier: Apache-2.0
++
++package logqueue
++
++import (
++	"os"
++	"path/filepath"
++	"strings"
++	"testing"
++	"time"
++)
++
++func appendN(t *testing.T, q *Queue, n int, size int) {
++	t.Helper()
++	line := []byte(strings.Repeat("x", size))
++	for i := 0; i < n; i++ {
++		if err := q.Append(time.Now(), "stdout", false, line); err != nil {
++			t.Fatal(err)
++		}
++	}
++}
++
++func TestNumbersContinueAfterReopen(t *testing.T) {
++	dir := t.TempDir()
++	q, err := Open(dir, 0)
++	if err != nil {
++		t.Fatal(err)
++	}
++	if err = q.Append(time.Now(), "stderr", true, []byte("a")); err != nil {
++		t.Fatal(err)
++	}
++	appendN(t, q, 2, 3)
++	q.Close()
++	q, err = Open(dir, 0)
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer q.Close()
++	appendN(t, q, 1, 3)
++	lines, gap, _, err := q.Read(0, 100)
++	if err != nil || gap != nil || len(lines) != 4 || lines[3].Seq != 4 {
++		t.Fatalf("lines %+v gap %+v err %v", lines, gap, err)
++	}
++	if lines[0].Stream != "stderr" || !lines[0].Partial || string(lines[0].Data) != "a" {
++		t.Fatalf("first %+v", lines[0])
++	}
++	lines, _, _, _ = q.Read(2, 100)
++	if len(lines) != 2 || lines[0].Seq != 3 {
++		t.Fatalf("after 2: %+v", lines)
++	}
++}
++
++func TestTornTailIsDropped(t *testing.T) {
++	dir := t.TempDir()
++	q, _ := Open(dir, 0)
++	appendN(t, q, 2, 10)
++	q.Close()
++	seg := filepath.Join(dir, segName(1))
++	f, _ := os.OpenFile(seg, os.O_WRONLY|os.O_APPEND, 0)
++	f.Write([]byte{0, 0, 0, 0, 0, 0, 0, 3, 1}) // half a header
++	f.Close()
++	q, err := Open(dir, 0)
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer q.Close()
++	appendN(t, q, 1, 10)
++	lines, gap, _, _ := q.Read(0, 100)
++	if gap != nil || len(lines) != 3 || lines[2].Seq != 3 {
++		t.Fatalf("lines %d gap %+v", len(lines), gap)
++	}
++}
++
++func TestFullQueueDropsOldestAndReportsGap(t *testing.T) {
++	q, err := Open(t.TempDir(), minSegment*2) // segments of minSegment
++	if err != nil {
++		t.Fatal(err)
++	}
++	defer q.Close()
++	appendN(t, q, 3000, 1000) // ~3MB into a 512KiB cap
++	lines, gap, _, err := q.Read(0, 10)
++	if err != nil || gap == nil || gap.From != 1 || len(lines) == 0 || lines[0].Seq != gap.To+1 {
++		t.Fatalf("gap %+v first %v err %v", gap, lines, err)
++	}
++	var total int64
++	for _, s := range q.sizes {
++		total += s
++	}
++	if total > q.maxSize+q.segSize {
++		t.Fatalf("queue holds %d bytes, cap %d", total, q.maxSize)
++	}
++	last, _, _, _ := q.Read(2999, 10)
++	if len(last) != 1 || last[0].Seq != 3000 {
++		t.Fatalf("newest %+v", last)
++	}
++}
++
++func TestAckDeletesWholeSegments(t *testing.T) {
++	q, _ := Open(t.TempDir(), 64<<20) // segSize 8MiB
++	defer q.Close()
++	q.segSize = 4096
++	appendN(t, q, 100, 200) // several segments
++	if len(q.segs) < 3 {
++		t.Fatalf("segments %d", len(q.segs))
++	}
++	q.Ack(50)
++	if q.segs[0] > 51 {
++		t.Fatalf("acked past 50: first %d", q.segs[0])
++	}
++	lines, gap, _, _ := q.Read(50, 1000)
++	if gap != nil || len(lines) != 50 || lines[0].Seq != 51 {
++		t.Fatalf("after ack: %d lines gap %+v", len(lines), gap)
++	}
++	q.Ack(1000)
++	if len(q.segs) != 1 {
++		t.Fatalf("segment being written must stay: %d", len(q.segs))
++	}
++}
++
++func TestWaitWakesOnAppend(t *testing.T) {
++	q, _ := Open(t.TempDir(), 0)
++	defer q.Close()
++	_, _, changed, _ := q.Read(0, 10)
++	go func() { time.Sleep(50 * time.Millisecond); appendN(t, q, 1, 1) }()
++	select {
++	case <-changed:
++	case <-time.After(5 * time.Second):
++		t.Fatal("no wake")
++	}
++}
+diff --git a/daemon/seafield/logqueue/router.go b/daemon/seafield/logqueue/router.go
+new file mode 100644
+index 0000000..017e9fc
+--- /dev/null
++++ b/daemon/seafield/logqueue/router.go
+@@ -0,0 +1,130 @@
++// SPDX-License-Identifier: Apache-2.0
++
++package logqueue
++
++import (
++	"context"
++	"errors"
++	"net/http"
++	"os"
++	"strconv"
++	"time"
++
++	"github.com/moby/moby/v2/daemon/server/httputils"
++	"github.com/moby/moby/v2/daemon/server/router"
++	"github.com/moby/moby/v2/errdefs"
++)
++
++// ContainerResolver maps a name or id prefix to a full container id.
++type ContainerResolver func(nameOrID string) (string, error)
++
++// Page is the answer to GET /seafield/logs/{name}.
++type Page struct {
++	Gap   *Gap   `json:"gap,omitempty"`
++	Lines []Line `json:"lines"`
++	// Live is true while the container's logger is open (more may come).
++	Live bool `json:"live"`
++}
++
++type qRouter struct{ resolve ContainerResolver }
++
++// NewRouter serves
++//
++//	GET  /seafield/logs/{name}?after=N[&limit=M][&wait=SECONDS]
++//	POST /seafield/logs/{name}/ack?upto=N
++func NewRouter(resolve ContainerResolver) router.Router { return qRouter{resolve: resolve} }
++
++func (r qRouter) Routes() []router.Route {
++	return []router.Route{
++		router.NewGetRoute("/seafield/logs/{name:.*}/lines", r.get),
++		router.NewPostRoute("/seafield/logs/{name:.*}/ack", r.ack),
++	}
++}
++
++func parseUint(v string) (uint64, error) {
++	if v == "" {
++		return 0, nil
++	}
++	n, err := strconv.ParseUint(v, 10, 64)
++	if err != nil {
++		return 0, errdefs.InvalidParameter(err)
++	}
++	return n, nil
++}
++
++func (r qRouter) get(ctx context.Context, w http.ResponseWriter, req *http.Request, vars map[string]string) error {
++	id, err := r.resolve(vars["name"])
++	if err != nil {
++		return err
++	}
++	q := req.URL.Query()
++	after, err := parseUint(q.Get("after"))
++	if err != nil {
++		return err
++	}
++	limit := 1000
++	if v := q.Get("limit"); v != "" {
++		n, err := strconv.Atoi(v)
++		if err != nil || n <= 0 {
++			return errdefs.InvalidParameter(errors.New("limit must be a positive number"))
++		}
++		limit = min(n, 10_000)
++	}
++	wait, err := parseUint(q.Get("wait"))
++	if err != nil {
++		return err
++	}
++	deadline := time.NewTimer(min(time.Duration(wait)*time.Second, 60*time.Second))
++	defer deadline.Stop()
++	for {
++		lq := lookup(id)
++		var (
++			lines   []Line
++			gap     *Gap
++			changed <-chan struct{}
++		)
++		if lq != nil {
++			lines, gap, changed, err = lq.Read(after, limit)
++		} else {
++			lines, gap, err = ReadDir(Dir(id), after, limit)
++			if errors.Is(err, os.ErrNotExist) {
++				err = nil
++			}
++		}
++		if err != nil {
++			return err
++		}
++		if len(lines) > 0 || gap != nil || wait == 0 || changed == nil {
++			if lines == nil {
++				lines = []Line{}
++			}
++			return httputils.WriteJSON(w, http.StatusOK, Page{Gap: gap, Lines: lines, Live: lq != nil})
++		}
++		select {
++		case <-changed:
++		case <-deadline.C:
++			wait = 0
++		case <-ctx.Done():
++			return ctx.Err()
++		}
++	}
++}
++
++func (r qRouter) ack(ctx context.Context, w http.ResponseWriter, req *http.Request, vars map[string]string) error {
++	id, err := r.resolve(vars["name"])
++	if err != nil {
++		return err
++	}
++	upto, err := parseUint(req.URL.Query().Get("upto"))
++	if err != nil {
++		return err
++	}
++	if lq := lookup(id); lq != nil {
++		lq.Ack(upto)
++	} else if q, err := Open(Dir(id), 0); err == nil {
++		q.Ack(upto)
++		_ = q.Close()
++	}
++	w.WriteHeader(http.StatusNoContent)
++	return nil
++}

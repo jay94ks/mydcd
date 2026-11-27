@@ -14,18 +14,18 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/config"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/schema"
-	"github.com/jay94ks/mydcd/internal/userauth"
-	"github.com/jay94ks/mydcd/internal/workload/volumes"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/config"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/userauth"
+	"github.com/jay94ks/seafield/internal/workload/volumes"
 )
 
-func verifySharedBackupBoundary(t *testing.T, ctx context.Context, a *Runtime, owner **Runtime, cfg config.Node, root string, admin userauth.Client, peer mydcp.Peer, session access.Session, p control.Policy, read func() cluster.View, change func(string, string, uint64, any), ready volumes.NativeReady, marker []byte) {
+func verifySharedBackupBoundary(t *testing.T, ctx context.Context, a *Runtime, owner **Runtime, cfg config.Node, root string, admin userauth.Client, peer sfcp.Peer, session access.Session, p control.Policy, read func() cluster.View, change func(string, string, uint64, any), ready volumes.NativeReady, marker []byte) {
 	t.Helper()
 	source := ready.Spec.Scope
 	for _, tenant := range []string{"", source.Tenant} {
@@ -44,7 +44,7 @@ func verifySharedBackupBoundary(t *testing.T, ctx context.Context, a *Runtime, o
 	run := func(args ...string) any {
 		t.Helper()
 		args = withTenant(selectedTenant, args)
-		command := nativeCLICmd(ctx, os.Getenv("MYDC_TEST_CLI"), home, profile, args...)
+		command := nativeCLICmd(ctx, os.Getenv("SFC_TEST_CLI"), home, profile, args...)
 		var output, diagnostic bytes.Buffer
 		command.Stdout, command.Stderr = &output, &diagnostic
 		if err := command.Run(); err != nil {
@@ -72,7 +72,7 @@ func verifySharedBackupBoundary(t *testing.T, ctx context.Context, a *Runtime, o
 	if !ok {
 		t.Fatal("source")
 	}
-	compatibility := sha256.Sum256([]byte("mydc-file-profile1/no-managed-writer"))
+	compatibility := sha256.Sum256([]byte("sfc-file-profile1/no-managed-writer"))
 	request := control.VolumeBackupBegin{Scope: source, ID: "one", MaxBytes: 128 << 10, MaxEntries: 16, Compatibility: compatibility}
 	document := func(name, action string, expected uint64, payload any) string {
 		t.Helper()
@@ -153,7 +153,7 @@ func verifySharedBackupBoundary(t *testing.T, ctx context.Context, a *Runtime, o
 		}
 		j, e := schema.Decode[control.VolumeBackup](reply.Data)
 		if e != nil || j.Binding.Digest() != original.Binding.Digest() {
-			return j, mydcp.ErrAdmission
+			return j, sfcp.ErrAdmission
 		}
 		return j, nil
 	}
@@ -179,7 +179,7 @@ func verifySharedBackupBoundary(t *testing.T, ctx context.Context, a *Runtime, o
 			return e
 		}
 		if c != j.Binding.Consumer || native.Owner != j.Binding.Source.Owner || native.Spec != j.Binding.Source.Spec {
-			return mydcp.ErrAdmission
+			return sfcp.ErrAdmission
 		}
 		return nil
 	}

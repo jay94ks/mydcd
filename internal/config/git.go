@@ -7,7 +7,7 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/jay94ks/mydcd/internal/cliprofile"
+	"github.com/jay94ks/seafield/internal/cliprofile"
 )
 
 // GitCredential is installation-local scope and file references, never secret

@@ -7,7 +7,7 @@ import (
 	"encoding/json"
 	"math"
 
-	"github.com/jay94ks/mydcd/internal/access"
+	"github.com/jay94ks/seafield/internal/access"
 )
 
 type GitSaveProof struct {
@@ -22,7 +22,7 @@ type GitSaveProof struct {
 func GitSaveProofBytes(p GitSaveProof) []byte {
 	p.Signature = nil
 	raw, _ := json.Marshal(p)
-	return append([]byte("mydc-imagebuild-git-request-1\x00"), raw...)
+	return append([]byte("sfc-imagebuild-git-request-1\x00"), raw...)
 }
 
 type GitSaveRequest struct {

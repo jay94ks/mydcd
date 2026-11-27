@@ -10,10 +10,10 @@ import (
 	"slices"
 	"strconv"
 
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/engine"
-	"github.com/jay94ks/mydcd/internal/ingress"
-	"github.com/jay94ks/mydcd/internal/network"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/engine"
+	"github.com/jay94ks/seafield/internal/ingress"
+	"github.com/jay94ks/seafield/internal/network"
 )
 
 func (r IngressRuntime) spec() ingress.Spec {
@@ -180,7 +180,7 @@ func resolveIngressBackend(cluster [32]byte, goal GoalCommand, i IngressDeclarat
 		return ingress.BackendSpec{}, ErrInputs
 	}
 	var service ComposeService
-	if json.Unmarshal(task.Goal.Config, &service) != nil || service.MyDC.Node != task.Goal.Node {
+	if json.Unmarshal(task.Goal.Config, &service) != nil || service.Sfc.Node != task.Goal.Node {
 		return ingress.BackendSpec{}, ErrInputs
 	}
 	instance, err := TaskInstanceForKey(goal.Tenant, goal.App, taskKey, service)

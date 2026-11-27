@@ -10,10 +10,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/ingress"
-	"github.com/jay94ks/mydcd/internal/web/mydc"
-	"github.com/jay94ks/mydcd/internal/web/store"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/ingress"
+	"github.com/jay94ks/seafield/internal/web/sfc"
+	"github.com/jay94ks/seafield/internal/web/store"
 )
 
 // Ingress webhooks (UI-5A/5B, REQ-22 G events): the watcher hands the
@@ -53,22 +53,22 @@ type ingressPending struct {
 	e     webEvent
 }
 
-// ingressWebhookEvent maps a mydcd event to an ingress link event, and
+// ingressWebhookEvent maps a sfcd event to an ingress link event, and
 // whether it is the recovery (ok false: not an ingress event).
 func ingressWebhookEvent(e webEvent) (string, bool, bool) {
 	route := e.Ingress != nil && e.Ingress.RouteID != ""
 	switch e.Kind {
-	case mydc.EventIngressListenerDown, mydc.EventIngressListenerUp:
-		return "down", e.Kind == mydc.EventIngressListenerUp, !route
-	case mydc.EventIngressCertMissing:
+	case sfc.EventIngressListenerDown, sfc.EventIngressListenerUp:
+		return "down", e.Kind == sfc.EventIngressListenerUp, !route
+	case sfc.EventIngressCertMissing:
 		if route {
 			return "cert", false, true
 		}
 		return "tls-rejects", false, true
-	case mydc.EventIngressSourceRejected:
+	case sfc.EventIngressSourceRejected:
 		return "source-rejects", false, !route
-	case mydc.EventIngressBackendsEmpty, mydc.EventIngressBackendsRestored:
-		return "no-backends", e.Kind == mydc.EventIngressBackendsRestored, route
+	case sfc.EventIngressBackendsEmpty, sfc.EventIngressBackendsRestored:
+		return "no-backends", e.Kind == sfc.EventIngressBackendsRestored, route
 	case webRouteMetric:
 		// The web's own sample of a route's recent metrics; whether it is
 		// over or a recovery is each link's threshold (ingressEvent).
@@ -287,7 +287,7 @@ func (s *Server) sendIngress(l *store.WebhookLink, ev string, recovered bool, e 
 	s.sendWebhookLater(h, webhookSend{Point: "ingress", Link: l.ID, Event: event, Payload: p, Summary: fmt.Sprintf("[외부 접속] %s: %s", where, word)})
 }
 
-// What the web watches itself for gateway links (no mydcd event): the
+// What the web watches itself for gateway links (no sfcd event): the
 // certificates the gateway's listeners serve, and the server's connection
 // use against its limits. Read at most every ingressPollEvery, only while a
 // gateway link wants them; only changes are sent (and the recovery).
@@ -345,7 +345,7 @@ func (s *Server) ingressPoll(ctx context.Context, ws *webSession) {
 	}
 	var iv *ingressView
 	var samples []webEvent
-	err := ws.do(ctx, func(ctx context.Context, c mydc.Conn) error {
+	err := ws.do(ctx, func(ctx context.Context, c sfc.Conn) error {
 		var err error
 		if iv, err = ingressRead(ctx, c, control.IngressQuery{}); err != nil {
 			return err
@@ -377,7 +377,7 @@ func (s *Server) ingressPoll(ctx context.Context, ws *webSession) {
 			}
 		}
 		for _, kind := range kinds {
-			if kind != mydc.GatewayExternal && kind != mydc.GatewayLocal {
+			if kind != sfc.GatewayExternal && kind != sfc.GatewayLocal {
 				continue
 			}
 			k := gw{o.m.Node, kind}
@@ -419,7 +419,7 @@ func (s *Server) ingressPoll(ctx context.Context, ws *webSession) {
 			continue
 		}
 		for _, g := range n.Gateways {
-			if g.Gateway != mydc.GatewayExternal && g.Gateway != mydc.GatewayLocal {
+			if g.Gateway != sfc.GatewayExternal && g.Gateway != sfc.GatewayLocal {
 				continue
 			}
 			target := n.Node + "/" + g.Gateway
@@ -440,7 +440,7 @@ func (s *Server) ingressPoll(ctx context.Context, ws *webSession) {
 	}
 }
 
-// What the web computes for error-rate and latency links: mydcd keeps the
+// What the web computes for error-rate and latency links: sfcd keeps the
 // last 60 s of request metrics per route (Runtime.Metrics) and makes no
 // event of them (docs/reference/ingress-management.md "이벤트"). Each poll
 // gives one sample per watched route and metric, summed over the app's
@@ -477,7 +477,7 @@ func withLinkLimit(l *store.WebhookLink, e webEvent) webEvent {
 	return e
 }
 
-func (s *Server) routeSamples(ctx context.Context, c mydc.Conn, iv *ingressView, links []*store.WebhookLink, now time.Time) []webEvent {
+func (s *Server) routeSamples(ctx context.Context, c sfc.Conn, iv *ingressView, links []*store.WebhookLink, now time.Time) []webEvent {
 	watched := func(m *control.IngressMapping) bool {
 		return slices.ContainsFunc(links, func(l *store.WebhookLink) bool {
 			return l.Scope.Tenant == m.Tenant && (l.Scope.App == "" || l.Scope.App == m.App)
@@ -553,10 +553,10 @@ func (s *Server) routeSamples(ctx context.Context, c mydc.Conn, iv *ingressView,
 // default, both = external and local).
 func routeGateways(g string) []string {
 	switch g {
-	case "", mydc.GatewayLocal:
-		return []string{mydc.GatewayLocal}
-	case mydc.GatewayBoth:
-		return []string{mydc.GatewayExternal, mydc.GatewayLocal}
+	case "", sfc.GatewayLocal:
+		return []string{sfc.GatewayLocal}
+	case sfc.GatewayBoth:
+		return []string{sfc.GatewayExternal, sfc.GatewayLocal}
 	}
 	return []string{g}
 }

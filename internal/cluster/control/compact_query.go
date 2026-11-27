@@ -7,10 +7,10 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/lifecycle"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/maintenance"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/lifecycle"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/maintenance"
 	"strings"
 )
 
@@ -140,7 +140,7 @@ func (p Policy) CompactStatusPage(s state.State, session access.Session, at int6
 		Operation string
 		Cluster   [32]byte
 	}{c.Revision, q.Operation, p.Cluster})
-	basis := sha256.Sum256(append([]byte("mydc-compact-status-1\x00"), raw...))
+	basis := sha256.Sum256(append([]byte("sfc-compact-status-1\x00"), raw...))
 	offset, err := compactOffset(q.After, basis, len(record.Job.Nodes))
 	if err != nil {
 		return out, err

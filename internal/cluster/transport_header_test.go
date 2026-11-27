@@ -4,8 +4,8 @@ package cluster
 
 import (
 	"context"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/mydcp"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/sfcp"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -52,11 +52,11 @@ func TestRaftHeaderUsesCurrentMemberAfterPublicTLSConnection(t *testing.T) {
 		t.Fatal(err)
 	}
 	var installed atomic.Bool
-	pa := mydcp.Peer{ID: "node-a", Policy: mydcp.Policy{Key: mydcp.Identity(a.Public), Member: true, Snapshot: true, Respond: true}}
-	pb := mydcp.Peer{ID: "node-b", Policy: mydcp.Policy{Key: mydcp.Identity(b.Public), Member: true, Snapshot: true, Respond: true}}
-	server, err := mydcp.NewTransport(a, [32]byte{1}, func(k mydcp.Identity) (mydcp.Peer, bool) {
+	pa := sfcp.Peer{ID: "node-a", Policy: sfcp.Policy{Key: sfcp.Identity(a.Public), Member: true, Snapshot: true, Respond: true}}
+	pb := sfcp.Peer{ID: "node-b", Policy: sfcp.Policy{Key: sfcp.Identity(b.Public), Member: true, Snapshot: true, Respond: true}}
+	server, err := sfcp.NewTransport(a, [32]byte{1}, func(k sfcp.Identity) (sfcp.Peer, bool) {
 		if k != pb.Key {
-			return mydcp.Peer{}, false
+			return sfcp.Peer{}, false
 		}
 		p := pb
 		if !installed.Load() {
@@ -74,7 +74,7 @@ func TestRaftHeaderUsesCurrentMemberAfterPublicTLSConnection(t *testing.T) {
 		t.Fatal(err)
 	}
 	pa.Endpoint = server.Addr().String()
-	client, err := mydcp.NewTransport(b, [32]byte{1}, func(k mydcp.Identity) (mydcp.Peer, bool) { return pa, k == pa.Key })
+	client, err := sfcp.NewTransport(b, [32]byte{1}, func(k sfcp.Identity) (sfcp.Peer, bool) { return pa, k == pa.Key })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,14 +83,14 @@ func TestRaftHeaderUsesCurrentMemberAfterPublicTLSConnection(t *testing.T) {
 		t.Fatal(err)
 	}
 	pb.Endpoint = client.Addr().String()
-	srv, err := newRaftTransport(server, raft.ServerAddress(pa.Endpoint), func(id raft.ServerID, addr raft.ServerAddress) (mydcp.Peer, bool) {
+	srv, err := newRaftTransport(server, raft.ServerAddress(pa.Endpoint), func(id raft.ServerID, addr raft.ServerAddress) (sfcp.Peer, bool) {
 		return pb, installed.Load() && string(id) == pb.ID && string(addr) == pb.Endpoint
 	}, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer srv.Close()
-	cli, err := newRaftTransport(client, raft.ServerAddress(pb.Endpoint), func(id raft.ServerID, addr raft.ServerAddress) (mydcp.Peer, bool) {
+	cli, err := newRaftTransport(client, raft.ServerAddress(pb.Endpoint), func(id raft.ServerID, addr raft.ServerAddress) (sfcp.Peer, bool) {
 		return pa, string(id) == pa.ID && string(addr) == pa.Endpoint
 	}, t.TempDir())
 	if err != nil {

@@ -257,7 +257,7 @@ func (n *NativeJobs) FinishWorkspace(ctx context.Context, spec JobSpec) ([32]byt
 }
 
 func workspaceClosure(r NativeRecord) [32]byte {
-	return digestJSON("mydc-imagebuild-native-workspace-1", struct {
+	return digestJSON("sfc-imagebuild-native-workspace-1", struct {
 		Job                                [32]byte
 		Workspace                          *NativeWorkspace
 		NativeID                           string

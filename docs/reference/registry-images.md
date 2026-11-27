@@ -3,10 +3,10 @@
 선택 tenant의 내장 registry 또는 승인된 외부 source에서 repository·이미지 metadata를 읽는다. 로그인·이미지 trust 추가·배포·이미지 삭제를 수행하지 않는다. 인증은 기존 사용자 Session/request proof를 사용하며 현재 tenant의 Read 또는 ManageRegistry가 필요하다.
 
 ```sh
-mydc --tenant payments image list private
-mydc --tenant payments image list private team/app
-mydc --tenant payments image list company --external
-mydc --tenant payments image list company team/app --external
+sfcli --tenant payments image list private
+sfcli --tenant payments image list private team/app
+sfcli --tenant payments image list company --external
+sfcli --tenant payments image list company team/app --external
 ```
 
 `private`는 내장 registry 이름, `company`는 같은 tenant의 외부 source 이름이다. 외부 source는 [명시 reader 승인](external-registries.md#앱-없는-관리-source-승인과-로그인-시험)이 있어야 한다. 조회는 그 원 reader의 자격/CA와 현재 승인 read-set을 사용한다. 호출 사용자의 Read 권한을 Vault 원문 읽기 권한으로 바꾸지 않는다. 다른 tenant·authority의 source를 선택할 수 없다.

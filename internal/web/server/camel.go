@@ -12,10 +12,10 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/jay94ks/mydcd/internal/access"
+	"github.com/jay94ks/seafield/internal/access"
 )
 
-// camelJSON encodes v the way /api/v1 presents mydcd views to the browser:
+// camelJSON encodes v the way /api/v1 presents sfcd views to the browser:
 // struct field names become lowerCamelCase (an explicit json tag name wins,
 // omitempty/"-" are honored, embedded structs are flattened), map keys are
 // kept verbatim (they are user data such as secret key names), fixed-size
@@ -38,7 +38,7 @@ var (
 	timeType       = reflect.TypeFor[time.Time]()
 	marshalerType  = reflect.TypeFor[json.Marshaler]()
 	rawMessageType = reflect.TypeFor[json.RawMessage]()
-	// wireStructs implement MarshalJSON only to keep mydcd's stored bytes
+	// wireStructs implement MarshalJSON only to keep sfcd's stored bytes
 	// (nil vs empty VolumeFiles). The browser view encodes them field by
 	// field like any other struct. Every other Marshaler is honored, above
 	// all the ones that refuse to encode private material.

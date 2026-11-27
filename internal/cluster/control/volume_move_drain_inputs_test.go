@@ -8,10 +8,10 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/workload"
-	"github.com/jay94ks/mydcd/internal/workload/volumes"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/workload"
+	"github.com/jay94ks/seafield/internal/workload/volumes"
 )
 
 // The original native/healthy observations are explicit algorithm inputs.
@@ -52,7 +52,7 @@ func drainInputsCore(t *testing.T, startAll bool) (*backupCoreFixture, []NodeDra
 		input.Volumes = map[string]deployment.ComposeVolume{}
 		for _, name := range []string{"data", "logs"} {
 			retain := true
-			input.Volumes[name] = deployment.ComposeVolume{External: true, MyDC: deployment.VolumeExtension{Node: "node-a", Driver: "local", Access: "single-writer", Retain: &retain, UID: 10001, GID: 10001, Mode: "0750", Capacity: 65536, Quota: "observe"}}
+			input.Volumes[name] = deployment.ComposeVolume{External: true, Sfc: deployment.VolumeExtension{Node: "node-a", Driver: "local", Access: "single-writer", Retain: &retain, UID: 10001, GID: 10001, Mode: "0750", Capacity: 65536, Quota: "observe"}}
 		}
 	})
 	apps, _ := f.p.Apps(f.s)

@@ -3,8 +3,8 @@
 package tenancy
 
 import (
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/network"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/network"
 )
 
 // ReplaceTUN consumes every original fenced member. It is a new explicit
@@ -35,6 +35,9 @@ func (n Networks) ReplaceTUN(c access.Catalog, quotas Quotas, actor string, expe
 		delete(q.changes, key(v.Tenant, v.ID))
 	}
 	if len(target.Members) == 0 {
+		if len(n.BridgesOf(BridgeEnd{target.Tenant, target.Name})) != 0 {
+			return n, ErrBridgeAttached
+		}
 		if _, err := q.Encode(); err != nil {
 			return n, err
 		}

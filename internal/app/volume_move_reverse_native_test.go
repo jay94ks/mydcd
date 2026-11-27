@@ -17,11 +17,11 @@ import (
 	"time"
 
 	cerrdefs "github.com/containerd/errdefs"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/workload/volumes"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/workload/volumes"
 	"github.com/moby/moby/client"
 )
 
@@ -106,7 +106,7 @@ func verifyReverseMoveTarget(t *testing.T, ctx context.Context, originalSource, 
 	if err != nil || row.State.Pending != nil || !row.State.Applied.Present || row.State.Applied != row.State.Desired.Resource {
 		t.Fatal("new source recipe is not settled", err)
 	}
-	compatibility := sha256.Sum256(append([]byte("mydc-volume-cold-recipe-1\x00"), []byte(row.State.Applied.Spec)...))
+	compatibility := sha256.Sum256(append([]byte("sfc-volume-cold-recipe-1\x00"), []byte(row.State.Applied.Spec)...))
 	core, ok := registry.Volume(first.Binding.Scope)
 	owner, revision := core.Owner()
 	if !ok || owner != current.Owner || len(core.Consumers()) != 1 {

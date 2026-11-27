@@ -12,13 +12,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/reconcile"
-	"github.com/jay94ks/mydcd/internal/schema"
-	"github.com/jay94ks/mydcd/internal/storage"
-	"github.com/jay94ks/mydcd/internal/workload/volumes"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/storage"
+	"github.com/jay94ks/seafield/internal/workload/volumes"
 )
 
 func restoreJobKey(b control.VolumeRestoreBinding) string {
@@ -75,7 +75,7 @@ func (r *Runtime) restorePermit(ctx context.Context, b control.VolumeRestoreBind
 	}
 	j, err := schema.Decode[control.VolumeRestore](reply.Data)
 	if err != nil || reply.Local || reply.RaftIndex == 0 || j.Binding.Digest() != b.Digest() {
-		return mydcp.ErrAdmission
+		return sfcp.ErrAdmission
 	}
 	return nil
 }
@@ -109,7 +109,7 @@ func (r *Runtime) restoreTarget(ctx context.Context, b control.VolumeRestoreBind
 func (r *Runtime) restoreAuthority(b control.VolumeRestoreBinding) volumes.ColdAuthority {
 	return func(ctx context.Context, ready volumes.NativeReady, c volumes.Consumer) error {
 		if ready.Spec != b.Target || ready.Generation != 1 || c != b.Consumer {
-			return mydcp.ErrAdmission
+			return sfcp.ErrAdmission
 		}
 		return r.restorePermit(ctx, b, false)
 	}

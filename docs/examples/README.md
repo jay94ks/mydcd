@@ -11,6 +11,6 @@
 | [fixed Volume 앱 참조](php-mysql/fixed-volume.example.app.yaml) | node-fixed Volume 이름 참조 |
 | [lifecycle 앱 참조](php-mysql/lifecycle.example.app.yaml) | named script의 앱 mapping |
 | [망 network.yaml](../cli/network.md)·[교차 tenant 경로](../cli/route.md) | 망 파일과 route 양측 승인 |
-| [CLI context](../cli/context.md#파일) | `~/.mydc/config.yaml`과 trust 파일의 모양 |
+| [CLI context](../cli/context.md#파일) | `~/.sfc/config.yaml`과 trust 파일의 모양 |
 
 PHP/MySQL은 범용 컨테이너 엔진을 설명하는 샘플이다. 제품이 이 이름·포트·SQL 초기화에 최적화되도록 요구하지 않는다. 원 시험 절차와 결과는 개발 검증에서 관리한다.

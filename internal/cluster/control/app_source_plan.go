@@ -5,8 +5,8 @@ package control
 import (
 	"crypto/sha256"
 
-	"github.com/jay94ks/mydcd/internal/deployment"
-	checker "github.com/jay94ks/mydcd/internal/workload/lifecycle"
+	"github.com/jay94ks/seafield/internal/deployment"
+	checker "github.com/jay94ks/seafield/internal/workload/lifecycle"
 )
 
 // AppSourcePlan is read-only preparation metadata. It attests no cache bytes,
@@ -24,7 +24,7 @@ func (p AppSourcePlan) Check(document []byte, cluster [32]byte, user, tenant str
 		return ErrCatalog
 	}
 	c, err := deployment.ParseApp(document)
-	if err != nil || c.MyDC.Tenant != "" && c.MyDC.Tenant != tenant {
+	if err != nil || c.Sfc.Tenant != "" && c.Sfc.Tenant != tenant {
 		return ErrCatalog
 	}
 	program, _, err := c.LifecycleProgram()

@@ -8,19 +8,19 @@ import (
 	"io"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/imagebuild"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/registry"
-	"github.com/jay94ks/mydcd/internal/registryclient"
-	"github.com/jay94ks/mydcd/internal/schema"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/imagebuild"
+	"github.com/jay94ks/seafield/internal/registry"
+	"github.com/jay94ks/seafield/internal/registryclient"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/sfcp"
 )
 
 func (r *Runtime) currentImageBuildBaseToken(ctx context.Context, q control.ImageBuildBaseTokenRequest) (control.ImageBuildBaseRead, error) {
 	view, err := r.currentView(ctx)
 	if err != nil || view.Local {
-		return control.ImageBuildBaseRead{}, mydcp.ErrAdmission
+		return control.ImageBuildBaseRead{}, sfcp.ErrAdmission
 	}
 	return r.controlPolicy.CurrentImageBuildBaseToken(view.State, q, time.Now().Unix())
 }
@@ -32,13 +32,13 @@ func (r *Runtime) imageBuildBaseTokenOwner(ctx context.Context, q control.ImageB
 	defer stop()
 	read, err := r.currentImageBuildBaseToken(ctx, q)
 	if err != nil || read.Target.Owner != r.Identity.Public || read.Target.Managed != nil {
-		return registryclient.PullToken{}, mydcp.ErrAdmission
+		return registryclient.PullToken{}, sfcp.ErrAdmission
 	}
 	var client *registryclient.Access
 	if read.Target.External != nil {
 		work, err := r.externalRegistryWork(ctx, *read.Target.External)
 		if err != nil || work.Inputs.ReadSet != read.Target.ExternalReadSet {
-			return registryclient.PullToken{}, mydcp.ErrAdmission
+			return registryclient.PullToken{}, sfcp.ErrAdmission
 		}
 		release, err := r.acquireExternalReader(work)
 		if err != nil {
@@ -52,7 +52,7 @@ func (r *Runtime) imageBuildBaseTokenOwner(ctx context.Context, q control.ImageB
 	} else {
 		_, authority, _, err := registryclient.Normalize(read.Target.Normalized)
 		if err != nil {
-			return registryclient.PullToken{}, mydcp.ErrAdmission
+			return registryclient.PullToken{}, sfcp.ErrAdmission
 		}
 		client, err = registryclient.New(authority, nil, nil, nil)
 		if err != nil {
@@ -65,7 +65,7 @@ func (r *Runtime) imageBuildBaseTokenOwner(ctx context.Context, q control.ImageB
 		return registryclient.PullToken{}, registryclient.Sanitize(err)
 	}
 	if _, err := r.currentImageBuildBaseToken(ctx, q); err != nil {
-		return registryclient.PullToken{}, mydcp.ErrAdmission
+		return registryclient.PullToken{}, sfcp.ErrAdmission
 	}
 	return token, nil
 }
@@ -74,11 +74,11 @@ func (r *Runtime) imageBuildBaseTokenOwner(ctx context.Context, q control.ImageB
 // lookup. One fresh state barrier supplies this bounded set of work grants.
 func (r *Runtime) imageBuildBasePullToken(ctx context.Context, spec imagebuild.JobSpec, sources []imagebuild.Source, challenge registryclient.PullTokenChallenge) (registryclient.PullToken, error) {
 	if spec.Validate() != nil || spec.Cluster != r.controlPolicy.Cluster || spec.Scope.Root.Key != r.Identity.Public || len(sources) == 0 || len(sources) > 8 {
-		return registryclient.PullToken{}, mydcp.ErrAdmission
+		return registryclient.PullToken{}, sfcp.ErrAdmission
 	}
 	view, err := r.currentView(ctx)
 	if err != nil || view.Local {
-		return registryclient.PullToken{}, mydcp.ErrAdmission
+		return registryclient.PullToken{}, sfcp.ErrAdmission
 	}
 	var reads []control.ImageBuildBaseRead
 	for _, source := range sources {
@@ -120,27 +120,27 @@ func (r *Runtime) imageBuildBasePullToken(ctx context.Context, spec imagebuild.J
 	} else if read.Target.Owner == r.Identity.Public {
 		token, err = r.imageBuildBaseTokenOwner(ctx, q)
 	} else {
-		peer, known := r.Mesh.Peer(mydcp.Identity(read.Target.Owner))
+		peer, known := r.Mesh.Peer(sfcp.Identity(read.Target.Owner))
 		if !known || !peer.Member {
-			return registryclient.PullToken{}, mydcp.ErrAdmission
+			return registryclient.PullToken{}, sfcp.ErrAdmission
 		}
 		raw, _ := json.Marshal(q)
 		reply, cause := cluster.CallManagement(ctx, r.Mesh, r.Identity, spec.Cluster, peer, cluster.ManagementRequest{Method: "image-build-base-token-owner", Input: raw})
 		if cause != nil || reply.Code != "ok" {
-			return registryclient.PullToken{}, mydcp.ErrAdmission
+			return registryclient.PullToken{}, sfcp.ErrAdmission
 		}
 		token, err = schema.Decode[registryclient.PullToken](reply.Data)
 	}
 	if err != nil || !token.Valid() {
-		return registryclient.PullToken{}, mydcp.ErrAdmission
+		return registryclient.PullToken{}, sfcp.ErrAdmission
 	}
 	if _, err := r.currentImageBuildBaseToken(ctx, q); err != nil {
-		return registryclient.PullToken{}, mydcp.ErrAdmission
+		return registryclient.PullToken{}, sfcp.ErrAdmission
 	}
 	remaining := int64(spec.CreatedAt+spec.Policy.Seconds) - token.IssuedAt
 	token.ExpiresIn = min(token.ExpiresIn, remaining)
 	if !token.Valid() || time.Now().Unix() >= token.IssuedAt+token.ExpiresIn {
-		return registryclient.PullToken{}, mydcp.ErrAdmission
+		return registryclient.PullToken{}, sfcp.ErrAdmission
 	}
 	return token, nil
 }
@@ -148,12 +148,12 @@ func (r *Runtime) imageBuildBasePullToken(ctx context.Context, spec imagebuild.J
 func (r *Runtime) imageBuildSessionAuth(ctx context.Context, spec imagebuild.JobSpec) (*imagebuild.BuildKitPullAuth, error) {
 	work, err := r.imageBuildJobWork(ctx, spec)
 	if err != nil || !work.Allowed || work.Run.Phase != "running" && work.Run.Phase != "unknown" {
-		return nil, mydcp.ErrAdmission
+		return nil, sfcp.ErrAdmission
 	}
 	authorize := func(ctx context.Context) error {
 		current, err := r.imageBuildJobWork(ctx, spec)
 		if err != nil || !current.Allowed || current.Run.Phase != "running" && current.Run.Phase != "unknown" {
-			return mydcp.ErrAdmission
+			return sfcp.ErrAdmission
 		}
 		return nil
 	}

@@ -17,7 +17,7 @@ import (
 // Settings are the web app's own settings (UI-C1). Zero values mean the
 // default.
 type Settings struct {
-	// SessionMaxHours caps a web login (0: until the MYDCP session ends).
+	// SessionMaxHours caps a web login (0: until the SFCP session ends).
 	SessionMaxHours int `json:"sessionMaxHours"`
 	// SessionIdleMinutes ends a login with no browser request for this long
 	// (0: off).
@@ -29,11 +29,14 @@ type Settings struct {
 	AllowKeyLogin *bool `json:"allowKeyLogin,omitempty"`
 	// MaxSessionsPerUser caps one user's live logins; the oldest ends
 	// first (0: no cap).
-	MaxSessionsPerUser           int       `json:"maxSessionsPerUser"`
-	WebhookDeliveryRetentionDays int       `json:"webhookDeliveryRetentionDays"`
-	MCPCallRetentionDays         int       `json:"mcpCallRetentionDays"`
-	UpdatedBy                    string    `json:"updatedBy,omitempty"`
-	UpdatedAt                    time.Time `json:"updatedAt,omitzero"`
+	MaxSessionsPerUser           int `json:"maxSessionsPerUser"`
+	WebhookDeliveryRetentionDays int `json:"webhookDeliveryRetentionDays"`
+	MCPCallRetentionDays         int `json:"mcpCallRetentionDays"`
+	// TrashRetentionDays: how long deleted definitions can be restored
+	// (UI-A5; 0: 7 days).
+	TrashRetentionDays int       `json:"trashRetentionDays"`
+	UpdatedBy          string    `json:"updatedBy,omitempty"`
+	UpdatedAt          time.Time `json:"updatedAt,omitzero"`
 }
 
 var keyWebSettings = []byte("web")
@@ -54,7 +57,8 @@ func (s *Store) GetSettings() (*Settings, error) {
 }
 
 // PutSettings replaces the settings.
-func (s *Store) PutSettings(v *Settings) error {
+func (s *Store) PutSettings(v *Settings) (err error) {
+	defer func() { s.changed(err, Change{Kind: "settings", ID: "web"}) }()
 	return s.db.Update(func(tx *bolt.Tx) error {
 		return putJSON(tx.Bucket(bucketSettings), keyWebSettings, v)
 	})
@@ -149,7 +153,7 @@ func pruneTimeOrdered(s *Store, bucket, pfx []byte, cutoff time.Time) (int, erro
 }
 
 // Notification is a copy of an event for one user (UI-C0). The event's
-// authority stays with mydcd or the web feature that raised it.
+// authority stays with sfcd or the web feature that raised it.
 type Notification struct {
 	ID        string    `json:"id"`
 	User      string    `json:"user"`
@@ -169,7 +173,8 @@ func notifyKey(user string, at time.Time, id string) []byte {
 }
 
 // PutNotification stores a notification.
-func (s *Store) PutNotification(n *Notification) error {
+func (s *Store) PutNotification(n *Notification) (err error) {
+	defer func() { s.changed(err, Change{Kind: "notification", User: n.User, ID: n.ID}) }()
 	return s.db.Update(func(tx *bolt.Tx) error {
 		return putJSON(tx.Bucket(bucketNotify), notifyKey(n.User, n.CreatedAt, n.ID), n)
 	})
@@ -209,7 +214,8 @@ func (s *Store) ListNotifications(user string, unreadOnly bool, limit int) ([]*N
 
 // MarkNotificationsRead marks a user's notifications read: the one with id,
 // or all when id is "".
-func (s *Store) MarkNotificationsRead(user, id string, at time.Time) error {
+func (s *Store) MarkNotificationsRead(user, id string, at time.Time) (err error) {
+	defer func() { s.changed(err, Change{Kind: "notification", User: user, ID: id}) }()
 	return s.db.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket(bucketNotify)
 		c := b.Cursor()
@@ -421,11 +427,11 @@ func (s *Store) PutAutoBackup(v *AutoBackup) error {
 	})
 }
 
-// Automation is the web's automation account: an ordinary mydcd
+// Automation is the web's automation account: an ordinary sfcd
 // account the web logs in to with its own key, for work no person is
 // there to sign (scheduled backups, certificate renewal, incident
 // actions). Only the public key is kept here; the private key is a sealed
-// file. mydcd decides what the account may do (put-user keys,
+// file. sfcd decides what the account may do (put-user keys,
 // set-account-scope, memberships).
 type Automation struct {
 	Username    string           `json:"username"`
@@ -441,7 +447,7 @@ type Automation struct {
 type AutomationCheck struct {
 	At     time.Time `json:"at"`
 	OK     bool      `json:"ok"`
-	User   string    `json:"user,omitempty"` // user ID mydcd answered
+	User   string    `json:"user,omitempty"` // user ID sfcd answered
 	Error  string    `json:"error,omitempty"`
 	Reason string    `json:"reason,omitempty"` // what the login was for
 }

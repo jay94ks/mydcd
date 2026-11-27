@@ -8,17 +8,17 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/jay94ks/mydcd/internal/web/mydc"
+	"github.com/jay94ks/seafield/internal/web/sfc"
 )
 
 // Manual raft log compaction (UI-17, raft-maintenance.md). The overview is
-// mydcd's raft-status read as the caller; the web reads raft-compact-plan
+// sfcd's raft-status read as the caller; the web reads raft-compact-plan
 // for the selection's Target and sends raft-compact (CompactChange,
 // Expected 0) signed by the caller; raft-compact-status follows one job.
-// mydcd decides who may (system administrators).
+// sfcd decides who may (system administrators).
 
 const (
-	// mydcd does not report its configured count yet; hashicorp/raft's
+	// sfcd does not report its configured count yet; hashicorp/raft's
 	// default TrailingLogs and REQ-23's "minimal" default.
 	raftRetainEntries  = 10240
 	raftMinimalEntries = 1000
@@ -37,7 +37,7 @@ type raftCompactNode struct {
 
 // compactRunning: the last manual compaction still has queued or running
 // servers.
-func compactRunning(st mydc.RaftStatus) bool {
+func compactRunning(st sfc.RaftStatus) bool {
 	lc := st.LastManualCompact
 	return lc != nil && !lc.Complete
 }
@@ -46,8 +46,8 @@ func compactRunning(st mydc.RaftStatus) bool {
 func (s *Server) handleRaftCompact(w http.ResponseWriter, r *http.Request, ws *webSession) {
 	ctx, cancel := s.callCtx(r)
 	defer cancel()
-	var st mydc.RaftStatus
-	err := ws.do(ctx, func(ctx context.Context, c mydc.Conn) error {
+	var st sfc.RaftStatus
+	err := ws.do(ctx, func(ctx context.Context, c sfc.Conn) error {
 		var err error
 		st, err = c.RaftStatus(ctx)
 		return err
@@ -102,10 +102,10 @@ func (s *Server) handleRaftCompact(w http.ResponseWriter, r *http.Request, ws *w
 // compactOperation: the raft-compact Operation of a web opId.
 func compactOperation(opID string) string { return "op-" + opID }
 
-// compactSelection: the screen's {nodes, mode, serial} as mydcd's
+// compactSelection: the screen's {nodes, mode, serial} as sfcd's
 // selection (minimal keeps raftMinimalEntries).
-func compactSelection(nodes []string, mode string, serial bool) (mydc.CompactSelection, error) {
-	sel := mydc.CompactSelection{Nodes: nodes, Mode: mode, Parallel: !serial}
+func compactSelection(nodes []string, mode string, serial bool) (sfc.CompactSelection, error) {
+	sel := sfc.CompactSelection{Nodes: nodes, Mode: mode, Parallel: !serial}
 	if len(sel.Nodes) == 0 {
 		sel.Nodes = nil
 	}
@@ -127,12 +127,12 @@ const compactMaxPages = 16
 
 // compactPlan reads every plan page; a Target or Total that changes
 // between pages is 409 plan-changed.
-func compactPlan(ctx context.Context, c mydc.Conn, sel mydc.CompactSelection) (mydc.CompactPlanPage, error) {
-	var out mydc.CompactPlanPage
+func compactPlan(ctx context.Context, c sfc.Conn, sel sfc.CompactSelection) (sfc.CompactPlanPage, error) {
+	var out sfc.CompactPlanPage
 	after := ""
 	for i := range compactMaxPages {
 		p, err := c.RaftCompactPlan(ctx, sel, after)
-		if isMydcCode(err, mydc.CodeConflict) {
+		if isSfcCode(err, sfc.CodeConflict) {
 			return out, &httpErr{http.StatusConflict, "plan-changed", "the servers changed while reading the plan; try again"}
 		}
 		if err != nil {
@@ -154,7 +154,7 @@ func compactPlan(ctx context.Context, c mydc.Conn, sel mydc.CompactSelection) (m
 	return out, &httpErr{http.StatusUnprocessableEntity, "too-large", "too many servers for one compaction; name fewer"}
 }
 
-func compactNodeNames(p mydc.CompactPlanPage) []string {
+func compactNodeNames(p sfc.CompactPlanPage) []string {
 	names := make([]string, 0, len(p.Nodes))
 	for _, n := range p.Nodes {
 		names = append(names, n.Node)
@@ -165,7 +165,7 @@ func compactNodeNames(p mydc.CompactPlanPage) []string {
 // GET /raft/compact/plan?nodes=a,b&mode=keep|minimal&serial=true|false →
 // {mode, retain?, parallel, total, nodes: [run order, leader last], plan}
 // (raft-compact-plan). plan is the roster's Target (64 hex); send it back
-// with the POST so what was shown is what gets signed. mydcd checks again
+// with the POST so what was shown is what gets signed. sfcd checks again
 // when it accepts.
 func (s *Server) handleRaftCompactPlan(w http.ResponseWriter, r *http.Request, ws *webSession) {
 	q := r.URL.Query()
@@ -178,7 +178,7 @@ func (s *Server) handleRaftCompactPlan(w http.ResponseWriter, r *http.Request, w
 		s.writeBackendError(w, ws, err)
 		return
 	}
-	read(s, w, r, ws, func(ctx context.Context, c mydc.Conn) (map[string]any, error) {
+	read(s, w, r, ws, func(ctx context.Context, c sfc.Conn) (map[string]any, error) {
 		p, err := compactPlan(ctx, c, sel)
 		if err != nil {
 			return nil, err
@@ -205,7 +205,7 @@ func (s *Server) handlePostRaftCompact(w http.ResponseWriter, r *http.Request, w
 	if !readJSON(w, r, &req) {
 		return
 	}
-	s.sharedCreate(w, r, ws, req.OpID, req, func(ctx context.Context, c mydc.Conn, _ mydc.Session) (string, any, uint64, string, error) {
+	s.sharedCreate(w, r, ws, req.OpID, req, func(ctx context.Context, c sfc.Conn, _ sfc.Session) (string, any, uint64, string, error) {
 		sel, err := compactSelection(req.Nodes, req.Mode, req.Serial)
 		if err != nil {
 			return "", nil, 0, "", err
@@ -224,7 +224,7 @@ func (s *Server) handlePostRaftCompact(w http.ResponseWriter, r *http.Request, w
 		if err := samePlan(req.Plan, hex.EncodeToString(p.Target[:]), "servers to compact"); err != nil {
 			return "", nil, 0, "", err
 		}
-		return mydc.ActionRaftCompact, mydc.CompactChange{Operation: compactOperation(req.OpID), Selection: sel, Target: p.Target}, 0, "raft", nil
+		return sfc.ActionRaftCompact, sfc.CompactChange{Operation: compactOperation(req.OpID), Selection: sel, Target: p.Target}, 0, "raft", nil
 	})
 }
 
@@ -240,16 +240,16 @@ type compactStatusNode struct {
 // nodes: [{node, state, code?, revision}]} (raft-compact-status, every
 // page). Unknown is 404. Snapshot and log numbers are on GET /raft/compact.
 func (s *Server) handleRaftCompactionStatus(w http.ResponseWriter, r *http.Request, ws *webSession) {
-	read(s, w, r, ws, func(ctx context.Context, c mydc.Conn) (map[string]any, error) {
+	read(s, w, r, ws, func(ctx context.Context, c sfc.Conn) (map[string]any, error) {
 		op := r.PathValue("operation")
 		var out map[string]any
 		nodes := []compactStatusNode{}
 		after := ""
 		for range compactMaxPages * 16 {
 			p, err := c.RaftCompactStatus(ctx, op, after)
-			// mydcd answers an unknown operation with conflict (it may not
+			// sfcd answers an unknown operation with conflict (it may not
 			// be committed yet); on the first page that is "no such job".
-			if isMydcCode(err, mydc.CodeMissing) || isMydcCode(err, mydc.CodeInvalid) || after == "" && isMydcCode(err, mydc.CodeConflict) {
+			if isSfcCode(err, sfc.CodeMissing) || isSfcCode(err, sfc.CodeInvalid) || after == "" && isSfcCode(err, sfc.CodeConflict) {
 				return nil, &httpErr{http.StatusNotFound, "not-found", "no such compaction"}
 			}
 			if err != nil {

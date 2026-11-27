@@ -7,7 +7,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/tenancy"
+	"github.com/jay94ks/seafield/internal/tenancy"
 )
 
 func TestRetiredMembershipSourceMetadataUsesOriginalChangeValidation(t *testing.T) {

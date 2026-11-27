@@ -12,13 +12,13 @@ import (
 	"time"
 
 	cerrdefs "github.com/containerd/errdefs"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/schema"
-	"github.com/jay94ks/mydcd/internal/storage"
-	checker "github.com/jay94ks/mydcd/internal/workload/lifecycle"
-	contract "github.com/jay94ks/mydcd/lifecycle/v1"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/storage"
+	checker "github.com/jay94ks/seafield/internal/workload/lifecycle"
+	contract "github.com/jay94ks/seafield/lifecycle/v1"
 	"github.com/moby/moby/client"
 )
 
@@ -28,10 +28,10 @@ import (
 // This covers a CLOSED job across rotation, not an unknown Create/Wait during
 // rotation. Original unknown-job recovery remains separate SDK/core evidence.
 func TestRealBoundaryInstalledIdentityReusesClosedCompilerJobAndArtifact(t *testing.T) {
-	if os.Getenv("MYDC_LIFECYCLE_COMPILER_CACHE") == "" {
-		t.Skip("requires explicitly prepared MYDC_LIFECYCLE_COMPILER_CACHE")
+	if os.Getenv("SFC_LIFECYCLE_COMPILER_CACHE") == "" {
+		t.Skip("requires explicitly prepared SFC_LIFECYCLE_COMPILER_CACHE")
 	}
-	if os.Getenv("MYDC_LIFECYCLE_COMPILER_IMAGE") != "" {
+	if os.Getenv("SFC_LIFECYCLE_COMPILER_IMAGE") != "" {
 		t.Fatal("select the prepared compiler cache without an image override")
 	}
 	runManagedAppOwner(t, true, true, true, true, managedAppIdentityCompiled, true, true, true)

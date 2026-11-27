@@ -10,9 +10,9 @@ import (
 	"errors"
 	"sync"
 
-	"github.com/jay94ks/mydcd/internal/reconcile"
-	"github.com/jay94ks/mydcd/internal/schema"
-	"github.com/jay94ks/mydcd/internal/storage"
+	"github.com/jay94ks/seafield/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/storage"
 )
 
 // RootManager records native directory registration in the SAME A2 journal
@@ -134,12 +134,12 @@ func (m *RootManager) Desired(root Root) error {
 		return ErrStorage
 	}
 	if root.Draining {
-		return m.journal.Desired(key, reconcile.Desired{Revision: root.Revision, Retiring: ref.Generation}, root.Definition.MaxVolumes)
+		return m.journal.Desired(key, reconcile.Desired{Revision: root.Revision, Retiring: ref.Generation}, RootPinCapacity)
 	}
 	if root.Closed != nil {
 		return ErrStorage
 	}
-	return m.journal.Desired(key, reconcile.Desired{Revision: root.Revision, Resource: reconcile.Resource{Generation: ref.Generation, Spec: string(raw), Present: true}}, root.Definition.MaxVolumes)
+	return m.journal.Desired(key, reconcile.Desired{Revision: root.Revision, Resource: reconcile.Resource{Generation: ref.Generation, Spec: string(raw), Present: true}}, RootPinCapacity)
 }
 
 type rootDriver struct {

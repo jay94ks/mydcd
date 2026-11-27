@@ -5,8 +5,8 @@ package control
 import (
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/observability"
-	"github.com/jay94ks/mydcd/internal/workload/volumes"
+	"github.com/jay94ks/seafield/internal/observability"
+	"github.com/jay94ks/seafield/internal/workload/volumes"
 )
 
 func TestAttachVolumeUsage(t *testing.T) {

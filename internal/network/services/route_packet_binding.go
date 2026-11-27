@@ -6,10 +6,10 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/network"
-	"github.com/jay94ks/mydcd/internal/reconcile"
-	"github.com/jay94ks/mydcd/internal/tenancy"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/network"
+	"github.com/jay94ks/seafield/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/tenancy"
 )
 
 // Both directions and both owners hash the same source->destination original
@@ -30,7 +30,7 @@ func (m RouteRuntime) packetToken(f routeFlowState) [16]byte {
 		SourcePin, DestinationPin   reconcile.Lease
 		Tuple                       [32]byte
 	}{m.consumer.Local.Cluster, source, destination, sourceBoot, destinationBoot, sourcePin, destinationPin, tupleHash(f.Tuple)})
-	digest := sha256.Sum256(append([]byte("mydc-route-packet-1\x00"), raw...))
+	digest := sha256.Sum256(append([]byte("sfc-route-packet-1\x00"), raw...))
 	return [16]byte(digest[:16])
 }
 

@@ -7,7 +7,7 @@ import (
 	"context"
 	"slices"
 
-	"github.com/jay94ks/mydcd/internal/access"
+	"github.com/jay94ks/seafield/internal/access"
 )
 
 // A sealed plan must cover every compiled content in the exact Task, and no

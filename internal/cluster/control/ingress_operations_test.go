@@ -12,9 +12,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/ingress"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/ingress"
 )
 
 // OS address observations are injected, while signatures, current authority,
@@ -125,7 +125,7 @@ func ingressGatewayAcceptedWorkloadCore(t *testing.T, standalone bool, protocol 
 	if standalone {
 		scope = deployment.StandaloneScopeName("tenant", name)
 	}
-	raw := []byte(fmt.Sprintf("name: held\nservices:\n  web:\n    image: docker.io/library/php@sha256:%s\n    cpus: '0.1'\n    mem_limit: 16m\n    ports: [{target: 8080, published: '8443', host_ip: 192.0.2.10, protocol: %s}]\n    networks: {lan: {ipv4_address: 10.80.1.40, aliases: [held]}}\n    dns: [10.80.1.1]\n    x-mydc: {node: node-a}\nnetworks:\n  lan: {external: true, name: services}\n", string(bytes.Repeat([]byte{'a'}, 64)), protocol))
+	raw := []byte(fmt.Sprintf("name: held\nservices:\n  web:\n    image: docker.io/library/php@sha256:%s\n    cpus: '0.1'\n    mem_limit: 16m\n    ports: [{target: 8080, published: '8443', host_ip: 192.0.2.10, protocol: %s}]\n    networks: {lan: {ipv4_address: 10.80.1.40, aliases: [held]}}\n    dns: [10.80.1.1]\n    x-sfc: {node: node-a}\nnetworks:\n  lan: {external: true, name: services}\n", string(bytes.Repeat([]byte{'a'}, 64)), protocol))
 	catalog, err := f.p.Catalog(f.s)
 	if err != nil {
 		t.Fatal(err)

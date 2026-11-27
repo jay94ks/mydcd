@@ -17,14 +17,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/imagebuild"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/userauth"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/imagebuild"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/userauth"
 )
 
 // Reuse the existing registered build root/registry/Runtime in the finite
@@ -41,13 +41,13 @@ func (f *managedRegistryNative) verifyImageBuildTransferGateNative(t *testing.T,
 	defer clear(key.Private)
 	change("rq6-upload-gate-user", "put-user", 0, access.User{ID: username, Username: username, Enabled: true, Credentials: []access.Credential{{ID: "key", Method: access.PrivateKey, PublicKey: key.Public, Enabled: true}}})
 	change("rq6-upload-gate-member", "set-membership", 0, access.Membership{Tenant: "tenant", User: username, Role: access.Manager, Enabled: true})
-	peer := mydcp.Peer{ID: base.Root.Node, Endpoint: r.Mesh.Addr().String(), Policy: mydcp.Policy{Key: mydcp.Identity(r.Identity.Public), Respond: true}}
-	mesh, err := mydcp.NewTransport(key, p.Cluster, func(k mydcp.Identity) (mydcp.Peer, bool) { return peer, k == peer.Key })
+	peer := sfcp.Peer{ID: base.Root.Node, Endpoint: r.Mesh.Addr().String(), Policy: sfcp.Policy{Key: sfcp.Identity(r.Identity.Public), Respond: true}}
+	mesh, err := sfcp.NewTransport(key, p.Cluster, func(k sfcp.Identity) (sfcp.Peer, bool) { return peer, k == peer.Key })
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer mesh.Close()
-	client := userauth.Client{Mesh: mesh, Self: key, Cluster: p.Cluster, Peers: []mydcp.Peer{peer}}
+	client := userauth.Client{Mesh: mesh, Self: key, Cluster: p.Cluster, Peers: []sfcp.Peer{peer}}
 	session, err := client.Login(ctx, peer, username, key.Private)
 	if err != nil {
 		t.Fatal("actual upload gate Manager login", err)
@@ -146,7 +146,7 @@ func (f *managedRegistryNative) verifyImageBuildTransferGateNative(t *testing.T,
 	locked = false
 	select {
 	case out := <-queued:
-		if !errors.Is(out.err, mydcp.ErrAdmission) || out.result.Schema != 0 {
+		if !errors.Is(out.err, sfcp.ErrAdmission) || out.result.Schema != 0 {
 			t.Fatal("stale queued ingress view authorized a native effect", out.err)
 		}
 	case <-ctx.Done():

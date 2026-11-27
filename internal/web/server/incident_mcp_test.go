@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/web/mydc"
+	"github.com/jay94ks/seafield/internal/web/sfc"
 )
 
 func TestIncidentMCPDiagnose(t *testing.T) {
@@ -24,7 +24,7 @@ func TestIncidentMCPDiagnose(t *testing.T) {
 		}
 	}
 	setAIRoles(t, f, []string{})
-	makeAutomation(t, f, "mydc-autofix", "a1b2c3d4-0000-4000-8000-0000000000e7", true, true)
+	makeAutomation(t, f, "sfc-autofix", "a1b2c3d4-0000-4000-8000-0000000000e7", true, true)
 	if code, out := f.do("PUT", "/api/v1/incidents/policy", map[string]any{"revision": 0, "level": "suggest", "ratePerHour": 5,
 		"approvers": map[string]any{"label": "관리자", "deadlineMinutes": 30}, "quiet": []string{}, "newAppDefault": "suggest"}); code != 200 {
 		t.Fatalf("policy: %d %v", code, out)
@@ -44,7 +44,7 @@ func TestIncidentMCPDiagnose(t *testing.T) {
 	v.openai = []string{openaiText(`{"level":"low","reversible":true,"blast_radius":1,"data_risk":"none","confidence":0.9,"reasons":[]}`)}
 	now := clock.Load()
 	for i := int64(3); i > 0; i-- {
-		fake.AddEvent(mydc.FixtureEvent{Time: now - i*30, Scope: "app", Tenant: "shop", App: "php-shop", Node: "node-a", Kind: "task-restarted", Target: "shop/php-shop/web/1"})
+		fake.AddEvent(sfc.FixtureEvent{Time: now - i*30, Scope: "app", Tenant: "shop", App: "php-shop", Node: "node-a", Kind: "task-restarted", Target: "shop/php-shop/web/1"})
 	}
 	f.srv.watchOnce(ctx)
 	row := findIncident(t, f, "task-restarted")

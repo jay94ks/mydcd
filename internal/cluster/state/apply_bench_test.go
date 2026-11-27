@@ -14,14 +14,13 @@ func benchState(n int) State {
 	s := initial()
 	value := strings.Repeat("x", 1024)
 	for i := 0; i < n; i++ {
-		s.objects[fmt.Sprintf("workload/bench/%08d", i)] = Object{Revision: 1, Generation: 1, Value: value, Present: true}
+		s.putObject(fmt.Sprintf("workload/bench/%08d", i), Object{Revision: 1, Generation: 1, Value: value, Present: true})
 	}
 	s.index = 1
 	return s
 }
 
 // BenchmarkApply is one committed mutation: what fsm.Apply does per Raft log.
-// BenchmarkApplyAndEncode adds the full-state encoding fsm.publish writes.
 func BenchmarkApply(b *testing.B) {
 	for _, n := range []int{1_000, 10_000, 100_000} {
 		s := benchState(n)
@@ -37,7 +36,8 @@ func BenchmarkApply(b *testing.B) {
 	}
 }
 
-func BenchmarkApplyAndEncode(b *testing.B) {
+// BenchmarkApplyAndStore adds the row writes fsm.publish makes.
+func BenchmarkApplyAndStore(b *testing.B) {
 	for _, n := range []int{1_000, 10_000, 100_000} {
 		s := benchState(n)
 		b.Run(fmt.Sprint(n), func(b *testing.B) {
@@ -48,7 +48,9 @@ func BenchmarkApplyAndEncode(b *testing.B) {
 				if err != nil {
 					b.Fatal(err)
 				}
-				if _, err := Encode(next); err != nil {
+				changes := NewChanges()
+				changes.Add(next)
+				if _, err := StoredWrites(next, changes, map[string][]byte{}); err != nil {
 					b.Fatal(err)
 				}
 			}

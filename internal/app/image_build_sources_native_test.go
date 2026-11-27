@@ -19,9 +19,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/imagebuild"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/imagebuild"
 )
 
 // File preparation is local CLI input only. All plan/edit/save/publication,
@@ -64,7 +64,7 @@ func (f *managedRegistryNative) verifyImageBuildGitNative(t *testing.T, ctx cont
 		t.Fatal("Git fixture credential was not installed before runtime initialization")
 	}
 	const firstProof = "rq6-native-git-first"
-	dockerfile := fmt.Sprintf("FROM %s\nCOPY --chmod=0444 context-proof /build-context-proof\nLABEL org.mydc.test.owner=%q\n", f.reference, f.public["Tag"])
+	dockerfile := fmt.Sprintf("FROM %s\nCOPY --chmod=0444 context-proof /build-context-proof\nLABEL org.sfc.test.owner=%q\n", f.reference, f.public["Tag"])
 	commit := f.buildGit.CommitFiles(map[string][]byte{"Dockerfile": []byte(dockerfile), "context-proof": []byte(firstProof)})
 	spec := base.Own()
 	spec.ID, spec.Kind, spec.Secrets, spec.Tags = "native-git", "git", nil, []string{"git-{commit}"}
@@ -225,7 +225,7 @@ func (f *managedRegistryNative) verifyImageBuildDraftNative(t *testing.T, ctx co
 	const proof = "rq6-native-draft-context"
 	multipart := bytes.Repeat([]byte("owned-multipart-file\n"), 2000)
 	multipartDigest := sha256.Sum256(multipart)
-	dockerfile := fmt.Sprintf("FROM %s\nCOPY --chmod=0444 context-proof /build-context-proof\nCOPY --chmod=0444 multipart.txt /build-multipart-proof\nLABEL org.mydc.test.owner=%q\n", f.reference, f.public["Tag"])
+	dockerfile := fmt.Sprintf("FROM %s\nCOPY --chmod=0444 context-proof /build-context-proof\nCOPY --chmod=0444 multipart.txt /build-multipart-proof\nLABEL org.sfc.test.owner=%q\n", f.reference, f.public["Tag"])
 	var originalEditFile string
 	var originalEdit *imagebuild.DraftEditResult
 	for i, file := range []struct {

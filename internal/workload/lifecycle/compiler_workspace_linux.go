@@ -17,8 +17,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/jay94ks/mydcd/internal/engine"
-	"github.com/jay94ks/mydcd/internal/schema"
+	"github.com/jay94ks/seafield/internal/engine"
+	"github.com/jay94ks/seafield/internal/schema"
 )
 
 const compilerUID = 10001
@@ -133,7 +133,7 @@ func (m *CompilerOwner) ensureDirectory(name string, uid, gid int, mode os.FileM
 }
 
 func (m *CompilerOwner) prepareDirectories(r *compilerDisk) error {
-	// Every parent is private to mydcd; only the mounted leaves admit UID10001.
+	// Every parent is private to sfcd; only the mounted leaves admit UID10001.
 	uid, gid := os.Geteuid(), os.Getegid()
 	for _, name := range []string{"jobs", "jobs/" + r.Intent.Tenant, "go-cache", "go-cache/" + r.Intent.Tenant} {
 		if err := m.ensureDirectory(name, uid, gid, 0700); err != nil {

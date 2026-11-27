@@ -4,8 +4,8 @@ package app
 
 import (
 	"crypto/tls"
-	"github.com/jay94ks/mydcd/internal/certstore"
-	"github.com/jay94ks/mydcd/internal/ingress"
+	"github.com/jay94ks/seafield/internal/certstore"
+	"github.com/jay94ks/seafield/internal/ingress"
 	"testing"
 )
 

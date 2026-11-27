@@ -10,23 +10,23 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/network"
-	"github.com/jay94ks/mydcd/internal/schema"
-	"github.com/jay94ks/mydcd/internal/tenancy"
-	"github.com/jay94ks/mydcd/internal/userauth"
-	"github.com/jay94ks/mydcd/internal/workload"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/network"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/tenancy"
+	"github.com/jay94ks/seafield/internal/userauth"
+	"github.com/jay94ks/seafield/internal/workload"
 )
 
 func TestRealManagedTunnelGoalQuorumPermitAndPacketPolicy(t *testing.T) {
 	testRealManagedJoin(t, true, "tunnel")
 }
 
-func verifyAppTunnelAdmission(t *testing.T, ctx context.Context, leader, follower *Runtime, c userauth.Client, session access.Session, target mydcp.Peer, p control.Policy, submit func(string, string, uint64, any)) {
+func verifyAppTunnelAdmission(t *testing.T, ctx context.Context, leader, follower *Runtime, c userauth.Client, session access.Session, target sfcp.Peer, p control.Policy, submit func(string, string, uint64, any)) {
 	t.Helper()
 	read := func() state.State {
 		t.Helper()
@@ -39,7 +39,7 @@ func verifyAppTunnelAdmission(t *testing.T, ctx context.Context, leader, followe
 	submit("tunnel-tenant", "create-tenant", 0, control.TenantID{ID: "tenant"})
 	catalog, _ := p.Catalog(read())
 	tenant, _ := catalog.Tenant("tenant")
-	submit("tunnel-nodes", "set-nodes", tenant.Revision, control.NodeAssignment{Tenant: "tenant", Nodes: []string{"node-a", "node-b"}})
+	submit("tunnel-nodes", "set-nodes", tenant.Revision, control.NodeChangeTo("tenant", tenant.AllowedNodes, []string{"node-a", "node-b"}))
 	for _, node := range []string{"node-a", "node-b"} {
 		for _, scope := range []string{"", "tenant"} {
 			submit("packet-limit/"+scope+"/"+node, "set-node-quota", 0, tenancy.NodeLimit{Tenant: scope, Node: node, Capacity: workload.Resources{CPU: 1e9, Memory: 256 << 20}, Networks: 4, MaxConsumers: 8, PacketQueuePackets: 32, PacketQueueBytes: 128 << 10})
@@ -51,14 +51,14 @@ func verifyAppTunnelAdmission(t *testing.T, ctx context.Context, leader, followe
 	}
 	definition := tenancy.TUNDefinition{Tenant: "tenant", Name: "existing"}
 	for i, node := range []string{"node-a", "node-b"} {
-		prefix, gateway, address := "10.199.0.0/24", "10.199.0.1", "10.199.2.1/32"
+		prefix, gateway := "10.199.0.0/24", "10.199.0.1"
 		if i == 1 {
-			prefix, gateway, address = "10.199.1.0/24", "10.199.1.1", "10.199.2.2/32"
+			prefix, gateway = "10.199.1.0/24", "10.199.1.1"
 		}
-		definition.Members = append(definition.Members, tenancy.TUNNode{Node: node, Pools: []tenancy.Subnet{{ID: "pool", Prefix: netip.MustParsePrefix(prefix), Gateway: netip.MustParseAddr(gateway), MTU: 1280}}, Addresses: []netip.Prefix{netip.MustParsePrefix(address)}})
+		definition.Members = append(definition.Members, tenancy.TUNNode{Node: node, Pools: []tenancy.Subnet{{ID: "pool", Prefix: netip.MustParsePrefix(prefix), Gateway: netip.MustParseAddr(gateway), MTU: 1280}}})
 	}
 	submit("managed-tunnel-network", "create-tun-network", resources.Networks.Revision(), definition)
-	doc := []byte("name: app\nservices:\n web:\n  image: docker.io/library/php@sha256:" + strings.Repeat("a", 64) + "\n  cpus: 0.1\n  mem_limit: 16m\n  networks: {app: {ipv4_address: 10.199.0.10}}\n  x-mydc: {node: node-a}\n db:\n  image: docker.io/library/mysql@sha256:" + strings.Repeat("b", 64) + "\n  cpus: 0.1\n  mem_limit: 16m\n  networks: {app: {ipv4_address: 10.199.1.10}}\n  x-mydc: {node: node-b}\nnetworks:\n app: {external: true, name: existing}\n")
+	doc := []byte("name: app\nservices:\n web:\n  image: docker.io/library/php@sha256:" + strings.Repeat("a", 64) + "\n  cpus: 0.1\n  mem_limit: 16m\n  networks: {app: {ipv4_address: 10.199.0.10}}\n  x-sfc: {node: node-a}\n db:\n  image: docker.io/library/mysql@sha256:" + strings.Repeat("b", 64) + "\n  cpus: 0.1\n  mem_limit: 16m\n  networks: {app: {ipv4_address: 10.199.1.10}}\n  x-sfc: {node: node-b}\nnetworks:\n app: {external: true, name: existing}\n")
 	raw, e := c.StreamAppPlan(ctx, target, session, "tenant", control.AppPlanRequest{Document: doc})
 	if e != nil {
 		t.Fatal(e)
@@ -174,5 +174,5 @@ func verifyAppTunnelAdmission(t *testing.T, ctx context.Context, leader, followe
 	if e = leader.Engine().Snapshot(ctx); e != nil {
 		t.Fatal(e)
 	}
-	t.Log("actual two Runtime/MYDCP member RPC/Raft/FSM/bbolt: named managed network -> bilateral original TUN sources/native current-owner packet permit, foreign/stale source denied, runtime quota-zero denial; management source/admission metadata only; no Docker/TUN/packet readiness claimed")
+	t.Log("actual two Runtime/SFCP member RPC/Raft/FSM/bbolt: named managed network -> bilateral original TUN sources/native current-owner packet permit, foreign/stale source denied, runtime quota-zero denial; management source/admission metadata only; no Docker/TUN/packet readiness claimed")
 }

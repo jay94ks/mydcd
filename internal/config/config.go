@@ -8,10 +8,11 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"github.com/jay94ks/mydcd/internal/cliprofile"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/ingress"
-	"github.com/jay94ks/mydcd/internal/nodeapp"
+	"github.com/jay94ks/seafield/internal/cliprofile"
+	"github.com/jay94ks/seafield/internal/clusterapp"
+	"github.com/jay94ks/seafield/internal/engineimage"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/ingress"
 	"io"
 	"math"
 	"net"
@@ -45,8 +46,7 @@ type Module struct {
 	Body    yaml.Node
 }
 type NetworkLocal struct {
-	Enabled      bool   `yaml:"enabled"`
-	DockerSocket string `yaml:"docker_socket"`
+	Enabled bool `yaml:"enabled"`
 }
 type WorkloadLocal struct {
 	Enabled bool `yaml:"enabled"`
@@ -67,6 +67,16 @@ func (m Module) Decode(target any) error {
 	d := yaml.NewDecoder(bytes.NewReader(b))
 	d.KnownFields(true)
 	return d.Decode(target)
+}
+
+// has reports whether the module body sets key.
+func (m Module) has(key string) bool {
+	for i := 0; i+1 < len(m.Body.Content); i += 2 {
+		if m.Body.Content[i].Value == key {
+			return true
+		}
+	}
+	return false
 }
 
 func (m *Module) UnmarshalYAML(n *yaml.Node) error {
@@ -102,20 +112,116 @@ type Node struct {
 		IdentityDir      string `yaml:"identity_dir"`
 		Listen           string `yaml:"listen"`
 		ManagementSocket string `yaml:"management_socket,omitempty"`
+		// InboundOnly: this node never dials other nodes; it uses the
+		// sessions they open to it (a public node in front of servers
+		// behind NAT, such as an ingress gateway).
+		InboundOnly bool `yaml:"inbound_only,omitempty"`
 	} `yaml:"node"`
 	Modules        map[string]Module  `yaml:"modules"`
 	Credentials    *CredentialBackend `yaml:"credentials,omitempty" json:",omitempty"`
 	Vaults         []VaultBackend     `yaml:"vaults,omitempty" json:",omitempty"`
 	ServiceCAs     []ServiceCA        `yaml:"service_cas,omitempty" json:",omitempty"`
 	GitCredentials []GitCredential    `yaml:"git_credentials,omitempty" json:",omitempty"`
-	NodeApps       NodeApps           `yaml:"node_apps,omitempty" json:",omitempty"`
+	ClusterApps    ClusterApps        `yaml:"cluster_apps,omitempty" json:",omitempty"`
 	NodeShell      NodeShell          `yaml:"node_shell,omitempty" json:",omitempty"`
+	Engine         Engine             `yaml:"engine,omitempty" json:",omitempty"`
+	Firewall       NodeFirewall       `yaml:"firewall,omitempty" json:",omitempty"`
+
+	// EngineAPI and EngineSocket are not node.yaml settings: a server's
+	// engine always serves its API at DefaultEngineAPI and dials sfcd at
+	// sfcp.DefaultEngineSocket. Tests and development runs set them (sfcd
+	// --engine-api, --engine-socket) to run several nodes on one host.
+	EngineAPI    string `yaml:"-" json:"-"`
+	EngineSocket string `yaml:"-" json:"-"`
+	// AnonymousImages is not a node.yaml setting either: tests set it so an
+	// image pull with no registry login reads a fake source instead of the
+	// image's registry over HTTPS. A server leaves it nil.
+	AnonymousImages func(authority string) (engineimage.Opener, error) `yaml:"-" json:"-"`
+}
+
+// DefaultEngineAPI is the Seafield engine's (sfed) Engine API socket.
+const DefaultEngineAPI = "unix:///run/sfe/sfed.sock"
+
+// EngineEndpoint is the engine API this node uses: EngineAPI, or
+// DefaultEngineAPI when it is empty.
+func (c Node) EngineEndpoint() string {
+	if c.EngineAPI != "" {
+		return c.EngineAPI
+	}
+	return DefaultEngineAPI
+}
+
+// NodeFirewall is node.yaml firewall: whether sfcd may control this
+// server's inbound firewall (devel/proposals/node-firewall.md). Off, sfcd
+// leaves iptables alone. KeepOpen lists "tcp/PORT" or "udp/PORT" entries
+// that stay open whatever rules are set remotely; nil keeps tcp/22, an
+// explicit empty list keeps none.
+type NodeFirewall struct {
+	Managed  bool      `yaml:"managed,omitempty" json:",omitempty"`
+	KeepOpen *[]string `yaml:"keep_open,omitempty" json:",omitempty"`
+}
+
+// DefaultKeepOpen is what keep_open holds when node.yaml leaves it out.
+var DefaultKeepOpen = []string{"tcp/22"}
+
+// KeepOpenPorts reads keep_open into protocol and port pairs.
+func (f NodeFirewall) KeepOpenPorts() ([]KeepOpenPort, error) {
+	list := DefaultKeepOpen
+	if f.KeepOpen != nil {
+		list = *f.KeepOpen
+	}
+	if len(list) > 32 {
+		return nil, errors.New("firewall.keep_open holds at most 32 entries")
+	}
+	out := []KeepOpenPort{}
+	for _, e := range list {
+		k, ok := parseKeepOpen(e)
+		if !ok {
+			return nil, fmt.Errorf("firewall.keep_open entry %q must be tcp/PORT or udp/PORT, optionally followed by \"from PREFIX[,PREFIX]\" (at most 32 prefixes)", e)
+		}
+		out = append(out, k)
+	}
+	return out, nil
+}
+
+// parseKeepOpen reads "tcp/22" or "tcp/22 from 192.168.1.0/24,fd00::/8".
+func parseKeepOpen(e string) (KeepOpenPort, bool) {
+	head, from, ranged := strings.Cut(strings.TrimSpace(e), " from ")
+	proto, port, ok := strings.Cut(strings.TrimSpace(head), "/")
+	n, err := strconv.ParseUint(port, 10, 16)
+	if !ok || proto != "tcp" && proto != "udp" || err != nil || n == 0 || strconv.FormatUint(n, 10) != port {
+		return KeepOpenPort{}, false
+	}
+	k := KeepOpenPort{Proto: proto, Port: uint16(n)}
+	if ranged {
+		seen := map[string]bool{}
+		for _, f := range strings.Split(from, ",") {
+			f = strings.TrimSpace(f)
+			p, err := netip.ParsePrefix(f)
+			if err != nil || p.Masked() != p || p.Addr().Zone() != "" || p.Addr().Is4In6() || seen[f] {
+				return KeepOpenPort{}, false
+			}
+			seen[f] = true
+			k.From = append(k.From, f)
+		}
+		if len(k.From) > 32 {
+			return KeepOpenPort{}, false
+		}
+	}
+	return k, true
+}
+
+// KeepOpenPort is one keep_open entry. From empty: open from anywhere.
+type KeepOpenPort struct {
+	Proto string
+	Port  uint16
+	From  []string
 }
 
 // NodeShell is node.yaml node_shell: where the node's own SSH server and
-// the mydc-shell account live (docs/reference/node-shell.md). Empty fields
+// the sfc-shell account live (docs/reference/node-shell.md). Empty fields
 // keep the defaults: 127.0.0.1:22, /etc/ssh/ssh_host_ed25519_key.pub,
-// /var/lib/mydc-shell and /etc/sudoers.d.
+// /var/lib/sfc-shell and /etc/sudoers.d.
 type NodeShell struct {
 	SSHEndpoint   string `yaml:"ssh_endpoint,omitempty" json:",omitempty"`
 	HostPublicKey string `yaml:"host_public_key,omitempty" json:",omitempty"`
@@ -123,28 +229,33 @@ type NodeShell struct {
 	SudoersDir    string `yaml:"sudoers_dir,omitempty" json:",omitempty"`
 }
 
-// NodeApps is node.yaml node_apps: the node apps this node runs
-// (devel/design/node-apps.md). mydc-web is brought up or down only here.
-type NodeApps struct {
-	Web *NodeAppWeb `yaml:"web,omitempty" json:",omitempty"`
+// ClusterApps is node.yaml cluster_apps: the cluster apps this node runs
+// (devel/design/cluster-apps.md). sfc-web is brought up or down only here.
+type ClusterApps struct {
+	Web *ClusterAppWeb `yaml:"web,omitempty" json:",omitempty"`
 }
 
-// NodeAppWeb is node_apps.web.
-type NodeAppWeb struct {
+// ClusterAppWeb is cluster_apps.web.
+type ClusterAppWeb struct {
 	Enabled bool `yaml:"enabled"`
-	// SealKeyFile holds mydc-web's seal key; without it mydc-web runs with
+	// SealKeyFile holds sfc-web's seal key; without it sfc-web runs with
 	// AI, DNS, certificate automation and notifications off.
 	SealKeyFile string `yaml:"seal_key_file,omitempty" json:",omitempty"`
-	// UID is the non-root UID the container runs as; it owns the node app's
+	// UID is the non-root UID the container runs as; it owns the cluster app's
 	// management socket and data directory. Empty (or 0: root is never used)
-	// is nodeapp.DefaultUID.
+	// is clusterapp.DefaultUID.
 	UID uint32 `yaml:"uid,omitempty" json:",omitempty"`
+	// Port, when set, opens this TCP port on the server's own address (the
+	// host of node.listen) to sfc-web's web port, while this server runs
+	// it: the first way in before any ingress route (Jay 2026-11-26).
+	// Removing it closes the port.
+	Port uint16 `yaml:"port,omitempty" json:",omitempty"`
 }
 
-// Enabled lists the enabled node apps by node app image name.
-func (b NodeApps) Enabled() []string {
+// Enabled lists the enabled cluster apps by cluster app image name.
+func (b ClusterApps) Enabled() []string {
 	if b.Web != nil && b.Web.Enabled {
-		return []string{nodeapp.Web}
+		return []string{clusterapp.Web}
 	}
 	return nil
 }
@@ -372,12 +483,12 @@ func LoadNode(path string) (Node, error) {
 		}
 	}
 	if m := c.Modules["network"]; m.Enabled {
+		if m.has("docker_socket") {
+			return c, errors.New("modules.network.docker_socket was removed: sfcd uses the Seafield engine at " + DefaultEngineAPI + "; delete the line from node.yaml")
+		}
 		var n NetworkLocal
 		if err := m.Decode(&n); err != nil {
 			return c, err
-		}
-		if !strings.HasPrefix(n.DockerSocket, "unix:///") || strings.TrimPrefix(n.DockerSocket, "unix://") == "/" {
-			return c, errors.New("network needs explicit absolute Docker UDS")
 		}
 	}
 	if m := c.Modules["workload"]; m.Enabled {
@@ -421,6 +532,9 @@ func LoadNode(path string) (Node, error) {
 	}
 	if c.Credentials != nil {
 		p := c.Credentials
+		if p.Profile == "builtin" {
+			return c, errors.New("credentials: profile builtin is the cluster's own store; name the external Vault differently")
+		}
 		if p.Profile == "" || !strings.HasPrefix(p.Address, "https://") || p.Mount == "" || p.CAFile == "" || p.TokenFile == "" {
 			return c, errors.New("credentials requires user_catalog and explicit profile/HTTPS address/mount/CA/token-file")
 		}
@@ -450,19 +564,28 @@ func LoadNode(path string) (Node, error) {
 		}
 		p.CAFile, p.TokenFile = pathFrom(path, p.CAFile), pathFrom(path, p.TokenFile)
 	}
-	if w := c.NodeApps.Web; w != nil {
+	if w := c.ClusterApps.Web; w != nil {
 		if w.Enabled && !c.Modules["network"].Enabled {
-			return c, errors.New("node app web requires network")
+			return c, errors.New("cluster app web requires network")
 		}
 		if w.SealKeyFile != "" {
 			w.SealKeyFile = pathFrom(path, w.SealKeyFile)
 		}
 		if w.UID == 0 {
-			w.UID = nodeapp.DefaultUID
+			w.UID = clusterapp.DefaultUID
 		}
 		if w.UID > math.MaxInt32 {
-			return c, errors.New("node app web uid must be a non-root UID")
+			return c, errors.New("cluster app web uid must be a non-root UID")
 		}
+		if _, listen, _ := net.SplitHostPort(c.Node.Listen); w.Port != 0 && strconv.Itoa(int(w.Port)) == listen {
+			return c, errors.New("cluster app web port must differ from node.listen")
+		}
+	}
+	if err := c.Engine.Validate(); err != nil {
+		return c, err
+	}
+	if _, err := c.Firewall.KeepOpenPorts(); err != nil {
+		return c, err
 	}
 	if m := c.Modules["ingress"]; m.Enabled {
 		var v IngressLocal
@@ -493,12 +616,12 @@ func LoadClient(path string) (Client, error) {
 		return c, err
 	}
 	for i := range c.Peers {
-		if strings.HasPrefix(c.Peers[i].Endpoint, "mydcp:") || strings.HasPrefix(c.Peers[i].Endpoint, "unix:") {
+		if strings.HasPrefix(c.Peers[i].Endpoint, "sfcp:") || strings.HasPrefix(c.Peers[i].Endpoint, "unix:") {
 			e, err := cliprofile.ParseEndpoint(c.Peers[i].Endpoint, false)
 			if err != nil {
 				return c, err
 			}
-			if e.Network == "mydcp" {
+			if e.Network == "sfcp" {
 				c.Peers[i].Endpoint = e.Address
 			}
 		}
@@ -521,7 +644,7 @@ func ResolveClient(file, dir, home, system string) (string, error) {
 	if file != "" {
 		return file, nil
 	}
-	for _, candidate := range []string{filepath.Join(home, ".mydc", "client.yaml"), filepath.Join(system, "client.yaml")} {
+	for _, candidate := range []string{filepath.Join(home, ".sfc", "client.yaml"), filepath.Join(system, "client.yaml")} {
 		info, err := os.Stat(candidate)
 		if errors.Is(err, os.ErrNotExist) {
 			continue

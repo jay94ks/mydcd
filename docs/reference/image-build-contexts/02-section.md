@@ -1,6 +1,6 @@
 ## 관리 변경
 
-기존 `mydc manage apply <change.json> --request-id <id>` 또는 같은 User `submit`을 사용한다. 클라이언트는 `whoami`의 `ImageBuildRootRevision`으로 outer RootRevision을 고정한다. 아래 Expected는 각 record의 별도 revision이다. 삭제나 consume로 원 ID를 초기화하지 않으며 원 operation의 result/resume 규칙을 따른다.
+기존 `sfcli manage apply <change.json> --request-id <id>` 또는 같은 User `submit`을 사용한다. 클라이언트는 `whoami`의 `Data.Roots["control/image-builds"]`으로 outer RootRevision을 고정한다. 아래 Expected는 각 record의 별도 revision이다. 삭제나 consume로 원 ID를 초기화하지 않으며 원 operation의 result/resume 규칙을 따른다.
 
 | action | payload | Expected·효과 |
 |---|---|---|

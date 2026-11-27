@@ -15,8 +15,8 @@ import (
 	"strings"
 
 	"github.com/containerd/containerd/v2/core/content"
-	"github.com/jay94ks/mydcd/internal/containerops"
-	"github.com/jay94ks/mydcd/internal/engine"
+	"github.com/jay94ks/seafield/internal/containerops"
+	"github.com/jay94ks/seafield/internal/engine"
 	bkclient "github.com/moby/buildkit/client"
 	"github.com/moby/buildkit/session"
 	bksecrets "github.com/moby/buildkit/session/secrets"

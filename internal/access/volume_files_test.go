@@ -11,37 +11,37 @@ func TestVolumeFileCredentialDelegationIsOwnedAndCannotEscapePrefixOrVolume(t *t
 	bot := user("backup-bot", false)
 	bot.AutomationOnly = true
 	bot.Credentials[0].Operations = []string{"volume-file-put", "volume-file-get", "volume-file-list", "volume-file-delete"}
-	bot.Credentials[0].VolumeFiles = []VolumeFileGrant{{Tenant: "tenant", Volume: "backups", Prefix: "mydc-web-backups/", Operations: []string{"volume-file-put", "volume-file-get", "volume-file-list", "volume-file-delete"}}}
+	bot.Credentials[0].VolumeFiles = []VolumeFileGrant{{Tenant: "tenant", Volume: "backups", Prefix: "sfc-web-backups/", Operations: []string{"volume-file-put", "volume-file-get", "volume-file-list", "volume-file-delete"}}}
 	c = put(t, c, "admin", bot)
 	c = member(t, c, "tenant", "backup-bot", Viewer, true)
 	c = put(t, c, "admin", user("manager", false))
 	c = member(t, c, "tenant", "manager", Manager, true)
 	session, issuer, _ := signedSession(c, "backup-bot", "key", []Scope{{Tenant: "tenant", Actions: []Action{Read}}})
 	for _, operation := range bot.Credentials[0].Operations {
-		name := "mydc-web-backups/today.bin"
+		name := "sfc-web-backups/today.bin"
 		if operation == "volume-file-list" {
-			name = "mydc-web-backups/"
+			name = "sfc-web-backups/"
 		}
 		if c.AuthorizeVolumeFile(session, key(1), issuer, 100, "tenant", "", "backups", name, operation, "") == nil {
 			t.Fatal("credential ceiling created folder authority", operation)
 		}
 	}
-	grant := VolumeFileFolderGrant{Tenant: "tenant", Volume: "backups", Prefix: "mydc-web-backups/", User: "backup-bot"}
+	grant := VolumeFileFolderGrant{Tenant: "tenant", Volume: "backups", Prefix: "sfc-web-backups/", User: "backup-bot"}
 	var err error
 	c, err = c.SetVolumeFileGrant("manager", c.Revision(), grant, false)
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, operation := range bot.Credentials[0].Operations {
-		name := "mydc-web-backups/today.bin"
+		name := "sfc-web-backups/today.bin"
 		if operation == "volume-file-list" {
-			name = "mydc-web-backups/"
+			name = "sfc-web-backups/"
 		}
 		if c.AuthorizeVolumeFile(session, key(1), issuer, 100, "tenant", "", "backups", name, operation, "") != nil {
 			t.Fatal("delegated operation refused", operation)
 		}
 	}
-	for _, q := range []struct{ tenant, app, volume, path, op string }{{"tenant", "", "other", "mydc-web-backups/a", "volume-file-put"}, {"tenant", "app", "backups", "mydc-web-backups/a", "volume-file-put"}, {"tenant", "", "backups", "mydc-web-backups-other/a", "volume-file-put"}, {"tenant", "", "backups", "mydc-web-backups/../other", "volume-file-delete"}, {"tenant", "", "backups", "mydc-web-backups", "volume-file-list"}, {"other", "", "backups", "mydc-web-backups/a", "volume-file-get"}} {
+	for _, q := range []struct{ tenant, app, volume, path, op string }{{"tenant", "", "other", "sfc-web-backups/a", "volume-file-put"}, {"tenant", "app", "backups", "sfc-web-backups/a", "volume-file-put"}, {"tenant", "", "backups", "sfc-web-backups-other/a", "volume-file-put"}, {"tenant", "", "backups", "sfc-web-backups/../other", "volume-file-delete"}, {"tenant", "", "backups", "sfc-web-backups", "volume-file-list"}, {"other", "", "backups", "sfc-web-backups/a", "volume-file-get"}} {
 		if c.AuthorizeVolumeFile(session, key(1), issuer, 100, q.tenant, q.app, q.volume, q.path, q.op, "") == nil {
 			t.Fatal("delegation escaped", q)
 		}
@@ -53,7 +53,7 @@ func TestVolumeFileCredentialDelegationIsOwnedAndCannotEscapePrefixOrVolume(t *t
 	owned.Credentials[0].VolumeFiles[0].Prefix = "other/"
 	public := PublicUserOf(bot)
 	public.Credentials[0].VolumeFiles[0].Operations[0] = "delete-volume"
-	if c.AuthorizeVolumeFile(session, key(1), issuer, 100, "tenant", "", "backups", "mydc-web-backups/a", "volume-file-put", "") != nil {
+	if c.AuthorizeVolumeFile(session, key(1), issuer, 100, "tenant", "", "backups", "sfc-web-backups/a", "volume-file-put", "") != nil {
 		t.Fatal("public grant alias changed catalog")
 	}
 	c, err = c.SetVolumeFileGrant("manager", c.Revision(), grant, true)
@@ -61,9 +61,9 @@ func TestVolumeFileCredentialDelegationIsOwnedAndCannotEscapePrefixOrVolume(t *t
 		t.Fatal(err)
 	}
 	for _, operation := range bot.Credentials[0].Operations {
-		name := "mydc-web-backups/today.bin"
+		name := "sfc-web-backups/today.bin"
 		if operation == "volume-file-list" {
-			name = "mydc-web-backups/"
+			name = "sfc-web-backups/"
 		}
 		if c.AuthorizeVolumeFile(session, key(1), issuer, 100, "tenant", "", "backups", name, operation, "") == nil {
 			t.Fatal("credential ceiling bypassed current folder revocation", operation)
@@ -74,7 +74,7 @@ func TestVolumeFileCredentialDelegationIsOwnedAndCannotEscapePrefixOrVolume(t *t
 		t.Fatal(err)
 	}
 	c = member(t, c, "tenant", "backup-bot", Viewer, false)
-	if c.AuthorizeVolumeFile(session, key(1), issuer, 100, "tenant", "", "backups", "mydc-web-backups/a", "volume-file-put", "") == nil {
+	if c.AuthorizeVolumeFile(session, key(1), issuer, 100, "tenant", "", "backups", "sfc-web-backups/a", "volume-file-put", "") == nil {
 		t.Fatal("membership removal did not revoke delegation")
 	}
 }
@@ -84,7 +84,7 @@ func TestVolumeFileCredentialRequiresAnExplicitFileOnlyActionCeiling(t *testing.
 	for _, operations := range [][]string{nil, {"put-user"}, {"volume-file-put", "delete-volume"}} {
 		bot := user("bot", false)
 		bot.Credentials[0].Operations = operations
-		bot.Credentials[0].VolumeFiles = []VolumeFileGrant{{Tenant: "tenant", Volume: "backup", Prefix: "mydc-web-backups/", Operations: []string{"volume-file-put"}}}
+		bot.Credentials[0].VolumeFiles = []VolumeFileGrant{{Tenant: "tenant", Volume: "backup", Prefix: "sfc-web-backups/", Operations: []string{"volume-file-put"}}}
 		if _, err := c.PutUser("admin", 0, bot); err == nil {
 			t.Fatal("broad unattended credential accepted", operations)
 		}
@@ -220,14 +220,14 @@ func TestTenantManagerFolderGrantSurvivesSnapshotAndRevocationDoesNotEditCredent
 	bot.Credentials[0].Operations = []string{"volume-file-put", "volume-file-get", "volume-file-list", "volume-file-delete"}
 	c = put(t, c, "admin", bot)
 	c = member(t, c, "tenant", "bot", Viewer, true)
-	g := VolumeFileFolderGrant{Tenant: "tenant", Volume: "backup", Prefix: "mydc-web-backups/", User: "bot"}
+	g := VolumeFileFolderGrant{Tenant: "tenant", Volume: "backup", Prefix: "sfc-web-backups/", User: "bot"}
 	before, _ := c.User("bot")
 	next, err := c.SetVolumeFileGrant("manager", c.Revision(), g, false)
 	if err != nil {
 		t.Fatal(err)
 	}
 	session, issuer, _ := signedSession(next, "bot", "key", []Scope{{Tenant: "tenant", Actions: []Action{Read}}})
-	if next.AuthorizeVolumeFile(session, key(1), issuer, 100, "tenant", "", "backup", "mydc-web-backups/today", "volume-file-put", "") != nil {
+	if next.AuthorizeVolumeFile(session, key(1), issuer, 100, "tenant", "", "backup", "sfc-web-backups/today", "volume-file-put", "") != nil {
 		t.Fatal("manager delegation rejected")
 	}
 	if next.AuthorizeVolumeFile(session, key(1), issuer, 100, "tenant", "", "backup", "other/today", "volume-file-put", "") == nil {
@@ -257,7 +257,7 @@ func TestTenantManagerFolderGrantSurvivesSnapshotAndRevocationDoesNotEditCredent
 	if err != nil {
 		t.Fatal(err)
 	}
-	if next.AuthorizeVolumeFile(session, key(1), issuer, 100, "tenant", "", "backup", "mydc-web-backups/today", "volume-file-put", "") == nil {
+	if next.AuthorizeVolumeFile(session, key(1), issuer, 100, "tenant", "", "backup", "sfc-web-backups/today", "volume-file-put", "") == nil {
 		t.Fatal("revoke left folder authority")
 	}
 	if _, err = next.SetVolumeFileGrant("bot", next.Revision(), g, false); err == nil {

@@ -12,9 +12,9 @@ import (
 
 	"github.com/moby/moby/client"
 
-	"github.com/jay94ks/mydcd/internal/engine"
-	"github.com/jay94ks/mydcd/internal/nodestorage"
-	"github.com/jay94ks/mydcd/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/engine"
+	"github.com/jay94ks/seafield/internal/nodestorage"
+	"github.com/jay94ks/seafield/internal/reconcile"
 )
 
 // NativeReady is a node fact, not a Raft commit or permission to start a writer.
@@ -38,7 +38,7 @@ func NativeBindingDigest(ready NativeReady) [32]byte {
 
 func NativeReadyBytes(r NativeReady) []byte {
 	r.Signature = nil
-	return signedBytes("mydc-volume-native-ready-1", r)
+	return signedBytes("sfc-volume-native-ready-1", r)
 }
 func (r NativeReady) Verify() error {
 	raw, err := json.Marshal(r.Spec)

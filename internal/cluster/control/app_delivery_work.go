@@ -8,7 +8,7 @@ import (
 	"encoding/json"
 	"math"
 
-	"github.com/jay94ks/mydcd/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/cluster/state"
 )
 
 type AppDeliveryWorkRequest struct {
@@ -139,7 +139,7 @@ func (p Policy) AppDeliverySyncWork(s state.State, caller [32]byte, q AppDeliver
 		Registration, Candidate [32]byte
 		Epoch                   uint64
 	}{registration, selected.Candidate, s.ModuleEpoch()})
-	id := sha256.Sum256(append([]byte("mydc-automatic-sync-1\x00"), raw...))
+	id := sha256.Sum256(append([]byte("sfc-automatic-sync-1\x00"), raw...))
 	choice := AppDeliveryChoice{Operation: "cd-" + hex.EncodeToString(id[:24]), Candidate: selected.Candidate, Registration: registration}
 	// The preview needs an original signed member report for acceptance; the
 	// immutable core can be checked directly here without forging that proof.

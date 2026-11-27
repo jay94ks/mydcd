@@ -8,8 +8,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/secrets"
+	"github.com/jay94ks/seafield/internal/secrets"
+	"github.com/jay94ks/seafield/internal/sfcp"
 )
 
 func TestPrivateInputFetchEncodingDoesNotWidenOrdinarySerialization(t *testing.T) {
@@ -32,7 +32,7 @@ func TestPrivateInputFetchEncodingDoesNotWidenOrdinarySerialization(t *testing.T
 	}
 	defer clear(got.Value.Values["PASSWORD"])
 	large := secrets.Fetched{Secret: "data", Values: map[string][]byte{"PASSWORD": make([]byte, 128<<10)}}
-	if _, err = encodeAppInputFetchResponse([32]byte{1}, large); err != mydcp.ErrBudget {
+	if _, err = encodeAppInputFetchResponse([32]byte{1}, large); err != sfcp.ErrBudget {
 		t.Fatal("private payload bound bypass", err)
 	}
 }

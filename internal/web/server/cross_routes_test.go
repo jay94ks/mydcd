@@ -5,10 +5,10 @@ package server
 import (
 	"context"
 	"fmt"
-	"github.com/jay94ks/mydcd/internal/web/mydc"
+	"github.com/jay94ks/seafield/internal/web/sfc"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/control"
 )
 
 func TestCrossTenantRoutes(t *testing.T) {
@@ -39,10 +39,14 @@ func TestCrossTenantRoutes(t *testing.T) {
 		r["destination"].(map[string]any)["tenant"] != "payments" || r["sourceTenant"] != "shop" {
 		t.Fatalf("shop view: %v", r)
 	}
+	// the peer network is named, its CIDR left out
+	if d := r["destination"].(map[string]any); d["name"] != "payments-net" || d["CIDR"] != nil || d["cidr"] != nil || r["source"].(map[string]any)["CIDR"] == nil && r["source"].(map[string]any)["cidr"] == nil {
+		t.Fatalf("shop view sides: %v", r)
+	}
 	if r := item(list("payments"), "shop-to-ledger"); r == nil || r["side"] != "destination" || r["state"] != "waiting-me" {
 		t.Fatalf("payments view: %v", r)
 	}
-	// alice only reads payments: her approval for it is refused by mydcd
+	// alice only reads payments: her approval for it is refused by sfcd
 	code, out := f.do("POST", "/api/v1/t/payments/routes/shop/shop-to-ledger/approve", map[string]any{"opId": op()})
 	if opState(t, code, out) != "failed" {
 		t.Fatalf("viewer approve: %d %v", code, out)
@@ -103,7 +107,7 @@ func TestCrossTenantRoutes(t *testing.T) {
 			t.Fatalf("%s: %d %v", path, code, out)
 		}
 	}
-	// a stale expected fails in mydcd
+	// a stale expected fails in sfcd
 	code, out = f.do("POST", "/api/v1/t/shop/routes/shop/"+q.ID+"/approve", map[string]any{"opId": op(), "expected": 1})
 	if opState(t, code, out) != "failed" {
 		t.Fatalf("stale approve: %d %v", code, out)
@@ -126,8 +130,8 @@ func TestCrossTenantRoutes(t *testing.T) {
 }
 
 type endpointsConn struct {
-	mydc.Conn
-	v mydc.RouteEndpoints
+	sfc.Conn
+	v sfc.RouteEndpoints
 }
 
 // PublicRead route-endpoints: one page of the fixed rows.
@@ -141,7 +145,7 @@ func (c endpointsConn) PublicRead(_ context.Context, method, _ string, _ control
 }
 
 func TestOpenEndpoint(t *testing.T) {
-	c := endpointsConn{v: mydc.RouteEndpoints{Tenant: "pay", Endpoints: []control.RouteEndpoint{
+	c := endpointsConn{v: sfc.RouteEndpoints{Tenant: "pay", Endpoints: []control.RouteEndpoint{
 		{Tenant: "pay", Network: "ledger", Node: "node-a", Pool: "main"},
 		{Tenant: "pay", Network: "ledger", Node: "node-c", Pool: "main"},
 		{Tenant: "pay", Network: "solo", Node: "node-b", Pool: "main"},

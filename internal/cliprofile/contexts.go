@@ -21,21 +21,21 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// The CLI's own files under ~/.mydc (devel/design/cli-and-formats.md):
+// The CLI's own files under ~/.sfc (devel/design/cli-and-formats.md):
 //
 //	config.yaml            contexts: where to connect, as whom, which tenant
 //	trust/<cluster>.yaml   node keys confirmed for one cluster
 //
 // Both are written only by the CLI (a person may edit config.yaml). Neither
-// grants remote authority; mydcd checks every request.
+// grants remote authority; sfcd checks every request.
 
 var (
-	ErrNoContext = errors.New("no context; add one with 'mydc context add NAME [ENDPOINT]'")
+	ErrNoContext = errors.New("no context; add one with 'sfcli context add NAME [ENDPOINT]'")
 	ErrNotFound  = errors.New("no such context")
 	ErrExists    = errors.New("a context with that name already exists")
 )
 
-// Config is ~/.mydc/config.yaml.
+// Config is ~/.sfc/config.yaml.
 type Config struct {
 	Version  int                `yaml:"version"`
 	Current  string             `yaml:"current,omitempty"`
@@ -48,10 +48,10 @@ type Context struct {
 	Cluster  string `yaml:"cluster" json:"cluster"` // hex cluster ID confirmed on first contact
 	User     string `yaml:"user,omitempty" json:"user,omitempty"`
 	Tenant   string `yaml:"tenant,omitempty" json:"tenant,omitempty"`
-	Key      string `yaml:"key,omitempty" json:"key,omitempty"` // wallet key used by 'mydc login'
+	Key      string `yaml:"key,omitempty" json:"key,omitempty"` // wallet key used by 'sfcli login'
 }
 
-// Trust is ~/.mydc/trust/<cluster>.yaml: the node keys this user confirmed.
+// Trust is ~/.sfc/trust/<cluster>.yaml: the node keys this user confirmed.
 type Trust struct {
 	Version int           `yaml:"version" json:"version"`
 	Cluster string        `yaml:"cluster" json:"cluster"`
@@ -59,7 +59,9 @@ type Trust struct {
 }
 
 // TrustedNode is one confirmed node key. How says how it was confirmed:
-// "fingerprint" (typed on the terminal) or "out-of-band" (--key).
+// "fingerprint" (typed on the terminal), "out-of-band" (--key) or
+// "relayed-login" (a trusted node relayed a login to this session issuer
+// and named it from the cluster's members).
 type TrustedNode struct {
 	ID        string    `yaml:"id" json:"id"`
 	Key       string    `yaml:"key" json:"key"` // hex public key
@@ -140,7 +142,7 @@ func (t Trust) Validate() error {
 	ids, keys := map[string]bool{}, map[string]bool{}
 	for _, n := range t.Nodes {
 		raw, err := hex.DecodeString(n.Key)
-		if !ValidKeyName(n.ID) || err != nil || len(raw) != 32 || hex.EncodeToString(raw) != n.Key || ids[n.ID] || keys[n.Key] || len(n.Endpoints) == 0 || n.How != "fingerprint" && n.How != "out-of-band" {
+		if !ValidKeyName(n.ID) || err != nil || len(raw) != 32 || hex.EncodeToString(raw) != n.Key || ids[n.ID] || keys[n.Key] || len(n.Endpoints) == 0 || !validHow(n.How) {
 			return ErrTrust
 		}
 		ids[n.ID], keys[n.Key] = true, true
@@ -153,12 +155,16 @@ func (t Trust) Validate() error {
 	return nil
 }
 
-// Store is ~/.mydc.
+func validHow(how string) bool {
+	return how == "fingerprint" || how == "out-of-band" || how == "relayed-login"
+}
+
+// Store is ~/.sfc.
 type Store struct{ root *os.Root }
 
-// OpenStore opens ~/.mydc, creating it with mode 0700 when create is set.
+// OpenStore opens ~/.sfc, creating it with mode 0700 when create is set.
 func OpenStore(home string, create bool) (*Store, error) {
-	dir := filepath.Join(home, ".mydc")
+	dir := filepath.Join(home, ".sfc")
 	if create {
 		if err := os.MkdirAll(dir, 0o700); err != nil {
 			return nil, err
@@ -180,7 +186,7 @@ func OpenStore(home string, create bool) (*Store, error) {
 
 func (s *Store) Close() error { return s.root.Close() }
 
-// Lock serializes writers of ~/.mydc between CLI processes.
+// Lock serializes writers of ~/.sfc between CLI processes.
 func (s *Store) Lock() (func(), error) {
 	f, err := s.root.OpenFile(".lock", os.O_RDWR|os.O_CREATE, 0o600)
 	if err != nil {
@@ -204,10 +210,10 @@ func (s *Store) Load() (Config, error) {
 		return c, err
 	}
 	if err = strictYAML(raw, &c); err != nil {
-		return c, fmt.Errorf("~/.mydc/config.yaml: %w", err)
+		return c, fmt.Errorf("~/.sfc/config.yaml: %w", err)
 	}
 	if err = c.Validate(); err != nil {
-		return c, fmt.Errorf("~/.mydc/config.yaml: %w", err)
+		return c, fmt.Errorf("~/.sfc/config.yaml: %w", err)
 	}
 	return c, nil
 }
@@ -234,7 +240,7 @@ func (s *Store) Trust(cluster string) (Trust, error) {
 		return t, err
 	}
 	if strictYAML(raw, &t) != nil || t.Validate() != nil || t.Cluster != cluster {
-		return Trust{}, fmt.Errorf("~/.mydc/trust/%s.yaml: %w", cluster, ErrTrust)
+		return Trust{}, fmt.Errorf("~/.sfc/trust/%s.yaml: %w", cluster, ErrTrust)
 	}
 	return t, nil
 }

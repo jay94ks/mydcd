@@ -18,7 +18,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/jay94ks/mydcd/internal/access"
+	"github.com/jay94ks/seafield/internal/access"
 
 	"github.com/google/go-containerregistry/pkg/authn"
 	"github.com/google/go-containerregistry/pkg/name"
@@ -82,6 +82,9 @@ func Sanitize(err error) error {
 			return &Error{Code: "NOT_FOUND"}
 		case 405, 501:
 			return &Error{Code: "UNSUPPORTED"}
+		case 429:
+			// Docker Hub limits anonymous manifest reads per address.
+			return &Error{Code: "RATE_LIMITED"}
 		}
 	}
 	return &Error{Code: "UNAVAILABLE"}

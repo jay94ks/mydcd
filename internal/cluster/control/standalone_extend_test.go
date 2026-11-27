@@ -11,10 +11,10 @@ import (
 	"math"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/containerops"
-	"github.com/jay94ks/mydcd/internal/deployment"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/containerops"
+	"github.com/jay94ks/seafield/internal/deployment"
 )
 
 func TestStandaloneExtensionArithmeticAndNumericBounds(t *testing.T) {
@@ -264,22 +264,18 @@ func TestStandaloneExtensionRejectsLifecycleScopeAndStaleManagement(t *testing.T
 				}
 				applyDownCAS(t, f, first, state.Applied)
 			case "credential", "operation-ceiling":
-				catalog, _ := f.p.Catalog(f.s)
-				u, _ := catalog.User("admin")
-				expected := u.Revision
-				u.Revision = 0
-				if mode == "credential" {
-					recovery := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{145}, ed25519.SeedSize))
-					u.Credentials = append(u.Credentials, access.Credential{ID: "recovery", Method: access.PrivateKey, PublicKey: [32]byte(recovery.Public().(ed25519.PublicKey)), Enabled: true})
-					clear(recovery)
-					u.Credentials[0].Enabled = false
-				} else {
-					u.Credentials[0].Operations = []string{"standalone-remove"}
-				}
 				// f.apply uses At=2: give that independent user-management
 				// command a valid session without changing the original op.
 				standaloneExtendSession(f, 1)
-				f.apply("revoke-extension-authority", "put-user", expected, u, state.Applied)
+				// A key's ceiling is fixed when it is added: the narrower
+				// ceiling is a replacement key, the original turned off.
+				var ceiling []string
+				if mode == "operation-ceiling" {
+					ceiling = []string{"standalone-remove"}
+				}
+				recovery := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{145}, ed25519.SeedSize))
+				f.replaceOwnKey("key", "recovery", [32]byte(recovery.Public().(ed25519.PublicKey)), ceiling)
+				clear(recovery)
 				want = state.Forbidden
 			}
 			before := f.s.Object(AppsKey)
@@ -467,7 +463,7 @@ func TestStandaloneExtensionAbsentFieldPreservesLegacyMetadataAndTargetBytes(t *
 		Controls [][32]byte
 		Clears   [][32]byte
 	}{entry.Inventory.Scope(), appRegistrationDigest(entry.Origin), old, [32]byte{}, nil, nil})
-	legacyTarget := sha256.Sum256(append([]byte("mydc-standalone-target-1\x00"), raw...))
+	legacyTarget := sha256.Sum256(append([]byte("sfc-standalone-target-1\x00"), raw...))
 	if legacyTarget != entry.standaloneTarget() {
 		t.Fatal("absent extension changed legacy management target")
 	}

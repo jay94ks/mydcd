@@ -9,14 +9,14 @@ import (
 	"errors"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/reconcile"
-	"github.com/jay94ks/mydcd/internal/schema"
-	"github.com/jay94ks/mydcd/internal/storage"
-	checker "github.com/jay94ks/mydcd/internal/workload/lifecycle"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/storage"
+	checker "github.com/jay94ks/seafield/internal/workload/lifecycle"
 )
 
 // compilerAuthority is the actual member/latest quorum edge. Recovery cannot
@@ -35,7 +35,7 @@ func (r *Runtime) compilerWork(ctx context.Context, b checker.BuildIntent, recov
 
 func (r *Runtime) compilerQuery(ctx context.Context, b checker.BuildIntent, start, recover bool) (control.CheckerBuildPermit, error) {
 	if b.Cluster != r.controlPolicy.Cluster || b.Owner != r.Identity.Public || r.ctx.Err() != nil {
-		return control.CheckerBuildPermit{}, mydcp.ErrAdmission
+		return control.CheckerBuildPermit{}, sfcp.ErrAdmission
 	}
 	view, err := r.Engine().Read(ctx, false)
 	if err != nil {
@@ -49,7 +49,7 @@ func (r *Runtime) compilerQuery(ctx context.Context, b checker.BuildIntent, star
 	}
 	p, err := schema.Decode[control.CheckerBuildPermit](reply.Data)
 	if err != nil || reply.Local || p.Schema != 1 || p.Job != b.Digest() || p.Manifest != b.Manifest || p.Owner != b.Owner || p.DeadlineUnixMilli != b.DeadlineUnixMilli || p.Index < q.MinimumIndex || p.PolicyRevision != b.Selection.PolicyRevision || p.Epoch == 0 || p.RootRevision == 0 || p.Recovery != recover {
-		return control.CheckerBuildPermit{}, mydcp.ErrAdmission
+		return control.CheckerBuildPermit{}, sfcp.ErrAdmission
 	}
 	return p, nil
 }

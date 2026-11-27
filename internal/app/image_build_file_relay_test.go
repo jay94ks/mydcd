@@ -8,13 +8,13 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/imagebuild"
-	"github.com/jay94ks/mydcd/internal/nodestorage"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/imagebuild"
+	"github.com/jay94ks/seafield/internal/nodestorage"
 )
 
 func TestDraftFileOwnerRelayKeepsConflictAndRejectsWrongKindsOrMixedResults(t *testing.T) {
-	scope := imagebuild.DraftScope{Schema: 1, Tenant: "tenant", Context: "source", Root: nodestorage.Reference{Cluster: [32]byte{1}, Node: "node-a", Key: [32]byte{2}, ID: "disk", Generation: 1, Path: "/srv/mydc"}, ContextRevision: 1, PolicyRevision: 1, Dockerfile: "Dockerfile", ExpandedLimit: 1 << 20}
+	scope := imagebuild.DraftScope{Schema: 1, Tenant: "tenant", Context: "source", Root: nodestorage.Reference{Cluster: [32]byte{1}, Node: "node-a", Key: [32]byte{2}, ID: "disk", Generation: 1, Path: "/srv/sfc"}, ContextRevision: 1, PolicyRevision: 1, Dockerfile: "Dockerfile", ExpandedLimit: 1 << 20}
 	q := imagebuild.DraftRequest{Context: scope.Context, Kind: "file", Scope: &scope, Revision: 2, Digest: &[32]byte{4}, Path: "composer.json"}
 	for _, cause := range []error{imagebuild.ErrConflict, imagebuild.ErrInvalid, access.ErrDenied} {
 		raw, _ := json.Marshal(imageBuildFileOwnerReply{Code: imageBuildFileReadCode(errors.Join(cause, errors.New("private /srv/owner/key path")))})

@@ -12,12 +12,12 @@ import (
 	"time"
 
 	cerrdefs "github.com/containerd/errdefs"
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/tenancy"
-	"github.com/jay94ks/mydcd/internal/workload/volumes"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/tenancy"
+	"github.com/jay94ks/seafield/internal/workload/volumes"
 	"github.com/moby/moby/client"
 )
 
@@ -77,7 +77,7 @@ func verifyMoveCancelSourceRedeploy(t *testing.T, ctx context.Context, source, t
 	oldConsumer := core.Consumers()[0]
 	call := func(files []*os.File, args ...string) []byte {
 		t.Helper()
-		out, diagnostic, err := runManagedCLICommand(ctx, os.Getenv("MYDC_TEST_CLI"), filepath.Join(root, "cli-home"), filepath.Join(root, "cli.yaml"), args, files)
+		out, diagnostic, err := runManagedCLICommand(ctx, os.Getenv("SFC_TEST_CLI"), filepath.Join(root, "cli-home"), filepath.Join(root, "cli.yaml"), args, files)
 		if err != nil {
 			t.Fatal("cancel/redeploy CLI", args, err, string(diagnostic), string(out))
 		}
@@ -111,7 +111,7 @@ func verifyMoveCancelSourceRedeploy(t *testing.T, ctx context.Context, source, t
 	if !foundTenant {
 		t.Fatal("original tenant missing")
 	}
-	change("cancel-revoke-source-placement", "set-nodes", tenant.Revision, control.NodeAssignment{Tenant: tenant.ID, Nodes: []string{job.Binding.Target.Node}})
+	change("cancel-revoke-source-placement", "set-nodes", tenant.Revision, control.NodeChangeTo(tenant.ID, tenant.AllowedNodes, []string{job.Binding.Target.Node}))
 	catalog, err = p.Catalog(read().State)
 	if err != nil || catalog.Authorize("admin", tenant.ID, access.ManageVolumes, job.Binding.Source.Node) == nil {
 		t.Fatal("source placement revocation did not take effect", err)
@@ -189,7 +189,7 @@ func verifyMoveCancelSourceRedeploy(t *testing.T, ctx context.Context, source, t
 		t.Fatal("cancelled source acquired a new writer through revoked placement")
 	}
 	tenant, _ = catalog.Tenant(tenant.ID)
-	change("cancel-restore-source-placement", "set-nodes", tenant.Revision, control.NodeAssignment{Tenant: tenant.ID, Nodes: []string{job.Binding.Source.Node, job.Binding.Target.Node}})
+	change("cancel-restore-source-placement", "set-nodes", tenant.Revision, control.NodeChangeTo(tenant.ID, tenant.AllowedNodes, []string{job.Binding.Source.Node, job.Binding.Target.Node}))
 	file := filepath.Join(root, "source-after-cancel.yaml")
 	if err = os.WriteFile(file, document, 0600); err != nil {
 		t.Fatal(err)

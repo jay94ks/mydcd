@@ -6,15 +6,15 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/nodestorage"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/nodestorage"
+	"github.com/jay94ks/seafield/internal/sfcp"
 	"time"
 )
 
-func (c Client) NodeStoragePage(ctx context.Context, target mydcp.Peer, session access.Session, node, after string) (Reply, error) {
+func (c Client) NodeStoragePage(ctx context.Context, target sfcp.Peer, session access.Session, node, after string) (Reply, error) {
 	return c.query(ctx, target, session, Request{Method: "node-storage", Node: node, After: after})
 }
 
@@ -56,17 +56,17 @@ func (s Service) nodeStorageSpace(ctx context.Context, view cluster.View, q Requ
 	return Reply{Schema: 1, Code: "ok", RootRevision: latest.State.Object(control.CatalogKey).Revision, ModuleEpoch: latest.State.ModuleEpoch(), NodeStorageRootRevision: latest.State.Object(control.NodeStorageKey).Revision, NodeStorageRevision: book.Revision(), NodeStorageObservedIndex: latest.State.Index(), NodeStorageSpace: &value}
 }
 
-func (c Client) NodeStorageSpace(ctx context.Context, target mydcp.Peer, session access.Session, selection control.NodeStorageSelection) (Reply, error) {
+func (c Client) NodeStorageSpace(ctx context.Context, target sfcp.Peer, session access.Session, selection control.NodeStorageSelection) (Reply, error) {
 	reply, err := c.query(ctx, target, session, Request{Method: "node-storage-space", NodeStorage: &selection})
 	if err != nil {
 		return reply, err
 	}
 	v := reply.NodeStorageSpace
 	if v == nil || v.Root.Validate() != nil || v.Root.Cluster != c.Cluster || v.Root.Node != selection.Node || v.Root.ID != selection.ID || reply.NodeStorageObservedIndex == 0 || reply.NodeStorageRootRevision == 0 || reply.ModuleEpoch == 0 {
-		return Reply{}, mydcp.ErrAdmission
+		return Reply{}, sfcp.ErrAdmission
 	}
 	if _, err = nodestorage.AggregateSpaces([]nodestorage.Space{*v}); err != nil {
-		return Reply{}, mydcp.ErrAdmission
+		return Reply{}, sfcp.ErrAdmission
 	}
 	return reply, nil
 }

@@ -4,7 +4,7 @@
 
 `GET /t/{t}/apps/{app}/stream?kind=logs|top|stats&service=&instance=&tail=&stdout=&stderr=&interval=`
 
-- `EventSource`로 연다(쿠키 인증, GET이라 `X-MyDC-Web` 불필요). `tail` 0..10000, `interval` 1s..1m(top/stats, 기본 5s).
+- `EventSource`로 연다(쿠키 인증, GET이라 `X-SFC-Web` 불필요). `tail` 0..10000, `interval` 1s..1m(top/stats, 기본 5s).
 - 이벤트: `target`(실제 대상 컨테이너), `stdout`·`stderr`(`{type, sequence, data(base64), text(UTF-8이면)}`), `sample`(`{type, sample}`), `output-eof`, 끝에 `end` 또는 `error`(`{code}`: `target-changed`면 다시 열기, `closed`·`disconnected`는 연결 끊김). 서버 ping은 SSE 주석(`: ping`).
 - 브라우저가 닫으면 스트림을 취소한다. 조회 스트림이라 남는 효과는 없다. 30초 주기 감시 규칙의 대상이 아니다(서버가 밀어 줌).
 

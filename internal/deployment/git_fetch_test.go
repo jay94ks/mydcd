@@ -69,7 +69,7 @@ func newGitFetchFixture(t *testing.T) *gitFetchFixture {
 		if _, err = w.Add("app.yaml"); err != nil {
 			t.Fatal(err)
 		}
-		h, err := w.Commit("app", &git.CommitOptions{Author: &object.Signature{Name: "fixture", Email: "fixture@mydc.test", When: time.Unix(when, 0)}})
+		h, err := w.Commit("app", &git.CommitOptions{Author: &object.Signature{Name: "fixture", Email: "fixture@sfc.test", When: time.Unix(when, 0)}})
 		if err != nil {
 			t.Fatal(err)
 		}

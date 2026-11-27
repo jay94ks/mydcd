@@ -7,8 +7,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/nodestorage"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/nodestorage"
 )
 
 // NodeStorageReport binds native evidence to the exact node key, registration
@@ -22,13 +22,16 @@ type NodeStorageReport struct {
 	Index                         uint64                  // committed quorum-read context, not a native operation ID
 	Ready                         *nodestorage.RootFact   `json:",omitempty"`
 	Closed                        *nodestorage.RootClosed `json:",omitempty"`
-	Signature                     []byte
+	// Default is the node's own default root (Action "default"), sent once
+	// on the node's first run in the cluster. Expected is 0.
+	Default   *nodestorage.Definition `json:",omitempty"`
+	Signature []byte
 }
 
 func NodeStorageReportBytes(r NodeStorageReport) []byte {
 	r.Signature = nil
 	raw, _ := json.Marshal(r)
-	return append([]byte("mydc-node-storage-report-1\x00"), raw...)
+	return append([]byte("sfc-node-storage-report-1\x00"), raw...)
 }
 
 func (r NodeStorageReport) Command() (state.Command, error) {
@@ -67,12 +70,23 @@ func (p Policy) nodeStorageReport(s state.State, cmd state.Command) (NodeStorage
 	}
 	switch r.Action {
 	case "registered":
-		if r.Ready == nil || r.Closed != nil || r.Ready.Verify() != nil {
+		if r.Ready == nil || r.Closed != nil || r.Default != nil || r.Ready.Verify() != nil {
 			return r, ref, ErrCatalog
 		}
 		ref = r.Ready.Root
+	case "default":
+		d := r.Default
+		if d == nil || r.Ready != nil || r.Closed != nil || r.Expected != 0 || d.Key != r.Reporter || d.ID != nodestorage.DefaultRootID || nodestorage.ValidateRootPath(d.Path) != nil {
+			return r, ref, ErrCatalog
+		}
+		// Only the node's active owner registers its default root, as for
+		// add-node-storage; the generation is assigned by the catalog.
+		if active, err := p.workNodeOwner(s, d.Node); err != nil || active != r.Reporter {
+			return r, ref, ErrCatalog
+		}
+		ref = nodestorage.Reference{Cluster: p.Cluster, Node: d.Node, Key: d.Key, ID: d.ID, Path: d.Path}
 	case "closed":
-		if r.Closed == nil || r.Ready != nil || r.Closed.Verify() != nil {
+		if r.Closed == nil || r.Ready != nil || r.Default != nil || r.Closed.Verify() != nil {
 			return r, ref, ErrCatalog
 		}
 		ref = r.Closed.Root
@@ -94,6 +108,14 @@ func (p Policy) reduceNodeStorageReport(s state.State, cmd state.Command) (map[s
 	roots, err := p.NodeStorage(s)
 	if err != nil {
 		return nil, state.Invalid
+	}
+	if r.Default != nil {
+		// RegisterDefault refuses a node that ever had a default root, so an
+		// operator's removal is not undone by a restart or rejoin.
+		if roots, err = roots.RegisterDefault(*r.Default); err != nil {
+			return nil, state.ConditionFailed
+		}
+		return p.nodeStorageCheckpoint(s, roots)
 	}
 	root, ok := roots.Root(ref.Node, ref.ID)
 	if !ok || root.Revision != r.Expected || root.Reference(p.Cluster) != ref {

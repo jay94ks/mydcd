@@ -11,8 +11,8 @@ import (
 	"syscall"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/nodestorage"
-	"github.com/jay94ks/mydcd/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/nodestorage"
+	"github.com/jay94ks/seafield/internal/reconcile"
 )
 
 type fixedBoundaryFault struct {
@@ -42,7 +42,7 @@ func (d fixedBoundaryFault) ExecuteCheckpoint(ctx context.Context, key string, o
 func TestNativeFixedVolumeCheckpointAndBindUnknownKeepOriginalOperation(t *testing.T) {
 	for _, point := range []string{"before-checkpoint", "after-checkpoint", "after-bind"} {
 		t.Run(point, func(t *testing.T) {
-			image, tag, hostNS := os.Getenv("MYDC_STORAGE_TEST_ROOT"), os.Getenv("MYDC_STORAGE_TEST_OWNER"), os.Getenv("MYDC_STORAGE_HOST_MOUNT_NS")
+			image, tag, hostNS := os.Getenv("SFC_STORAGE_TEST_ROOT"), os.Getenv("SFC_STORAGE_TEST_OWNER"), os.Getenv("SFC_STORAGE_HOST_MOUNT_NS")
 			if image == "" || tag == "" || hostNS == "" {
 				t.Skip("requires S1 owned ext4/private namespace and Docker fixture")
 			}
@@ -50,7 +50,7 @@ func TestNativeFixedVolumeCheckpointAndBindUnknownKeepOriginalOperation(t *testi
 			if err != nil || ns == hostNS {
 				t.Fatal("private namespace required", err)
 			}
-			marker, err := os.ReadFile(filepath.Join(image, ".mydc-storage-test-owner"))
+			marker, err := os.ReadFile(filepath.Join(image, ".sfc-storage-test-owner"))
 			if err != nil || string(marker) != tag {
 				t.Fatal("owned image marker required", err)
 			}
@@ -79,7 +79,7 @@ func TestNativeFixedVolumeCheckpointAndBindUnknownKeepOriginalOperation(t *testi
 			if err != nil {
 				t.Fatal(err)
 			}
-			book, err = book.Add(fixture.c, "admin", 0, nodestorage.Definition{Node: "node-a", Key: public(fixture.a), ID: "disk", Path: base, Tenants: []string{"tenant"}, MaxVolumes: 2})
+			book, err = book.Add(fixture.c, "admin", 0, nodestorage.Definition{Node: "node-a", Key: public(fixture.a), ID: "disk", Path: base, Tenants: []string{"tenant"}})
 			if err != nil {
 				t.Fatal(err)
 			}

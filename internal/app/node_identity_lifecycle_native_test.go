@@ -12,19 +12,19 @@ import (
 	"gopkg.in/yaml.v3"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/userauth"
-	checker "github.com/jay94ks/mydcd/internal/workload/lifecycle"
-	contract "github.com/jay94ks/mydcd/lifecycle/v1"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/userauth"
+	checker "github.com/jay94ks/seafield/internal/workload/lifecycle"
+	contract "github.com/jay94ks/seafield/lifecycle/v1"
 )
 
 // Runs within the existing installed-identity native fixture and its rollback.
-// It adds real MYDCP/editor/SourceStore reads, not another process or compiler.
-func prepareIdentityLifecycleReadback(t *testing.T, ctx context.Context, user *userauth.Client, peer *mydcp.Peer, session *access.Session, node string, compiled ...bool) func() {
+// It adds real SFCP/editor/SourceStore reads, not another process or compiler.
+func prepareIdentityLifecycleReadback(t *testing.T, ctx context.Context, user *userauth.Client, peer *sfcp.Peer, session *access.Session, node string, compiled ...bool) func() {
 	t.Helper()
 	change := func(id, action string, expected uint64, payload any) {
 		t.Helper()
@@ -45,7 +45,7 @@ func prepareIdentityLifecycleReadback(t *testing.T, ctx context.Context, user *u
 			t.Fatal("identity lifecycle change", id, result.Code, err)
 		}
 	}
-	policy := checker.TenantPolicy{Tenant: "tenant", Enabled: true, Execution: checker.ExecutionPolicy{MaxConcurrent: 1, TimeoutMS: 5000, NanoCPU: 100000000, MemoryBytes: 64 << 20, MaxPIDs: 32, OutputBytes: 4096, ProbeBytes: 4096, Capabilities: []string{"file"}}, Resolver: checker.ResolverPolicy{AllowPackages: []string{"context", "github.com/jay94ks/mydcd/lifecycle/v1"}, SourceCacheBytes: 1 << 20}}
+	policy := checker.TenantPolicy{Tenant: "tenant", Enabled: true, Execution: checker.ExecutionPolicy{MaxConcurrent: 1, TimeoutMS: 5000, NanoCPU: 100000000, MemoryBytes: 64 << 20, MaxPIDs: 32, OutputBytes: 4096, ProbeBytes: 4096, Capabilities: []string{"file"}}, Resolver: checker.ResolverPolicy{AllowPackages: []string{"context", "github.com/jay94ks/seafield/lifecycle/v1"}, SourceCacheBytes: 1 << 20}}
 	compile := len(compiled) != 0 && compiled[0]
 	if !compile {
 		change("identity-source-policy", "set-lifecycle-policy", 0, policy)
@@ -53,7 +53,7 @@ func prepareIdentityLifecycleReadback(t *testing.T, ctx context.Context, user *u
 	text := []byte(`package checker
 import (
  "context"
- lifecycle "github.com/jay94ks/mydcd/lifecycle/v1"
+ lifecycle "github.com/jay94ks/seafield/lifecycle/v1"
 )
 func Check(ctx context.Context,in lifecycle.Request,probe lifecycle.Probe)(lifecycle.Result,error){
  return lifecycle.Result{Schema:1,Status:"pass",Reason:"retained-source"},nil
@@ -126,9 +126,9 @@ func attachIdentityLifecycleReadback(t *testing.T, path string, compiled ...bool
 	if compile {
 		script.Compile = &compile
 	}
-	input.MyDC.Lifecycle = &deployment.LifecycleDeclaration{Scripts: map[string]checker.Script{"identity-original": script}}
+	input.Sfc.Lifecycle = &deployment.LifecycleDeclaration{Scripts: map[string]checker.Script{"identity-original": script}}
 	service := input.Services["web"]
-	service.MyDC.Lifecycle = &deployment.ServiceLifecycle{Checks: []deployment.LifecycleCheck{{ID: "identity-retained-source", Phase: contract.Readiness, Interval: "1s", Timeout: "3s", LifecycleTemplate: deployment.LifecycleTemplate{Script: "identity-original"}}}}
+	service.Sfc.Lifecycle = &deployment.ServiceLifecycle{Checks: []deployment.LifecycleCheck{{ID: "identity-retained-source", Phase: contract.Readiness, Interval: "1s", Timeout: "3s", LifecycleTemplate: deployment.LifecycleTemplate{Script: "identity-original"}}}}
 	input.Services["web"] = service
 	raw, err = yaml.Marshal(input)
 	if err != nil {

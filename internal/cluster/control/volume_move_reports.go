@@ -8,10 +8,10 @@ import (
 	"encoding/json"
 	"slices"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/schema"
-	"github.com/jay94ks/mydcd/internal/workload/volumes"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/workload/volumes"
 )
 
 type VolumeMoveReport struct {
@@ -38,7 +38,7 @@ type VolumeMoveReport struct {
 func VolumeMoveReportBytes(r VolumeMoveReport) []byte {
 	r.Signature = nil
 	raw, _ := json.Marshal(r)
-	return append([]byte("mydc-volume-move-report-1\x00"), raw...)
+	return append([]byte("sfc-volume-move-report-1\x00"), raw...)
 }
 func volumeMoveReportValue(raw []byte) bool {
 	var tag struct{ Operation string }

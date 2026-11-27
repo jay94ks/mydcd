@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	checker "github.com/jay94ks/mydcd/internal/workload/lifecycle"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	checker "github.com/jay94ks/seafield/internal/workload/lifecycle"
 )
 
 // Only this test adapter's quorum decision is simulated. The authenticated Unix
@@ -102,7 +102,7 @@ func TestCheckerOriginalUploadTokenSurvivesLostUnixReplyAndPhysicalGC(t *testing
 		t.Fatal("consumed original auto reuploaded")
 	} else {
 		var response *Error
-		if !errors.As(err, &response) || response.Code != "invalid" || response.Phase != mydcp.Completed || ctx.Err() != nil {
+		if !errors.As(err, &response) || response.Code != "invalid" || response.Phase != sfcp.Completed || ctx.Err() != nil {
 			t.Fatal("initial rejection did not close both Unix stream halves", err)
 		}
 	}

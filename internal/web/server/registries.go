@@ -8,15 +8,15 @@ import (
 	"net/netip"
 	"strings"
 
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/registry"
-	"github.com/jay94ks/mydcd/internal/web/mydc"
-	"github.com/jay94ks/mydcd/internal/workload"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/registry"
+	"github.com/jay94ks/seafield/internal/web/sfc"
+	"github.com/jay94ks/seafield/internal/workload"
 )
 
 // Built-in registries (UI-80 '내장 저장소'): the `registries` rows with the
 // CLI's status, and put/start/stop/delete-registry with record CAS
-// (Expected = the row's revision, 0 for a new ID). mydcd checks the
+// (Expected = the row's revision, 0 for a new ID). sfcd checks the
 // definition, the Volume and the node permissions; the web fills defaults
 // for a new definition and keeps the stored values on an edit.
 
@@ -54,7 +54,7 @@ func defaultRegistryLimits(capacity uint64) registryLimits {
 }
 
 type registryRow struct {
-	mydc.RegistryView
+	sfc.RegistryView
 	Status string         `json:"status"`
 	Limits registryLimits `json:"limits"`
 }
@@ -64,7 +64,7 @@ type registryRow struct {
 // volume, enabled, deleted, draining, observedAt, status, limits}], next,
 // revision, asOf}.
 func (s *Server) handleRegistries(w http.ResponseWriter, r *http.Request, ws *webSession) {
-	read(s, w, r, ws, func(ctx context.Context, c mydc.Conn) (listPage, error) {
+	read(s, w, r, ws, func(ctx context.Context, c sfc.Conn) (listPage, error) {
 		p, err := c.Registries(ctx, r.PathValue("t"), r.URL.Query().Get("after"))
 		if err != nil {
 			return listPage{}, err
@@ -77,7 +77,7 @@ func (s *Server) handleRegistries(w http.ResponseWriter, r *http.Request, ws *we
 	})
 }
 
-func findRegistry(ctx context.Context, c mydc.Conn, tenant, id string) (*mydc.RegistryView, error) {
+func findRegistry(ctx context.Context, c sfc.Conn, tenant, id string) (*sfc.RegistryView, error) {
 	after := ""
 	for {
 		p, err := c.Registries(ctx, tenant, after)
@@ -117,7 +117,7 @@ func (s *Server) handlePutRegistry(w http.ResponseWriter, r *http.Request, ws *w
 		return
 	}
 	tenant, id := r.PathValue("t"), r.PathValue("id")
-	s.sharedCreate(w, r, ws, req.OpID, req, func(ctx context.Context, c mydc.Conn, _ mydc.Session) (string, any, uint64, string, error) {
+	s.sharedCreate(w, r, ws, req.OpID, req, func(ctx context.Context, c sfc.Conn, _ sfc.Session) (string, any, uint64, string, error) {
 		cur, err := findRegistry(ctx, c, tenant, id)
 		if err != nil {
 			return "", nil, 0, "", err
@@ -164,7 +164,7 @@ func (s *Server) handlePutRegistry(w http.ResponseWriter, r *http.Request, ws *w
 		if spec.Validate(spec.Volume.Cluster) != nil {
 			return "", nil, 0, "", invalid("the registry definition is not valid: authority host[:port] matching the address port, address IP:port, certificate name, limits in range")
 		}
-		return mydc.ActionPutRegistry, control.RegistryPut{Spec: spec}, expectedOr(req.Expected, rev), "registry/" + id, nil
+		return sfc.ActionPutRegistry, control.RegistryPut{Spec: spec}, expectedOr(req.Expected, rev), "registry/" + id, nil
 	})
 }
 
@@ -178,7 +178,7 @@ func authorityPort(a string) string {
 	return "443"
 }
 
-var registryActions = map[string]string{"start": mydc.ActionStartRegistry, "stop": mydc.ActionStopRegistry, "delete": mydc.ActionDeleteRegistry}
+var registryActions = map[string]string{"start": sfc.ActionStartRegistry, "stop": sfc.ActionStopRegistry, "delete": sfc.ActionDeleteRegistry}
 
 // POST /t/{t}/registries/{id}/{start|stop|delete} {opId, expected?}.
 // stop and delete keep the Volume's data; delete needs a stopped registry
@@ -198,7 +198,7 @@ func (s *Server) handleRegistryAction(verb string) func(http.ResponseWriter, *ht
 			Action string
 			Req    any
 		}{action, req}
-		s.sharedCreate(w, r, ws, req.OpID, body, func(ctx context.Context, c mydc.Conn, _ mydc.Session) (string, any, uint64, string, error) {
+		s.sharedCreate(w, r, ws, req.OpID, body, func(ctx context.Context, c sfc.Conn, _ sfc.Session) (string, any, uint64, string, error) {
 			cur, err := findRegistry(ctx, c, tenant, id)
 			if err != nil {
 				return "", nil, 0, "", err
@@ -206,7 +206,7 @@ func (s *Server) handleRegistryAction(verb string) func(http.ResponseWriter, *ht
 			if cur == nil || cur.Deleted {
 				return "", nil, 0, "", &httpErr{http.StatusNotFound, "not-found", "no such registry"}
 			}
-			if action == mydc.ActionDeleteRegistry && (cur.Enabled || cur.Active) {
+			if action == sfc.ActionDeleteRegistry && (cur.Enabled || cur.Active) {
 				return "", nil, 0, "", &httpErr{http.StatusConflict, "not-stopped", "stop the registry and wait until it is stopped"}
 			}
 			return action, control.RegistrySelection{Tenant: tenant, ID: id}, expectedOr(req.Expected, cur.Revision), "registry/" + id, nil

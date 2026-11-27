@@ -9,11 +9,11 @@ import (
 	"crypto/ed25519"
 	"encoding/json"
 	"errors"
-	"github.com/jay94ks/mydcd/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/reconcile"
 	"path/filepath"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/storage"
+	"github.com/jay94ks/seafield/internal/storage"
 )
 
 func TestCheckerCompiledGCDeletesBinaryPreservesOriginalEvidenceAndCanRehydrateExactBytes(t *testing.T) {

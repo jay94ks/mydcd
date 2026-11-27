@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Package observability contains public measurements, never admission or
-// execution authority. Node reports use the existing authenticated MYDCP path.
+// execution authority. Node reports use the existing authenticated SFCP path.
 package observability
 
 import (
@@ -11,12 +11,14 @@ import (
 	"encoding/json"
 	"errors"
 	"math"
+	"net/netip"
+	"slices"
 	"strings"
 
-	"github.com/jay94ks/mydcd/internal/cluster/lifecycle"
-	"github.com/jay94ks/mydcd/internal/containerops"
-	"github.com/jay94ks/mydcd/internal/registryclient"
-	"github.com/jay94ks/mydcd/internal/schema"
+	"github.com/jay94ks/seafield/internal/cluster/lifecycle"
+	"github.com/jay94ks/seafield/internal/containerops"
+	"github.com/jay94ks/seafield/internal/registryclient"
+	"github.com/jay94ks/seafield/internal/schema"
 )
 
 const MaxAge = uint64(120_000) // report timestamps/freshness use Unix milliseconds
@@ -25,19 +27,92 @@ const MaxReportBytes = 60 << 10
 var ErrReport = errors.New("invalid node observation")
 
 type Host struct {
-	RuntimeEnabled          bool
-	Version                 string
-	CPUCapacity             uint64  // nanocores, physical host logical processors
-	CPUUsed                 *uint64 `json:",omitempty"`
-	MemoryTotal, MemoryUsed *uint64 `json:",omitempty"`
+	RuntimeEnabled bool
+	Version        string
+	// Features are the names of the build's features (buildinfo feature
+	// table of its major); empty for the major's baseline.
+	Features                []string `json:",omitempty"`
+	CPUCapacity             uint64   // nanocores, physical host logical processors
+	CPUUsed                 *uint64  `json:",omitempty"`
+	MemoryTotal, MemoryUsed *uint64  `json:",omitempty"`
 	ModuleReady             bool
 	// TunnelWaits names managed TUN networks whose path this server cannot
 	// open yet, with a fixed-format reason (never peer data or secrets).
 	TunnelWaits []TunnelWait `json:",omitempty"`
+	// ClusterApps are the cluster apps this server's node.yaml turns on
+	// (devel/design/cluster-apps.md), with their container's state.
+	ClusterApps []ClusterApp `json:",omitempty"`
+	// Build says whether this server runs image builds. Absent means an
+	// older daemon that did not say.
+	Build *Build `json:",omitempty"`
+}
+
+// Build is one server's image build capability. Reason is empty when
+// Enabled, otherwise one of BuildReasons.
+type Build struct {
+	Enabled bool
+	Reason  string `json:",omitempty"`
+}
+
+// BuildReasons are the fixed codes for a server that does not build:
+// its engine serves no build API (Seafield features.buildkit: false), or
+// its workload module is off.
+var BuildReasons = []string{"ENGINE_BUILD_OFF", "WORKLOAD_OFF"}
+
+func (b Build) valid() bool {
+	if b.Enabled {
+		return b.Reason == ""
+	}
+	return slices.Contains(BuildReasons, b.Reason)
 }
 
 type TunnelWait struct {
 	Tenant, Network, Reason string
+}
+
+// ClusterApp is one cluster app on this server. State is one of ClusterAppStates;
+// Reason is a fixed code (ClusterAppReasons), never Docker or provider text.
+// Control is the image's control policy ("node-config": only node.yaml
+// brings it up or down; any short id, so a new policy does not invalidate
+// the report). Address is its sfc-system address.
+type ClusterApp struct {
+	Name, Control, Digest, State string
+	// Image is the image's repository name (sfc/web) and Version the
+	// release that built it ("" when the build did not pin one).
+	Image    string           `json:",omitempty"`
+	Version  string           `json:",omitempty"`
+	Ports    []ClusterAppPort `json:",omitempty"`
+	Address  string           `json:",omitempty"`
+	Reason   string           `json:",omitempty"`
+	Restarts uint64           `json:",omitempty"`
+	// RunningOn: the server that runs this cluster app, when it is not
+	// this one (State refused: only one server in the cluster runs it).
+	RunningOn string `json:",omitempty"`
+}
+
+// ClusterAppPort is one port a cluster app listens on in its container.
+type ClusterAppPort struct {
+	Name     string
+	Port     uint16
+	Protocol string
+}
+
+// ClusterAppStates are the states a cluster app reports. image-not-found and
+// image-mismatch say the cluster app image package is missing or broken;
+// refused says another server runs it (RunningOn).
+var ClusterAppStates = []string{"starting", "running", "restarting", "stopping", "exited", "failed", "image-not-found", "image-mismatch", "refused", "unknown"}
+
+func (a ClusterApp) valid() bool {
+	ok := lifecycle.ValidID(a.Name) && lifecycle.ValidID(a.Control) && len(a.Digest) <= 80 && !strings.ContainsAny(a.Digest, "\x00\r\n ") && slices.Contains(ClusterAppStates, a.State) && len(a.Reason) <= 64 && !strings.ContainsAny(a.Reason, "\x00\r\n") && (a.RunningOn == "" || a.State == "refused" && lifecycle.ValidID(a.RunningOn))
+	ok = ok && len(a.Image) <= 128 && !strings.ContainsAny(a.Image, "\x00\r\n ") && len(a.Version) <= 64 && !strings.ContainsAny(a.Version, "\x00\r\n ") && len(a.Ports) <= 8
+	for _, p := range a.Ports {
+		ok = ok && lifecycle.ValidID(p.Name) && p.Port != 0 && (p.Protocol == "tcp" || p.Protocol == "udp")
+	}
+	if a.Address != "" {
+		addr, err := netip.ParseAddr(a.Address)
+		ok = ok && err == nil && addr.String() == a.Address
+	}
+	return ok
 }
 
 type Disk struct {
@@ -78,7 +153,7 @@ func (p RegistryPull) Valid(at uint64) bool {
 	return lifecycle.ValidID(p.Tenant) && lifecycle.ValidID(p.Source) && p.Sequence > 0 && p.CompletedAt > 0 && p.CompletedAt <= at && registryAuthority(p.Authority) && (registryclient.PullOutcome{Stage: p.Stage, Code: p.Code}).Valid()
 }
 func registryAuthority(raw string) bool {
-	_, authority, _, err := registryclient.Normalize(raw + "/mydc-observation:check")
+	_, authority, _, err := registryclient.Normalize(raw + "/sfc-observation:check")
 	return err == nil && authority == raw
 }
 
@@ -111,6 +186,12 @@ type Link struct {
 	Measurement                   string
 	LastHandshakeAt, LastChangeAt uint64
 	Samples                       uint64
+	// Dialer is the node that opened the SFCP session now carrying the
+	// pair's traffic (this node or Peer); empty while the link is down.
+	Dialer string `json:",omitempty"`
+	// Via is the member whose transit session carries the pair's traffic;
+	// empty when the link is direct (devel/design/sfcp-transit.md).
+	Via string `json:",omitempty"`
 }
 
 type Consensus struct {
@@ -137,13 +218,14 @@ type Report struct {
 	Task         *Task         `json:",omitempty"`
 	RegistryPull *RegistryPull `json:",omitempty"`
 	Volume       *VolumeUsage  `json:",omitempty"`
+	Devices      *Devices      `json:",omitempty"`
 	Signature    []byte
 }
 
 func SigningBytes(r Report) []byte {
 	r.Signature = nil
 	raw, _ := json.Marshal(r)
-	return append([]byte("mydc-node-observation-1\x00"), raw...)
+	return append([]byte("sfc-node-observation-1\x00"), raw...)
 }
 
 func (r Report) Valid() bool {
@@ -151,6 +233,12 @@ func (r Report) Valid() bool {
 		return false
 	}
 	count := 0
+	if d := r.Devices; d != nil {
+		count++
+		if !d.valid() {
+			return false
+		}
+	}
 	if v := r.Volume; v != nil {
 		count++
 		if !v.valid(r.At) {
@@ -171,7 +259,18 @@ func (r Report) Valid() bool {
 	}
 	if h := r.Host; h != nil {
 		count++
-		if len(h.TunnelWaits) > 32 {
+		if !validFeatureNames(h.Features) {
+			return false
+		}
+		if len(h.ClusterApps) > 16 {
+			return false
+		}
+		for i, a := range h.ClusterApps {
+			if !a.valid() || i > 0 && a.Name <= h.ClusterApps[i-1].Name {
+				return false
+			}
+		}
+		if len(h.TunnelWaits) > 32 || h.Build != nil && !h.Build.valid() {
 			return false
 		}
 		for _, w := range h.TunnelWaits {
@@ -203,7 +302,7 @@ func (r Report) Valid() bool {
 	}
 	if l := r.Link; l != nil {
 		count++
-		if !lifecycle.ValidID(l.Peer) || l.Peer == r.Node || l.ID != PairID(r.Node, l.Peer) || l.State != "up" && l.State != "degraded" && l.State != "down" || l.LastHandshakeAt > r.At || l.LastChangeAt > r.At || l.LastChangeAt == 0 || l.Measurement == "" || len(l.Measurement) > 64 {
+		if !lifecycle.ValidID(l.Peer) || l.Peer == r.Node || l.ID != PairID(r.Node, l.Peer) || l.State != "up" && l.State != "degraded" && l.State != "down" || l.LastHandshakeAt > r.At || l.LastChangeAt > r.At || l.LastChangeAt == 0 || l.Measurement == "" || len(l.Measurement) > 64 || l.Dialer != "" && l.Dialer != r.Node && l.Dialer != l.Peer || l.Via != "" && (!lifecycle.ValidID(l.Via) || l.Via == r.Node || l.Via == l.Peer || l.Dialer == "") {
 			return false
 		}
 		for _, n := range []*float64{l.RTTMillis, l.LossPct} {
@@ -255,6 +354,8 @@ func (r Report) Source() string {
 		return "volume/" + r.Volume.Key
 	case r.Host != nil:
 		return "host"
+	case r.Devices != nil:
+		return "devices"
 	case r.Disk != nil:
 		return "disk/" + r.Disk.Source
 	case r.Usage != nil:
@@ -275,8 +376,29 @@ func PairID(a, b string) string {
 }
 
 func FilesystemID(node, filesystem string) string {
-	digest := sha256.Sum256([]byte("mydc-filesystem-1\x00" + node + "\x00" + filesystem))
+	digest := sha256.Sum256([]byte("sfc-filesystem-1\x00" + node + "\x00" + filesystem))
 	return hex.EncodeToString(digest[:])
 }
 
 func Fresh(at, now uint64) bool { return at != 0 && at <= now && now-at <= MaxAge }
+
+// validFeatureNames: at most 64 distinct lowercase names, each 1-32 bytes of
+// a-z, 0-9 and '-'. Order is the reporter's table order, not checked.
+func validFeatureNames(names []string) bool {
+	if len(names) > 64 {
+		return false
+	}
+	seen := map[string]bool{}
+	for _, n := range names {
+		if n == "" || len(n) > 32 || seen[n] {
+			return false
+		}
+		for _, c := range n {
+			if (c < 'a' || c > 'z') && (c < '0' || c > '9') && c != '-' {
+				return false
+			}
+		}
+		seen[n] = true
+	}
+	return true
+}

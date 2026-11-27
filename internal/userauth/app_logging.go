@@ -5,13 +5,13 @@ package userauth
 import (
 	"context"
 	"errors"
-	"github.com/jay94ks/mydcd/internal/workload"
+	"github.com/jay94ks/seafield/internal/workload"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/mydcp"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/sfcp"
 )
 
 func (s Service) logClearQuery(view cluster.View, q Request, session access.Session) Reply {
@@ -49,9 +49,9 @@ func (s Service) logClearQuery(view cluster.View, q Request, session access.Sess
 	return out
 }
 
-func (c Client) QueryLogClear(ctx context.Context, peer mydcp.Peer, session access.Session, tenant string, plan bool, q control.AppLogClearQuery) (Reply, error) {
+func (c Client) QueryLogClear(ctx context.Context, peer sfcp.Peer, session access.Session, tenant string, plan bool, q control.AppLogClearQuery) (Reply, error) {
 	if tenant == "" || !q.Valid(plan) {
-		return Reply{}, mydcp.ErrAdmission
+		return Reply{}, sfcp.ErrAdmission
 	}
 	method := "app-log-clear-status"
 	if plan {
@@ -64,10 +64,10 @@ func (c Client) QueryLogClear(ctx context.Context, peer mydcp.Peer, session acce
 	if plan {
 		v := reply.LogClearPlan
 		if v == nil || v.Schema != 1 || v.Tenant != tenant || (q.Selection.Standalone == "" && v.App != q.Selection.App || q.Selection.Standalone != "" && v.Container.Standalone != q.Selection.Standalone) || v.Container.Cluster != c.Cluster || v.Container.Tenant != tenant || (q.Selection.Standalone == "" && v.Container.App != q.Selection.App) || q.Selection.Service != "" && v.Container.Service != q.Selection.Service || q.Selection.Instance != "" && v.Container.Instance != q.Selection.Instance || v.Target == ([32]byte{}) || v.InventoryRevision == 0 || len(v.Impact) == 0 {
-			return reply, mydcp.ErrFrame
+			return reply, sfcp.ErrFrame
 		}
 	} else if reply.LogClearStatus == nil || reply.LogClearStatus.Operation != q.Operation {
-		return reply, mydcp.ErrFrame
+		return reply, sfcp.ErrFrame
 	}
 	return reply, nil
 }

@@ -22,12 +22,12 @@ const (
 // This owned fixture holds real sockets in node-b's existing private netns.
 // It never reads a product frame, serves application traffic or reports Ready.
 func TestManagedMovePortBlocker(t *testing.T) {
-	marker := os.Getenv("MYDC_MOVE_PORT_BLOCKER")
+	marker := os.Getenv("SFC_MOVE_PORT_BLOCKER")
 	if marker == "" {
 		t.Skip("owned SQL move port fixture only")
 	}
 	namespace, err := os.Readlink("/proc/self/ns/net")
-	if err != nil || !filepath.IsAbs(marker) || namespace == os.Getenv("MYDC_KERNEL_HOST_NETNS") || os.Getenv("MYDC_KERNEL_HOST_NETNS") == "" {
+	if err != nil || !filepath.IsAbs(marker) || namespace == os.Getenv("SFC_KERNEL_HOST_NETNS") || os.Getenv("SFC_KERNEL_HOST_NETNS") == "" {
 		t.Fatal("private namespace and owned absolute marker required", err)
 	}
 	tcp, err := net.Listen("tcp4", sqlMoveBlockedTCP)
@@ -86,7 +86,7 @@ func holdSQLMovePorts(t *testing.T, ctx context.Context, root, namespace string,
 		t.Fatal(err)
 	}
 	child := exec.Command("nsenter", "--net="+namespace, "--", self, "-test.run=^TestManagedMovePortBlocker$", "-test.v", "-test.timeout=490s")
-	child.Env = append(os.Environ(), "MYDC_MOVE_PORT_BLOCKER="+marker)
+	child.Env = append(os.Environ(), "SFC_MOVE_PORT_BLOCKER="+marker)
 	child.SysProcAttr = &syscall.SysProcAttr{Pdeathsig: syscall.SIGKILL}
 	child.Stdout, child.Stderr = log, log
 	input, err := child.StdinPipe()

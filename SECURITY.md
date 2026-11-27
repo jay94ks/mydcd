@@ -2,7 +2,7 @@
 
 ## Supported versions
 
-MyDC is in early preview. Only the latest release receives security fixes.
+Seafield Cluster is in early preview. Only the latest release receives security fixes.
 
 | Version | Supported |
 |---|---|
@@ -14,7 +14,7 @@ MyDC is in early preview. Only the latest release receives security fixes.
 **Please do not open a public issue, discussion or pull request for a security problem.**
 
 Report it privately through GitHub:
-[Report a vulnerability](https://github.com/jay94ks/mydcd/security/advisories/new)
+[Report a vulnerability](https://github.com/jay94ks/seafield/security/advisories/new)
 (Security tab → "Report a vulnerability").
 
 Please include:
@@ -33,8 +33,8 @@ Please include:
 
 ## Scope
 
-In scope: `mydcd`, `mydc`, `mydc-web`, the MYDCP protocol, the lifecycle sandbox, and the container images
+In scope: `sfcd`, `sfcli`, `sfc-web`, the SFCP protocol, the lifecycle sandbox, and the container images
 released from this repository.
 
-Out of scope: vulnerabilities in third-party dependencies that are not reachable through MyDC (report those
+Out of scope: vulnerabilities in third-party dependencies that are not reachable through Seafield Cluster (report those
 upstream), and issues that need an attacker who already holds a cluster administrator key.

@@ -8,12 +8,12 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/desired"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/network"
-	"github.com/jay94ks/mydcd/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/desired"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/network"
+	"github.com/jay94ks/seafield/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/sfcp"
 )
 
 // Real transport handler registration and empty retained native journals;
@@ -35,7 +35,7 @@ func TestHistoricalTunnelJournalsDoNotRegisterOnSharedCurrentTransport(t *testin
 				t.Fatal(err)
 			}
 			clusterID := [32]byte{113}
-			mesh, err := mydcp.NewTransport(current, clusterID, func(mydcp.Identity) (mydcp.Peer, bool) { return mydcp.Peer{}, false })
+			mesh, err := sfcp.NewTransport(current, clusterID, func(sfcp.Identity) (sfcp.Peer, bool) { return sfcp.Peer{}, false })
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -84,7 +84,7 @@ func TestHistoricalTunnelJournalsDoNotRegisterOnSharedCurrentTransport(t *testin
 				open("current", current, false)
 				oldRuntime, retained = open("historical", old, true)
 			}
-			if oldRuntime.Mesh != mesh || mesh.LocalKey() != mydcp.Identity(current.Public) || oldRuntime.Identity.Public == current.Public {
+			if oldRuntime.Mesh != mesh || mesh.LocalKey() != sfcp.Identity(current.Public) || oldRuntime.Identity.Public == current.Public {
 				t.Fatal("native journal owner replaced the current transport identity")
 			}
 			// Closing only a historical native owner cannot revoke/replace the
@@ -92,10 +92,10 @@ func TestHistoricalTunnelJournalsDoNotRegisterOnSharedCurrentTransport(t *testin
 			if err := retained.Close(); err != nil {
 				t.Fatal(err)
 			}
-			if err := mesh.OnPath(func(context.Context, *mydcp.Session, []byte, int) error { return nil }, nil); !errors.Is(err, mydcp.ErrAdmission) {
+			if err := mesh.OnPath(func(context.Context, *sfcp.Session, []byte, int) error { return nil }, nil); !errors.Is(err, sfcp.ErrAdmission) {
 				t.Fatal("historical Close removed/replaced current path registration", err)
 			}
-			if err := mesh.OnPacket(func(*mydcp.Session, mydcp.Frame) error { return nil }); !errors.Is(err, mydcp.ErrAdmission) {
+			if err := mesh.OnPacket(func(*sfcp.Session, sfcp.Frame) error { return nil }); !errors.Is(err, sfcp.ErrAdmission) {
 				t.Fatal("historical Close removed/replaced current packet registration", err)
 			}
 		})

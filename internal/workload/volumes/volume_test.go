@@ -8,8 +8,8 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/reconcile"
 )
 
 func private(n byte) ed25519.PrivateKey    { return ed25519.NewKeyFromSeed(bytes.Repeat([]byte{n}, 32)) }
@@ -44,8 +44,8 @@ func makeFixture(t *testing.T) *fixture {
 		t.Fatal(e)
 	}
 	a, b := private(10), private(11)
-	source := Owner{"node-a", public(a), "mydc-source"}
-	target := Owner{"node-b", public(b), "mydc-stage"}
+	source := Owner{"node-a", public(a), "sfc-source"}
+	target := Owner{"node-b", public(b), "sfc-stage"}
 	s, e := New(c, "admin", Scope{Cluster: [32]byte{9}, Tenant: "tenant", App: "app", ID: "mysql", Generation: 1}, source, 3)
 	if e != nil {
 		t.Fatal(e)
@@ -411,7 +411,7 @@ func TestVolumeCommitAckLossCannotUndoNewWritesAndReverseUsesFreshCopy(t *testin
 	_, e = f.s.Prepare(f.c, "admin", f.s.Revision(), p.OwnerRevision, "reverse-old", f.source, [32]byte{22}, 1<<20)
 	expectDenied(t, e)
 	fresh := f.source
-	fresh.Native = "mydc-reverse-fresh"
+	fresh.Native = "sfc-reverse-fresh"
 	reverse := f.prepare("reverse", fresh)
 	f.verified(reverse, [32]byte{99})
 	f.set(f.s.CommitOwner(f.c, "admin", "reverse", f.s.Revision(), reverse.Binding.SourceOwnerRevision))

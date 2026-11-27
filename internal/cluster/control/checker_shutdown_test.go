@@ -6,10 +6,10 @@ import (
 	"crypto/ed25519"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	checker "github.com/jay94ks/mydcd/internal/workload/lifecycle"
-	contract "github.com/jay94ks/mydcd/lifecycle/v1"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/deployment"
+	checker "github.com/jay94ks/seafield/internal/workload/lifecycle"
+	contract "github.com/jay94ks/seafield/lifecycle/v1"
 )
 
 // Full product planner/FSM/Binding/Catalog, with injected acceptance/native
@@ -20,7 +20,7 @@ func shutdownPermitFixture(t *testing.T) (*backupCoreFixture, CheckerShutdownReq
 	managedDNSChange(t, f, "shutdown-policy", "set-lifecycle-policy", 0, checkerPolicy(), state.Applied)
 	task := managedDNSTaskCoreBegin(t, f, "first", "10.80.1.10", "first", func(input *deployment.Compose, planning *deployment.PlanningContext) {
 		service := input.Services["web"]
-		service.MyDC.Lifecycle = &deployment.ServiceLifecycle{Checks: []deployment.LifecycleCheck{{ID: "before-stop", Phase: contract.Shutdown, LifecycleTemplate: deployment.LifecycleTemplate{Builtin: "docker_health"}}}}
+		service.Sfc.Lifecycle = &deployment.ServiceLifecycle{Checks: []deployment.LifecycleCheck{{ID: "before-stop", Phase: contract.Shutdown, LifecycleTemplate: deployment.LifecycleTemplate{Builtin: "docker_health"}}}}
 		input.Services["web"] = service
 		planning.Features["lifecycle"] = true // pure-core planning input, not product support
 	})

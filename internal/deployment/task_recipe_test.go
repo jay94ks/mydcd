@@ -11,12 +11,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/engine"
-	"github.com/jay94ks/mydcd/internal/imagesource"
-	"github.com/jay94ks/mydcd/internal/network"
-	"github.com/jay94ks/mydcd/internal/reconcile"
-	"github.com/jay94ks/mydcd/internal/workload"
-	"github.com/jay94ks/mydcd/internal/workload/volumes"
+	"github.com/jay94ks/seafield/internal/engine"
+	"github.com/jay94ks/seafield/internal/imagesource"
+	"github.com/jay94ks/seafield/internal/network"
+	"github.com/jay94ks/seafield/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/workload"
+	"github.com/jay94ks/seafield/internal/workload/volumes"
 )
 
 func taskMaterialFixture(t *testing.T) (*fixture, Blueprint, TaskMaterial) {
@@ -84,10 +84,10 @@ func TestTaskRecipeRoutesStayInOriginalLogicalNetwork(t *testing.T) {
 	}
 	// Other declarations are not a route authority for this attachment.
 	other := b.d.Input.Networks["app"]
-	other.MyDC.Pools = maps.Clone(other.MyDC.Pools)
-	remote := other.MyDC.Pools["node-a"]
+	other.Sfc.Pools = maps.Clone(other.Sfc.Pools)
+	remote := other.Sfc.Pools["node-a"]
 	remote.CIDR, remote.Gateway = "198.18.90.0/24", "198.18.90.1"
-	other.MyDC.Pools["node-a"] = remote
+	other.Sfc.Pools["node-a"] = remote
 	b.d.Input.Networks["unattached"] = other
 	_, again, err := b.taskRecipe("db", material, material.Bridge.Owner)
 	if err != nil || !slices.Equal(again.Routes, want) {
@@ -147,7 +147,7 @@ func TestTaskRecipeOriginalBindingVolumeAndNetworkCorrespondence(t *testing.T) {
 
 func TestTaskRecipeExternalNetworkKeepsOriginalSource(t *testing.T) {
 	f, input, ctx, source := externalFixture(t)
-	input.Services["web"].MyDC.Readiness.Timeout = "3s"
+	input.Services["web"].Sfc.Readiness.Timeout = "3s"
 	b, err := Compile(input, f.c, ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -188,7 +188,7 @@ func TestTaskRecipeAcceptsRegistryOnlyProjection(t *testing.T) {
 	login := addRegistryInputFixture(t, f)
 	_, b, material := taskMaterialFixtureIn(t, f, func(input *Compose) {
 		s := input.Services["db"]
-		s.Secrets, s.MyDC.Sources = nil, nil
+		s.Secrets, s.Sfc.Sources = nil, nil
 		input.Services["db"] = s
 	}, func(ctx *PlanningContext) {
 		source := imagesource.Source{Tenant: "tenant", ID: "docker", Authority: "docker.io", Repository: "**", Enabled: true, Auth: "password", Credential: &imagesource.Credential{Realm: login.Realm, ID: login.Object, UsernameKey: "username", PasswordKey: "password"}}

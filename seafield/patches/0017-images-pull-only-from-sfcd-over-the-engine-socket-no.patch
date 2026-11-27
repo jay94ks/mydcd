@@ -1,0 +1,584 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Fri, 27 Nov 2026 11:01:24 +0000
+Subject: [PATCH 17/20] images: pull only from sfcd over the engine socket; no
+ registry access
+
+Every manifest and blob comes from sfcd (purpose 37, daemon/seafield/imagesrc).
+A pull needs name@sha256; the repository sent is the name as written
+(reference.FamiliarName). Registry hosts, endpoints, auth and search are
+refused, so neither pulls, push, login, search nor BuildKit reach a registry.
+
+diff --git a/daemon/command/daemon.go b/daemon/command/daemon.go
+index abb6654..909454a 100644
+--- a/daemon/command/daemon.go
++++ b/daemon/command/daemon.go
+@@ -5,6 +5,7 @@
+ 	"crypto/tls"
+ 	"encoding/json"
+ 	"fmt"
++	ctrd "github.com/moby/moby/v2/daemon/containerd"
+ 	"net"
+ 	"net/http"
+ 	"os"
+@@ -38,6 +39,7 @@
+ 	dopts "github.com/moby/moby/v2/daemon/pkg/opts"
+ 	"github.com/moby/moby/v2/daemon/pkg/plugin"
+ 	"github.com/moby/moby/v2/daemon/seafield/eventfeed"
++	"github.com/moby/moby/v2/daemon/seafield/imagesrc"
+ 	"github.com/moby/moby/v2/daemon/seafield/logqueue"
+ 	"github.com/moby/moby/v2/daemon/seafield/monitor"
+ 	"github.com/moby/moby/v2/daemon/seafield/netdrv"
+@@ -327,6 +329,7 @@ func (cli *daemonCLI) start(ctx context.Context) (retErr error) {
+ 	sfcdClient := sfcd.New(sfcd.Socket(), peer.Allowed())
+ 	volumeservice.ExtraDrivers = append(volumeservice.ExtraDrivers, volumedrv.New(sfcdClient))
+ 	bridge.Wrappers = append(bridge.Wrappers, netdrv.Wrap(sfcdClient))
++	ctrd.Source = imagesrc.New(sfcdClient)
+ 	netdrv.ContainerInfo = func(id string) (string, map[string]string) {
+ 		if d := upDaemon.Load(); d != nil {
+ 			if c, err := d.GetContainer(id); err == nil && c.Config != nil {
+diff --git a/daemon/containerd/image_pull.go b/daemon/containerd/image_pull.go
+index aee19bd..8f3992a 100644
+--- a/daemon/containerd/image_pull.go
++++ b/daemon/containerd/image_pull.go
+@@ -65,6 +65,10 @@ func (i *ImageService) PullImage(ctx context.Context, baseRef reference.Named, o
+ 		platform = &p
+ 	}
+ 
++	// Seafield: sfcd resolves tags; the engine pulls only name@digest.
++	if _, ok := baseRef.(reference.Canonical); !ok {
++		return cerrdefs.ErrInvalidArgument.WithMessage("seafield: pull needs name@sha256:<digest>")
++	}
+ 	if !reference.IsNameOnly(baseRef) {
+ 		return i.pullTag(ctx, baseRef, platform, options.MetaHeaders, options.AuthConfig, out)
+ 	}
+diff --git a/daemon/containerd/resolver.go b/daemon/containerd/resolver.go
+index 8f275a3..a2fdc06 100644
+--- a/daemon/containerd/resolver.go
++++ b/daemon/containerd/resolver.go
+@@ -15,10 +15,35 @@
+ 	"github.com/moby/moby/v2/daemon/pkg/registry"
+ 	"github.com/moby/moby/v2/dockerversion"
+ 	"github.com/moby/moby/v2/pkg/useragent"
++	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
+ )
+ 
++// Source is the engine's only image source (Seafield: sfcd over purpose
++// 37). Without it every pull and push is refused; registries are never used.
++var Source remotes.Resolver
++
+ func (i *ImageService) newResolverFromAuthConfig(ctx context.Context, authConfig *registrytypes.AuthConfig, ref reference.Named, metaHeaders http.Header) (remotes.Resolver, docker.StatusTracker) {
+ 	tracker := docker.NewInMemoryTracker()
++	if Source != nil {
++		return Source, tracker
++	}
++	return noSource{}, tracker
++}
++
++type noSource struct{}
++
++func (noSource) Resolve(context.Context, string) (string, ocispec.Descriptor, error) {
++	return "", ocispec.Descriptor{}, errNoSource
++}
++func (noSource) Fetcher(context.Context, string) (remotes.Fetcher, error) { return nil, errNoSource }
++func (noSource) Pusher(context.Context, string) (remotes.Pusher, error)   { return nil, errNoSource }
++
++var errNoSource = cerrdefs.ErrUnavailable.WithMessage("seafield: no image source (sfcd session not set up)")
++
++// registryResolver is the upstream resolver, kept only for reference; it is
++// not reachable.
++func (i *ImageService) registryResolver(ctx context.Context, authConfig *registrytypes.AuthConfig, ref reference.Named, metaHeaders http.Header) (remotes.Resolver, docker.StatusTracker) {
++	tracker := docker.NewInMemoryTracker()
+ 
+ 	hosts := i.registryHosts
+ 	if authConfig != nil {
+diff --git a/daemon/containerd/resolver_test.go b/daemon/containerd/resolver_test.go
+index cc3a7d5..6ceb928 100644
+--- a/daemon/containerd/resolver_test.go
++++ b/daemon/containerd/resolver_test.go
+@@ -110,7 +110,7 @@ type testRegistry struct {
+ 	}
+ 	authConfig := registrytypes.AuthConfig{ServerAddress: registries[0].server.URL}
+ 	imageService := ImageService{registryHosts: hostsFn}
+-	resolver, _ := imageService.newResolverFromAuthConfig(t.Context(), &authConfig, ref, nil)
++	resolver, _ := imageService.registryResolver(t.Context(), &authConfig, ref, nil)
+ 
+ 	_, desc, err := resolver.Resolve(t.Context(), ref.String())
+ 	assert.NilError(t, err)
+diff --git a/daemon/hosts.go b/daemon/hosts.go
+index d1213fd..7f5ff03 100644
+--- a/daemon/hosts.go
++++ b/daemon/hosts.go
+@@ -43,6 +43,13 @@ func configureRegistryHosts(host string, insecure bool) ([]docker.RegistryHost,
+ // RegistryHosts returns the registry hosts configuration for the host component
+ // of a distribution image reference.
+ func (daemon *Daemon) RegistryHosts(host string) ([]docker.RegistryHost, error) {
++	// Seafield: the engine never contacts a registry (BuildKit included).
++	return nil, errNoRegistry
++}
++
++var errNoRegistry = cerrdefs.ErrNotImplemented.WithMessage("seafield: the engine does not use registries; images come from sfcd")
++
++func (daemon *Daemon) registryHosts(host string) ([]docker.RegistryHost, error) {
+ 	hosts, err := configureRegistryHosts(host, docker.IsLocalhost(host) && daemon.registryService.IsInsecureRegistry(host))
+ 	if err == nil {
+ 		// Merge in legacy configuration if provided
+diff --git a/daemon/hosts_test.go b/daemon/hosts_test.go
+index 0f2e156..4b06d05 100644
+--- a/daemon/hosts_test.go
++++ b/daemon/hosts_test.go
+@@ -172,3 +172,10 @@ func testRegistryHost(scheme, host, path string, caps docker.HostCapabilities) d
+ 		Capabilities: caps,
+ 	}
+ }
++
++// Seafield: BuildKit, push and pull never get a registry host.
++func TestSeafieldNoRegistryHosts(t *testing.T) {
++	if _, err := (&Daemon{}).RegistryHosts("docker.io"); err == nil {
++		t.Fatal("registry host returned")
++	}
++}
+diff --git a/daemon/pkg/registry/errors.go b/daemon/pkg/registry/errors.go
+index c693076..83166d0 100644
+--- a/daemon/pkg/registry/errors.go
++++ b/daemon/pkg/registry/errors.go
+@@ -1,6 +1,7 @@
+ package registry
+ 
+ import (
++	cerrdefs "github.com/containerd/errdefs"
+ 	"net/url"
+ 
+ 	"github.com/docker/distribution/registry/api/errcode"
+@@ -65,3 +66,7 @@ func (errUnknown) Unknown() {}
+ func (e errUnknown) Unwrap() error {
+ 	return e.error
+ }
++
++// errNoRegistry: Seafield's engine never contacts a registry; sfcd serves
++// every image over the engine socket.
++var errNoRegistry = cerrdefs.ErrNotImplemented.WithMessage("seafield: the engine does not use registries; images come from sfcd")
+diff --git a/daemon/pkg/registry/registry_test.go b/daemon/pkg/registry/registry_test.go
+index dcc285a..4f04da7 100644
+--- a/daemon/pkg/registry/registry_test.go
++++ b/daemon/pkg/registry/registry_test.go
+@@ -69,7 +69,7 @@ func TestMirrorEndpointLookup(t *testing.T) {
+ 	if err != nil {
+ 		t.Error(err)
+ 	}
+-	pushAPIEndpoints, err := s.LookupPushEndpoints(reference.Domain(imageName))
++	pushAPIEndpoints, err := s.upstreamV2Endpoints(t.Context(), reference.Domain(imageName), false)
+ 	if err != nil {
+ 		t.Fatal(err)
+ 	}
+@@ -77,7 +77,7 @@ func TestMirrorEndpointLookup(t *testing.T) {
+ 		t.Fatal("Push endpoint should not contain mirror")
+ 	}
+ 
+-	pullAPIEndpoints, err := s.LookupPullEndpoints(reference.Domain(imageName))
++	pullAPIEndpoints, err := s.upstreamV2Endpoints(t.Context(), reference.Domain(imageName), true)
+ 	if err != nil {
+ 		t.Fatal(err)
+ 	}
+diff --git a/daemon/pkg/registry/seafield_test.go b/daemon/pkg/registry/seafield_test.go
+new file mode 100644
+index 0000000..d81a111
+--- /dev/null
++++ b/daemon/pkg/registry/seafield_test.go
+@@ -0,0 +1,29 @@
++package registry
++
++import (
++	"testing"
++
++	cerrdefs "github.com/containerd/errdefs"
++	"github.com/moby/moby/api/types/registry"
++	"github.com/moby/moby/v2/daemon/internal/filters"
++)
++
++// Seafield: no registry is ever contacted.
++func TestSeafieldNoRegistry(t *testing.T) {
++	s, err := NewService(ServiceOptions{})
++	if err != nil {
++		t.Fatal(err)
++	}
++	if _, err := s.LookupPullEndpoints("docker.io"); !cerrdefs.IsNotImplemented(err) {
++		t.Fatal("pull endpoints", err)
++	}
++	if _, err := s.LookupPushEndpoints("example.com"); !cerrdefs.IsNotImplemented(err) {
++		t.Fatal("push endpoints", err)
++	}
++	if _, err := s.Auth(t.Context(), &registry.AuthConfig{}, ""); !cerrdefs.IsNotImplemented(err) {
++		t.Fatal("auth", err)
++	}
++	if _, err := s.Search(t.Context(), filters.NewArgs(), "x", 0, nil, nil); !cerrdefs.IsNotImplemented(err) {
++		t.Fatal("search", err)
++	}
++}
+diff --git a/daemon/pkg/registry/search.go b/daemon/pkg/registry/search.go
+index f7b668e..f4a7b9c 100644
+--- a/daemon/pkg/registry/search.go
++++ b/daemon/pkg/registry/search.go
+@@ -25,6 +25,10 @@
+ // Search queries the public registry for repositories matching the specified
+ // search term and filters.
+ func (s *Service) Search(ctx context.Context, searchFilters filters.Args, term string, limit int, authConfig *registry.AuthConfig, headers map[string][]string) ([]registry.SearchResult, error) {
++	return nil, errNoRegistry
++}
++
++func (s *Service) upstreamSearch(ctx context.Context, searchFilters filters.Args, term string, limit int, authConfig *registry.AuthConfig, headers map[string][]string) ([]registry.SearchResult, error) {
+ 	if err := searchFilters.Validate(acceptedSearchFilterTags); err != nil {
+ 		return nil, err
+ 	}
+diff --git a/daemon/pkg/registry/search_test.go b/daemon/pkg/registry/search_test.go
+index 11f05cd..33968b8 100644
+--- a/daemon/pkg/registry/search_test.go
++++ b/daemon/pkg/registry/search_test.go
+@@ -145,7 +145,7 @@ func TestSearchErrors(t *testing.T) {
+ 
+ 			reg, err := NewService(ServiceOptions{})
+ 			assert.NilError(t, err)
+-			_, err = reg.Search(t.Context(), tc.filtersArgs, term, 0, nil, map[string][]string{})
++			_, err = reg.upstreamSearch(t.Context(), tc.filtersArgs, term, 0, nil, map[string][]string{})
+ 			assert.ErrorContains(t, err, tc.expectedError)
+ 			if tc.shouldReturnError {
+ 				assert.Check(t, cerrdefs.IsUnknown(err), "got: %T: %v", err, err)
+@@ -409,7 +409,7 @@ func TestSearch(t *testing.T) {
+ 
+ 			reg, err := NewService(ServiceOptions{})
+ 			assert.NilError(t, err)
+-			results, err := reg.Search(t.Context(), tc.filtersArgs, searchTerm, 0, nil, map[string][]string{})
++			results, err := reg.upstreamSearch(t.Context(), tc.filtersArgs, searchTerm, 0, nil, map[string][]string{})
+ 			assert.NilError(t, err)
+ 			assert.DeepEqual(t, results, tc.expectedResults)
+ 		})
+diff --git a/daemon/pkg/registry/service.go b/daemon/pkg/registry/service.go
+index d782446..cec626d 100644
+--- a/daemon/pkg/registry/service.go
++++ b/daemon/pkg/registry/service.go
+@@ -57,6 +57,10 @@ func (s *Service) ReplaceConfig(options ServiceOptions) (commit func(), _ error)
+ // and returns OK if authentication was successful.
+ // It can be used to verify the validity of a client's credentials.
+ func (s *Service) Auth(ctx context.Context, authConfig *registry.AuthConfig, userAgent string) (token string, _ error) {
++	return "", errNoRegistry
++}
++
++func (s *Service) upstreamAuth(ctx context.Context, authConfig *registry.AuthConfig, userAgent string) (token string, _ error) {
+ 	// TODO Use ctx when searching for repositories
+ 	registryHostName := IndexHostname
+ 
+diff --git a/daemon/pkg/registry/service_v2.go b/daemon/pkg/registry/service_v2.go
+index df343a1..137623e 100644
+--- a/daemon/pkg/registry/service_v2.go
++++ b/daemon/pkg/registry/service_v2.go
+@@ -9,6 +9,11 @@
+ )
+ 
+ func (s *Service) lookupV2Endpoints(ctx context.Context, hostname string, includeMirrors bool) ([]APIEndpoint, error) {
++	// Seafield: the engine never contacts a registry.
++	return nil, errNoRegistry
++}
++
++func (s *Service) upstreamV2Endpoints(ctx context.Context, hostname string, includeMirrors bool) ([]APIEndpoint, error) {
+ 	var endpoints []APIEndpoint
+ 	if hostname == DefaultNamespace || hostname == IndexHostname {
+ 		if includeMirrors {
+diff --git a/daemon/seafield/imagesrc/resolver.go b/daemon/seafield/imagesrc/resolver.go
+new file mode 100644
+index 0000000..926a5cc
+--- /dev/null
++++ b/daemon/seafield/imagesrc/resolver.go
+@@ -0,0 +1,199 @@
++// Package imagesrc is the engine's only image source: every manifest and
++// blob comes from sfcd over the engine socket (purpose 37), never from a
++// registry. A reference must carry its digest; tags are resolved by sfcd
++// before it asks the engine to pull.
++package imagesrc
++
++import (
++	"context"
++	"crypto/rand"
++	"encoding/hex"
++	"errors"
++	"fmt"
++	"io"
++
++	"github.com/containerd/containerd/v2/core/images"
++	"github.com/containerd/containerd/v2/core/remotes"
++	cerrdefs "github.com/containerd/errdefs"
++	"github.com/distribution/reference"
++	"github.com/moby/moby/v2/daemon/seafield/sfcd"
++	"github.com/moby/moby/v2/daemon/seafield/sfcp/wire"
++	"github.com/opencontainers/go-digest"
++	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
++)
++
++// Purpose 37 bodies (seafield/docs/sfcd-socket.md "op 구조체").
++type (
++	ContentQ struct {
++		sfcd.Request
++		Repository string
++		Digest     string
++		Offset     uint64
++	}
++	ContentA struct {
++		sfcd.Reply
++		ContentType string
++		Size        int64
++	}
++)
++
++// ErrNoRegistry is returned wherever upstream would contact a registry.
++var ErrNoRegistry = cerrdefs.ErrNotImplemented.WithMessage("seafield: the engine does not use registries; images come from sfcd")
++
++// Caller is the part of the sfcd client the source uses.
++type Caller interface {
++	CallStream(ctx context.Context, p wire.Purpose, op string, req sfcd.Requester, out sfcd.Replier) (io.ReadCloser, error)
++}
++
++// Resolver is a containerd remotes.Resolver over sfcd.
++type Resolver struct{ C Caller }
++
++func New(c Caller) Resolver { return Resolver{C: c} }
++
++// Repository is what the engine sends for a reference: the name as written,
++// without Docker's docker.io/ or library/ normalization.
++func Repository(ref string) (string, digest.Digest, error) {
++	named, err := reference.ParseNormalizedNamed(ref)
++	if err != nil {
++		return "", "", cerrdefs.ErrInvalidArgument.WithMessage(err.Error())
++	}
++	c, ok := named.(reference.Canonical)
++	if !ok {
++		return "", "", cerrdefs.ErrInvalidArgument.WithMessage("seafield: image reference needs a digest: " + ref)
++	}
++	if err := c.Digest().Validate(); err != nil {
++		return "", "", cerrdefs.ErrInvalidArgument.WithMessage(err.Error())
++	}
++	return reference.FamiliarName(named), c.Digest(), nil
++}
++
++func opID(op string) string {
++	b := make([]byte, 8)
++	_, _ = rand.Read(b)
++	return op + ":" + hex.EncodeToString(b)
++}
++
++func (r Resolver) open(ctx context.Context, op, repo string, dgst digest.Digest, offset uint64) (io.ReadCloser, ContentA, error) {
++	var a ContentA
++	rc, err := r.C.CallStream(ctx, sfcd.Image, op, &ContentQ{Request: sfcd.Request{OpID: opID(op)}, Repository: repo, Digest: dgst.String(), Offset: offset}, &a)
++	if err != nil {
++		var e *sfcd.Error
++		if errors.As(err, &e) && e.Code == sfcd.NotFound {
++			return nil, a, cerrdefs.ErrNotFound.WithMessage(fmt.Sprintf("%s@%s: %v", repo, dgst, err))
++		}
++		return nil, a, err
++	}
++	if a.Size < 0 || uint64(a.Size) < offset {
++		rc.Close()
++		return nil, a, fmt.Errorf("seafield: sfcd answered a bad size for %s@%s", repo, dgst)
++	}
++	return rc, a, nil
++}
++
++// Resolve reads the manifest the reference's digest names.
++func (r Resolver) Resolve(ctx context.Context, ref string) (string, ocispec.Descriptor, error) {
++	repo, dgst, err := Repository(ref)
++	if err != nil {
++		return "", ocispec.Descriptor{}, err
++	}
++	rc, a, err := r.open(ctx, "manifest", repo, dgst, 0)
++	if err != nil {
++		return "", ocispec.Descriptor{}, err
++	}
++	defer rc.Close()
++	v := dgst.Verifier()
++	n, err := io.Copy(v, io.LimitReader(rc, a.Size+1))
++	if err != nil {
++		return "", ocispec.Descriptor{}, err
++	}
++	if n != a.Size || !v.Verified() {
++		return "", ocispec.Descriptor{}, fmt.Errorf("seafield: manifest %s@%s does not match its digest", repo, dgst)
++	}
++	return ref, ocispec.Descriptor{MediaType: a.ContentType, Digest: dgst, Size: a.Size}, nil
++}
++
++func (r Resolver) Fetcher(_ context.Context, ref string) (remotes.Fetcher, error) {
++	repo, _, err := Repository(ref)
++	if err != nil {
++		return nil, err
++	}
++	return fetcher{r: r, repo: repo}, nil
++}
++
++func (r Resolver) Pusher(context.Context, string) (remotes.Pusher, error) {
++	return nil, ErrNoRegistry
++}
++
++type fetcher struct {
++	r    Resolver
++	repo string
++}
++
++func isManifest(mt string) bool { return images.IsManifestType(mt) || images.IsIndexType(mt) }
++
++// Fetch returns the content from offset 0; containerd seeks to resume a
++// partial download, which reopens the stream at that offset.
++func (f fetcher) Fetch(ctx context.Context, desc ocispec.Descriptor) (io.ReadCloser, error) {
++	op := "blob"
++	if isManifest(desc.MediaType) {
++		op = "manifest"
++	}
++	return &reader{ctx: ctx, f: f, op: op, desc: desc}, nil
++}
++
++// FetchReferrers: sfcd serves no referrers.
++func (f fetcher) FetchReferrers(context.Context, digest.Digest, ...remotes.FetchReferrersOpt) ([]ocispec.Descriptor, error) {
++	return nil, nil
++}
++
++type reader struct {
++	ctx    context.Context
++	f      fetcher
++	op     string
++	desc   ocispec.Descriptor
++	offset int64
++	rc     io.ReadCloser
++}
++
++func (r *reader) Read(p []byte) (int, error) {
++	if r.rc == nil {
++		rc, a, err := r.f.r.open(r.ctx, r.op, r.f.repo, r.desc.Digest, uint64(r.offset))
++		if err != nil {
++			return 0, err
++		}
++		if r.desc.Size > 0 && a.Size != r.desc.Size {
++			rc.Close()
++			return 0, fmt.Errorf("seafield: %s@%s is %d bytes, expected %d", r.f.repo, r.desc.Digest, a.Size, r.desc.Size)
++		}
++		r.rc = rc
++	}
++	n, err := r.rc.Read(p)
++	r.offset += int64(n)
++	return n, err
++}
++
++// Seek moves the next read; only absolute offsets before any read or after
++// a reopen are supported, which is all containerd's resume needs.
++func (r *reader) Seek(offset int64, whence int) (int64, error) {
++	if whence != io.SeekStart || offset < 0 {
++		return r.offset, errors.New("seafield: only absolute seeks")
++	}
++	if r.rc != nil {
++		if offset == r.offset {
++			return offset, nil
++		}
++		r.rc.Close()
++		r.rc = nil
++	}
++	r.offset = offset
++	return offset, nil
++}
++
++func (r *reader) Close() error {
++	if r.rc != nil {
++		return r.rc.Close()
++	}
++	return nil
++}
++
++var _ remotes.Resolver = Resolver{}
+diff --git a/daemon/seafield/imagesrc/resolver_test.go b/daemon/seafield/imagesrc/resolver_test.go
+new file mode 100644
+index 0000000..3ba8000
+--- /dev/null
++++ b/daemon/seafield/imagesrc/resolver_test.go
+@@ -0,0 +1,88 @@
++package imagesrc
++
++import (
++	"bytes"
++	"context"
++	"io"
++	"testing"
++
++	"github.com/containerd/containerd/v2/core/images"
++	cerrdefs "github.com/containerd/errdefs"
++	"github.com/moby/moby/v2/daemon/seafield/sfcd"
++	"github.com/moby/moby/v2/daemon/seafield/sfcp/wire"
++	"github.com/opencontainers/go-digest"
++	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
++)
++
++type fakeSfcd struct {
++	content map[string][]byte // repo@digest
++	asked   []ContentQ
++}
++
++func (f *fakeSfcd) CallStream(_ context.Context, p wire.Purpose, op string, req sfcd.Requester, out sfcd.Replier) (io.ReadCloser, error) {
++	q := *req.(*ContentQ)
++	q.Op = op
++	f.asked = append(f.asked, q)
++	b, ok := f.content[q.Repository+"@"+q.Digest]
++	if p != sfcd.Image || !ok {
++		return nil, &sfcd.Error{Result: sfcd.NotApplied, Code: sfcd.NotFound, Sent: true}
++	}
++	a := out.(*ContentA)
++	a.ContentType, a.Size = "application/vnd.oci.image.manifest.v1+json", int64(len(b))
++	return io.NopCloser(bytes.NewReader(b[q.Offset:])), nil
++}
++
++func TestRepositoryKeepsTheWrittenName(t *testing.T) {
++	d := digest.FromString("x")
++	for in, want := range map[string]string{
++		"sfc-cluster-app/web@" + d.String():           "sfc-cluster-app/web",
++		"docker.io/sfc-cluster-app/web@" + d.String(): "sfc-cluster-app/web",
++		"reg.example:5000/t/a@" + d.String():          "reg.example:5000/t/a",
++		"alpine@" + d.String():                        "alpine",
++	} {
++		got, dg, err := Repository(in)
++		if err != nil || got != want || dg != d {
++			t.Fatal(in, got, err)
++		}
++	}
++	if _, _, err := Repository("sfc-cluster-app/web:latest"); !cerrdefs.IsInvalidArgument(err) {
++		t.Fatal("tag accepted", err)
++	}
++}
++
++func TestResolveAndFetch(t *testing.T) {
++	manifest := []byte(`{"schemaVersion":2}`)
++	blob := []byte("layer bytes 0123456789")
++	md, bd := digest.FromBytes(manifest), digest.FromBytes(blob)
++	f := &fakeSfcd{content: map[string][]byte{"sfc-cluster-app/web@" + md.String(): manifest, "sfc-cluster-app/web@" + bd.String(): blob}}
++	r := New(f)
++	ref := "docker.io/sfc-cluster-app/web@" + md.String()
++	_, desc, err := r.Resolve(context.Background(), ref)
++	if err != nil || desc.Digest != md || desc.Size != int64(len(manifest)) || !images.IsManifestType(desc.MediaType) {
++		t.Fatal(desc, err)
++	}
++	fe, _ := r.Fetcher(context.Background(), ref)
++	rc, _ := fe.Fetch(context.Background(), ocispec.Descriptor{MediaType: ocispec.MediaTypeImageLayerGzip, Digest: bd, Size: int64(len(blob))})
++	if _, err := rc.(io.Seeker).Seek(6, io.SeekStart); err != nil {
++		t.Fatal(err)
++	}
++	got, err := io.ReadAll(rc)
++	if err != nil || string(got) != string(blob[6:]) {
++		t.Fatal(string(got), err)
++	}
++	last := f.asked[len(f.asked)-1]
++	if last.Op != "blob" || last.Offset != 6 || last.Repository != "sfc-cluster-app/web" {
++		t.Fatal(last)
++	}
++	// A manifest whose bytes do not match is refused.
++	f.content["sfc-cluster-app/web@"+md.String()] = []byte(`{"schemaVersion":3}`)
++	if _, _, err := r.Resolve(context.Background(), ref); err == nil {
++		t.Fatal("bad manifest accepted")
++	}
++	if _, _, err := r.Resolve(context.Background(), "sfc-cluster-app/none@"+md.String()); !cerrdefs.IsNotFound(err) {
++		t.Fatal("not found", err)
++	}
++	if _, err := r.Pusher(context.Background(), ref); err == nil {
++		t.Fatal("push allowed")
++	}
++}

@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/workload"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/workload"
 )
 
 func TestFreshTaskEvidenceRequiresTheActualDriverFact(t *testing.T) {

@@ -16,14 +16,14 @@ import (
 	"time"
 
 	cerrdefs "github.com/containerd/errdefs"
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/config"
-	"github.com/jay94ks/mydcd/internal/containerops"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/userauth"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/config"
+	"github.com/jay94ks/seafield/internal/containerops"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/userauth"
 	"github.com/moby/moby/api/pkg/stdcopy"
 	"github.com/moby/moby/client"
 )
@@ -40,11 +40,11 @@ type loggingNative struct {
 	logFiles                                []string
 }
 
-func verifyManagedContainerLogging(t *testing.T, ctx context.Context, runtime **Runtime, cfg config.Node, root string, user userauth.Client, peer mydcp.Peer, session access.Session, p control.Policy, read func() cluster.View, wait func(string, func() bool), stopFault *managedCreateReplyFault, remote *Runtime, cd bool) string {
+func verifyManagedContainerLogging(t *testing.T, ctx context.Context, runtime **Runtime, cfg config.Node, root string, user userauth.Client, peer sfcp.Peer, session access.Session, p control.Policy, read func() cluster.View, wait func(string, func() bool), stopFault *managedCreateReplyFault, remote *Runtime, cd bool) string {
 	t.Helper()
 	call := func(want int, args ...string) []byte {
 		t.Helper()
-		body, diagnostic, err := runManagedCLICommand(ctx, os.Getenv("MYDC_TEST_CLI"), filepath.Join(root, "cli-home"), filepath.Join(root, "cli.yaml"), append([]string{"--tenant", "tenant"}, args...), nil)
+		body, diagnostic, err := runManagedCLICommand(ctx, os.Getenv("SFC_TEST_CLI"), filepath.Join(root, "cli-home"), filepath.Join(root, "cli.yaml"), append([]string{"--tenant", "tenant"}, args...), nil)
 		code := 0
 		if err != nil {
 			if exited, ok := err.(interface{ ExitCode() int }); ok {
@@ -180,7 +180,7 @@ func verifyManagedContainerLogging(t *testing.T, ctx context.Context, runtime **
 		policyBefore = d.Policy()
 	}
 	if remote != nil {
-		remotePeer, ok := (*runtime).Mesh.Peer(mydcp.Identity(remote.Identity.Public))
+		remotePeer, ok := (*runtime).Mesh.Peer(sfcp.Identity(remote.Identity.Public))
 		if !ok {
 			t.Fatal("missing real remote control")
 		}

@@ -3,12 +3,12 @@
 package userauth
 
 import (
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/cluster/membership"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/network/services"
-	"github.com/jay94ks/mydcd/internal/schema"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/membership"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/network/services"
+	"github.com/jay94ks/seafield/internal/schema"
 )
 
 // nodeRequestAllowed filters the USER ingress/relay role, not Raft voting or
@@ -55,11 +55,11 @@ func nodeIngressAllowed(self [32]byte, members membership.Directory, catalog acc
 	} else if members.WorkKey(self) {
 		return true
 	}
-	if control.PublicReadMethod(request.Method) {
-		return true
+	if rule, typed := methodRules[request.Method]; typed {
+		return rule.ingress
 	}
 	switch request.Method {
-	case "node-shell-policy", "node-shell-sessions", "node-drain-plan", "node-drain-status", "node-diagnostics", "node-force-remove-plan", "node-demote-plan", "node-remove-plan", "lifecycle-source", "lifecycle-source-recover", "lifecycle-module-recover", "standalone-list", "standalone-get", "volume-file-plan", "volume-file-status", "ingresses", "certificates", "tenant-storage", "image-build-cache", "image-build-logs", "build-context-content", "check-build-context", "image-builds", "events", "app-cd-toggle-plan", "registry-action-plan", "external-registries", "external-registry-bind-plan", "registry-login-test", "image-resolve", "image-content", "image-usages", "registry-maintenance-plan", "registry-maintenance-status", "registry-catalog", "registry-prune-preview", "registry-prune-results", "external-registry-pulls", "raft-status", "node-summary", "node-disks", "node-tenant-usage", "mesh-links", "app-source", "app-revisions", "tasks", "my-credentials", "users", "tenant-members", "container-exec-status", "app-log-clear-plan", "app-log-clear-status", "user-credentials", "node-cli-policy", "container-observe", "tenant-retirement", "whoami", "tenants", "select-tenant", "members", "node-storage", "node-storage-space", "resources", "volumes", "volume-restores", "volume-backups", "volume-usage", "volume-backup-source", "apps", "app-operation", "app-cd-field", "app-cd-history", "app-cd-diff", "app-cd-registration", "app-uploads", "vault", "lifecycles", "registries", "result", "checker-source-recover", "checker-module-recover":
+	case "node-shell-policy", "node-shell-sessions", "lifecycle-source-recover", "lifecycle-module-recover", "standalone-list", "standalone-get", "tenant-storage", "image-build-cache", "image-build-logs", "build-context-content", "check-build-context", "image-builds", "events", "login-records", "own-sessions", "app-cd-toggle-plan", "registry-action-plan", "external-registries", "external-registry-bind-plan", "registry-login-test", "image-resolve", "image-content", "image-usages", "registry-maintenance-plan", "registry-maintenance-status", "registry-catalog", "registry-prune-preview", "registry-prune-results", "external-registry-pulls", "raft-status", "app-source", "app-revisions", "my-credentials", "users", "tenant-members", "container-exec-status", "app-log-clear-plan", "app-log-clear-status", "user-credentials", "node-cli-policy", "container-observe", "tenant-retirement", "members", "node-storage", "node-storage-space", "apps", "app-operation", "app-cd-field", "app-cd-history", "app-cd-diff", "app-cd-registration", "app-uploads", "vault", "registries", "result", "checker-source-recover", "checker-module-recover":
 		return true
 	case "vault-write-plan", "vault-approval-plan":
 		// Locating an original write/accepted approval must remain possible
@@ -76,12 +76,12 @@ func nodeIngressAllowed(self [32]byte, members membership.Directory, catalog acc
 		}
 		switch request.Operation.Change.Action {
 		case "close-node-shell", "begin-tenant-retirement", "finish-tenant-retirement", "drain-node", "demote-node", "isolate-node", "restore-node", "remove-node", "force-remove-node", "resume-node-operation", "rotate-node-operations",
-			"down-app", "resume-app-retirement", "pause-app-cd", "abandon-app-sync", "rotate-app-history",
+			"down-app", "resume-app-retirement", "resume-app-step", "pause-app-cd", "abandon-app-sync", "rotate-app-history",
 			"drain-network", "leave-tun-network", "fence-network-change", "cancel-network-change", "withdraw-route", "drain-reservation", "release-reservation",
 			"cancel-volume-create", "unregister-fixed-volume", "delete-volume", "delete-retained-volume", "cancel-volume-backup", "delete-volume-backup", "cancel-volume-restore", "cancel-volume-move", "release-volume",
 			"cancel-image-build", "delete-image-build-job", "delete-build-version", "abort-build-zip-upload", "delete-build-context", "delete-image-build-policy", "stop-registry", "delete-registry", "drain-node-storage", "remove-node-storage",
 			"vault-observe-write", "vault-publish-write", "vault-abandon-write", "vault-revoke", "vault-retire", "vault-revoke-approval", "vault-rotate-writes",
-			"retire-lifecycle-script", "delete-lifecycle-script", "disable-credential", "revoke-session", "rotate-ledger":
+			"retire-lifecycle-script", "delete-lifecycle-script", "disable-credential", "revoke-session", "rotate-ledger", "cluster-backup":
 			return true
 		case "begin-volume-move", "commit-volume-move":
 			// Explicit evacuation uses the same signed move, owner fence and
@@ -125,6 +125,9 @@ func (s Service) nodeSecretAllowed(view state.State, request SecretRequest) bool
 	}
 	if request.Mode == "certificate" {
 		return members.WorkKey(s.Self.Public) || request.Certificate != nil && request.Certificate.Recover
+	}
+	if request.Mode == "vps-credential" {
+		return members.VoterKey(s.Self.Public)
 	}
 	if members.WorkKey(s.Self.Public) || request.Mode == "recover" {
 		return true

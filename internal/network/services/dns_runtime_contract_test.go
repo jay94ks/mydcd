@@ -25,7 +25,7 @@ func TestDNSDisabledCleanupAfterNodeRevocationNeverEnablesAdmission(t *testing.T
 	f, _ = settingsTarget(t, f, cfg, f.scope)
 	f = settingsSwitch(t, f)
 	f = settingsPublish(t, f, 220)
-	if _, _, _, err = f.m.AcquireDNS(f.d.f.c, f.d.f.n, f.d.f.a, f.d.m, "first", "dns", f.d.origin, dnsWire("web.app.mydc.test.", dns.TypeA), f.d.clock(221)); err == nil {
+	if _, _, _, err = f.m.AcquireDNS(f.d.f.c, f.d.f.n, f.d.f.a, f.d.m, "first", "dns", f.d.origin, dnsWire("web.app.sfc.test.", dns.TypeA), f.d.clock(221)); err == nil {
 		t.Fatal("disabled cleanup admitted a query")
 	}
 	if f.m.Status(f.key).Applied != cfg.Source || f.m.scopes[f.key].Switch.Applied.Present {

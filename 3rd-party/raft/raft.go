@@ -1472,6 +1472,10 @@ func (r *Raft) processRPC(rpc RPC) {
 		rpc.Respond(nil, err)
 		return
 	}
+	if cmd, ok := rpc.Command.(*TimeoutNowRequest); ok && !r.timeoutNowFromLeader(cmd) {
+		rpc.Respond(nil, errors.New("timeout now is accepted only from the current leader"))
+		return
+	}
 
 	switch cmd := rpc.Command.(type) {
 	case *AppendEntriesRequest:
@@ -1532,6 +1536,15 @@ func (r *Raft) appendEntries(rpc RPC, a *AppendEntriesRequest) {
 		resp.CommitIndex = r.getCommitIndex()
 		rpc.Respond(resp, rpcErr)
 	}()
+
+	// MyDC: a server this follower knows as a non-voter cannot be a leader,
+	// unless the request itself carries the configuration that made it a
+	// voter (this follower is behind). Refuse before the term or leader
+	// changes, as a log mismatch, so a real leader backs off to our last log.
+	if r.refusedLeader(ServerID(a.ID), a.Entries, nil) {
+		r.logger.Warn("rejecting appendEntries from a non-voter", "from", ServerID(a.ID), "term", a.Term)
+		return
+	}
 
 	// Ignore an older term
 	if a.Term < r.getCurrentTerm() {
@@ -1733,6 +1746,13 @@ func (r *Raft) requestVote(rpc RPC, req *RequestVoteRequest) {
 			return
 		}
 	}
+	// MyDC: a non-voter's vote request is refused before it can raise our
+	// term. Pre-vote is on, so a demoted server that does not know it yet never
+	// raises its own term past the voters' (the upstream step-down for #526).
+	if len(req.ID) > 0 && r.knownNonVoter(ServerID(req.ID)) {
+		r.logger.Warn("rejecting vote request since node is not a voter", "from", candidate)
+		return
+	}
 	if leaderAddr, leaderID := r.LeaderWithID(); leaderAddr != "" && leaderAddr != candidate && !req.LeadershipTransfer {
 		r.logger.Warn("rejecting vote request since we have a leader",
 			"from", candidate,
@@ -1914,6 +1934,13 @@ func (r *Raft) installSnapshot(rpc RPC, req *InstallSnapshotRequest) {
 	if req.SnapshotVersion < SnapshotVersionMin ||
 		req.SnapshotVersion > SnapshotVersionMax {
 		rpcErr = fmt.Errorf("unsupported snapshot version %d", req.SnapshotVersion)
+		return
+	}
+
+	// MyDC: as for appendEntries, a known non-voter cannot send a snapshot
+	// unless the snapshot's own configuration makes it a voter.
+	if r.refusedLeader(ServerID(req.ID), nil, req.Configuration) {
+		r.logger.Warn("rejecting installSnapshot from a non-voter", "from", ServerID(req.ID), "term", req.Term)
 		return
 	}
 
@@ -2310,6 +2337,70 @@ func (r *Raft) setLatestConfiguration(c Configuration, i uint64) {
 func (r *Raft) setCommittedConfiguration(c Configuration, i uint64) {
 	r.configurations.committed = c
 	r.configurations.committedIndex = i
+	r.committedConfiguration.Store(c.Clone())
+}
+
+// MyDC: getCommittedConfiguration reads the copy of the committed
+// configuration, like getLatestConfiguration.
+func (r *Raft) getCommittedConfiguration() Configuration {
+	switch c := r.committedConfiguration.Load().(type) {
+	case Configuration:
+		return c
+	default:
+		return Configuration{}
+	}
+}
+
+// MyDC: knownNonVoter reports whether id is in this server's latest
+// configuration and has no vote there or in the committed configuration. An
+// empty configuration (a joining server before its first log) knows nobody,
+// and the transport has already admitted the sender's key.
+func (r *Raft) knownNonVoter(id ServerID) bool {
+	latest := r.getLatestConfiguration()
+	if len(latest.Servers) == 0 || !inConfiguration(latest, id) {
+		return false
+	}
+	return !hasVote(latest, id) && !hasVote(r.getCommittedConfiguration(), id)
+}
+
+// MyDC: refusedLeader reports whether a request that only a leader sends
+// comes from a known non-voter while this server follows (or is) another
+// leader. A server unknown here may be a voter added in entries this follower
+// has not got, so it is not refused. Without a current leader the request is
+// taken: a lagging follower (one that missed the sender's promotion, possibly
+// by more than one batch of entries) then catches up, and a non-voter can no
+// longer displace a working leader. A request that carries a configuration
+// giving the sender a vote is taken as well.
+func (r *Raft) refusedLeader(id ServerID, entries []*Log, snapshot []byte) bool {
+	// An old-protocol header without an ID is left to the transport, which in
+	// MyDC binds every request to the authenticated peer's ID.
+	if len(id) == 0 || !r.knownNonVoter(id) {
+		return false
+	}
+	if _, leader := r.LeaderWithID(); leader == "" || leader == id {
+		return false
+	}
+	for _, e := range entries {
+		if e.Type == LogConfiguration && votesIn(e.Data, id) {
+			return false
+		}
+	}
+	return !(len(snapshot) > 0 && votesIn(snapshot, id))
+}
+
+// MyDC: votesIn decodes a configuration from a peer without the panic of
+// DecodeConfiguration; an undecodable one gives no vote.
+func votesIn(buf []byte, id ServerID) bool {
+	var c Configuration
+	return decodeMsgPack(buf, &c) == nil && hasVote(c, id)
+}
+
+// MyDC: timeoutNowFromLeader reports whether a leadership transfer comes from
+// the leader this server follows. Only that leader sends it, after it has
+// brought this server up to date.
+func (r *Raft) timeoutNowFromLeader(req *TimeoutNowRequest) bool {
+	_, leader := r.LeaderWithID()
+	return len(req.ID) > 0 && leader == ServerID(req.ID)
 }
 
 // getLatestConfiguration reads the configuration from a copy of the main

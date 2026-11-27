@@ -10,8 +10,8 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/cluster/lifecycle"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/cluster/lifecycle"
+	"github.com/jay94ks/seafield/internal/cluster/state"
 )
 
 // Installation reports are modeled facts. The same production membership/FSM
@@ -90,7 +90,7 @@ func TestCheckerProbeRetainedOwnersUseCurrentKeysAndKeepFrozenRequest(t *testing
 	// Current authorization stays mandatory after either owner rotates.
 	users, _ := f.p.Catalog(f.s)
 	tenant, _ := users.Tenant("tenant")
-	managedDNSChange(t, f, "checker-revoke-node-b", "set-nodes", tenant.Revision, NodeAssignment{Tenant: "tenant", Nodes: []string{"node-a"}}, state.Applied)
+	managedDNSChange(t, f, "checker-revoke-node-b", "set-nodes", tenant.Revision, NodeChangeTo("tenant", tenant.AllowedNodes, []string{"node-a"}), state.Applied)
 	for _, caller := range [][32]byte{[32]byte(a.Public().(ed25519.PublicKey)), [32]byte(b.Public().(ed25519.PublicKey))} {
 		if _, err := f.p.CheckerProbePermit(f.s, caller, q); err == nil {
 			t.Fatal("old probe survived current tenant/node revocation")

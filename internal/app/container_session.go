@@ -9,27 +9,27 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/containerops"
-	"github.com/jay94ks/mydcd/internal/engine"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/userauth"
-	"github.com/jay94ks/mydcd/internal/workload"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/containerops"
+	"github.com/jay94ks/seafield/internal/engine"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/userauth"
+	"github.com/jay94ks/seafield/internal/workload"
 )
 
 func (r *Runtime) runContainerSession(parent context.Context, session access.Session, intent containerops.SessionIntent, channel *userauth.ContainerChannel) error {
 	if intent.Target.Owner != r.Identity.Public {
 		owner, ok := r.nativeOwner(intent.Target.Owner)
 		if !ok || !r.acceptsResourceOwner(parent, intent.Target.Node, intent.Target.Owner) {
-			return mydcp.ErrAdmission
+			return sfcp.ErrAdmission
 		}
 		return owner.runContainerSession(parent, session, intent, channel)
 	}
 	r.life.RLock()
 	defer r.life.RUnlock()
 	if r.closed || r.workload == nil || intent.Target.Owner != r.Identity.Public {
-		return mydcp.ErrAdmission
+		return sfcp.ErrAdmission
 	}
 	ctx, cancel := context.WithCancelCause(parent)
 	defer cancel(context.Canceled)
@@ -38,7 +38,12 @@ func (r *Runtime) runContainerSession(parent context.Context, session access.Ses
 	permit := func(call context.Context) error {
 		call, finish := context.WithTimeout(call, 5*time.Second)
 		defer finish()
-		if err := r.containerSessionPermit(call, control.ContainerSessionPermit{Session: session, Original: session, Intent: intent}); err != nil {
+		q := control.ContainerSessionPermit{Session: session, Original: session, Intent: intent}
+		check := r.containerSessionPermit
+		if intent.Spec.Kind == "logs" {
+			check = r.localContainerSessionPermit
+		}
+		if err := check(call, q); err != nil {
 			return err
 		}
 		t := intent.Target
@@ -144,7 +149,7 @@ func containerSessionError(err error) string {
 	if errors.Is(err, engine.ErrOwnership) {
 		return "target-changed"
 	}
-	if errors.Is(err, access.ErrDenied) || errors.Is(err, mydcp.ErrAdmission) {
+	if errors.Is(err, access.ErrDenied) || errors.Is(err, sfcp.ErrAdmission) {
 		return "denied"
 	}
 	if errors.Is(err, context.DeadlineExceeded) {

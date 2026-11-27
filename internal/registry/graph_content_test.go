@@ -12,7 +12,7 @@ import (
 
 	v1 "github.com/google/go-containerregistry/pkg/v1"
 	"github.com/google/go-containerregistry/pkg/v1/types"
-	"github.com/jay94ks/mydcd/internal/registryclient"
+	"github.com/jay94ks/seafield/internal/registryclient"
 )
 
 func TestNativeGraphContentHoldsOriginalStoreUntilBodyClose(t *testing.T) {

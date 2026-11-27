@@ -8,10 +8,10 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/network"
-	"github.com/jay94ks/mydcd/internal/reconcile"
-	"github.com/jay94ks/mydcd/internal/tenancy"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/network"
+	"github.com/jay94ks/seafield/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/tenancy"
 )
 
 // RouteReference is shared coordination policy, never native Applied/Observed.
@@ -62,7 +62,7 @@ func routeLocal(r RouteReference) Source {
 }
 func routeHash(r RouteReference) [32]byte {
 	raw, _ := json.Marshal(r)
-	return sha256.Sum256(append([]byte("mydc-route-instance-1\x00"), raw...))
+	return sha256.Sum256(append([]byte("sfc-route-instance-1\x00"), raw...))
 }
 func sourceMatchesBinding(s Source, b tenancy.Binding) bool {
 	return s.Tenant == b.Tenant && s.Network == b.Network && s.Node == b.Node && s.Owner == b.Owner && s.NetworkGeneration == b.Generation && s.Prefix == b.Prefix

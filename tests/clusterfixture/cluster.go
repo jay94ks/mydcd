@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// Package clusterfixture runs a managed mydcd cluster of real nodes for
-// tests (devel/refactor/16). Each node has its own state, MyDCP endpoint,
+// Package clusterfixture runs a managed sfcd cluster of real nodes for
+// tests (devel/refactor/16). Each node has its own state, SFCP endpoint,
 // management socket and fake Docker engine (tests/enginefake); only host
 // work is fake. New runs every node in the test process on loopback;
 // NewIsolated runs node-1 onward as child processes, each in its own
@@ -23,25 +23,25 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/app"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/cluster/membership"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/config"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/userauth"
-	"github.com/jay94ks/mydcd/tests/enginefake"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/app"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/membership"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/config"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/userauth"
+	"github.com/jay94ks/seafield/tests/enginefake"
 )
 
-// Node is one mydcd of the cluster.
+// Node is one sfcd of the cluster.
 type Node struct {
 	ID      string
 	Config  config.Node
 	Runtime *app.Runtime
 	Engine  *enginefake.Engine
-	// Socket is the node's management socket (what mydc-web mounts).
+	// Socket is the node's management socket (what sfc-web mounts).
 	Socket string
 	// Key is the node identity key a client pins.
 	Key [32]byte
@@ -66,7 +66,7 @@ type Cluster struct {
 	client  userauth.Client
 	session access.Session
 	mu      sync.RWMutex
-	known   map[mydcp.Identity]mydcp.Peer
+	known   map[sfcp.Identity]sfcp.Peer
 	// net is the bridge joining the nodes' namespaces (NewIsolated).
 	net  *hostNet
 	opts []Option
@@ -106,7 +106,7 @@ func newCluster(t *testing.T, ctx context.Context, count int, isolated bool, opt
 	if err != nil {
 		t.Fatal(err)
 	}
-	c := &Cluster{t: t, ctx: ctx, Admin: admin, known: map[mydcp.Identity]mydcp.Peer{}, opts: opts, root: root}
+	c := &Cluster{t: t, ctx: ctx, Admin: admin, known: map[sfcp.Identity]sfcp.Peer{}, opts: opts, root: root}
 	if isolated {
 		if c.net, err = newHostNet(); err != nil {
 			t.Fatal("host network", err)
@@ -144,8 +144,8 @@ func newCluster(t *testing.T, ctx context.Context, count int, isolated bool, opt
 	if err != nil {
 		t.Fatal(err)
 	}
-	c.client = userauth.Client{Self: self, Cluster: c.ID, Peers: []mydcp.Peer{c.Peer(0)}}
-	if c.client.Mesh, err = mydcp.NewTransport(self, c.ID, c.lookup); err != nil {
+	c.client = userauth.Client{Self: self, Cluster: c.ID, Peers: []sfcp.Peer{c.Peer(0)}}
+	if c.client.Mesh, err = sfcp.NewTransport(self, c.ID, c.lookup); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = c.client.Mesh.Close(); clear(self.Private) })
@@ -205,7 +205,7 @@ func (c *Cluster) Join(n *Node, inv membership.Invitation) {
 	c.client.Peers = append(c.client.Peers, c.Peer(slices.Index(c.Nodes, n)))
 }
 
-// node prepares a node's directories, MyDCP endpoint (loopback, or the
+// node prepares a node's directories, SFCP endpoint (loopback, or the
 // bridge address of NewIsolated) and fake engine.
 func (c *Cluster) node(root, id string) *Node {
 	c.t.Helper()
@@ -239,8 +239,8 @@ func (c *Cluster) node(root, id string) *Node {
 			c.t.Errorf("%s: Docker calls the fake engine does not know: %v", id, u)
 		}
 	})
-	n := &Node{ID: id, Engine: engine, Socket: filepath.Join(dir, "mydc.sock")}
-	n.Config = config.Node{Version: 1, Modules: engine.Modules()}
+	n := &Node{ID: id, Engine: engine, Socket: filepath.Join(dir, "sfcdp.sock")}
+	n.Config = engine.Node()
 	n.Config.Node.ID, n.Config.Node.Listen, n.Config.Node.ManagementSocket = id, address, n.Socket
 	n.Config.Node.StateDir, n.Config.Node.IdentityDir = filepath.Join(dir, "state"), filepath.Join(dir, "node-key")
 	for _, opt := range c.opts {
@@ -256,28 +256,31 @@ func (c *Cluster) serve(n *Node) {
 	if err := n.Runtime.Mesh.ListenUnix(n.Socket); err != nil {
 		c.t.Fatal(err)
 	}
+	if socket, ok := listenEngine(n.Runtime, filepath.Dir(n.Socket)); ok {
+		n.Engine.ConnectSFCD(socket)
+	}
 	n.Key = n.Runtime.Identity.Public
 	c.register(n)
 }
 
 // register makes n (with its Key) a known peer.
 func (c *Cluster) register(n *Node) {
-	k := mydcp.Identity(n.Key)
+	k := sfcp.Identity(n.Key)
 	c.mu.Lock()
-	c.known[k] = mydcp.Peer{ID: n.ID, Endpoint: n.Config.Node.Listen, Policy: mydcp.Policy{Key: k, Respond: true}}
+	c.known[k] = sfcp.Peer{ID: n.ID, Endpoint: n.Config.Node.Listen, Policy: sfcp.Policy{Key: k, Respond: true}}
 	c.mu.Unlock()
 }
 
-func (c *Cluster) lookup(k mydcp.Identity) (mydcp.Peer, bool) {
+func (c *Cluster) lookup(k sfcp.Identity) (sfcp.Peer, bool) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	p, ok := c.known[k]
 	return p, ok
 }
 
-// Peer is node i as a MyDCP client target.
-func (c *Cluster) Peer(i int) mydcp.Peer {
-	p, _ := c.lookup(mydcp.Identity(c.Nodes[i].Key))
+// Peer is node i as a SFCP client target.
+func (c *Cluster) Peer(i int) sfcp.Peer {
+	p, _ := c.lookup(sfcp.Identity(c.Nodes[i].Key))
 	return p
 }
 
@@ -362,4 +365,26 @@ func (c *Cluster) Wait(label string, check func() bool) {
 		case <-tick.C:
 		}
 	}
+}
+
+// listenEngine opens r's engine socket in dir for the fake engine, as sfcd
+// does for sfed: event feed (32) and log queue (33, 34) travel there. The
+// socket admits only root peers, so without root there is none and the
+// node sees no engine events or logs.
+func listenEngine(r *app.Runtime, dir string) (string, bool) {
+	if os.Geteuid() != 0 {
+		return "", false
+	}
+	exe, err := os.Executable()
+	if err == nil {
+		exe, err = filepath.EvalSymlinks(exe)
+	}
+	if err != nil || r.Mesh.AllowEnginePeer(exe) != nil {
+		return "", false
+	}
+	socket := filepath.Join(dir, "sfcd-engine.sock")
+	if err := r.ListenEngine(socket); err != nil {
+		return "", false
+	}
+	return socket, true
 }

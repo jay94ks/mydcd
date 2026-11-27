@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/cluster/state"
 )
 
 func dnsActivationFixture(t *testing.T) *executionFixture {
@@ -16,8 +16,8 @@ func dnsActivationFixture(t *testing.T) *executionFixture {
 	ctx.Features["network-services"] = true
 	c := smallCompose(t)
 	n := c.Networks["app"]
-	n.MyDC.DNS = &DNSDeclaration{Enabled: true, Zone: "app.mydc.test", TTL: 30, NegativeTTL: 5, Transports: []string{"tcp", "udp"}}
-	n.MyDC.DNS.Limits.Cache, n.MyDC.DNS.Limits.Inflight, n.MyDC.DNS.Limits.TCP, n.MyDC.DNS.Limits.Timeout = 4, 8, 4, 1000
+	n.Sfc.DNS = &DNSDeclaration{Enabled: true, Zone: "app.sfc.test", TTL: 30, NegativeTTL: 5, Transports: []string{"tcp", "udp"}}
+	n.Sfc.DNS.Limits.Cache, n.Sfc.DNS.Limits.Inflight, n.Sfc.DNS.Limits.TCP, n.Sfc.DNS.Limits.Timeout = 4, 8, 4, 1000
 	c.Networks["app"] = n
 	b, err := Compile(c, f.c, ctx)
 	if err != nil {

@@ -16,7 +16,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/web/mydc"
+	"github.com/jay94ks/seafield/internal/web/sfc"
 )
 
 // hookServer is an https receiver that answers from a script of statuses
@@ -102,10 +102,10 @@ func TestWebhooksExternal(t *testing.T) {
 		t.Fatalf("test: %d %v", code, out)
 	}
 	req, body := hs.last()
-	sig := req.Header.Get("X-MyDC-Signature")
+	sig := req.Header.Get("X-SFC-Signature")
 	var ts int64
 	var v1 string
-	if _, err := fmt.Sscanf(sig, "t=%d,v1=%s", &ts, &v1); err != nil || v1 != webhookSign([]byte(secret), ts, body) || req.Header.Get("X-MyDC-Event") != "test" {
+	if _, err := fmt.Sscanf(sig, "t=%d,v1=%s", &ts, &v1); err != nil || v1 != webhookSign([]byte(secret), ts, body) || req.Header.Get("X-SFC-Event") != "test" {
 		t.Fatalf("signature %q over %s", sig, body)
 	}
 
@@ -115,8 +115,8 @@ func TestWebhooksExternal(t *testing.T) {
 		t.Fatalf("rotate: %v", rot)
 	}
 	f.do("POST", "/api/v1/webhooks/ops/test", nil)
-	if req, _ := hs.last(); strings.Count(req.Header.Get("X-MyDC-Signature"), "v1=") != 2 {
-		t.Fatalf("rotating signature: %s", req.Header.Get("X-MyDC-Signature"))
+	if req, _ := hs.last(); strings.Count(req.Header.Get("X-SFC-Signature"), "v1=") != 2 {
+		t.Fatalf("rotating signature: %s", req.Header.Get("X-SFC-Signature"))
 	}
 
 	// A notify delivery retries 5xx; three failed deliveries turn it off.
@@ -166,7 +166,7 @@ func TestWebhooksExternal(t *testing.T) {
 	}
 	_ = clock
 	fakeLogin(t, f, "admin")
-	if code, _ := f.do("DELETE", "/api/v1/webhooks/ops", map[string]any{"confirmName": "ops"}); code != 204 {
+	if code, _ := f.do("DELETE", "/api/v1/webhooks/ops", map[string]any{"confirmName": "ops"}); code != 200 {
 		t.Fatalf("delete: %d", code)
 	}
 	if _, err := f.srv.opt.Seal.Get(webhookSecretKey("ops")); err == nil {
@@ -204,7 +204,7 @@ func TestWebhookSecretNames(t *testing.T) {
 	if sealed("old-foo") != oldFoo {
 		t.Fatal("rotating foo overwrote old-foo")
 	}
-	if code, _ := f.do("DELETE", "/api/v1/webhooks/old-foo", map[string]any{"confirmName": "old-foo"}); code != 204 {
+	if code, _ := f.do("DELETE", "/api/v1/webhooks/old-foo", map[string]any{"confirmName": "old-foo"}); code != 200 {
 		t.Fatal("delete old-foo")
 	}
 	if _, err := f.srv.opt.Seal.Get(webhookOldSecretKey("foo")); err != nil {
@@ -227,10 +227,10 @@ func TestWebhookSecretNames(t *testing.T) {
 
 func TestWebhooksInternalAndLinks(t *testing.T) {
 	f, fake, _ := incidentFixture(t)
-	var got mydc.ServiceCallRequest
-	fake.SetServiceResponder("shop", "php-shop", "web", func(q mydc.ServiceCallRequest) mydc.ServiceResponse {
+	var got sfc.ServiceCallRequest
+	fake.SetServiceResponder("shop", "php-shop", "web", func(q sfc.ServiceCallRequest) sfc.ServiceResponse {
 		got = q
-		return mydc.ServiceResponse{Status: 202, ContentType: "application/json", Body: []byte(`{"action":"none"}`), ElapsedMS: 12, TLS: q.Port == 8443}
+		return sfc.ServiceResponse{Status: 202, ContentType: "application/json", Body: []byte(`{"action":"none"}`), ElapsedMS: 12, TLS: q.Port == 8443}
 	})
 	fakeLogin(t, f, "alice")
 	target := map[string]any{"app": "php-shop", "service": "web", "port": 8080, "path": "/decide"}
@@ -238,7 +238,7 @@ func TestWebhooksInternalAndLinks(t *testing.T) {
 		t.Fatalf("internal without workspace: %d", code)
 	}
 	// https inside the network: a plain port fails the handshake.
-	for port, want := range map[int]string{8443: "", 8080: mydc.ServiceCallTLS} {
+	for port, want := range map[int]string{8443: "", 8080: sfc.ServiceCallTLS} {
 		name := fmt.Sprintf("tls-%d", port)
 		tls := map[string]any{"app": "php-shop", "service": "web", "port": port, "path": "/decide", "scheme": "https"}
 		if code, out := f.do("POST", "/api/v1/webhooks", map[string]any{"name": name, "tenant": "shop", "kind": "internal", "target": tls, "role": "notify"}); code != 201 {
@@ -256,13 +256,13 @@ func TestWebhooksInternalAndLinks(t *testing.T) {
 		t.Fatalf("create internal: %d %v", code, h)
 	}
 	code, out := f.do("POST", "/api/v1/webhooks/bot/test", nil)
-	if code != 200 || out["delivery"].(map[string]any)["status"] != float64(202) || got.Headers["X-MyDC-Token"] != "s3cr3t-token-9876" || got.Path != "/decide" ||
+	if code != 200 || out["delivery"].(map[string]any)["status"] != float64(202) || got.Headers["X-SFC-Token"] != "s3cr3t-token-9876" || got.Path != "/decide" ||
 		!strings.Contains(fmt.Sprint(out["steps"]), "action·decision·result 중 하나가 있음") {
 		t.Fatalf("internal test: %d %v %+v", code, out, got)
 	}
 	fake.SetTaskReady("shop", "php-shop", "web", "1", false)
 	_, out = f.do("POST", "/api/v1/webhooks/bot/test", nil)
-	if e := out["delivery"].(map[string]any)["error"]; e != mydc.ServiceNoReadyTask {
+	if e := out["delivery"].(map[string]any)["error"]; e != sfc.ServiceNoReadyTask {
 		t.Fatalf("no ready task: %v", out)
 	}
 	code, n := f.do("POST", "/api/v1/webhooks", map[string]any{"name": "shop-chat", "tenant": "shop", "kind": "internal", "target": map[string]any{"app": "php-shop", "service": "web", "port": 8080, "path": "/chat"}, "role": "notify", "format": "slack", "sign": "none"})
@@ -331,8 +331,8 @@ func TestWebhookRetryable(t *testing.T) {
 		want     bool
 	}{
 		{true, 503, "", true}, {true, 429, "", true}, {true, 400, "", false},
-		{true, 0, mydc.ServiceNoReadyTask, true}, {true, 0, mydc.ServiceCallRateLimited, true},
-		{true, 0, mydc.ServiceCallTimeout, false}, {true, 0, mydc.ServiceCallRefused, false}, {true, 0, "unavailable", false}, {true, 0, mydc.ServiceCallTLS, false},
+		{true, 0, sfc.ServiceNoReadyTask, true}, {true, 0, sfc.ServiceCallRateLimited, true},
+		{true, 0, sfc.ServiceCallTimeout, false}, {true, 0, sfc.ServiceCallRefused, false}, {true, 0, "unavailable", false}, {true, 0, sfc.ServiceCallTLS, false},
 		{false, 502, "", true}, {false, 0, "timeout", true}, {false, 0, "connect", true}, {false, 0, "tls", false}, {false, 301, "redirect", false},
 	} {
 		if got := retryable(c.internal, c.status, c.code); got != c.want {

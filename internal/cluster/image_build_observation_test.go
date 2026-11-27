@@ -8,10 +8,10 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/mydcp"
+	"github.com/jay94ks/seafield/internal/sfcp"
 )
 
-// Real authenticated MYDCP/Engine native-observation routing. The callback
+// Real authenticated SFCP/Engine native-observation routing. The callback
 // represents owner work; original job/Store authorization is tested separately.
 func TestBuildNativeObservationStaysOnOwnerAndRequiresInstalledMember(t *testing.T) {
 	for _, method := range []string{"image-build-publication-owner", "image-build-caches-owner", "image-build-cache-owner", "image-build-logs-owner", "image-build-base-owner", "image-build-base-token-owner", "image-build-base-tls-owner", "image-build-registry-tls-owner"} {
@@ -28,7 +28,7 @@ func TestBuildNativeObservationStaysOnOwnerAndRequiresInstalledMember(t *testing
 					return json.RawMessage(`{"Schema":1,"Code":"UNAVAILABLE"}`), nil
 				}
 			})
-			peer, _ := f.lookup(mydcp.Identity(f.node.Public))
+			peer, _ := f.lookup(sfcp.Identity(f.node.Public))
 			request := ManagementRequest{Method: ownerMethod, Input: []byte(`{"Tenant":"tenant"}`)}
 			if reply, err := CallManagement(f.ctx, f.cli, f.client, f.policy.Cluster, peer, request); err == nil && reply.Code == "ok" {
 				t.Fatal("non-member accessed owner observation")
@@ -37,7 +37,7 @@ func TestBuildNativeObservationStaysOnOwnerAndRequiresInstalledMember(t *testing
 				t.Fatal("non-member reached native owner")
 			}
 			f.mu.Lock()
-			member := f.peers[mydcp.Identity(f.client.Public)]
+			member := f.peers[sfcp.Identity(f.client.Public)]
 			member.Member = true
 			f.peers[member.Key] = member
 			f.mu.Unlock()

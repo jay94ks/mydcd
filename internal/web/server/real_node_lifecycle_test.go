@@ -10,13 +10,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/identity"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/identity"
 )
 
-// Server lifecycle through the web on three real mydcd nodes: identity
+// Server lifecycle through the web on three real sfcd nodes: identity
 // rotation, diagnostics, isolate/restore, drain, demote and remove, the
-// plans and refusals mydcd gives, and that a workspace manager may not.
+// plans and refusals sfcd gives, and that a workspace manager may not.
 func TestRealServerNodeLifecycle(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
 	defer cancel()
@@ -60,7 +60,7 @@ func TestRealServerNodeLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if resp.StatusCode != 200 || resp.Header.Get("Content-Type") != "application/gzip" || !strings.HasPrefix(resp.Header.Get("Content-Disposition"), `attachment; filename="mydcd-diag-node-1-`) || len(resp.Header.Get("X-Mydc-Digest")) != 64 {
+	if resp.StatusCode != 200 || resp.Header.Get("Content-Type") != "application/gzip" || !strings.HasPrefix(resp.Header.Get("Content-Disposition"), `attachment; filename="sfcd-diag-node-1-`) || len(resp.Header.Get("X-Sfc-Digest")) != 64 {
 		t.Fatalf("diagnostics: %d %v", resp.StatusCode, resp.Header)
 	}
 	zr, err := gzip.NewReader(resp.Body)
@@ -99,7 +99,7 @@ func TestRealServerNodeLifecycle(t *testing.T) {
 		t.Fatalf("demote: %d %v", code, out)
 	}
 	c.Wait("demoted", func() bool { return node("node-2")["voter"] == false })
-	// mydcd gives no voter plan for a server that is not a voter
+	// sfcd gives no voter plan for a server that is not a voter
 	if code, out := f.do("GET", "/api/v1/nodes/node-2/voter-plan", nil); code != 403 {
 		t.Fatalf("non-voter plan: %d %v", code, out)
 	}
@@ -149,7 +149,7 @@ func TestRealServerNodeLifecycle(t *testing.T) {
 	if code, st := f.do("GET", "/api/v1/nodes/node-1/drain-status", nil); code != 200 || st["operation"] != dp["operation"] {
 		t.Fatalf("last drain status: %d %v", code, st)
 	}
-	// mydcd does not answer for a server that has no drain
+	// sfcd does not answer for a server that has no drain
 	if code, out := f.do("GET", "/api/v1/nodes/node-0/drain-status", nil); code != 403 {
 		t.Fatalf("no drain: %d %v", code, out)
 	}
@@ -166,7 +166,7 @@ func TestRealServerNodeLifecycle(t *testing.T) {
 	if code, out := f.do("POST", "/api/v1/nodes/node-1/rotate-identity", map[string]any{"opId": op()}); opState(t, code, out) != "applied" {
 		t.Fatalf("rotate: %d %v", code, out)
 	}
-	// mydcd accepts the rotation and shows it on the row; in this fixture it
+	// sfcd accepts the rotation and shows it on the row; in this fixture it
 	// stays Preparing (node-1 does not install a new key here), and the
 	// server's other changes wait for it.
 	c.Wait("rotation on the row", func() bool {

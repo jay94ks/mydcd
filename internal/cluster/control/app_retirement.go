@@ -8,12 +8,12 @@ import (
 	"encoding/json"
 	"strings"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/network/services"
-	"github.com/jay94ks/mydcd/internal/reconcile"
-	"github.com/jay94ks/mydcd/internal/tenancy"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/network/services"
+	"github.com/jay94ks/seafield/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/tenancy"
 )
 
 type AppRetirementProgress struct {
@@ -320,7 +320,7 @@ func (p Policy) reduceAppRetirement(s state.State, r AppProgress, a Apps, entry 
 		encoded, _ := json.Marshal(retirement)
 		proof := *entry.PendingSync
 		recreation := *proof.Recreate
-		recreation.Closure = sha256.Sum256(append([]byte("mydc-log-clear-closure-1\x00"), encoded...))
+		recreation.Closure = sha256.Sum256(append([]byte("sfc-log-clear-closure-1\x00"), encoded...))
 		proof.Recreate = &recreation
 		entry.PendingSync = &proof
 	}

@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// Package dns is mydc-web's external DNS adapter layer (devel/design/
+// Package dns is sfc-web's external DNS adapter layer (devel/design/
 // web-dns-plan.md). The web app calls DNS providers directly; nothing here
-// reaches mydcd. Each vendor is one adapter behind Provider; the rest of the
+// reaches sfcd. Each vendor is one adapter behind Provider; the rest of the
 // web code knows only this interface.
 //
 // Changes are planned and applied per RRSet (one name + type). Applying an
@@ -21,7 +21,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/web/provlog"
+	"github.com/jay94ks/seafield/internal/web/provlog"
 )
 
 // Record is one value of an RRSet.

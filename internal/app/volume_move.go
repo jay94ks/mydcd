@@ -11,14 +11,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/reconcile"
-	"github.com/jay94ks/mydcd/internal/schema"
-	"github.com/jay94ks/mydcd/internal/workload/volumes"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/workload/volumes"
 )
 
 func (r *Runtime) volumeMovePermit(ctx context.Context, job control.VolumeMove, kind string) (control.VolumeMovePermit, error) {
@@ -29,7 +29,7 @@ func (r *Runtime) volumeMovePermit(ctx context.Context, job control.VolumeMove, 
 	}
 	permit, err := schema.Decode[control.VolumeMovePermit](reply.Data)
 	if err != nil || reply.Local || reply.RaftIndex == 0 || permit.Job.Digest() != job.Digest() {
-		return control.VolumeMovePermit{}, mydcp.ErrAdmission
+		return control.VolumeMovePermit{}, sfcp.ErrAdmission
 	}
 	return permit, nil
 }
@@ -122,7 +122,7 @@ func moveErrorClass(err error) string {
 			return "rejected-" + reason
 		}
 		return "rejected"
-	case errors.Is(err, mydcp.ErrAdmission):
+	case errors.Is(err, sfcp.ErrAdmission):
 		return "admission"
 	case errors.Is(err, access.ErrDenied):
 		return "denied"
@@ -149,7 +149,7 @@ func (r *Runtime) reconcileVolumeMoveSources(ctx context.Context, v cluster.View
 		core, ok := registry.Volume(job.Binding.Scope)
 		_, move, exists := registry.Move(job.Selection())
 		if !ok || !exists {
-			failed = errors.Join(failed, mydcp.ErrAdmission)
+			failed = errors.Join(failed, sfcp.ErrAdmission)
 			continue
 		}
 		switch move.Phase {
@@ -179,14 +179,14 @@ func (r *Runtime) reconcileVolumeMoveSources(ctx context.Context, v cluster.View
 				var source volumes.ColdSource
 				source, e = r.activations.ColdSource(ctx, job.Source)
 				if e == nil && !backupSourceMatches(source, control.VolumeBackupBinding{Scope: job.Binding.Scope, Source: job.Source, Compatibility: job.Binding.Compatibility}) {
-					e = mydcp.ErrAdmission
+					e = sfcp.ErrAdmission
 				}
 			}
 			if e == nil {
 				var proof volumes.FenceProof
 				proof, e = r.activations.FenceSource(ctx, job.Source, job.Binding, func(ctx context.Context, b volumes.Binding) error {
 					if b != job.Binding {
-						return mydcp.ErrAdmission
+						return sfcp.ErrAdmission
 					}
 					_, err := r.volumeMovePermit(ctx, job, "fence")
 					return err

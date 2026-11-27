@@ -13,7 +13,7 @@ func TestDNSAvailabilityFiltersOneReplicaWithoutChangingReservedView(t *testing.
 	d := newDNSFixture(t)
 	d.cfg.Names = []DNSName{{Name: "web", Endpoint: "web-four", Generation: 2}, {Name: "web", Endpoint: "origin", Generation: 1}}
 	d = publishDNS(t, d, d.cfg, 100)
-	d, handle, raw := startDNS(t, d, "web.app.mydc.test.", dns.TypeA, 200)
+	d, handle, raw := startDNS(t, d, "web.app.sfc.test.", dns.TypeA, 200)
 	before := encodeDNS(t, d.m)
 	result, err := d.m.Answer(d.f.c, d.f.n, d.f.a, handle, raw, d.clock(200), []DNSAddressReference{{Endpoint: "web-four", Generation: 2}})
 	if err != nil || result.Response.Rcode != dns.RcodeSuccess || len(result.Response.Answer) != 1 {

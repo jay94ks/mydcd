@@ -6,7 +6,7 @@ User `image-build-cache`의 Job selector는 선택한 tenant의 원 job이 사�
 `ObservedKind`로 구분한다. 종류 생략은 기존 빌드, `cache-prune`는 수동 정리다.
 삭제된 job이나 현재 사용자·tenant·노드 범위에서 조회할 수 없는 job은 거부한다.
 
-사용자 Unix와 네트워크 MYDCP User 요청은 같다.
+사용자 Unix와 네트워크 SFCP User 요청은 같다.
 
 ```text
 Request = {Schema:1,Method:"image-build-cache",Nonce:[32],Tenant,

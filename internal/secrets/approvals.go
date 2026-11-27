@@ -10,8 +10,8 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/reconcile"
 )
 
 const approvalFact = "secret-group-use-approved"
@@ -30,7 +30,7 @@ type Approval struct {
 
 func ApprovalBytes(a Approval) []byte {
 	b, _ := json.Marshal(a.Payload)
-	return append([]byte("mydc-secret-group-approval-1\x00"), b...)
+	return append([]byte("sfc-secret-group-approval-1\x00"), b...)
 }
 
 type Issuer struct {
@@ -540,7 +540,7 @@ type ConsumerGone struct {
 func ConsumerGoneBytes(p ConsumerGone) []byte {
 	p.Signature = nil
 	b, _ := json.Marshal(p)
-	return append([]byte("mydc-secret-consumer-gone-1\x00"), b...)
+	return append([]byte("sfc-secret-consumer-gone-1\x00"), b...)
 }
 func (a Approvals) Release(p ConsumerGone) (Approvals, error) {
 	r, ok := a.records[p.ApprovalID]

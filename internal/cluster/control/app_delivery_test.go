@@ -10,9 +10,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/deployment"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/deployment"
 
 	"gopkg.in/yaml.v3"
 )
@@ -26,12 +26,12 @@ func deliveryControlFixture(t *testing.T) *backupCoreFixture {
 	f.session.Scopes[0].Actions = append(f.session.Scopes[0].Actions, access.ManageCD)
 	f.session.Signature = ed25519.Sign(f.node, access.SessionBytes(f.session))
 	managedDNSTaskCoreBegin(t, f, "source-app", "10.80.1.2", "web", func(c *deployment.Compose, ctx *deployment.PlanningContext) {
-		c.MyDC.Delivery = &deployment.DeliveryDeclaration{}
-		c.MyDC.Delivery.Enabled = true
-		c.MyDC.Delivery.Source.Kind, c.MyDC.Delivery.Source.Repository, c.MyDC.Delivery.Source.Ref, c.MyDC.Delivery.Source.Path = "git", "https://git.mydc.test/team/app.git", "refs/heads/main", "app.yaml"
-		c.MyDC.Delivery.Poll, c.MyDC.Delivery.Limits.Fetch, c.MyDC.Delivery.Limits.Bytes, c.MyDC.Delivery.Limits.Queued, c.MyDC.Delivery.Limits.Active = 60, 30, 4<<20, 1, 1
-		c.MyDC.Delivery.Sync.Mode, c.MyDC.Delivery.Sync.Drift = "manual", "report"
-		c.MyDC.Delivery.Runtime.Mode, c.MyDC.Delivery.Runtime.Expiry = "require-explicit-override", "manual-release"
+		c.Sfc.Delivery = &deployment.DeliveryDeclaration{}
+		c.Sfc.Delivery.Enabled = true
+		c.Sfc.Delivery.Source.Kind, c.Sfc.Delivery.Source.Repository, c.Sfc.Delivery.Source.Ref, c.Sfc.Delivery.Source.Path = "git", "https://git.sfc.test/team/app.git", "refs/heads/main", "app.yaml"
+		c.Sfc.Delivery.Poll, c.Sfc.Delivery.Limits.Fetch, c.Sfc.Delivery.Limits.Bytes, c.Sfc.Delivery.Limits.Queued, c.Sfc.Delivery.Limits.Active = 60, 30, 4<<20, 1, 1
+		c.Sfc.Delivery.Sync.Mode, c.Sfc.Delivery.Sync.Drift = "manual", "report"
+		c.Sfc.Delivery.Runtime.Mode, c.Sfc.Delivery.Runtime.Expiry = "require-explicit-override", "manual-release"
 		if !ctx.Features["git-cd"] {
 			t.Fatal("product planning omitted its connected Git/CD input contract")
 		}

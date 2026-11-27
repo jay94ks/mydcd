@@ -9,10 +9,10 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/imagecache"
-	"github.com/jay94ks/mydcd/internal/workload"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/imagecache"
+	"github.com/jay94ks/seafield/internal/workload"
 )
 
 // ImageReference is derived from the original shared owners. It is not native
@@ -28,7 +28,7 @@ type ImageReference struct {
 func imageReferenceID(row ImageReference) string {
 	row.ID = ""
 	raw, _ := json.Marshal(row)
-	digest := sha256.Sum256(append([]byte("mydc-image-reference-1\x00"), raw...))
+	digest := sha256.Sum256(append([]byte("sfc-image-reference-1\x00"), raw...))
 	return hex.EncodeToString(digest[:])
 }
 
@@ -217,9 +217,9 @@ func (p Policy) ImageReferences(s state.State, tenant, node string) ([]ImageRefe
 			}
 
 			for name, service := range input.Services {
-				nodes := service.MyDC.Nodes
+				nodes := service.Sfc.Nodes
 				if len(nodes) == 0 {
-					nodes = []string{service.MyDC.Node}
+					nodes = []string{service.Sfc.Node}
 				}
 				for _, placement := range nodes {
 					row := ImageReference{Tenant: scope.Tenant, App: scope.App, Deployment: scope.Deployment, Node: placement, Service: name, Image: service.Image, Kind: "app-previous", Operation: version.Operation, Commit: version.Commit, Version: version.Revision}

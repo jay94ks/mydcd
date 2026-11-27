@@ -8,12 +8,12 @@ import (
 	"errors"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/imagebuild"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/reconcile"
-	"github.com/jay94ks/mydcd/internal/registryclient"
-	"github.com/jay94ks/mydcd/internal/schema"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/imagebuild"
+	"github.com/jay94ks/seafield/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/registryclient"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/sfcp"
 )
 
 // The real member/latest-quorum authority used by NativeJobs. A local state
@@ -54,34 +54,34 @@ func (r *Runtime) resumeImageBuildPublication(ctx context.Context, spec imagebui
 
 func (r *Runtime) imageBuildJobWork(ctx context.Context, spec imagebuild.JobSpec) (control.ImageBuildJobWork, error) {
 	if spec.Cluster != r.controlPolicy.Cluster || spec.Scope.Root.Key != r.Identity.Public || r.ctx.Err() != nil {
-		return control.ImageBuildJobWork{}, mydcp.ErrAdmission
+		return control.ImageBuildJobWork{}, sfcp.ErrAdmission
 	}
 	q := control.ImageBuildJobWorkQuery{Tenant: spec.Tenant, ID: spec.ID, At: time.Now().Unix()}
 	raw, _ := json.Marshal(q)
 	reply, err := r.appCall(ctx, "image-build-job-work", raw)
 	if err != nil || reply.Local {
-		return control.ImageBuildJobWork{}, mydcp.ErrAdmission
+		return control.ImageBuildJobWork{}, sfcp.ErrAdmission
 	}
 	work, err := schema.Decode[control.ImageBuildJobWork](reply.Data)
 	if err != nil || work.Schema != 1 || work.Run.Shape() != nil || work.Run.Spec.Digest() != spec.Digest() || work.Index == 0 || work.RootRevision == 0 || work.Epoch == 0 {
-		return control.ImageBuildJobWork{}, mydcp.ErrAdmission
+		return control.ImageBuildJobWork{}, sfcp.ErrAdmission
 	}
 	// The permit above is quorum-backed; ReadAtLeast consumes its durable
 	// local prefix. Local=true is expected here, not a fresh authority grant.
 	view, err := r.Engine().ReadAtLeast(ctx, work.Index)
 	if err != nil || view.State.ModuleEpoch() != work.Epoch {
-		return control.ImageBuildJobWork{}, mydcp.ErrAdmission
+		return control.ImageBuildJobWork{}, sfcp.ErrAdmission
 	}
 	q.At = time.Now().Unix()
 	current, err := r.controlPolicy.ImageBuildJobWork(view.State, r.Identity.Public, q)
 	if err != nil || current.Run.Spec.Digest() != spec.Digest() || current.Run.Revision < work.Run.Revision {
-		return control.ImageBuildJobWork{}, mydcp.ErrAdmission
+		return control.ImageBuildJobWork{}, sfcp.ErrAdmission
 	}
 	return current, nil
 }
 
 // This finite consumer owns its SDK client/output until their real I/O has
-// joined. Recovery observes via the original registry owner's MYDCP Store
+// joined. Recovery observes via the original registry owner's SFCP Store
 // read, even when the accepted job can no longer obtain a new push login.
 // Shared report/Secret usage and original root-pin return belong to the worker.
 func (r *Runtime) publishImageBuildOutput(ctx context.Context, spec imagebuild.JobSpec, native *imagebuild.NativeJobs) (result imagebuild.JobResult, failure error) {

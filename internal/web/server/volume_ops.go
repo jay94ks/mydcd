@@ -8,19 +8,19 @@ import (
 	"net/http"
 	"slices"
 
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/web/mydc"
-	"github.com/jay94ks/mydcd/internal/workload/volumes"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/web/sfc"
+	"github.com/jay94ks/seafield/internal/workload/volumes"
 )
 
 // Data store backups, restores, capacity and delete (UI-60 row menu, UI-62
-// backups, UI-63 restore). The daemon builds the payloads from the mydcd
+// backups, UI-63 restore). The daemon builds the payloads from the sfcd
 // rows (volume scope and native binding, the backup record, the backup
-// source); mydcd decides. Move (UI-64) is in volume_move.go: it is an app
+// source); sfcd decides. Move (UI-64) is in volume_move.go: it is an app
 // operation (app-plan-stream with a move request, artifact upload, approvals).
 
 // findVolume reads a tenant volume by name (and app when given).
-func findVolume(ctx context.Context, c mydc.Conn, tenant, name, app string) (volumeView, error) {
+func findVolume(ctx context.Context, c sfc.Conn, tenant, name, app string) (volumeView, error) {
 	var found []volumeView
 	after := ""
 	for {
@@ -47,8 +47,8 @@ func findVolume(ctx context.Context, c mydc.Conn, tenant, name, app string) (vol
 	return volumeView{}, &httpErr{http.StatusConflict, "ambiguous", "several apps have a data store of this name; give app"}
 }
 
-func volumeBackups(ctx context.Context, c mydc.Conn, v volumeView) ([]mydc.VolumeBackupView, error) {
-	var out []mydc.VolumeBackupView
+func volumeBackups(ctx context.Context, c sfc.Conn, v volumeView) ([]sfc.VolumeBackupView, error) {
+	var out []sfc.VolumeBackupView
 	after := ""
 	for {
 		p, err := c.VolumeBackups(ctx, v.Tenant, after)
@@ -67,8 +67,8 @@ func volumeBackups(ctx context.Context, c mydc.Conn, v volumeView) ([]mydc.Volum
 	}
 }
 
-func volumeRestores(ctx context.Context, c mydc.Conn, v volumeView) ([]mydc.VolumeRestoreView, error) {
-	var out []mydc.VolumeRestoreView
+func volumeRestores(ctx context.Context, c sfc.Conn, v volumeView) ([]sfc.VolumeRestoreView, error) {
+	var out []sfc.VolumeRestoreView
 	after := ""
 	for {
 		p, err := c.VolumeRestores(ctx, v.Tenant, after)
@@ -87,35 +87,35 @@ func volumeRestores(ctx context.Context, c mydc.Conn, v volumeView) ([]mydc.Volu
 	}
 }
 
-func findBackup(ctx context.Context, c mydc.Conn, v volumeView, id string) (mydc.VolumeBackupView, error) {
+func findBackup(ctx context.Context, c sfc.Conn, v volumeView, id string) (sfc.VolumeBackupView, error) {
 	bs, err := volumeBackups(ctx, c, v)
 	if err != nil {
-		return mydc.VolumeBackupView{}, err
+		return sfc.VolumeBackupView{}, err
 	}
 	for _, b := range bs {
 		if b.ID == id {
 			return b, nil
 		}
 	}
-	return mydc.VolumeBackupView{}, &httpErr{http.StatusNotFound, "not-found", "no such backup"}
+	return sfc.VolumeBackupView{}, &httpErr{http.StatusNotFound, "not-found", "no such backup"}
 }
 
 type volumeDetail struct {
-	Volume   volumeView               `json:"volume"`
-	Backups  []mydc.VolumeBackupView  `json:"backups"`
-	Restores []mydc.VolumeRestoreView `json:"restores"`
+	Volume   volumeView              `json:"volume"`
+	Backups  []sfc.VolumeBackupView  `json:"backups"`
+	Restores []sfc.VolumeRestoreView `json:"restores"`
 }
 
 // GET /t/{t}/volumes/{name}?app=
 func (s *Server) handleVolumeDetail(w http.ResponseWriter, r *http.Request, ws *webSession) {
-	read(s, w, r, ws, func(ctx context.Context, c mydc.Conn) (volumeDetail, error) {
+	read(s, w, r, ws, func(ctx context.Context, c sfc.Conn) (volumeDetail, error) {
 		v, err := findVolume(ctx, c, r.PathValue("t"), r.PathValue("name"), r.URL.Query().Get("app"))
 		if err != nil {
 			return volumeDetail{}, err
 		}
 		rows := []volumeView{v}
 		fillWriters(ctx, c, rows)
-		d := volumeDetail{Volume: rows[0], Backups: []mydc.VolumeBackupView{}, Restores: []mydc.VolumeRestoreView{}}
+		d := volumeDetail{Volume: rows[0], Backups: []sfc.VolumeBackupView{}, Restores: []sfc.VolumeRestoreView{}}
 		if d.Backups, err = volumeBackups(ctx, c, v); err != nil {
 			return d, err
 		}
@@ -128,9 +128,9 @@ func (s *Server) handleVolumeDetail(w http.ResponseWriter, r *http.Request, ws *
 
 // volumeStep is a data store endpoint: build gets the volume row.
 func (s *Server) volumeStep(w http.ResponseWriter, r *http.Request, ws *webSession, opID, app string, body any,
-	build func(ctx context.Context, c mydc.Conn, v volumeView) (string, any, uint64, error)) {
+	build func(ctx context.Context, c sfc.Conn, v volumeView) (string, any, uint64, error)) {
 	tenant, name := r.PathValue("t"), r.PathValue("name")
-	s.sharedCreate(w, r, ws, opID, body, func(ctx context.Context, c mydc.Conn, _ mydc.Session) (string, any, uint64, string, error) {
+	s.sharedCreate(w, r, ws, opID, body, func(ctx context.Context, c sfc.Conn, _ sfc.Session) (string, any, uint64, string, error) {
 		v, err := findVolume(ctx, c, tenant, name, app)
 		if err != nil {
 			return "", nil, 0, "", err
@@ -155,9 +155,9 @@ func (s *Server) handleVolumeBackup(w http.ResponseWriter, r *http.Request, ws *
 	if !readJSON(w, r, &req) {
 		return
 	}
-	s.volumeStep(w, r, ws, req.OpID, req.App, req, func(ctx context.Context, c mydc.Conn, v volumeView) (string, any, uint64, error) {
+	s.volumeStep(w, r, ws, req.OpID, req.App, req, func(ctx context.Context, c sfc.Conn, v volumeView) (string, any, uint64, error) {
 		if v.App == "" {
-			return "", nil, 0, &httpErr{http.StatusConflict, "no-app", "mydcd backs up only data stores that belong to an app"}
+			return "", nil, 0, &httpErr{http.StatusConflict, "no-app", "sfcd backs up only data stores that belong to an app"}
 		}
 		id := req.ID
 		if id == "" {
@@ -185,7 +185,7 @@ func (s *Server) handleVolumeBackup(w http.ResponseWriter, r *http.Request, ws *
 			return "", nil, 0, err
 		}
 		q := control.VolumeBackupBegin{Scope: src.Source.Scope, ID: id, MaxBytes: maxBytes, MaxEntries: entries, Compatibility: src.Source.Compatibility}
-		return mydc.ActionBeginVolumeBackup, q, src.VolumeRevision, nil
+		return sfc.ActionBeginVolumeBackup, q, src.VolumeRevision, nil
 	})
 }
 
@@ -205,7 +205,7 @@ func (s *Server) handleVolumeBackupSelection(action string) func(http.ResponseWr
 			Req    any
 		}{action, req}
 		id := r.PathValue("id")
-		s.volumeStep(w, r, ws, req.OpID, req.App, body, func(ctx context.Context, c mydc.Conn, v volumeView) (string, any, uint64, error) {
+		s.volumeStep(w, r, ws, req.OpID, req.App, body, func(ctx context.Context, c sfc.Conn, v volumeView) (string, any, uint64, error) {
 			b, err := findBackup(ctx, c, v, id)
 			if err != nil {
 				return "", nil, 0, err
@@ -217,8 +217,8 @@ func (s *Server) handleVolumeBackupSelection(action string) func(http.ResponseWr
 
 // POST /t/{t}/volumes/{name}/restore {opId, app?, backup, target:{name, app?},
 // capacityBytes?} → begin-volume-restore into a new data store on the
-// backup's server (mydcd restores only into a new volume). The restore ID
-// is "r-" + the first 8 characters of opId. MaxBytes is mydcd's lower
+// backup's server (sfcd restores only into a new volume). The restore ID
+// is "r-" + the first 8 characters of opId. MaxBytes is sfcd's lower
 // bound, DataBytes + 8 KiB × Entries of the backup's receipt.
 func (s *Server) handleVolumeRestore(w http.ResponseWriter, r *http.Request, ws *webSession) {
 	var req struct {
@@ -235,9 +235,9 @@ func (s *Server) handleVolumeRestore(w http.ResponseWriter, r *http.Request, ws 
 	if !readJSON(w, r, &req) {
 		return
 	}
-	s.volumeStep(w, r, ws, req.OpID, req.App, req, func(ctx context.Context, c mydc.Conn, v volumeView) (string, any, uint64, error) {
+	s.volumeStep(w, r, ws, req.OpID, req.App, req, func(ctx context.Context, c sfc.Conn, v volumeView) (string, any, uint64, error) {
 		if req.Target.Existing {
-			return "", nil, 0, &httpErr{http.StatusUnprocessableEntity, "restore-new-only", "mydcd restores only into a new data store"}
+			return "", nil, 0, &httpErr{http.StatusUnprocessableEntity, "restore-new-only", "sfcd restores only into a new data store"}
 		}
 		if !storageIDRE.MatchString(req.Target.Name) {
 			return "", nil, 0, invalid("target.name: a new data store name")
@@ -260,7 +260,7 @@ func (s *Server) handleVolumeRestore(w http.ResponseWriter, r *http.Request, ws 
 		if spec.Validate() != nil {
 			return "", nil, 0, invalid("target: not a valid data store for this backup")
 		}
-		// mydcd's restoreNeed: the data plus 8 KiB for each archive entry
+		// sfcd's restoreNeed: the data plus 8 KiB for each archive entry
 		maxBytes := max(b.Source.Receipt.DataBytes+uint64(b.Source.Receipt.Entries)*8192, 1024)
 		if maxBytes > 1<<40 {
 			return "", nil, 0, &httpErr{http.StatusUnprocessableEntity, "restore-too-large", "this backup needs more than 1 TiB to restore"}
@@ -269,7 +269,7 @@ func (s *Server) handleVolumeRestore(w http.ResponseWriter, r *http.Request, ws 
 			return "", nil, 0, invalid("capacityBytes: from the backup's restore size up to 1 TiB")
 		}
 		q := control.VolumeRestoreBegin{Backup: control.VolumeBackupSelection{Scope: b.Source.Scope, ID: b.ID}, ID: id, Target: spec, MaxBytes: maxBytes, CapacityBytes: req.CapacityBytes}
-		return mydc.ActionBeginVolumeRestore, q, b.Revision, nil
+		return sfc.ActionBeginVolumeRestore, q, b.Revision, nil
 	})
 }
 
@@ -283,14 +283,14 @@ func (s *Server) handleVolumeRestoreCancel(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	id := r.PathValue("id")
-	s.volumeStep(w, r, ws, req.OpID, req.App, req, func(ctx context.Context, c mydc.Conn, v volumeView) (string, any, uint64, error) {
+	s.volumeStep(w, r, ws, req.OpID, req.App, req, func(ctx context.Context, c sfc.Conn, v volumeView) (string, any, uint64, error) {
 		rs, err := volumeRestores(ctx, c, v)
 		if err != nil {
 			return "", nil, 0, err
 		}
 		for _, x := range rs {
 			if x.ID == id {
-				return mydc.ActionCancelVolumeRestore, control.VolumeRestoreSelection{Backup: x.Source.Backup, ID: x.ID}, x.Revision, nil
+				return sfc.ActionCancelVolumeRestore, control.VolumeRestoreSelection{Backup: x.Source.Backup, ID: x.ID}, x.Revision, nil
 			}
 		}
 		return "", nil, 0, &httpErr{http.StatusNotFound, "not-found", "no such restore"}
@@ -308,14 +308,14 @@ func (s *Server) handleVolumeCapacity(w http.ResponseWriter, r *http.Request, ws
 	if !readJSON(w, r, &req) {
 		return
 	}
-	s.volumeStep(w, r, ws, req.OpID, req.App, req, func(ctx context.Context, c mydc.Conn, v volumeView) (string, any, uint64, error) {
+	s.volumeStep(w, r, ws, req.OpID, req.App, req, func(ctx context.Context, c sfc.Conn, v volumeView) (string, any, uint64, error) {
 		if req.Bytes == 0 || req.Bytes > 1<<40 {
 			return "", nil, 0, invalid("bytes: up to 1 TiB")
 		}
 		if req.Bytes <= v.CapacityBytes {
 			return "", nil, 0, &httpErr{http.StatusUnprocessableEntity, "capacity-grow-only", "capacity can only grow"}
 		}
-		return mydc.ActionSetVolumeCapacity, control.VolumeCapacity{Scope: v.Scope, Native: v.NativeBinding, Bytes: req.Bytes}, v.Revision, nil
+		return sfc.ActionSetVolumeCapacity, control.VolumeCapacity{Scope: v.Scope, Native: v.NativeBinding, Bytes: req.Bytes}, v.Revision, nil
 	})
 }
 
@@ -329,10 +329,10 @@ func (s *Server) handleVolumeDelete(w http.ResponseWriter, r *http.Request, ws *
 	if !readJSON(w, r, &req) {
 		return
 	}
-	s.volumeStep(w, r, ws, req.OpID, req.App, req, func(ctx context.Context, c mydc.Conn, v volumeView) (string, any, uint64, error) {
-		action := mydc.ActionDeleteVolume
+	s.volumeStep(w, r, ws, req.OpID, req.App, req, func(ctx context.Context, c sfc.Conn, v volumeView) (string, any, uint64, error) {
+		action := sfc.ActionDeleteVolume
 		if v.Kind == "fixed" {
-			action = mydc.ActionUnregisterFixed
+			action = sfc.ActionUnregisterFixed
 		}
 		return action, v.Scope, v.Revision, nil
 	})
@@ -367,11 +367,11 @@ func backupLimitOf(l control.PublicBackupLimit) backupLimitView {
 // GET /t/{t}/backup-limits?node= → {items}: the workspace's rows (PublicRead
 // volume-backup-limits) and the server-wide rows. A system administrator
 // gets the server-wide values (a second read with no tenant); anyone else
-// only learns that one exists (hidden). mydcd admits a backup only when
+// only learns that one exists (hidden). sfcd admits a backup only when
 // both rows of its node exist.
 func (s *Server) handleBackupLimits(w http.ResponseWriter, r *http.Request, ws *webSession) {
 	tenant, node := r.PathValue("t"), r.URL.Query().Get("node")
-	read(s, w, r, ws, func(ctx context.Context, c mydc.Conn) (map[string][]backupLimitView, error) {
+	read(s, w, r, ws, func(ctx context.Context, c sfc.Conn) (map[string][]backupLimitView, error) {
 		rows, err := readBackupLimits(ctx, c, tenant, node)
 		if err != nil {
 			return nil, err
@@ -391,7 +391,7 @@ func (s *Server) handleBackupLimits(w http.ResponseWriter, r *http.Request, ws *
 				out = append(out, backupLimitOf(l))
 				delete(global, l.Node)
 			}
-		case !isMydcCode(err, mydc.CodeDenied):
+		case !isSfcCode(err, sfc.CodeDenied):
 			return nil, err
 		}
 		for _, n := range slices.Sorted(maps.Keys(global)) {
@@ -419,7 +419,7 @@ func (s *Server) handleBackupLimit(w http.ResponseWriter, r *http.Request, ws *w
 		return
 	}
 	tenant, node := r.PathValue("t"), r.PathValue("node")
-	s.sharedCreate(w, r, ws, req.OpID, req, func(ctx context.Context, c mydc.Conn, _ mydc.Session) (string, any, uint64, string, error) {
+	s.sharedCreate(w, r, ws, req.OpID, req, func(ctx context.Context, c sfc.Conn, _ sfc.Session) (string, any, uint64, string, error) {
 		rowTenant := tenant
 		switch req.Scope {
 		case "", "workspace":
@@ -435,8 +435,8 @@ func (s *Server) handleBackupLimit(w http.ResponseWriter, r *http.Request, ws *w
 		if err != nil {
 			return "", nil, 0, "", err
 		}
-		l := mydc.VolumeBackupLimit{Tenant: rowTenant, Node: node, Count: req.Count, Bytes: req.Bytes, StagingCount: req.StagingCount, StagingBytes: req.StagingBytes}
-		// The row's Original (the move budget) goes back as it is: mydcd
+		l := sfc.VolumeBackupLimit{Tenant: rowTenant, Node: node, Count: req.Count, Bytes: req.Bytes, StagingCount: req.StagingCount, StagingBytes: req.StagingBytes}
+		// The row's Original (the move budget) goes back as it is: sfcd
 		// refuses a change that drops it (ConditionFailed). REQ-66: the
 		// PublicRead row carries it.
 		expected := uint64(0)
@@ -452,13 +452,13 @@ func (s *Server) handleBackupLimit(w http.ResponseWriter, r *http.Request, ws *w
 		if req.Expected != 0 {
 			expected = req.Expected
 		}
-		return mydc.ActionSetVolumeBackupLimit, l, expected, "backup-limit/" + node, nil
+		return sfc.ActionSetVolumeBackupLimit, l, expected, "backup-limit/" + node, nil
 	})
 }
 
 // GET /t/{t}/volumes/{name}/users?app= → volume-users.
 func (s *Server) handleVolumeUsers(w http.ResponseWriter, r *http.Request, ws *webSession) {
-	read(s, w, r, ws, func(ctx context.Context, c mydc.Conn) (resourceUsersView, error) {
+	read(s, w, r, ws, func(ctx context.Context, c sfc.Conn) (resourceUsersView, error) {
 		v, err := findVolume(ctx, c, r.PathValue("t"), r.PathValue("name"), r.URL.Query().Get("app"))
 		if err != nil {
 			return resourceUsersView{}, err
@@ -469,7 +469,7 @@ func (s *Server) handleVolumeUsers(w http.ResponseWriter, r *http.Request, ws *w
 
 // GET /t/{t}/networks/{name}/users → network-users.
 func (s *Server) handleNetworkUsers(w http.ResponseWriter, r *http.Request, ws *webSession) {
-	read(s, w, r, ws, func(ctx context.Context, c mydc.Conn) (resourceUsersView, error) {
+	read(s, w, r, ws, func(ctx context.Context, c sfc.Conn) (resourceUsersView, error) {
 		return readResourceUsers(ctx, c, "network-users", r.PathValue("t"), r.PathValue("name"), "")
 	})
 }

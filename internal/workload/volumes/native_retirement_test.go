@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/reconcile"
 )
 
 func TestNativeOriginalCreationRetirementRequiresPositiveIdentity(t *testing.T) {
@@ -35,7 +35,7 @@ func TestNativeOriginalCreationRetirementRequiresPositiveIdentity(t *testing.T) 
 			}
 			if scenario == "foreign" {
 				sdk.mu.Lock()
-				sdk.value.Labels["org.mydc.spec"] = "foreign"
+				sdk.value.Labels["org.sfc.spec"] = "foreign"
 				sdk.mu.Unlock()
 			}
 			if err = m.Step(context.Background(), key); err == nil {

@@ -17,7 +17,7 @@ import (
 )
 
 func scriptSource(extra, body string) []byte {
-	return []byte("package checker\nimport (\"context\"; lifecycle \"github.com/jay94ks/mydcd/lifecycle/v1\";" + extra + ")\nfunc Check(ctx context.Context, in lifecycle.Request, probe lifecycle.Probe) (lifecycle.Result, error) {\n" + body + "\n}\n")
+	return []byte("package checker\nimport (\"context\"; lifecycle \"github.com/jay94ks/seafield/lifecycle/v1\";" + extra + ")\nfunc Check(ctx context.Context, in lifecycle.Request, probe lifecycle.Probe) (lifecycle.Result, error) {\n" + body + "\n}\n")
 }
 
 const passBody = `return lifecycle.Result{Schema: 1, Status: lifecycle.Pass, Reason: "ready"}, nil`
@@ -223,8 +223,8 @@ func TestCheckerResolverKeepsPrivateBridgeAndContractOutsideTenantOverride(t *te
 	}{
 		{"blank-import", scriptSource(`_ "example.invalid/safe";`, passBody), []string{"example.invalid/safe"}},
 		{"dot-import", scriptSource(`. "strings";`, passBody), []string{"strings"}},
-		{"private-bridge", scriptSource(`"mydc.internal/lifecyclebridge";`, passBody), []string{checkerBridge}},
-		{"product-module", scriptSource(`"github.com/jay94ks/mydcd/extra";`, passBody), []string{productModule + "/extra"}},
+		{"private-bridge", scriptSource(`"sfc.internal/lifecyclebridge";`, passBody), []string{checkerBridge}},
+		{"product-module", scriptSource(`"github.com/jay94ks/seafield/extra";`, passBody), []string{productModule + "/extra"}},
 		{"unknown-standard", scriptSource(`"reflect";`, passBody), []string{"reflect"}},
 		{"wrong-entry-type", bytes.ReplaceAll(scriptSource("", passBody), []byte("probe lifecycle.Probe"), []byte("probe any")), nil},
 		{"wrong-package", bytes.ReplaceAll(scriptSource("", passBody), []byte("package checker"), []byte("package main")), nil},

@@ -8,8 +8,8 @@ import (
 	"math"
 	"strings"
 
-	"github.com/jay94ks/mydcd/internal/cluster/lifecycle"
-	"github.com/jay94ks/mydcd/internal/engine"
+	"github.com/jay94ks/seafield/internal/cluster/lifecycle"
+	"github.com/jay94ks/seafield/internal/engine"
 	bolt "go.etcd.io/bbolt"
 	"golang.org/x/sys/unix"
 )
@@ -50,7 +50,7 @@ func (s NativeCachePruneSpec) selectionKind(kind string) bool {
 	return kind == "manual-"+s.Filter.Mode
 }
 func (s NativeCachePruneSpec) Digest() [32]byte {
-	return digestJSON("mydc-native-cache-prune-spec-1", s)
+	return digestJSON("sfc-native-cache-prune-spec-1", s)
 }
 func (s NativeCachePruneSpec) Own() NativeCachePruneSpec {
 	s.Source = s.Source.Own()

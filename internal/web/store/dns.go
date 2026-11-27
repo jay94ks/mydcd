@@ -12,7 +12,7 @@ import (
 
 // External DNS rows (devel/design/web-dns-plan.md). Record values stay with
 // the provider; these rows hold only connection data, assignments, marks of
-// records MyDC made and the change history. Provider tokens are in sealed
+// records Seafield Cluster made and the change history. Provider tokens are in sealed
 // files, never here.
 
 // DNSProvider is one provider connection (one API token).
@@ -47,7 +47,7 @@ type DNSDomain struct {
 	AddedAt     time.Time       `json:"addedAt"`
 }
 
-// DNSManaged marks an RRSet MyDC wrote.
+// DNSManaged marks an RRSet Seafield Cluster wrote.
 type DNSManaged struct {
 	Domain      string    `json:"domain"`
 	Name        string    `json:"name"`

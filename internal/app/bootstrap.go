@@ -12,13 +12,13 @@ import (
 	"time"
 
 	"github.com/hashicorp/raft"
-	"github.com/jay94ks/mydcd/internal/bootstrap"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/cluster/lifecycle"
-	"github.com/jay94ks/mydcd/internal/cluster/membership"
-	"github.com/jay94ks/mydcd/internal/config"
-	"github.com/jay94ks/mydcd/internal/identity"
+	"github.com/jay94ks/seafield/internal/bootstrap"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/lifecycle"
+	"github.com/jay94ks/seafield/internal/cluster/membership"
+	"github.com/jay94ks/seafield/internal/config"
+	"github.com/jay94ks/seafield/internal/identity"
 )
 
 type managedInstallation struct {
@@ -93,7 +93,7 @@ func (r *Runtime) InstallConfiguration(ctx context.Context) (bootstrap.Record, e
 				admitted := true
 				for _, server := range installed.Configuration.Servers {
 					entry, found := directory.Entry(string(server.ID))
-					if !found || string(server.Address) != entry.Peer.Endpoint || server.Suffrage != raft.Voter && server.Suffrage != raft.Nonvoter {
+					if !found || !entry.EndpointMatches(string(server.Address)) || server.Suffrage != raft.Voter && server.Suffrage != raft.Nonvoter {
 						admitted = false
 						break
 					}
@@ -124,6 +124,9 @@ func (r *Runtime) InstallConfiguration(ctx context.Context) (bootstrap.Record, e
 						return bootstrap.Record{}, err
 					}
 					record, err := bootstrap.Install(r.installation.config, configuration, installed.AppliedIndex)
+					if err == nil {
+						r.Mesh.SetStarting(false)
+					}
 					return record, err
 				}
 			}

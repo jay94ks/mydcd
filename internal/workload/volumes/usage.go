@@ -11,7 +11,7 @@ import (
 	"path"
 	"syscall"
 
-	"github.com/jay94ks/mydcd/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/reconcile"
 	"github.com/moby/moby/client"
 )
 
@@ -186,7 +186,7 @@ func scanUsage(ctx context.Context, directory string, limits UsageLimits) (Usage
 // serializes Desired/DeleteDesired against the scan. Pending effects are not
 // observed as empty volumes; concurrent workload writes are not fenced by this
 // method. The caller must enforce current user/tenant read authorization before
-// publishing this node-local observation over MYDCP.
+// publishing this node-local observation over SFCP.
 func (m *NativeManager) Usage(ctx context.Context, key string, limits UsageLimits) (Usage, error) {
 	if fixedNativeKey(key) {
 		if m.fixed == nil {

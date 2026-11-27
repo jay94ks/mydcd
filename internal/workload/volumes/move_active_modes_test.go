@@ -96,7 +96,7 @@ func TestMoveActiveLegacySigningBytesAndReadonlyConsumerIdentity(t *testing.T) {
 		Running   bool
 		Signature []byte
 	}{Binding: p.Binding, Consumer: p.Consumer, Running: p.Running}
-	if !bytes.Equal(ActiveBytes(p), signedBytes("mydc-volume-active-1", legacy)) {
+	if !bytes.Equal(ActiveBytes(p), signedBytes("sfc-volume-active-1", legacy)) {
 		t.Fatal("absent Idle changed existing schema1 signing bytes")
 	}
 	for _, change := range []func(*ActiveProof){

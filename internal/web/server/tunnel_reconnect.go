@@ -7,15 +7,15 @@ import (
 	"net/http"
 	"slices"
 
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/observability"
-	"github.com/jay94ks/mydcd/internal/web/mydc"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/observability"
+	"github.com/jay94ks/seafield/internal/web/sfc"
 )
 
-// RQ4 node-pair link reconnect in mydcd's real shape
+// RQ4 node-pair link reconnect in sfcd's real shape
 // (docs/reference/tunnel-reconnect.md): tunnel-reconnect-plan {Node, Peer}
 // → signed reconnect-tunnel control.TunnelChange{Operation, Plan}
-// (Expected 0) → tunnel-reconnect-status {Operation}. mydcd admits only
+// (Expected 0) → tunnel-reconnect-status {Operation}. sfcd admits only
 // system administrators; the web does not judge that itself. Node is the
 // owner that dials (the server that saw the link down), Peer the other end.
 
@@ -32,17 +32,17 @@ type tunnelLinkView struct {
 }
 
 // GET /t/{t}/networks/{name}/tunnels → {items:[{tenant, network, pairId,
-// from, to, state(up/degraded/down/pending), since}]}. mydcd has no
+// from, to, state(up/degraded/down/pending), since}]}. sfcd has no
 // per-network link read: the network row's servers and mesh-links are
 // joined by PairID.
 func (s *Server) handleNetworkTunnels(w http.ResponseWriter, r *http.Request, ws *webSession) {
 	tenant, name := r.PathValue("t"), r.PathValue("name")
-	readList(s, w, r, ws, func(ctx context.Context, c mydc.Conn) ([]tunnelLinkView, error) {
+	readList(s, w, r, ws, func(ctx context.Context, c sfc.Conn) ([]tunnelLinkView, error) {
 		n, _, err := findNetwork(ctx, c, tenant, name)
 		if err != nil {
 			return nil, err
 		}
-		var links []mydc.MeshLinkView
+		var links []sfc.MeshLinkView
 		for after := ""; ; {
 			p, err := c.MeshLinks(ctx, tenant, "", after)
 			if err != nil {
@@ -85,18 +85,18 @@ func (s *Server) handleReconnectTunnel(w http.ResponseWriter, r *http.Request, w
 	if n := r.PathValue("node"); n != "" {
 		req.From, req.To = n, r.PathValue("peer")
 	}
-	s.sharedCreate(w, r, ws, req.OpID, req, func(ctx context.Context, c mydc.Conn, _ mydc.Session) (string, any, uint64, string, error) {
+	s.sharedCreate(w, r, ws, req.OpID, req, func(ctx context.Context, c sfc.Conn, _ sfc.Session) (string, any, uint64, string, error) {
 		if req.From == "" || req.To == "" || req.From == req.To {
 			return "", nil, 0, "", invalid("from, to: two different servers")
 		}
 		plan, err := c.PlanTunnelReconnect(ctx, req.From, req.To)
-		if isMydcCode(err, mydc.CodeConflict) {
+		if isSfcCode(err, sfc.CodeConflict) {
 			return "", nil, 0, "", &httpErr{http.StatusConflict, "not-down", "the link is not down (or a server is not an active member); only a down link is reconnected"}
 		}
 		if err != nil {
 			return "", nil, 0, "", err
 		}
-		return mydc.ActionReconnectTunnel, control.TunnelChange{Operation: tunnelOperation(req.OpID), Plan: plan}, 0, "tunnel/" + plan.PairID, nil
+		return sfc.ActionReconnectTunnel, control.TunnelChange{Operation: tunnelOperation(req.OpID), Plan: plan}, 0, "tunnel/" + plan.PairID, nil
 	})
 }
 
@@ -119,9 +119,9 @@ type tunnelStatusView struct {
 // GET /tunnel-reconnects/{operation} → tunnel-reconnect-status. An
 // unknown operation is 404.
 func (s *Server) handleTunnelReconnectStatus(w http.ResponseWriter, r *http.Request, ws *webSession) {
-	read(s, w, r, ws, func(ctx context.Context, c mydc.Conn) (tunnelStatusView, error) {
+	read(s, w, r, ws, func(ctx context.Context, c sfc.Conn) (tunnelStatusView, error) {
 		st, err := c.TunnelReconnectStatus(ctx, r.PathValue("operation"))
-		if isMydcCode(err, mydc.CodeConflict) {
+		if isSfcCode(err, sfc.CodeConflict) {
 			return tunnelStatusView{}, &httpErr{http.StatusNotFound, "not-found", "no such reconnect"}
 		}
 		if err != nil {

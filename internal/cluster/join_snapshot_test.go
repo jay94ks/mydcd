@@ -13,13 +13,13 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/config"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/config"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/sfcp"
 
 	"github.com/hashicorp/raft"
 )
@@ -35,13 +35,13 @@ func TestRealManagedJoiningReplicationInstallsDirectorySnapshot(t *testing.T) {
 		}
 		address := socket.LocalAddr().String()
 		_ = socket.Close()
-		peer := f.peers[mydcp.Identity(f.node.Public)]
+		peer := f.peers[sfcp.Identity(f.node.Public)]
 		peer.Endpoint = address
 		f.peers[peer.Key] = peer
 		f.policy.TrustRoot, f.policy.Genesis = f.node.Public, config.Peer{ID: "node", Key: f.node.Actor(), Endpoint: address, Voter: true}
 		f.options.Validate, f.options.Reduce, f.options.AdmitModule, f.options.ModuleID = f.policy.Validate, f.policy.Reduce, f.policy.AdmitModule, f.policy.ID()
 		f.options.TrackConfiguration = true
-		f.options.Resolve = func(id raft.ServerID, address raft.ServerAddress) (mydcp.Peer, bool) {
+		f.options.Resolve = func(id raft.ServerID, address raft.ServerAddress) (sfcp.Peer, bool) {
 			f.mu.RLock()
 			defer f.mu.RUnlock()
 			for _, p := range f.peers {
@@ -49,7 +49,7 @@ func TestRealManagedJoiningReplicationInstallsDirectorySnapshot(t *testing.T) {
 					return p, true
 				}
 			}
-			return mydcp.Peer{}, false
+			return sfcp.Peer{}, false
 		}
 	})
 	f.enroll()
@@ -58,11 +58,11 @@ func TestRealManagedJoiningReplicationInstallsDirectorySnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer clear(target.Private)
-	p := mydcp.Peer{ID: "learner", Policy: mydcp.Policy{Key: mydcp.Identity(target.Public), Replicate: true, Snapshot: true, Respond: true}}
+	p := sfcp.Peer{ID: "learner", Policy: sfcp.Policy{Key: sfcp.Identity(target.Public), Replicate: true, Snapshot: true, Respond: true}}
 	f.mu.Lock()
 	f.peers[p.Key] = p
 	f.mu.Unlock()
-	mesh, err := mydcp.NewTransport(target, f.policy.Cluster, f.lookup)
+	mesh, err := sfcp.NewTransport(target, f.policy.Cluster, f.lookup)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -175,5 +175,5 @@ func TestRealManagedJoiningReplicationInstallsDirectorySnapshot(t *testing.T) {
 	if current, _ := f.lookup(p.Key); current.Member || !current.Replicate {
 		t.Fatal("test silently granted full membership")
 	}
-	t.Log("actual compacted SDK snapshot crossed MYDCP to replication-only nonvoter; original managed directory/A2 dispatch/catalog/configuration index installed")
+	t.Log("actual compacted SDK snapshot crossed SFCP to replication-only nonvoter; original managed directory/A2 dispatch/catalog/configuration index installed")
 }

@@ -16,8 +16,8 @@ import (
 
 	"github.com/moby/moby/client"
 
-	"github.com/jay94ks/mydcd/internal/engine"
-	"github.com/jay94ks/mydcd/internal/storage"
+	"github.com/jay94ks/seafield/internal/engine"
+	"github.com/jay94ks/seafield/internal/storage"
 )
 
 // Actual owner DB/lock, simulated shared phase/authority and fatal SDK HTTP
@@ -41,7 +41,7 @@ func TestCheckerCompilerAcceptanceHasNoContainerOrJobDirectoryAndSurvivesReopen(
 		raw, _ := json.Marshal(policy)
 		return CompilerGrant{Schema: 1, Job: b.Digest(), Manifest: b.Manifest, Policy: sha256.Sum256(raw), Owner: b.Owner, Phase: "reserved", Revision: 1, Index: 5, DeadlineUnixMilli: b.DeadlineUnixMilli, Recovery: true}, nil
 	}
-	api, err := client.New(client.WithHost("unix:///nonexistent-mydc-compiler.sock"), client.WithAPIVersion("1.53"), client.WithHTTPClient(&http.Client{Transport: compilerSDKTransport(func(*http.Request) (*http.Response, error) {
+	api, err := client.New(client.WithHost("unix:///nonexistent-sfc-compiler.sock"), client.WithAPIVersion("1.53"), client.WithHTTPClient(&http.Client{Transport: compilerSDKTransport(func(*http.Request) (*http.Response, error) {
 		t.Fatal("metadata acceptance/never-dispatched cleanup issued native HTTP")
 		return nil, errors.New("unexpected native request")
 	})}))

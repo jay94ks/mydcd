@@ -7,9 +7,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/eventlog"
-	"github.com/jay94ks/mydcd/internal/storage"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/eventlog"
+	"github.com/jay94ks/seafield/internal/storage"
 	"sync"
 	"sync/atomic"
 
@@ -18,12 +18,14 @@ import (
 
 var ErrRecovering = errors.New("FSM replay has not reached durable checkpoint")
 
+// fsmRecord is the checkpoint row. The state itself is stored as rows under
+// state.StoredPrefix; Head is its small head row, written with every apply.
 type fsmRecord struct {
-	Schema               uint8
-	Cluster              string
-	RaftIndex, Term      uint64
-	Configuration, State []byte
-	ConfigurationIndex   uint64 `json:",omitempty"`
+	Schema              uint8
+	Cluster             string
+	RaftIndex, Term     uint64
+	Configuration, Head []byte
+	ConfigurationIndex  uint64 `json:",omitempty"`
 }
 type application struct {
 	Result          state.Result
@@ -59,16 +61,19 @@ type fsm struct {
 	configurationIndex uint64
 	trackConfiguration bool
 	durable            fsmRecord
-	ready              bool
-	failed             error
-	failure            chan error
-	validate           state.Validator
-	reduce             state.Reducer
-	admitModule        state.ModuleAuthorizer
-	admitMutation      state.MutationAuthorizer
-	admitPatch         state.ModulePatchAuthorizer
-	changes            chan struct{}
-	readView           atomic.Pointer[fsmReadView]
+	// dirty holds the rows changed since the last write. Replay below the
+	// durable floor collects them too; reaching the floor clears them.
+	dirty         *state.Changes
+	ready         bool
+	failed        error
+	failure       chan error
+	validate      state.Validator
+	reduce        state.Reducer
+	admitModule   state.ModuleAuthorizer
+	admitMutation state.MutationAuthorizer
+	admitPatch    state.ModulePatchAuthorizer
+	changes       chan struct{}
+	readView      atomic.Pointer[fsmReadView]
 }
 
 func newFSM(db *storage.DB, logs raft.LogStore, cluster, admin string, validate state.Validator) (*fsm, error) {
@@ -76,7 +81,7 @@ func newFSM(db *storage.DB, logs raft.LogStore, cluster, admin string, validate 
 	if err != nil {
 		return nil, err
 	}
-	f := &fsm{db: db, logs: logs, cluster: cluster, admin: admin, work: initial, published: initial, ready: true, failure: make(chan error, 1), validate: validate, changes: make(chan struct{})}
+	f := &fsm{db: db, logs: logs, cluster: cluster, admin: admin, work: initial, published: initial, dirty: state.NewChanges(), ready: true, failure: make(chan error, 1), validate: validate, changes: make(chan struct{})}
 	b, err := db.Get("fsm")
 	if errors.Is(err, storage.ErrMissing) {
 		f.publishReadView()
@@ -88,7 +93,11 @@ func newFSM(db *storage.DB, logs raft.LogStore, cluster, admin string, validate 
 	if err = json.Unmarshal(b, &f.durable); err != nil || f.durable.Schema != 1 || f.durable.Cluster != cluster || f.durable.RaftIndex == 0 || f.durable.Term == 0 {
 		return nil, errors.New("invalid FSM binding/checkpoint")
 	}
-	f.published, err = state.Decode(f.durable.State)
+	rows, err := db.Scan(state.StoredPrefix)
+	if err != nil {
+		return nil, err
+	}
+	f.published, err = state.DecodeStored(f.durable.Head, rows)
 	if err != nil {
 		return nil, err
 	}
@@ -120,13 +129,13 @@ func (f *fsm) fail(err error) error {
 	}
 	return f.failed
 }
-func (f *fsm) record() (fsmRecord, error) {
-	b, err := state.Encode(f.work)
+func (f *fsm) record(writes map[string][]byte) (fsmRecord, error) {
+	head, err := state.StoredWrites(f.work, f.dirty, writes)
 	var index uint64
 	if f.configurationTracking(f.work) {
 		index = f.configurationIndex
 	}
-	return fsmRecord{Schema: 1, Cluster: f.cluster, RaftIndex: f.position, Term: f.term, Configuration: append([]byte(nil), f.configuration...), State: b, ConfigurationIndex: index}, err
+	return fsmRecord{Schema: 1, Cluster: f.cluster, RaftIndex: f.position, Term: f.term, Configuration: append([]byte(nil), f.configuration...), Head: head, ConfigurationIndex: index}, err
 }
 
 func (f *fsm) configurationTracking(s state.State) bool {
@@ -140,29 +149,40 @@ func (f *fsm) publish() error {
 	if f.position < f.durable.RaftIndex {
 		return nil
 	}
-	r, err := f.record()
-	if err != nil {
-		return f.fail(err)
-	}
-	if r.RaftIndex == f.durable.RaftIndex && r.RaftIndex != 0 {
-		if r.Term != f.durable.Term || r.ConfigurationIndex != f.durable.ConfigurationIndex || !bytes.Equal(r.State, f.durable.State) || !bytes.Equal(r.Configuration, f.durable.Configuration) {
+	writes := map[string][]byte{}
+	if f.position == f.durable.RaftIndex && f.position != 0 {
+		// Replay reached the stored checkpoint: the replayed state must be
+		// exactly the stored one. Compared once, at start-up.
+		var index uint64
+		if f.configurationTracking(f.work) {
+			index = f.configurationIndex
+		}
+		replayed, err := state.Encode(f.work)
+		stored, err2 := state.Encode(f.published)
+		if err != nil || err2 != nil || f.term != f.durable.Term || index != f.durable.ConfigurationIndex || !bytes.Equal(replayed, stored) || !bytes.Equal(f.configuration, f.durable.Configuration) {
 			return f.fail(errors.New("durable FSM differs from Raft replay"))
 		}
+		f.dirty = state.NewChanges()
 		f.ready = true
 		f.published = f.work
 		f.publishReadView()
 		return nil
 	}
+	r, err := f.record(writes)
+	if err != nil {
+		return f.fail(err)
+	}
 	b, err := json.Marshal(r)
 	if err != nil {
 		return f.fail(err)
 	}
-	writes := map[string][]byte{"fsm": b}
+	writes["fsm"] = b
 	f.projectWrites(writes, r.RaftIndex)
 	if err = f.db.Write(writes); err != nil {
 		return f.fail(fmt.Errorf("FSM atomic sync: %w", err))
 	}
 	f.durable = r
+	f.dirty = state.NewChanges()
 	f.pendingEvents, f.pendingEventError, f.projectionRestore = nil, nil, 0
 	f.published = f.work
 	f.ready = true
@@ -199,6 +219,7 @@ func (f *fsm) Apply(log *raft.Log) any {
 		f.pendingEvents, f.pendingEventError = f.project(f.work, n, command, result)
 	}
 	f.work = n
+	f.dirty.Add(n)
 	f.position = log.Index
 	f.term = log.Term
 	err = f.publish()

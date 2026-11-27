@@ -10,13 +10,13 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/userauth"
-	checker "github.com/jay94ks/mydcd/internal/workload/lifecycle"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/userauth"
+	checker "github.com/jay94ks/seafield/internal/workload/lifecycle"
 )
 
 // Called by the existing interpreted/compiled checker fixture after its real
@@ -24,7 +24,7 @@ import (
 // The existing mixed fixture compiles an inline endpoint; its named native-file
 // remains interpreted. Thus this helper proves app-binding rows, not a live
 // compiler row. Active named build-job rows use the shared-control core test.
-func verifyManagedLifecyclePublicReads(t *testing.T, ctx context.Context, root string, user userauth.Client, peer mydcp.Peer, session access.Session, p control.Policy, read func() cluster.View, live, retired, deleted bool) {
+func verifyManagedLifecyclePublicReads(t *testing.T, ctx context.Context, root string, user userauth.Client, peer sfcp.Peer, session access.Session, p control.Policy, read func() cluster.View, live, retired, deleted bool) {
 	t.Helper()
 	query := control.PublicReadQuery{Name: "native-file"}
 	page := readNativePublicPage(t, ctx, user, peer, session, "lifecycle-uses", "tenant", query)

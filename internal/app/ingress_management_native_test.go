@@ -29,22 +29,22 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/certstore"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/config"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/engine"
-	"github.com/jay94ks/mydcd/internal/eventlog"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/ingress"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/network/services"
-	"github.com/jay94ks/mydcd/internal/tenancy"
-	"github.com/jay94ks/mydcd/internal/userauth"
-	"github.com/jay94ks/mydcd/internal/workload"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/certstore"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/config"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/engine"
+	"github.com/jay94ks/seafield/internal/eventlog"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/ingress"
+	"github.com/jay94ks/seafield/internal/network/services"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/tenancy"
+	"github.com/jay94ks/seafield/internal/userauth"
+	"github.com/jay94ks/seafield/internal/workload"
 	bolt "go.etcd.io/bbolt"
 	"gopkg.in/yaml.v3"
 )
@@ -55,7 +55,7 @@ import (
 // Extra app shutdown and both Runtime.Close/owned journal cleanup are installed
 // before accepting an extra app; no host network setting or image is fetched.
 func TestRQ7ManagedIngressCLIThreeMappingsTwoOwners(t *testing.T) {
-	if os.Getenv("MYDC_DOCKER_TEST_REMOTE_CIDR") == "" {
+	if os.Getenv("SFC_DOCKER_TEST_REMOTE_CIDR") == "" {
 		t.Skip("existing owned remote CIDR baseline required")
 	}
 	runManagedAppOwner(t, true, true, true, true, managedAppIngressManagement, true, true, false, true)
@@ -123,7 +123,7 @@ func rq7CertificateLasting(t *testing.T, key crypto.Signer, lifetime time.Durati
 	return certstore.Material{Chain: pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), Key: pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: private})}, parsed
 }
 
-func verifyManagedIngressManagement(t *testing.T, ctx context.Context, a, b *Runtime, cfg config.Node, root string, user userauth.Client, peer mydcp.Peer, session access.Session, p control.Policy, read func() cluster.View, change func(string, string, uint64, any), wait func(string, func() bool), image string, public map[string]any, save func(), fixtureTest func(*testing.T)) {
+func verifyManagedIngressManagement(t *testing.T, ctx context.Context, a, b *Runtime, cfg config.Node, root string, user userauth.Client, peer sfcp.Peer, session access.Session, p control.Policy, read func() cluster.View, change func(string, string, uint64, any), wait func(string, func() bool), image string, public map[string]any, save func(), fixtureTest func(*testing.T)) {
 	t.Helper()
 	parent := t
 	selectedAny := false
@@ -145,7 +145,7 @@ func verifyManagedIngressManagement(t *testing.T, ctx context.Context, a, b *Run
 		// sets; the shared S2 setup above is mandatory even for a later selector.
 		return ok
 	}
-	primary := netip.MustParsePrefix(os.Getenv("MYDC_DOCKER_TEST_CIDR"))
+	primary := netip.MustParsePrefix(os.Getenv("SFC_DOCKER_TEST_CIDR"))
 	if primary.Bits() != 28 || !primary.Addr().Is4() {
 		t.Fatal("same primary/adjacent owned /28 baseline as tenant isolation required")
 	}
@@ -197,7 +197,7 @@ func verifyManagedIngressManagement(t *testing.T, ctx context.Context, a, b *Run
 			}
 			args = append([]string{"--timeout", budget}, args...)
 		}
-		body, why, err := runManagedCLICommand(ctx, os.Getenv("MYDC_TEST_CLI"), home, profile, args, inputs)
+		body, why, err := runManagedCLICommand(ctx, os.Getenv("SFC_TEST_CLI"), home, profile, args, inputs)
 		if (err == nil) != success {
 			// Preserve first-failure facts before deferred app retirement/Close
 			// can replace them with shutdown errors. No diagnostic CLI or retry.
@@ -292,19 +292,19 @@ func verifyManagedIngressManagement(t *testing.T, ctx context.Context, a, b *Run
 		if scope == "tenant" {
 			nodes = append(nodes, "node-b")
 		}
-		change("rq7-nodes-"+scope, "set-nodes", tenant.Revision, control.NodeAssignment{Tenant: scope, Nodes: nodes})
+		change("rq7-nodes-"+scope, "set-nodes", tenant.Revision, control.NodeChangeTo(scope, tenant.AllowedNodes, nodes))
 	}
 	users, _ = p.Catalog(read().State)
 	other, _ := users.Tenant("second")
-	change("rq7-trust", "set-trust", other.Revision, control.TrustAssignment{Tenant: "second", Rules: []access.TrustRule{{Registry: strings.Split(image, "/")[0], Repository: "fixture"}}})
+	change("rq7-trust", "set-trust", other.Revision, control.TrustChange{Tenant: "second", Add: []access.TrustRule{{Registry: strings.Split(image, "/")[0], Repository: "fixture"}}, Remove: other.ImageSources})
 	for _, item := range []struct{ tenant, node string }{{"", "node-b"}, {"tenant", "node-b"}, {"second", "node-a"}} {
 		// Match the initial RQ7 node-a global ceiling, including distinct
 		// Task/route/DNS edges; a tenant limit cannot exceed its node.
 		change("rq7-quota-"+item.tenant+"-"+item.node, "set-node-quota", 0, tenancy.NodeLimit{Tenant: item.tenant, Node: item.node, Capacity: workload.Resources{CPU: 1e9, Memory: 256 << 20}, Networks: 2, MaxConsumers: 16, MaxIngressInstances: 2, MaxIngressListeners: 4, MaxIngressRequests: 4, MaxIngressConnections: 16, IngressBufferBytes: 256 << 10})
 	}
 	for _, def := range []tenancy.TUNDefinition{
-		{Tenant: "second", Name: "rq7-second", Members: []tenancy.TUNNode{{Node: "node-a", Pools: []tenancy.Subnet{{ID: "pool", Prefix: second, Gateway: second.Addr().Next(), MTU: 1280}}, Addresses: []netip.Prefix{netip.MustParsePrefix("198.18.253.1/32")}}}},
-		{Tenant: "tenant", Name: "rq7-remote", Members: []tenancy.TUNNode{{Node: "node-b", Pools: []tenancy.Subnet{{ID: "pool", Prefix: remote, Gateway: remote.Addr().Next(), MTU: 1280}}, Addresses: []netip.Prefix{netip.MustParsePrefix("198.18.253.2/32")}}}},
+		{Tenant: "second", Name: "rq7-second", Members: []tenancy.TUNNode{{Node: "node-a", Pools: []tenancy.Subnet{{ID: "pool", Prefix: second, Gateway: second.Addr().Next(), MTU: 1280}}}}},
+		{Tenant: "tenant", Name: "rq7-remote", Members: []tenancy.TUNNode{{Node: "node-b", Pools: []tenancy.Subnet{{ID: "pool", Prefix: remote, Gateway: remote.Addr().Next(), MTU: 1280}}}}},
 	} {
 		resources, err := p.Resources(read().State)
 		if err != nil {
@@ -312,7 +312,7 @@ func verifyManagedIngressManagement(t *testing.T, ctx context.Context, a, b *Run
 		}
 		change("rq7-network-"+def.Name, "create-tun-network", resources.Networks.Revision(), def)
 	}
-	dns := services.ManagedDNSDefinition{Schema: 1, Tenant: "tenant", Network: "shared-services", Policy: services.ManagedDNSPolicy{Enabled: true, Zone: "rq7.mydc.test.", TTL: 1, NegativeTTL: 1, Transports: []string{"udp", "tcp"}, Upstreams: []netip.AddrPort{}, MaxQueries: 8, MaxCacheEntries: 8, MaxResponseBytes: 4096, MaxConnections: 8, RequestTimeoutMS: 1000}}
+	dns := services.ManagedDNSDefinition{Schema: 1, Tenant: "tenant", Network: "shared-services", Policy: services.ManagedDNSPolicy{Enabled: true, Zone: "rq7.sfc.test.", TTL: 1, NegativeTTL: 1, Transports: []string{"udp", "tcp"}, Upstreams: []netip.AddrPort{}, MaxQueries: 8, MaxCacheEntries: 8, MaxResponseBytes: 4096, MaxConnections: 8, RequestTimeoutMS: 1000}}
 	change("rq7-dns", "configure-network-dns", 0, dns)
 	for _, grant := range []control.IngressHostPolicyChange{{Tenant: "tenant", Policy: ingress.HostPolicy{ExternalAllowed: true, LocalHosts: []string{"shop.example"}, ExternalHosts: []string{"shop.example"}}}, {Tenant: "second", Policy: ingress.HostPolicy{LocalHosts: []string{"grafana.internal", "metrics.example"}, ExternalHosts: []string{"metrics.example"}}}} {
 		call(true, nil, "ingress", "host-policy", writeJSON("rq7-hosts-"+grant.Tenant, grant), "--tenant", grant.Tenant, "--request-id", "rq7-hosts-"+grant.Tenant)
@@ -320,7 +320,7 @@ func verifyManagedIngressManagement(t *testing.T, ctx context.Context, a, b *Run
 	rq7ExerciseIngressApps(t, ctx, a, b, root, cfg, user, peer, session, follower, provider, p, read, change, wait, call, writeJSON, put, image, primary, second, remote, shop, next, internal, leaf, nextLeaf, internalLeaf, run)
 }
 
-func rq7ExerciseIngressApps(t *testing.T, ctx context.Context, a, b *Runtime, root string, cfg config.Node, user userauth.Client, peer mydcp.Peer, session access.Session, follower userauth.Client, provider mydcp.Peer, p control.Policy, read func() cluster.View, change func(string, string, uint64, any), wait func(string, func() bool), call func(bool, []*os.File, ...string) []byte, writeJSON func(string, any) string, put func(string, certstore.Material, bool), image string, primary, second, remote netip.Prefix, shop, next, internal certstore.Material, leaf, nextLeaf, internalLeaf *x509.Certificate, run func(string, func(*testing.T)) bool) {
+func rq7ExerciseIngressApps(t *testing.T, ctx context.Context, a, b *Runtime, root string, cfg config.Node, user userauth.Client, peer sfcp.Peer, session access.Session, follower userauth.Client, provider sfcp.Peer, p control.Policy, read func() cluster.View, change func(string, string, uint64, any), wait func(string, func() bool), call func(bool, []*os.File, ...string) []byte, writeJSON func(string, any) string, put func(string, certstore.Material, bool), image string, primary, second, remote netip.Prefix, shop, next, internal certstore.Material, leaf, nextLeaf, internalLeaf *x509.Certificate, run func(string, func(*testing.T)) bool) {
 	t.Helper()
 	// Rebind this helper's closures as well as the root's callbacks. A failed
 	// predecessor stops subsequent dependent native mutations. Independent sets
@@ -619,10 +619,10 @@ func rq7ExerciseIngressApps(t *testing.T, ctx context.Context, a, b *Runtime, ro
 				t.Fatal(err)
 			}
 			input.Name = "rq7-" + mode
-			input.MyDC.Ingress.Routes[0].Balance = nil
+			input.Sfc.Ingress.Routes[0].Balance = nil
 			if mode == "unassigned" {
-				for i := range input.MyDC.Ingress.Routes {
-					input.MyDC.Ingress.Routes[i].Host = "unassigned.example"
+				for i := range input.Sfc.Ingress.Routes {
+					input.Sfc.Ingress.Routes[i].Host = "unassigned.example"
 				}
 			}
 			raw, err = yaml.Marshal(input)
@@ -688,7 +688,7 @@ func rq7ExerciseIngressApps(t *testing.T, ctx context.Context, a, b *Runtime, ro
 func rq7IngressDocument(t *testing.T, image, tenant, app, node, network, host string, pool netip.Prefix) []byte {
 	t.Helper()
 	document := fmt.Sprintf(`name: %s
-x-mydc:
+x-sfc:
  ingress:
   node: %s
   runtime: {max_requests: 2, max_connections: 8, max_header_bytes: 4096, max_body_bytes: 1048576, buffer_bytes: 131072, request_timeout_ms: 10000, dial_timeout_ms: 500, response_header_timeout_ms: 8000, health_interval_ms: 100}
@@ -699,11 +699,11 @@ services:
   image: %s
   cpus: 0.1
   mem_limit: 16m
-  environment: {MYDC_READINESS_FIXTURE: "1", MYDC_TENANT_FIXTURE: %s}
+  environment: {SFC_READINESS_FIXTURE: "1", SFC_TENANT_FIXTURE: %s}
   tmpfs: ["/data:size=4m,uid=10001,gid=10001,mode=0700"]
   healthcheck: {test: [CMD, /backend, --probe], interval: 1s, timeout: 1s, retries: 2}
   networks: {app: {ipv4_address: %s}}
-  x-mydc: {node: %s, ready: {http: /readyz, port: 8080}}
+  x-sfc: {node: %s, ready: {http: /readyz, port: 8080}}
 networks:
  app: {external: true, name: %s}
 `, app, node, host, image, tenant, pool.Addr().Next().Next(), node, network)
@@ -713,20 +713,20 @@ networks:
 	}
 	if app == "rq7-shop" {
 		web := input.Services["web"]
-		web.MyDC.Node, web.MyDC.Nodes, web.MyDC.PerNode = "", []string{node}, 2
+		web.Sfc.Node, web.Sfc.Nodes, web.Sfc.PerNode = "", []string{node}, 2
 		web.Networks = map[string]deployment.Attachment{"app": {}}
 		input.Services["web"] = web
 		admin := web
-		admin.MyDC.Nodes, admin.MyDC.PerNode, admin.MyDC.Node = nil, 0, node
+		admin.Sfc.Nodes, admin.Sfc.PerNode, admin.Sfc.Node = nil, 0, node
 		admin.Networks = map[string]deployment.Attachment{"app": {IPv4: pool.Addr().Next().Next().Next().Next().Next().Next().String()}}
 		input.Services["admin"] = admin
 		task := deployment.ResourceKey("task", tenant, app, (deployment.TaskInstance{Service: "web", Node: node, Ordinal: 2}).ResourceID())
 		hash := sha256.Sum256([]byte(task))
-		input.MyDC.Ingress.Routes[0].Balance = &ingress.Balance{Method: "hash", Key: "cookie:session", Groups: map[string]ingress.BackendGroup{"canary": {Backends: []string{"root/task-" + hex.EncodeToString(hash[:])}}}, Match: []ingress.BalanceCondition{{ID: "canary", Group: "canary", Headers: map[string]ingress.ValueMatch{"X-Canary": {Equal: rq7String("1")}}}}}
-		input.MyDC.Ingress.Routes = append(input.MyDC.Ingress.Routes, deployment.IngressRouteDeclaration{ID: "admin", Host: host, Prefix: "/admin", Service: "admin", Port: 8080, HealthPath: "/readyz", Gateway: "both"})
+		input.Sfc.Ingress.Routes[0].Balance = &ingress.Balance{Method: "hash", Key: "cookie:session", Groups: map[string]ingress.BackendGroup{"canary": {Backends: []string{"root/task-" + hex.EncodeToString(hash[:])}}}, Match: []ingress.BalanceCondition{{ID: "canary", Group: "canary", Headers: map[string]ingress.ValueMatch{"X-Canary": {Equal: rq7String("1")}}}}}
+		input.Sfc.Ingress.Routes = append(input.Sfc.Ingress.Routes, deployment.IngressRouteDeclaration{ID: "admin", Host: host, Prefix: "/admin", Service: "admin", Port: 8080, HealthPath: "/readyz", Gateway: "both"})
 	}
 	if app == "rq7-internal" {
-		input.MyDC.Ingress.Routes = append(input.MyDC.Ingress.Routes, deployment.IngressRouteDeclaration{ID: "grafana", Host: "grafana.internal", Prefix: "/", Service: "web", Port: 8080, HealthPath: "/readyz", Gateway: "local"})
+		input.Sfc.Ingress.Routes = append(input.Sfc.Ingress.Routes, deployment.IngressRouteDeclaration{ID: "grafana", Host: "grafana.internal", Prefix: "/", Service: "web", Port: 8080, HealthPath: "/readyz", Gateway: "local"})
 	}
 	raw, err := yaml.Marshal(input)
 	if err != nil {
@@ -781,7 +781,7 @@ func rq7DamageWrappedCertificate(t *testing.T, r *Runtime, version certstore.Cer
 	}
 }
 
-func rq7ExerciseBlocks(t *testing.T, ctx context.Context, a, b *Runtime, root string, user userauth.Client, peer mydcp.Peer, session access.Session, p control.Policy, read func() cluster.View, change func(string, string, uint64, any), wait func(string, func() bool), call func(bool, []*os.File, ...string) []byte, writeJSON func(string, any) string, tenant, app, external, local string, shopClient, metricsClient, localClient *http.Client, request func(*http.Client, string, string, string, string, int) [32]byte, run func(string, func(*testing.T)) bool) bool {
+func rq7ExerciseBlocks(t *testing.T, ctx context.Context, a, b *Runtime, root string, user userauth.Client, peer sfcp.Peer, session access.Session, p control.Policy, read func() cluster.View, change func(string, string, uint64, any), wait func(string, func() bool), call func(bool, []*os.File, ...string) []byte, writeJSON func(string, any) string, tenant, app, external, local string, shopClient, metricsClient, localClient *http.Client, request func(*http.Client, string, string, string, string, int) [32]byte, run func(string, func(*testing.T)) bool) bool {
 	t.Helper()
 	phase := func(name string, action func()) bool {
 		return run(name, func(current *testing.T) {
@@ -1031,8 +1031,8 @@ func rq7ExerciseBlocks(t *testing.T, ctx context.Context, a, b *Runtime, root st
 		if err != nil {
 			t.Fatal(err)
 		}
-		input.MyDC.Ingress.Routes[0].Balance.Method = "least-request"
-		input.MyDC.Ingress.Routes[0].Balance.Key = ""
+		input.Sfc.Ingress.Routes[0].Balance.Method = "least-request"
+		input.Sfc.Ingress.Routes[0].Balance.Key = ""
 		raw, err = yaml.Marshal(input)
 		if err != nil {
 			t.Fatal(err)
@@ -1194,7 +1194,7 @@ func rq7ExerciseBlocks(t *testing.T, ctx context.Context, a, b *Runtime, root st
 
 }
 
-func rq7ExerciseUserAuthority(t *testing.T, ctx context.Context, root string, admin userauth.Client, peer mydcp.Peer, adminSession access.Session, p control.Policy, read func() cluster.View, change func(string, string, uint64, any), material certstore.Material, provider mydcp.Peer) {
+func rq7ExerciseUserAuthority(t *testing.T, ctx context.Context, root string, admin userauth.Client, peer sfcp.Peer, adminSession access.Session, p control.Policy, read func() cluster.View, change func(string, string, uint64, any), material certstore.Material, provider sfcp.Peer) {
 	t.Helper()
 	for _, name := range []string{"rq7-uploader", "rq7-manager", "rq7-second-manager"} {
 		key, err := identity.Create(filepath.Join(root, name+"-key"))
@@ -1219,7 +1219,7 @@ func rq7ExerciseUserAuthority(t *testing.T, ctx context.Context, root string, ad
 			t.Fatal(err)
 		}
 		defer clear(self.Private)
-		mesh, err := mydcp.NewTransport(self, admin.Cluster, func(key mydcp.Identity) (mydcp.Peer, bool) {
+		mesh, err := sfcp.NewTransport(self, admin.Cluster, func(key sfcp.Identity) (sfcp.Peer, bool) {
 			if key == peer.Key {
 				return peer, true
 			}
@@ -1229,7 +1229,7 @@ func rq7ExerciseUserAuthority(t *testing.T, ctx context.Context, root string, ad
 			t.Fatal(err)
 		}
 		defer mesh.Close()
-		user := userauth.Client{Mesh: mesh, Self: self, Cluster: admin.Cluster, Peers: []mydcp.Peer{peer, provider}}
+		user := userauth.Client{Mesh: mesh, Self: self, Cluster: admin.Cluster, Peers: []sfcp.Peer{peer, provider}}
 		session, err := user.Login(ctx, peer, name, key.Private)
 		if err != nil {
 			t.Fatal(err)
@@ -1281,7 +1281,7 @@ func rq7ExerciseUserAuthority(t *testing.T, ctx context.Context, root string, ad
 					t.Fatal(err)
 				}
 				input.Name = "rq7-cross-collision"
-				input.MyDC.Ingress.Routes[0].Host = "shop.example"
+				input.Sfc.Ingress.Routes[0].Host = "shop.example"
 				raw, err = yaml.Marshal(input)
 				if err != nil {
 					t.Fatal(err)
@@ -1342,7 +1342,7 @@ func rq7ExerciseUserAuthority(t *testing.T, ctx context.Context, root string, ad
 	}
 }
 
-func rq7ReopenBlockedOwner(t *testing.T, ctx context.Context, owner *Runtime, user userauth.Client, peer mydcp.Peer, session access.Session, wait func(string, func() bool), call func(bool, []*os.File, ...string) []byte, writeJSON func(string, any) string, request func(*http.Client, string, string, string, string, int) [32]byte, client *http.Client, address string, lifetime *testing.T) {
+func rq7ReopenBlockedOwner(t *testing.T, ctx context.Context, owner *Runtime, user userauth.Client, peer sfcp.Peer, session access.Session, wait func(string, func() bool), call func(bool, []*os.File, ...string) []byte, writeJSON func(string, any) string, request func(*http.Client, string, string, string, string, int) [32]byte, client *http.Client, address string, lifetime *testing.T) {
 	t.Helper()
 	key := deployment.ResourceKey("ingress", "tenant", "rq7-remote", "http")
 	task := deployment.ResourceKey("task", "tenant", "rq7-remote", "web")

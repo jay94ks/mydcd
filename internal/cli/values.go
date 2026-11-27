@@ -15,7 +15,7 @@ import (
 // NewID returns a new request ID: 16 lower-case hex characters starting
 // with a letter, so it is also a valid server operation ID. The CLI
 // makes one per change and saves it before sending, so a lost reply is
-// settled with the same ID (mydc op show/resume), never a new one.
+// settled with the same ID (sfcli op show/resume), never a new one.
 func NewID() string {
 	var b [8]byte
 	if _, err := rand.Read(b[:]); err != nil {

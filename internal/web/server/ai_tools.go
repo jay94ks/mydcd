@@ -12,11 +12,12 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"unicode/utf8"
 
-	"github.com/jay94ks/mydcd/internal/web/ai"
+	"github.com/jay94ks/seafield/internal/web/ai"
 )
 
 // The coordinator's tool catalog (W2.2). Every tool is one screen API
@@ -24,7 +25,7 @@ import (
 // code path: a read tool is a GET run on the person's own session, a
 // change tool becomes a proposal whose approval sends that route's request
 // on the person's session (signed with their key, like a click). The
-// catalog is not filtered per user (the cache prefix stays shared); mydcd
+// catalog is not filtered per user (the cache prefix stays shared); sfcd
 // judges permission when a tool runs.
 
 // aiToolDef is one catalog entry. Path is the route pattern; its {params}
@@ -39,14 +40,10 @@ type aiToolDef struct {
 	Path     string
 	Props    map[string]any
 	Required []string
-	// change tools
-	Title        string // card title; {param} is replaced
-	Action       string // mydcd action shown on the card
-	Target       string // "node/{node}"
-	Impact       string // low / medium / high (rule-based)
-	Revert       string
-	Irreversible bool
-	Confirm      string // the argument the person types again (irreversible)
+	// change tools; the grade and undo come from webActions[Action]
+	Title  string // card title; {param} is replaced
+	Action string // sfcd action shown on the card
+	Target string // "node/{node}"
 }
 
 const (
@@ -62,92 +59,18 @@ func integer(desc string) map[string]any {
 	return map[string]any{"type": "integer", "description": desc}
 }
 
+// Arguments several tools share.
+var (
+	afterQ  = map[string]any{"after": str("page cursor from the previous page's next")}
+	tenantQ = map[string]any{"tenant": str("workspace (tenant) ID to narrow to")}
+	sel     = map[string]any{"service": str("service name"), "instance": str("instance (replica) name")}
+)
+
 // aiCatalog is sorted by name once (the request prefix must not move).
+// aiCatalog is every tool, sorted by name once (the request prefix must
+// not move). A new area file adds its list here.
 var aiCatalog = func() []aiToolDef {
-	afterQ := map[string]any{"after": str("page cursor from the previous page's next")}
-	tenantQ := map[string]any{"tenant": str("workspace (tenant) ID to narrow to")}
-	sel := map[string]any{"service": str("service name"), "instance": str("instance (replica) name")}
-	defs := []aiToolDef{
-		// core
-		{Name: "ops_list", Desc: "List the person's recent operations (changes sent from the web) with state.", Kind: aiKindRead, Core: true, Method: "GET", Path: "/api/v1/ops"},
-		{Name: "ops_get", Desc: "Read one operation's state and result by op ID (after a proposal was approved).", Kind: aiKindRead, Core: true, Method: "GET", Path: "/api/v1/ops/{id}"},
-		{Name: "tenants_list", Desc: "List the workspaces (tenants) the person can see.", Kind: aiKindRead, Core: true, Method: "GET", Path: "/api/v1/tenants"},
-		{Name: "dashboard_get", Desc: "Cluster dashboard summary: servers, apps, alerts.", Kind: aiKindRead, Core: true, Method: "GET", Path: "/api/v1/dashboard"},
-		{Name: "incidents_list", Desc: "List incidents (detected faults) the person can see, newest first, with the decision on each temporary action.", Kind: aiKindRead, Method: "GET", Path: "/api/v1/incidents",
-			Props: map[string]any{"scope": str("app or cluster"), "decision": str("pending, auto, approved, rejected, expired, none"), "tenant": str("workspace"), "app": str("app name")}},
-		{Name: "incidents_get", Desc: "Read one incident: signals, timeline, candidates, assessment and any pending approval.", Kind: aiKindRead, Method: "GET", Path: "/api/v1/incidents/{id}"},
-
-		// cluster and servers
-		{Name: "nodes_list", Desc: "List cluster servers (nodes) with role, state, cordon and revision.", Kind: aiKindRead, Method: "GET", Path: "/api/v1/nodes", Props: afterQ},
-		{Name: "nodes_summary", Desc: "Per-server CPU, memory and disk usage summary.", Kind: aiKindRead, Method: "GET", Path: "/api/v1/nodes/summary", Props: tenantQ},
-		{Name: "node_tasks", Desc: "Containers (tasks) running on one server.", Kind: aiKindRead, Method: "GET", Path: "/api/v1/nodes/{node}/tasks", Props: map[string]any{"tenant": str("workspace ID to narrow to"), "after": str("page cursor")}},
-		{Name: "node_storage", Desc: "Storage roots of one server and their space.", Kind: aiKindRead, Method: "GET", Path: "/api/v1/nodes/{node}/storage", Props: afterQ},
-		{Name: "node_disks", Desc: "Disks of one server (size, used, mount).", Kind: aiKindRead, Method: "GET", Path: "/api/v1/nodes/{node}/disks"},
-		{Name: "node_image_prune_plan", Desc: "Plan which unused images on a server can be removed and the space freed. Its plan value goes to node_image_prune.", Kind: aiKindRead, Method: "GET", Path: "/api/v1/nodes/{node}/image-prune-plan"},
-		{Name: "node_drain_plan", Desc: "Plan moving every task off a server: what moves where and what is blocked. Its plan and operation values go to node_drain.", Kind: aiKindRead, Method: "GET", Path: "/api/v1/nodes/{node}/drain-plan"},
-		{Name: "node_remove_plan", Desc: "What removing a server from the cluster would need and block.", Kind: aiKindRead, Method: "GET", Path: "/api/v1/nodes/{node}/remove-plan"},
-		{Name: "cluster_raft", Desc: "Control plane (Raft) status: leader, voters, health.", Kind: aiKindRead, Method: "GET", Path: "/api/v1/raft"},
-		{Name: "cluster_mesh", Desc: "Server-to-server network (mesh) links and their state.", Kind: aiKindRead, Method: "GET", Path: "/api/v1/mesh"},
-		{Name: "events_list", Desc: "Recent cluster events, newest first.", Kind: aiKindRead, Method: "GET", Path: "/api/v1/events",
-			Props: map[string]any{"tenant": str("workspace ID to narrow to"), "since": str("event cursor to read after"), "limit": integer("at most this many (default 50)")}},
-
-		// workspace resources
-		{Name: "apps_list", Desc: "Apps in a workspace with deployment state and health.", Kind: aiKindRead, Method: "GET", Path: "/api/v1/t/{t}/apps", Props: afterQ},
-		{Name: "tasks_list", Desc: "All containers (tasks) of a workspace.", Kind: aiKindRead, Method: "GET", Path: "/api/v1/t/{t}/tasks", Props: afterQ},
-		{Name: "resources_list", Desc: "Shared resources of a workspace (networks, volumes, vault, registries…).", Kind: aiKindRead, Method: "GET", Path: "/api/v1/t/{t}/resources", Props: afterQ},
-		{Name: "networks_list", Desc: "Networks of a workspace.", Kind: aiKindRead, Method: "GET", Path: "/api/v1/t/{t}/networks", Props: afterQ},
-		{Name: "volumes_list", Desc: "Data stores (volumes) of a workspace with size and placement.", Kind: aiKindRead, Method: "GET", Path: "/api/v1/t/{t}/volumes", Props: afterQ},
-		{Name: "volume_get", Desc: "One data store (volume) with its backups and users.", Kind: aiKindRead, Method: "GET", Path: "/api/v1/t/{t}/volumes/{name}"},
-		{Name: "volume_backups_list", Desc: "Backups of a workspace's data stores.", Kind: aiKindRead, Method: "GET", Path: "/api/v1/t/{t}/volume-backups", Props: afterQ},
-		{Name: "vault_list", Desc: "Secret vault entries of a workspace: paths, key names and access. Never values.", Kind: aiKindRead, Method: "GET", Path: "/api/v1/t/{t}/vault", Props: afterQ},
-		{Name: "lifecycles_list", Desc: "Lifecycle scripts of a workspace.", Kind: aiKindRead, Method: "GET", Path: "/api/v1/t/{t}/lifecycles", Props: afterQ},
-		{Name: "routes_list", Desc: "External access routes of a workspace.", Kind: aiKindRead, Method: "GET", Path: "/api/v1/t/{t}/routes"},
-		{Name: "registries_list", Desc: "Image registries of a workspace.", Kind: aiKindRead, Method: "GET", Path: "/api/v1/t/{t}/registries"},
-		{Name: "builds_list", Desc: "Image builds of a workspace.", Kind: aiKindRead, Method: "GET", Path: "/api/v1/t/{t}/builds"},
-		{Name: "standalone_list", Desc: "Single containers (standalone) of a workspace.", Kind: aiKindRead, Method: "GET", Path: "/api/v1/t/{t}/standalone"},
-
-		// one app
-		{Name: "app_tasks", Desc: "Containers (tasks) of one app.", Kind: aiKindRead, Method: "GET", Path: "/api/v1/t/{t}/apps/{app}/tasks", Props: afterQ},
-		{Name: "app_operation", Desc: "One app operation's progress and result.", Kind: aiKindRead, Method: "GET", Path: "/api/v1/t/{t}/apps/{app}/operations/{id}"},
-		{Name: "app_source", Desc: "The running app.yaml of an app (secret-like values masked).", Kind: aiKindRead, Method: "GET", Path: "/api/v1/t/{t}/apps/{app}/source", Props: map[string]any{"version": integer("app version (default: current)")}},
-		{Name: "app_revisions", Desc: "Version history of an app.", Kind: aiKindRead, Method: "GET", Path: "/api/v1/t/{t}/apps/{app}/revisions", Props: afterQ},
-		{Name: "app_cd", Desc: "Automatic deployment (CD) state of an app: candidate, pause, last sync.", Kind: aiKindRead, Method: "GET", Path: "/api/v1/t/{t}/apps/{app}/cd"},
-		{Name: "app_cd_history", Desc: "Automatic deployment history of an app.", Kind: aiKindRead, Method: "GET", Path: "/api/v1/t/{t}/apps/{app}/cd/history", Props: afterQ},
-		{Name: "app_relocation_check", Desc: "Whether an app's tasks can move to other servers.", Kind: aiKindRead, Method: "GET", Path: "/api/v1/t/{t}/apps/{app}/relocation-check"},
-		{Name: "app_logs_clear_plan", Desc: "Plan clearing a task's log files: size and target. Its target goes to app_logs_clear.", Kind: aiKindRead, Method: "GET", Path: "/api/v1/t/{t}/apps/{app}/logs-clear/plan", Props: sel, Required: []string{"service"}},
-		{Name: "task_detail", Desc: "One task's detail: state, restarts, last exit code, placement.", Kind: aiKindRead, Method: "GET", Path: "/api/v1/t/{t}/apps/{app}/task", Props: sel, Required: []string{"service"}},
-		{Name: "task_history", Desc: "One task's recent state changes and exits.", Kind: aiKindRead, Method: "GET", Path: "/api/v1/t/{t}/apps/{app}/task/history", Props: sel, Required: []string{"service"}},
-		{Name: "task_stats", Desc: "One task's CPU and memory samples.", Kind: aiKindRead, Method: "GET", Path: "/api/v1/t/{t}/apps/{app}/task/stats", Props: sel, Required: []string{"service"}},
-
-		// changes (proposals)
-		{Name: "node_cordon", Desc: "Stop new placements on a server (running tasks stay).", Kind: aiKindChange, Method: "POST", Path: "/api/v1/nodes/{node}/cordon",
-			Props: map[string]any{"reason": str("why, shown with the operation")}, Title: "{node} 서버에 새 배치 막기", Action: "cordon-node", Target: "node/{node}",
-			Impact: "low", Revert: "node_uncordon으로 다시 배치를 허용해요."},
-		{Name: "node_uncordon", Desc: "Allow new placements on a cordoned server again.", Kind: aiKindChange, Method: "POST", Path: "/api/v1/nodes/{node}/uncordon",
-			Title: "{node} 서버에 배치 다시 허용", Action: "uncordon-node", Target: "node/{node}", Impact: "low", Revert: "node_cordon으로 다시 막을 수 있어요."},
-		{Name: "node_image_prune", Desc: "Remove a server's unused images (from node_image_prune_plan).", Kind: aiKindChange, Method: "POST", Path: "/api/v1/nodes/{node}/image-prune",
-			Props: map[string]any{"plan": str("plan value from node_image_prune_plan")}, Required: []string{"plan"},
-			Title: "{node} 서버의 쓰지 않는 이미지 정리", Action: "prune-node-images", Target: "node/{node}", Impact: "low", Revert: "지운 이미지는 필요할 때 저장소에서 다시 받아요."},
-		{Name: "node_drain", Desc: "Move every task off a server (from node_drain_plan).", Kind: aiKindChange, Method: "POST", Path: "/api/v1/nodes/{node}/drain",
-			Props: map[string]any{"plan": str("plan value from node_drain_plan"), "operation": str("operation value from node_drain_plan"),
-				"leaveBlocked": boolean("leave tasks that cannot move")}, Required: []string{"plan", "operation"},
-			Title: "{node} 서버의 작업 모두 옮기기", Action: "drain-node", Target: "node/{node}", Impact: "high", Revert: "옮긴 작업은 자동으로 돌아오지 않아요. 필요하면 다시 배치해요."},
-		{Name: "task_restart", Desc: "Restart one task of an app.", Kind: aiKindChange, Method: "POST", Path: "/api/v1/t/{t}/apps/{app}/task/restart",
-			Props: sel, Required: []string{"service", "instance"},
-			Title: "{app}의 {service} 작업 다시 시작", Action: "restart-task", Target: "app/{app}", Impact: "medium", Revert: "다시 시작은 되돌릴 수 없지만 상태는 그대로예요."},
-		{Name: "app_cd_sync", Desc: "Deploy an app's automatic deployment candidate now.", Kind: aiKindChange, Method: "POST", Path: "/api/v1/t/{t}/apps/{app}/cd/sync",
-			Title: "{app} 자동 배포 후보 지금 배포", Action: "sync-app", Target: "app/{app}", Impact: "medium", Revert: "이전 버전으로 되돌리기(recover)로 돌아가요."},
-		{Name: "app_cd_pause", Desc: "Pause an app's automatic deployment.", Kind: aiKindChange, Method: "POST", Path: "/api/v1/t/{t}/apps/{app}/cd/pause",
-			Title: "{app} 자동 배포 멈추기", Action: "pause-app-cd", Target: "app/{app}", Impact: "low", Revert: "app_cd_resume으로 다시 켜요."},
-		{Name: "app_cd_resume", Desc: "Resume an app's paused automatic deployment.", Kind: aiKindChange, Method: "POST", Path: "/api/v1/t/{t}/apps/{app}/cd/resume",
-			Title: "{app} 자동 배포 다시 켜기", Action: "resume-app-cd", Target: "app/{app}", Impact: "medium", Revert: "app_cd_pause로 다시 멈춰요."},
-		{Name: "app_logs_clear", Desc: "Clear one task's log files (from app_logs_clear_plan). The logs are gone for good.", Kind: aiKindChange, Method: "POST", Path: "/api/v1/t/{t}/apps/{app}/logs-clear",
-			Props: map[string]any{"service": str("service name"), "instance": str("instance name"), "target": str("target value from app_logs_clear_plan")}, Required: []string{"service", "target"},
-			Title: "{app}의 {service} 로그 지우기", Action: "clear-app-logs", Target: "app/{app}", Impact: "medium", Revert: "지운 로그는 되돌릴 수 없어요.", Irreversible: true, Confirm: "app"},
-		{Name: "volume_backup", Desc: "Start a backup of one data store (volume).", Kind: aiKindChange, Method: "POST", Path: "/api/v1/t/{t}/volumes/{name}/backups",
-			Props: map[string]any{"app": str("app that owns the data store, if any")},
-			Title: "{name} 데이터 저장소 백업", Action: "begin-volume-backup", Target: "volume/{name}", Impact: "low", Revert: "만든 백업은 지울 수 있어요."},
-	}
+	defs := slices.Concat(aiToolsCore, aiToolsCluster, aiToolsWorkspace, aiToolsApp)
 	sort.Slice(defs, func(i, j int) bool { return defs[i].Name < defs[j].Name })
 	return defs
 }()
@@ -162,8 +85,25 @@ func (d aiToolDef) pathParams() []string {
 	return out
 }
 
-var pathParamDesc = map[string]string{
-	"t": "workspace (tenant) ID", "app": "app name", "node": "server (node) name", "name": "resource name", "id": "ID",
+// aiArgInfo is what the tools say about one argument name: the schema
+// description of a path value, and the card label of an argument a change
+// tool takes (TestAIArgInfo checks both are there).
+type aiArgInfo struct {
+	Label    string
+	PathDesc string
+}
+
+var aiArgInfos = map[string]aiArgInfo{
+	"t":        {"작업 공간", "workspace (tenant) ID"},
+	"app":      {"앱", "app name"},
+	"node":     {"서버", "server (node) name"},
+	"name":     {"이름", "resource name"},
+	"id":       {"ID", "ID"},
+	"service":  {"서비스", ""},
+	"instance": {"인스턴스", ""},
+	"plan":     {"계획", ""},
+	"reason":   {"사유", ""},
+	"target":   {"대상", ""},
 }
 
 // schema is the tool's JSON Schema (fixed bytes: maps marshal sorted).
@@ -171,7 +111,7 @@ func (d aiToolDef) schema() map[string]any {
 	props := map[string]any{}
 	req := append([]string{}, d.pathParams()...)
 	for _, p := range d.pathParams() {
-		props[p] = str(pathParamDesc[p])
+		props[p] = str(aiArgInfos[p].PathDesc)
 	}
 	for k, v := range d.Props {
 		props[k] = v

@@ -17,19 +17,19 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/userauth"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/userauth"
 )
 
 // Extends the existing identity native fixture after its actual CLI download.
 // It opens no Docker/kernel fixture and changes neither the original admin nor
 // its wallet/defaults. The extra account's changes use ordinary signed APIs.
-func verifyManagedNodeDiagnostics(t *testing.T, ctx context.Context, root, node string, admin userauth.Client, peer mydcp.Peer, session access.Session, policy control.Policy, read func() cluster.View, originalArchive string) {
+func verifyManagedNodeDiagnostics(t *testing.T, ctx context.Context, root, node string, admin userauth.Client, peer sfcp.Peer, session access.Session, policy control.Policy, read func() cluster.View, originalArchive string) {
 	t.Helper()
 	checkNodeDiagnosticArchive(t, originalArchive, node, nil)
 	const username = "rq12-diagnostics-reader"
@@ -93,7 +93,7 @@ func verifyManagedNodeDiagnostics(t *testing.T, ctx context.Context, root, node 
 	}()
 	cli := func(want int, args ...string) ([]byte, []byte) {
 		t.Helper()
-		out, why, err := runManagedCLICommand(ctx, os.Getenv("MYDC_TEST_CLI"), home, profile, args, nil)
+		out, why, err := runManagedCLICommand(ctx, os.Getenv("SFC_TEST_CLI"), home, profile, args, nil)
 		code := 0
 		if err != nil {
 			var exit interface{ ExitCode() int }
@@ -223,7 +223,7 @@ func checkNodeDiagnosticArchive(t *testing.T, path, node string, metadata *contr
 	allowed := map[string][]string{
 		"config-summary.json": {"Schema", "Node", "Endpoint", "Managed", "Network", "Workload", "Ingress"},
 		"status.json":         {"Schema", "Index", "MembersRoot", "ConfigurationIndex", "Node", "Phase", "Voter", "Cordoned", "AdmitsWork", "NativeClosed"},
-		"mydcd-events.json":   {"At", "Kind", "Scope", "Node", "Tenant", "App", "Service", "Code", "State"},
+		"sfcd-events.json":    {"At", "Kind", "Scope", "Node", "Tenant", "App", "Service", "Code", "State"},
 	}
 	seen := map[string]bool{}
 	total := int64(0)
@@ -247,7 +247,7 @@ func checkNodeDiagnosticArchive(t *testing.T, path, node string, metadata *contr
 		total += header.Size
 		seen[header.Name] = true
 		var rows []map[string]json.RawMessage
-		if header.Name == "mydcd-events.json" {
+		if header.Name == "sfcd-events.json" {
 			if json.Unmarshal(body, &rows) != nil || len(rows) > 100 {
 				t.Fatal("unbounded/invalid diagnostic events")
 			}

@@ -14,7 +14,7 @@ import (
 
 	"github.com/google/go-containerregistry/pkg/name"
 	registrytransport "github.com/google/go-containerregistry/pkg/v1/remote/transport"
-	"github.com/jay94ks/mydcd/internal/access"
+	"github.com/jay94ks/seafield/internal/access"
 )
 
 // PullTokenChallenge is public registry protocol input, not authority to read

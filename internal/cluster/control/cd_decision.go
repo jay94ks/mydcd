@@ -4,10 +4,10 @@ package control
 
 import (
 	"crypto/sha256"
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/lifecycle"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/deployment"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/lifecycle"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/deployment"
 )
 
 type AppCDDecisionChange struct {
@@ -56,7 +56,7 @@ func validCDDecision(d *AppCDDecision, scope deployment.AppScope) bool {
 	return d.Origin.VerifyOriginal(scope.Cluster) == nil && validAppCDDecisionChange(d.Origin.Change) && canonical(d.Origin.Change.Payload, &q) == nil && q.Tenant == scope.Tenant && q.App == scope.App && q.Candidate == d.Selection.Candidate && d.Selection.Artifact != ([32]byte{}) && d.Selection.Intent != ([32]byte{})
 }
 func (d AppCDDecision) digest() [32]byte {
-	return sha256.Sum256(append([]byte("mydc-cd-decision-1\x00"), OperationBytes(d.Origin)...))
+	return sha256.Sum256(append([]byte("sfc-cd-decision-1\x00"), OperationBytes(d.Origin)...))
 }
 func acceptedCDApproval(users access.Catalog, entry appEntry) bool {
 	d := entry.CDDecision

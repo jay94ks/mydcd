@@ -16,12 +16,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/storage"
-	checker "github.com/jay94ks/mydcd/internal/workload/lifecycle"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/storage"
+	checker "github.com/jay94ks/seafield/internal/workload/lifecycle"
 )
 
 // Real Unix TLS/frames, current access core and bbolt source store; the quorum
@@ -82,9 +82,9 @@ func (b *sourceTestBackend) Recover(ctx context.Context, s access.Session, d che
 	return b.store.Recover(ctx, d)
 }
 
-func sourceStreamFixture(t *testing.T) (Client, mydcp.Peer, access.Session, *sourceTestBackend) {
+func sourceStreamFixture(t *testing.T) (Client, sfcp.Peer, access.Session, *sourceTestBackend) {
 	t.Helper()
-	root, err := os.MkdirTemp("", "mydc-l1-source-")
+	root, err := os.MkdirTemp("", "sfc-l1-source-")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -103,18 +103,18 @@ func sourceStreamFixture(t *testing.T) (Client, mydcp.Peer, access.Session, *sou
 	}
 	t.Cleanup(func() { clear(node.Private); clear(self.Private) })
 	cluster := [32]byte{114}
-	peer := mydcp.Peer{ID: "node", Endpoint: "unix://" + filepath.Join(root, "mydc.sock"), Policy: mydcp.Policy{Key: mydcp.Identity(node.Public), Respond: true}}
-	lookup := func(key mydcp.Identity) (mydcp.Peer, bool) {
-		if key == mydcp.Identity(self.Public) {
-			return mydcp.Peer{ID: "user", Policy: mydcp.Policy{Key: key, UserAuth: true}}, true
+	peer := sfcp.Peer{ID: "node", Endpoint: "unix://" + filepath.Join(root, "sfcdp.sock"), Policy: sfcp.Policy{Key: sfcp.Identity(node.Public), Respond: true}}
+	lookup := func(key sfcp.Identity) (sfcp.Peer, bool) {
+		if key == sfcp.Identity(self.Public) {
+			return sfcp.Peer{ID: "user", Policy: sfcp.Policy{Key: key, UserAuth: true}}, true
 		}
 		return peer, key == peer.Key
 	}
-	server, err := mydcp.NewTransport(node, cluster, lookup)
+	server, err := sfcp.NewTransport(node, cluster, lookup)
 	if err != nil {
 		t.Fatal(err)
 	}
-	mesh, err := mydcp.NewTransport(self, cluster, lookup)
+	mesh, err := sfcp.NewTransport(self, cluster, lookup)
 	if err != nil {
 		server.Close()
 		t.Fatal(err)
@@ -155,19 +155,19 @@ func sourceStreamFixture(t *testing.T) (Client, mydcp.Peer, access.Session, *sou
 	}
 	backend := &sourceTestBackend{store: store, users: users, cluster: cluster, issuer: node.Public, policy: checker.TenantPolicy{Tenant: "tenant", Revision: 1, Enabled: true,
 		Execution: checker.ExecutionPolicy{MaxConcurrent: 1, TimeoutMS: 1000, NanoCPU: 100_000_000, MemoryBytes: 32 << 20, MaxPIDs: 16, OutputBytes: 4096, ProbeBytes: 4096, Capabilities: []string{"file"}},
-		Resolver:  checker.ResolverPolicy{AllowPackages: []string{"context", "github.com/jay94ks/mydcd/lifecycle/v1"}, SourceCacheBytes: 1 << 20}}}
+		Resolver:  checker.ResolverPolicy{AllowPackages: []string{"context", "github.com/jay94ks/seafield/lifecycle/v1"}, SourceCacheBytes: 1 << 20}}}
 	svc := Service{Mesh: server, Self: node, Policy: control.Policy{Cluster: cluster}, CheckerSources: backend}
-	if err := server.OnManagement(mydcp.User, func(ctx context.Context, conn *mydcp.Session, stream mydcp.Stream, frame mydcp.Frame) error {
+	if err := server.OnManagement(sfcp.User, func(ctx context.Context, conn *sfcp.Session, stream sfcp.Stream, frame sfcp.Frame) error {
 		// This fixture verifies the source protocol/store with a modeled current
 		// authority. Actual managed node/Engine admission is covered by runtime tests.
 		if len(frame.Fields) != 2 {
-			return mydcp.ErrFrame
+			return sfcp.ErrFrame
 		}
 		digest := sha256.Sum256(frame.Fields[0].Value)
 		var envelope Envelope
 		var request Request
 		if !bytes.Equal(digest[:], frame.Fields[1].Value) || strict(frame.Fields[0].Value, &envelope) != nil || strict(envelope.Body, &request) != nil || request.Schema != 1 || request.Nonce == ([32]byte{}) {
-			return mydcp.ErrFrame
+			return sfcp.ErrFrame
 		}
 		binding, err := svc.binding(conn, frame.Kind, envelope)
 		if err != nil {
@@ -177,14 +177,14 @@ func sourceStreamFixture(t *testing.T) (Client, mydcp.Peer, access.Session, *sou
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := server.ListenUnix(filepath.Join(root, "mydc.sock")); err != nil {
+	if err := server.ListenUnix(filepath.Join(root, "sfcdp.sock")); err != nil {
 		t.Fatal(err)
 	}
 	u, _ := users.User("operator")
 	now := time.Now().Unix()
 	session := access.Session{Schema: 1, ID: "source-session", Cluster: cluster, User: u.ID, Credential: "key", AccountRevision: u.Revision, Key: self.Public, Issuer: node.Public, IssuerEpoch: 1, IssuedAt: now, ExpiresAt: now + 3600, Scopes: []access.Scope{{Tenant: "tenant", Actions: []access.Action{access.ManageServices}}}}
 	session.Signature = ed25519.Sign(node.Private, access.SessionBytes(session))
-	c := Client{Mesh: mesh, Self: self, Cluster: cluster, Peers: []mydcp.Peer{peer}}
+	c := Client{Mesh: mesh, Self: self, Cluster: cluster, Peers: []sfcp.Peer{peer}}
 	// Every transfer carries its original upload ID; this is the fixture's.
 	c = withUpload(c, "fixture upload")
 	return c, peer, session, backend
@@ -223,7 +223,7 @@ func TestCheckerActualUnixSourceChunksLostResultRecoveryAndRevocation(t *testing
 		t.Fatal("injected lost result became success")
 	} else {
 		var outcome *Error
-		if !errors.As(err, &outcome) || outcome.Phase != mydcp.Unknown {
+		if !errors.As(err, &outcome) || outcome.Phase != sfcp.Unknown {
 			t.Fatal("lost result not retained as unknown", err)
 		}
 	}
@@ -292,10 +292,10 @@ func TestCheckerActualSourceRejectsWrongOffsetHeaderAndTrailingBytes(t *testing.
 			raw, _ := json.Marshal(envelope)
 			header := sha256.Sum256(raw)
 			id := c.Mesh.NextRequest()
-			if err := mydcp.WriteFrame(stream, mydcp.Frame{Purpose: mydcp.User, Kind: 1, Request: id, Fields: []mydcp.Field{{Tag: 1, Required: true, Value: raw}, {Tag: 2, Required: true, Value: header[:]}}}); err != nil {
+			if err := sfcp.WriteFrame(stream, sfcp.Frame{Purpose: sfcp.User, Kind: 1, Request: id, Fields: []sfcp.Field{{Tag: 1, Required: true, Value: raw}, {Tag: 2, Required: true, Value: header[:]}}}); err != nil {
 				t.Fatal(err)
 			}
-			ready, err := mydcp.ReadFrame(stream, 128<<10)
+			ready, err := sfcp.ReadFrame(stream, 128<<10)
 			var reply Reply
 			if err != nil || strict(ready.Fields[0].Value, &reply) != nil || reply.Code != "continue" {
 				t.Fatal("source preflight", err)
@@ -307,14 +307,14 @@ func TestCheckerActualSourceRejectsWrongOffsetHeaderAndTrailingBytes(t *testing.
 			if mode == "header" {
 				header[0] ^= 1
 			}
-			if err := mydcp.WriteFrame(stream, mydcp.Frame{Purpose: mydcp.User, Kind: 4, Request: id, Fields: []mydcp.Field{{Tag: 1, Required: true, Value: offset[:]}, {Tag: 2, Required: true, Value: data}, {Tag: 3, Required: true, Value: header[:]}}}); err != nil {
+			if err := sfcp.WriteFrame(stream, sfcp.Frame{Purpose: sfcp.User, Kind: 4, Request: id, Fields: []sfcp.Field{{Tag: 1, Required: true, Value: offset[:]}, {Tag: 2, Required: true, Value: data}, {Tag: 3, Required: true, Value: header[:]}}}); err != nil {
 				t.Fatal(err)
 			}
 			if mode == "trailing" {
 				_, _ = stream.Write([]byte{1})
 			}
 			_ = stream.Close()
-			if _, err := mydcp.ReadFrame(stream, 128<<10); err == nil {
+			if _, err := sfcp.ReadFrame(stream, 128<<10); err == nil {
 				t.Fatal("malformed content returned a success frame")
 			}
 			if _, err := backend.store.Read(ctx, d); err == nil {

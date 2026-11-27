@@ -7,7 +7,7 @@ import (
 	"encoding/json"
 )
 
-// RemovalProbe attests only to a fresh authenticated MYDCP request outcome.
+// RemovalProbe attests only to a fresh authenticated SFCP request outcome.
 // A failed request is permission to retire logical membership, never evidence
 // of native closure, an absent Task, or a writable Volume fence.
 type RemovalProbe struct {
@@ -25,7 +25,7 @@ type RemovalProbe struct {
 func RemovalProbeBytes(p RemovalProbe) []byte {
 	p.Signature = nil
 	raw, _ := json.Marshal(p)
-	return append([]byte("mydc-force-removal-probe-1\x00"), raw...)
+	return append([]byte("sfc-force-removal-probe-1\x00"), raw...)
 }
 func (p RemovalProbe) Valid() bool {
 	return p.Schema == 1 && p.Cluster != ([32]byte{}) && ValidID(p.Node) && ValidID(p.Operation) && p.Target != ([32]byte{}) && p.Observer != ([32]byte{}) && p.Epoch > 0 && p.Expected > 0 && p.ConfigurationIndex > 0 && p.StartedAt > 0 && p.FinishedAt >= p.StartedAt && p.FinishedAt-p.StartedAt <= 10 && p.Challenge != ([32]byte{}) && ed25519.Verify(ed25519.PublicKey(p.Observer[:]), RemovalProbeBytes(p), p.Signature)

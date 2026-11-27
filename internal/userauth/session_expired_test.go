@@ -8,10 +8,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/wallet"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/wallet"
 )
 
 // A saved login that has only run out of time says so, instead of the
@@ -31,7 +31,7 @@ func TestExpiredSavedLoginSaysLogInAgain(t *testing.T) {
 	self, _ := identity.Ephemeral()
 	defer clear(issuer.Private)
 	defer clear(self.Private)
-	c := Client{Cluster: [32]byte{42}, Self: self, Peers: []mydcp.Peer{{ID: "node", Endpoint: "127.0.0.1:7443", Policy: mydcp.Policy{Key: mydcp.Identity(issuer.Public), Respond: true}}}}
+	c := Client{Cluster: [32]byte{42}, Self: self, Peers: []sfcp.Peer{{ID: "node", Endpoint: "127.0.0.1:7443", Policy: sfcp.Policy{Key: sfcp.Identity(issuer.Public), Respond: true}}}}
 	store, err := OpenCredentials(home, password)
 	if err != nil {
 		t.Fatal(err)

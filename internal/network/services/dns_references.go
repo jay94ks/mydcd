@@ -4,8 +4,8 @@ package services
 
 import (
 	"encoding/hex"
-	"github.com/jay94ks/mydcd/internal/network"
-	"github.com/jay94ks/mydcd/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/network"
+	"github.com/jay94ks/seafield/internal/reconcile"
 )
 
 type localReferenceFence struct {

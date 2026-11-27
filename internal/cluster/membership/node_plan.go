@@ -2,7 +2,7 @@
 
 package membership
 
-import "github.com/jay94ks/mydcd/internal/cluster/lifecycle"
+import "github.com/jay94ks/seafield/internal/cluster/lifecycle"
 
 // NodeChangePlan describes only committed membership/lifecycle facts. It is
 // shared by admission and public plans; network silence is not a committed fact

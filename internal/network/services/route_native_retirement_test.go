@@ -7,7 +7,7 @@ import (
 	"crypto/ed25519"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/reconcile"
 )
 
 func TestRouteUnknownApplyRetiresSameIDWithoutInventingItsOutcome(t *testing.T) {

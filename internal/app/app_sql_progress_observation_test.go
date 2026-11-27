@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/mydcp"
+	"github.com/jay94ks/seafield/internal/sfcp"
 )
 
 func TestSQLReceiveProgressObservationPublicationAndReplacement(t *testing.T) {
@@ -22,7 +22,7 @@ func TestSQLReceiveProgressObservationPublicationAndReplacement(t *testing.T) {
 			}
 			defer dir.Close()
 			intent := moveReceiveIntent{Schema: 1}
-			p := moveReceiveProgress{Schema: 1, Binding: intent.digest(), Inode: 1, Offset: mydcp.VolumeChunkSize}
+			p := moveReceiveProgress{Schema: 1, Binding: intent.digest(), Inode: 1, Offset: sfcp.VolumeChunkSize}
 			raw, err := json.Marshal(p)
 			if err != nil {
 				t.Fatal(err)

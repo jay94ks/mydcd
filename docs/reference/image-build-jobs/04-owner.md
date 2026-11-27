@@ -1,7 +1,7 @@
 ## owner 실행·정산 경계
 
 FROM/COPY/RUN `--from`의 digest 해결은 member `image-build-base-work`와
-`image-build-base-owner`를 사용한다. 두 메시지는 기존 Management/MYDCP 경계이며
+`image-build-base-owner`를 사용한다. 두 메시지는 기존 Management/SFCP 경계이며
 사용자 CLI 명령이나 새 비인증 registry proxy가 아니다.
 
 ```text
@@ -31,7 +31,7 @@ owner가 조회 전후 current quorum·job/신뢰·source reader generation/read
 
 Bearer 교환은 member `image-build-base-token-owner`를 사용한다. 요청은
 `{Read:<image-build-base-work 응답>,Challenge:{Host,Realm,Service,Scopes:["repository:REPO:pull",...]},Additional?:[<다른 repository의 원 Read>,...]}`이고
-응답은 보호된 일시 값 `{Token,IssuedAt,ExpiresIn}`이다. 노드 간 MYDCP의 설치된 원 Builder만
+응답은 보호된 일시 값 `{Token,IssuedAt,ExpiresIn}`이다. 노드 간 SFCP의 설치된 원 Builder만
 호출하며 `Latest:false`로 원 source owner에 직접 전달한다. owner가 별도로 current quorum과
 running/unknown의 서명된 begin/source binding을 조회한다. queued job은 token을 받을 수 없다.
 같은 host에 repository가 여러 개면 frozen Inputs에서 요청된 scope 각각의 source를 고른다. Additional은 최대7개로, 총8개 scope/서로 다른 repository까지 같은 원 job/Spec·owner·external reader 선택/세대·ReadSet인지 확인한다. 공용 anonymous source도 같은 owner만 결합한다. 중복 scope는 같은 reader를 추가하지 않으며 요청된 scope가 하나라도 고정 입력에 없으면 전체를 거부한다. 외부 reader가 다르거나 push/catalog를 포함한 요청은 결합하지 않는다.
@@ -41,14 +41,14 @@ Realm/Service가 요청과 일치할 때만 채택 OCI SDK로 선택한 scope �
 보내지 않으며 HTTP downgrade를 하지 않는다. 응답에는 password·refresh token·CA를 넣지
 않고 job/관측/Raft/log에도 token을 보관하지 않는다. 교환 뒤 현재 권한을 다시 확인한다.
 ExpiresIn은 upstream 응답(누락 시 OCI 기본60초)을 사용하되 client 재사용 기한을 원 job
-deadline 이하로 줄인다. upstream token 자체의 scope/실제 만료를 MyDC가 재서명한다는 뜻은 아니다.
+deadline 이하로 줄인다. upstream token 자체의 scope/실제 만료를 Sfc가 재서명한다는 뜻은 아니다.
 
 내장 managed source는 원 builder가 고정 BuildSubject의 pull login으로 registry owner의
 token을 교환하며 외부 source owner 메시지로 managed 자격을 발급하지 않는다. BuildKit
 session adapter는 이 경로를 repository scope callback에 연결하고 host-only Credentials에
 password를 반환하지 않는다. ambient Docker config/helper/token seed를 읽거나 만들지 않는다.
 SDK의 client token 위임을 위해 Get/VerifyTokenAuthority에 job-local 메모리 키로 응답하고
-session 종료 뒤 폐기한다. registry access token을 MyDC가 새로 발급하는 키가 아니다.
+session 종료 뒤 폐기한다. registry access token을 Sfc가 새로 발급하는 키가 아니다.
 Basic-only source와 서로 다른 reader/managed repository는 아래 FROM graph 본문
 경계에서 각각의 owner가 읽는다. host-only 인증에 자격이나 복수 scope를 합치지 않는다.
 실제 SDK solve/session·CA의 native 검증은 별도 수락 조건이며,
@@ -70,7 +70,7 @@ registry run·원 job/owner·현재 accepted 권한을 확인하며, 다른 repo
 이 관리 허가는 현재 내장 registry 경계이며 외부 private FROM 자격 연결을 대체하지 않는다.
 
 registry-only login grant의 `Subject.Build`는 Session/Task와 배타적이다. 원 builder node가
-서명하고 Basic username `mydc-build`로 `/token`에 제출한다. registry owner는 원 job과
+서명하고 Basic username `sfc-build`로 `/token`에 제출한다. registry owner는 원 job과
 실제 요청 repository/action을 다시 확인한 뒤 자신의 서명으로 access token을 발급한다.
 기존 login/access 도메인과 최대300초·job deadline 한도를 유지한다. builder의 로그인 키와
 registry owner의 access issuer를 혼동하지 않으며, 취소·현재 권한/정책 회수·종결 뒤에는
@@ -87,7 +87,7 @@ Blocked는 `WAITING_FOR_SLOT|WAITING_FOR_BUDGET|NOT_READY|CANCELLED|TIMEOUT|PERM
 slot/budget 대기는 원 queued job을 유지하며 취소·권한 회수로 바꾸지 않는다. queued 기한 만료나
 회수도 원 identity만 기록한 cleanup을 거쳐 종료 보고하며 native 실행 권한을 새로 만들지 않는다.
 
-managed workload의 mydcd는 같은 observations DB/Engine을 사용하는 worker를 기동한다.
+managed workload의 sfcd는 같은 observations DB/Engine을 사용하는 worker를 기동한다.
 한 노드의 queued 준비는 한 번에 하나이며 shared begin이 예산을 예약하면 다른 job을
 설정된 tenant 동시성 안에서 진행한다. 로컬 view는 발견·대기에만 사용하고 새 native
 Create/Copy/Start/게시에는 current quorum 허가가 필요하다. 원 native journal 유실을
@@ -105,7 +105,7 @@ Bearer 자격은 원 source owner에서 교환하며 관리·빌드 Applied를 �
 
 `image-build-job-report`의 형식은
 `{Schema:1,Kind:"job",Cluster,Owner,Tenant,Job,Action,Expected,RootRevision,Epoch,At,Inputs?,Sources?,Closure?,Secrets?,Signature}`다.
-owner가 `mydc-imagebuild-job-report-1\x00`와 Signature를 nil로 한 JSON을 서명한다.
+owner가 `sfc-imagebuild-job-report-1\x00`와 Signature를 nil로 한 JSON을 서명한다.
 Action은 `begin|uncertain|complete`이고 현재 원 job Revision과 root/epoch를 사용한다.
 Secrets는 complete에서만 허용하는 realm 순서의 `[]secrets.UseGone`이다. 각 증거의
 purpose·원 consumer/generation/selection/lifetime·owner 서명·Stopped/MountsGone을 대조한다.
@@ -142,7 +142,7 @@ registry Store도 해당 job이 종결되기 전에는 반환하지 않는다. �
 running base 조회·managed pull에 사용할 수 없다.
 
 Closure는 `{Schema:1,Job:[32],Native:[32],Result,At,Signature}`다. 원 Spec digest와 실제
-정리 근거 Native·결과·시각을 `mydc-imagebuild-job-closure-1\x00` 도메인으로 owner가 서명한다.
+정리 근거 Native·결과·시각을 `sfc-imagebuild-job-closure-1\x00` 도메인으로 owner가 서명한다.
 Closure.At은 실제 종료 증거를 고정한 시각이며 report.At보다 늦을 수 없다. quorum 단절 뒤
 재보고할 때는 저장된 Closure를 그대로 사용하고 보고 envelope의 At·현재 CAS/epoch만 갱신한다.
 현재 보고의 freshness 검사를 과거 종료 시각으로 대체하지 않는다. queued 취소는 native

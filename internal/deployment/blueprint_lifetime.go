@@ -27,7 +27,7 @@ func validateLifetimes(steps []Step) error {
 			for at, key := range s.Identity {
 				task, exists := byKey[key]
 				var service ComposeService
-				if !exists || task.Kind != "task" || at > 0 && s.Identity[at-1] == key || !slices.Contains(s.Dependencies, Dependency{key, Healthy}) || json.Unmarshal(task.Goal, &service) != nil || service.MyDC.Instance == nil || !ingressHasService(declaration, service.MyDC.Instance.Service) {
+				if !exists || task.Kind != "task" || at > 0 && s.Identity[at-1] == key || !slices.Contains(s.Dependencies, Dependency{key, Healthy}) || json.Unmarshal(task.Goal, &service) != nil || service.Sfc.Instance == nil || !ingressHasService(declaration, service.Sfc.Instance.Service) {
 					return inputError("INVALID_INGRESS_IDENTITY", s.Key)
 				}
 			}
@@ -36,7 +36,7 @@ func validateLifetimes(steps []Step) error {
 					continue
 				}
 				var service ComposeService
-				if json.Unmarshal(task.Goal, &service) != nil || service.MyDC.Instance != nil && ingressHasService(declaration, service.MyDC.Instance.Service) && !slices.Contains(s.Identity, task.Key) {
+				if json.Unmarshal(task.Goal, &service) != nil || service.Sfc.Instance != nil && ingressHasService(declaration, service.Sfc.Instance.Service) && !slices.Contains(s.Identity, task.Key) {
 					return inputError("INVALID_INGRESS_IDENTITY", s.Key)
 				}
 			}

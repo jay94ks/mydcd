@@ -18,7 +18,7 @@ const (
 	OpApplied = "applied"
 	// OpFailed: delivered with a non-zero Result.Code (CAS failed, forbidden, ...).
 	OpFailed = "failed"
-	// OpRejected: mydcd refused the request (denied/invalid) before execution.
+	// OpRejected: sfcd refused the request (denied/invalid) before execution.
 	OpRejected = "rejected"
 	// OpUnknown: delivered or possibly delivered, outcome not known.
 	OpUnknown = "unknown"
@@ -43,7 +43,7 @@ type OpResult struct {
 // Op is one original signed UserOperation submitted by a user through the web.
 type Op struct {
 	ID          string    `json:"id"`        // browser-chosen idempotency ID
-	User        string    `json:"user"`      // mydc user ID
+	User        string    `json:"user"`      // sfcli user ID
 	Username    string    `json:"username"`  // for display
 	RequestID   string    `json:"requestId"` // UserOperation.RequestID
 	Action      string    `json:"action"`
@@ -61,6 +61,19 @@ type Op struct {
 	// used for permission.
 	Reason *OpReason `json:"reason,omitempty"`
 
+	// Batch groups the ops of one change set sent together; display only.
+	Batch string `json:"batch,omitempty"`
+
+	// Change: the target as the web read it right before this op was
+	// signed, for "revert this change" (UI-A4). Only actions the web knows
+	// how to revert have it.
+	Change *OpChange `json:"change,omitempty"`
+	// RevertOf: the web op ID this op reverts (same user).
+	RevertOf string `json:"revertOf,omitempty"`
+	// Restores: the deleted item (store.TrashItem) this op brings back;
+	// the item goes when the op applies.
+	Restores string `json:"restores,omitempty"`
+
 	// Parent is the web op ID of a multi-step job (deploy) this op belongs to.
 	Parent string `json:"parent,omitempty"`
 	// Deploy holds a deploy job's input and progress (parent rows only).
@@ -73,6 +86,15 @@ type Op struct {
 	// RegistryBind: a bind-external-registry original (Signed, not yet
 	// sent) waiting for protected Group approvals of the source's secrets.
 	RegistryBind *RegistryBindJob `json:"registryBind,omitempty"`
+}
+
+// OpChange is the revert record of an op: the target before the op, in the
+// shape of the action's payload (null when the target did not exist), and
+// the payload sent. Neither holds secrets: only actions whose payload and
+// target views carry none have a record.
+type OpChange struct {
+	Before json.RawMessage `json:"before"`
+	Sent   json.RawMessage `json:"sent"`
 }
 
 // RegistryBindJob: the source, the reader's server, the realms the bind
@@ -167,7 +189,7 @@ type StandaloneUpJob struct {
 	Expected uint64          `json:"expected"`
 }
 
-// MoveJob is the volume move part of a deploy job: mydcd's planned
+// MoveJob is the volume move part of a deploy job: sfcd's planned
 // begin-volume-move payload and its Expected (the volume revision).
 type MoveJob struct {
 	Volume   string          `json:"volume"`
@@ -199,6 +221,11 @@ func stateIndexKey(o *Op) []byte {
 // CreateOp stores a new op. If an op with the same ID exists for the user it
 // is returned with ok=false; the caller compares digests.
 func (s *Store) CreateOp(o *Op) (existing *Op, err error) {
+	defer func() {
+		if existing == nil {
+			s.changed(err, Change{Kind: "op", User: o.User, ID: o.ID})
+		}
+	}()
 	err = s.db.Update(func(tx *bolt.Tx) error {
 		ops := tx.Bucket(bucketOps)
 		k := key(o.User, o.ID)
@@ -215,7 +242,8 @@ func (s *Store) CreateOp(o *Op) (existing *Op, err error) {
 }
 
 // UpdateOp replaces an op and moves its state index in the same transaction.
-func (s *Store) UpdateOp(o *Op) error {
+func (s *Store) UpdateOp(o *Op) (err error) {
+	defer func() { s.changed(err, Change{Kind: "op", User: o.User, ID: o.ID}) }()
 	return s.db.Update(func(tx *bolt.Tx) error {
 		ops := tx.Bucket(bucketOps)
 		k := key(o.User, o.ID)

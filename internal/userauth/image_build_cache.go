@@ -5,18 +5,18 @@ package userauth
 import (
 	"context"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/imagebuild"
-	"github.com/jay94ks/mydcd/internal/mydcp"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/imagebuild"
+	"github.com/jay94ks/seafield/internal/sfcp"
 )
 
-func (c Client) ImageBuildCacheUsage(ctx context.Context, target mydcp.Peer, session access.Session, tenant string, q imagebuild.CacheQuery, after string) (control.ImageBuildCachePage, error) {
+func (c Client) ImageBuildCacheUsage(ctx context.Context, target sfcp.Peer, session access.Session, tenant string, q imagebuild.CacheQuery, after string) (control.ImageBuildCachePage, error) {
 	if tenant == "" || !q.Valid() {
-		return control.ImageBuildCachePage{}, mydcp.ErrAdmission
+		return control.ImageBuildCachePage{}, sfcp.ErrAdmission
 	}
 	if _, _, _, _, err := control.ImageBuildCacheOffset(after); err != nil {
-		return control.ImageBuildCachePage{}, mydcp.ErrAdmission
+		return control.ImageBuildCachePage{}, sfcp.ErrAdmission
 	}
 	reply, err := c.query(ctx, target, session, Request{Method: "image-build-cache", Tenant: tenant, ImageBuildCache: &q, After: after})
 	if err != nil {
@@ -24,7 +24,7 @@ func (c Client) ImageBuildCacheUsage(ctx context.Context, target mydcp.Peer, ses
 	}
 	page := reply.ImageBuildCache
 	if page == nil || !page.ValidQuery(tenant, q, after) {
-		return control.ImageBuildCachePage{}, mydcp.ErrFrame
+		return control.ImageBuildCachePage{}, sfcp.ErrFrame
 	}
 	return *page, nil
 }

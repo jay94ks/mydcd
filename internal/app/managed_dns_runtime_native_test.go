@@ -19,18 +19,17 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/config"
-	"github.com/jay94ks/mydcd/internal/engine"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/network"
-	"github.com/jay94ks/mydcd/internal/network/services"
-	"github.com/jay94ks/mydcd/internal/tenancy"
-	"github.com/jay94ks/mydcd/tests/registryfixture"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/engine"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/network"
+	"github.com/jay94ks/seafield/internal/network/services"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/tenancy"
+	"github.com/jay94ks/seafield/tests/registryfixture"
 	"github.com/miekg/dns"
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/client"
@@ -80,22 +79,22 @@ func testManagedDNSRuntime(t *testing.T, ctx context.Context, a *Runtime, root, 
 		}
 		return r
 	}
-	backend := os.Getenv("MYDC_DOCKER_TEST_BACKEND")
+	backend := os.Getenv("SFC_DOCKER_TEST_BACKEND")
 	if !filepath.IsAbs(backend) {
 		t.Fatal("prebuilt static backend required")
 	}
-	registry := registryfixture.OpenPreparedAt(t, backend, container.Config{Cmd: []string{"/backend"}, Env: []string{"MYDC_DNS_FIXTURE=1"}, User: "10001:10001", Labels: map[string]string{"org.mydc.test.owner": os.Getenv("MYDC_KERNEL_TEST_OWNER")}}, "192.0.2.1:0")
+	registry := registryfixture.OpenPreparedAt(t, backend, container.Config{Cmd: []string{"/backend"}, Env: []string{"SFC_DNS_FIXTURE=1"}, User: "10001:10001", Labels: map[string]string{"org.sfc.test.owner": os.Getenv("SFC_KERNEL_TEST_OWNER")}}, "192.0.2.1:0")
 	catalog, err := p.Catalog(read().State)
 	if err != nil {
 		t.Fatal(err)
 	}
 	tenant, _ := catalog.Tenant("tenant")
-	change("dns-runtime/trust", "set-trust", tenant.Revision, control.TrustAssignment{Tenant: "tenant", Rules: append(tenant.ImageSources, access.TrustRule{Registry: registry.Registry, Repository: "fixture"})})
+	change("dns-runtime/trust", "set-trust", tenant.Revision, control.TrustChange{Tenant: "tenant", Add: []access.TrustRule{access.TrustRule{Registry: registry.Registry, Repository: "fixture"}}})
 	public := sqlPublicFixture{Images: map[string]string{registry.Reference: registry.ConfigDigest}}
 	var engines [2]*engine.Client
 	var keys [2][32]byte
 	for n, path := range configs {
-		cfg, e := config.LoadNode(path)
+		cfg, e := loadTestNode(path)
 		if e != nil {
 			t.Fatal(e)
 		}
@@ -123,7 +122,7 @@ func testManagedDNSRuntime(t *testing.T, ctx context.Context, a *Runtime, root, 
 	if err = os.WriteFile(filepath.Join(root, "dns-fixture.json"), raw, 0644); err != nil {
 		t.Fatal(err)
 	}
-	remote := mydcp.Peer{ID: "node-b", Endpoint: "192.0.2.2:44101", Policy: mydcp.Policy{Key: mydcp.Identity(keys[1]), Member: true, Read: true, Respond: true}}
+	remote := sfcp.Peer{ID: "node-b", Endpoint: "192.0.2.2:44101", Policy: sfcp.Policy{Key: sfcp.Identity(keys[1]), Member: true, Read: true, Respond: true}}
 	observe := func(node, key string) (ModuleObservation, error) {
 		var result ModuleObservation
 		var raw []byte
@@ -224,7 +223,7 @@ func testManagedDNSRuntime(t *testing.T, ctx context.Context, a *Runtime, root, 
 			t.Fatal(ctx.Err())
 		}
 	}
-	policy := services.ManagedDNSDefinition{Schema: 1, Tenant: "tenant", Network: "dns-runtime", Policy: services.ManagedDNSPolicy{Enabled: true, Zone: "dns-runtime.mydc.test.", TTL: 1, NegativeTTL: 1, Transports: []string{"udp", "tcp"}, Upstreams: []netip.AddrPort{netip.MustParseAddrPort(udp.LocalAddr().String())}, MaxQueries: 8, MaxCacheEntries: 8, MaxResponseBytes: 4096, MaxConnections: 8, RequestTimeoutMS: 15000}}
+	policy := services.ManagedDNSDefinition{Schema: 1, Tenant: "tenant", Network: "dns-runtime", Policy: services.ManagedDNSPolicy{Enabled: true, Zone: "dns-runtime.sfc.test.", TTL: 1, NegativeTTL: 1, Transports: []string{"udp", "tcp"}, Upstreams: []netip.AddrPort{netip.MustParseAddrPort(udp.LocalAddr().String())}, MaxQueries: 8, MaxCacheEntries: 8, MaxResponseBytes: 4096, MaxConnections: 8, RequestTimeoutMS: 15000}}
 	policyKey := services.ManagedDNSKey("tenant", "dns-runtime")
 	change("dns-runtime/enable", "configure-network-dns", 0, policy)
 	profile, home := filepath.Join(root, "dns-client.yaml"), filepath.Join(root, "dns-home")
@@ -236,7 +235,7 @@ func testManagedDNSRuntime(t *testing.T, ctx context.Context, a *Runtime, root, 
 	}
 	cli := func(args ...string) {
 		t.Helper()
-		out, diagnostic, e := runManagedCLICommand(ctx, filepath.Join(products, "mydc"), home, profile, args, nil)
+		out, diagnostic, e := runManagedCLICommand(ctx, filepath.Join(products, "sfc"), home, profile, args, nil)
 		if e != nil {
 			t.Fatal(args, e, string(out), string(diagnostic))
 		}
@@ -245,7 +244,7 @@ func testManagedDNSRuntime(t *testing.T, ctx context.Context, a *Runtime, root, 
 	cli("login", "--username", "admin", "--method", "private-key", "--key-file", filepath.Join(root, "admin/key.pem"))
 	app := "name: dns-clients\nservices:\n"
 	for n, node := range []string{"node-a", "node-b"} {
-		app += fmt.Sprintf(" client%d:\n  image: %s\n  command: [/backend]\n  environment: {MYDC_DNS_FIXTURE: '1'}\n  user: '10001:10001'\n  cpus: 0.1\n  mem_limit: 16m\n  healthcheck: {test: [CMD, /backend, --tcp-probe, '127.0.0.1:8080'], interval: 1s, timeout: 2s, retries: 3}\n  networks: {lan: {ipv4_address: '198.19.86.%d', ipv6_address: 'fd42:6d79:86:%x::2'}}\n  x-mydc: {node: %s}\n", n, registry.Reference, n*16+2, n+1, node)
+		app += fmt.Sprintf(" client%d:\n  image: %s\n  command: [/backend]\n  environment: {SFC_DNS_FIXTURE: '1'}\n  user: '10001:10001'\n  cpus: 0.1\n  mem_limit: 16m\n  healthcheck: {test: [CMD, /backend, --tcp-probe, '127.0.0.1:8080'], interval: 1s, timeout: 2s, retries: 3}\n  networks: {lan: {ipv4_address: '198.19.86.%d', ipv6_address: 'fd42:6d79:86:%x::2'}}\n  x-sfc: {node: %s}\n", n, registry.Reference, n*16+2, n+1, node)
 	}
 	app += "networks:\n lan: {external: true, name: dns-runtime}\n"
 	appPath := filepath.Join(root, "dns-app.yaml")

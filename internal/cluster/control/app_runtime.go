@@ -5,8 +5,8 @@ package control
 import (
 	"slices"
 
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/schema"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/schema"
 )
 
 // ValidateManaged keeps the application FSM independent of local native flags.

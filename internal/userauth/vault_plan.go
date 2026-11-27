@@ -7,14 +7,14 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/mydcp"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/sfcp"
 )
 
 // PlanVaultApprovals retrieves a single canonical public plan. A changing
 // policy/approval digest aborts the read instead of mixing snapshot parts.
-func (c Client) PlanVaultApprovals(ctx context.Context, target mydcp.Peer, session access.Session, tenant string, q control.VaultApprovalPlanRequest) (control.VaultApprovalPlan, error) {
+func (c Client) PlanVaultApprovals(ctx context.Context, target sfcp.Peer, session access.Session, tenant string, q control.VaultApprovalPlanRequest) (control.VaultApprovalPlan, error) {
 	q.Part = 0
 	q.Digest = [32]byte{}
 	var raw []byte
@@ -27,15 +27,15 @@ func (c Client) PlanVaultApprovals(ctx context.Context, target mydcp.Peer, sessi
 		}
 		part := reply.VaultPlan
 		if part == nil || part.Part != q.Part || part.Length < 1 || part.Length > 4<<20 || len(part.Data) == 0 || len(part.Data) > 24<<10 {
-			return control.VaultApprovalPlan{}, mydcp.ErrFrame
+			return control.VaultApprovalPlan{}, sfcp.ErrFrame
 		}
 		if q.Part == 0 {
 			root, length, q.Digest = part.RootRevision, part.Length, part.Digest
 		} else if part.RootRevision != root || part.Length != length || part.Digest != q.Digest {
-			return control.VaultApprovalPlan{}, mydcp.ErrFrame
+			return control.VaultApprovalPlan{}, sfcp.ErrFrame
 		}
 		if len(part.Data) != min(24<<10, length-len(raw)) {
-			return control.VaultApprovalPlan{}, mydcp.ErrFrame
+			return control.VaultApprovalPlan{}, sfcp.ErrFrame
 		}
 		raw = append(raw, part.Data...)
 		if len(raw) == length {
@@ -44,15 +44,15 @@ func (c Client) PlanVaultApprovals(ctx context.Context, target mydcp.Peer, sessi
 		q.Part++
 	}
 	if sha256.Sum256(raw) != q.Digest {
-		return control.VaultApprovalPlan{}, mydcp.ErrFrame
+		return control.VaultApprovalPlan{}, sfcp.ErrFrame
 	}
 	var plan control.VaultApprovalPlan
 	if strict(raw, &plan) != nil || plan.Realm != q.Realm {
-		return plan, mydcp.ErrFrame
+		return plan, sfcp.ErrFrame
 	}
 	canonical, _ := json.Marshal(plan)
 	if len(canonical) != length {
-		return plan, mydcp.ErrFrame
+		return plan, sfcp.ErrFrame
 	}
 	return plan, nil
 }

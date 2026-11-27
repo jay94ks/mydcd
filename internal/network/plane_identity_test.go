@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/mydcp"
+	"github.com/jay94ks/seafield/internal/sfcp"
 )
 
 func TestPacketPlanRetainsOriginalEndpointPolicyWithCurrentLocalRelay(t *testing.T) {
@@ -53,7 +53,7 @@ func TestPacketPlanRetainsOriginalEndpointPolicyWithCurrentLocalRelay(t *testing
 	}
 	// Losing current same-node ownership must fence both new and queued bytes.
 	destination.SetPlan(PacketPlan{WireKey: current, Policy: policy, Gate: fixedRouteBindingGate{PacketBinding{token, target}}})
-	if err := destination.ReceiveLocal(token, packet); err != mydcp.ErrAdmission {
+	if err := destination.ReceiveLocal(token, packet); err != sfcp.ErrAdmission {
 		t.Fatal("removed current mapping admitted an old original local source", err)
 	}
 	if policy.Inbound(originalB, current, id, target.ID, 1280, packet) == nil {
@@ -72,7 +72,7 @@ func TestPacketPlanDefaultWireIdentityPreservesOriginalLocalContract(t *testing.
 	token := [16]byte{225}
 	p.SetPlan(PacketPlan{Policy: policy, Gate: fixedRouteBindingGate{PacketBinding{token, target}}})
 	packet := transportPacket(4, 6)
-	frame := mydcp.Frame{Purpose: mydcp.Packet, Kind: 2, Fields: []mydcp.Field{{Tag: 1, Required: true, Value: original[:]}, {Tag: 2, Required: true, Value: id[:]}, {Tag: 3, Required: true, Value: token[:]}, {Tag: 4, Required: true, Value: packet}}}
+	frame := sfcp.Frame{Purpose: sfcp.Packet, Kind: 2, Fields: []sfcp.Field{{Tag: 1, Required: true, Value: original[:]}, {Tag: 2, Required: true, Value: id[:]}, {Tag: 3, Required: true, Value: token[:]}, {Tag: 4, Required: true, Value: packet}}}
 	if !p.admittedLocal(frame) || p.plan.Load().WireKey != ([32]byte{}) || len(p.plan.Load().LocalOwners) != 0 {
 		t.Fatal("zero mapping changed the original unrotated route contract")
 	}

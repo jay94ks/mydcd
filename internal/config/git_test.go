@@ -9,11 +9,11 @@ import (
 )
 
 func TestInstalledGitProfileRejectsCredentialURLAndNonHTTPS(t *testing.T) {
-	p := GitCredential{Tenant: "default", Profile: "git-read", Repository: "https://git.mydc.test/team/app.git", Username: "reader", PasswordFile: "/installed/git/password"}
+	p := GitCredential{Tenant: "default", Profile: "git-read", Repository: "https://git.sfc.test/team/app.git", Username: "reader", PasswordFile: "/installed/git/password"}
 	if err := p.Validate(); err != nil {
 		t.Fatal("default is a valid remote tenant name, not a profile link selection", err)
 	}
-	for _, repository := range []string{"http://git.mydc.test/app.git", "file:///private/app.git", "https://user:password@git.mydc.test/app.git", "https://git.mydc.test/app.git?", "https://git.mydc.test/app.git?token=private", "https://git.mydc.test/app.git#main"} {
+	for _, repository := range []string{"http://git.sfc.test/app.git", "file:///private/app.git", "https://user:password@git.sfc.test/app.git", "https://git.sfc.test/app.git?", "https://git.sfc.test/app.git?token=private", "https://git.sfc.test/app.git#main"} {
 		bad := p
 		bad.Repository = repository
 		if bad.Validate() == nil {
@@ -38,7 +38,7 @@ modules:
 git_credentials:
   - tenant: default
     profile: git-read
-    repository: https://git.mydc.test/team/app.git
+    repository: https://git.sfc.test/team/app.git
     username: reader
     password_file: private/token
     ca_file: installed/ca.pem
@@ -51,7 +51,7 @@ git_credentials:
 		t.Fatal("installed source profile config", err)
 	}
 	p := c.GitCredentials[0]
-	if p.PasswordFile != filepath.Join(root, "private/token") || p.CAFile != filepath.Join(root, "installed/ca.pem") || p.Repository != "https://git.mydc.test/team/app.git" {
+	if p.PasswordFile != filepath.Join(root, "private/token") || p.CAFile != filepath.Join(root, "installed/ca.pem") || p.Repository != "https://git.sfc.test/team/app.git" {
 		t.Fatal("installed relative paths or exact repository changed", p)
 	}
 	// Loading config must not require opening the secret/provider/network.

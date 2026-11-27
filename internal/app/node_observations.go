@@ -9,24 +9,25 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
+	"log"
 	"math"
 	"slices"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/cluster/membership"
-	"github.com/jay94ks/mydcd/internal/containerops"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/observability"
-	"github.com/jay94ks/mydcd/internal/storage"
-	"github.com/jay94ks/mydcd/internal/workload"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/membership"
+	"github.com/jay94ks/seafield/internal/containerops"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/eventbus"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/observability"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/storage"
+	"github.com/jay94ks/seafield/internal/workload"
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/client"
 )
@@ -38,10 +39,10 @@ type observedContainerCPU struct {
 
 // Edge measurements stay in observations.db, outside the management FSM.
 // They may diagnose a node, never authorize a container or reserve capacity.
-func (r *Runtime) storeNodeObservation(caller mydcp.Identity, raw []byte) error {
+func (r *Runtime) storeNodeObservation(caller sfcp.Identity, raw []byte) error {
 	report, err := observability.Decode(raw)
 	if err != nil || report.Key != [32]byte(caller) || report.Cluster != r.controlPolicy.Cluster {
-		return mydcp.ErrAdmission
+		return sfcp.ErrAdmission
 	}
 	v, err := r.Engine().Read(r.ctx, false)
 	if err != nil {
@@ -59,7 +60,8 @@ func (r *Runtime) storeNodeObservation(caller mydcp.Identity, raw []byte) error 
 	key, keyErr := identity.ParseKey(entry.CurrentPeer().Key)
 	now := uint64(time.Now().UnixMilli())
 	if !ok || keyErr != nil || key != report.Key || !d.MemberKey(report.Key) || report.Index > v.State.Index() || !observability.Fresh(report.At, now) {
-		return mydcp.ErrAdmission
+		log.Printf("node observation dropped: node=%s source=%s reason=admission member=%t index=%d local-index=%d at=%d now=%d", report.Node, report.Source(), ok && keyErr == nil && key == report.Key && d.MemberKey(report.Key), report.Index, v.State.Index(), report.At, now)
+		return sfcp.ErrAdmission
 	}
 	r.reportMu.Lock()
 	defer r.reportMu.Unlock()
@@ -81,18 +83,22 @@ func (r *Runtime) storeValidatedNodeObservation(report observability.Report, raw
 			return nil
 		}
 		newPull := previous.RegistryPull != nil && report.RegistryPull != nil && previous.RegistryPull.Sequence < report.RegistryPull.Sequence
-		if previous.Key == report.Key && !newPull && (previous.At >= report.At || report.RegistryPull == nil && previous.Index > report.Index) {
+		stale := func(reason string) error {
+			log.Printf("node observation dropped: node=%s source=%s reason=%s at=%d stored-at=%d index=%d stored-index=%d", report.Node, report.Source(), reason, report.At, previous.At, report.Index, previous.Index)
 			return nil
+		}
+		if previous.Key == report.Key && !newPull && (previous.At >= report.At || report.RegistryPull == nil && previous.Index > report.Index) {
+			return stale("older-than-stored")
 		} // no stale overwrite
 		if previous.Key == report.Key && previous.RegistryPull != nil && report.RegistryPull != nil &&
 			(previous.RegistryPull.Sequence > report.RegistryPull.Sequence || previous.RegistryPull.Sequence == report.RegistryPull.Sequence && *previous.RegistryPull != *report.RegistryPull) {
-			return nil // an old republished sample cannot replace a new pull
+			return stale("older-registry-pull") // an old republished sample cannot replace a new pull
 		}
 		if previous.Volume != nil && report.Volume != nil && previous.Volume.Binding == report.Volume.Binding && previous.Volume.ScannedAt > report.Volume.ScannedAt {
-			return nil // an older scan cannot replace a newer one of the same volume
+			return stale("older-volume-scan") // an older scan cannot replace a newer one of the same volume
 		}
 		if previous.Task != nil && report.Task != nil && (previous.Task.Generation > report.Task.Generation || previous.Task.Generation == report.Task.Generation && previous.Task.Revision > report.Task.Revision) {
-			return nil
+			return stale("older-task-revision")
 		}
 	} else if !errors.Is(e, storage.ErrMissing) {
 		return e
@@ -100,7 +106,26 @@ func (r *Runtime) storeValidatedNodeObservation(report observability.Report, raw
 	if err := r.appendObservationEvents(prior, report); err != nil {
 		return err
 	}
-	return r.reports.Write(map[string][]byte{id: raw})
+	if err := r.reports.Write(map[string][]byte{id: raw}); err != nil {
+		return err
+	}
+	r.publishNodeObservation(report)
+	return nil
+}
+
+// publishNodeObservation tells event subscribers which observation changed.
+// The tenant/app, when the observation belongs to one, decides who may read it.
+func (r *Runtime) publishNodeObservation(report observability.Report) {
+	e := eventbus.Event{Topic: eventbus.TopicReport, Kind: eventbus.KindNodeObservation, Node: report.Node, Source: report.Source(), Changed: true}
+	switch {
+	case report.Task != nil:
+		e.Tenant, e.App = report.Task.Tenant, report.Task.App
+	case report.Usage != nil:
+		e.Tenant = report.Usage.Tenant
+	case report.RegistryPull != nil:
+		e.Tenant = report.RegistryPull.Tenant
+	}
+	r.bus.Publish(e)
 }
 
 func (r *Runtime) nodeObservations(ctx context.Context, v cluster.View) ([]observability.Report, error) {
@@ -138,23 +163,27 @@ func (r *Runtime) collectNodeObservations(ctx context.Context, v cluster.View) (
 		return nil, err
 	}
 	d, err := p.Members(v.State)
-	if err != nil || !d.MemberKey(r.Identity.Public) {
-		return nil, mydcp.ErrAdmission
+	if err != nil {
+		return nil, err
 	}
 	entry, ok := d.Entry(r.Engine().ObservedNodeID())
-	if !ok {
-		return nil, mydcp.ErrAdmission
+	if v.State.Index() == 0 || !ok || !d.MemberKey(r.Identity.Public) {
+		return nil, errObservationsNotReady
 	}
 	base := observability.Report{Kind: "node-observation", Schema: 1, Cluster: p.Cluster, Node: entry.Peer.ID, Key: r.Identity.Public, Index: v.State.Index()}
 	out := [][]byte{}
+	// An invalid sample is dropped on its own, with a log line; it never
+	// keeps the node's other reports from being taken.
 	appendReport := func(report observability.Report) error {
 		report.At = uint64(time.Now().UnixMilli())
 		report.Signature = ed25519.Sign(r.Identity.Private, observability.SigningBytes(report))
 		if !report.Valid() {
 			if c := report.Consensus; c != nil {
-				return fmt.Errorf("node observation consensus rejected: role=%q leader=%q applied=%d commit=%d last=%d snapshot-at=%d at=%d log-first=%d log-last=%d: %w", c.Role, c.Leader, c.AppliedIndex, c.CommitIndex, c.LastIndex, c.SnapshotAt, report.At, c.LogFirstIndex, c.LogLastIndex, observability.ErrReport)
+				log.Printf("node observation dropped: node=%s source=consensus reason=invalid role=%q leader=%q term=%d applied=%d commit=%d last=%d snapshot-at=%d at=%d log-first=%d log-last=%d", report.Node, c.Role, c.Leader, c.Term, c.AppliedIndex, c.CommitIndex, c.LastIndex, c.SnapshotAt, report.At, c.LogFirstIndex, c.LogLastIndex)
+				return nil
 			}
-			return fmt.Errorf("node observation %s rejected: %w", report.Source(), observability.ErrReport)
+			log.Printf("node observation dropped: node=%s source=%s reason=invalid", report.Node, report.Source())
+			return nil
 		}
 		raw, err := json.Marshal(report)
 		if err == nil {
@@ -170,6 +199,10 @@ func (r *Runtime) collectNodeObservations(ctx context.Context, v cluster.View) (
 	r.mu.RUnlock()
 	if r.tunnel != nil {
 		host.TunnelWaits = r.tunnel.Waits()
+	}
+	host.Build = r.buildCapability()
+	if r.installation != nil {
+		host.ClusterApps = clusterAppReports(ctx, r.installation.config.ClusterApps.Enabled(), readClusterAppRelease, r.clusterAppLiveState)
 	}
 	if hostErr != nil && host.CPUCapacity == 0 {
 		host.ModuleReady = false
@@ -195,6 +228,18 @@ func (r *Runtime) collectNodeObservations(ctx context.Context, v cluster.View) (
 		disk.Source = source
 		sample := base
 		sample.Disk = &disk
+		if err := appendReport(sample); err != nil {
+			return nil, err
+		}
+	}
+	// The block device inventory is one report; a busy or failed read
+	// keeps the last stored inventory, which goes stale on its own.
+	if devices, e := observability.InspectDevices(ctx); e != nil {
+		log.Printf("node observation dropped: node=%s source=devices reason=unavailable error=%v", base.Node, e)
+	} else {
+		devices.Recorded = r.recordedMounts(devices)
+		sample := base
+		sample.Devices = &devices
 		if err := appendReport(sample); err != nil {
 			return nil, err
 		}
@@ -237,7 +282,7 @@ func (r *Runtime) collectNodeObservations(ctx context.Context, v cluster.View) (
 		if e != nil {
 			return nil, e
 		}
-		peer, known := r.Mesh.Peer(mydcp.Identity(key))
+		peer, known := r.Mesh.Peer(sfcp.Identity(key))
 		if !known {
 			continue
 		}
@@ -249,7 +294,9 @@ func (r *Runtime) collectNodeObservations(ctx context.Context, v cluster.View) (
 			}
 		}
 	}
-	if consensus, e := r.Engine().ConsensusObservation(ctx); e == nil {
+	if consensus, e := r.Engine().ConsensusObservation(ctx); e != nil {
+		log.Printf("node observation dropped: node=%s source=consensus reason=unavailable error=%v", base.Node, e)
+	} else {
 		if !entry.Peer.Voter && consensus.Role == "follower" {
 			consensus.Role = "non-voter"
 		}
@@ -327,7 +374,7 @@ func (r *Runtime) publishTaskMeasurement(v cluster.View, app control.AppView, st
 	if err != nil {
 		return err
 	}
-	return publisher.storeNodeObservation(mydcp.Identity(signer.Public), raw)
+	return publisher.storeNodeObservation(sfcp.Identity(signer.Public), raw)
 }
 
 // observationResend is how long an unchanged report waits before it is sent
@@ -357,9 +404,18 @@ func observationDue(last observationSentAt, known bool, digest [32]byte, linkedS
 	return !known || last.digest != digest || now.Sub(last.at) >= observationResend || !linked || linkedSince.After(last.at)
 }
 
+// errObservationsNotReady: this node's committed view does not list it as a
+// member yet (just after a join, before the entry is applied here), so it has
+// nothing it may report. The loop says so once, not every round.
+var errObservationsNotReady = errors.New("this node is not a member in its committed view yet")
+
+// observationInterval is how often a node collects and sends its reports.
+var observationInterval = 30 * time.Second
+
 func (r *Runtime) managedObservationLoop() {
-	tick := time.NewTicker(30 * time.Second)
+	tick := time.NewTicker(observationInterval)
 	defer tick.Stop()
+	waiting := false
 	for {
 		ctx, cancel := context.WithTimeout(r.ctx, 30*time.Second)
 		v, err := r.Engine().Read(ctx, false)
@@ -367,11 +423,24 @@ func (r *Runtime) managedObservationLoop() {
 		if err == nil {
 			raw, err = r.collectNodeObservations(ctx, v)
 		}
+		if notReady := errors.Is(err, errObservationsNotReady); notReady != waiting {
+			waiting = notReady
+			if notReady {
+				log.Printf("node observations waiting: %v", err)
+			} else {
+				log.Printf("node observations resumed")
+			}
+		}
+
+		// One report that cannot be stored is dropped alone, with a log
+		// line; the reports after it are still stored and sent.
 		allStored := make([][]byte, 0, len(raw))
 		for _, b := range raw {
-			if writeErr := r.storeNodeObservation(mydcp.Identity(r.Identity.Public), b); writeErr != nil {
+			if writeErr := r.storeNodeObservation(sfcp.Identity(r.Identity.Public), b); writeErr != nil {
+				source, _, _ := observationDigest(b)
+				log.Printf("node observation dropped: source=%s reason=local-store error=%v", source, writeErr)
 				err = errors.Join(err, writeErr)
-				break
+				continue
 			}
 			allStored = append(allStored, b)
 		}
@@ -385,7 +454,7 @@ func (r *Runtime) managedObservationLoop() {
 				type delivery struct {
 					sources []string
 					digests [][32]byte
-					ok      bool
+					sent    []bool
 				}
 				deliveries := map[[32]byte]*delivery{}
 				var deliveriesMu sync.Mutex
@@ -396,12 +465,12 @@ func (r *Runtime) managedObservationLoop() {
 					if keyErr != nil || key == r.Identity.Public || !membership.FullMember(entry) {
 						continue
 					}
-					peer, known := r.Mesh.Peer(mydcp.Identity(key))
+					peer, known := r.Mesh.Peer(sfcp.Identity(key))
 					if !known {
 						continue
 					}
 					sent := r.observationSent[key]
-					linkedSince, linked := r.Mesh.ConnectedSince(mydcp.Identity(key))
+					linkedSince, linked := r.Mesh.ConnectedSince(sfcp.Identity(key))
 					due := &delivery{}
 					var stored [][]byte
 					for _, b := range allStored {
@@ -411,8 +480,9 @@ func (r *Runtime) managedObservationLoop() {
 							continue
 						}
 						stored = append(stored, b)
-						if ok {
-							due.sources, due.digests = append(due.sources, source), append(due.digests, digest)
+						due.sources, due.digests = append(due.sources, source), append(due.digests, digest)
+						if !ok {
+							due.digests[len(due.digests)-1] = [32]byte{}
 						}
 					}
 					if len(stored) == 0 {
@@ -431,13 +501,24 @@ func (r *Runtime) managedObservationLoop() {
 						call, stop := context.WithTimeout(ctx, 2*time.Second)
 						session, sendErr := r.Mesh.Dial(call, peer)
 						stop()
-						if sendErr == nil {
-							for _, b := range stored {
-								call, stop := context.WithTimeout(ctx, 2*time.Second)
-								sendErr = session.Report(call, b)
-								stop()
-								if sendErr != nil {
-									break
+						sent := make([]bool, len(stored))
+						if sendErr != nil {
+							log.Printf("node observations not sent: peer=%s reports=%d error=%v", peer.ID, len(stored), sendErr)
+						} else {
+							// One frame carries as many reports as fit. A
+							// report the peer refuses is dropped alone.
+							call, stop := context.WithTimeout(ctx, 2*time.Second)
+							accepted, e := session.ReportBatch(call, sfcp.KindNodeObservation, stored)
+							stop()
+							copy(sent, accepted)
+							if e != nil {
+								sendErr = e
+								log.Printf("node observations not sent: peer=%s reports=%d error=%v", peer.ID, len(stored), e)
+							}
+							for i, ok := range accepted {
+								if !ok && e == nil {
+									sendErr = sfcp.ErrReportRefused
+									log.Printf("node observation dropped: peer=%s source=%s reason=refused", peer.ID, due.sources[i])
 								}
 							}
 						}
@@ -449,26 +530,29 @@ func (r *Runtime) managedObservationLoop() {
 						}
 						r.mu.Unlock()
 						deliveriesMu.Lock()
-						due.ok = sendErr == nil
+						due.sent = sent
 						deliveriesMu.Unlock()
 					}()
 				}
 				workers.Wait()
 				for key, due := range deliveries {
-					if !due.ok {
-						delete(r.observationSent, key)
-						continue
-					}
 					if r.observationSent[key] == nil {
 						r.observationSent[key] = map[string]observationSentAt{}
 					}
 					for i, source := range due.sources {
-						r.observationSent[key][source] = observationSentAt{digest: due.digests[i], at: now}
+						if i < len(due.sent) && due.sent[i] && due.digests[i] != ([32]byte{}) {
+							r.observationSent[key][source] = observationSentAt{digest: due.digests[i], at: now}
+						} else {
+							delete(r.observationSent[key], source)
+						}
 					}
 				}
 			} else {
 				err = errors.Join(err, directoryErr)
 			}
+		}
+		if err != nil && !waiting {
+			log.Printf("node observation round incomplete: %v", err)
 		}
 		r.mu.Lock()
 		r.reportError = err
@@ -504,13 +588,13 @@ func (r *Runtime) collectTenantUsage(ctx context.Context, v cluster.View, node s
 		}
 		return out, nil
 	}
-	listed, err := r.docker.API.ContainerList(ctx, client.ContainerListOptions{All: true, Filters: client.Filters{}.Add("label", "org.mydc.owner="+r.owner)})
+	listed, err := r.docker.API.ContainerList(ctx, client.ContainerListOptions{All: true, Filters: client.Filters{}.Add("label", "org.sfc.owner="+r.owner)})
 	if err != nil {
 		return nil, err
 	}
 	nextCPU := map[string]observedContainerCPU{}
 	for _, item := range listed.Items {
-		key := item.Labels["org.mydc.key"]
+		key := item.Labels["org.sfc.key"]
 		parts := strings.Split(key, "/")
 		if len(parts) != 5 || parts[0] != "workload" || parts[1] != "task" {
 			continue
@@ -626,4 +710,14 @@ func (r *Runtime) collectTenantUsage(ctx context.Context, v cluster.View, node s
 		out = append(out, u)
 	}
 	return out, ctx.Err()
+}
+
+// buildCapability is what this server's Host observation says about image
+// builds. Today's Docker engine always offers build containers, so only the
+// workload module decides; a Seafield engine also reports its build API.
+func (r *Runtime) buildCapability() *observability.Build {
+	if r.imageBuildNative == nil {
+		return &observability.Build{Reason: "WORKLOAD_OFF"}
+	}
+	return &observability.Build{Enabled: true}
 }

@@ -10,7 +10,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/access"
+	"github.com/jay94ks/seafield/internal/access"
 )
 
 func TestPartProofSurvivesRelayWithoutAllowingDifferentBytesOrCreator(t *testing.T) {
@@ -64,7 +64,7 @@ func TestPartProofSurvivesRelayWithoutAllowingDifferentBytesOrCreator(t *testing
 		Signature     []byte
 	}{p.Schema, p.Scope, p.Index, p.Length, p.Digest, p.Expected, p.At, p.ExpiresAt, p.Nonce, nil}
 	raw, _ := json.Marshal(old)
-	if !bytes.Equal(PartProofBytes(p), append([]byte("mydc-imagebuild-part-request-1\x00"), raw...)) {
+	if !bytes.Equal(PartProofBytes(p), append([]byte("sfc-imagebuild-part-request-1\x00"), raw...)) {
 		t.Fatal("legacy exact user proof signing bytes changed")
 	}
 	changed = q

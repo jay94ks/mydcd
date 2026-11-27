@@ -16,9 +16,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/certstore"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/certstore"
+	"github.com/jay94ks/seafield/internal/cluster/state"
 )
 
 func controlCertificate(t *testing.T, f *nodeStorageFixture, serial int64, request string) certstore.Certificate {
@@ -82,11 +82,10 @@ func TestCertificateManagementIsSystemAdminOnlyAndLinksFollowDomains(t *testing.
 	f.apply("admin", "disable-certificate", 0, CertificateSelection{newer.Metadata.ID}, state.Applied)
 	f.apply("admin", "delete-certificate", 0, CertificateSelection{newer.Metadata.ID}, state.Applied)
 	f.apply("admin", "delete-certificate", 0, CertificateSelection{v.Metadata.ID}, state.ConditionFailed)
+	// A key's ceiling is fixed when it is added: sign in with a put-only key.
 	u, _ := f.users.User("admin")
-	u.Credentials[0].Operations = []string{"put-certificate"}
-	expectedAccount := u.Revision
-	u.Revision = 0 // replacement input; CAS uses the separately observed revision
-	users, err := f.users.PutUser("admin", expectedAccount, u)
+	putOnly := [32]byte(ed25519.NewKeyFromSeed(bytes.Repeat([]byte{202}, ed25519.SeedSize)).Public().(ed25519.PublicKey))
+	users, err := f.users.AddCredential("admin", f.p.Cluster, u.Revision, access.CredentialAddition{User: "admin", Credential: access.CredentialKey{ID: "put-only", Method: access.PrivateKey, PublicKey: putOnly}, Operations: []string{"put-certificate"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -98,7 +97,7 @@ func TestCertificateManagementIsSystemAdminOnlyAndLinksFollowDomains(t *testing.
 	f.checkpoint(CatalogKey, writes)
 	u, _ = users.User("admin")
 	session := f.sessions["admin"]
-	session.AccountRevision = u.Revision
+	session.AccountRevision, session.Credential, session.Key = u.Revision, "put-only", putOnly
 	session.Signature = ed25519.Sign(f.node, access.SessionBytes(session))
 	f.sessions["admin"] = session
 	if f.p.CertificateAllowed(f.s, session, 3, "put-certificate") != nil || f.p.CertificateAllowed(f.s, session, 3, "disable-certificate") == nil {

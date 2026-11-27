@@ -25,8 +25,5 @@ purpose15는 Unix/QUIC의 동일 인증을 사용하고 remote owner에는 원 �
 
 | 명령 | 대상·주체 | 원 실행/보존 |
 |---|---|---|
-| app clear-logs APP SERVICE [--instance TASK] (확인 질문) | 현재 cluster/tenant 사용자 Read/Deploy, 이름 기반 서비스와 실제 owner | driver·native lifetime·종속 영향 조회. 효과/동의 생성 없음 |
-| app clear-logs APP SERVICE -y [--id ID] | 같은 선택·관리 변경 권한과 독립 승인 정책 | 표시 대상의 중단·로컬 로그/writable layer 손실에 명시 동의. Volume/외부 로그 보존. 기존 retirement/recreation·원 CAS와 내구 작업. 반복은 원 결과만 조회 |
-| op show ID (app clear-logs) | 같은 tenant의 현재 Read | 원 삭제와 교체 상태/이전·새 native 세대 조회. 현재 생존이나 신규 승인 아님 |
-| manage result/resume의 원 clear 요청 | 출력한 원 request ID와 현재 동일 계정 | 저장된 원 Target/서명/CAS로만 결과/명시 재개. 새 native 선택·새 ID/자동 재제출 없음 |
+| app clear-logs APP [SERVICE] [--instance TASK] (확인 질문, `-y`) | 받은 서버는 tenant Read, 각 서버는 자기 상태로 Deploy | 서버마다 로그 보관소에서만 지움. 컨테이너·Raft·작업 기록 없음. 닿지 못한 서버는 같은 명령을 다시 보내 지움 |
 

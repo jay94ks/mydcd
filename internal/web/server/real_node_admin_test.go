@@ -10,14 +10,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/nodestorage"
-	"github.com/jay94ks/mydcd/internal/tenancy"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/nodestorage"
+	"github.com/jay94ks/seafield/internal/tenancy"
 )
 
-// Storage roots on a server through the web on mydcd: add, refusals,
+// Storage roots on a server through the web on sfcd: add, refusals,
 // policy, drain and remove, the workspace view and who may change them.
 func TestRealServerNodeStorage(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
@@ -37,13 +37,13 @@ func TestRealServerNodeStorage(t *testing.T) {
 
 	// add: tenants are sorted and de-duplicated
 	o := op()
-	code, out := f.do("POST", "/api/v1/nodes/node-0/storage", map[string]any{"opId": o, "id": "nvme", "path": nvme, "tenants": []string{"shop", "payments", "shop"}, "maxVolumes": 8})
+	code, out := f.do("POST", "/api/v1/nodes/node-0/storage", map[string]any{"opId": o, "id": "nvme", "path": nvme, "tenants": []string{"shop", "payments", "shop"}, "capacityBytes": 8 << 30})
 	if opState(t, code, out) != "applied" || out["op"].(map[string]any)["action"] != "add-node-storage" {
 		t.Fatalf("add: %d %v", code, out)
 	}
 	var d nodestorage.Definition
 	userPayload(t, f, "u-admin", o, &d)
-	if !slices.Equal(d.Tenants, []string{"payments", "shop"}) || d.Node != "node-0" || d.MaxVolumes != 8 || d.Path != nvme {
+	if !slices.Equal(d.Tenants, []string{"payments", "shop"}) || d.Node != "node-0" || d.CapacityBytes != 8<<30 || d.Path != nvme {
 		t.Fatalf("payload: %+v", d)
 	}
 	// node-0 attests the root
@@ -52,7 +52,7 @@ func TestRealServerNodeStorage(t *testing.T) {
 		row = storageItem(t, f, "/api/v1/nodes/node-0/storage", "nvme")
 		return row != nil && row["attested"] == true
 	})
-	if row["volumes"] != float64(0) || row["closed"] != false || row["maxVolumes"] != float64(8) {
+	if row["volumes"] != float64(0) || row["closed"] != false || row["capacityBytes"] != float64(8<<30) || row["allTenants"] != false || row["default"] != false {
 		t.Fatalf("nvme row: %v", row)
 	}
 	if code, out := f.do("GET", "/api/v1/nodes/node-0/storage/nvme/space", nil); code != 200 || out["node"] != "node-0" || out["id"] != "nvme" {
@@ -64,36 +64,36 @@ func TestRealServerNodeStorage(t *testing.T) {
 
 	// bad input is refused before signing
 	for _, b := range []map[string]any{
-		{"opId": op(), "id": "Bad", "path": "/srv/x", "maxVolumes": 1},
-		{"opId": op(), "id": "x", "path": "/srv/../x", "maxVolumes": 1},
-		{"opId": op(), "id": "x", "path": "/srv/x", "maxVolumes": 0},
-		{"opId": op(), "id": "x", "path": "/srv/x", "maxVolumes": 1, "tenants": []string{"No"}},
+		{"opId": op(), "id": "Bad", "path": "/srv/x"},
+		{"opId": op(), "id": "x", "path": "/srv/../x"},
+		{"opId": op(), "id": "x", "path": "/srv/x", "capacityBytes": uint64(1) << 61},
+		{"opId": op(), "id": "x", "path": "/srv/x", "tenants": []string{"No"}}, {"opId": op(), "id": "x", "path": "/srv/x", "allTenants": true, "tenants": []string{"shop"}},
 	} {
 		if code, out := f.do("POST", "/api/v1/nodes/node-0/storage", b); code != 422 {
 			t.Fatalf("bad %v: %d %v", b, code, out)
 		}
 	}
-	// a path inside another root on the node fails in mydcd
-	if code, out := f.do("POST", "/api/v1/nodes/node-0/storage", map[string]any{"opId": op(), "id": "inner", "path": filepath.Join(nvme, "a"), "maxVolumes": 1}); opState(t, code, out) != "failed" {
+	// a path inside another root on the node fails in sfcd
+	if code, out := f.do("POST", "/api/v1/nodes/node-0/storage", map[string]any{"opId": op(), "id": "inner", "path": filepath.Join(nvme, "a")}); opState(t, code, out) != "failed" {
 		t.Fatalf("nested: %d %v", code, out)
 	}
 
 	// policy: a stale expected fails, the current one applies
 	rev := row["revision"].(float64)
-	if code, out := f.do("PUT", "/api/v1/nodes/node-0/storage/nvme", map[string]any{"opId": op(), "tenants": []string{"shop"}, "maxVolumes": 4, "expected": rev - 1}); opState(t, code, out) != "failed" {
+	if code, out := f.do("PATCH", "/api/v1/nodes/node-0/storage/nvme", map[string]any{"opId": op(), "removeTenants": []string{"payments"}, "capacityBytes": 4 << 30, "expected": rev - 1}); opState(t, code, out) != "failed" {
 		t.Fatalf("stale policy: %d %v", code, out)
 	}
 	o = op()
-	if code, out := f.do("PUT", "/api/v1/nodes/node-0/storage/nvme", map[string]any{"opId": o, "tenants": []string{"shop"}, "maxVolumes": 4, "expected": rev}); opState(t, code, out) != "applied" {
+	if code, out := f.do("PATCH", "/api/v1/nodes/node-0/storage/nvme", map[string]any{"opId": o, "removeTenants": []string{"payments"}, "capacityBytes": 4 << 30, "expected": rev}); opState(t, code, out) != "applied" {
 		t.Fatalf("policy: %d %v", code, out)
 	}
 	var q control.NodeStoragePolicy
 	userPayload(t, f, "u-admin", o, &q)
-	if q.Node != "node-0" || q.ID != "nvme" || q.MaxVolumes != 4 || !slices.Equal(q.Tenants, []string{"shop"}) {
+	if q.Node != "node-0" || q.ID != "nvme" || q.CapacityBytes == nil || *q.CapacityBytes != 4<<30 || !slices.Equal(q.RemoveTenants, []string{"payments"}) || len(q.AddTenants) != 0 {
 		t.Fatalf("policy payload: %+v", q)
 	}
 	row = storageItem(t, f, "/api/v1/storage", "nvme")
-	if row["maxVolumes"] != float64(4) {
+	if row["capacityBytes"] != float64(4<<30) {
 		t.Fatalf("after policy: %v", row)
 	}
 
@@ -119,8 +119,8 @@ func TestRealServerNodeStorage(t *testing.T) {
 	if code, out := f.do("GET", "/api/v1/t/payments/storage", nil); code != 403 {
 		t.Fatalf("payments viewer: %d %v", code, out)
 	}
-	// a workspace manager is refused by mydcd
-	if code, out := f.do("POST", "/api/v1/nodes/node-0/storage", map[string]any{"opId": op(), "id": "mine", "path": filepath.Join(dir, "mine"), "maxVolumes": 1}); code == 200 && opState(t, code, out) == "applied" {
+	// a workspace manager is refused by sfcd
+	if code, out := f.do("POST", "/api/v1/nodes/node-0/storage", map[string]any{"opId": op(), "id": "mine", "path": filepath.Join(dir, "mine")}); code == 200 && opState(t, code, out) == "applied" {
 		t.Fatalf("manager add: %d %v", code, out)
 	}
 
@@ -156,7 +156,7 @@ func TestRealServerNodeStorage(t *testing.T) {
 	}
 }
 
-// A workspace's per-server limit through the web on mydcd.
+// A workspace's per-server limit through the web on sfcd.
 func TestRealServerTenantNodeLimit(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()

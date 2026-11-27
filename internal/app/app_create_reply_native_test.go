@@ -21,19 +21,19 @@ import (
 	"time"
 
 	"github.com/hashicorp/raft"
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/bootstrap"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/cluster/membership"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/config"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/engine"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/reconcile"
-	"github.com/jay94ks/mydcd/internal/userauth"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/bootstrap"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/membership"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/config"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/engine"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/userauth"
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/client"
 )
@@ -286,7 +286,7 @@ func (f *managedCreateReplyFault) ServeHTTP(w http.ResponseWriter, req *http.Req
 	}
 	req.Body = io.NopCloser(bytes.NewReader(raw))
 	var config container.Config
-	if json.Unmarshal(raw, &config) != nil || owner == "" || config.Labels["org.mydc.owner"] != owner || config.Labels["org.mydc.key"] != key || config.Labels["org.mydc.kind"] != "container" {
+	if json.Unmarshal(raw, &config) != nil || owner == "" || config.Labels["org.sfc.owner"] != owner || config.Labels["org.sfc.key"] != key || config.Labels["org.sfc.kind"] != "container" {
 		f.forward.ServeHTTP(w, req)
 		return
 	}
@@ -378,14 +378,14 @@ func promoteManagedFaultProvider(t *testing.T, ctx context.Context, a, b *Runtim
 	}
 }
 
-func prepareManagedHandoffControl(t *testing.T, ctx context.Context, root string, source *Runtime, user userauth.Client, peer mydcp.Peer, session access.Session, p control.Policy, read func() cluster.View, change func(string, string, uint64, any), names ...string) *Runtime {
+func prepareManagedHandoffControl(t *testing.T, ctx context.Context, root string, source *Runtime, user userauth.Client, peer sfcp.Peer, session access.Session, p control.Policy, read func() cluster.View, change func(string, string, uint64, any), names ...string) *Runtime {
 	t.Helper()
 	return prepareManagedHandoffControlAtReady(t, ctx, root, source, user, peer, session, p, read, change, nil, nil, names...)
 }
 
 // The optional hooks consume the same installed learner before its existing
 // promotion; they do not create another runtime, source or native app fixture.
-func prepareManagedHandoffControlAtReady(t *testing.T, ctx context.Context, root string, source *Runtime, user userauth.Client, peer mydcp.Peer, session access.Session, p control.Policy, read func() cluster.View, change func(string, string, uint64, any), configure func(*config.Node), ready func(*Runtime), names ...string) *Runtime {
+func prepareManagedHandoffControlAtReady(t *testing.T, ctx context.Context, root string, source *Runtime, user userauth.Client, peer sfcp.Peer, session access.Session, p control.Policy, read func() cluster.View, change func(string, string, uint64, any), configure func(*config.Node), ready func(*Runtime), names ...string) *Runtime {
 	t.Helper()
 	nodeID, suffix := "node-c", "c"
 	if len(names) > 0 {
@@ -473,7 +473,7 @@ func prepareManagedHandoffControlAtReady(t *testing.T, ctx context.Context, root
 	return r
 }
 
-func verifyManagedCreateReplyFault(t *testing.T, ctx context.Context, f *managedCreateReplyFault, a, b **Runtime, c *Runtime, cfg config.Node, user userauth.Client, peer mydcp.Peer, session access.Session, p control.Policy, read func() cluster.View, change func(string, string, uint64, any), wait func(string, func() bool)) map[string]any {
+func verifyManagedCreateReplyFault(t *testing.T, ctx context.Context, f *managedCreateReplyFault, a, b **Runtime, c *Runtime, cfg config.Node, user userauth.Client, peer sfcp.Peer, session access.Session, p control.Policy, read func() cluster.View, change func(string, string, uint64, any), wait func(string, func() bool)) map[string]any {
 	t.Helper()
 	key := deployment.ResourceKey("task", "tenant", "app", "web")
 	wait("actual Create 201 reply lost and original journal Unknown", func() bool {
@@ -500,7 +500,7 @@ func verifyManagedCreateReplyFault(t *testing.T, ctx context.Context, f *managed
 	inspect := func() {
 		t.Helper()
 		got, err := direct.API.ContainerInspect(ctx, evidence.ID, client.ContainerInspectOptions{})
-		if err != nil || got.Container.State == nil || got.Container.State.Running || got.Container.ID != evidence.ID || got.Container.Config.Labels["org.mydc.owner"] != (*a).owner || got.Container.Config.Labels["org.mydc.key"] != key {
+		if err != nil || got.Container.State == nil || got.Container.State.Running || got.Container.ID != evidence.ID || got.Container.Config.Labels["org.sfc.owner"] != (*a).owner || got.Container.Config.Labels["org.sfc.key"] != key {
 			t.Fatal("actual original stopped object", err)
 		}
 	}
@@ -585,19 +585,19 @@ func verifyManagedCreateReplyFault(t *testing.T, ctx context.Context, f *managed
 			leader = c
 		}
 		leaderID = leader.installation.record.Root.Self.ID
-		peers := map[mydcp.Identity]mydcp.Peer{peer.Key: peer}
+		peers := map[sfcp.Identity]sfcp.Peer{peer.Key: peer}
 		remote := user
 		for _, member := range []*Runtime{*b, c} {
-			m := mydcp.Peer{ID: member.installation.record.Root.Self.ID, Endpoint: member.installation.record.Endpoint, Policy: mydcp.Policy{Key: mydcp.Identity(member.Identity.Public), Respond: true}}
+			m := sfcp.Peer{ID: member.installation.record.Root.Self.ID, Endpoint: member.installation.record.Endpoint, Policy: sfcp.Policy{Key: sfcp.Identity(member.Identity.Public), Respond: true}}
 			peers[m.Key] = m
 			remote.Peers = append(remote.Peers, m)
 		}
-		remote.Mesh, err = mydcp.NewTransport(user.Self, user.Cluster, func(k mydcp.Identity) (mydcp.Peer, bool) { p, ok := peers[k]; return p, ok })
+		remote.Mesh, err = sfcp.NewTransport(user.Self, user.Cluster, func(k sfcp.Identity) (sfcp.Peer, bool) { p, ok := peers[k]; return p, ok })
 		if err != nil {
 			t.Fatal(err)
 		}
 		defer remote.Mesh.Close()
-		selected := peers[mydcp.Identity(leader.Identity.Public)]
+		selected := peers[sfcp.Identity(leader.Identity.Public)]
 		originalOperation, _ := apps.Inventory("tenant", "app")
 		before, _ := originalOperation.Active()
 		reply, err := remote.AppOperation(ctx, selected, session, "tenant", control.AppOperationRequest{App: "app", ID: "rollout"})
@@ -657,7 +657,7 @@ func verifyManagedCreateReplyFault(t *testing.T, ctx context.Context, f *managed
 	}
 	tenant, _ := catalog.Tenant("tenant")
 	trust := append([]access.TrustRule(nil), tenant.ImageSources...)
-	change("fault-revoke-image-source", "set-trust", tenant.Revision, control.TrustAssignment{Tenant: "tenant"})
+	change("fault-revoke-image-source", "set-trust", tenant.Revision, control.TrustChange{Tenant: "tenant", Remove: trust})
 	f.releaseInspect()
 	if err := (*a).workload.Step(ctx, key); err == nil {
 		t.Fatal("untrusted original stopped Task was activated")
@@ -669,7 +669,7 @@ func verifyManagedCreateReplyFault(t *testing.T, ctx context.Context, f *managed
 	}
 	catalog, _ = p.Catalog(read().State)
 	tenant, _ = catalog.Tenant("tenant")
-	change("fault-restore-image-source", "set-trust", tenant.Revision, control.TrustAssignment{Tenant: "tenant", Rules: trust})
+	change("fault-restore-image-source", "set-trust", tenant.Revision, control.TrustChange{Tenant: "tenant", Add: trust})
 	wait("same original container after explicit trust restore", func() bool {
 		status, err := (*a).workload.Status(ctx, key)
 		if f.snapshot().Creates != 1 {

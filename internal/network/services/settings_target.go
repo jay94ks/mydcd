@@ -9,9 +9,9 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/network"
-	"github.com/jay94ks/mydcd/internal/tenancy"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/network"
+	"github.com/jay94ks/seafield/internal/tenancy"
 )
 
 type SettingKind string
@@ -99,7 +99,7 @@ func bindingConflicts(a, b settingBinding) bool {
 }
 func (t SettingsTarget) hash() [32]byte {
 	raw, _ := json.Marshal(targetSnapshot(t))
-	return sha256.Sum256(append([]byte("mydc-settings-target-1\x00"), raw...))
+	return sha256.Sum256(append([]byte("sfc-settings-target-1\x00"), raw...))
 }
 func settingsDNS(c access.Catalog, n tenancy.Networks, a Authority, actor string, cfg DNSConfig, scope NativeScope) (SettingsTarget, error) {
 	p, e := buildDNS(c, n, a, actor, cfg)

@@ -17,22 +17,22 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/secrets"
-	"github.com/jay94ks/mydcd/internal/web/mydc"
-	"github.com/jay94ks/mydcd/internal/web/store"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/secrets"
+	"github.com/jay94ks/seafield/internal/web/sfc"
+	"github.com/jay94ks/seafield/internal/web/store"
 )
 
-// Vault provider writes (mydc-web side). mydcd owns the write protocol, the
+// Vault provider writes (sfc-web side). sfcd owns the write protocol, the
 // receiver, the provider and the Group password check; the web runs the same
-// steps as `mydc secret put` / `secret group password` under one web opId,
+// steps as `sfcli secret put` / `secret group password` under one web opId,
 // stores each signed original before sending it, and passes the values only
-// through mydcd's SecretInput. Values and passwords are never stored (bbolt,
+// through sfcd's SecretInput. Values and passwords are never stored (bbolt,
 // logs, originals, the op digest) and are dropped when the request ends.
 
 // POST /t/{t}/vault/value {opId, path, values:{key: value}}: write a Secret's
-// values (mydcd publishes the written keys as the Secret's keys).
+// values (sfcd publishes the written keys as the Secret's keys).
 func (s *Server) handleVaultValue(w http.ResponseWriter, r *http.Request, ws *webSession) {
 	var req struct {
 		OpID   string            `json:"opId"`
@@ -74,7 +74,7 @@ func (s *Server) handleVaultValue(w http.ResponseWriter, r *http.Request, ws *we
 
 // POST /t/{t}/vault/password {opId, path, password, profile?}: set (or
 // change) a Group's password. profile names the verifier writer profile
-// the first time (mydcd keeps the Group's own after that). mydcd then protects the Group: an app's use of its
+// the first time (sfcd keeps the Group's own after that). sfcd then protects the Group: an app's use of its
 // Secrets needs an approval with this password. The web hashes it (Argon2id,
 // as the CLI does) and sends only the hash, as the "verifier" value.
 func (s *Server) handleVaultPassword(w http.ResponseWriter, r *http.Request, ws *webSession) {
@@ -128,10 +128,10 @@ func sortedCopy(v []string) []string {
 	return out
 }
 
-// vaultWriteID names the provider write of a web op: one stable mydcd
+// vaultWriteID names the provider write of a web op: one stable sfcd
 // write ID per opId (a lowercase identifier).
 func vaultWriteID(opID string) string {
-	h := sha256.Sum256([]byte("mydc-web-vault-write\x00" + opID))
+	h := sha256.Sum256([]byte("sfc-web-vault-write\x00" + opID))
 	return "web-" + hex.EncodeToString(h[:12])
 }
 
@@ -177,10 +177,10 @@ func (s *Server) vaultWrite(w http.ResponseWriter, r *http.Request, ws *webSessi
 
 	ctx, cancel := s.callCtx(r)
 	defer cancel()
-	err = ws.do(ctx, func(ctx context.Context, c mydc.Conn) error {
+	err = ws.do(ctx, func(ctx context.Context, c sfc.Conn) error {
 		if parent == nil {
 			id := vaultWriteID(opID)
-			plan, err := c.PlanVaultWrite(ctx, tenant, mydc.VaultWritePlanRequest{Realm: tenant, ID: id, Object: object, Profile: profile, Kind: kind, Keys: keys})
+			plan, err := c.PlanVaultWrite(ctx, tenant, sfc.VaultWritePlanRequest{Realm: tenant, ID: id, Object: object, Profile: profile, Kind: kind, Keys: keys})
 			if err != nil {
 				return err
 			}
@@ -221,7 +221,7 @@ func (s *Server) vaultWrite(w http.ResponseWriter, r *http.Request, ws *webSessi
 //	                         same opId again (without values) to recover it
 //	errorCode step-unknown   a step original's outcome is unknown: settle it
 //	                         with /ops/{opId}.{n}/result, then send again
-func (s *Server) runVaultWrite(ctx context.Context, c mydc.Conn, ws *webSession, parent *store.Op, values map[string][]byte) error {
+func (s *Server) runVaultWrite(ctx context.Context, c sfc.Conn, ws *webSession, parent *store.Op, values map[string][]byte) error {
 	j := parent.VaultWrite
 	defer func() {
 		parent.UpdatedAt = s.now()
@@ -275,7 +275,7 @@ func (s *Server) runVaultWrite(ctx context.Context, c mydc.Conn, ws *webSession,
 		}
 	}
 	for range 8 {
-		plan, err := c.PlanVaultWrite(ctx, j.Realm, mydc.VaultWritePlanRequest{Realm: j.Realm, ID: j.WriteID})
+		plan, err := c.PlanVaultWrite(ctx, j.Realm, sfc.VaultWritePlanRequest{Realm: j.Realm, ID: j.WriteID})
 		if err != nil {
 			return err
 		}
@@ -293,15 +293,15 @@ func (s *Server) runVaultWrite(ctx context.Context, c mydc.Conn, ws *webSession,
 		case "NotApplied", "Abandoned", "Invalid":
 			return stop(store.OpFailed, "write-not-applied")
 		case "":
-			ok, err = step(0, mydc.ActionVaultPrepareWrite, plan.TreeRevision, control.VaultWrite{Realm: j.Realm, Request: req})
+			ok, err = step(0, sfc.ActionVaultPrepareWrite, plan.TreeRevision, control.VaultWrite{Realm: j.Realm, Request: req})
 		case "Prepared":
-			ok, err = step(1, mydc.ActionVaultDispatchWrite, plan.TreeRevision, control.VaultWriteAction{Realm: j.Realm, ID: j.WriteID, Epoch: req.Epoch})
+			ok, err = step(1, sfc.ActionVaultDispatchWrite, plan.TreeRevision, control.VaultWriteAction{Realm: j.Realm, ID: j.WriteID, Epoch: req.Epoch})
 		case "Dispatched", "Unknown":
 			if j.Observation == nil {
 				if plan.Receiver == nil {
 					return stop(store.OpFailed, "no-receiver")
 				}
-				q := mydc.SecretWrite{Realm: j.Realm, ID: j.WriteID, Mode: "recover"}
+				q := sfc.SecretWrite{Realm: j.Realm, ID: j.WriteID, Mode: "recover"}
 				if !j.Attempted && status == "Dispatched" {
 					if values == nil {
 						return stop(store.OpRunning, "needs-input")
@@ -333,11 +333,11 @@ func (s *Server) runVaultWrite(ctx context.Context, c mydc.Conn, ws *webSession,
 			if err := json.Unmarshal(j.Observation, &o); err != nil {
 				return err
 			}
-			if ok, err = step(2, mydc.ActionVaultObserveWrite, plan.TreeRevision, control.VaultObserve{Observation: o}); ok {
+			if ok, err = step(2, sfc.ActionVaultObserveWrite, plan.TreeRevision, control.VaultObserve{Observation: o}); ok {
 				j.Observation = nil
 			}
 		case "StoredUnreferenced":
-			ok, err = step(3, mydc.ActionVaultPublishWrite, plan.TreeRevision, control.VaultWriteAction{Realm: j.Realm, ID: j.WriteID, Epoch: req.Epoch, ObjectRevision: plan.Write.ExpectedObjectRevision})
+			ok, err = step(3, sfc.ActionVaultPublishWrite, plan.TreeRevision, control.VaultWriteAction{Realm: j.Realm, ID: j.WriteID, Epoch: req.Epoch, ObjectRevision: plan.Write.ExpectedObjectRevision})
 		default:
 			return stop(store.OpUnknown, "write-"+strings.ToLower(status))
 		}

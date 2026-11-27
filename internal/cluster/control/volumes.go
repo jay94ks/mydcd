@@ -7,9 +7,9 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/workload/volumes"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/workload/volumes"
 )
 
 const VolumesKey = "control/volumes"
@@ -489,6 +489,14 @@ func (p Policy) reduceVolumes(s state.State, cmd state.Command) (map[string][]by
 			entry.Grants = append(entry.Grants, volumeGrant{consumer, change.Principal})
 		}
 	} else {
+		// A remote consumer's Gone is signed by its runner: trust the runner
+		// key only as the membership's current resource key of that node.
+		if gone.Consumer.Remote() {
+			key, ok := gone.Consumer.GoneKey()
+			if !ok || !p.resourceNodeOwner(s, gone.Consumer.Runner, key, false) {
+				return nil, state.Forbidden
+			}
+		}
 		entry.State, err = entry.State.Release(gone)
 		if err != nil {
 			return nil, state.ConditionFailed
@@ -512,7 +520,16 @@ func (p Policy) VolumePermit(s state.State, caller [32]byte, r volumes.StartRequ
 	}
 	owner, _ := e.State.Owner()
 	current, err := p.nodeOwner(s, owner.Node)
-	if err != nil || !p.ownsResource(s, current, owner.Key) || !p.ownsResource(s, caller, owner.Key) {
+	if err != nil || !p.ownsResource(s, current, owner.Key) {
+		return volumes.Permit{}, access.ErrDenied
+	}
+	if r.Consumer.Remote() {
+		// A remote consumer's start is asked by its runner, under the exact
+		// share record (control/volume-shares).
+		if !p.remoteRunner(s, caller, r.Scope, r.Consumer) {
+			return volumes.Permit{}, access.ErrDenied
+		}
+	} else if !p.ownsResource(s, caller, owner.Key) {
 		return volumes.Permit{}, access.ErrDenied
 	}
 	c, err := p.Catalog(s)
@@ -646,3 +663,6 @@ func (v Volumes) Page(c access.Catalog, actor, tenant, after string) ([]VolumeVi
 	}
 	return page, "", nil
 }
+
+// volumesBook is the VolumesKey book (books.go).
+var volumesBook = Book{Key: VolumesKey, Reduce: byKind(map[state.CommandKind]reducer{state.Module: Policy.reduceVolumes, state.ModuleReport: Policy.reduceVolumes})}

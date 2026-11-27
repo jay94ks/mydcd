@@ -5,12 +5,12 @@ package app
 import (
 	"context"
 	"errors"
-	"github.com/jay94ks/mydcd/internal/bootstrap"
-	"github.com/jay94ks/mydcd/internal/config"
-	"github.com/jay94ks/mydcd/internal/desired"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/workload"
+	"github.com/jay94ks/seafield/internal/bootstrap"
+	"github.com/jay94ks/seafield/internal/config"
+	"github.com/jay94ks/seafield/internal/desired"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/workload"
 )
 
 func (r *Runtime) commandIdentity() *identity.Identity {
@@ -40,7 +40,7 @@ func (r *Runtime) physicalOwners() []*Runtime {
 // in the original namespace. They cannot authenticate or allocate a new old-key
 // task: compiler placement uses CurrentPeer and every effect consumes its exact
 // retained source through the current-key permit.
-func (r *Runtime) openHistoricalOwners(effective, original config.Node, record bootstrap.Record, peers map[mydcp.Identity]mydcp.Peer) error {
+func (r *Runtime) openHistoricalOwners(effective, original config.Node, record bootstrap.Record, peers map[sfcp.Identity]sfcp.Peer) error {
 	seen := map[[32]byte]bool{r.Identity.Public: true}
 	for _, transition := range record.Root.Keys {
 		key := transition.Proof.Old
@@ -56,7 +56,7 @@ func (r *Runtime) openHistoricalOwners(effective, original config.Node, record b
 		if err != nil {
 			return err
 		}
-		owner := &Runtime{parentRuntime: r, Identity: ownerIdentity, controlIdentity: r.Identity, historicalOwner: true, Mesh: r.Mesh, engine: r.Engine(), policy: r.policy, controlPolicy: r.controlPolicy, owner: desired.Owner(r.controlPolicy.Cluster, key), networkEnabled: r.networkEnabled, installation: r.installation, credentials: r.credentials, gitFetcher: r.gitFetcher, gitCredentials: r.gitCredentials, vaultBackends: r.vaultBackends, vaultApprovalBudget: r.vaultApprovalBudget}
+		owner := &Runtime{parentRuntime: r, Identity: ownerIdentity, controlIdentity: r.Identity, historicalOwner: true, Mesh: r.Mesh, engine: r.Engine(), policy: r.policy, controlPolicy: r.controlPolicy, owner: desired.Owner(r.controlPolicy.Cluster, key), networkEnabled: r.networkEnabled, installation: r.installation, credentials: r.credentials, gitFetcher: r.gitFetcher, gitCredentials: r.gitCredentials, vaultBackends: r.vaultBackends, builtinValues: r.builtinValues, vaultApprovalBudget: r.vaultApprovalBudget}
 		owner.ctx, owner.cancel = context.WithCancel(r.ctx)
 		owner.checkerSourceBudget = r.checkerSourceBudget
 		c := effective
@@ -112,24 +112,24 @@ func (r *Runtime) nativeOwner(key [32]byte) (*Runtime, bool) {
 	}
 	return nil, false
 }
-func (r *Runtime) resourcePeer(ctx context.Context, node string, original [32]byte) (mydcp.Peer, bool) {
+func (r *Runtime) resourcePeer(ctx context.Context, node string, original [32]byte) (sfcp.Peer, bool) {
 	view, err := r.Engine().Read(ctx, false)
 	if err != nil {
-		return mydcp.Peer{}, false
+		return sfcp.Peer{}, false
 	}
 	members, err := r.controlPolicy.Members(view.State)
 	if err != nil || !members.ResourceKeyForNode(node, original) {
-		return mydcp.Peer{}, false
+		return sfcp.Peer{}, false
 	}
 	entry, ok := members.Entry(node)
 	if !ok {
-		return mydcp.Peer{}, false
+		return sfcp.Peer{}, false
 	}
 	key, err := identity.ParseKey(entry.CurrentPeer().Key)
 	if err != nil || !members.MemberKey(key) {
-		return mydcp.Peer{}, false
+		return sfcp.Peer{}, false
 	}
-	peer, ok := r.Mesh.Peer(mydcp.Identity(key))
+	peer, ok := r.Mesh.Peer(sfcp.Identity(key))
 	return peer, ok && peer.Member && peer.ID == node
 }
 
@@ -143,21 +143,21 @@ func (r *Runtime) acceptsResourceOwner(ctx context.Context, node string, key [32
 
 // resourcePeerForKey is routing for an exact retained fact/use/job. Only the
 // current peer is dialed; the original key remains in the resource and proofs.
-func (r *Runtime) resourcePeerForKey(ctx context.Context, original [32]byte) (mydcp.Peer, bool) {
+func (r *Runtime) resourcePeerForKey(ctx context.Context, original [32]byte) (sfcp.Peer, bool) {
 	view, err := r.Engine().Read(ctx, false)
 	if err != nil {
-		return mydcp.Peer{}, false
+		return sfcp.Peer{}, false
 	}
 	members, err := r.controlPolicy.Members(view.State)
 	if err != nil {
-		return mydcp.Peer{}, false
+		return sfcp.Peer{}, false
 	}
 	for _, entry := range members.Entries {
 		if members.ResourceKeyForNode(entry.Peer.ID, original) {
 			return r.resourcePeer(ctx, entry.Peer.ID, original)
 		}
 	}
-	return mydcp.Peer{}, false
+	return sfcp.Peer{}, false
 }
 func (r *Runtime) resourceCaller(ctx context.Context, current, original [32]byte) bool {
 	view, err := r.Engine().Read(ctx, false)

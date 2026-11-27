@@ -6,7 +6,7 @@ import (
 	"net/netip"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/network"
+	"github.com/jay94ks/seafield/internal/network"
 )
 
 func TestNetworkIPAMDockerRangeProjectsIdenticallyAndRequiresExplicitChange(t *testing.T) {

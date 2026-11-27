@@ -3,7 +3,7 @@
 package userauth
 
 import (
-	"github.com/jay94ks/mydcd/internal/imagecache"
+	"github.com/jay94ks/seafield/internal/imagecache"
 	"strings"
 	"testing"
 )

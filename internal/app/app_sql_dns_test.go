@@ -13,11 +13,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/engine"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/network/services"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/engine"
+	"github.com/jay94ks/seafield/internal/network/services"
+	"github.com/jay94ks/seafield/internal/sfcp"
 	"github.com/miekg/dns"
 	"github.com/moby/moby/client"
 	"gopkg.in/yaml.v3"
@@ -26,12 +26,12 @@ import (
 // The parent enters each ORIGINAL running container's network namespace. This
 // is a wire client only; it does not bind a server, change routes or spoof IPs.
 func TestManagedDNSQueryHelper(t *testing.T) {
-	server := os.Getenv("MYDC_SQL_DNS_SERVER")
+	server := os.Getenv("SFC_SQL_DNS_SERVER")
 	if server == "" {
 		t.Skip("explicit owned container namespace client only")
 	}
 	for _, protocol := range []string{"udp", "tcp"} {
-		for _, row := range []struct{ name, address string }{{"web.app.mydc.test.", "198.19.80.2"}, {"db.app.mydc.test.", "198.19.80.18"}, {"app.mydc.test.", ""}} {
+		for _, row := range []struct{ name, address string }{{"web.app.sfc.test.", "198.19.80.2"}, {"db.app.sfc.test.", "198.19.80.18"}, {"app.sfc.test.", ""}} {
 			q := new(dns.Msg)
 			kind := uint16(dns.TypeA)
 			if row.address == "" {
@@ -44,7 +44,7 @@ func TestManagedDNSQueryHelper(t *testing.T) {
 				t.Fatal("original native DNS view", protocol, row.name, r, err)
 			}
 			if row.address == "" {
-				if got := fmt.Sprint(r.Answer[0].(*dns.SOA).Serial); got != os.Getenv("MYDC_SQL_DNS_SERIAL") {
+				if got := fmt.Sprint(r.Answer[0].(*dns.SOA).Serial); got != os.Getenv("SFC_SQL_DNS_SERIAL") {
 					t.Fatal("native SOA differs from shared serial", got)
 				}
 			} else if r.Answer[0].(*dns.A).A.String() != row.address {
@@ -57,7 +57,7 @@ func TestManagedDNSQueryHelper(t *testing.T) {
 // App down returns its own addresses/borrowers. The management DNS instances
 // remain until this separate explicit policy change obtains original positive
 // closure from BOTH owners. Fixture bridge cleanup is not a DNS close proof.
-func retireManagedSQLDNS(t *testing.T, ctx context.Context, a *Runtime, remote mydcp.Peer, root string, cli func([]*os.File, ...string) []byte, read func() cluster.View, wait func(string, func() bool)) {
+func retireManagedSQLDNS(t *testing.T, ctx context.Context, a *Runtime, remote sfcp.Peer, root string, cli func([]*os.File, ...string) []byte, read func() cluster.View, wait func(string, func() bool)) {
 	t.Helper()
 	v := read()
 	sources, err := a.controlPolicy.ManagedDNS(v.State)
@@ -132,7 +132,7 @@ func retireManagedSQLDNS(t *testing.T, ctx context.Context, a *Runtime, remote m
 	t.Log("explicit tenant DNS disable: both original signed instance closures, queries/sockets/Bridge pins returned; app down did not delete the management policy or sources")
 }
 
-func verifyManagedSQLDNS(t *testing.T, ctx context.Context, a *Runtime, engines [2]*engine.Client, natives [2]string, remote mydcp.Peer, read func() cluster.View) {
+func verifyManagedSQLDNS(t *testing.T, ctx context.Context, a *Runtime, engines [2]*engine.Client, natives [2]string, remote sfcp.Peer, read func() cluster.View) {
 	t.Helper()
 	v := read()
 	apps, err := a.controlPolicy.Apps(v.State)
@@ -184,7 +184,7 @@ func verifyManagedSQLDNS(t *testing.T, ctx context.Context, a *Runtime, engines 
 		}
 		info, err := engines[n].API.ContainerInspect(ctx, natives[n], client.ContainerInspectOptions{})
 		gateway := []string{"198.19.80.1", "198.19.80.17"}[n]
-		if err != nil || info.Container.State == nil || !info.Container.State.Running || len(info.Container.HostConfig.DNS) != 1 || info.Container.HostConfig.DNS[0].String() != gateway || !slices.Equal(info.Container.HostConfig.DNSSearch, []string{"app.mydc.test"}) || len(info.Container.HostConfig.ExtraHosts) != 0 {
+		if err != nil || info.Container.State == nil || !info.Container.State.Running || len(info.Container.HostConfig.DNS) != 1 || info.Container.HostConfig.DNS[0].String() != gateway || !slices.Equal(info.Container.HostConfig.DNSSearch, []string{"app.sfc.test"}) || len(info.Container.HostConfig.ExtraHosts) != 0 {
 			t.Fatal("actual container resolver/search/provenance", n, err)
 		}
 		self, err := os.Executable()
@@ -192,7 +192,7 @@ func verifyManagedSQLDNS(t *testing.T, ctx context.Context, a *Runtime, engines 
 			t.Fatal(err)
 		}
 		cmd := exec.CommandContext(ctx, "nsenter", fmt.Sprintf("--net=/proc/%d/ns/net", info.Container.State.Pid), "--", self, "-test.run=^TestManagedDNSQueryHelper$", "-test.v")
-		cmd.Env = append(os.Environ(), "MYDC_SQL_DNS_SERVER="+gateway, "MYDC_SQL_DNS_SERIAL="+fmt.Sprint(serial))
+		cmd.Env = append(os.Environ(), "SFC_SQL_DNS_SERVER="+gateway, "SFC_SQL_DNS_SERIAL="+fmt.Sprint(serial))
 		if output, err := cmd.CombinedOutput(); err != nil {
 			t.Fatal("original container namespace DNS client", n, err, string(output))
 		}

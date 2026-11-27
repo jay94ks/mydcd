@@ -8,8 +8,8 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/state"
 )
 
 // Large normalized records model only the list algorithm. The authenticated
@@ -118,6 +118,13 @@ func TestRQ15ShellListCurrentAuthorityAndSignedBookFilterConsumer(t *testing.T) 
 		nodeShellOwnerReport(t, f, f.node, NodeShellReport{Node: "node-a", Kind: "closed", SessionID: id, At: 2, LastActivity: 2, Reason: "exit"}, state.Applied)
 	}
 	nodeShellApply(t, f, alice, aliceKey, "alice-live", "open-node-shell", 0, NodeShellOpen{Node: "node-a", Cols: 80, Rows: 24}, 2, state.Applied)
+	nodeShellApply(t, f, f.session, f.admin, "admin-live", "open-node-shell", 0, NodeShellOpen{Node: "node-a", Cols: 80, Rows: 24}, 2, state.Applied)
+	// Only the opener sees an open shell; a system administrator sees every
+	// one and is the only one who can close another user's shell.
+	nodeShellApply(t, f, alice, aliceKey, "alice-close-admin", "close-node-shell", 0, NodeShellClose{SessionID: "admin-live"}, 2, state.Forbidden)
+	if all, err := f.p.NodeShellSessions(f.s, f.session, 2, "", NodeShellSessionsQuery{State: "open", Node: "node-a"}); err != nil || all.Total != 2 {
+		t.Fatal("administrator does not see every open shell", all, err)
+	}
 	before := f.s.Object(NodeShellKey)
 	got, err := f.p.NodeShellSessions(f.s, alice, 2, "", NodeShellSessionsQuery{State: "open", Node: "node-a"})
 	if err != nil || got.Total != 1 || len(got.Sessions) != 1 || got.Sessions[0].SessionID != "alice-live" {
@@ -147,7 +154,7 @@ func TestRQ15ShellListCurrentAuthorityAndSignedBookFilterConsumer(t *testing.T) 
 	expected := u.Revision
 	u.Revision = 0
 	u.Enabled = false
-	f.apply("disable-query-user", "put-user", expected, u, state.Applied)
+	f.apply("disable-query-user", "put-user", expected, accountFields(u), state.Applied)
 	if _, err := f.p.NodeShellSessions(f.s, alice, 2, "", NodeShellSessionsQuery{State: "open"}); err == nil {
 		t.Fatal("revoked current user enumerated sessions")
 	}

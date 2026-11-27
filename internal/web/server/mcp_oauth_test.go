@@ -228,7 +228,7 @@ func TestMCPOAuth(t *testing.T) {
 	if code, _ := f.do("POST", "/api/v1/system/mcp/grafana/oauth/login", nil); code != 404 {
 		t.Fatalf("unknown server: %d", code)
 	}
-	if code, _ := f.do("DELETE", "/api/v1/system/mcp/wiki", map[string]any{"confirmName": "wiki"}); code != 204 {
+	if code, _ := f.do("DELETE", "/api/v1/system/mcp/wiki", map[string]any{"confirmName": "wiki"}); code != 200 {
 		t.Fatalf("delete: %d", code)
 	}
 	if _, err := f.srv.opt.Seal.Get(mcpOAuthKey("wiki")); err == nil {

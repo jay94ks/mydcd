@@ -40,7 +40,7 @@ func gitContextFixture(t *testing.T, files map[string]string) (*git.Repository, 
 			t.Fatal(err)
 		}
 	}
-	hash, err := work.Commit("context", &git.CommitOptions{Author: &object.Signature{Name: "fixture", Email: "fixture@mydc.test", When: time.Unix(1, 0)}})
+	hash, err := work.Commit("context", &git.CommitOptions{Author: &object.Signature{Name: "fixture", Email: "fixture@sfc.test", When: time.Unix(1, 0)}})
 	if err != nil {
 		t.Fatal(err)
 	}

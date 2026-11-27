@@ -13,8 +13,8 @@ import (
 
 	"golang.org/x/net/websocket"
 
-	"github.com/jay94ks/mydcd/internal/web/mydc"
-	"github.com/jay94ks/mydcd/tests/clusterfixture"
+	"github.com/jay94ks/seafield/internal/web/sfc"
+	"github.com/jay94ks/seafield/tests/clusterfixture"
 )
 
 // shellDial dials the server shell socket with the fixture's cookies.
@@ -47,8 +47,8 @@ func shellDial(t *testing.T, f *fixture, node, opID string, refused ...bool) (*w
 	return nil, resp.StatusCode, out
 }
 
-// The server shell through the web on real mydcd: the administrator turns
-// it on for node-0 and grants alice, node-0 prepares the mydc-shell account
+// The server shell through the web on real sfcd: the administrator turns
+// it on for node-0 and grants alice, node-0 prepares the sfc-shell account
 // and reaches the test SSH server, and alice runs a shell there.
 func TestRealServerNodeShell(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
@@ -93,7 +93,7 @@ func TestRealServerNodeShell(t *testing.T) {
 	if c, out := f.do("PUT", "/api/v1/node-shell", map[string]any{"opId": op(), "enabled": false}); c == 200 && opState(t, c, out) == "applied" {
 		t.Fatalf("alice set policy: %v", out)
 	}
-	// mydcd refuses before the socket opens: alice has no grant on node-1
+	// sfcd refuses before the socket opens: alice has no grant on node-1
 	var ra string
 	c.Wait("node-1 refused", func() bool {
 		ra = op()
@@ -158,13 +158,13 @@ func TestRealServerNodeShell(t *testing.T) {
 		return b.String()
 	}
 	sess, _ := first["session"].(map[string]any)
-	if first["type"] != "session" || sess["node"] != "node-0" || sess["account"] != mydc.NodeShellAccount || sess["sudo"] != false {
+	if first["type"] != "session" || sess["node"] != "node-0" || sess["account"] != sfc.NodeShellAccount || sess["sudo"] != false {
 		t.Fatalf("session: %v", first)
 	}
 	screen("$ ")
 	_ = websocket.JSON.Send(conn, map[string]any{"type": "resize", "cols": 120, "rows": 40})
 	_ = websocket.JSON.Send(conn, map[string]any{"type": "stdin", "data": []byte("whoami; stty size\r")})
-	if s := screen("40 120"); !strings.Contains(s, mydc.NodeShellAccount+"\r\n") {
+	if s := screen("40 120"); !strings.Contains(s, sfc.NodeShellAccount+"\r\n") {
 		t.Fatalf("whoami: %q", s)
 	}
 	// listed opened once node-0's report lands (it may be sent again)
@@ -237,7 +237,7 @@ func TestRealServerNodeShell(t *testing.T) {
 		case "applied":
 			return true
 		case "failed":
-			if out["op"].(map[string]any)["resultCode"] == float64(mydc.ResultConditionFailed) {
+			if out["op"].(map[string]any)["resultCode"] == float64(sfc.ResultConditionFailed) {
 				return false
 			}
 		}
@@ -260,7 +260,7 @@ func TestRealServerNodeShell(t *testing.T) {
 			break
 		}
 	}
-	// closing a session that is gone: mydcd refuses
+	// closing a session that is gone: sfcd refuses
 	if code, out := f.do("POST", "/api/v1/node-shell/sessions/sh-99/close", map[string]any{"opId": op()}); code == 200 && opState(t, code, out) == "applied" {
 		t.Fatalf("close gone: %v", out)
 	}

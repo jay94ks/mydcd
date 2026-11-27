@@ -21,7 +21,7 @@ func localServiceBody(t *testing.T, d Delivery) []byte {
 	service := input.Services["web"]
 	service.DependsOn = nil
 	service.Volumes, service.Secrets = nil, nil
-	service.MyDC.Sources, service.MyDC.SecretEnv, service.MyDC.Lifecycle = nil, nil, nil
+	service.Sfc.Sources, service.Sfc.SecretEnv, service.Sfc.Lifecycle = nil, nil, nil
 	for name, attachment := range service.Networks {
 		if attachment.IPv4 != "" {
 			ip := netip.MustParseAddr(attachment.IPv4)
@@ -34,7 +34,7 @@ func localServiceBody(t *testing.T, d Delivery) []byte {
 		service.Networks[name] = attachment
 	}
 	scope := d.Inventory().Scope()
-	local := Compose{Name: scope.App, MyDC: AppExtension{Schema: 1, Tenant: scope.Tenant, Deployment: scope.Deployment}, Services: map[string]ComposeService{"worker": service}, Networks: input.Networks}
+	local := Compose{Name: scope.App, Sfc: AppExtension{Schema: 1, Tenant: scope.Tenant, Deployment: scope.Deployment}, Services: map[string]ComposeService{"worker": service}, Networks: input.Networks}
 	raw, err := yaml.Marshal(local)
 	if err != nil {
 		t.Fatal(err)
@@ -93,7 +93,7 @@ func TestCDLocalServicesRejectGitNameChangesDependenciesAndManagementRoots(t *te
 			s.DependsOn = Dependencies{"web": {Condition: "service_started"}}
 			c.Services["worker"] = s
 		},
-		func(c *Compose) { c.MyDC.Delivery = source.MyDC.Delivery },
+		func(c *Compose) { c.Sfc.Delivery = source.Sfc.Delivery },
 		func(c *Compose) {
 			for alias, n := range c.Networks {
 				n.Name = "other-managed-network"

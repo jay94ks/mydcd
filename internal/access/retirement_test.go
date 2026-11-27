@@ -95,7 +95,7 @@ func TestTenantRetirementClosesAdmissionPreservesReadCleanupAndScopes(t *testing
 	if _, err := c.SetNodes("admin", "first", v.Revision, []string{"new-node"}); err != ErrDenied {
 		t.Fatal("grant changed while retiring", err)
 	}
-	if _, err := c.SetTrust("admin", "first", v.Revision, nil); err != ErrDenied {
+	if _, err := c.ChangeTrust("admin", "first", v.Revision, nil, v.ImageSources); err != ErrDenied {
 		t.Fatal("new trust granted", err)
 	}
 	if _, err := c.SetMembership("admin", 0, Membership{Tenant: "first", User: "viewer", Role: Manager, Enabled: true}); err != ErrDenied {

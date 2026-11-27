@@ -23,6 +23,14 @@ const (
 	// NetworkSystemRange: a workspace network's subnet or tunnel address
 	// overlaps the system network range.
 	NetworkSystemRange
+	// The virtual bridge refusals (devel/design/virtual-bridge.md): the
+	// two networks already have a bridge, the other network does not take
+	// bridges (bridge-inbound off), a bridged network is changing, or a
+	// network's last member cannot leave while a bridge is attached.
+	BridgeExists
+	BridgePeerClosed
+	NetworkChanging
+	BridgeAttached
 )
 
 func RejectionReason(code Code) string {
@@ -57,10 +65,18 @@ func RejectionReason(code Code) string {
 		return "node-unreachable"
 	case NetworkSystemRange:
 		return "system-range-overlap"
+	case BridgeExists:
+		return "bridge-exists"
+	case BridgePeerClosed:
+		return "peer-closed"
+	case NetworkChanging:
+		return "network-changing"
+	case BridgeAttached:
+		return "bridge-attached"
 	}
 	return ""
 }
-func ValidResultCode(code Code) bool { return code <= NetworkSystemRange }
+func ValidResultCode(code Code) bool { return code <= BridgeAttached }
 func (r Result) ValidReason() bool {
 	return ValidResultCode(r.Code) && r.Reason == RejectionReason(r.Code)
 }

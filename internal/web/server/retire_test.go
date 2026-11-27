@@ -5,8 +5,8 @@ package server
 import (
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/web/mydc"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/web/sfc"
 )
 
 func TestTenantRetirement(t *testing.T) {
@@ -15,7 +15,7 @@ func TestTenantRetirement(t *testing.T) {
 	const opT, opB, opB2, opF0, opF = "d1b2c3d4-0000-4000-8000-000000000001", "d1b2c3d4-0000-4000-8000-000000000002",
 		"d1b2c3d4-0000-4000-8000-000000000003", "d1b2c3d4-0000-4000-8000-000000000004", "d1b2c3d4-0000-4000-8000-000000000005"
 	// an empty workspace to retire
-	code, out := f.do("POST", "/api/v1/ops", map[string]any{"opId": opT, "action": mydc.ActionCreateTenant, "principal": "u-admin", "expected": 0,
+	code, out := f.do("POST", "/api/v1/ops", map[string]any{"opId": opT, "action": sfc.ActionCreateTenant, "principal": "u-admin", "expected": 0,
 		"payload": map[string]any{"ID": "old"}})
 	if opState(t, code, out) != "applied" {
 		t.Fatalf("create tenant: %d %v", code, out)

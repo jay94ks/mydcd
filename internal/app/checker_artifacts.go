@@ -8,12 +8,12 @@ import (
 	"errors"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/schema"
-	"github.com/jay94ks/mydcd/internal/storage"
-	checker "github.com/jay94ks/mydcd/internal/workload/lifecycle"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/storage"
+	checker "github.com/jay94ks/seafield/internal/workload/lifecycle"
 )
 
 type checkerArtifactMetadata struct {
@@ -32,13 +32,13 @@ func (r *Runtime) checkerArtifactPermit(ctx context.Context, q control.CheckerAr
 	}
 	p, err := schema.Decode[control.CheckerArtifactPermit](reply.Data)
 	if err != nil || p.Schema != 1 || p.Use != q.Use || p.UseID != q.UseID || p.Tenant != q.Tenant || p.Consumer != q.Consumer || p.Parent == ([32]byte{}) || p.Index < q.MinimumIndex || p.Source.Verify() != nil || p.Source.Cluster != r.controlPolicy.Cluster || p.Source.Tenant != q.Tenant || p.Source.ContentDigest() != q.Content || !p.Policy.AllowsSource(p.Source) {
-		return control.CheckerArtifactPermit{}, mydcp.ErrAdmission
+		return control.CheckerArtifactPermit{}, sfcp.ErrAdmission
 	}
 	if (p.Compiled == nil) != (q.Compiled == nil) || q.Compiled != nil && (q.Module != nil || p.Compiled.Verify() != nil || p.Compiled.Digest() != q.Compiled.Digest() || p.Compiled.Build.Cluster != p.Source.Cluster || p.Compiled.Build.Recipe.Tenant != q.Tenant || p.Compiled.Build.Recipe.Source != q.Content) {
-		return control.CheckerArtifactPermit{}, mydcp.ErrAdmission
+		return control.CheckerArtifactPermit{}, sfcp.ErrAdmission
 	}
 	if (p.Lookup == nil) != (q.Lookup == nil) || q.Lookup != nil && (q.Module != nil || q.Compiled != nil || p.Lookup.Provider != q.Lookup.Provider || p.Lookup.Recipe.Validate() != nil || p.Lookup.Recipe.Key() != q.Lookup.Recipe.Key() || p.Lookup.Recipe.Source != q.Content || p.Lookup.Recipe.Tenant != q.Tenant) {
-		return control.CheckerArtifactPermit{}, mydcp.ErrAdmission
+		return control.CheckerArtifactPermit{}, sfcp.ErrAdmission
 	}
 	return p, nil
 }
@@ -55,33 +55,33 @@ func checkerArtifactBytes(q control.CheckerArtifactRequest, p control.CheckerArt
 
 func checkerArtifactMetadataAllowed(raw []byte, q control.CheckerArtifactRequest, permit control.CheckerArtifactPermit) error {
 	if q.Lookup != nil {
-		return mydcp.ErrAdmission
+		return sfcp.ErrAdmission
 	}
 	meta, err := schema.Decode[checkerArtifactMetadata](raw)
 	if err != nil || meta.Schema != 1 {
-		return mydcp.ErrAdmission
+		return sfcp.ErrAdmission
 	}
 	if q.Compiled != nil {
 		if q.Module != nil || permit.Compiled == nil || meta.Source != nil || meta.Module != nil || meta.Compiled == nil || meta.Compiled.Verify() != nil || meta.Compiled.Digest() != permit.Compiled.Digest() {
-			return mydcp.ErrAdmission
+			return sfcp.ErrAdmission
 		}
 	} else if q.Module == nil {
 		if meta.Compiled != nil || meta.Module != nil || meta.Source == nil || meta.Source.Verify() != nil || meta.Source.Owner != permit.Source.Owner || meta.Source.Cluster != permit.Source.Cluster || meta.Source.Tenant != permit.Tenant || meta.Source.ContentDigest() != q.Content {
-			return mydcp.ErrAdmission
+			return sfcp.ErrAdmission
 		}
 	} else {
 		if meta.Compiled != nil || meta.Source != nil || meta.Module == nil || meta.Module.Verify() != nil || meta.Module.Owner != permit.Source.Owner || meta.Module.Cluster != permit.Source.Cluster || meta.Module.Tenant != permit.Tenant || meta.Module.Module != *q.Module {
-			return mydcp.ErrAdmission
+			return sfcp.ErrAdmission
 		}
 	}
 	return nil
 }
 
 func (r *Runtime) serveCheckerArtifacts() error {
-	return r.Mesh.OnCheckerArtifact(func(ctx context.Context, s *mydcp.Session, wire mydcp.CheckerArtifactRequest) (mydcp.CheckerArtifactSource, error) {
+	return r.Mesh.OnCheckerArtifact(func(ctx context.Context, s *sfcp.Session, wire sfcp.CheckerArtifactRequest) (sfcp.CheckerArtifactSource, error) {
 		q, err := schema.Decode[control.CheckerArtifactRequest](wire.Metadata)
 		if err != nil || q.Lookup != nil || !r.resourceCaller(ctx, [32]byte(s.Peer().Key), q.Consumer) {
-			return mydcp.CheckerArtifactSource{}, mydcp.ErrAdmission
+			return sfcp.CheckerArtifactSource{}, sfcp.ErrAdmission
 		}
 		source, err := r.checkerArtifactSource(ctx, q)
 		if err != nil {
@@ -92,31 +92,31 @@ func (r *Runtime) serveCheckerArtifacts() error {
 		permit, err := r.checkerArtifactPermit(ctx, q)
 		if err != nil {
 			clear(source.Data)
-			return mydcp.CheckerArtifactSource{}, err
+			return sfcp.CheckerArtifactSource{}, err
 		}
 		digest, length := checkerArtifactBytes(q, permit)
 		if wire.Digest != digest || wire.Bytes != length {
 			clear(source.Data)
-			return mydcp.CheckerArtifactSource{}, mydcp.ErrAdmission
+			return sfcp.CheckerArtifactSource{}, sfcp.ErrAdmission
 		}
 		return source, nil
 	})
 }
 
-func (r *Runtime) checkerArtifactSource(ctx context.Context, q control.CheckerArtifactRequest) (mydcp.CheckerArtifactSource, error) {
+func (r *Runtime) checkerArtifactSource(ctx context.Context, q control.CheckerArtifactRequest) (sfcp.CheckerArtifactSource, error) {
 	permit, err := r.checkerArtifactPermit(ctx, q)
 	if err != nil || !r.acceptsResourceKey(ctx, permit.Provider()) {
-		return mydcp.CheckerArtifactSource{}, mydcp.ErrAdmission
+		return sfcp.CheckerArtifactSource{}, sfcp.ErrAdmission
 	}
 	owner, ok := r.nativeOwner(permit.Provider())
 	if !ok {
-		return mydcp.CheckerArtifactSource{}, mydcp.ErrAdmission
+		return sfcp.CheckerArtifactSource{}, sfcp.ErrAdmission
 	}
 	d := permit.Source.Descriptor()
 	owner.life.RLock()
 	if owner.closed || owner.ctx.Err() != nil || owner.checkerSources == nil {
 		owner.life.RUnlock()
-		return mydcp.CheckerArtifactSource{}, mydcp.ErrAdmission
+		return sfcp.CheckerArtifactSource{}, sfcp.ErrAdmission
 	}
 	metadata := checkerArtifactMetadata{Schema: 1}
 	var data []byte
@@ -136,7 +136,7 @@ func (r *Runtime) checkerArtifactSource(ctx context.Context, q control.CheckerAr
 	owner.life.RUnlock()
 	if err != nil {
 		clear(data)
-		return mydcp.CheckerArtifactSource{}, err
+		return sfcp.CheckerArtifactSource{}, err
 	}
 	raw, err := json.Marshal(metadata)
 	if err == nil {
@@ -144,12 +144,12 @@ func (r *Runtime) checkerArtifactSource(ctx context.Context, q control.CheckerAr
 	}
 	if err != nil {
 		clear(data)
-		return mydcp.CheckerArtifactSource{}, err
+		return sfcp.CheckerArtifactSource{}, err
 	}
-	return mydcp.CheckerArtifactSource{Lifetime: owner.ctx, Metadata: raw, Data: data, Authorize: func(ctx context.Context) error {
+	return sfcp.CheckerArtifactSource{Lifetime: owner.ctx, Metadata: raw, Data: data, Authorize: func(ctx context.Context) error {
 		latest, err := r.checkerArtifactPermit(ctx, q)
 		if err != nil || !permit.Equal(latest) {
-			return mydcp.ErrAdmission
+			return sfcp.ErrAdmission
 		}
 		return nil
 	}}, nil
@@ -160,7 +160,7 @@ func (r *Runtime) checkerArtifactSource(ctx context.Context, q control.CheckerAr
 // shared original provider/source and accepted use are never rewritten.
 func (r *Runtime) receiveCheckerArtifact(ctx context.Context, q control.CheckerArtifactRequest) error {
 	if q.Lookup != nil || q.Consumer != r.Identity.Public || !r.acceptsResourceKey(ctx, q.Consumer) {
-		return mydcp.ErrAdmission
+		return sfcp.ErrAdmission
 	}
 	permit, err := r.checkerArtifactPermit(ctx, q)
 	if err != nil {
@@ -172,7 +172,7 @@ func (r *Runtime) receiveCheckerArtifact(ctx context.Context, q control.CheckerA
 	closed := r.closed
 	r.life.RUnlock()
 	if closed || store == nil || r.ctx.Err() != nil {
-		return mydcp.ErrAdmission
+		return sfcp.ErrAdmission
 	}
 	if q.Compiled != nil {
 		if fact, data, err := store.CompiledArtifact(ctx, d.Tenant, q.Compiled.Build.Recipe.Key()); err == nil {
@@ -202,7 +202,7 @@ func (r *Runtime) receiveCheckerArtifact(ctx context.Context, q control.CheckerA
 	storeArtifact := func(ctx context.Context, data []byte) error {
 		current, err := r.checkerArtifactPermit(ctx, q)
 		if err != nil || !current.Equal(permit) {
-			return mydcp.ErrAdmission
+			return sfcp.ErrAdmission
 		}
 		if q.Compiled != nil {
 			_, err = store.StageCompiled(ctx, d, current.Policy, q.Compiled.Build, data)
@@ -229,7 +229,7 @@ func (r *Runtime) receiveCheckerArtifact(ctx context.Context, q control.CheckerA
 	}
 	peer, ok := r.resourcePeerForKey(ctx, permit.Provider())
 	if !ok || !peer.Member {
-		return mydcp.ErrAdmission
+		return sfcp.ErrAdmission
 	}
 	session, err := r.Mesh.Dial(ctx, peer)
 	if err != nil {
@@ -241,8 +241,8 @@ func (r *Runtime) receiveCheckerArtifact(ctx context.Context, q control.CheckerA
 	if end, ok := ctx.Deadline(); ok && end.Before(expires) {
 		expires = end
 	}
-	wire := mydcp.CheckerArtifactRequest{Schema: 1, Metadata: metadata, Digest: digest, Bytes: length, ExpiresAt: expires.Unix()}
-	return session.PullCheckerArtifact(ctx, wire, mydcp.CheckerArtifactSink{Metadata: func(raw []byte) error {
+	wire := sfcp.CheckerArtifactRequest{Schema: 1, Metadata: metadata, Digest: digest, Bytes: length, ExpiresAt: expires.Unix()}
+	return session.PullCheckerArtifact(ctx, wire, sfcp.CheckerArtifactSink{Metadata: func(raw []byte) error {
 		return checkerArtifactMetadataAllowed(raw, q, permit)
 	}, Store: storeArtifact,
 	})
@@ -254,11 +254,11 @@ func (r *Runtime) prepareCheckerInputs(ctx context.Context, b deployment.Binding
 		return nil
 	}
 	if u.Owner != r.Identity.Public {
-		return mydcp.ErrAdmission
+		return sfcp.ErrAdmission
 	}
 	view, err := r.Engine().Read(ctx, false)
 	if err != nil || view.State.Index() < index {
-		return mydcp.ErrAdmission
+		return sfcp.ErrAdmission
 	}
 	book, err := r.controlPolicy.Lifecycles(view.State)
 	if err != nil {
@@ -268,7 +268,7 @@ func (r *Runtime) prepareCheckerInputs(ctx context.Context, b deployment.Binding
 	for _, ref := range u.Scripts {
 		record, ok := book.Script(u.Tenant, ref.Name)
 		if !ok {
-			return mydcp.ErrAdmission
+			return sfcp.ErrAdmission
 		}
 		found := false
 		for _, v := range record.Versions {
@@ -279,7 +279,7 @@ func (r *Runtime) prepareCheckerInputs(ctx context.Context, b deployment.Binding
 			}
 		}
 		if !found {
-			return mydcp.ErrAdmission
+			return sfcp.ErrAdmission
 		}
 	}
 	seen := map[[32]byte]bool{}

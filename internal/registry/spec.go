@@ -9,9 +9,9 @@ import (
 	"net/url"
 	"strconv"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/workload"
-	"github.com/jay94ks/mydcd/internal/workload/volumes"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/workload"
+	"github.com/jay94ks/seafield/internal/workload/volumes"
 )
 
 // Specification is tenant management metadata, not an app declaration or an
@@ -62,7 +62,7 @@ func (s Specification) Validate(cluster [32]byte) error {
 
 func (s Specification) Digest() [32]byte {
 	raw, _ := json.Marshal(s)
-	return sha256.Sum256(append([]byte("mydc-registry-spec-1\x00"), raw...))
+	return sha256.Sum256(append([]byte("sfc-registry-spec-1\x00"), raw...))
 }
 func (s Specification) Key() string { return s.Tenant + "/" + s.ID }
 func (s Specification) BudgetKey() string {

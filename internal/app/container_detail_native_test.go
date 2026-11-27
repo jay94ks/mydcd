@@ -8,16 +8,16 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/containerops"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/userauth"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/containerops"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/userauth"
 	"github.com/moby/moby/client"
 )
 
 // Fault and rollback affect only this fixture's exact original container.
 // Restore the actual pre-test Resources even if either SDK reply is lost.
-func verifyContainerDetailDrift(t *testing.T, ctx context.Context, r *Runtime, user userauth.Client, peer mydcp.Peer, session access.Session) {
+func verifyContainerDetailDrift(t *testing.T, ctx context.Context, r *Runtime, user userauth.Client, peer sfcp.Peer, session access.Session) {
 	t.Helper()
 	query := containerops.Query{Schema: 1, Kind: "inspect", Selection: containerops.Selection{App: "app", Service: "web"}, MaxBytes: containerops.MaxOutput, HistoryLimit: 1}
 	reply, err := user.ObserveContainer(ctx, peer, session, "tenant", query)

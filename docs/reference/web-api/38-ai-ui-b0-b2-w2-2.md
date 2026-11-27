@@ -1,10 +1,10 @@
 ## AI 코디네이터 (UI-B0~B2, W2.2, 본인 대화만)
 
-코디네이터는 **로그인한 사람 그대로** 동작한다. 읽기 도구는 그 사람의 세션으로 화면 API를 부르고, 바꾸는 도구는 **제안 작업**만 만든다. 제안을 승인하면 그 도구의 화면 API가 그 사람의 세션과 `opId`로 나간다(버튼을 누른 것과 같은 op, 서명도 그 사람 키). 모델이 직접 바꾸거나 서명할 길은 없다. 권한은 mydcd가 실행할 때 판단한다(카탈로그는 사람마다 거르지 않는다: 캐시 앞부분을 공유하려고). 설정 › AI의 코디네이터 역할(메인·예비·effort·출력 상한·흘려 보내기)과 상한을 쓴다.
+코디네이터는 **로그인한 사람 그대로** 동작한다. 읽기 도구는 그 사람의 세션으로 화면 API를 부르고, 바꾸는 도구는 **제안 작업**만 만든다. 제안을 승인하면 그 도구의 화면 API가 그 사람의 세션과 `opId`로 나간다(버튼을 누른 것과 같은 op, 서명도 그 사람 키). 모델이 직접 바꾸거나 서명할 길은 없다. 권한은 sfcd가 실행할 때 판단한다(카탈로그는 사람마다 거르지 않는다: 캐시 앞부분을 공유하려고). 설정 › AI의 코디네이터 역할(메인·예비·effort·출력 상한·흘려 보내기)과 상한을 쓴다.
 
-- 도구 카탈로그: 화면 API 경로 하나가 도구 하나다(이름은 `nodes_list`·`app_source`·`node_cordon`처럼 밑줄, Claude 도구 이름 규칙). 읽기 39개·바꾸기 10개로 시작한다(`internal/web/server/ai_tools.go`). 입력은 서버가 스키마(`additionalProperties: false`, 경로 값은 이름 형식)로 다시 검사하고, 틀리면 실행하지 않고 오류 결과를 준다. 로그 원문(서버 쪽 가림 REQ-20 4 전까지)·exec·보관함 값·파일 내용은 카탈로그에 없다.
+- 도구 카탈로그: 화면 API 경로 하나가 도구 하나다(이름은 `nodes_list`·`app_source`·`node_cordon`처럼 밑줄, Claude 도구 이름 규칙). 읽기 41개·바꾸기 9개다(영역별 `internal/web/server/ai_tools_*.go`). 화면 API마다 도구로 내거나 내지 않는 이유가 `ai_exposure.go`에 있다. 바꾸기 도구의 영향·되돌림·확인 입력은 sfcd action마다 한 곳(`ai_actions.go` `webActions`)에서 오고 장애 임시 조치와 같다. **영향이 high인 작업은 AI가 어느 경로로도 제안하지 않는다**(서버 비우기 `node_drain`은 화면에서 사람이 한다, 계획 읽기 `node_drain_plan`은 있다). MCP 도구 카드의 영향은 관리자가 정한 하한(`auto.floor`), 없으면 알림 도구 low·나머지 medium이고, 하한이 high인 도구는 코디네이터와 장애 조치 후보에 나가지 않는다. 입력은 서버가 스키마(`additionalProperties: false`, 경로 값은 이름 형식)로 다시 검사하고, 틀리면 실행하지 않고 오류 결과를 준다. 로그 원문(서버 쪽 가림 REQ-20 4 전까지)·exec·보관함 값·파일 내용은 카탈로그에 없다.
   - Claude: 핵심 도구 4개(`ops_list`·`ops_get`·`tenants_list`·`dashboard_get`)와 도구 검색(`tool_search_tool_bm25`)만 올리고 나머지는 `defer_loading`. 이름순 고정이라 요청 앞부분(도구+시스템 지시, 1시간 캐시 지점)은 사용자·대화·단계 사이에 바이트가 같다.
-  - OpenAI: 고정 메타 도구 3개(`find_tools`·`describe_tool`·`call_tool`). 앞의 둘은 웹이 같은 카탈로그로 답하고 `call_tool`만 실행한다. `prompt_cache_key: mydc-coordinator-v1`, `store: false`, 추론은 암호화된 채로 되돌려 보낸다.
+  - OpenAI: 고정 메타 도구 3개(`find_tools`·`describe_tool`·`call_tool`). 앞의 둘은 웹이 같은 카탈로그로 답하고 `call_tool`만 실행한다. `prompt_cache_key: sfc-coordinator-v1`, `store: false`, 추론은 암호화된 채로 되돌려 보낸다.
 - 보내는 값 가림: 비밀처럼 보이는 키 이름(password·secret·token·credential·private key·api key)의 값, 비밀처럼 보이는 환경 변수 값(`DB_PASSWORD: …` → `«가림: DB_PASSWORD»`, AI 설정의 `maskSecretLikeEnv`)과 그 값이 다른 곳에 다시 나온 것까지 바꾼다. 도구 결과 하나는 16 KiB까지(넘으면 잘렸다고 알린다). `excludeTenants`의 작업 공간은 어디로도 보내지 않는다: 경로(`{t}`)나 쿼리(`tenant`)로 그 작업 공간을 읽는 도구는 "보내지 않음"만 돌려주고, 여러 작업 공간을 돌려주는 결과(이벤트·작업 목록·대시보드·작업 공간 목록 등)에서는 그 이름이 든 행을 빼며, 남은 곳(결과·질문·이번 턴 맥락·칩)의 그 이름은 `«제외된 작업 공간»`으로 바꾼다(`payments-net`처럼 그 이름으로 시작하는 낱말 포함). 이번 턴 맥락의 경로·선택·칩이 그 작업 공간을 가리키면 통째로 뺀다(경로는 `«제외된 작업 공간»`만, 칩은 `«제외된 작업 공간» (left out)`만 남는다). 그 안의 앱 이름 같은 것까지 나가지 않게 하려는 것이다.
 - `GET /ai/conversations` → `{items: [{id, title, model?, tenant?, incident?, createdAt, updatedAt, pendingProposals}]}` 최신 순. `model`은 마지막 답의 모델 표시 이름. `incident`는 대화 칩 중 첫 incident 칩의 id(사건에서 연 대화)이고, 휴대폰 대화 목록의 '장애 대응' 칩이 이것으로 거른다.
 - `POST /ai/conversations` `{title?, tenant?, chips?}` → 201 대화(제목 기본 '새 대화', 첫 질문으로 바뀐다). `chips`는 맥락 칩 `[{kind, …}]`(예: `{kind: incident, id}`, `{kind: app, tenant, app}`; 8개까지, kind는 소문자·숫자·-, 값은 한 줄 200자까지)이고 대화와 함께 저장돼 다시 열어도 그대로 나온다.
@@ -22,5 +22,5 @@
 - `POST /ai/proposals/{id}/reject` `{reason?(500자)}` → 204.
 - `PUT /ai/proposals/{id}` `{payload}` → 제안 작업. 카드 안 수정: 도구 스키마로 다시 검사하고 미리보기·`basisHash`를 새로 만들며 `edited: true`. 대상(경로 값)은 바꿀 수 없다(422 `target-changed`). pending일 때만.
 - 승인·거절·수정은 다음 질문의 `<context>`로 모델에게 전해진다. AI 감사에 `proposal-approved`·`proposal-rejected`가 남는다.
-- 기준 버전: 계획 값이 있는 도구(`node_drain`·`node_image_prune`·`app_logs_clear`)는 그 계획 값이 화면 API의 409 `plan-changed`로 지킨다. 나머지는 승인 때의 현재 버전으로 보낸다.
+- 기준 버전: 계획 값이 있는 도구(`node_image_prune`·`app_logs_clear`)는 그 계획 값이 화면 API의 409 `plan-changed`로 지킨다. 나머지는 승인 때의 현재 버전으로 보낸다.
 

@@ -8,13 +8,15 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"slices"
 	"strings"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/config"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/secrets"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/membership"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/config"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/secrets"
 )
 
 type VaultApprovalPlanRequest struct {
@@ -120,13 +122,23 @@ func (p Policy) PlanVaultApproval(s state.State, session access.Session, at int6
 				return VaultApprovalPart{}, err
 			}
 			profile, ok := tree.WriteProfile(binding.Reference.Profile)
-			entry, found := members.Entry(profile.Node)
-			peer := entry.CurrentPeer()
-			issuerKey, err = identity.ParseKey(peer.Key)
-			if !ok || !profile.Enabled || !profile.Verifiers || !found || err != nil || !p.ownsResource(s, issuerKey, profile.Key) {
-				return VaultApprovalPart{}, access.ErrDenied
+			if ok && profile.Builtin() {
+				// A voter that holds the builtin verifier checks the password.
+				peer, found := builtinVerifierHolder(members, v.Approvals, tree, binding.Reference)
+				if !profile.Enabled || !profile.Verifiers || !found {
+					return VaultApprovalPart{}, access.ErrDenied
+				}
+				issuerKey, _ = identity.ParseKey(peer.Key)
+				approver = &peer
+			} else {
+				entry, found := members.Entry(profile.Node)
+				peer := entry.CurrentPeer()
+				issuerKey, err = identity.ParseKey(peer.Key)
+				if !ok || !profile.Enabled || !profile.Verifiers || !found || err != nil || !p.ownsResource(s, issuerKey, profile.Key) {
+					return VaultApprovalPart{}, access.ErrDenied
+				}
+				approver = &peer
 			}
-			approver = &peer
 		}
 		issuer, registered := v.Approvals.Issuer(issuerKey)
 		if !members.MemberKey(issuerKey) || !registered || !issuer.Enabled {
@@ -223,8 +235,13 @@ func (p Policy) VaultApprovalPermit(s state.State, caller [32]byte, q VaultAppro
 		return VaultApprovalPermit{}, err
 	}
 	profile, ok := tree.WriteProfile(binding.Reference.Profile)
-	if !ok || !profile.Enabled || !profile.Verifiers || !p.ownsResource(s, caller, profile.Key) {
+	if !ok || !profile.Enabled || !profile.Verifiers || !p.servesProvider(s, caller, profile) {
 		return VaultApprovalPermit{}, access.ErrDenied
+	}
+	if profile.Builtin() {
+		if _, held := tree.BuiltinHolding(secrets.VerifierWrite, binding.Reference.Object, binding.Reference.Revision); !held {
+			return VaultApprovalPermit{}, access.ErrDenied
+		}
 	}
 	permit := VaultApprovalPermit{Target: target, Binding: binding, RootRevision: s.Object(VaultKey).Revision, Epoch: s.ModuleEpoch(), Capacity: capacity}
 	if existing, ok := v.Approvals.Existing(c, tree, target, q.At); ok {
@@ -250,7 +267,7 @@ type VaultApprovalReport struct {
 func VaultApprovalReportBytes(r VaultApprovalReport) []byte {
 	r.Signature = nil
 	raw, _ := json.Marshal(r)
-	return append([]byte("mydc-vault-approval-report-1\x00"), raw...)
+	return append([]byte("sfc-vault-approval-report-1\x00"), raw...)
 }
 func (r VaultApprovalReport) Command() (state.Command, error) {
 	raw, err := json.Marshal(r)
@@ -325,4 +342,25 @@ func (p Policy) VaultApprovalResult(s state.State, caller [32]byte, command stat
 		return AppResult{}, nil
 	}
 	return AppResult{Found: true, Result: &result}, nil
+}
+
+// builtinVerifierHolder is the first current voter, in directory order, that
+// holds the builtin verifier r and is an enabled issuer: it checks the
+// password and signs the approval.
+func builtinVerifierHolder(members membership.Directory, approvals secrets.Approvals, tree secrets.Tree, r secrets.Reference) (config.Peer, bool) {
+	h, ok := tree.BuiltinHolding(secrets.VerifierWrite, r.Object, r.Revision)
+	if !ok {
+		return config.Peer{}, false
+	}
+	for _, e := range members.Entries {
+		peer := e.CurrentPeer()
+		key, err := identity.ParseKey(peer.Key)
+		if err != nil || !members.VoterKey(key) || !slices.Contains(h.Holders, key) {
+			continue
+		}
+		if issuer, registered := approvals.Issuer(key); registered && issuer.Enabled {
+			return peer, true
+		}
+	}
+	return config.Peer{}, false
 }

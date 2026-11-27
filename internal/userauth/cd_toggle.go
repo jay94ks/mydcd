@@ -7,10 +7,10 @@ import (
 	"errors"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/mydcp"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/sfcp"
 )
 
 func (s Service) cdTogglePlan(view cluster.View, request Request, session access.Session) Reply {
@@ -26,10 +26,10 @@ func (s Service) cdTogglePlan(view cluster.View, request Request, session access
 	}
 	return Reply{Schema: 1, Code: "unavailable"}
 }
-func (c Client) PlanCDToggle(ctx context.Context, peer mydcp.Peer, session access.Session, tenant string, q control.CDToggleQuery) (control.CDTogglePlan, error) {
+func (c Client) PlanCDToggle(ctx context.Context, peer sfcp.Peer, session access.Session, tenant string, q control.CDToggleQuery) (control.CDTogglePlan, error) {
 	var out control.CDTogglePlan
 	if tenant == "" || !q.Valid() {
-		return out, mydcp.ErrAdmission
+		return out, sfcp.ErrAdmission
 	}
 	reply, err := c.query(ctx, peer, session, Request{Method: "app-cd-toggle-plan", Tenant: tenant, CDToggle: &q})
 	if err != nil {
@@ -37,7 +37,7 @@ func (c Client) PlanCDToggle(ctx context.Context, peer mydcp.Peer, session acces
 	}
 	p := reply.CDTogglePlan
 	if p == nil || p.Schema != 1 || p.Tenant != tenant || p.App != q.App || p.Action != q.Action || p.Expected == 0 || p.Epoch == 0 || p.WouldPause != (q.Action == "pause-app-cd") || !p.PreservesOriginal {
-		return out, mydcp.ErrFrame
+		return out, sfcp.ErrFrame
 	}
 	return *p, nil
 }

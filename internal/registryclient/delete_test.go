@@ -24,7 +24,7 @@ import (
 )
 
 // Real HTTPS, authentication challenge and the pinned SDK's Delete transport.
-// The remote fixture is not a MyDC Vault/Session/Raft authorization proof.
+// The remote fixture is not a Seafield Cluster Vault/Session/Raft authorization proof.
 func TestExternalDeleteUsesOnlyOriginalResponseAndNeverRetriesMutation(t *testing.T) {
 	for _, tc := range []struct {
 		name   string

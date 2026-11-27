@@ -3,7 +3,7 @@
 package workload
 
 import (
-	"github.com/jay94ks/mydcd/internal/schema"
+	"github.com/jay94ks/seafield/internal/schema"
 )
 
 type Report struct {

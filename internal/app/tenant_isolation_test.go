@@ -10,10 +10,10 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/engine"
-	"github.com/jay94ks/mydcd/internal/network"
-	"github.com/jay94ks/mydcd/internal/reconcile"
-	"github.com/jay94ks/mydcd/internal/storage"
+	"github.com/jay94ks/seafield/internal/engine"
+	"github.com/jay94ks/seafield/internal/network"
+	"github.com/jay94ks/seafield/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/storage"
 )
 
 func isolationRecordFixture(t *testing.T) isolationRecord {
@@ -129,5 +129,37 @@ func TestIsolationDBFailureStopsWritesAndReopensSameOriginalIntent(t *testing.T)
 	actual, err := decodeIsolationRecord(raw, record.Owner, record.Boot)
 	if err != nil || actual.Source != record.Source || actual.State.Pending == nil || *actual.State.Pending != *record.State.Pending {
 		t.Fatal("same DB lost the original native request", err)
+	}
+}
+
+// The isolation spec follows local journals as well as the view, so it can
+// change while the Raft index stands still (lab 2026-11-27: a draining
+// network stopped every owner pass on one server). It must still go forward,
+// and an unchanged spec must stay where it is.
+func TestIsolationDesiredMovesWithoutANewIndex(t *testing.T) {
+	record := isolationRecordFixture(t)
+	old := record.State.Desired
+	if old.Revision == 0 || !old.Present {
+		t.Fatal("fixture has no present desired spec", old)
+	}
+	changed := old
+	changed.Spec += " "
+	for _, index := range []uint64{old.Revision, old.Revision - 1} {
+		wanted := changed
+		wanted.Revision = index
+		next, err := reconcile.SetDesired(record.State, isolationDesired(old, wanted))
+		if err != nil || next.Desired.Revision != old.Revision+1 || next.Desired.Spec != changed.Spec {
+			t.Fatal("changed spec at an old index", index, next.Desired, err)
+		}
+	}
+	same := old
+	same.Revision = old.Revision - 1
+	if next, err := reconcile.SetDesired(record.State, isolationDesired(old, same)); err != nil || next.Desired != old {
+		t.Fatal("unchanged spec moved", next.Desired, err)
+	}
+	ahead := changed
+	ahead.Revision = old.Revision + 7
+	if got := isolationDesired(old, ahead); got != ahead {
+		t.Fatal("a newer index was rewritten", got)
 	}
 }

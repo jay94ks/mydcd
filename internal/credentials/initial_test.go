@@ -18,12 +18,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/secrets"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/secrets"
 )
 
 // Models the existing Vault KVv2 HTTP/CAS boundary. It is not evidence of an
-// installed Vault service, MYDCP authentication, or Raft/user activation.
+// installed Vault service, SFCP authentication, or Raft/user activation.
 type initialProviderFixture struct {
 	mu           sync.Mutex
 	objects      map[string]map[string]any
@@ -96,7 +96,7 @@ func initialBackend(t *testing.T) (*Backend, *initialProviderFixture, InitialReq
 		t.Fatal(err)
 	}
 	t.Cleanup(b.Close)
-	r := InitialRequest{Schema: 1, Cluster: [32]byte{31}, Owner: [32]byte{32}, Operation: [32]byte{33}, User: "new-user", Username: "new.user", Credential: "first", Profile: "system", Method: access.Token, ExpectedUserRevision: 4, At: time.Now().Unix()}
+	r := InitialRequest{Schema: 1, Cluster: [32]byte{31}, Owner: [32]byte{32}, Operation: [32]byte{33}, User: "new-user", Username: "new.user", Credential: "first", Profile: "system", Method: access.Token, ExpectedUserRevision: 4, At: time.Now().Unix(), Seconds: 86400}
 	return b, f, r
 }
 
@@ -126,7 +126,7 @@ func TestInitialTokenProtectedCASOneUseAcrossIssuersAndRestart(t *testing.T) {
 	u := access.User{ID: r.User, Username: r.Username, Enabled: true, Credentials: []access.Credential{credential}}
 	var successes atomic.Int32
 	var wg sync.WaitGroup
-	for _, issuer := range []*Backend{b, {vault: b.vault, profile: b.profile, budget: NewBudget()}} {
+	for _, issuer := range []*Backend{b, {stores: b.stores, budget: NewBudget()}} {
 		wg.Add(1)
 		go func(issuer *Backend) {
 			defer wg.Done()
@@ -140,7 +140,7 @@ func TestInitialTokenProtectedCASOneUseAcrossIssuersAndRestart(t *testing.T) {
 		t.Fatalf("one-use successes=%d", successes.Load())
 	}
 	// A separate backend (another issuer/restart) still sees the consumed marker.
-	other := &Backend{vault: b.vault, profile: b.profile, budget: NewBudget()}
+	other := &Backend{stores: b.stores, budget: NewBudget()}
 	if _, err := other.Verify(context.Background(), r.Cluster, u, credential, issued.Token, "new-source", time.Now()); err == nil {
 		t.Fatal("consumed token accepted after restart")
 	}
@@ -192,7 +192,7 @@ func TestInitialLostProviderReplyObservedWithoutRegenerationOrTokenReplay(t *tes
 
 func TestInitialPasswordStoresOnlyExistingArgonVerifierAndExactBinding(t *testing.T) {
 	b, f, r := initialBackend(t)
-	r.Method = access.Password
+	r.Method, r.Seconds = access.Password, 0
 	password := []byte("first-password-not-a-public-intent")
 	issued, err := b.PrepareInitial(context.Background(), r, password, "admin-source", time.Now())
 	if err != nil {

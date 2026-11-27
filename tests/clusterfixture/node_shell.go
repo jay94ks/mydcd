@@ -11,26 +11,26 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/jay94ks/mydcd/tests/sshfake"
+	"github.com/jay94ks/seafield/tests/sshfake"
 )
 
 // NodeShell points node's shell at a test SSH server (tests/sshfake). The
-// node's mydcd creates the real mydc-shell account with useradd when its
+// node's sfcd creates the real sfc-shell account with useradd when its
 // shell is turned on; the test removes it at the end. It skips the test
-// unless it runs as root on a machine without a mydc-shell account.
+// unless it runs as root on a machine without a sfc-shell account.
 func NodeShell(t *testing.T, node string) Option {
 	t.Helper()
 	if os.Geteuid() != 0 {
-		t.Skip("node shell needs root (useradd, running as mydc-shell)")
+		t.Skip("node shell needs root (useradd, running as sfc-shell)")
 	}
 	if _, err := user.Lookup(sshfake.Account); err == nil {
-		t.Skip("a mydc-shell account already exists here")
+		t.Skip("a sfc-shell account already exists here")
 	}
 	if _, err := exec.LookPath("useradd"); err != nil {
 		t.Skip("no useradd")
 	}
-	// The home's parents must let mydc-shell in, unlike t.TempDir.
-	dir, err := os.MkdirTemp("", "mydc-shell-")
+	// The home's parents must let sfc-shell in, unlike t.TempDir.
+	dir, err := os.MkdirTemp("", "sfc-shell-")
 	if err == nil {
 		err = os.Chmod(dir, 0o755)
 	}

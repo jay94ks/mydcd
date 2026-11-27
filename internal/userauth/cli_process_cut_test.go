@@ -16,13 +16,13 @@ import (
 	"time"
 
 	"github.com/hashicorp/raft"
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/wallet"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/wallet"
 )
 
 type e7CLIReplyGate struct {
@@ -39,7 +39,7 @@ type e7CLIProcess struct {
 	err     error
 }
 type e7CLIBlockedReply struct {
-	mydcp.Stream
+	sfcp.Stream
 	gate *e7CLIReplyGate
 	ctx  context.Context
 }
@@ -55,11 +55,11 @@ func (s *e7CLIBlockedReply) Write(raw []byte) (int, error) {
 }
 
 // The prebuilt real CLI is killed AFTER the real service commits but BEFORE
-// its response enters the actual MYDCP stream. No product hook or fake result.
+// its response enters the actual SFCP stream. No product hook or fake result.
 func TestE7ActualCLIInterruptAndKillPreserveOriginalWireOperation(t *testing.T) {
-	binary := os.Getenv("MYDC_TEST_CLI")
+	binary := os.Getenv("SFC_TEST_CLI")
 	if !filepath.IsAbs(binary) {
-		t.Skip("requires ordinary-user prebuilt final mydc")
+		t.Skip("requires ordinary-user prebuilt final sfc")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
@@ -75,14 +75,14 @@ func TestE7ActualCLIInterruptAndKillPreserveOriginalWireOperation(t *testing.T) 
 	}
 	defer clear(self.Private)
 	clusterID := [32]byte{177}
-	peer := mydcp.Peer{ID: "node", Policy: mydcp.Policy{Key: mydcp.Identity(node.Public), Member: true, Read: true, Respond: true}}
-	lookup := func(key mydcp.Identity) (mydcp.Peer, bool) {
-		if key == mydcp.Identity(self.Public) {
-			return mydcp.Peer{ID: "user", Policy: mydcp.Policy{Key: key, UserAuth: true}}, true
+	peer := sfcp.Peer{ID: "node", Policy: sfcp.Policy{Key: sfcp.Identity(node.Public), Member: true, Read: true, Respond: true}}
+	lookup := func(key sfcp.Identity) (sfcp.Peer, bool) {
+		if key == sfcp.Identity(self.Public) {
+			return sfcp.Peer{ID: "user", Policy: sfcp.Policy{Key: key, UserAuth: true}}, true
 		}
 		return peer, key == peer.Key
 	}
-	server, err := mydcp.NewTransport(node, clusterID, lookup)
+	server, err := sfcp.NewTransport(node, clusterID, lookup)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -91,13 +91,13 @@ func TestE7ActualCLIInterruptAndKillPreserveOriginalWireOperation(t *testing.T) 
 		t.Fatal(err)
 	}
 	peer.Endpoint = "unix://" + filepath.Join(root, "management.sock")
-	clientMesh, err := mydcp.NewTransport(self, clusterID, lookup)
+	clientMesh, err := sfcp.NewTransport(self, clusterID, lookup)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer clientMesh.Close()
 	policy := control.Policy{Cluster: clusterID, BootstrapKey: self.Public, Issuers: [][32]byte{node.Public}}
-	e, err := cluster.Open(cluster.Options{ID: "node", Root: filepath.Join(root, "state"), Admin: self.Actor(), Cluster: clusterID, Mesh: server, Bootstrap: true, Servers: []raft.Server{{ID: "node", Address: raft.ServerAddress(server.Addr().String()), Suffrage: raft.Voter}}, Resolve: func(id raft.ServerID, address raft.ServerAddress) (mydcp.Peer, bool) { return peer, id == "node" }, ModuleID: policy.ID(), Validate: policy.Validate, Reduce: policy.Reduce, AdmitModule: policy.AdmitModule})
+	e, err := cluster.Open(cluster.Options{ID: "node", Root: filepath.Join(root, "state"), Admin: self.Actor(), Cluster: clusterID, Mesh: server, Bootstrap: true, Servers: []raft.Server{{ID: "node", Address: raft.ServerAddress(server.Addr().String()), Suffrage: raft.Voter}}, Resolve: func(id raft.ServerID, address raft.ServerAddress) (sfcp.Peer, bool) { return peer, id == "node" }, ModuleID: policy.ID(), Validate: policy.Validate, Reduce: policy.Reduce, AdmitModule: policy.AdmitModule})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -137,7 +137,7 @@ func TestE7ActualCLIInterruptAndKillPreserveOriginalWireOperation(t *testing.T) 
 		}
 	}()
 	svc := Service{Engine: e, Mesh: server, Self: node, Policy: policy}
-	if err := server.OnManagement(mydcp.User, func(call context.Context, conn *mydcp.Session, stream mydcp.Stream, frame mydcp.Frame) error {
+	if err := server.OnManagement(sfcp.User, func(call context.Context, conn *sfcp.Session, stream sfcp.Stream, frame sfcp.Frame) error {
 		var envelope Envelope
 		var request Request
 		if len(frame.Fields) > 0 && json.Unmarshal(frame.Fields[0].Value, &envelope) == nil && json.Unmarshal(envelope.Body, &request) == nil && request.Method == "submit" && request.Operation != nil {
@@ -152,7 +152,7 @@ func TestE7ActualCLIInterruptAndKillPreserveOriginalWireOperation(t *testing.T) 
 	if err := server.ListenUnix(filepath.Join(root, "management.sock")); err != nil {
 		t.Fatal(err)
 	}
-	c := Client{Mesh: clientMesh, Self: self, Cluster: clusterID, Peers: []mydcp.Peer{peer}}
+	c := Client{Mesh: clientMesh, Self: self, Cluster: clusterID, Peers: []sfcp.Peer{peer}}
 	password := []byte("private-e7-cli-process-wallet")
 	disk, err := wallet.OpenDisk(home, true)
 	if err != nil {
@@ -280,5 +280,5 @@ func TestE7ActualCLIInterruptAndKillPreserveOriginalWireOperation(t *testing.T) 
 	if err := e.Snapshot(ctx); err != nil {
 		t.Fatal(err)
 	}
-	t.Log("actual CLI SIGINT/SIGKILL after real Raft/bbolt commit before MYDCP response; encrypted-wallet private intent preserved; explicit resume exact original receipt/signature with no new mutation")
+	t.Log("actual CLI SIGINT/SIGKILL after real Raft/bbolt commit before SFCP response; encrypted-wallet private intent preserved; explicit resume exact original receipt/signature with no new mutation")
 }

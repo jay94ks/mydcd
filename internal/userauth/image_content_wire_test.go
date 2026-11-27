@@ -14,11 +14,11 @@ import (
 	"time"
 
 	"github.com/google/go-containerregistry/pkg/v1/types"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/registryclient"
-	"github.com/jay94ks/mydcd/internal/schema"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/registryclient"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/sfcp"
 )
 
 // Actual pinned TLS/Unix/QUIC and the production body sender/receiver. Only
@@ -28,19 +28,19 @@ func TestImageContentActualWireRejectsPartialCorruptAndOverlongBodies(t *testing
 		for _, mode := range []string{"ok", "truncated", "corrupt", "extra", "revoked"} {
 			t.Run(network+"/"+mode, func(t *testing.T) {
 				_, c, session, node := journalFixture(t)
-				root, err := os.MkdirTemp("", "mydc-image-content-wire-")
+				root, err := os.MkdirTemp("", "sfc-image-content-wire-")
 				if err != nil {
 					t.Fatal(err)
 				}
 				defer os.RemoveAll(root)
 				peer := c.Peers[0]
-				lookup := func(key mydcp.Identity) (mydcp.Peer, bool) {
-					if key == mydcp.Identity(c.Self.Public) {
-						return mydcp.Peer{ID: "user", Policy: mydcp.Policy{Key: key, UserAuth: true}}, true
+				lookup := func(key sfcp.Identity) (sfcp.Peer, bool) {
+					if key == sfcp.Identity(c.Self.Public) {
+						return sfcp.Peer{ID: "user", Policy: sfcp.Policy{Key: key, UserAuth: true}}, true
 					}
 					return peer, key == peer.Key
 				}
-				server, err := mydcp.NewTransport(node, c.Cluster, lookup)
+				server, err := sfcp.NewTransport(node, c.Cluster, lookup)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -53,7 +53,7 @@ func TestImageContentActualWireRejectsPartialCorruptAndOverlongBodies(t *testing
 					}
 					peer.Endpoint = server.Addr().String()
 				}
-				mesh, err := mydcp.NewTransport(c.Self, c.Cluster, lookup)
+				mesh, err := sfcp.NewTransport(c.Self, c.Cluster, lookup)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -74,7 +74,7 @@ func TestImageContentActualWireRejectsPartialCorruptAndOverlongBodies(t *testing
 				}
 				binding := Service{Mesh: server, Self: node, Policy: control.Policy{Cluster: c.Cluster}}
 				finished := make(chan error, 1)
-				if err = server.OnManagement(mydcp.ImageContent, func(ctx context.Context, conn *mydcp.Session, stream mydcp.Stream, frame mydcp.Frame) error {
+				if err = server.OnManagement(sfcp.ImageContent, func(ctx context.Context, conn *sfcp.Session, stream sfcp.Stream, frame sfcp.Frame) error {
 					result := func() error {
 						envelope, err := schema.Decode[Envelope](frame.Fields[0].Value)
 						if err != nil {
@@ -82,7 +82,7 @@ func TestImageContentActualWireRejectsPartialCorruptAndOverlongBodies(t *testing
 						}
 						request, err := schema.Decode[ImageContentRequest](envelope.Body)
 						if err != nil || !request.valid(time.Now().Unix()) || request.Query != query {
-							return mydcp.ErrFrame
+							return sfcp.ErrFrame
 						}
 						if _, err = binding.binding(conn, frame.Kind, envelope); err != nil {
 							return err
@@ -94,7 +94,7 @@ func TestImageContentActualWireRejectsPartialCorruptAndOverlongBodies(t *testing
 						source := ImageContentSource{Info: info, Body: io.NopCloser(bytes.NewReader(body)), Authorize: func(context.Context) error {
 							calls++
 							if mode == "revoked" && calls > 1 {
-								return mydcp.ErrAdmission
+								return sfcp.ErrAdmission
 							}
 							return nil
 						}}
@@ -146,25 +146,25 @@ func TestImageContentUnixIngressRelaysOriginalUserProofToActualQUICOwner(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	root, err := os.MkdirTemp("", "mydc-image-content-relay-")
+	root, err := os.MkdirTemp("", "sfc-image-content-relay-")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer os.RemoveAll(root)
-	ingressPeer := mydcp.Peer{ID: "ingress", Endpoint: "unix://" + filepath.Join(root, "api.sock"), Policy: mydcp.Policy{Key: mydcp.Identity(node.Public), Respond: true, Member: true}}
-	ownerPeer := mydcp.Peer{ID: "owner", Policy: mydcp.Policy{Key: mydcp.Identity(owner.Public), Respond: true, Member: true}}
-	lookup := func(key mydcp.Identity) (mydcp.Peer, bool) {
+	ingressPeer := sfcp.Peer{ID: "ingress", Endpoint: "unix://" + filepath.Join(root, "api.sock"), Policy: sfcp.Policy{Key: sfcp.Identity(node.Public), Respond: true, Member: true}}
+	ownerPeer := sfcp.Peer{ID: "owner", Policy: sfcp.Policy{Key: sfcp.Identity(owner.Public), Respond: true, Member: true}}
+	lookup := func(key sfcp.Identity) (sfcp.Peer, bool) {
 		switch key {
-		case mydcp.Identity(c.Self.Public):
-			return mydcp.Peer{ID: "user", Policy: mydcp.Policy{Key: key, UserAuth: true}}, true
+		case sfcp.Identity(c.Self.Public):
+			return sfcp.Peer{ID: "user", Policy: sfcp.Policy{Key: key, UserAuth: true}}, true
 		case ingressPeer.Key:
 			return ingressPeer, true
 		case ownerPeer.Key:
 			return ownerPeer, true
 		}
-		return mydcp.Peer{}, false
+		return sfcp.Peer{}, false
 	}
-	reader, err := mydcp.NewTransport(owner, c.Cluster, lookup)
+	reader, err := sfcp.NewTransport(owner, c.Cluster, lookup)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -173,12 +173,12 @@ func TestImageContentUnixIngressRelaysOriginalUserProofToActualQUICOwner(t *test
 		t.Fatal(err)
 	}
 	ownerPeer.Endpoint = reader.Addr().String()
-	ingress, err := mydcp.NewTransport(node, c.Cluster, lookup)
+	ingress, err := sfcp.NewTransport(node, c.Cluster, lookup)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer ingress.Close()
-	client, err := mydcp.NewTransport(c.Self, c.Cluster, lookup)
+	client, err := sfcp.NewTransport(c.Self, c.Cluster, lookup)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -190,18 +190,18 @@ func TestImageContentUnixIngressRelaysOriginalUserProofToActualQUICOwner(t *test
 	info := registryclient.ContentInfo{Schema: 1, Ref: q.Ref, Kind: q.Kind, Digest: digest, MediaType: string(types.OCILayer), Bytes: int64(len(payload))}
 	ownerBinding := Service{Mesh: reader, Self: owner, Policy: control.Policy{Cluster: c.Cluster}}
 	completed := make(chan error, 2)
-	if err = reader.OnManagement(mydcp.ImageContent, func(ctx context.Context, conn *mydcp.Session, stream mydcp.Stream, frame mydcp.Frame) error {
+	if err = reader.OnManagement(sfcp.ImageContent, func(ctx context.Context, conn *sfcp.Session, stream sfcp.Stream, frame sfcp.Frame) error {
 		result := func() error {
 			envelope, err := schema.Decode[Envelope](frame.Fields[0].Value)
 			if err != nil || frame.Kind != 3 || envelope.Relay == nil || envelope.Relay.Node != node.Public || envelope.Relay.Target != owner.Public || envelope.Session == nil || !sameSession(*envelope.Session, session) {
-				return mydcp.ErrAdmission
+				return sfcp.ErrAdmission
 			}
 			if _, err = ownerBinding.binding(conn, frame.Kind, envelope); err != nil {
 				return err
 			}
 			request, err := schema.Decode[ImageContentRequest](envelope.Body)
 			if err != nil || request.Query != q {
-				return mydcp.ErrFrame
+				return sfcp.ErrFrame
 			}
 			if err = streamEOF(stream); err != nil {
 				return err
@@ -216,7 +216,7 @@ func TestImageContentUnixIngressRelaysOriginalUserProofToActualQUICOwner(t *test
 		t.Fatal(err)
 	}
 	ingressBinding := Service{Mesh: ingress, Self: node, Policy: control.Policy{Cluster: c.Cluster}}
-	if err = ingress.OnManagement(mydcp.ImageContent, func(ctx context.Context, conn *mydcp.Session, stream mydcp.Stream, frame mydcp.Frame) error {
+	if err = ingress.OnManagement(sfcp.ImageContent, func(ctx context.Context, conn *sfcp.Session, stream sfcp.Stream, frame sfcp.Frame) error {
 		result := func() error {
 			envelope, err := schema.Decode[Envelope](frame.Fields[0].Value)
 			if err != nil {

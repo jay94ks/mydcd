@@ -9,8 +9,8 @@ import (
 	"encoding/json"
 	"slices"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/state"
 )
 
 // The one accepted Execution owns every wave. Previous is an original native
@@ -49,7 +49,7 @@ func (e Execution) replacementRetirementIDAt(wave int) string {
 		Epoch                             uint64
 		Wave                              int
 	}{e.d.Plan.Cluster, e.d.Plan.Tenant, e.d.Plan.App, e.d.Operation, e.d.Submitter, e.d.Epoch, wave})
-	digest := sha256.Sum256(append([]byte("mydc-replacement-retire-1\x00"), raw...))
+	digest := sha256.Sum256(append([]byte("sfc-replacement-retire-1\x00"), raw...))
 	return "roll-" + hex.EncodeToString(digest[:24])
 }
 
@@ -398,7 +398,7 @@ func (a Inventory) ReplacementReady(now uint64) bool {
 		if json.Unmarshal(step.Goal, &service) != nil {
 			return false
 		}
-		if service.MyDC.Instance != nil {
+		if service.Sfc.Instance != nil {
 			keys = append(keys, step.Key)
 		}
 	}

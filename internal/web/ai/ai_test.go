@@ -112,7 +112,7 @@ func TestListModels(t *testing.T) {
 func TestGeneratePromptCaching(t *testing.T) {
 	f := newFakeVendors(t)
 	ctx := context.Background()
-	req := Request{Model: "claude-opus-5-5", System: "너는 MyDC 도우미다.", Messages: []Message{{Role: "user", Text: "안녕"}}, CacheKey: "mydc-simple-v1"}
+	req := Request{Model: "claude-opus-5-5", System: "너는 Seafield Cluster 도우미다.", Messages: []Message{{Role: "user", Text: "안녕"}}, CacheKey: "sfc-simple-v1"}
 	out, err := Generate(ctx, f.ep(), Claude, "sk-ant-test", req)
 	if err != nil || out.Text != "안녕" || out.Usage.CacheRead != 4000 || out.Usage.Input != 12 {
 		t.Fatalf("claude: %v %+v", err, out)
@@ -137,7 +137,7 @@ func TestGeneratePromptCaching(t *testing.T) {
 		t.Fatalf("openai: %v %+v", err, out)
 	}
 	ob := f.bodies["/openai/responses"][0]
-	if ob["prompt_cache_key"] != "mydc-simple-v1" || ob["store"] != false || ob["instructions"] != req.System {
+	if ob["prompt_cache_key"] != "sfc-simple-v1" || ob["store"] != false || ob["instructions"] != req.System {
 		t.Fatalf("openai body: %v", ob)
 	}
 

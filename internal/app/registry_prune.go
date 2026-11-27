@@ -12,12 +12,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/registry"
-	"github.com/jay94ks/mydcd/internal/registryclient"
-	"github.com/jay94ks/mydcd/internal/schema"
-	"github.com/jay94ks/mydcd/internal/storage"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/registry"
+	"github.com/jay94ks/seafield/internal/registryclient"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/storage"
 )
 
 type registryPruneProgress struct {
@@ -116,11 +116,11 @@ func (r *Runtime) registryPruneResultsOwner(ctx context.Context, read control.Re
 	}
 	latest, err := r.currentView(ctx)
 	if err != nil || latest.Local {
-		return out, mydcp.ErrAdmission
+		return out, sfcp.ErrAdmission
 	}
 	current, err := r.controlPolicy.CurrentRegistryPruneRead(latest.State, read, time.Now().Unix(), true)
 	if err != nil || !out.Valid(current, true) {
-		return control.RegistryPruneView{}, mydcp.ErrAdmission
+		return control.RegistryPruneView{}, sfcp.ErrAdmission
 	}
 	return out, nil
 }
@@ -153,7 +153,7 @@ func (r *Runtime) registryPruneGuard(local registryMaintenanceReceipt) func(cont
 				return err
 			}
 			if fresh.State != "running" || fresh.Change.DigestValue() != local.Target {
-				return mydcp.ErrAdmission
+				return sfcp.ErrAdmission
 			}
 			if !fresh.Allowed {
 				return registry.ErrForbidden
@@ -329,7 +329,7 @@ func (r *Runtime) finishRegistryPrune(ctx context.Context, work control.Registry
 		return
 	}
 	h := sha256.New()
-	_, _ = h.Write([]byte("mydc-registry-prune-result-1\x00"))
+	_, _ = h.Write([]byte("sfc-registry-prune-result-1\x00"))
 	raw, _ := json.Marshal(struct {
 		Target         [32]byte
 		Summary        control.RegistryPruneSummary

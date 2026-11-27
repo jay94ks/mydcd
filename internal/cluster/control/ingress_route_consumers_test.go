@@ -6,9 +6,9 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/tenancy"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/tenancy"
 )
 
 // The actual NativePermit consumer gate must consume the same multi-route
@@ -42,11 +42,11 @@ func TestIngressMultipleRouteConsumerPermitUsesDistinctBackendEdges(t *testing.T
 	var followed []string
 	for _, instance := range []deployment.TaskInstance{{Service: "web", Node: "node-a", Ordinal: 1}, {Service: "web", Node: "node-a", Ordinal: 2}, {Service: "admin", Node: "node-a"}} {
 		var service deployment.ComposeService
-		service.MyDC.Node = "node-a"
+		service.Sfc.Node = "node-a"
 		id := instance.Service
 		if instance.Ordinal > 0 {
 			copy := instance
-			service.MyDC.Instance = &copy
+			service.Sfc.Instance = &copy
 			id = instance.ResourceID()
 		}
 		key := deployment.ResourceKey("task", "tenant", "app", id)

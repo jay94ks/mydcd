@@ -18,9 +18,9 @@ import (
 )
 
 func authority() (*x509.Certificate, ed25519.PrivateKey, []byte, error) {
-	seed := sha256.Sum256([]byte("mydc-owned-service-call-fixture-ca-not-a-product-key"))
+	seed := sha256.Sum256([]byte("sfc-owned-service-call-fixture-ca-not-a-product-key"))
 	key := ed25519.NewKeyFromSeed(seed[:])
-	ca := &x509.Certificate{SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "MyDC owned service-call fixture CA"}, NotBefore: time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC), NotAfter: time.Date(2040, 1, 1, 0, 0, 0, 0, time.UTC), IsCA: true, BasicConstraintsValid: true, KeyUsage: x509.KeyUsageCertSign | x509.KeyUsageDigitalSignature}
+	ca := &x509.Certificate{SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "Seafield Cluster owned service-call fixture CA"}, NotBefore: time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC), NotAfter: time.Date(2040, 1, 1, 0, 0, 0, 0, time.UTC), IsCA: true, BasicConstraintsValid: true, KeyUsage: x509.KeyUsageCertSign | x509.KeyUsageDigitalSignature}
 	der, err := x509.CreateCertificate(rand.Reader, ca, ca, key.Public(), key)
 	if err != nil {
 		return nil, nil, nil, err

@@ -11,14 +11,14 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/web/mydc"
-	"github.com/jay94ks/mydcd/internal/web/store"
+	"github.com/jay94ks/seafield/internal/web/sfc"
+	"github.com/jay94ks/seafield/internal/web/store"
 )
 
 // Incident response policies (W2.3, UI-B5 and UI-B8). The cluster policy
 // is the system administrators'; an app's policy is its workspace
-// managers'. Both are web data: mydcd still judges every action they lead
-// to. Permissions are asked of mydcd on each request.
+// managers'. Both are web data: sfcd still judges every action they lead
+// to. Permissions are asked of sfcd on each request.
 
 // Policy levels, lowest first.
 const (
@@ -58,28 +58,33 @@ func impactRank(l string) int {
 	return 2
 }
 
-// incidentActionDef is one temporary action of the fixed list. Floor is
-// the rule floor of its impact; actions above low can never run on their
-// own.
+// incidentActionDef is one temporary action of the fixed list. Action is
+// its row in webActions, which holds the rule floor of its impact
+// (actions above low never run on their own) and whether it undoes.
 type incidentActionDef struct {
-	ID    string
-	Scope string // app, cluster
-	Label string
-	Floor string
+	ID     string
+	Scope  string // app, cluster
+	Label  string
+	Action string
+	// Build makes the screen API call for one incident (nil: people
+	// choose, it is never built). See incident_builds.go.
+	Build func(s *Server, ctx context.Context, b incidentBuild) (*store.IncidentAction, string)
 }
+
+func (a incidentActionDef) floor() string { return webActions[a.Action].Impact }
 
 // The temporary actions (web-ai-plan "임시 조치 목록과 기본 등급").
 var incidentActions = []incidentActionDef{
-	{"restart-task", "app", "재시작 반복 중인 컨테이너 재시작", impactLow},
-	{"pause-cd", "app", "자동 배포 일시 정지", impactLow},
-	{"cd-rollback", "app", "자동 배포 직후 되돌리기", impactLow},
-	{"rollback-previous", "app", "직전 버전으로 되돌리기", impactMedium},
-	{"move-service", "app", "다른 서버로 재배치", impactMedium},
-	{"cordon-node", "cluster", "문제 서버를 새 배치 대상에서 잠시 제외", impactLow},
-	{"reconnect-tunnel", "cluster", "서버 간 망(터널) 다시 연결", impactLow},
-	{"restart-registry", "cluster", "이미지 저장소 다시 시작", impactLow},
-	{"prune-images", "cluster", "서버 이미지 캐시 정리", impactMedium},
-	{"drain-node", "cluster", "서버 비우기", impactHigh},
+	{"restart-task", "app", "재시작 반복 중인 컨테이너 재시작", sfc.ActionRestartTask, buildRestartTask},
+	{"pause-cd", "app", "자동 배포 일시 정지", sfc.ActionPauseAppCD, buildPauseCD},
+	{"cd-rollback", "app", "자동 배포 직후 되돌리기", "cd-rollback", buildRollbackAction},
+	{"rollback-previous", "app", "직전 버전으로 되돌리기", "rollback-previous", buildRollbackAction},
+	{"move-service", "app", "다른 서버로 재배치", "move-service", nil},
+	{"cordon-node", "cluster", "문제 서버를 새 배치 대상에서 잠시 제외", sfc.ActionCordonNode, buildCordonNode},
+	{"reconnect-tunnel", "cluster", "서버 간 망(터널) 다시 연결", sfc.ActionReconnectTunnel, buildReconnectTunnel},
+	{"restart-registry", "cluster", "이미지 저장소 다시 시작", "restart-registry", nil},
+	{"prune-images", "cluster", "서버 이미지 캐시 정리", sfc.ActionPruneNodeImages, buildPruneImages},
+	{"drain-node", "cluster", "서버 비우기", sfc.ActionDrainNode, nil},
 }
 
 func incidentActionByID(id string) *incidentActionDef {
@@ -99,7 +104,7 @@ const (
 )
 
 func defaultActionSetting(a incidentActionDef) string {
-	switch a.Floor {
+	switch a.floor() {
 	case impactLow:
 		return actionAllow
 	case impactMedium:
@@ -210,7 +215,7 @@ type policyActionView struct {
 func actionViews(defs []incidentActionDef, cluster *store.IncidentPolicy) []policyActionView {
 	out := make([]policyActionView, 0, len(defs))
 	for _, a := range defs {
-		out = append(out, policyActionView{ID: a.ID, Scope: a.Scope, Label: a.Label, Floor: a.Floor, Auto: cluster.Actions[a.ID]})
+		out = append(out, policyActionView{ID: a.ID, Scope: a.Scope, Label: a.Label, Floor: a.floor(), Auto: cluster.Actions[a.ID]})
 	}
 	return out
 }
@@ -232,11 +237,11 @@ func approversLabel(to string, admins int) string {
 	return who
 }
 
-// systemAdminCount reads how many enabled system administrators mydcd has,
+// systemAdminCount reads how many enabled system administrators sfcd has,
 // as ws (-1 when it cannot be read).
 func (s *Server) systemAdminCount(ctx context.Context, ws *webSession) int {
 	n := 0
-	err := ws.do(ctx, func(ctx context.Context, c mydc.Conn) error {
+	err := ws.do(ctx, func(ctx context.Context, c sfc.Conn) error {
 		after := ""
 		for range incidentMaxPages {
 			p, err := c.Users(ctx, after)
@@ -377,7 +382,7 @@ func (s *Server) handlePutIncidentPolicy(w http.ResponseWriter, r *http.Request,
 			writeError(w, http.StatusUnprocessableEntity, "invalid", "actions: a known action id → allow, approval or human")
 			return
 		}
-		if v == actionAllow && a.Floor != impactLow {
+		if v == actionAllow && a.floor() != impactLow {
 			writeError(w, http.StatusUnprocessableEntity, "floor", a.ID+": only low-impact actions may run on their own")
 			return
 		}
@@ -544,10 +549,10 @@ func (s *Server) handlePutAppIncident(w http.ResponseWriter, r *http.Request, ws
 			return
 		}
 	}
-	// The app must exist (and be readable) in mydcd.
+	// The app must exist (and be readable) in sfcd.
 	ctx, cancel := s.callCtx(r)
 	defer cancel()
-	err = ws.do(ctx, func(ctx context.Context, c mydc.Conn) error {
+	err = ws.do(ctx, func(ctx context.Context, c sfc.Conn) error {
 		rev, err := s.appRevision(ctx, c, tenant, app)
 		if err == nil && rev == 0 {
 			err = &httpErr{http.StatusNotFound, "not-found", "no such app"}
@@ -608,14 +613,14 @@ type incidentVersionView struct {
 }
 
 // GET /t/{t}/apps/{app}/incident/versions (workspace members): the app's
-// versions from mydcd with the web's "data migration" marks.
+// versions from sfcd with the web's "data migration" marks.
 func (s *Server) handleAppIncidentVersions(w http.ResponseWriter, r *http.Request, ws *webSession) {
 	tenant, app := r.PathValue("t"), r.PathValue("app")
 	ctx, cancel := s.callCtx(r)
 	defer cancel()
-	var page mydc.Page[mydc.AppRevision]
+	var page sfc.Page[sfc.AppRevision]
 	docs := map[uint64][]byte{}
-	err := ws.do(ctx, func(ctx context.Context, c mydc.Conn) error {
+	err := ws.do(ctx, func(ctx context.Context, c sfc.Conn) error {
 		var err error
 		if page, err = c.AppRevisions(ctx, tenant, app, ""); err != nil {
 			return err
@@ -656,7 +661,7 @@ func (s *Server) handleAppIncidentVersions(w http.ResponseWriter, r *http.Reques
 	writeJSON(w, http.StatusOK, map[string]any{"items": items})
 }
 
-func versionView(v mydc.AppRevision, p *store.AppIncidentPolicy) incidentVersionView {
+func versionView(v sfc.AppRevision, p *store.AppIncidentPolicy) incidentVersionView {
 	out := incidentVersionView{Version: v.Version, Summary: v.Operation, By: v.Submitter, CD: v.Kind == "cd", At: rfc3339(time.Unix(v.AcceptedAt, 0))}
 	if p != nil {
 		out.Migration = p.Migrations[v.Version]
@@ -685,8 +690,8 @@ func (s *Server) handlePutAppIncidentVersion(w http.ResponseWriter, r *http.Requ
 	}
 	ctx, cancel := s.callCtx(r)
 	defer cancel()
-	var found *mydc.AppRevision
-	err = ws.do(ctx, func(ctx context.Context, c mydc.Conn) error {
+	var found *sfc.AppRevision
+	err = ws.do(ctx, func(ctx context.Context, c sfc.Conn) error {
 		after := ""
 		for {
 			page, err := c.AppRevisions(ctx, tenant, app, after)

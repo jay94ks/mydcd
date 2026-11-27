@@ -8,12 +8,11 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"net/url"
 	"slices"
 	"strings"
 
-	"github.com/jay94ks/mydcd/internal/web/mydc"
-	"github.com/jay94ks/mydcd/internal/web/store"
+	"github.com/jay94ks/seafield/internal/web/sfc"
+	"github.com/jay94ks/seafield/internal/web/store"
 )
 
 // Webhook links (W2.3b): where a webhook is used. incident and ingress
@@ -175,7 +174,7 @@ func checkIngressLink(l *store.WebhookLink, h *store.Webhook) string {
 	allowed := ingressRouteEvents
 	switch {
 	case sc.Gateway != "":
-		if sc.Tenant != "" || sc.Gateway != mydc.GatewayExternal && sc.Gateway != mydc.GatewayLocal {
+		if sc.Tenant != "" || sc.Gateway != sfc.GatewayExternal && sc.Gateway != sfc.GatewayLocal {
 			return "scope.gateway: external or local, without a workspace"
 		}
 		allowed = ingressGatewayEvents
@@ -265,7 +264,7 @@ func (s *Server) linkView(ctx context.Context, ws *webSession, l *store.WebhookL
 	return v
 }
 
-// cdApproverState: the automation account and whether mydcd lists it as an
+// cdApproverState: the automation account and whether sfcd lists it as an
 // approver of the app.
 func (s *Server) cdApproverState(ctx context.Context, ws *webSession, tenant, app string) map[string]any {
 	a := s.automationRow()
@@ -275,7 +274,7 @@ func (s *Server) cdApproverState(ctx context.Context, ws *webSession, tenant, ap
 	}
 	out["account"] = a.Username
 	var users []string
-	if err := ws.do(ctx, func(ctx context.Context, c mydc.Conn) error {
+	if err := ws.do(ctx, func(ctx context.Context, c sfc.Conn) error {
 		_, cd, err := cdRow(ctx, c, tenant, app)
 		if err == nil {
 			users = cd.Approvers
@@ -424,8 +423,8 @@ func (s *Server) webhookRole(name string) string {
 
 // preSyncReady: the app's CD waits for approval ("" = fine).
 func (s *Server) preSyncReady(ctx context.Context, ws *webSession, l *store.WebhookLink) string {
-	var cd *mydc.AppCD
-	err := ws.do(ctx, func(ctx context.Context, c mydc.Conn) error {
+	var cd *sfc.AppCD
+	err := ws.do(ctx, func(ctx context.Context, c sfc.Conn) error {
 		var err error
 		_, cd, err = cdRow(ctx, c, l.Scope.Tenant, l.Scope.App)
 		return err
@@ -440,8 +439,8 @@ func (s *Server) preSyncReady(ctx context.Context, ws *webSession, l *store.Webh
 }
 
 // cdApprover makes the automation account an approver of the app's CD
-// candidates (or drops it), as the person saving the link (mydcd judges
-// it). mydcd takes the user ID, which the web learns from the account's
+// candidates (or drops it), as the person saving the link (sfcd judges
+// it). sfcd takes the user ID, which the web learns from the account's
 // login; before any login it logs in once to learn it.
 func (s *Server) cdApprover(ctx context.Context, ws *webSession, tenant, app string, grant bool) {
 	a := s.automationRow()
@@ -459,13 +458,13 @@ func (s *Server) cdApprover(ctx context.Context, ws *webSession, tenant, app str
 			return
 		}
 	}
-	method := http.MethodPost
+	route := routeAppCDApproverAdd
 	if !grant {
-		method = http.MethodDelete
+		route = routeAppCDApproverDel
 	}
 	body, _ := json.Marshal(map[string]any{"opId": newOpID(), "userId": a.UserID})
-	path := "/api/v1/t/" + url.PathEscape(tenant) + "/apps/" + url.PathEscape(app) + "/cd/approvers"
-	if status, out := s.dispatchWith(ctx, ws, method, path, nil, body, map[string]string{"X-MyDC-Reason": "webhook-pre-sync"}); status >= 400 {
+	method, path := routePath(route, "t", tenant, "app", app)
+	if status, out := s.dispatchWith(ctx, ws, method, path, nil, body, map[string]string{"X-SFC-Reason": "webhook-pre-sync"}); status >= 400 {
 		s.log.Warn("cd approver", "tenant", tenant, "app", app, "grant", grant, "status", status, "body", string(out))
 	}
 }

@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/web/mydc"
-	"github.com/jay94ks/mydcd/internal/web/store"
+	"github.com/jay94ks/seafield/internal/web/sfc"
+	"github.com/jay94ks/seafield/internal/web/store"
 )
 
 const (
@@ -38,7 +38,7 @@ func TestVaultValueInputLost(t *testing.T) {
 	fakeLogin(t, f, "alice")
 	// the private input's call fails: the outcome is unknown and the values
 	// are not kept, so they are never sent again
-	fake.FailNext("secret-input", mydc.CodeTransport)
+	fake.FailNext("secret-input", sfc.CodeTransport)
 	code, out := f.do("POST", "/api/v1/t/shop/vault/value", map[string]any{"opId": opVw3, "path": "db/mysql", "values": map[string]string{"MYSQL_PASSWORD": "lost-pw", "MYSQL_ROOT_PASSWORD": "lost-root"}})
 	if code != 202 || opState(t, code, out) != "unknown" || out["op"].(map[string]any)["errorCode"] != "input-unknown" {
 		t.Fatalf("lost: %d %v", code, out)

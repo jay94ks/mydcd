@@ -7,7 +7,7 @@ name: fixed-volume-sample
 services:
   db:
     image: <MYSQL_IMAGE_AT_VERIFIED_DIGEST>
-    x-mydc:
+    x-sfc:
       node: node-a
     volumes:
       - type: volume

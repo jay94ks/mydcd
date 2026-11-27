@@ -11,9 +11,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/mydcp"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/sfcp"
 
 	"github.com/hashicorp/raft"
 )
@@ -22,16 +22,16 @@ func TestRealBoundaryRaftAutomaticFollowerSnapshotAndTailRecovery(t *testing.T) 
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
 	var nodes [2]realNode
-	peers := make(map[mydcp.Identity]mydcp.Peer)
-	byID := make(map[string]mydcp.Peer)
+	peers := make(map[sfcp.Identity]sfcp.Peer)
+	byID := make(map[string]sfcp.Peer)
 	var peersMu sync.RWMutex
-	lookup := func(key mydcp.Identity) (mydcp.Peer, bool) {
+	lookup := func(key sfcp.Identity) (sfcp.Peer, bool) {
 		peersMu.RLock()
 		defer peersMu.RUnlock()
 		p, ok := peers[key]
 		return p, ok
 	}
-	resolve := func(id raft.ServerID, address raft.ServerAddress) (mydcp.Peer, bool) {
+	resolve := func(id raft.ServerID, address raft.ServerAddress) (sfcp.Peer, bool) {
 		peersMu.RLock()
 		defer peersMu.RUnlock()
 		p, ok := byID[string(id)]
@@ -58,7 +58,7 @@ func TestRealBoundaryRaftAutomaticFollowerSnapshotAndTailRecovery(t *testing.T) 
 		if err != nil {
 			t.Fatal(err)
 		}
-		n.mesh, err = mydcp.NewTransport(n.identity, [32]byte{73}, lookup)
+		n.mesh, err = sfcp.NewTransport(n.identity, [32]byte{73}, lookup)
 		if err == nil {
 			err = n.mesh.Listen("127.0.0.1:0")
 		}
@@ -66,7 +66,7 @@ func TestRealBoundaryRaftAutomaticFollowerSnapshotAndTailRecovery(t *testing.T) 
 			t.Fatal(err)
 		}
 		n.address = n.mesh.Addr().String()
-		p := mydcp.Peer{ID: fmt.Sprint(i + 1), Endpoint: n.address, Policy: mydcp.Policy{Key: mydcp.Identity(n.identity.Public), Member: true, Snapshot: true, Respond: true, Read: true}}
+		p := sfcp.Peer{ID: fmt.Sprint(i + 1), Endpoint: n.address, Policy: sfcp.Policy{Key: sfcp.Identity(n.identity.Public), Member: true, Snapshot: true, Respond: true, Read: true}}
 		peersMu.Lock()
 		peers[p.Key], byID[p.ID] = p, p
 		peersMu.Unlock()
@@ -143,7 +143,7 @@ func TestRealBoundaryRaftAutomaticFollowerSnapshotAndTailRecovery(t *testing.T) 
 	if err = follower.mesh.Close(); err != nil {
 		t.Fatal(err)
 	}
-	follower.mesh, err = mydcp.NewTransport(follower.identity, [32]byte{73}, lookup)
+	follower.mesh, err = sfcp.NewTransport(follower.identity, [32]byte{73}, lookup)
 	if err == nil {
 		err = follower.mesh.Listen(follower.address)
 	}

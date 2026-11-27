@@ -7,22 +7,21 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"net/http"
 	"net/url"
 	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
 
-	"github.com/jay94ks/mydcd/internal/web/mydc"
-	"github.com/jay94ks/mydcd/internal/web/store"
+	"github.com/jay94ks/seafield/internal/web/sfc"
+	"github.com/jay94ks/seafield/internal/web/store"
 )
 
 // What the webhooks are sent for (W2.3b): incident notices and the decide
 // webhook of incident response, and the CD checks and notices (UI-44,
 // REQ-25 events). Answers are data: a decide webhook only picks among the
 // candidates the rules built and cannot lower the impact floor; a CD check
-// only approves, rejects or holds the candidate mydcd shows.
+// only approves, rejects or holds the candidate sfcd shows.
 
 // incidentPayload is the incident as webhooks get it (no signal details,
 // which may hold anything a container printed).
@@ -256,10 +255,10 @@ func (s *Server) cdEvent(e webEvent) {
 				}
 			}
 			s.sendWebhookLater(h, webhookSend{Point: "cd", Link: l.ID, Event: "cd." + name, Payload: p, Summary: fmt.Sprintf("[자동 배포] %s/%s %s", e.Tenant, e.App, name)})
-		case l.Kind == "pre-sync" && e.Kind == mydc.EventCDApprovalRequired && e.CD != nil:
+		case l.Kind == "pre-sync" && e.Kind == sfc.EventCDApprovalRequired && e.CD != nil:
 			l, h, e := l, h, e
 			s.background(func(ctx context.Context) { s.preSync(ctx, l, h, e) })
-		case l.Kind == "post-sync" && e.Kind == mydc.EventCDSyncSucceeded:
+		case l.Kind == "post-sync" && e.Kind == sfc.EventCDSyncSucceeded:
 			l, h, e := l, h, e
 			s.background(func(ctx context.Context) { s.postSync(ctx, l, h, e) })
 		}
@@ -278,13 +277,13 @@ func (s *Server) background(fn func(ctx context.Context)) {
 }
 
 // cdSend sends a CD screen action as the automation account.
-func (s *Server) cdSend(ctx context.Context, tenant, app, verb string, body map[string]any) (int, string) {
+func (s *Server) cdSend(ctx context.Context, tenant, app, route string, body map[string]any) (int, string) {
 	ws, err := s.watchSession(ctx)
 	if err != nil {
 		return 0, automationErrorCode(err)
 	}
 	body["opId"] = newOpID()
-	// The reason is signed into the op (X-MyDC-Reason); without one the op
+	// The reason is signed into the op (X-SFC-Reason); without one the op
 	// still says it came from a CD webhook.
 	reason := "webhook-cd"
 	if v, _ := body["reason"].(string); v != "" {
@@ -292,8 +291,8 @@ func (s *Server) cdSend(ctx context.Context, tenant, app, verb string, body map[
 	}
 	delete(body, "reason")
 	raw, _ := json.Marshal(body)
-	path := "/api/v1/t/" + url.PathEscape(tenant) + "/apps/" + url.PathEscape(app) + "/cd/" + verb
-	status, out := s.dispatchWith(ctx, ws, http.MethodPost, path, nil, raw, map[string]string{"X-MyDC-Reason": url.PathEscape(reason)})
+	method, path := routePath(route, "t", tenant, "app", app)
+	status, out := s.dispatchWith(ctx, ws, method, path, nil, raw, map[string]string{"X-SFC-Reason": url.PathEscape(reason)})
 	if status >= 400 {
 		var res struct {
 			Error *apiError `json:"error"`
@@ -328,7 +327,7 @@ func (s *Server) preSync(ctx context.Context, l *store.WebhookLink, h *store.Web
 	// Only while it is still the candidate waiting (an older event's
 	// candidate is gone or superseded).
 	cur := ""
-	if err := ws.do(ctx, func(ctx context.Context, c mydc.Conn) error {
+	if err := ws.do(ctx, func(ctx context.Context, c sfc.Conn) error {
 		_, cd, err := cdRow(ctx, c, e.Tenant, e.App)
 		if err == nil && cd.Candidate != "" && cd.CandidateDigest != ([32]byte{}) {
 			cur = hex.EncodeToString(cd.CandidateDigest[:])
@@ -381,13 +380,13 @@ func (s *Server) preSync(ctx context.Context, l *store.WebhookLink, h *store.Web
 	}
 	switch decision {
 	case "pass":
-		if st, code := s.cdSend(ctx, e.Tenant, e.App, "candidate/approve", map[string]any{"candidate": e.CD.CandidateID, "reason": oneLine(why, 512)}); code != "" {
+		if st, code := s.cdSend(ctx, e.Tenant, e.App, routeAppCDApprove, map[string]any{"candidate": e.CD.CandidateID, "reason": oneLine(why, 512)}); code != "" {
 			chk.State, chk.Reason, chk.Status = "failed", "승인을 보내지 못함: "+code, st
 		} else {
 			chk.State = "passed"
 		}
 	case "reject":
-		if st, code := s.cdSend(ctx, e.Tenant, e.App, "candidate/reject", map[string]any{"candidate": e.CD.CandidateID, "reason": oneLine(why, 512)}); code != "" {
+		if st, code := s.cdSend(ctx, e.Tenant, e.App, routeAppCDReject, map[string]any{"candidate": e.CD.CandidateID, "reason": oneLine(why, 512)}); code != "" {
 			chk.State, chk.Reason, chk.Status = "failed", "반려를 보내지 못함: "+code, st
 		} else {
 			chk.State = "rejected"
@@ -419,7 +418,7 @@ func (s *Server) postSync(ctx context.Context, l *store.WebhookLink, h *store.We
 	if ws, err := s.watchSession(ctx); err == nil {
 		deadline := time.Now().Add(time.Duration(l.WaitSeconds) * time.Second)
 		for {
-			_ = ws.do(ctx, func(ctx context.Context, c mydc.Conn) error {
+			_ = ws.do(ctx, func(ctx context.Context, c sfc.Conn) error {
 				a, _, err := cdRow(ctx, c, e.Tenant, e.App)
 				health = a.Health
 				return err
@@ -472,7 +471,7 @@ func (s *Server) postSync(ctx context.Context, l *store.WebhookLink, h *store.We
 	chk.State = "failed"
 	_ = s.opt.Store.PutCDCheck(chk)
 	pause := store.CDCheckAction{Kind: "pause", State: "done"}
-	if _, code := s.cdSend(ctx, e.Tenant, e.App, "pause", map[string]any{}); code != "" {
+	if _, code := s.cdSend(ctx, e.Tenant, e.App, routeAppCDPause, map[string]any{}); code != "" {
 		pause.State, pause.Code = "failed", code
 		s.log.Warn("post-sync pause", "tenant", e.Tenant, "app", e.App, "code", code)
 	}

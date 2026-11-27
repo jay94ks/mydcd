@@ -7,7 +7,7 @@ import (
 	"crypto/ed25519"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/workload/volumes"
+	"github.com/jay94ks/seafield/internal/workload/volumes"
 )
 
 func TestVolumeUsagePublicBindingRejectsTamperedObservations(t *testing.T) {

@@ -7,8 +7,8 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/state"
 )
 
 func TestStandaloneExtensionReplyKeepsOriginalBoundsAndConfirmedResult(t *testing.T) {
@@ -18,7 +18,7 @@ func TestStandaloneExtensionReplyKeepsOriginalBoundsAndConfirmedResult(t *testin
 	raw, _ := control.ChangeBytes("standalone-extend", session.User, 2, q)
 	var change control.Change
 	_ = json.Unmarshal(raw, &change)
-	op, err := c.prepareOperation(session, "original-extend", change, Reply{AppsRootRevision: 7, ModuleEpoch: 1}, created+3000)
+	op, err := c.prepareOperation(session, "original-extend", change, 1, 7, created+3000)
 	if err != nil || !control.StandaloneCASAllowed(op.Change) || op.VerifyOriginal(c.Cluster) != nil {
 		t.Fatal("extension did not use original signing path", err)
 	}

@@ -10,7 +10,7 @@ import (
 
 // StandaloneOrigin records that a standalone container definition was filled
 // by copying an app service's settings (UI-3E '가져온 설정'). It is web data
-// only: the copy has no link to the app, so mydcd keeps nothing of it. An
+// only: the copy has no link to the app, so sfcd keeps nothing of it. An
 // entry is tied to the web op of the standalone-up that sent the definition
 // and counts only once that op applied.
 type StandaloneOrigin struct {

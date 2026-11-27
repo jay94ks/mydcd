@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/reconcile"
 )
 
 func gitStageGrantFixture(plan GitSavePlan) (GitStageGrant, reconcile.Lease) {
@@ -112,7 +112,7 @@ func TestGitStagePartialRetirementRequiresCommittedFenceAndCannotRegenerate(t *t
 	if err := spool.RetireGitStage(context.Background(), g, lease); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(filepath.Join(plan.Root.Path, ".mydc-imagebuild", gitSaveName(plan))); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(plan.Root.Path, ".sfc-imagebuild", gitSaveName(plan))); !os.IsNotExist(err) {
 		t.Fatal("partial source retained", err)
 	}
 	if err := FinishGitStageRetirement(spool.db, plan, lease); err != nil {
@@ -141,7 +141,7 @@ func TestGitStageRetirementResumesIntentUnlinkAndReturnCommitFailures(t *testing
 			if !errors.Is(err, errDraftGCCommit) {
 				t.Fatal("missing injected boundary", err)
 			}
-			_, pathErr := os.Stat(filepath.Join(plan.Root.Path, ".mydc-imagebuild", gitSaveName(plan)))
+			_, pathErr := os.Stat(filepath.Join(plan.Root.Path, ".sfc-imagebuild", gitSaveName(plan)))
 			if failAt == 1 && pathErr != nil || failAt != 1 && !os.IsNotExist(pathErr) {
 				t.Fatal("incorrect unlink boundary", pathErr)
 			}
@@ -162,7 +162,7 @@ func TestGitStageRetirementRejectsReplacedMissingAndUnrecordedNonemptySource(t *
 			spool, plan := failedGitStageFixture(t)
 			g, lease := gitStageGrantFixture(plan)
 			g.ContextRevision++
-			name := filepath.Join(plan.Root.Path, ".mydc-imagebuild", gitSaveName(plan))
+			name := filepath.Join(plan.Root.Path, ".sfc-imagebuild", gitSaveName(plan))
 			switch cause {
 			case "replacement":
 				if err := os.Rename(name, name+".original"); err != nil {
@@ -203,7 +203,7 @@ func TestGitStageRetirementClosesOnlyEmptyCreationIntentWithoutInode(t *testing.
 			if err := spool.saveGit(nativeGitSave{Plan: plan}); err != nil {
 				t.Fatal(err)
 			}
-			name := filepath.Join(plan.Root.Path, ".mydc-imagebuild", gitSaveName(plan))
+			name := filepath.Join(plan.Root.Path, ".sfc-imagebuild", gitSaveName(plan))
 			if created {
 				if err := os.WriteFile(name, nil, 0600); err != nil {
 					t.Fatal(err)

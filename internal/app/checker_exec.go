@@ -7,8 +7,8 @@ import (
 	"errors"
 	"slices"
 
-	"github.com/jay94ks/mydcd/internal/workload"
-	checker "github.com/jay94ks/mydcd/internal/workload/lifecycle"
+	"github.com/jay94ks/seafield/internal/workload"
+	checker "github.com/jay94ks/seafield/internal/workload/lifecycle"
 )
 
 func (p checkerObservation) validateExecutions() error {

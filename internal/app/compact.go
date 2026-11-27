@@ -11,13 +11,13 @@ import (
 	"errors"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/maintenance"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/schema"
-	"github.com/jay94ks/mydcd/internal/storage"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/maintenance"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/storage"
 )
 
 var errCompactCAS = errors.New("original compaction progress view changed")
@@ -69,7 +69,7 @@ func (r *Runtime) compactWork(ctx context.Context, operation string) (control.Co
 	}
 	work, err := schema.Decode[control.CompactWork](reply.Data)
 	if err != nil || work.Schema != 1 || work.Cluster != r.controlPolicy.Cluster || work.Owner != r.Identity.Public || work.Operation != operation || work.Index == 0 || reply.Local || reply.RaftIndex == 0 || reply.CommandIndex < work.Index {
-		return work, reply, mydcp.ErrAdmission
+		return work, reply, sfcp.ErrAdmission
 	}
 	return work, reply, nil
 }
@@ -90,8 +90,6 @@ func (r *Runtime) compactReport(ctx context.Context, report control.CompactRepor
 	return reply, nil
 }
 func (r *Runtime) runCompaction(operation string) {
-	defer r.wg.Done()
-	defer func() { r.mu.Lock(); r.compactBusy = false; r.mu.Unlock() }()
 	ctx := r.ctx
 	work, _, err := r.compactWork(ctx, operation)
 	if err != nil {
@@ -211,13 +209,7 @@ func (r *Runtime) advanceCompactions(ctx context.Context) {
 					continue
 				}
 			}
-			r.mu.Lock()
-			if !r.compactBusy && ctx.Err() == nil {
-				r.compactBusy = true
-				r.wg.Add(1)
-				go r.runCompaction(record.Job.Operation)
-			}
-			r.mu.Unlock()
+			r.startJob(&r.compactJob, record.Job.Operation, r.runCompaction)
 		}
 		if !r.Engine().IsLeader() {
 			continue
@@ -226,7 +218,7 @@ func (r *Runtime) advanceCompactions(ctx context.Context) {
 			if node.Key == r.Identity.Public || node.State != "queued" || !record.Job.CanBegin(node.Node, string(leader)) {
 				continue
 			}
-			peer, known := r.Mesh.Peer(mydcp.Identity(node.Key))
+			peer, known := r.Mesh.Peer(sfcp.Identity(node.Key))
 			reachable := false
 			if known && peer.Member {
 				probe, cancel := context.WithTimeout(ctx, 2*time.Second)

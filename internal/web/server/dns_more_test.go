@@ -8,8 +8,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/web/dns"
-	"github.com/jay94ks/mydcd/internal/web/seal"
+	"github.com/jay94ks/seafield/internal/web/dns"
+	"github.com/jay94ks/seafield/internal/web/seal"
 )
 
 const opRv = "d1b2c3d4-0000-4000-8000-000000000001"

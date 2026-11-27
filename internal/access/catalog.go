@@ -227,7 +227,9 @@ func validUser(u User) bool {
 			enabled++
 		}
 	}
-	if enabled == 0 {
+	// Likewise an ordinary account whose every method is off (a revoked
+	// invitation): only an administrator can give it a new one.
+	if enabled == 0 && u.SystemAdmin {
 		return false
 	}
 	raw, err := json.Marshal(PublicUserOf(u))
@@ -323,11 +325,29 @@ func (c Catalog) authorize(actor, tenant string, action Action, node string, cle
 
 // PutUser requires a currently authenticated system administrator, not a role
 // string supplied by a YAML file or by an unverified client payload.
+//
+// With expected 0 it creates the account: the whole first record, with its
+// first login methods. On an existing account it changes only Username,
+// Enabled and SystemAdmin: u carries no Credentials, Operations or
+// AutomationOnly (those change with add-credential, disable-credential and
+// set-account-scope), and something must change.
 func (c Catalog) PutUser(actor string, expected uint64, u User) (Catalog, error) {
 	if !c.SystemAllowed(actor) {
 		return c, ErrDenied
 	}
-	return c.replaceUser(expected, u)
+	old, exists := c.users[u.ID]
+	if !exists {
+		return c.replaceUser(expected, u)
+	}
+	if old.Revision != expected {
+		return c, ErrConflict
+	}
+	if u.Credentials != nil || u.Operations != nil || u.AutomationOnly || u.Revision != 0 || u.Username == old.Username && u.Enabled == old.Enabled && u.SystemAdmin == old.SystemAdmin {
+		return c, ErrInvalid
+	}
+	next := old
+	next.Username, next.Enabled, next.SystemAdmin, next.Revision = u.Username, u.Enabled, u.SystemAdmin, 0
+	return c.replaceUser(expected, next)
 }
 
 // replaceUser retains one validation/publication boundary for administrator
@@ -394,7 +414,42 @@ func (c Catalog) CreateTenant(actor, id string, expected uint64) (Catalog, error
 	n.tenants[id] = Tenant{ID: id, Revision: n.revision, Enabled: true, Phase: TenantActive, ImageSources: []TrustRule{{Registry: "docker.io", Repository: "**"}}}
 	return n, nil
 }
+
+// SetNodes is ChangeNodes for a caller that holds the whole wanted list
+// (fixtures and tests). It computes the delta from the current list; the
+// set-nodes action itself carries only Add and Remove.
 func (c Catalog) SetNodes(actor, tenant string, expected uint64, nodes []string) (Catalog, error) {
+	t, ok := c.tenants[tenant]
+	if !ok {
+		return c, ErrDenied
+	}
+	var add, remove []string
+	for _, n := range nodes {
+		if !slices.Contains(t.AllowedNodes, n) && !slices.Contains(add, n) {
+			add = append(add, n)
+		}
+	}
+	for _, n := range t.AllowedNodes {
+		if !slices.Contains(nodes, n) {
+			remove = append(remove, n)
+		}
+	}
+	if len(add)+len(remove) == 0 {
+		if !c.SystemAllowed(actor) || t.Phase != TenantActive {
+			return c, ErrDenied
+		}
+		if t.Revision != expected {
+			return c, ErrConflict
+		}
+		return c, nil
+	}
+	return c.ChangeNodes(actor, tenant, expected, add, remove)
+}
+
+// ChangeNodes adds and removes servers a tenant may use. Expected is the
+// tenant revision. Adding a server the tenant already has, or removing one it
+// does not have, is a conflict: the caller saw an older list.
+func (c Catalog) ChangeNodes(actor, tenant string, expected uint64, add, remove []string) (Catalog, error) {
 	if !c.SystemAllowed(actor) {
 		return c, ErrDenied
 	}
@@ -405,13 +460,35 @@ func (c Catalog) SetNodes(actor, tenant string, expected uint64, nodes []string)
 	if t.Revision != expected {
 		return c, ErrConflict
 	}
-	nodes = slices.Clone(nodes)
-	slices.Sort(nodes)
-	for i, node := range nodes {
-		if !identifier(node) || i > 0 && node == nodes[i-1] {
-			return c, ErrInvalid
+	if len(add) == 0 && len(remove) == 0 {
+		return c, ErrInvalid
+	}
+	for _, list := range [][]string{add, remove} {
+		sorted := slices.Sorted(slices.Values(list))
+		for i, node := range sorted {
+			if !identifier(node) || i > 0 && node == sorted[i-1] {
+				return c, ErrInvalid
+			}
 		}
 	}
+	nodes := slices.Clone(t.AllowedNodes)
+	for _, node := range remove {
+		i := slices.Index(nodes, node)
+		if i < 0 {
+			return c, ErrConflict
+		}
+		nodes = slices.Delete(nodes, i, i+1)
+	}
+	for _, node := range add {
+		if slices.Contains(remove, node) {
+			return c, ErrInvalid
+		}
+		if slices.Contains(t.AllowedNodes, node) {
+			return c, ErrConflict
+		}
+		nodes = append(nodes, node)
+	}
+	slices.Sort(nodes)
 	if len(nodes) > maxRecords {
 		return c, ErrInvalid
 	}
@@ -450,7 +527,11 @@ func (c Catalog) SetMembership(actor string, expected uint64, m Membership) (Cat
 	n.members[k] = m
 	return n, nil
 }
-func (c Catalog) SetTrust(actor, tenant string, expected uint64, rules []TrustRule) (Catalog, error) {
+
+// ChangeTrust adds and removes image trust rules of one tenant. Expected is
+// the tenant revision. A rule added that is already trusted, or removed that
+// is not, is a conflict: the caller saw an older list.
+func (c Catalog) ChangeTrust(actor, tenant string, expected uint64, add, remove []TrustRule) (Catalog, error) {
 	if c.Authorize(actor, tenant, ManageTrust, "") != nil {
 		return c, ErrDenied
 	}
@@ -458,8 +539,35 @@ func (c Catalog) SetTrust(actor, tenant string, expected uint64, rules []TrustRu
 	if expected != t.Revision {
 		return c, ErrConflict
 	}
-	rules, err := CanonicalTrust(rules)
+	if len(add) == 0 && len(remove) == 0 {
+		return c, ErrInvalid
+	}
+	add, err := CanonicalTrust(add)
 	if err != nil {
+		return c, err
+	}
+	remove, err = CanonicalTrust(remove)
+	if err != nil {
+		return c, err
+	}
+	rules := slices.Clone(t.ImageSources)
+	for _, r := range remove {
+		i := slices.Index(rules, r)
+		if i < 0 {
+			return c, ErrConflict
+		}
+		rules = slices.Delete(rules, i, i+1)
+	}
+	for _, r := range add {
+		if slices.Contains(t.ImageSources, r) {
+			return c, ErrConflict
+		}
+		if slices.Contains(remove, r) {
+			return c, ErrInvalid
+		}
+		rules = append(rules, r)
+	}
+	if rules, err = CanonicalTrust(rules); err != nil {
 		return c, err
 	}
 	n, err := c.clone()
@@ -532,7 +640,24 @@ func Decode(b []byte) (Catalog, error) {
 	var r catalogRecord
 	d := json.NewDecoder(bytes.NewReader(b))
 	d.DisallowUnknownFields()
-	if d.Decode(&r) != nil || r.Schema != 1 || len(r.Users) > maxRecords || len(r.Tenants) > maxRecords || len(r.Members) > maxRecords || len(r.Revocations) > maxRecords || len(r.VolumeFiles) > maxRecords {
+	if d.Decode(&r) != nil {
+		return Catalog{}, ErrInvalid
+	}
+	c, err := fromRecord(r)
+	if err != nil {
+		return Catalog{}, err
+	}
+	canonical, err := c.Encode()
+	if err != nil || !bytes.Equal(canonical, b) {
+		return Catalog{}, ErrInvalid
+	}
+	return c, nil
+}
+
+// fromRecord checks every record and every cross-record rule of a catalog
+// and builds it. Decode and DecodeRows share it.
+func fromRecord(r catalogRecord) (Catalog, error) {
+	if r.Schema != 1 || len(r.Users) > maxRecords || len(r.Tenants) > maxRecords || len(r.Members) > maxRecords || len(r.Revocations) > maxRecords || len(r.VolumeFiles) > maxRecords {
 		return Catalog{}, ErrInvalid
 	}
 	c := Catalog{revision: r.Revision, anchor: r.Anchor, users: map[string]User{}, tenants: map[string]Tenant{}, members: map[string]Membership{}, revocations: map[string]Revocation{}}
@@ -621,10 +746,6 @@ func Decode(b []byte) (Catalog, error) {
 			return Catalog{}, ErrInvalid
 		}
 	} else if admins == 0 {
-		return Catalog{}, ErrInvalid
-	}
-	canonical, err := c.Encode()
-	if err != nil || !bytes.Equal(canonical, b) {
 		return Catalog{}, ErrInvalid
 	}
 	return c, nil

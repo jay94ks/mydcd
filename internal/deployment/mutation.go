@@ -5,8 +5,8 @@ package deployment
 import (
 	"encoding/json"
 
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/reconcile"
 )
 
 // Mutation is a consumer of A2 for one immutable management request. It never

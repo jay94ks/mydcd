@@ -7,9 +7,9 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/deployment"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/deployment"
 )
 
 // Native facts are signed model inputs; all planning, A1, progress and CAS
@@ -195,7 +195,7 @@ func TestAppFieldCASSignedModeIsExactAndLegacyBytesStayUnchanged(t *testing.T) {
 	q.Target = nil
 	legacy, _ := signedFieldCAS(t, f, "legacy", f.s.Object(AppsKey).Revision, view.Revision, q, false)
 	var fields map[string]json.RawMessage
-	if json.Unmarshal(OperationBytes(legacy)[len("mydc-user-operation-1\x00"):], &fields) != nil || fields["AppFieldCAS"] != nil {
+	if json.Unmarshal(OperationBytes(legacy)[len("sfc-user-operation-1\x00"):], &fields) != nil || fields["AppFieldCAS"] != nil {
 		t.Fatal("legacy signed bytes gained a field")
 	}
 	var payload map[string]json.RawMessage

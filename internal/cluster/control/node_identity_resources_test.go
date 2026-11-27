@@ -10,9 +10,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/ingress"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/ingress"
 )
 
 // Extend the existing accepted Task/network fixture rather than validating
@@ -37,14 +37,14 @@ func TestIdentityActivationPreservesLiveAppResourcesAndOriginalVaultIssuer(t *te
 	f.apply("identity-ingress-host", "set-ingress-host-policy", 0, IngressHostPolicyChange{Tenant: "tenant", Policy: ingress.HostPolicy{LocalHosts: []string{"identity.internal.example"}}}, state.Applied)
 	managedDNSTaskCoreBegin(t, f, "identity-app", "10.80.1.41", "identity-app", func(input *deployment.Compose, _ *deployment.PlanningContext) {
 		service := input.Services["web"]
-		service.MyDC.Node, service.MyDC.Nodes, service.MyDC.PerNode = "", []string{"node-a"}, 1
+		service.Sfc.Node, service.Sfc.Nodes, service.Sfc.PerNode = "", []string{"node-a"}, 1
 		attachment := service.Networks["lan"]
 		attachment.IPv4 = ""
 		service.Networks["lan"] = attachment
 		input.Services["web"] = service
 		d := &deployment.IngressDeclaration{Node: "node-a", Host: "identity.internal.example", Listeners: []deployment.ListenerDeclaration{{Address: "127.0.0.1:18081"}}, Runtime: deployment.IngressRuntime{MaxRequests: 2, MaxConnections: 8, MaxHeaderBytes: 4096, MaxBodyBytes: 1 << 20, BufferBytes: 128 << 10, RequestTimeoutMS: 5000, DialTimeoutMS: 1000, ResponseHeaderTimeoutMS: 2000, HealthIntervalMS: 100}}
 		d.Backend.Service, d.Backend.Network, d.Backend.Port, d.Backend.HealthPath = "web", "lan", 8080, "/readyz"
-		input.MyDC.Ingress = d
+		input.Sfc.Ingress = d
 	})
 	apps, err := f.p.Apps(f.s)
 	if err != nil {

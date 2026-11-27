@@ -3,24 +3,32 @@
 package userauth
 
 import (
-	"github.com/jay94ks/mydcd/internal/cluster/control"
+	"encoding/json"
 	"testing"
 )
 
-func TestTunnelQueryCannotMixTenantAndOtherAuthoritySelectors(t *testing.T) {
-	q := control.TunnelQuery{Node: "a", Peer: "b"}
-	base := Request{Method: "tunnel-reconnect-plan", Tunnel: &q}
-	if !base.validQuerySelectors() {
-		t.Fatal("tunnel plan shape rejected")
-	}
-	for _, edit := range []func(*Request){func(r *Request) { r.Tenant = "team" }, func(r *Request) { r.Node = "a" }, func(r *Request) { r.After = "cursor" }, func(r *Request) { r.Tunnel = nil }, func(r *Request) { r.Method = "whoami" }} {
-		bad := base
-		edit(&bad)
-		if bad.validQuerySelectors() {
-			t.Fatal("mixed tunnel query accepted")
+// A reconnect plan names exactly two different servers and a status one
+// operation; neither takes a tenant, node or cursor.
+func TestTunnelReconnectQueriesAreStrict(t *testing.T) {
+	for _, r := range []Request{
+		{Schema: 1, Method: "tunnel-reconnect-plan", Params: json.RawMessage(`{"Node":"a","Peer":"b"}`)},
+		{Schema: 1, Method: "tunnel-reconnect-status", Params: json.RawMessage(`{"Operation":"repair-42"}`)},
+	} {
+		if !r.validMethodFields() {
+			t.Fatal("valid reconnect query refused", r.Method)
 		}
 	}
-	if !(Request{Method: "tunnel-reconnect-status", Tunnel: &control.TunnelQuery{Operation: "repair-42"}}).validQuerySelectors() {
-		t.Fatal("original status shape rejected")
+	for name, r := range map[string]Request{
+		"same server":     {Schema: 1, Method: "tunnel-reconnect-plan", Params: json.RawMessage(`{"Node":"a","Peer":"a"}`)},
+		"plan operation":  {Schema: 1, Method: "tunnel-reconnect-plan", Params: json.RawMessage(`{"Node":"a","Peer":"b","Operation":"x"}`)},
+		"status node":     {Schema: 1, Method: "tunnel-reconnect-status", Params: json.RawMessage(`{"Operation":"repair-42","Node":"a"}`)},
+		"tenant field":    {Schema: 1, Method: "tunnel-reconnect-plan", Tenant: "team", Params: json.RawMessage(`{"Node":"a","Peer":"b"}`)},
+		"cursor field":    {Schema: 1, Method: "tunnel-reconnect-status", After: "cursor", Params: json.RawMessage(`{"Operation":"repair-42"}`)},
+		"missing params":  {Schema: 1, Method: "tunnel-reconnect-status"},
+		"empty operation": {Schema: 1, Method: "tunnel-reconnect-status", Params: json.RawMessage(`{"Operation":""}`)},
+	} {
+		if r.validMethodFields() {
+			t.Fatal(name, "accepted")
+		}
 	}
 }

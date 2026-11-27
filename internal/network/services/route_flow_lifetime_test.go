@@ -7,7 +7,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/network"
+	"github.com/jay94ks/seafield/internal/network"
 )
 
 func TestRouteFlowCensusRequiresPositiveObservationAndRetainsOriginalPin(t *testing.T) {

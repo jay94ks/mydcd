@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/mydcp"
+	"github.com/jay94ks/seafield/internal/sfcp"
 )
 
 // Only the TUN bytes and durable-admission result are modeled. The actual
@@ -157,7 +157,7 @@ func TestRoutePacketBarrierWaitsForOriginalWriteAndKeepsOtherFlowServing(t *test
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatal("barrier claimed closure while original IO was still running", err)
 	}
-	if err := p.ReceiveLocal(oldToken, packet); !errors.Is(err, mydcp.ErrAdmission) {
+	if err := p.ReceiveLocal(oldToken, packet); !errors.Is(err, sfcp.ErrAdmission) {
 		t.Fatal("closing gate accepted more original packets", err)
 	}
 	close(device.release)
@@ -202,12 +202,12 @@ func TestRoutePacketPlaneRejectsOldFlowTokenOnReceiveAndQueuedRecheck(t *testing
 	oldToken, freshToken := [16]byte{75}, [16]byte{76}
 	p.SetPlan(PacketPlan{Policy: policy, Gate: fixedRouteBindingGate{PacketBinding{oldToken, destination}}})
 	packet := transportPacket(4, 6)
-	frame := mydcp.Frame{Purpose: mydcp.Packet, Kind: 2, Fields: []mydcp.Field{{Tag: 1, Required: true, Value: local[:]}, {Tag: 2, Required: true, Value: id[:]}, {Tag: 3, Required: true, Value: oldToken[:]}, {Tag: 4, Required: true, Value: packet}}}
-	wire, err := mydcp.Encode(frame)
+	frame := sfcp.Frame{Purpose: sfcp.Packet, Kind: 2, Fields: []sfcp.Field{{Tag: 1, Required: true, Value: local[:]}, {Tag: 2, Required: true, Value: id[:]}, {Tag: 3, Required: true, Value: oldToken[:]}, {Tag: 4, Required: true, Value: packet}}}
+	wire, err := sfcp.Encode(frame)
 	if err != nil {
 		t.Fatal(err)
 	}
-	decoder, _ := mydcp.NewDecoder(mydcp.MaxBody)
+	decoder, _ := sfcp.NewDecoder(sfcp.MaxBody)
 	queued, _, err := decoder.Feed(wire)
 	if err != nil || queued == nil || !p.admittedLocal(*queued) {
 		t.Fatal("original flow was not admitted", err)
@@ -320,10 +320,10 @@ func TestRoutePacketPlaneLocalRelayWaitsForBilateralAdmissionAndKeepsReceiveRead
 		t.Fatal("retransmission or receive created another admission")
 	}
 	rightGate.allow.Store(false)
-	if err := right.ReceiveLocal(rightGate.token, packet); !errors.Is(err, mydcp.ErrAdmission) || incomingAdmits.Load() != 0 {
+	if err := right.ReceiveLocal(rightGate.token, packet); !errors.Is(err, sfcp.ErrAdmission) || incomingAdmits.Load() != 0 {
 		t.Fatal("revoked receive waited for new pin/control IO", err)
 	}
-	if err := right.Receive(nil, mydcp.Frame{}); !errors.Is(err, mydcp.ErrAdmission) {
+	if err := right.Receive(nil, sfcp.Frame{}); !errors.Is(err, sfcp.ErrAdmission) {
 		t.Fatal("remote receive acquired local relay provenance", err)
 	}
 }
@@ -552,7 +552,7 @@ func TestRouteAdmissionUsesExistingByteBudgetAndStopReturnsCandidate(t *testing.
 	copy(reply[16:20], netip.MustParseAddr("10.1.0.10").AsSlice())
 	binary.BigEndian.PutUint16(reply[20:22], 3306)
 	binary.BigEndian.PutUint16(reply[22:24], 49001)
-	if err = p.ReceiveLocal([16]byte{151}, reply); !errors.Is(err, mydcp.ErrBudget) {
+	if err = p.ReceiveLocal([16]byte{151}, reply); !errors.Is(err, sfcp.ErrBudget) {
 		t.Fatal("receive bypassed pending candidate byte ownership", err)
 	}
 	if p.bytes.Load() != 1200 {

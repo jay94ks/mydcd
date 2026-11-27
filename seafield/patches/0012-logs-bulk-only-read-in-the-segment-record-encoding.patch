@@ -1,0 +1,194 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Fri, 27 Nov 2026 08:42:39 +0000
+Subject: [PATCH 12/20] logs: bulk-only read in the segment record encoding
+
+
+diff --git a/daemon/seafield/logqueue/queue.go b/daemon/seafield/logqueue/queue.go
+index cb8f26d..0328962 100644
+--- a/daemon/seafield/logqueue/queue.go
++++ b/daemon/seafield/logqueue/queue.go
+@@ -33,6 +33,24 @@ type Line struct {
+ 	Data    []byte    `json:"data"`
+ }
+ 
++// AppendRecord appends l in the record encoding shared by segment files and
++// the bulk read: big-endian seq (8), unix nanoseconds (8), stream (1: 1
++// stdout, 2 stderr), partial (1), data length (4), then the data.
++func AppendRecord(b []byte, l Line) []byte {
++	var h [headerSize]byte
++	binary.BigEndian.PutUint64(h[0:], l.Seq)
++	binary.BigEndian.PutUint64(h[8:], uint64(l.Time.UnixNano()))
++	h[16] = 1
++	if l.Stream == "stderr" {
++		h[16] = 2
++	}
++	if l.Partial {
++		h[17] = 1
++	}
++	binary.BigEndian.PutUint32(h[18:], uint32(len(l.Data)))
++	return append(append(b, h[:]...), l.Data...)
++}
++
+ // Gap is a range of numbers that is no longer in the queue.
+ type Gap struct {
+ 	From uint64 `json:"from"`
+@@ -172,19 +190,8 @@ func (q *Queue) Append(t time.Time, stream string, partial bool, data []byte) er
+ 			return err
+ 		}
+ 	}
+-	var h [headerSize]byte
+-	binary.BigEndian.PutUint64(h[0:], q.next)
+-	binary.BigEndian.PutUint64(h[8:], uint64(t.UnixNano()))
+-	if stream == "stderr" {
+-		h[16] = 2
+-	} else {
+-		h[16] = 1
+-	}
+-	if partial {
+-		h[17] = 1
+-	}
+-	binary.BigEndian.PutUint32(h[18:], uint32(len(data)))
+-	if _, err := q.cur.Write(append(h[:], data...)); err != nil {
++	rec := AppendRecord(nil, Line{Seq: q.next, Time: t, Stream: stream, Partial: partial, Data: data})
++	if _, err := q.cur.Write(rec); err != nil {
+ 		return err
+ 	}
+ 	q.sizes[len(q.sizes)-1] += int64(headerSize + len(data))
+diff --git a/daemon/seafield/logqueue/router.go b/daemon/seafield/logqueue/router.go
+index f94cf15..769ff48 100644
+--- a/daemon/seafield/logqueue/router.go
++++ b/daemon/seafield/logqueue/router.go
+@@ -9,7 +9,6 @@
+ 	"os"
+ 	"strconv"
+ 
+-	"github.com/moby/moby/v2/daemon/server/httputils"
+ 	"github.com/moby/moby/v2/daemon/server/router"
+ 	"github.com/moby/moby/v2/errdefs"
+ )
+@@ -17,25 +16,17 @@
+ // ContainerResolver maps a name or id prefix to a full container id.
+ type ContainerResolver func(nameOrID string) (string, error)
+ 
+-// Page is the answer to GET /seafield/logs/{name}.
+-type Page struct {
+-	Gap   *Gap   `json:"gap,omitempty"`
+-	Lines []Line `json:"lines"`
+-	// Live is true while the container's logger is open (more may come).
+-	Live bool `json:"live"`
+-}
+-
+ type qRouter struct{ resolve ContainerResolver }
+ 
+ // NewRouter serves
+ //
+-//	GET  /seafield/logs/{name}/lines?after=N[&limit=M]
++//	GET  /seafield/logs/{name}/bulk?after=N[&max_bytes=M]
+ //	POST /seafield/logs/{name}/ack?upto=N
+ func NewRouter(resolve ContainerResolver) router.Router { return qRouter{resolve: resolve} }
+ 
+ func (r qRouter) Routes() []router.Route {
+ 	return []router.Route{
+-		router.NewGetRoute("/seafield/logs/{name:.*}/lines", r.get),
++		router.NewGetRoute("/seafield/logs/{name:.*}/bulk", r.get),
+ 		router.NewPostRoute("/seafield/logs/{name:.*}/ack", r.ack),
+ 	}
+ }
+@@ -51,6 +42,14 @@ func parseUint(v string) (uint64, error) {
+ 	return n, nil
+ }
+ 
++const (
++	defaultBulk = 4 << 20
++	maxBulk     = 16 << 20
++)
++
++// get answers one bulk of records after `after`, in the segment record
++// encoding (AppendRecord), up to max_bytes (at least one record). There is
++// no per-line read and no waiting: the seafield.logs event says when to come.
+ func (r qRouter) get(ctx context.Context, w http.ResponseWriter, req *http.Request, vars map[string]string) error {
+ 	id, err := r.resolve(vars["name"])
+ 	if err != nil {
+@@ -61,34 +60,66 @@ func (r qRouter) get(ctx context.Context, w http.ResponseWriter, req *http.Reque
+ 	if err != nil {
+ 		return err
+ 	}
+-	limit := 1000
+-	if v := q.Get("limit"); v != "" {
++	limit := defaultBulk
++	if v := q.Get("max_bytes"); v != "" {
+ 		n, err := strconv.Atoi(v)
+ 		if err != nil || n <= 0 {
+-			return errdefs.InvalidParameter(errors.New("limit must be a positive number"))
++			return errdefs.InvalidParameter(errors.New("max_bytes must be a positive number"))
+ 		}
+-		limit = min(n, 10_000)
++		limit = min(n, maxBulk)
+ 	}
+ 	lq := lookup(id)
+-	var (
+-		lines []Line
+-		gap   *Gap
+-	)
+-	if lq != nil {
+-		lines, gap, _, err = lq.Read(after, limit)
+-	} else {
+-		lines, gap, err = ReadDir(Dir(id), after, limit)
++	read := func(after uint64) ([]Line, *Gap, error) {
++		if lq != nil {
++			l, g, _, err := lq.Read(after, 1000)
++			return l, g, err
++		}
++		l, g, err := ReadDir(Dir(id), after, 1000)
+ 		if errors.Is(err, os.ErrNotExist) {
+ 			err = nil
+ 		}
++		return l, g, err
+ 	}
++	var (
++		body        []byte
++		first, last uint64
++		count       int
++	)
++	lines, gap, err := read(after)
+ 	if err != nil {
+ 		return err
+ 	}
+-	if lines == nil {
+-		lines = []Line{}
++fill:
++	for len(lines) > 0 {
++		for _, l := range lines {
++			if count > 0 && len(body)+headerSize+len(l.Data) > limit {
++				break fill
++			}
++			body = AppendRecord(body, l)
++			if count == 0 {
++				first = l.Seq
++			}
++			last, count = l.Seq, count+1
++		}
++		if lines, _, err = read(last); err != nil {
++			return err
++		}
++	}
++	h := w.Header()
++	h.Set("Content-Type", "application/vnd.seafield.log-records")
++	h.Set("Seafield-Live", strconv.FormatBool(lq != nil))
++	h.Set("Seafield-Count", strconv.Itoa(count))
++	if count > 0 {
++		h.Set("Seafield-First", strconv.FormatUint(first, 10))
++		h.Set("Seafield-Last", strconv.FormatUint(last, 10))
++	}
++	if gap != nil {
++		h.Set("Seafield-Gap", strconv.FormatUint(gap.From, 10)+"-"+strconv.FormatUint(gap.To, 10))
+ 	}
+-	return httputils.WriteJSON(w, http.StatusOK, Page{Gap: gap, Lines: lines, Live: lq != nil})
++	h.Set("Content-Length", strconv.Itoa(len(body)))
++	w.WriteHeader(http.StatusOK)
++	_, err = w.Write(body)
++	return err
+ }
+ 
+ func (r qRouter) ack(ctx context.Context, w http.ResponseWriter, req *http.Request, vars map[string]string) error {

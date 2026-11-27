@@ -10,10 +10,10 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/imagebuild"
-	"github.com/jay94ks/mydcd/internal/schema"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/imagebuild"
+	"github.com/jay94ks/seafield/internal/schema"
 )
 
 func TestImageBuildCompactPartPermitMatchesFullDataWithoutRecordingEffects(t *testing.T) {
@@ -202,19 +202,14 @@ func TestImageBuildCompactPartPermitRechecksCurrentMembershipContextAndCredentia
 				spec.Dockerfile = "changed/Dockerfile"
 				f.apply("manager", "put-build-context", 1, ImageBuildContextPut{spec}, state.Applied)
 			case "operation", "approval-operation":
-				catalog, _ := f.p.Catalog(f.s)
-				u, _ := catalog.User("manager")
 				approver := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{71}, 32))
 				if name == "operation" {
-					u.Credentials[0].Operations = []string{"image-builds"}
+					f.limitAccount("manager", "image-builds")
 				} else {
-					u.Credentials = append(u.Credentials, access.Credential{ID: "approval", Method: access.PrivateKey, PublicKey: [32]byte(approver.Public().(ed25519.PublicKey)), Enabled: true, Operations: []string{"image-builds"}})
+					f.addKey("manager", "approval", [32]byte(approver.Public().(ed25519.PublicKey)), []string{"image-builds"})
 				}
-				expected := u.Revision
-				u.Revision = 0
-				f.apply("admin", "put-user", expected, u, state.Applied)
-				catalog, _ = f.p.Catalog(f.s)
-				u, _ = catalog.User("manager")
+				catalog, _ := f.p.Catalog(f.s)
+				u, _ := catalog.User("manager")
 				q.Session.AccountRevision = u.Revision
 				q.Session.Signature = ed25519.Sign(f.node, access.SessionBytes(q.Session))
 				if name == "approval-operation" {

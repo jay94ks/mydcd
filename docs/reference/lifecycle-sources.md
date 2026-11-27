@@ -42,12 +42,12 @@ source 성공은 `Source` 하나, module 성공은 `Module` 하나다. 진단 �
 ## 정확한 버전의 원문 읽기
 
 ```json
-{"Schema":1,"Method":"lifecycle-source","Nonce":[0],"Tenant":"tenant","LifecycleSource":{"Name":"ready","Revision":7,"Offset":0}}
+{"Schema":1,"Method":"lifecycle-source","Nonce":[0],"Params":{"Tenant":"tenant","Source":{"Name":"ready","Revision":7,"Offset":0}}}
 ```
 
 Revision은 이름 record CAS와 구분되는 **immutable source revision**이며0/latest는 받지 않는다. 현재 ManageServices·Session/credential ceiling을 검사하고 Catalog의 해당 버전에서 원 provider와 descriptor를 선택한다. 입력으로 provider/URL/host 경로를 받지 않는다. retired이지만 삭제하지 않은 버전은 읽을 수 있고 삭제 버전은 missing이다. 원 provider의 부재/전송·저장 오류를 성공이나 빈 원문으로 바꾸지 않는다.
 
-`Reply.LifecycleSource`:
+typed 응답 `Reply.Data`:
 
 ```text
 {Tenant,Name,Revision,Offset,Total,Next,Digest:[32]byte,Data:[]byte}
@@ -62,13 +62,13 @@ Data는 최대24KiB 원 바이트이며 JSON에서는 base64다. UTF-8 code poin
 SDK는 `StageLifecycleSource`, `StageLifecycleModule`, `RecoverLifecycleSource`, `RecoverLifecycleModule`, `LifecycleSourcePage`, `LifecycleSource`를 제공한다. stage의 descriptor/Upload와 이후 Node를 그대로 보존한다.
 
 ```sh
-mydc --tenant tenant lifecycle source module --source-file ready.go --modules lock.json \
+sfcli --tenant tenant lifecycle source module --source-file ready.go --modules lock.json \
   --module example.invalid/safe --file safe.zip --upload ORIGINAL_64_HEX --node node-a
-mydc --tenant tenant lifecycle source stage --file ready.go --modules lock.json \
+sfcli --tenant tenant lifecycle source stage --file ready.go --modules lock.json \
   --upload ORIGINAL_64_HEX --node node-a
-mydc --tenant tenant lifecycle source recover --source-file ready.go --modules lock.json \
+sfcli --tenant tenant lifecycle source recover --source-file ready.go --modules lock.json \
   --upload ORIGINAL_64_HEX --node node-a
-mydc --tenant tenant lifecycle source read ready --revision 7
+sfcli --tenant tenant lifecycle source read ready --revision 7
 ```
 
 CLI는 `--upload`를 임의 생성하지 않는다. stage는 원 파일을 descriptor에 고정하고 진단만 반환하면 종료3, signed fact 반환은0이다. 별도 이름 등록·앱 배포는 실행하지 않는다. 기존 script put/result/resume의 원 wallet/journal·CAS 동작도 유지한다. Secret Vault의 키나 값은 source 입력/진단에 자동 포함하지 않는다.

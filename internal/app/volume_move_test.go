@@ -9,17 +9,17 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/config"
-	"github.com/jay94ks/mydcd/internal/engine"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/reconcile"
-	"github.com/jay94ks/mydcd/internal/schema"
-	"github.com/jay94ks/mydcd/internal/userauth"
-	"github.com/jay94ks/mydcd/internal/workload/volumes"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/config"
+	"github.com/jay94ks/seafield/internal/engine"
+	"github.com/jay94ks/seafield/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/userauth"
+	"github.com/jay94ks/seafield/internal/workload/volumes"
 )
 
 func TestRealVolumeMoveRecipeMemberReadBoundary(t *testing.T) {
@@ -30,7 +30,7 @@ func TestRealVolumeMoveQuorumAuthorityAndSameDB(t *testing.T) {
 	testRealManagedJoin(t, true, "volume-move")
 }
 
-func verifyVolumeMoveAuthority(t *testing.T, ctx context.Context, a *Runtime, source **Runtime, cfg config.Node, client userauth.Client, session access.Session, leader mydcp.Peer, p control.Policy, submit func(string, string, uint64, any), wait func(string, func() bool), recipeOnly ...bool) {
+func verifyVolumeMoveAuthority(t *testing.T, ctx context.Context, a *Runtime, source **Runtime, cfg config.Node, client userauth.Client, session access.Session, leader sfcp.Peer, p control.Policy, submit func(string, string, uint64, any), wait func(string, func() bool), recipeOnly ...bool) {
 	t.Helper()
 	read := func() state.State {
 		t.Helper()
@@ -54,7 +54,7 @@ func verifyVolumeMoveAuthority(t *testing.T, ctx context.Context, a *Runtime, so
 		t.Fatal(err)
 	}
 	tenant, _ := catalog.Tenant("tenant")
-	submit("move-placement", "set-nodes", tenant.Revision, control.NodeAssignment{Tenant: "tenant", Nodes: []string{"node-a", "node-b"}})
+	submit("move-placement", "set-nodes", tenant.Revision, control.NodeChangeTo("tenant", tenant.AllowedNodes, []string{"node-a", "node-b"}))
 	scope := volumes.Scope{Cluster: p.Cluster, Tenant: "tenant", App: "app", ID: "data", Generation: 1}
 	// Native facts are signed fixture INPUTS to the actual authenticated
 	// management/Raft/DB boundary. No Docker/clean exit or file is asserted here.
@@ -69,7 +69,7 @@ func verifyVolumeMoveAuthority(t *testing.T, ctx context.Context, a *Runtime, so
 	ready.Signature = ed25519.Sign((*source).Identity.Private, volumes.NativeReadyBytes(ready))
 	submit("move-register-source", "create-volume", 0, ready)
 	if len(recipeOnly) == 1 && recipeOnly[0] {
-		peer, ok := a.Mesh.Peer(mydcp.Identity((*source).Identity.Public))
+		peer, ok := a.Mesh.Peer(sfcp.Identity((*source).Identity.Public))
 		if !ok {
 			t.Fatal("installed source peer missing")
 		}
@@ -195,7 +195,7 @@ func verifyVolumeMoveAuthority(t *testing.T, ctx context.Context, a *Runtime, so
 		t.Fatal(err)
 	}
 	tenant, _ = catalog.Tenant("tenant")
-	submit("move-revoke-target", "set-nodes", tenant.Revision, control.NodeAssignment{Tenant: "tenant", Nodes: []string{"node-b"}})
+	submit("move-revoke-target", "set-nodes", tenant.Revision, control.NodeChangeTo("tenant", tenant.AllowedNodes, []string{"node-b"}))
 	if _, err = (*source).volumeMovePermit(ctx, job, "read"); err == nil {
 		t.Fatal("revoked target copy still admitted")
 	}
@@ -231,5 +231,5 @@ func verifyVolumeMoveAuthority(t *testing.T, ctx context.Context, a *Runtime, so
 	if _, err = schema.Decode[control.VolumeMoveReport](input); err != nil {
 		t.Fatal(err)
 	}
-	t.Log("actual signed user operation/MYDCP/N1+installed nonvoter/Raft/bbolt -> atomic move budgets/frozen original writer -> source-only latest quorum permit -> signed fence/read consumer -> source same DB/key/Snapshot -> target placement revoke/read deny -> original cancel/reader Gone and exact report ACK replay; source/target native facts are fixtures, no Docker/transfer/SQL/complete move claim")
+	t.Log("actual signed user operation/SFCP/N1+installed nonvoter/Raft/bbolt -> atomic move budgets/frozen original writer -> source-only latest quorum permit -> signed fence/read consumer -> source same DB/key/Snapshot -> target placement revoke/read deny -> original cancel/reader Gone and exact report ACK replay; source/target native facts are fixtures, no Docker/transfer/SQL/complete move claim")
 }

@@ -6,8 +6,8 @@ import (
 	"crypto/ed25519"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/workload/volumes"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/workload/volumes"
 )
 
 func TestInventoryFencedCancelRedeployPreservesVolumeAndUsesNewTaskConsumer(t *testing.T) {
@@ -28,7 +28,7 @@ func TestInventoryFencedCancelRedeployPreservesVolumeAndUsesNewTaskConsumer(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	target := volumes.Owner{Node: "node-a", Key: public(x.f.na), Native: "mydc-cancelled-stage"}
+	target := volumes.Owner{Node: "node-a", Key: public(x.f.na), Native: "sfc-cancelled-stage"}
 	core, err = core.Prepare(x.f.c, "alice", core.Revision(), ownerRevision, "move", target, [32]byte{51}, 1<<20)
 	if err != nil {
 		t.Fatal(err)

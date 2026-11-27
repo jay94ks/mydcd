@@ -172,7 +172,7 @@ func TestSpoolConfirmedPartRecoveryNeverRecreatesMissingOriginal(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	path := filepath.Join(root.Name(), ".mydc-imagebuild", scopeName(scope)+".zip")
+	path := filepath.Join(root.Name(), ".sfc-imagebuild", scopeName(scope)+".zip")
 	file, err := os.OpenFile(path, os.O_RDWR, 0)
 	if err != nil {
 		t.Fatal(err)
@@ -242,7 +242,7 @@ func TestSpoolRecoversExactPendingPartAndNeverMissingOriginal(t *testing.T) {
 	if err != nil || !part.Valid(scope) {
 		t.Fatal("same original pending recovery", err)
 	}
-	name := filepath.Join(scope.Root.Path, ".mydc-imagebuild", scopeName(scope)+".zip")
+	name := filepath.Join(scope.Root.Path, ".sfc-imagebuild", scopeName(scope)+".zip")
 	if err := os.Rename(name, name+".original"); err != nil {
 		t.Fatal(err)
 	}
@@ -292,7 +292,7 @@ func TestSpoolPreparationCrashCanBeReclaimedOnlyWhenEmpty(t *testing.T) {
 // artifact opt-in. It exercises actual disk parts/native receipts/shared core,
 // not the still-to-be-connected User/Raft/CLI path or a BuildKit job.
 func TestSpoolHundredMBZIP(t *testing.T) {
-	if os.Getenv("MYDC_IMAGEBUILD_LARGE") != "1" {
+	if os.Getenv("SFC_IMAGEBUILD_LARGE") != "1" {
 		t.Skip("RQ6 final large artifact batch")
 	}
 	ctx := context.Background()

@@ -31,20 +31,21 @@ func (s State) reportRootAvailable(actor, key string) bool {
 			roots[k.Key] = true
 		}
 	}
-	for k, r := range s.reportReceipts {
-		if k.actor == actor {
-			roots[r.Key] = true
-		}
-	}
+	s.actorReports(actor, func(_ requestKey, r reportReceipt) bool {
+		roots[r.Key] = true
+		return true
+	})
 	return roots[key] || len(roots) < maxReportRoots
 }
 
 func reportRows(s State) ([]reportReceiptRow, []reportFloorRow) {
 	var reports []reportReceiptRow
 	var floors []reportFloorRow
-	for k, v := range s.reportReceipts {
-		reports = append(reports, reportReceiptRow{k.actor, k.id, v.Key, v.Expected})
-	}
+	s.reportReceipts.walk("", func(k string, v reportReceipt) bool {
+		key, _ := parseRequestKey(k)
+		reports = append(reports, reportReceiptRow{key.actor, key.id, v.Key, v.Expected})
+		return true
+	})
 	for k, v := range s.reportFloors {
 		floors = append(floors, reportFloorRow{k.Actor, k.Key, v})
 	}
@@ -60,7 +61,7 @@ func reportRows(s State) ([]reportReceiptRow, []reportFloorRow) {
 }
 
 func restoreReportRows(s *State, reports []reportReceiptRow, floors []reportFloorRow) error {
-	s.reportReceipts = map[requestKey]reportReceipt{}
+	s.reportReceipts = tree[reportReceipt]{}
 	s.reportFloors = map[reportRoot]uint64{}
 	for _, row := range floors {
 		key := reportRoot{row.Actor, row.Key}
@@ -74,8 +75,8 @@ func restoreReportRows(s *State, reports []reportReceiptRow, floors []reportFloo
 	}
 	for _, row := range reports {
 		key := requestKey{row.Actor, row.ID}
-		stored, known := s.requests[key]
-		if _, exists := s.reportReceipts[key]; exists {
+		stored, known := s.request(key)
+		if _, exists := s.reportReceipts.get(key.String()); exists {
 			return ErrSnapshot
 		}
 		if !known || !strings.HasPrefix(row.Actor, "node/") || !strings.HasPrefix(row.ID, "checkpoint/") || len(row.ID) != len("checkpoint/")+64 || !strings.HasPrefix(row.Key, "control/") || len(row.Key) <= len("control/") || len(row.Key) > 512 || row.Expected >= stored.result.Index || !s.reportRootAvailable(row.Actor, row.Key) {
@@ -84,7 +85,7 @@ func restoreReportRows(s *State, reports []reportReceiptRow, floors []reportFloo
 		if _, err := hex.DecodeString(strings.TrimPrefix(row.ID, "checkpoint/")); err != nil {
 			return ErrSnapshot
 		}
-		s.reportReceipts[key] = reportReceipt{row.Key, row.Expected}
+		s.putReport(key, reportReceipt{row.Key, row.Expected})
 	}
 	return nil
 }
@@ -107,7 +108,7 @@ func (s State) reportExpired(c Command) bool {
 	}
 	// Keep the exact latest original result, including a lost final ACK, even
 	// when its CAS is behind the namespace replay fence.
-	if r, ok := s.requests[requestKey{c.Actor, c.RequestID}]; ok && r.digest == Digest(c) {
+	if r, ok := s.request(requestKey{c.Actor, c.RequestID}); ok && r.digest == Digest(c) {
 		return false
 	}
 	return true
@@ -124,28 +125,34 @@ func collectReports(s *State, actor string) bool {
 			roots[key.Key] = floor
 		}
 	}
-	for key, m := range s.reportReceipts {
-		if key.actor != actor {
-			continue
-		}
-		r, exists := s.requests[key]
+	missing := false
+	type entry struct {
+		key requestKey
+		m   reportReceipt
+	}
+	var entries []entry
+	s.actorReports(actor, func(key requestKey, m reportReceipt) bool {
+		r, exists := s.request(key)
 		if !exists {
+			missing = true
 			return false
 		}
+		entries = append(entries, entry{key, m})
 		roots[m.Key] = max(roots[m.Key], s.Object(m.Key).Revision)
 		latest[m.Key] = max(latest[m.Key], r.result.Index)
-	}
-	if len(roots) > maxReportRoots {
+		return true
+	})
+	if missing || len(roots) > maxReportRoots {
 		return false
 	}
-	for key, m := range s.reportReceipts {
-		r := s.requests[key]
+	for _, e := range entries {
+		r, _ := s.request(e.key)
 		// A superseded CAS is stale, and a rejected result changed nothing, so
 		// its replay only re-runs the reducer on current state. Either may go,
 		// but the newest receipt per root stays for a lost final ACK.
-		if key.actor == actor && (m.Expected < roots[m.Key] || r.result.Code != Applied) && r.result.Index != latest[m.Key] {
-			delete(s.reportReceipts, key)
-			delete(s.requests, key)
+		if (e.m.Expected < roots[e.m.Key] || r.result.Code != Applied) && r.result.Index != latest[e.m.Key] {
+			s.dropReport(e.key)
+			s.dropRequest(e.key)
 		}
 	}
 	if s.reportFloors == nil {
@@ -156,24 +163,12 @@ func collectReports(s *State, actor string) bool {
 			s.reportFloors[reportRoot{actor, key}] = floor
 		}
 	}
-	count := 0
-	for key := range s.requests {
-		if key.actor == actor {
-			count++
-		}
-	}
-	return count < LedgerLimit
+	return s.requestCount(actor) < LedgerLimit
 }
 
 // ReportLedgerFull says whether actor's request ledger is at its limit or
 // has no room for another report root, so a new report from it can only be
 // applied if it succeeds and frees older receipts. Local diagnostics only.
 func (s State) ReportLedgerFull(actor, key string) bool {
-	count := 0
-	for k := range s.requests {
-		if k.actor == actor {
-			count++
-		}
-	}
-	return count >= LedgerLimit || !s.reportRootAvailable(actor, key)
+	return s.requestCount(actor) >= LedgerLimit || !s.reportRootAvailable(actor, key)
 }

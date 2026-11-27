@@ -8,8 +8,8 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"fmt"
-	"github.com/jay94ks/mydcd/internal/bootstrap"
-	"github.com/jay94ks/mydcd/internal/schema"
+	"github.com/jay94ks/seafield/internal/bootstrap"
+	"github.com/jay94ks/seafield/internal/schema"
 	"io"
 	"net"
 	"net/http"
@@ -20,13 +20,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/config"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/ingress"
-	"github.com/jay94ks/mydcd/internal/network"
-	"github.com/jay94ks/mydcd/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/config"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/ingress"
+	"github.com/jay94ks/seafield/internal/network"
+	"github.com/jay94ks/seafield/internal/reconcile"
 
 	"github.com/quic-go/quic-go/http3"
 	"golang.org/x/net/http2"
@@ -57,7 +57,7 @@ func managedIngressFixture(t *testing.T, root, document string) (string, string)
 	}
 	plain, secure := port(false), port(true)
 	document = strings.Replace(document, "ingress: {enabled: false}", "ingress: {enabled: true}", 1)
-	yaml := fmt.Sprintf(`x-mydc:
+	yaml := fmt.Sprintf(`x-sfc:
  ingress:
   node: node-a
   host: app.test
@@ -184,7 +184,7 @@ func verifyManagedIngressServing(t *testing.T, ctx context.Context, r *Runtime, 
 		}
 		body, e := io.ReadAll(io.LimitReader(response.Body, 4096))
 		_ = response.Body.Close()
-		if e != nil || response.StatusCode != http.StatusOK || string(body) != "mydc-boundary /ping" || response.ProtoMajor != n+1 {
+		if e != nil || response.StatusCode != http.StatusOK || string(body) != "sfc-boundary /ping" || response.ProtoMajor != n+1 {
 			t.Fatal("actual ingress/backend", n, response.StatusCode, response.ProtoMajor, e)
 		}
 	}

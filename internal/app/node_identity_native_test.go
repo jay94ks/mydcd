@@ -6,14 +6,14 @@ import (
 	"context"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/cluster/membership"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/userauth"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/membership"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/userauth"
 )
 
-// Actual MYDCP/Raft/FSM/local installation restart, with workload/network native
+// Actual SFCP/Raft/FSM/local installation restart, with workload/network native
 // modules disabled by the existing N3 fixture. Resource-bearing original Task,
 // Volume and sealed-input settlement require their native fixture separately.
 func verifyRuntimeIdentityRotation(t *testing.T, ctx context.Context, nodes []*Runtime, client userauth.Client, session access.Session, policy control.Policy, submit func(string, string, uint64, any), wait func(string, func() bool)) {
@@ -93,7 +93,7 @@ func verifyRuntimeIdentityRotation(t *testing.T, ctx context.Context, nodes []*R
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = restored.Close() })
-	if restored.Identity.Public == original || restored.Mesh.LocalKey() != mydcp.Identity(restored.Identity.Public) || restored.installation.record.Root.OriginalKey() != original {
+	if restored.Identity.Public == original || restored.Mesh.LocalKey() != sfcp.Identity(restored.Identity.Public) || restored.installation.record.Root.OriginalKey() != original {
 		t.Fatal("restart did not select actual new TLS identity and historic root")
 	}
 	if _, err = restored.ResumeInstallation(ctx); err != nil {
@@ -116,10 +116,10 @@ func verifyRuntimeIdentityRotation(t *testing.T, ctx context.Context, nodes []*R
 	if !ok {
 		t.Fatal("missing unchanged leader")
 	}
-	if _, admitted := leader.Mesh.Peer(mydcp.Identity(original)); admitted {
+	if _, admitted := leader.Mesh.Peer(sfcp.Identity(original)); admitted {
 		t.Fatal("historic key leaked into current TLS/user fallback")
 	}
-	var peer mydcp.Peer
+	var peer sfcp.Peer
 	for _, candidate := range client.Peers {
 		if [32]byte(candidate.Key) == leader.Identity.Public {
 			peer = candidate
@@ -139,7 +139,7 @@ func verifyRuntimeIdentityRotation(t *testing.T, ctx context.Context, nodes []*R
 	if !found {
 		t.Fatal("public node status omitted original replacement progress")
 	}
-	wait("other node applies new member key without a new SDK configuration", func() bool {
+	wait("other cluster applies new member key without a new SDK configuration", func() bool {
 		_, directory, readErr := observer.members(ctx, false)
 		installed, configErr := observer.Engine().InstalledConfiguration(ctx, false)
 		return readErr == nil && configErr == nil && installed.Index == observerRecord.Root.Installed.Index && directory.MemberKey(restored.Identity.Public) && !directory.MemberKey(original)
@@ -167,8 +167,8 @@ func verifyRuntimeIdentityRotation(t *testing.T, ctx context.Context, nodes []*R
 	}
 	wait("reopened other node admits only the replaced peer's current TLS key", func() bool {
 		_, directory, readErr := reopenedObserver.members(ctx, false)
-		_, oldAdmitted := reopenedObserver.Mesh.Peer(mydcp.Identity(original))
-		newPeer, newAdmitted := reopenedObserver.Mesh.Peer(mydcp.Identity(restored.Identity.Public))
+		_, oldAdmitted := reopenedObserver.Mesh.Peer(sfcp.Identity(original))
+		newPeer, newAdmitted := reopenedObserver.Mesh.Peer(sfcp.Identity(restored.Identity.Public))
 		return readErr == nil && directory.MemberKey(restored.Identity.Public) && !directory.MemberKey(original) && !oldAdmitted && newAdmitted && (newPeer.Member || newPeer.Replicate)
 	})
 	_, d, _ = current()

@@ -1,17 +1,17 @@
 # Volume 파일 작업
 
-`volume-file-put/list/get/delete`는 등록된 tenant/app Volume 아래 상대 경로만 다룬다. 파일 본문은 MYDCP purpose18의 유한 스트림으로 전달하며 operation에는 경로·길이·상한·digest·덮어쓰기 동의·원 native/consumer만 보존한다. 본문을 관리 이력이나 로그에 저장하지 않는다.
+`volume-file-put/list/get/delete`는 등록된 tenant/app Volume 아래 상대 경로만 다룬다. 파일 본문은 SFCP purpose18의 유한 스트림으로 전달하며 operation에는 경로·길이·상한·digest·덮어쓰기 동의·원 native/consumer만 보존한다. 본문을 관리 이력이나 로그에 저장하지 않는다.
 
 ```sh
-mydc volume files grant backup mydc-web-backups/ web-backup
-mydc volume files put backup ./backup.db mydc-web-backups/today.db --max-size 256MiB
-mydc volume files ls backup mydc-web-backups/
-mydc volume files get backup mydc-web-backups/today.db ./recovered.db --max-size 256MiB
-mydc volume files rm backup mydc-web-backups/today.db
-mydc volume files revoke backup mydc-web-backups/ web-backup
+sfcli volume files grant backup sfc-web-backups/ web-backup
+sfcli volume files put backup ./backup.db sfc-web-backups/today.db --max-size 256MiB
+sfcli volume files ls backup sfc-web-backups/
+sfcli volume files get backup sfc-web-backups/today.db ./recovered.db --max-size 256MiB
+sfcli volume files rm backup sfc-web-backups/today.db
+sfcli volume files revoke backup sfc-web-backups/ web-backup
 ```
 
-볼륨 이름에 `앱/`이 없으면 사전 등록된 tenant Volume이다. 명령 전체는 [mydc volume](../cli/volume.md#파일-넣고-빼기)에 있다. 폴더 위임은 `volume files grant/revoke`로 tenant 관리자가 사용자에게 지정 Volume·접두어 아래 네 가지 파일 작업만 허용한다. 전역 사용자/credential을 편집하지 않는다. 실행 계정은 현재 tenant Read와 파일 operation ceiling을 만족해야 하며, credential에 별도 `VolumeFiles` ceiling이 있으면 그것도 동시에 만족해야 한다. 다른 경로·다른 Volume·다른 tenant에는 권한이 생기지 않는다. 일반 Volume manager는 현재 ManageVolumes 범위로 작업한다.
+볼륨 이름에 `앱/`이 없으면 사전 등록된 tenant Volume이다. 명령 전체는 [sfcli volume](../cli/volume.md#파일-넣고-빼기)에 있다. 폴더 위임은 `volume files grant/revoke`로 tenant 관리자가 사용자에게 지정 Volume·접두어 아래 네 가지 파일 작업만 허용한다. 전역 사용자/credential을 편집하지 않는다. 실행 계정은 현재 tenant Read와 파일 operation ceiling을 만족해야 하며, credential에 별도 `VolumeFiles` ceiling이 있으면 그것도 동시에 만족해야 한다. 다른 경로·다른 Volume·다른 tenant에는 권한이 생기지 않는다. 일반 Volume manager는 현재 ManageVolumes 범위로 작업한다.
 
 credential의 `VolumeFiles`는 선택적인 추가 ceiling이다. 항목은 `{Tenant,App,Volume,Prefix,Operations}`이며 Tenant·Volume·선택 App은 정확히 일치해야 하고 Prefix는 끝이 `/`인 canonical 상대 폴더다. App의 빈 값은 tenant 등록 Volume을 뜻하며 모든 앱을 뜻하지 않는다. Operations는 `volume-file-put/get/list/delete`의 명시 목록이다. ceiling을 생략한 nil은 기존 권한을 좁히지 않으며 명시적인 빈 배열 `VolumeFiles:[]`는 파일 작업 전체를 거부한다. 저장 credential과 공개 credential은 JSON roundtrip에서도 이 빈 배열을 유지한다. 기존 nil은 필드를 생략하고 비어 있지 않은 ceiling의 schema1 JSON 바이트는 유지한다. 원 사용자 operation payload에서도 빈 ceiling의 존재를 보존하며 원 서명을 다시 쓰거나 nil로 완화하지 않는다. 독립 사용자 Approval 키에도 ceiling이 있으면 현재 입력 credential과 함께 교집합으로 검사한다. ceiling 자체는 권한을 부여하지 않으므로 folder grant 회수 후 Read와 ceiling만으로 파일 작업을 계속할 수 없다. plan/status와 실제 purpose18 I/O가 같은 현재 `AuthorizeVolumeFile` 경계를 소비한다.
 

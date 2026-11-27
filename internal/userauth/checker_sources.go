@@ -12,11 +12,11 @@ import (
 	"errors"
 	"strconv"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/storage"
-	checker "github.com/jay94ks/mydcd/internal/workload/lifecycle"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/storage"
+	checker "github.com/jay94ks/seafield/internal/workload/lifecycle"
 )
 
 // SourceArtifacts is the node store boundary. Permit is checked before bounded
@@ -40,10 +40,10 @@ func (c Client) WithCheckerUpload(i CheckerScriptIntent) Client {
 	return c
 }
 
-func (s Service) streamCheckerSource(ctx context.Context, conn *mydcp.Session, stream mydcp.Stream, frame mydcp.Frame, header [32]byte, envelope Envelope, request Request, binding userBinding) error {
+func (s Service) streamCheckerSource(ctx context.Context, conn *sfcp.Session, stream sfcp.Stream, frame sfcp.Frame, header [32]byte, envelope Envelope, request Request, binding userBinding) error {
 	denied := func(code string) error { return s.respond(stream, frame, header, Reply{Schema: 1, Code: code}) }
 	module := request.Method == "checker-module-stage" || request.Method == "checker-module-recover"
-	if frame.Kind != 1 || envelope.Relay != nil || envelope.Session == nil || envelope.Session.Key != binding.key || access.VerifyRequest(*envelope.Session, binding.challenge, envelope.Body, envelope.Signature) != nil || request.Operation != nil || request.Enrollment != nil || request.Username != "" || request.UserKey != ([32]byte{}) || request.Ticket != nil || request.Proof != nil || request.After != "" || request.Node != "" || request.CheckerUpload == nil || request.CheckerSource == nil || request.CheckerSource.Validate() != nil || request.Tenant != request.CheckerSource.Tenant || (request.CheckerModule != nil) != module || module && !moduleInput(*request.CheckerSource, *request.CheckerModule) {
+	if frame.Kind != 1 || envelope.Relay != nil || envelope.Session == nil || envelope.Session.Key != binding.key || access.VerifyRequest(*envelope.Session, binding.challenge, envelope.Body, envelope.Signature) != nil || request.Operation != nil || request.Enrollment != nil || request.UserKey != ([32]byte{}) || request.After != "" || request.Node != "" || request.CheckerUpload == nil || request.CheckerSource == nil || request.CheckerSource.Validate() != nil || request.Tenant != request.CheckerSource.Tenant || (request.CheckerModule != nil) != module || module && !moduleInput(*request.CheckerSource, *request.CheckerModule) {
 		return denied("denied")
 	}
 	d := request.CheckerSource.Clone()
@@ -121,7 +121,7 @@ func checkerArtifactFailure(err error) string {
 		return "missing"
 	case errors.Is(err, storage.ErrMissing) && !errors.Is(err, checker.ErrSourceStore):
 		return "missing"
-	case errors.Is(err, access.ErrDenied), errors.Is(err, mydcp.ErrAdmission):
+	case errors.Is(err, access.ErrDenied), errors.Is(err, sfcp.ErrAdmission):
 		return "denied"
 	case errors.Is(err, checker.ErrReference), errors.Is(err, checker.ErrSourceStore), errors.Is(err, checker.ErrSource):
 		return "invalid"
@@ -130,19 +130,19 @@ func checkerArtifactFailure(err error) string {
 	}
 }
 
-func (c Client) sourceReply(target mydcp.Peer, d checker.SourceDescriptor, reply Reply) (checker.SourceFact, error) {
+func (c Client) sourceReply(target sfcp.Peer, d checker.SourceDescriptor, reply Reply) (checker.SourceFact, error) {
 	f := reply.CheckerSource
 	if reply.Code != "ok" || reply.CheckerModule != nil || reply.Tenant != d.Tenant || reply.Node != hex.EncodeToString(target.Key[:]) || f == nil || f.Verify() != nil || f.Owner != [32]byte(target.Key) || f.Cluster != c.Cluster || f.Tenant != d.Tenant || f.ContentDigest() != d.ContentDigest() || c.checkerUpload == nil || f.Upload == nil || *f.Upload != *c.checkerUpload {
-		return checker.SourceFact{}, mydcp.ErrAdmission
+		return checker.SourceFact{}, sfcp.ErrAdmission
 	}
 	return f.Clone(), nil
 }
 
 // StageCheckerSource does not redirect or auto-resubmit. A transport failure
 // after sending preserves this descriptor; RecoverCheckerSource sends no bytes.
-func (c Client) StageCheckerSource(ctx context.Context, target mydcp.Peer, session access.Session, d checker.SourceDescriptor, data []byte) (checker.SourceFact, error) {
+func (c Client) StageCheckerSource(ctx context.Context, target sfcp.Peer, session access.Session, d checker.SourceDescriptor, data []byte) (checker.SourceFact, error) {
 	if c.Verify(session) != nil || d.Validate() != nil || uint64(len(data)) != d.Length || sha256.Sum256(data) != d.Digest {
-		return checker.SourceFact{}, mydcp.ErrAdmission
+		return checker.SourceFact{}, sfcp.ErrAdmission
 	}
 	d = d.Clone()
 	reply, err := c.stageCheckerArtifact(ctx, target, session, Request{CheckerUpload: c.checkerUpload, Method: "checker-source-stage", Tenant: d.Tenant, CheckerSource: &d}, data)
@@ -154,11 +154,11 @@ func (c Client) StageCheckerSource(ctx context.Context, target mydcp.Peer, sessi
 
 // stageCheckerArtifact shares the original bounded source upload framing and
 // request lifetime with module ZIPs. It never redirects or retries an upload.
-func (c Client) stageCheckerArtifact(ctx context.Context, target mydcp.Peer, session access.Session, request Request, data []byte) (Reply, error) {
+func (c Client) stageCheckerArtifact(ctx context.Context, target sfcp.Peer, session access.Session, request Request, data []byte) (Reply, error) {
 	if c.Verify(session) != nil || c.Mesh == nil || c.Self == nil || c.Self.Public != [32]byte(c.Mesh.LocalKey()) {
-		return Reply{}, mydcp.ErrAdmission
+		return Reply{}, sfcp.ErrAdmission
 	}
-	return c.stageCheckerExchange(ctx, target, data, 1, func(conn *mydcp.Session) (Envelope, error) {
+	return c.stageCheckerExchange(ctx, target, data, 1, func(conn *sfcp.Session) (Envelope, error) {
 		body, err := requestBody(request)
 		if err != nil {
 			return Envelope{}, err
@@ -166,15 +166,15 @@ func (c Client) stageCheckerArtifact(ctx context.Context, target mydcp.Peer, ses
 		return Envelope{Body: body, Session: &session, Signature: ed25519.Sign(c.Self.Private, access.RequestBytes(session, conn.PeerChallenge(), body))}, nil
 	})
 }
-func (c Client) stageCheckerExchange(ctx context.Context, target mydcp.Peer, data []byte, kind uint8, makeEnvelope func(*mydcp.Session) (Envelope, error)) (Reply, error) {
+func (c Client) stageCheckerExchange(ctx context.Context, target sfcp.Peer, data []byte, kind uint8, makeEnvelope func(*sfcp.Session) (Envelope, error)) (Reply, error) {
 	if c.Mesh == nil || c.Self == nil || c.Self.Public != [32]byte(c.Mesh.LocalKey()) {
-		return Reply{}, mydcp.ErrAdmission
+		return Reply{}, sfcp.ErrAdmission
 	}
 	data = bytes.Clone(data)
 	defer clear(data)
 	conn, err := c.Mesh.Dial(ctx, target)
 	if err != nil {
-		return Reply{}, &Error{Code: "transport", Phase: mydcp.NotSent, Cause: err}
+		return Reply{}, &Error{Code: "transport", Phase: sfcp.NotSent, Cause: err}
 	}
 	envelope, err := makeEnvelope(conn)
 	if err != nil {
@@ -187,7 +187,7 @@ func (c Client) stageCheckerExchange(ctx context.Context, target mydcp.Peer, dat
 	header := sha256.Sum256(raw)
 	stream, err := conn.OpenManagement(ctx)
 	if err != nil {
-		return Reply{}, &Error{Code: "transport", Phase: mydcp.NotSent, Cause: err}
+		return Reply{}, &Error{Code: "transport", Phase: sfcp.NotSent, Cause: err}
 	}
 	defer stream.CancelRead(0)
 	defer stream.Close()
@@ -195,23 +195,23 @@ func (c Client) stageCheckerExchange(ctx context.Context, target mydcp.Peer, dat
 	defer stop()
 	id := c.Mesh.NextRequest()
 	requestID := strconv.FormatUint(id, 10)
-	lifetime, _ := mydcp.NewRequest(requestID, header)
+	lifetime, _ := sfcp.NewRequest(requestID, header)
 	lifetime, _ = lifetime.BeginSend()
 	var prepared Reply
 	unknown := func(err error) (Reply, error) {
 		return prepared, &Error{Code: "transport", Phase: lifetime.Abandon().Phase(), Cause: err}
 	}
-	if err = mydcp.WriteFrame(stream, mydcp.Frame{Purpose: mydcp.User, Kind: kind, Request: id, Fields: []mydcp.Field{{Tag: 1, Required: true, Value: raw}, {Tag: 2, Required: true, Value: header[:]}}}); err != nil {
+	if err = sfcp.WriteFrame(stream, sfcp.Frame{Purpose: sfcp.User, Kind: kind, Request: id, Fields: []sfcp.Field{{Tag: 1, Required: true, Value: raw}, {Tag: 2, Required: true, Value: header[:]}}}); err != nil {
 		return unknown(err)
 	}
 	read := func() (Reply, error) {
-		f, err := mydcp.ReadFrame(stream, 128<<10)
+		f, err := sfcp.ReadFrame(stream, 128<<10)
 		var reply Reply
 		if err != nil {
 			return reply, err
 		}
-		if f.Purpose != mydcp.User || f.Kind != 2 || f.Request != id || conn.Admit(f, mydcp.User, false) != nil || !bytes.Equal(f.Fields[1].Value, header[:]) || strict(f.Fields[0].Value, &reply) != nil || reply.Schema != 1 {
-			return reply, mydcp.ErrFrame
+		if f.Purpose != sfcp.User || f.Kind != 2 || f.Request != id || conn.Admit(f, sfcp.User, false) != nil || !bytes.Equal(f.Fields[1].Value, header[:]) || strict(f.Fields[0].Value, &reply) != nil || reply.Schema != 1 {
+			return reply, sfcp.ErrFrame
 		}
 		return reply, nil
 	}
@@ -230,7 +230,7 @@ func (c Client) stageCheckerExchange(ctx context.Context, target mydcp.Peer, dat
 			return unknown(err)
 		}
 		if streamEOF(stream) != nil {
-			return unknown(mydcp.ErrFrame)
+			return unknown(sfcp.ErrFrame)
 		}
 		if ready.Code == "unknown" || ready.Code == "unavailable" {
 			return prepared, &Error{Code: ready.Code, Phase: lifetime.Abandon().Phase()}
@@ -239,7 +239,7 @@ func (c Client) stageCheckerExchange(ctx context.Context, target mydcp.Peer, dat
 		return prepared, &Error{Code: ready.Code, Phase: lifetime.Phase()}
 	}
 	if ready.Node != hex.EncodeToString(target.Key[:]) || (ready.CheckerSource != nil || ready.CheckerModule != nil) {
-		return unknown(mydcp.ErrFrame)
+		return unknown(sfcp.ErrFrame)
 	}
 	if err = writeUserInput(stream, id, header, data); err != nil {
 		return unknown(err)
@@ -249,7 +249,7 @@ func (c Client) stageCheckerExchange(ctx context.Context, target mydcp.Peer, dat
 	}
 	reply, err := read()
 	if err != nil || streamEOF(stream) != nil {
-		return unknown(errors.Join(mydcp.ErrFrame, err))
+		return unknown(errors.Join(sfcp.ErrFrame, err))
 	}
 	if reply.Code != "ok" {
 		phase := lifetime.Abandon().Phase()
@@ -263,16 +263,16 @@ func (c Client) stageCheckerExchange(ctx context.Context, target mydcp.Peer, dat
 	return reply, nil
 }
 
-func (c Client) RecoverCheckerSource(ctx context.Context, target mydcp.Peer, session access.Session, d checker.SourceDescriptor) (checker.SourceFact, error) {
+func (c Client) RecoverCheckerSource(ctx context.Context, target sfcp.Peer, session access.Session, d checker.SourceDescriptor) (checker.SourceFact, error) {
 	if c.Verify(session) != nil || d.Validate() != nil {
-		return checker.SourceFact{}, mydcp.ErrAdmission
+		return checker.SourceFact{}, sfcp.ErrAdmission
 	}
 	d = d.Clone()
 	body, err := requestBody(Request{CheckerUpload: c.checkerUpload, Method: "checker-source-recover", Tenant: d.Tenant, CheckerSource: &d})
 	if err != nil {
 		return checker.SourceFact{}, err
 	}
-	reply, _, err := c.exchange(ctx, target, func(conn *mydcp.Session) (Envelope, error) {
+	reply, _, err := c.exchange(ctx, target, func(conn *sfcp.Session) (Envelope, error) {
 		return Envelope{Body: body, Session: &session, Signature: ed25519.Sign(c.Self.Private, access.RequestBytes(session, conn.PeerChallenge(), body))}, nil
 	}, false)
 	if err != nil {

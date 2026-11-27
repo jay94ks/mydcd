@@ -10,22 +10,22 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/imagesource"
-	"github.com/jay94ks/mydcd/internal/registryclient"
-	"github.com/jay94ks/mydcd/internal/web/mydc"
-	"github.com/jay94ks/mydcd/internal/web/store"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/imagesource"
+	"github.com/jay94ks/seafield/internal/registryclient"
+	"github.com/jay94ks/seafield/internal/web/sfc"
+	"github.com/jay94ks/seafield/internal/web/store"
 )
 
-// External image registry sources in mydcd's real contract (REQ-17,
+// External image registry sources in sfcd's real contract (REQ-17,
 // docs/reference/external-registries.md; canvas RegistryExternal: list,
 // add, credential swap, reader server, login test, users). A source holds
-// vault references only; mydcd checks the definition, reads the vault,
+// vault references only; sfcd checks the definition, reads the vault,
 // judges permissions and keeps the record CAS (Expected = the record
 // Revision, 0 for a new ID). The web reads with the person's session,
 // reshapes rows and keeps nothing but its own op records.
 
-const maxExternalPages = 40 // 8 a page; mydcd keeps at most 256 sources
+const maxExternalPages = 40 // 8 a page; sfcd keeps at most 256 sources
 
 type registryReaderView struct {
 	Node       string `json:"node"`
@@ -59,7 +59,7 @@ type externalRegistryView struct {
 
 // externalSources reads every page of `external-registries`, again from
 // the start when the root revision moves between pages.
-func externalSources(ctx context.Context, c mydc.Conn, tenant string) ([]control.ExternalRegistryView, uint64, error) {
+func externalSources(ctx context.Context, c sfc.Conn, tenant string) ([]control.ExternalRegistryView, uint64, error) {
 	for range 3 {
 		var out []control.ExternalRegistryView
 		var root uint64
@@ -87,7 +87,7 @@ func externalSources(ctx context.Context, c mydc.Conn, tenant string) ([]control
 	return nil, 0, &httpErr{http.StatusConflict, "changed", "the sources kept changing; read again"}
 }
 
-func findExternalSource(ctx context.Context, c mydc.Conn, tenant, id string) (*control.ExternalRegistryView, error) {
+func findExternalSource(ctx context.Context, c sfc.Conn, tenant, id string) (*control.ExternalRegistryView, error) {
 	rows, _, err := externalSources(ctx, c, tenant)
 	if err != nil {
 		return nil, err
@@ -102,8 +102,8 @@ func findExternalSource(ctx context.Context, c mydc.Conn, tenant, id string) (*c
 // registryPulls reads the pages of `external-registry-pulls` (at most
 // maxExternalPages), again from the start once when the rows change
 // between pages.
-func registryPulls(ctx context.Context, c mydc.Conn, tenant string) ([]control.RegistryPullView, error) {
-	var me *mydc.Error
+func registryPulls(ctx context.Context, c sfc.Conn, tenant string) ([]control.RegistryPullView, error) {
+	var me *sfc.Error
 	for try := 0; ; try++ {
 		var out []control.RegistryPullView
 		after := ""
@@ -121,7 +121,7 @@ func registryPulls(ctx context.Context, c mydc.Conn, tenant string) ([]control.R
 		if err == nil {
 			return out, nil
 		}
-		if try > 0 || !errors.As(err, &me) || me.Code != mydc.CodeConflict {
+		if try > 0 || !errors.As(err, &me) || me.Code != sfc.CodeConflict {
 			return nil, err
 		}
 	}
@@ -142,7 +142,7 @@ func viewExternalSource(x control.ExternalRegistryView, pulls []control.Registry
 	return v
 }
 
-// lowerCode: mydcd's bounded codes (OK, NOT_FOUND, …) as ok, not-found.
+// lowerCode: sfcd's bounded codes (OK, NOT_FOUND, …) as ok, not-found.
 func lowerCode(code string) string {
 	return strings.ReplaceAll(strings.ToLower(code), "_", "-")
 }
@@ -152,7 +152,7 @@ func lowerCode(code string) string {
 // latest real pull per server.
 func (s *Server) handleExternalRegistries(w http.ResponseWriter, r *http.Request, ws *webSession) {
 	tenant := r.PathValue("t")
-	read(s, w, r, ws, func(ctx context.Context, c mydc.Conn) (listPage, error) {
+	read(s, w, r, ws, func(ctx context.Context, c sfc.Conn) (listPage, error) {
 		rows, root, err := externalSources(ctx, c, tenant)
 		if err != nil {
 			return listPage{}, err
@@ -186,7 +186,7 @@ type imageUsageView struct {
 // logs in for (`image-usages` with ExternalSource).
 func (s *Server) handleExternalRegistryUsers(w http.ResponseWriter, r *http.Request, ws *webSession) {
 	tenant, id := r.PathValue("t"), r.PathValue("id")
-	read(s, w, r, ws, func(ctx context.Context, c mydc.Conn) (listPage, error) {
+	read(s, w, r, ws, func(ctx context.Context, c sfc.Conn) (listPage, error) {
 		p, err := c.ImageUsages(ctx, tenant, control.ImageUsageQuery{ExternalSource: id}, r.URL.Query().Get("after"))
 		if err != nil {
 			return listPage{}, err
@@ -223,10 +223,10 @@ func (s *Server) handleTestExternalRegistry(w http.ResponseWriter, r *http.Reque
 		s.writeOpOutcome(w, ws, nil, 0, invalid("image: at most 512 characters"))
 		return
 	}
-	read(s, w, r, ws, func(ctx context.Context, c mydc.Conn) (registryProbeView, error) {
+	read(s, w, r, ws, func(ctx context.Context, c sfc.Conn) (registryProbeView, error) {
 		res, err := c.ProbeExternalRegistry(ctx, r.PathValue("t"), control.ExternalRegistryProbeQuery{ID: r.PathValue("id"), Image: req.Image})
-		var me *mydc.Error
-		if errors.As(err, &me) && me.Code == mydc.CodeConflict {
+		var me *sfc.Error
+		if errors.As(err, &me) && me.Code == sfc.CodeConflict {
 			return registryProbeView{}, &httpErr{http.StatusConflict, "not-bound", "bind the source to a server first"}
 		}
 		if err != nil {
@@ -257,7 +257,7 @@ func (s *Server) handlePutExternalRegistry(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	tenant, id := r.PathValue("t"), r.PathValue("id")
-	s.sharedCreate(w, r, ws, req.OpID, req, func(ctx context.Context, c mydc.Conn, _ mydc.Session) (string, any, uint64, string, error) {
+	s.sharedCreate(w, r, ws, req.OpID, req, func(ctx context.Context, c sfc.Conn, _ sfc.Session) (string, any, uint64, string, error) {
 		spec := imagesource.Source{Tenant: tenant, ID: id, Authority: req.Authority, Repository: req.Repository, Enabled: req.Enabled == nil || *req.Enabled,
 			Auth: req.Auth, Credential: req.Credential, CA: req.CA}
 		if spec.Repository == "" {
@@ -277,12 +277,12 @@ func (s *Server) handlePutExternalRegistry(w http.ResponseWriter, r *http.Reques
 			}
 			rev = cur.Revision
 		}
-		return mydc.ActionPutExternalRegistry, control.ExternalRegistryPut{Spec: spec}, expectedOr(req.Expected, rev), "external-registry/" + id, nil
+		return sfc.ActionPutExternalRegistry, control.ExternalRegistryPut{Spec: spec}, expectedOr(req.Expected, rev), "external-registry/" + id, nil
 	})
 }
 
 // selectionChange: delete/unbind {Tenant, ID} with Expected = the record
-// Revision; 404 for an ID mydcd does not list.
+// Revision; 404 for an ID sfcd does not list.
 func (s *Server) selectionChange(w http.ResponseWriter, r *http.Request, ws *webSession, action string, check func(*control.ExternalRegistryView) error) {
 	var req struct {
 		OpID     string `json:"opId"`
@@ -296,7 +296,7 @@ func (s *Server) selectionChange(w http.ResponseWriter, r *http.Request, ws *web
 		Action string
 		Req    any
 	}{action, req}
-	s.sharedCreate(w, r, ws, req.OpID, body, func(ctx context.Context, c mydc.Conn, _ mydc.Session) (string, any, uint64, string, error) {
+	s.sharedCreate(w, r, ws, req.OpID, body, func(ctx context.Context, c sfc.Conn, _ sfc.Session) (string, any, uint64, string, error) {
 		cur, err := findExternalSource(ctx, c, tenant, id)
 		if err != nil {
 			return "", nil, 0, "", err
@@ -315,14 +315,14 @@ func (s *Server) selectionChange(w http.ResponseWriter, r *http.Request, ws *web
 // delete-external-registry. Running containers keep running; the reader
 // drains and later pulls go without this login.
 func (s *Server) handleDeleteExternalRegistry(w http.ResponseWriter, r *http.Request, ws *webSession) {
-	s.selectionChange(w, r, ws, mydc.ActionDeleteExternalRegistry, func(*control.ExternalRegistryView) error { return nil })
+	s.selectionChange(w, r, ws, sfc.ActionDeleteExternalRegistry, func(*control.ExternalRegistryView) error { return nil })
 }
 
 // POST /t/{t}/external-registries/{id}/unbind {opId, expected?} →
 // unbind-external-registry: the reader stops (drains, then its server
 // closes it).
 func (s *Server) handleUnbindExternalRegistry(w http.ResponseWriter, r *http.Request, ws *webSession) {
-	s.selectionChange(w, r, ws, mydc.ActionUnbindExternalRegistry, func(x *control.ExternalRegistryView) error {
+	s.selectionChange(w, r, ws, sfc.ActionUnbindExternalRegistry, func(x *control.ExternalRegistryView) error {
 		if x.Reader == nil || x.Reader.Draining {
 			return &httpErr{http.StatusConflict, "not-bound", "the source has no reader to stop"}
 		}
@@ -330,15 +330,15 @@ func (s *Server) handleUnbindExternalRegistry(w http.ResponseWriter, r *http.Req
 	})
 }
 
-// Bind approvals (as `mydc registry external-bind`): the bind original is
+// Bind approvals (as `sfcli registry external-bind`): the bind original is
 // signed once; each realm the plan uses is planned with it as Origin
 // (vault-approval-plan ID "registry-bind/<request ID>"), and a protected
 // Group waits for the requester's password (approve below, never stored).
 // When every Group is approved the same original is sent.
 
-func refreshBindApprovals(ctx context.Context, c mydc.Conn, o *store.Op) (bool, error) {
+func refreshBindApprovals(ctx context.Context, c sfc.Conn, o *store.Op) (bool, error) {
 	j := o.RegistryBind
-	origin, err := mydc.DecodeOperation(mydc.SignedOp(o.Signed))
+	origin, err := sfc.DecodeOperation(sfc.SignedOp(o.Signed))
 	if err != nil {
 		return false, err
 	}
@@ -351,7 +351,7 @@ func refreshBindApprovals(ctx context.Context, c mydc.Conn, o *store.Op) (bool, 
 }
 
 func holdBind(job *store.RegistryBindJob) holdFunc {
-	return func(ctx context.Context, c mydc.Conn, o *store.Op, op mydc.SignedOp) (bool, error) {
+	return func(ctx context.Context, c sfc.Conn, o *store.Op, op sfc.SignedOp) (bool, error) {
 		if len(job.Realms) == 0 {
 			return false, nil // no secret: nothing to approve
 		}
@@ -366,12 +366,12 @@ func holdBind(job *store.RegistryBindJob) holdFunc {
 	}
 }
 
-func (s *Server) sendHeldBind(ctx context.Context, c mydc.Conn, o *store.Op) error {
+func (s *Server) sendHeldBind(ctx context.Context, c sfc.Conn, o *store.Op) error {
 	ready, err := refreshBindApprovals(ctx, c, o)
 	if err != nil || !ready {
 		return err
 	}
-	res, err := c.Submit(ctx, mydc.SignedOp(o.Signed))
+	res, err := c.Submit(ctx, sfc.SignedOp(o.Signed))
 	o.State, o.ErrorCode = store.OpPending, ""
 	settleSubmit(o, res, err, s.now())
 	if o.State == store.OpFailed && o.ErrorCode == "" {
@@ -383,7 +383,7 @@ func (s *Server) sendHeldBind(ctx context.Context, c mydc.Conn, o *store.Op) err
 
 // POST /t/{t}/external-registries/{id}/bind {opId, node} →
 // bind-external-registry with external-registry-bind-plan's Selection and
-// Expected: the source's reader runs on that server (mydcd checks
+// Expected: the source's reader runs on that server (sfcd checks
 // ManageRegistry and the server's Deploy right). With protected Groups the
 // op waits (running, approval-required, approvals) for the approve call.
 func (s *Server) handleBindExternalRegistry(w http.ResponseWriter, r *http.Request, ws *webSession) {
@@ -396,14 +396,14 @@ func (s *Server) handleBindExternalRegistry(w http.ResponseWriter, r *http.Reque
 	}
 	tenant, id := r.PathValue("t"), r.PathValue("id")
 	job := &store.RegistryBindJob{Tenant: tenant, Source: id, Node: req.Node}
-	s.sharedCreateHold(w, r, ws, req.OpID, req, func(ctx context.Context, c mydc.Conn, _ mydc.Session) (string, any, uint64, string, error) {
+	s.sharedCreateHold(w, r, ws, req.OpID, req, func(ctx context.Context, c sfc.Conn, _ sfc.Session) (string, any, uint64, string, error) {
 		q := control.ExternalRegistryBindQuery{ID: id, Node: req.Node}
 		if !q.Valid() {
 			return "", nil, 0, "", invalid("node: a server name")
 		}
 		plan, err := c.PlanExternalRegistryBind(ctx, tenant, q)
-		var me *mydc.Error
-		if errors.As(err, &me) && me.Code == mydc.CodeConflict {
+		var me *sfc.Error
+		if errors.As(err, &me) && me.Code == sfc.CodeConflict {
 			return "", nil, 0, "", &httpErr{http.StatusConflict, "not-bindable", "only an enabled source without a reader can be bound; stop the current reader first"}
 		}
 		if err != nil {
@@ -413,7 +413,7 @@ func (s *Server) handleBindExternalRegistry(w http.ResponseWriter, r *http.Reque
 			job.Realms = append(job.Realms, realm)
 		}
 		slices.Sort(job.Realms)
-		return mydc.ActionBindExternalRegistry, plan.Selection, plan.Expected, "external-registry/" + id, nil
+		return sfc.ActionBindExternalRegistry, plan.Selection, plan.Expected, "external-registry/" + id, nil
 	}, holdBind(job))
 }
 

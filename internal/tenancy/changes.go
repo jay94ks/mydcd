@@ -7,11 +7,12 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"net/netip"
 	"slices"
 	"strings"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/network"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/network"
 )
 
 type ChangePhase string
@@ -61,6 +62,11 @@ func (c NetworkChange) CheckRetired(cluster [32]byte, original Network) error {
 		return ErrPolicy
 	}
 	n.revision = c.Revision
+	// The retired member's server address stands for its server's; a
+	// target on the same server shares it.
+	if original.Logical != "" && len(original.TunnelAddresses) == 1 {
+		n.servers = map[string]netip.Addr{original.Node: original.TunnelAddresses[0].Addr()}
+	}
 	n.networks[key(original.Tenant, original.ID)] = ownNetwork(original)
 	n.changes[key(original.Tenant, original.ID)] = ownChange(c)
 	if !n.validChange(c) {
@@ -91,11 +97,11 @@ func (p ChangeCandidateClose) Empty() bool {
 func ChangeCandidateBytes(p ChangeCandidateClose) []byte {
 	p.Signature = nil
 	raw, _ := json.Marshal(p)
-	return append([]byte("mydc-network-candidate-close-1\x00"), raw...)
+	return append([]byte("sfc-network-candidate-close-1\x00"), raw...)
 }
 func ChangeTargetHash(v Network) [32]byte {
 	raw, _ := json.Marshal(v)
-	return sha256.Sum256(append([]byte("mydc-network-change-target-1\x00"), raw...))
+	return sha256.Sum256(append([]byte("sfc-network-change-target-1\x00"), raw...))
 }
 func CandidateNativeID(c NetworkChange) string {
 	if c.MetadataOnly {
@@ -165,7 +171,7 @@ func validDefinition(v Network) bool {
 func (n Networks) reservedOverlap(v Network, except string) bool {
 	// A tenant network never takes the system network's range, whether or
 	// not the system network exists now.
-	if !v.System && n.overlapsSystemRange(v) {
+	if !v.System && overlapsSystemRange(v) {
 		return true
 	}
 	for k, old := range n.networks {
@@ -185,6 +191,22 @@ func (n Networks) reservedOverlap(v Network, except string) bool {
 		}
 	}
 	return false
+}
+
+// withNodeTunnel fills a change target's tunnel address with its server's
+// address (the server already has one: the target is on the original's
+// server). A target may not name another one.
+func (n Networks) withNodeTunnel(v Network) (Network, bool) {
+	if v.Logical == "" {
+		return v, len(v.TunnelAddresses) == 0
+	}
+	a, ok := n.NodeAddress(v.Node)
+	want := []netip.Prefix{netip.PrefixFrom(a, 32)}
+	if !ok || len(v.TunnelAddresses) != 0 && !slices.Equal(v.TunnelAddresses, want) {
+		return v, false
+	}
+	v.TunnelAddresses = want
+	return v, true
 }
 
 // sameNetwork compares one member's definition and state. Toggles are left
@@ -212,6 +234,10 @@ func (n Networks) planChange(c access.Catalog, actor, tenant, id, request string
 	v, ok := n.networks[key(tenant, id)]
 	old, planned := n.changes[key(tenant, id)]
 	target = ownNetwork(target)
+	if target, ok = n.withNodeTunnel(target); !ok {
+		return n, ErrPolicy
+	}
+	_, ok = n.networks[key(tenant, id)]
 	original := v
 	if planned && old.ID == request {
 		original = old.Original
@@ -326,6 +352,10 @@ func (n Networks) FenceChange(c access.Catalog, actor, tenant, id string, genera
 func (n Networks) RecoverChange(c access.Catalog, actor, tenant, id string, generation, expected uint64, target Network, p ChangeCandidateClose) (Networks, error) {
 	ch, ok := n.changes[key(tenant, id)]
 	target = ownNetwork(target)
+	if target, ok = n.withNodeTunnel(target); !ok {
+		return n, ErrPolicy
+	}
+	ch, ok = n.changes[key(tenant, id)]
 	slices.SortFunc(target.Pools, func(a, b Subnet) int { return strings.Compare(a.ID, b.ID) })
 	if !ok || ch.MetadataOnly || ch.Generation != generation || ch.Revision != expected || ch.Phase != ChangeFenced || !n.verifiesCandidate(ch, p) || len(ch.Previous) >= 64 || target.Tenant != tenant || target.ID != id || !validDefinition(target) || n.reservedOverlap(target, key(tenant, id)) {
 		return n, ErrPolicy

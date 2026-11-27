@@ -8,14 +8,14 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"errors"
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/cluster/membership"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/containerops"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/userauth"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/membership"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/containerops"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/userauth"
 	"github.com/moby/moby/client"
 	"os"
 	"path/filepath"
@@ -27,7 +27,7 @@ import (
 // Uses only the fixture's registered Task. The existing fixture owns baseline,
 // down/unknown settlement, Docker cleanup and leadership rollback. Restart is
 // intentionally not reversed by another restart, which would lose its history.
-func verifyUserTaskRestartNative(t *testing.T, ctx context.Context, r *Runtime, root string, c userauth.Client, peer mydcp.Peer, session access.Session) {
+func verifyUserTaskRestartNative(t *testing.T, ctx context.Context, r *Runtime, root string, c userauth.Client, peer sfcp.Peer, session access.Session) {
 	t.Helper()
 	selection := containerops.Selection{App: "app", Service: "web"}
 	planned, err := c.QueryTaskRestart(ctx, peer, session, "tenant", true, control.TaskRestartQuery{Selection: selection})
@@ -39,7 +39,7 @@ func verifyUserTaskRestartNative(t *testing.T, ctx context.Context, r *Runtime, 
 	if err != nil || before.Container.State == nil {
 		t.Fatal("original native baseline", err)
 	}
-	owned, err := r.docker.API.ContainerList(ctx, client.ContainerListOptions{All: true, Filters: client.Filters{}.Add("label", "org.mydc.owner="+r.docker.Owner)})
+	owned, err := r.docker.API.ContainerList(ctx, client.ContainerListOptions{All: true, Filters: client.Filters{}.Add("label", "org.sfc.owner="+r.docker.Owner)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -58,7 +58,7 @@ func verifyUserTaskRestartNative(t *testing.T, ctx context.Context, r *Runtime, 
 		if len(args) != 0 && args[0] == "compose" {
 			args = append([]string{"--tenant", "tenant"}, args...)
 		}
-		out, diag, err := runManagedCLICommand(ctx, os.Getenv("MYDC_TEST_CLI"), filepath.Join(root, "cli-home"), filepath.Join(root, "cli.yaml"), args, nil)
+		out, diag, err := runManagedCLICommand(ctx, os.Getenv("SFC_TEST_CLI"), filepath.Join(root, "cli-home"), filepath.Join(root, "cli.yaml"), args, nil)
 		if err != nil {
 			t.Fatal("actual Task restart CLI", args, err, string(diag))
 		}
@@ -76,7 +76,7 @@ func verifyUserTaskRestartNative(t *testing.T, ctx context.Context, r *Runtime, 
 	defer func() {
 		clean, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
-		_, diag, err := runManagedCLICommand(clean, os.Getenv("MYDC_TEST_CLI"), filepath.Join(root, "cli-home"), filepath.Join(root, "cli.yaml"), []string{"-y", "node", "uncordon", node, "--if-revision", strconv.FormatUint(baseline+1, 10), "--id", "native-uncordon"}, nil)
+		_, diag, err := runManagedCLICommand(clean, os.Getenv("SFC_TEST_CLI"), filepath.Join(root, "cli-home"), filepath.Join(root, "cli.yaml"), []string{"-y", "node", "uncordon", node, "--if-revision", strconv.FormatUint(baseline+1, 10), "--id", "native-uncordon"}, nil)
 		if err != nil {
 			t.Error("restore scheduling baseline", err, string(diag))
 		}
@@ -142,10 +142,10 @@ func verifyUserTaskRestartNative(t *testing.T, ctx context.Context, r *Runtime, 
 	if err != nil || replay.Container.State == nil || replay.Container.State.StartedAt != started {
 		t.Fatal("replay performed another restart", err)
 	}
-	if os.Getenv("MYDC_TEST_RQ4_AUTOMATION") == "1" {
+	if os.Getenv("SFC_TEST_RQ4_AUTOMATION") == "1" {
 		verifyRestrictedTaskRestartNative(t, ctx, root, c, peer, session, selection)
 	}
-	if os.Getenv("MYDC_TEST_RQ4_EVENTS") == "1" {
+	if os.Getenv("SFC_TEST_RQ4_EVENTS") == "1" {
 		verifyThreeRestartEventsNative(t, ctx, r, c, peer, session, plan.Container, run)
 	}
 	for id, stamp := range other {
@@ -157,7 +157,7 @@ func verifyUserTaskRestartNative(t *testing.T, ctx context.Context, r *Runtime, 
 	run([]string{"compose", "restart-status", "-p", "app", "--operation", "native-restart-web"})
 }
 
-func verifyRestrictedTaskRestartNative(t *testing.T, ctx context.Context, root string, admin userauth.Client, peer mydcp.Peer, session access.Session, selection containerops.Selection) {
+func verifyRestrictedTaskRestartNative(t *testing.T, ctx context.Context, root string, admin userauth.Client, peer sfcp.Peer, session access.Session, selection containerops.Selection) {
 	t.Helper()
 	public, private, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
@@ -276,7 +276,7 @@ func verifyRestrictedTaskRestartNative(t *testing.T, ctx context.Context, root s
 	}
 	disabled.Revision = 0 // CAS is carried by Change.Expected, not the new record.
 	send(admin, session, "native-autofix-disable", "put-user", revision, disabled)
-	if _, err = client.Query(ctx, peer, actor, "whoami", ""); err == nil {
+	if _, err = client.Whoami(ctx, peer, actor); err == nil {
 		t.Fatal("revoked automation key retained its session")
 	}
 	if _, err = client.Login(ctx, peer, account.Username, private); err == nil {

@@ -11,7 +11,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/jay94ks/mydcd/internal/engine"
+	"github.com/jay94ks/seafield/internal/engine"
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/api/types/mount"
 	"github.com/moby/moby/client"
@@ -28,8 +28,8 @@ type NativePlan struct {
 const nativeBuilderUID = 1000
 
 func nativeWorkspaceNames(p NativePlan) [3]string {
-	job := ".mydc-imagebuild/jobs/" + hex.EncodeToString(p.Job[:])
-	return [3]string{job + "/input", job + "/output", ".mydc-imagebuild/build-cache/" + hex.EncodeToString(p.Cache[:])}
+	job := ".sfc-imagebuild/jobs/" + hex.EncodeToString(p.Job[:])
+	return [3]string{job + "/input", job + "/output", ".sfc-imagebuild/build-cache/" + hex.EncodeToString(p.Cache[:])}
 }
 func nativeWorkspacePaths(spec JobSpec, p NativePlan) [3]string {
 	names := nativeWorkspaceNames(p)
@@ -64,7 +64,7 @@ func PlanNative(spec JobSpec, owner string) (NativePlan, error) {
 // CacheIdentity is shared by native ownership and read projections. It does
 // not include the job ID: successive jobs reuse exactly this cache scope.
 func CacheIdentity(spec JobSpec) [32]byte {
-	return digestJSON("mydc-imagebuild-cache-scope-1", struct {
+	return digestJSON("sfc-imagebuild-cache-scope-1", struct {
 		Tenant, Context, Builder string
 		Root                     [32]byte
 	}{spec.Tenant, spec.Context.ID, spec.Policy.BuilderImage, spec.Scope.Root.Digest()})
@@ -112,7 +112,7 @@ func (p NativePlan) createOptionsWithTLS(spec JobSpec, sdk, tls bool) (client.Co
 	}
 	pids := int64(512)
 	stop := 10
-	config := &container.Config{Image: spec.Policy.BuilderImage, User: "1000:1000", WorkingDir: "/input/context", Entrypoint: []string{"/bin/sh", "-ec", nativeDeadlineCommand, "mydc-build", strconv.FormatUint(spec.CreatedAt+spec.Policy.Seconds, 10), "/usr/bin/buildctl-daemonless.sh"}, Cmd: args, Env: []string{"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", "HOME=/home/user", "USER=user", "XDG_RUNTIME_DIR=/run/user/1000", "TMPDIR=/tmp", "BUILDKIT_HOST=unix:///run/user/1000/buildkit/buildkitd.sock", "BUILDKITD_FLAGS=--oci-worker-snapshotter=native --containerd-worker=false --root /home/user/.local/share/buildkit"}, Labels: maps.Clone(p.Container.Labels), StopSignal: "SIGTERM", StopTimeout: &stop, Healthcheck: &container.HealthConfig{Test: []string{"NONE"}}}
+	config := &container.Config{Image: spec.Policy.BuilderImage, User: "1000:1000", WorkingDir: "/input/context", Entrypoint: []string{"/bin/sh", "-ec", nativeDeadlineCommand, "sfc-build", strconv.FormatUint(spec.CreatedAt+spec.Policy.Seconds, 10), "/usr/bin/buildctl-daemonless.sh"}, Cmd: args, Env: []string{"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", "HOME=/home/user", "USER=user", "XDG_RUNTIME_DIR=/run/user/1000", "TMPDIR=/tmp", "BUILDKIT_HOST=unix:///run/user/1000/buildkit/buildkitd.sock", "BUILDKITD_FLAGS=--oci-worker-snapshotter=native --containerd-worker=false --root /home/user/.local/share/buildkit"}, Labels: maps.Clone(p.Container.Labels), StopSignal: "SIGTERM", StopTimeout: &stop, Healthcheck: &container.HealthConfig{Test: []string{"NONE"}}}
 	if sdk {
 		config.Entrypoint[len(config.Entrypoint)-1] = "/usr/bin/rootlesskit"
 		config.Cmd = []string{"/usr/bin/buildkitd", "--addr", "unix:///output/buildkit.sock", "--oci-worker-snapshotter=native", "--containerd-worker=false", "--root", "/home/user/.local/share/buildkit"}

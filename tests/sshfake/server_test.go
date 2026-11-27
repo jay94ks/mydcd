@@ -19,13 +19,13 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-// The server runs a shell as mydc-shell on a PTY and reports its exit code.
+// The server runs a shell as sfc-shell on a PTY and reports its exit code.
 func TestShell(t *testing.T) {
 	if os.Geteuid() != 0 {
 		t.Skip("needs root")
 	}
 	if _, err := user.Lookup(Account); err == nil {
-		t.Skip("mydc-shell exists")
+		t.Skip("sfc-shell exists")
 	}
 	dir, _ := os.MkdirTemp("", "sshfake-")
 	_ = os.Chmod(dir, 0o755)

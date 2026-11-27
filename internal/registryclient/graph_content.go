@@ -133,3 +133,24 @@ func (a *Access) OpenGraphContent(ctx context.Context, q GraphContentQuery) (Con
 	}
 	return a.openSelectedContent(ctx, info)
 }
+
+// OpenGraphContentAt is OpenGraphContent from offset bytes in; ContentInfo
+// still describes the whole item. A blob is read from its start and the
+// first offset bytes are dropped, so the source still checks the full digest.
+func (a *Access) OpenGraphContentAt(ctx context.Context, q GraphContentQuery, offset int64) (ContentInfo, io.ReadCloser, error) {
+	info, body, err := a.OpenGraphContent(ctx, q)
+	if err != nil {
+		return info, nil, err
+	}
+	if offset < 0 || offset > info.Bytes {
+		_ = body.Close()
+		return info, nil, &Error{Code: "INVALID_IMAGE"}
+	}
+	if offset > 0 {
+		if _, err = io.CopyN(io.Discard, body, offset); err != nil {
+			_ = body.Close()
+			return info, nil, Sanitize(err)
+		}
+	}
+	return info, body, nil
+}

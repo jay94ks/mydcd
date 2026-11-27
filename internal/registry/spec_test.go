@@ -5,8 +5,8 @@ package registry
 import (
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/workload"
-	"github.com/jay94ks/mydcd/internal/workload/volumes"
+	"github.com/jay94ks/seafield/internal/workload"
+	"github.com/jay94ks/seafield/internal/workload/volumes"
 )
 
 func TestRegistrySpecificationSeparatesListenAuthorityCertificateAndVolumeOwner(t *testing.T) {

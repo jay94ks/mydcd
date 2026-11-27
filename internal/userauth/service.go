@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// Package userauth is the MYDCP user authentication adapter. It grants neither
+// Package userauth is the SFCP user authentication adapter. It grants neither
 // node membership nor legacy management rights to a user/session transport key.
 package userauth
 
@@ -8,36 +8,37 @@ import (
 	"bytes"
 	"context"
 	"crypto/ed25519"
-	"crypto/rand"
 	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/certstore"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/cluster/lifecycle"
-	"github.com/jay94ks/mydcd/internal/cluster/membership"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/config"
-	"github.com/jay94ks/mydcd/internal/containerops"
-	"github.com/jay94ks/mydcd/internal/credentials"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/eventlog"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/imagebuild"
-	"github.com/jay94ks/mydcd/internal/imagecache"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/nodestorage"
-	"github.com/jay94ks/mydcd/internal/schema"
-	"github.com/jay94ks/mydcd/internal/secrets"
-	"github.com/jay94ks/mydcd/internal/servicecall"
-	checker "github.com/jay94ks/mydcd/internal/workload/lifecycle"
-	"github.com/jay94ks/mydcd/internal/workload/volumes"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/certstore"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/lifecycle"
+	"github.com/jay94ks/seafield/internal/cluster/membership"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/config"
+	"github.com/jay94ks/seafield/internal/containerops"
+	"github.com/jay94ks/seafield/internal/credentials"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/eventbus"
+	"github.com/jay94ks/seafield/internal/eventlog"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/imagebuild"
+	"github.com/jay94ks/seafield/internal/imagecache"
+	"github.com/jay94ks/seafield/internal/loginlog"
+	"github.com/jay94ks/seafield/internal/nodestorage"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/secrets"
+	"github.com/jay94ks/seafield/internal/servicecall"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/vps"
+	checker "github.com/jay94ks/seafield/internal/workload/lifecycle"
+	"github.com/jay94ks/seafield/internal/workload/volumes"
 )
 
 type Ticket struct {
@@ -56,21 +57,17 @@ type Ticket struct {
 func ticketBytes(t Ticket) []byte {
 	t.Signature = nil
 	b, _ := json.Marshal(t)
-	return append([]byte("mydc-user-login-ticket-1\x00"), b...)
+	return append([]byte("sfc-user-login-ticket-1\x00"), b...)
 }
 
 type Request struct {
-	Certificate           *control.CertificateQuery           `json:",omitempty"`
-	Ingress               *control.IngressQuery               `json:",omitempty"`
+	// Params is a typed method's request (methods.go). A typed method's
+	// Request has nothing else but Schema, Method and Nonce.
+	Params                json.RawMessage                     `json:",omitempty"`
 	ServiceCall           *servicecall.Request                `json:",omitempty"`
 	ServiceInput          *ServiceCallInput                   `json:",omitempty"`
 	CDProbe               *deployment.GitProbeRequest         `json:",omitempty"`
 	Standalone            *control.StandaloneQuery            `json:",omitempty"`
-	VolumeFile            *control.VolumeFileQuery            `json:",omitempty"`
-	PublicRead            *control.PublicReadQuery            `json:",omitempty"`
-	LifecycleSource       *control.LifecycleSourceQuery       `json:",omitempty"`
-	NodeDrain             *control.NodeDrainQuery             `json:",omitempty"`
-	NodeForce             *control.NodeForceQuery             `json:",omitempty"`
 	AppCDRead             *control.AppCDReadRequest           `json:",omitempty"`
 	Events                *eventlog.Query                     `json:",omitempty"`
 	InitialCredential     *credentials.InitialRequest         `json:",omitempty"`
@@ -78,35 +75,28 @@ type Request struct {
 	RegistryMaintenance   *control.RegistryMaintenanceQuery   `json:",omitempty"`
 	RegistryPrune         *control.RegistryPruneQuery         `json:",omitempty"`
 	ImageCache            *imagecache.Query                   `json:",omitempty"`
-	Tunnel                *control.TunnelQuery                `json:",omitempty"`
 	RegistryCatalog       *control.RegistryCatalogueQuery     `json:",omitempty"`
 	ImageUsage            *control.ImageUsageQuery            `json:",omitempty"`
 	ImageResolve          *control.ImageResolveQuery          `json:",omitempty"`
 	ExternalRegistryProbe *control.ExternalRegistryProbeQuery `json:",omitempty"`
 	ExternalRegistryBind  *control.ExternalRegistryBindQuery  `json:",omitempty"`
 	RegistryAction        *control.RegistryActionQuery        `json:",omitempty"`
-	Compact               *control.CompactQuery               `json:",omitempty"`
 	AppSource             *control.AppSourceSelection         `json:",omitempty"`
-	App                   string                              `json:",omitempty"`
 	TaskRestart           *control.TaskRestartQuery           `json:",omitempty"`
 	LogClear              *control.AppLogClearQuery           `json:",omitempty"`
 	TargetUser            string                              `json:",omitempty"`
 	Container             *containerops.Query                 `json:",omitempty"`
+	LoginQuery            *loginlog.Query                     `json:",omitempty"`
 	Schema                uint8
 	Method                string
-	Username              string                 `json:",omitempty"`
 	UserKey               [32]byte               `json:",omitempty"`
 	Tenant                string                 `json:",omitempty"`
 	After                 string                 `json:",omitempty"`
 	Node                  string                 `json:",omitempty"`
 	State                 string                 `json:",omitempty"`
-	Ticket                *Ticket                `json:",omitempty"`
-	Proof                 *access.KeyProof       `json:",omitempty"`
 	Operation             *control.UserOperation `json:",omitempty"`
 	Enrollment            *control.Enrollment    `json:",omitempty"`
 	Nonce                 [32]byte
-	AuthMethod            access.Method                     `json:",omitempty"`
-	Credential            string                            `json:",omitempty"`
 	Secret                []byte                            `json:",omitempty"`
 	AppPlan               *control.AppPlanRequest           `json:",omitempty"`
 	AppOperation          *control.AppOperationRequest      `json:",omitempty"`
@@ -115,9 +105,7 @@ type Request struct {
 	AppInput              *AppPlanInput                     `json:",omitempty"`
 	VaultPlan             *control.VaultApprovalPlanRequest `json:",omitempty"`
 	VaultWritePlan        *control.VaultWritePlanRequest    `json:",omitempty"`
-	VolumeUsage           *control.VolumeSelector           `json:",omitempty"`
 	NodeStorage           *control.NodeStorageSelection     `json:",omitempty"`
-	VolumeSource          *control.VolumeSelector           `json:",omitempty"`
 	CheckerUpload         *[32]byte                         `json:",omitempty"`
 	CheckerSource         *checker.SourceDescriptor         `json:",omitempty"`
 	CheckerModule         *checker.ModulePin                `json:",omitempty"`
@@ -138,6 +126,32 @@ type Envelope struct {
 	Signature []byte          `json:",omitempty"`
 	Relay     *Relay          `json:",omitempty"`
 }
+
+// envelopeWire carries Body as itself, not base64 (design O4).
+type envelopeWire struct {
+	Body      json.RawMessage
+	Session   *access.Session `json:",omitempty"`
+	Signature []byte          `json:",omitempty"`
+	Relay     *Relay          `json:",omitempty"`
+}
+
+func (e Envelope) MarshalJSON() ([]byte, error) {
+	body, err := sfcp.RawBody(e.Body)
+	if err != nil {
+		return nil, err
+	}
+	return json.Marshal(envelopeWire{body, e.Session, e.Signature, e.Relay})
+}
+
+func (e *Envelope) UnmarshalJSON(raw []byte) error {
+	var w envelopeWire
+	if err := sfcp.StrictJSON(raw, &w); err != nil {
+		return err
+	}
+	*e = Envelope{Body: bytes.Clone(w.Body), Session: w.Session, Signature: w.Signature, Relay: w.Relay}
+	return nil
+}
+
 type UserView struct {
 	ID, Username string
 	Revision     uint64
@@ -150,35 +164,34 @@ type TenantView struct {
 	AllowedNodes []string
 }
 type Reply struct {
-	NodeShellPolicy                 *control.NodeShellPolicyView         `json:",omitempty"`
-	NodeShellSessions               *control.NodeShellSessionsPage       `json:",omitempty"`
-	NodeShellRootRevision           uint64                               `json:",omitempty"`
-	LifecycleStage                  *LifecycleStageResult                `json:",omitempty"`
-	LifecycleSource                 *checker.SourcePage                  `json:",omitempty"`
-	NodeDrainPlan                   *control.NodeDrainPlan               `json:",omitempty"`
-	NodeDrainStatus                 *control.NodeDrainStatus             `json:",omitempty"`
-	NodeDiagnostics                 *control.NodeDiagnosticsBundle       `json:",omitempty"`
-	NodeForcePlan                   *control.NodeForcePlan               `json:",omitempty"`
-	TenantStorage                   []control.TenantStorageRoot          `json:",omitempty"`
-	TenantStorageNext               string                               `json:",omitempty"`
-	TenantStorageViewIndex          uint64                               `json:",omitempty"`
-	Certificate                     *certstore.Certificate               `json:",omitempty"`
-	CertificatePage                 *control.CertificatePage             `json:",omitempty"`
-	CertificatesRootRevision        uint64                               `json:",omitempty"`
-	IngressRootRevision             uint64                               `json:",omitempty"`
-	Ingress                         *control.IngressPage                 `json:",omitempty"`
-	ServiceCall                     *servicecall.Result                  `json:",omitempty"`
-	CDProbe                         *deployment.GitProbeResult           `json:",omitempty"`
-	Standalones                     []control.StandaloneView             `json:",omitempty"`
-	StandaloneNext                  string                               `json:",omitempty"`
-	StandaloneExtension             *control.StandaloneExtensionPlan     `json:",omitempty"`
-	StandaloneExtensionCode         string                               `json:",omitempty"`
-	VolumeFilePlan                  *control.VolumeFilePlan              `json:",omitempty"`
-	VolumeFileStatus                *control.VolumeFileView              `json:",omitempty"`
-	ServerVersion                   *ServerVersion                       `json:",omitempty"`
-	PublicRead                      *control.PublicReadPage              `json:",omitempty"`
-	Events                          *eventlog.Page                       `json:",omitempty"`
-	InitialCredentialFact           *credentials.InitialFact             `json:",omitempty"`
+	// Data is a typed method's reply (methods.go).
+	Data                     json.RawMessage                  `json:",omitempty"`
+	NodeShellPolicy          *control.NodeShellPolicyView     `json:",omitempty"`
+	NodeShellSessions        *control.NodeShellSessionsPage   `json:",omitempty"`
+	NodeShellRootRevision    uint64                           `json:",omitempty"`
+	LifecycleStage           *LifecycleStageResult            `json:",omitempty"`
+	TenantStorage            []control.TenantStorageRoot      `json:",omitempty"`
+	TenantStorageNext        string                           `json:",omitempty"`
+	TenantStorageViewIndex   uint64                           `json:",omitempty"`
+	Certificate              *certstore.Certificate           `json:",omitempty"`
+	CertificatesRootRevision uint64                           `json:",omitempty"`
+	VPSCredential            *vps.SealedCredential            `json:",omitempty"`
+	VPSRootRevision          uint64                           `json:",omitempty"`
+	IngressRootRevision      uint64                           `json:",omitempty"`
+	ServiceCall              *servicecall.Result              `json:",omitempty"`
+	CDProbe                  *deployment.GitProbeResult       `json:",omitempty"`
+	Standalones              []control.StandaloneView         `json:",omitempty"`
+	StandaloneNext           string                           `json:",omitempty"`
+	StandaloneExtension      *control.StandaloneExtensionPlan `json:",omitempty"`
+	StandaloneExtensionCode  string                           `json:",omitempty"`
+	Events                   *eventlog.Page                   `json:",omitempty"`
+	LoginPage                *loginlog.Page                   `json:",omitempty"`
+	LoginBudget              *LoginBudget                     `json:",omitempty"`
+	OwnSessions              *loginlog.Page                   `json:",omitempty"`
+	InitialCredentialFact    *credentials.InitialFact         `json:",omitempty"`
+	// InitialCredentialProfile is the provider a server uses when the
+	// caller names none: its installed external Vault, else builtin.
+	InitialCredentialProfile        string                               `json:",omitempty"`
 	InitialCredentialToken          []byte                               `json:",omitempty"`
 	CDTogglePlan                    *control.CDTogglePlan                `json:",omitempty"`
 	RegistryMaintenancePlan         *control.RegistryMaintenancePlan     `json:",omitempty"`
@@ -187,8 +200,6 @@ type Reply struct {
 	ImageCachePlan                  *imagecache.Plan                     `json:",omitempty"`
 	ImageCacheStatus                *control.ImageCacheStatus            `json:",omitempty"`
 	ImageCacheRootRevision          uint64                               `json:",omitempty"`
-	TunnelPlan                      *control.TunnelPlan                  `json:",omitempty"`
-	TunnelStatus                    *control.TunnelStatus                `json:",omitempty"`
 	TunnelRootRevision              uint64                               `json:",omitempty"`
 	RegistryPulls                   *control.RegistryPullPage            `json:",omitempty"`
 	RegistryCatalog                 *control.RegistryCatalogueResult     `json:",omitempty"`
@@ -198,24 +209,14 @@ type Reply struct {
 	ExternalRegistryProbe           *control.ExternalRegistryProbeResult `json:",omitempty"`
 	ExternalRegistryBindPlan        *control.ExternalRegistryBindPlan    `json:",omitempty"`
 	RegistryActionPlan              *control.RegistryActionPlan          `json:",omitempty"`
-	CompactPlan                     *control.CompactPlanPage             `json:",omitempty"`
-	CompactStatus                   *control.CompactStatusPage           `json:",omitempty"`
 	CompactRootRevision             uint64                               `json:",omitempty"`
+	ClusterBackupRootRevision       uint64                               `json:",omitempty"`
 	OperationReason                 *control.OperationReason             `json:",omitempty"`
 	RaftStatus                      *RaftStatus                          `json:",omitempty"`
-	NodeRemovePlan                  *control.NodeRemovePlan              `json:",omitempty"`
-	NodeVotingPlan                  *control.NodeVotingPlan              `json:",omitempty"`
-	NodeSummary                     *control.NodeSummaryPage             `json:",omitempty"`
-	NodeDisks                       *control.NodeDisksPage               `json:",omitempty"`
-	NodeTenantUsage                 *control.NodeTenantPage              `json:",omitempty"`
-	MeshLinks                       *control.MeshLinksPage               `json:",omitempty"`
 	AppSource                       *control.AppSourcePart               `json:",omitempty"`
 	AppRevisions                    []control.AppRevisionView            `json:",omitempty"`
 	AppRevisionsNext                string                               `json:",omitempty"`
 	AppRevisionsRootRevision        uint64                               `json:",omitempty"`
-	Tasks                           []control.TaskView                   `json:",omitempty"`
-	TasksNext                       string                               `json:",omitempty"`
-	TasksRootRevision               uint64                               `json:",omitempty"`
 	SelfCredentials                 *access.PublicUser                   `json:",omitempty"`
 	Users                           []access.PublicUser                  `json:",omitempty"`
 	UsersNext                       string                               `json:",omitempty"`
@@ -240,22 +241,16 @@ type Reply struct {
 	AppCDSnapshot                   *control.AppCDSnapshotPart           `json:",omitempty"`
 	Schema                          uint8
 	Code                            string
-	InputCode                       string          `json:",omitempty"`
-	Node                            string          `json:",omitempty"`
-	RelayedBy                       string          `json:",omitempty"`
-	Leader                          string          `json:",omitempty"`
-	Ticket                          *Ticket         `json:",omitempty"`
-	Session                         *access.Session `json:",omitempty"`
-	User                            *UserView       `json:",omitempty"`
-	Tenants                         []TenantView    `json:",omitempty"`
-	Tenant                          string          `json:",omitempty"`
+	InputCode                       string       `json:",omitempty"`
+	Node                            string       `json:",omitempty"`
+	RelayedBy                       string       `json:",omitempty"`
+	SessionIssuer                   *config.Peer `json:",omitempty"`
+	Leader                          string       `json:",omitempty"`
+	User                            *UserView    `json:",omitempty"`
+	Tenant                          string       `json:",omitempty"`
 	RootRevision                    uint64
 	Result                          *state.Result                   `json:",omitempty"`
 	Found                           bool                            `json:",omitempty"`
-	LifecycleRootRevision           uint64                          `json:",omitempty"`
-	LifecycleRevision               uint64                          `json:",omitempty"`
-	Lifecycles                      []control.LifecycleEntry        `json:",omitempty"`
-	LifecyclesNext                  string                          `json:",omitempty"`
 	ExternalRegistriesRootRevision  uint64                          `json:",omitempty"`
 	ExternalRegistries              []control.ExternalRegistryView  `json:",omitempty"`
 	ExternalRegistriesNext          string                          `json:",omitempty"`
@@ -294,27 +289,8 @@ type Reply struct {
 	Members                         []membership.Entry              `json:",omitempty"`
 	MembersNext                     string                          `json:",omitempty"`
 	Invitation                      *membership.Invitation          `json:",omitempty"`
-	ResourcesRootRevision           uint64                          `json:",omitempty"`
-	ResourceRevision                uint64                          `json:",omitempty"`
-	ResourcesViewIndex              uint64                          `json:",omitempty"`
-	NetworkRevision                 uint64                          `json:",omitempty"`
-	QuotaRevision                   uint64                          `json:",omitempty"`
-	Resources                       []control.ResourceEntry         `json:",omitempty"`
-	ResourcesNext                   string                          `json:",omitempty"`
 	ModuleEpoch                     uint64                          `json:",omitempty"`
 	LedgerRootRevision              uint64                          `json:",omitempty"`
-	VolumesRootRevision             uint64                          `json:",omitempty"`
-	VolumeRevision                  uint64                          `json:",omitempty"`
-	Volumes                         []control.VolumeView            `json:",omitempty"`
-	VolumesNext                     string                          `json:",omitempty"`
-	VolumeUsage                     *volumes.Usage                  `json:",omitempty"`
-	VolumeSourceIndex               uint64                          `json:",omitempty"`
-	VolumeSource                    *control.VolumeBackupSource     `json:",omitempty"`
-	VolumeUsageIndex                uint64                          `json:",omitempty"`
-	VolumeBackups                   []control.VolumeBackupView      `json:",omitempty"`
-	VolumeRestores                  []control.VolumeRestoreView     `json:",omitempty"`
-	VolumeRestoresNext              string                          `json:",omitempty"`
-	VolumeBackupsNext               string                          `json:",omitempty"`
 	AppsRootRevision                uint64                          `json:",omitempty"`
 	AppRevision                     uint64                          `json:",omitempty"`
 	Apps                            []control.AppView               `json:",omitempty"`
@@ -340,17 +316,29 @@ func strict(raw []byte, target any) error {
 	d := json.NewDecoder(bytes.NewReader(raw))
 	d.DisallowUnknownFields()
 	if d.Decode(target) != nil || d.Decode(new(any)) != io.EOF {
-		return mydcp.ErrFrame
+		return sfcp.ErrFrame
 	}
 	b, err := json.Marshal(target)
 	if err != nil || !bytes.Equal(raw, b) {
-		return mydcp.ErrFrame
+		return sfcp.ErrFrame
 	}
 	return nil
 }
 
 type Service struct {
-	CertificateWriter     func(context.Context, access.Session, CertificateInput) (certstore.Certificate, error)
+	// Changes, when set, serves change watches (purpose ChangeWatch).
+	Changes *ChangeFeed
+	// Events, when set, carries the event topics a change watch may add.
+	Events              *eventbus.Bus
+	CertificateWriter   func(context.Context, access.Session, CertificateInput) (certstore.Certificate, error)
+	VPSCredentialSealer func(context.Context, access.Session, VPSCredentialInput) (vps.SealedCredential, error)
+	// VPSOfferReader reads an account's live catalogue (voters only).
+	VPSOfferReader func(context.Context, access.Session, control.VPSOfferQuery) (control.VPSOffer, error)
+	// VPSStatusReader reads the leader's live VPS cost watch.
+	VPSStatusReader func(context.Context) (control.VPSStatus, error)
+	// ClusterBackupMaster returns this voter's cluster master key for a
+	// cluster backup; the caller clears it.
+	ClusterBackupMaster   func() ([]byte, error)
 	IngressObserver       func(context.Context, control.IngressRead) (control.IngressPage, error)
 	ServiceCaller         func(context.Context, control.ServiceCallRead) (servicecall.Result, error)
 	ServiceCallLimiter    *servicecall.Limiter
@@ -360,6 +348,10 @@ type Service struct {
 	NetworkObserver       func(context.Context, control.NetworkReadTarget) (control.NetworkClosureStatus, error)
 	NodeDrainPlanner      func(context.Context, cluster.View, access.Session, int64, control.NodeDrainQuery) (control.NodeDrainPlan, error)
 	NodeDiagnostics       func(context.Context, control.NodeDiagnosticsRead) (control.NodeDiagnosticsBundle, error)
+	NodeDiskChanger       func(context.Context, control.NodeDiskRead) (control.NodeDiskResult, error)
+	LogsClearer           func(context.Context, access.Session, control.LogsClear) ([]control.LogsClearNode, error)
+	StoredLogsReader      func(context.Context, access.Session, control.StoredLogsQuery) ([]control.StoredLogsNode, error)
+	NodeFirewall          func(context.Context, control.NodeFirewallRead) (control.NodeFirewallResult, error)
 	NodeForceProbe        func(context.Context, cluster.View, control.NodeForcePlan) (lifecycle.RemovalProbe, error)
 	ImageBuildDraft       func(context.Context, control.ImageBuildDraftCall) (imagebuild.DraftResponse, error)
 	ImageBuildGit         func(context.Context, control.ImageBuildGitCall) (imagebuild.GitSaveResponse, error)
@@ -374,7 +366,11 @@ type Service struct {
 	RegistryCatalog       func(context.Context, control.RegistryCatalogueRead) (control.RegistryCatalogueResult, error)
 	RegistryPrune         func(context.Context, control.RegistryPruneRead, bool) (control.RegistryPruneView, error)
 
-	EventReader            func(context.Context, cluster.View, access.Session, eventlog.Query) (eventlog.Page, error)
+	EventReader func(context.Context, cluster.View, access.Session, eventlog.Query) (eventlog.Page, error)
+	// LoginRecorder keeps one judged login on this node (loginlog); it runs
+	// on the login path. LoginRecords reads a user's records cluster-wide.
+	LoginRecorder          func(loginlog.Record)
+	LoginRecords           func(context.Context, cluster.View, access.Session, loginlog.Query) (loginlog.Page, error)
 	NodeObservations       NodeObservations
 	NodeShellLifetime      context.Context
 	NodeShellOpen          func(context.Context, string) (NodeShellStream, error)
@@ -387,7 +383,7 @@ type Service struct {
 	ImageResolver          func(context.Context, control.ImageResolveRead) (control.ImageResolveResult, error)
 	ExternalRegistryProber func(context.Context, control.ExternalRegistryProbeRead) (json.RawMessage, error)
 	Engine                 *cluster.Engine
-	Mesh                   *mydcp.Transport
+	Mesh                   *sfcp.Transport
 	Self                   *identity.Identity
 	Policy                 control.Policy
 	// Optional committed policy gate for an existing static root. No credential
@@ -406,51 +402,60 @@ type Service struct {
 
 func (s Service) Serve() error {
 	if s.Engine == nil || s.Mesh == nil || s.Self == nil || s.Self.Public != [32]byte(s.Mesh.LocalKey()) || s.Policy.Cluster == ([32]byte{}) {
-		return mydcp.ErrAdmission
+		return sfcp.ErrAdmission
 	}
-	if err := s.Mesh.OnManagement(mydcp.User, s.handle); err != nil {
+	if err := s.Mesh.OnManagement(sfcp.User, s.handle); err != nil {
 		return err
 	}
-	if err := s.Mesh.OnManagement(mydcp.NodeShell, s.handleNodeShell); err != nil {
+	if err := s.Mesh.OnManagement(sfcp.NodeShell, s.handleNodeShell); err != nil {
+		return err
+	}
+	if err := s.Mesh.OnManagement(sfcp.ClusterBackup, s.handleClusterBackup); err != nil {
 		return err
 	}
 	if s.VolumeFiles != nil {
-		if err := s.Mesh.OnManagement(mydcp.VolumeFile, s.handleVolumeFile); err != nil {
+		if err := s.Mesh.OnManagement(sfcp.VolumeFile, s.handleVolumeFile); err != nil {
 			return err
 		}
 	}
 	if s.ImageContent != nil || s.ImageBuildBaseContent != nil {
-		if err := s.Mesh.OnManagement(mydcp.ImageContent, s.handleImageContent); err != nil {
+		if err := s.Mesh.OnManagement(sfcp.ImageContent, s.handleImageContent); err != nil {
 			return err
 		}
 	}
 	if s.ContainerPlanner != nil || s.ContainerRunner != nil || s.ContainerExecObserver != nil {
-		if err := s.Mesh.OnManagement(mydcp.ContainerSession, s.handleContainerSession); err != nil {
+		if err := s.Mesh.OnManagement(sfcp.ContainerSession, s.handleContainerSession); err != nil {
+			return err
+		}
+	}
+	if s.Changes != nil {
+		if err := s.Mesh.OnManagement(sfcp.ChangeWatch, s.handleChangeWatch); err != nil {
 			return err
 		}
 	}
 	if s.VaultWriter != nil || s.VaultApprover != nil || s.CertificateWriter != nil {
-		return s.Mesh.OnManagement(mydcp.SecretInput, s.secretInput)
+		return s.Mesh.OnManagement(sfcp.SecretInput, s.secretInput)
 	}
 	return nil
 }
 
-func (s Service) handle(ctx context.Context, conn *mydcp.Session, stream mydcp.Stream, frame mydcp.Frame) error {
+func (s Service) handle(ctx context.Context, conn *sfcp.Session, stream sfcp.Stream, frame sfcp.Frame) error {
 	if frame.Kind != 1 && frame.Kind != 3 {
-		return mydcp.ErrFrame
+		return sfcp.ErrFrame
 	}
 	digest := sha256.Sum256(frame.Fields[0].Value)
 	if !bytes.Equal(digest[:], frame.Fields[1].Value) {
-		return mydcp.ErrFrame
+		return sfcp.ErrFrame
 	}
 	var envelope Envelope
 	var request Request
 	if strict(frame.Fields[0].Value, &envelope) != nil || strict(envelope.Body, &request) != nil || request.Schema != 1 || request.Nonce == ([32]byte{}) {
-		return mydcp.ErrFrame
+		return sfcp.ErrFrame
 	}
 	credentialRequest := request.credentialRequest()
 	if credentialRequest || request.Secret != nil {
 		defer clear(request.Secret)
+		defer clear(request.Params)
 		defer clear(envelope.Body)
 		defer clear(frame.Fields[0].Value)
 	}
@@ -467,15 +472,14 @@ func (s Service) handle(ctx context.Context, conn *mydcp.Session, stream mydcp.S
 	// This finite, sessionless query identifies this responding daemon, including
 	// before enrollment or while quorum is unavailable. No relay or login grant
 	// is accepted, and no cluster catalog is read for this public metadata.
-	if request.Method == "server-version" {
-		if !request.validServerVersion() || frame.Kind != 1 || envelope.Session != nil || envelope.Relay != nil || len(envelope.Signature) != 0 {
+	if request.Method == ServerVersionMethod.Name {
+		if _, ok := paramsOf(request, ServerVersionMethod); !ok || frame.Kind != 1 || envelope.Session != nil || envelope.Relay != nil || len(envelope.Signature) != 0 {
 			return s.respond(stream, frame, digest, Reply{Schema: 1, Code: "denied"})
 		}
 		if _, err := s.binding(conn, frame.Kind, envelope); err != nil {
 			return err
 		}
-		version := localServerVersion()
-		return s.respond(stream, frame, digest, Reply{Schema: 1, Code: "ok", ServerVersion: &version})
+		return s.respond(stream, frame, digest, sessionlessReply(localServerVersion()))
 	}
 	if s.Enabled != nil {
 		local, err := s.Engine.Read(ctx, false)
@@ -489,12 +493,13 @@ func (s Service) handle(ctx context.Context, conn *mydcp.Session, stream mydcp.S
 	if !request.validCredentialFields(envelope, frame.Kind) {
 		return s.respond(stream, frame, digest, Reply{Schema: 1, Code: "denied"})
 	}
-	binding, err := s.binding(conn, frame.Kind, envelope)
+	keyLogin := request.Method == "challenge" || request.Method == "login"
+	binding, err := s.relayBinding(conn, frame.Kind, envelope, keyLogin)
 	if err != nil {
 		return s.respond(stream, frame, digest, Reply{Schema: 1, Code: "denied"})
 	}
-	if frame.Kind == 3 && (request.Method == "challenge" || request.Method == "login" || request.Method == "enroll-admin") {
-		return mydcp.ErrAdmission
+	if frame.Kind == 3 && request.Method == "enroll-admin" {
+		return sfcp.ErrAdmission
 	}
 
 	local, err := s.Engine.Read(ctx, false)
@@ -502,7 +507,15 @@ func (s Service) handle(ctx context.Context, conn *mydcp.Session, stream mydcp.S
 		return s.respond(stream, frame, digest, Reply{Schema: 1, Code: "unavailable"})
 	}
 	catalog, err := s.Policy.Catalog(local.State)
-	if err == nil && (request.Method == "challenge" || request.Method == "login" || request.Method == "credential-challenge" || request.Method == "credential-login") && !s.nodeLoginAllowed(local.State, catalog, "") {
+	if err == nil && (keyLogin || request.Method == "credential-challenge" || request.Method == "credential-login") && !s.nodeLoginAllowed(local.State, catalog, "") {
+		// A member that cannot issue sessions (a non-voter, such as a public
+		// gateway that only takes connections) relays a private-key login to
+		// the leader, which issues the session; the user's proof is bound to
+		// the caller's key and this connection, so the relay learns nothing
+		// it could reuse. A password or token is never relayed.
+		if keyLogin && frame.Kind == 1 {
+			return s.respond(stream, frame, digest, s.forwardLogin(ctx, local.State, envelope, binding))
+		}
 		return s.respond(stream, frame, digest, Reply{Schema: 1, Code: "not-session-issuer"})
 	}
 	if err != nil || !s.nodeRequestAllowed(local.State, catalog, request, envelope) {
@@ -578,6 +591,14 @@ func (s Service) handle(ctx context.Context, conn *mydcp.Session, stream mydcp.S
 				if sourceErr == nil {
 					reply = s.credential(ctx, catalog, binding, request, envelope, source)
 				}
+			} else if keyLogin {
+				reply = s.keyLogin(catalog, binding, request, envelope)
+				if q, ok := paramsOf(request, LoginMethod); ok {
+					source, _ := conn.CredentialSource()
+					s.recordLogin(&q.Ticket, q.LoginClient, source, reply, "denied")
+				}
+			} else if _, typed := methodRules[request.Method]; typed {
+				reply = s.typedQuery(ctx, view, catalog, binding, request, envelope)
 			} else {
 				reply = s.execute(catalog, binding, request, envelope)
 			}
@@ -586,18 +607,6 @@ func (s Service) handle(ctx context.Context, conn *mydcp.Session, stream mydcp.S
 			}
 			if reply.Code == "ok" && request.Method == "app-cd-toggle-plan" {
 				reply = s.cdTogglePlan(view, request, *envelope.Session)
-			}
-			if reply.Code == "ok" && request.Method == "certificates" {
-				page, e := s.Policy.CertificatePage(view.State, *envelope.Session, time.Now().Unix(), *request.Certificate)
-				if e != nil {
-					reply = Reply{Schema: 1, Code: "denied"}
-				} else {
-					reply.CertificatePage = &page
-					reply.CertificatesRootRevision = view.State.Object(control.CertificatesKey).Revision
-				}
-			}
-			if reply.Code == "ok" && request.Method == "ingresses" {
-				reply = s.ingressQuery(ctx, view, *envelope.Session, *request.Ingress)
 			}
 			if reply.Code == "ok" && (request.Method == "standalone-list" || request.Method == "standalone-get") {
 				rows, next, err := s.Policy.StandalonePage(view.State, *envelope.Session, time.Now().Unix(), request.Tenant, request.Standalone.Name, request.After)
@@ -608,31 +617,27 @@ func (s Service) handle(ctx context.Context, conn *mydcp.Session, stream mydcp.S
 					reply.AppsRootRevision = view.State.Object(control.AppsKey).Revision
 				}
 			}
-			if reply.Code == "ok" && request.Method == "volume-file-plan" {
-				plan, err := s.Policy.PlanVolumeFile(view.State, *envelope.Session, time.Now().Unix(), request.Tenant, *request.VolumeFile)
-				if err != nil {
-					reply = Reply{Schema: 1, Code: "denied"}
-				} else {
-					reply.VolumeFilePlan = &plan
-				}
-			}
-			if reply.Code == "ok" && request.Method == "volume-file-status" {
-				status, err := s.Policy.VolumeFileStatus(view.State, *envelope.Session, time.Now().Unix(), request.Tenant, *request.VolumeFile)
-				if err != nil {
-					reply = Reply{Schema: 1, Code: "denied"}
-				} else {
-					reply.VolumeFileStatus = &status
-				}
-			}
-			if reply.Code == "ok" && control.PublicReadMethod(request.Method) {
-				reply = s.publicReadReply(ctx, view, *envelope.Session, request)
-			}
 			if reply.Code == "ok" && request.Method == "events" {
 				reply = s.eventQuery(ctx, view, *envelope.Session, *request.Events)
 			}
+			if reply.Code == "ok" && request.Method == "login-records" {
+				reply = s.loginRecordsQuery(ctx, view, *envelope.Session, *request.LoginQuery)
+			}
+			if reply.Code == "ok" && request.Method == "own-sessions" {
+				reply = s.ownSessions(ctx, view, *envelope.Session)
+			}
 			if reply.Code == "ok" && request.Method == "image-build-job-plan" {
-				plan, err := s.Policy.ImageBuildJobPlan(view.State, *envelope.Session, time.Now().Unix(), request.Tenant, *request.ImageBuildJob)
-				if err != nil {
+				now := time.Now().Unix()
+				plan, err := s.Policy.ImageBuildJobPlan(view.State, *envelope.Session, now, request.Tenant, *request.ImageBuildJob)
+				if err == nil && s.NodeObservations != nil {
+					// The build server's own report, when fresh, can rule it out.
+					if reports, rerr := s.NodeObservations(ctx, view); rerr == nil {
+						err = s.Policy.CheckBuildNode(view.State, plan.Spec.Context.Root.Node, reports, now)
+					}
+				}
+				if errors.Is(err, control.ErrBuildDisabled) {
+					reply = Reply{Schema: 1, Code: "build-disabled"}
+				} else if err != nil {
 					reply = imageBuildError(err)
 				} else {
 					reply.ImageBuildJobPlan = &plan
@@ -702,23 +707,6 @@ func (s Service) handle(ctx context.Context, conn *mydcp.Session, stream mydcp.S
 						reply = Reply{Schema: 1, Code: "unavailable"}
 					} else {
 						reply.CDProbe = &out
-					}
-				}
-			}
-			if reply.Code == "ok" && request.Method == "lifecycle-source" {
-				if request.LifecycleSource == nil || s.LifecycleSourceReader == nil {
-					reply = Reply{Schema: 1, Code: "unavailable"}
-				} else {
-					read, err := s.Policy.LifecycleSourceVersion(view.State, *envelope.Session, time.Now().Unix(), request.Tenant, *request.LifecycleSource)
-					if err != nil {
-						reply = Reply{Schema: 1, Code: checkerArtifactFailure(err)}
-					} else {
-						page, err := s.LifecycleSourceReader(ctx, read)
-						if err != nil {
-							reply = Reply{Schema: 1, Code: checkerArtifactFailure(err)}
-						} else {
-							reply.LifecycleSource = &page
-						}
 					}
 				}
 			}
@@ -807,38 +795,14 @@ func (s Service) handle(ctx context.Context, conn *mydcp.Session, stream mydcp.S
 			if reply.Code == "ok" && (request.Method == "image-cache-plan" || request.Method == "image-cache-status") {
 				reply = s.imageCacheQuery(ctx, view, request, *envelope.Session)
 			}
-			if reply.Code == "ok" && (request.Method == "tunnel-reconnect-plan" || request.Method == "tunnel-reconnect-status") {
-				reply = s.tunnelQuery(ctx, view, request, *envelope.Session)
-			}
 			if reply.Code == "ok" && request.Method == "registry-action-plan" {
 				reply = s.registryActionPlan(view, request, *envelope.Session)
-			}
-			if reply.Code == "ok" && (request.Method == "raft-compact-plan" || request.Method == "raft-compact-status") {
-				reply = s.compactQuery(view, request, *envelope.Session)
 			}
 			if reply.Code == "ok" && request.Method == "raft-status" {
 				reply = s.raftStatusReply(ctx, view, *envelope.Session, request.After)
 			}
-			if reply.Code == "ok" && (request.Method == "node-summary" || request.Method == "node-disks" || request.Method == "node-tenant-usage" || request.Method == "mesh-links") {
-				reply = s.nodeObservationQueryReply(ctx, view, *envelope.Session, request)
-			}
 			if reply.Code == "ok" && (request.Method == "app-source" || request.Method == "app-revisions") {
 				reply = s.appSourceQueryReply(view, *envelope.Session, request)
-			}
-			if reply.Code == "ok" && (request.Method == "node-drain-plan" || request.Method == "node-drain-status") {
-				reply = s.nodeDrainReply(ctx, view, *envelope.Session, request)
-			}
-			if reply.Code == "ok" && request.Method == "node-diagnostics" {
-				reply = s.nodeDiagnosticsReply(ctx, view, *envelope.Session, request.Node)
-			}
-			if reply.Code == "ok" && request.Method == "node-force-remove-plan" {
-				reply = s.nodeForcePlanReply(ctx, view, *envelope.Session, *request.NodeForce)
-			}
-			if reply.Code == "ok" && (request.Method == "node-remove-plan" || request.Method == "node-demote-plan") {
-				reply = s.nodeRemovePlanReply(view, *envelope.Session, request)
-			}
-			if reply.Code == "ok" && request.Method == "tasks" {
-				reply = s.taskQueryReply(ctx, view, *envelope.Session, request)
 			}
 			if reply.Code == "ok" && request.Method == "tenant-retirement" {
 				status, err := s.Policy.TenantRetirementStatus(view.State, request.Tenant, request.After)
@@ -884,37 +848,16 @@ func (s Service) handle(ctx context.Context, conn *mydcp.Session, stream mydcp.S
 			if reply.Code == "ok" && request.Method == "container-observe" {
 				reply = s.containerObservation(ctx, view, request, *envelope.Session)
 			}
-			if reply.Code == "ok" && request.Method == "volume-usage" {
-				reply = s.volumeUsage(ctx, view, request, *envelope.Session)
-			}
-			if reply.Code == "ok" && request.Method == "volume-backup-source" {
-				reply = s.volumeBackupSource(ctx, view, request, *envelope.Session)
-			}
 			if reply.Code == "ok" && request.Method == "node-storage-space" {
 				reply = s.nodeStorageSpace(ctx, view, request, *envelope.Session)
 			}
-			if reply.Code == "ok" && (request.Method == "registries" || request.Method == "external-registries" || request.Method == "whoami") {
+			if reply.Code == "ok" && (request.Method == "registries" || request.Method == "external-registries") {
 				reply = s.registryQueryReply(view, *envelope.Session, request, reply)
 			}
-			if reply.Code == "ok" && (request.Method == "lifecycles" || request.Method == "whoami") {
-				reply = s.lifecycleQueryReply(view, *envelope.Session, request, reply)
-			}
-			if reply.Code == "ok" && (request.Method == "node-storage" || request.Method == "tenant-storage" || request.Method == "whoami") {
+			if reply.Code == "ok" && (request.Method == "node-storage" || request.Method == "tenant-storage") {
 				reply = s.storageQueryReply(view, catalog, *envelope.Session, request, reply)
 			}
-			if reply.Code == "ok" && (request.Method == "resources" || request.Method == "whoami") {
-				reply = s.resourcesQueryReply(view, catalog, *envelope.Session, request, reply)
-				if reply.Code == "ok" && request.Method == "resources" {
-					reply = s.resourceDNSRead(ctx, view, *envelope.Session, request, reply)
-				}
-			}
-			if reply.Code == "ok" && (request.Method == "volumes" || request.Method == "volume-backups" || request.Method == "volume-restores" || request.Method == "whoami") {
-				reply = s.volumesQueryReply(view, catalog, *envelope.Session, request, reply)
-				if reply.Code == "ok" && request.Method == "volumes" {
-					s.volumeUsageRows(ctx, view, reply.Volumes)
-				}
-			}
-			if reply.Code == "ok" && (request.Method == "vault" || request.Method == "whoami") {
+			if reply.Code == "ok" && request.Method == "vault" {
 				reply = s.vaultQueryReply(view, catalog, *envelope.Session, request, reply)
 			}
 
@@ -937,7 +880,7 @@ func (s Service) handle(ctx context.Context, conn *mydcp.Session, stream mydcp.S
 					reply.AppCDRegistration = &registration
 				}
 			}
-			if reply.Code == "ok" && (request.Method == "apps" || request.Method == "app-operation" || request.Method == "app-uploads" || request.Method == "whoami") {
+			if reply.Code == "ok" && (request.Method == "apps" || request.Method == "app-operation" || request.Method == "app-uploads") {
 				reply = s.appsQueryReply(view, catalog, *envelope.Session, request, reply)
 				if reply.Code == "ok" && reply.AppOperation != nil && len(reply.AppOperation.Waiting) > 0 {
 					reply.AppOperation.Waiting = append(reply.AppOperation.Waiting, s.tunnelWaits(ctx, view, request.Tenant)...)
@@ -1021,13 +964,15 @@ func (s Service) handle(ctx context.Context, conn *mydcp.Session, stream mydcp.S
 		if reply.RootRevision == 0 {
 			reply.RootRevision = view.State.Object(control.CatalogKey).Revision
 		}
-		if reply.Code == "ok" && (request.Method == "whoami" || request.Method == "user-credentials" || request.Method == "node-cli-policy") {
+		if reply.Code == "ok" && (request.Method == "user-credentials" || request.Method == "node-cli-policy") {
 			if view.State.ModuleEpoch() > 1 {
 				reply.ModuleEpoch = view.State.ModuleEpoch()
 			}
 			reply.CertificatesRootRevision = view.State.Object(control.CertificatesKey).Revision
+			reply.VPSRootRevision = view.State.Object(control.VPSKey).Revision
 			reply.IngressRootRevision = view.State.Object(control.IngressManagementKey).Revision
 			reply.CompactRootRevision = view.State.Object(control.CompactKey).Revision
+			reply.ClusterBackupRootRevision = view.State.Object(control.ClusterBackupKey).Revision
 			reply.TunnelRootRevision = view.State.Object(control.TunnelReconnectKey).Revision
 			reply.RegistryMaintenanceRootRevision = view.State.Object(control.RegistryMaintenanceKey).Revision
 			reply.ImageBuildRootRevision = view.State.Object(control.ImageBuildKey).Revision
@@ -1041,7 +986,7 @@ func (s Service) handle(ctx context.Context, conn *mydcp.Session, stream mydcp.S
 	return s.respond(stream, frame, digest, reply)
 }
 
-func (s Service) respond(stream mydcp.Stream, frame mydcp.Frame, digest [32]byte, reply Reply) error {
+func (s Service) respond(stream sfcp.Stream, frame sfcp.Frame, digest [32]byte, reply Reply) error {
 	if reply.Node == "" {
 		reply.Node = s.Self.Actor()
 	}
@@ -1050,7 +995,7 @@ func (s Service) respond(stream mydcp.Stream, frame mydcp.Frame, digest [32]byte
 		return err
 	}
 	defer clear(raw)
-	return mydcp.WriteFrame(stream, mydcp.Frame{Purpose: mydcp.User, Kind: 2, Request: frame.Request, Fields: []mydcp.Field{{Tag: 1, Required: true, Value: raw}, {Tag: 2, Required: true, Value: digest[:]}}})
+	return sfcp.WriteFrame(stream, sfcp.Frame{Purpose: sfcp.User, Kind: 2, Request: frame.Request, Fields: []sfcp.Field{{Tag: 1, Required: true, Value: raw}, {Tag: 2, Required: true, Value: digest[:]}}})
 }
 
 func (s Service) operation(ctx context.Context, view cluster.View, c access.Catalog, binding userBinding, r Request, envelope Envelope) (reply Reply) {
@@ -1060,7 +1005,7 @@ func (s Service) operation(ctx context.Context, view cluster.View, c access.Cata
 			addStandaloneExtensionOutcome(&reply, *r.Operation)
 		}
 	}()
-	if r.Operation == nil || envelope.Session == nil || r.Username != "" || r.UserKey != ([32]byte{}) || r.Ticket != nil || r.Proof != nil || r.Tenant != "" || r.After != "" || r.Node != "" {
+	if r.Operation == nil || envelope.Session == nil || r.UserKey != ([32]byte{}) || r.Tenant != "" || r.After != "" || r.Node != "" {
 		return reply
 	}
 	op := *r.Operation
@@ -1170,51 +1115,7 @@ func (s Service) execute(c access.Catalog, binding userBinding, r Request, envel
 		return reply
 	}
 	now := time.Now().Unix()
-	if (r.Method == "challenge" || r.Method == "login") && !s.Policy.Issuer(s.Self.Public).Enabled {
-		return Reply{Schema: 1, Code: "not-session-issuer"}
-	}
-	if r.Method == "challenge" {
-		if envelope.Session != nil || len(envelope.Signature) != 0 || r.Ticket != nil || r.Proof != nil || r.Tenant != "" {
-			return reply
-		}
-		u, ok := c.Username(r.Username)
-		if !ok || !u.Enabled {
-			return reply
-		}
-		for _, credential := range u.Credentials {
-			if credential.Enabled && credential.Method == access.PrivateKey && credential.PublicKey == r.UserKey {
-				t := Ticket{Schema: 1, Cluster: s.Policy.Cluster, User: u.ID, Username: u.Username, Credential: credential.ID, AccountRevision: u.Revision, SessionKey: binding.key, UserKey: r.UserKey, Challenge: binding.challenge, Issuer: s.Self.Public, IssuedAt: now, Deadline: now + 300}
-				if _, err := rand.Read(t.Nonce[:]); err != nil {
-					return reply
-				}
-				t.Signature = ed25519.Sign(s.Self.Private, ticketBytes(t))
-				return Reply{Schema: 1, Code: "ok", Ticket: &t}
-			}
-		}
-		return reply
-	}
-	if r.Method == "login" {
-		if envelope.Session != nil || len(envelope.Signature) != 0 || r.Ticket == nil || r.Proof == nil || r.Username != "" || r.Tenant != "" || r.UserKey != ([32]byte{}) {
-			return reply
-		}
-		t, proof := *r.Ticket, *r.Proof
-		if t.Schema != 1 || t.Cluster != s.Policy.Cluster || t.Issuer != s.Self.Public || t.SessionKey != binding.key || t.Challenge != binding.challenge || t.Nonce == ([32]byte{}) || t.IssuedAt > now || t.Deadline <= now || t.Deadline-t.IssuedAt != 300 || !ed25519.Verify(ed25519.PublicKey(s.Self.Public[:]), ticketBytes(t), t.Signature) {
-			return reply
-		}
-		u, exists := c.User(t.User)
-		if !exists || u.Revision != t.AccountRevision || proof.User != t.User || proof.Username != t.Username || proof.Credential != t.Credential || proof.SessionKey != t.SessionKey || proof.Deadline != t.Deadline || c.VerifyKeyProof(proof, s.Policy.Cluster, binding.challenge, now) != nil {
-			return reply
-		}
-		// Private-key credentials authenticate the account; every request still
-		// intersects this ceiling with CURRENT roles/membership and revocations.
-		session := access.Session{Schema: 1, ID: "s" + hex.EncodeToString(t.Nonce[:16]), Cluster: s.Policy.Cluster, User: u.ID, Credential: t.Credential, AccountRevision: u.Revision, Key: t.SessionKey, Issuer: s.Self.Public, IssuerEpoch: 1, IssuedAt: t.IssuedAt, ExpiresAt: t.IssuedAt + access.MaxSessionSeconds, Scopes: fullUserScopes()}
-		session.Signature = ed25519.Sign(s.Self.Private, access.SessionBytes(session))
-		if c.VerifyAuthenticationSession(session, s.Policy.Cluster, s.Policy.Issuer(s.Self.Public), now) != nil {
-			return reply
-		}
-		return Reply{Schema: 1, Code: "ok", Session: &session}
-	}
-	if envelope.Session == nil || r.Ticket != nil || r.Proof != nil || r.Username != "" || r.UserKey != ([32]byte{}) {
+	if envelope.Session == nil || r.UserKey != ([32]byte{}) {
 		return reply
 	}
 	session := *envelope.Session
@@ -1222,25 +1123,9 @@ func (s Service) execute(c access.Catalog, binding userBinding, r Request, envel
 	if session.Key != binding.key || c.VerifySession(session, s.Policy.Cluster, policy, now) != nil || access.VerifyRequest(session, binding.challenge, envelope.Body, envelope.Signature) != nil {
 		return reply
 	}
-	if control.PublicReadMethod(r.Method) {
-		if r.PublicRead == nil {
-			return reply
-		}
-		return Reply{Schema: 1, Code: "ok"}
-	}
 	switch r.Method {
 	case "node-shell-policy", "node-shell-sessions":
 
-		return Reply{Schema: 1, Code: "ok"}
-	case "certificates":
-		if r.Certificate == nil {
-			return reply
-		}
-		return Reply{Schema: 1, Code: "ok"}
-	case "ingresses":
-		if r.Ingress == nil || !r.Ingress.Valid() {
-			return reply
-		}
 		return Reply{Schema: 1, Code: "ok"}
 	case "service-call", "cd-probe":
 		action := access.CallService
@@ -1251,22 +1136,24 @@ func (s Service) execute(c access.Catalog, binding userBinding, r Request, envel
 			return reply
 		}
 		return Reply{Schema: 1, Code: "ok"}
-	case "lifecycle-source", "lifecycle-source-stage", "lifecycle-module-stage", "lifecycle-source-recover", "lifecycle-module-recover":
+	case "lifecycle-source-stage", "lifecycle-module-stage", "lifecycle-source-recover", "lifecycle-module-recover":
 		recover := r.Method == "lifecycle-source-recover" || r.Method == "lifecycle-module-recover"
 		if !r.validLifecycleSourceFields() {
 			return reply
 		}
 		var err error
-		if recover || r.Method == "lifecycle-source" {
+		if recover {
 			err = c.AuthorizeSessionCleanup(session, s.Policy.Cluster, policy, now, r.Tenant, access.ManageServices)
 		} else {
 			err = c.AuthorizeSession(session, s.Policy.Cluster, policy, now, r.Tenant, access.ManageServices, "")
 		}
-		operation := "lifecycle-source-upload"
-		if r.Method == "lifecycle-source" {
-			operation = "lifecycle-source"
+		if err != nil || !recover && c.OperationAllowed(session, "lifecycle-source-upload") != nil {
+			return reply
 		}
-		if err != nil || !recover && c.OperationAllowed(session, operation) != nil {
+		return Reply{Schema: 1, Code: "ok"}
+	case "login-records", "own-sessions":
+		// Every signed-in user reads only their own records.
+		if (r.LoginQuery == nil) != (r.Method == "own-sessions") || r.Tenant != "" {
 			return reply
 		}
 		return Reply{Schema: 1, Code: "ok"}
@@ -1292,41 +1179,9 @@ func (s Service) execute(c access.Catalog, binding userBinding, r Request, envel
 			return reply
 		}
 		return Reply{Schema: 1, Code: "ok", Tenant: r.Tenant}
-	case "volume-file-plan", "volume-file-status":
-		// Exact manager or folder-grant + Read authority, credential ceilings
-		// and the selected Volume/path are checked by the existing policy
-		// handler against this committed view before it exposes a result.
-		if r.Tenant == "" {
-			return reply
-		}
-		return Reply{Schema: 1, Code: "ok", Tenant: r.Tenant}
-	case "node-drain-plan", "node-drain-status", "node-diagnostics", "node-force-remove-plan", "node-remove-plan", "node-demote-plan", "app-cd-toggle-plan", "image-cache-plan", "image-cache-status", "tunnel-reconnect-plan", "tunnel-reconnect-status", "registry-action-plan", "external-registry-bind-plan", "registry-login-test", "image-resolve", "image-usages", "external-registry-pulls", "registry-catalog", "registry-prune-preview", "registry-prune-results", "registry-maintenance-plan", "registry-maintenance-status", "raft-compact-plan", "raft-compact-status", "task-restart-plan", "task-restart-status", "raft-status", "node-summary", "node-disks", "node-tenant-usage", "mesh-links", "app-source", "app-revisions", "tasks", "my-credentials", "users", "tenant-members", "app-log-clear-plan", "app-log-clear-status", "user-credentials", "node-cli-policy", "container-observe", "tenant-retirement", "whoami", "tenants", "select-tenant", "members", "node-invitation", "node-storage", "node-storage-space", "resources", "volumes", "volume-restores", "volume-backups", "volume-usage", "volume-backup-source", "apps", "app-operation", "app-cd-field", "app-cd-history", "app-cd-diff", "app-cd-registration", "app-uploads", "app-plan", "standalone-plan", "app-plan-stream", "vault", "vault-approval-plan", "vault-write-plan", "lifecycles", "registries", "external-registries", "registry-credential", "image-builds", "build-zip-transfer", "check-build-context", "build-context-content", "image-build-cache", "image-build-logs", "image-build-job-plan", "build-draft", "save-build-git":
-		if r.Method == "raft-compact-plan" || r.Method == "raft-compact-status" {
-			if r.Compact == nil || !r.Compact.Valid(r.Method == "raft-compact-plan") || r.Tenant != "" || c.AuthorizeSession(session, s.Policy.Cluster, policy, now, "", access.ManageCluster, "") != nil {
-				return reply
-			}
-			return Reply{Schema: 1, Code: "ok"}
-		}
-		if r.Method == "node-drain-plan" || r.Method == "node-drain-status" || r.Method == "node-diagnostics" || r.Method == "node-force-remove-plan" || r.Method == "node-remove-plan" || r.Method == "node-demote-plan" {
-			if c.AuthorizeSession(session, s.Policy.Cluster, policy, now, "", access.ManageCluster, "") != nil {
-				return reply
-			}
-			return Reply{Schema: 1, Code: "ok"}
-		}
+	case "app-cd-toggle-plan", "image-cache-plan", "image-cache-status", "registry-action-plan", "external-registry-bind-plan", "registry-login-test", "image-resolve", "image-usages", "external-registry-pulls", "registry-catalog", "registry-prune-preview", "registry-prune-results", "registry-maintenance-plan", "registry-maintenance-status", "task-restart-plan", "task-restart-status", "raft-status", "app-source", "app-revisions", "my-credentials", "users", "tenant-members", "app-log-clear-plan", "app-log-clear-status", "user-credentials", "node-cli-policy", "container-observe", "tenant-retirement", "members", "node-invitation", "node-storage", "node-storage-space", "apps", "app-operation", "app-cd-field", "app-cd-history", "app-cd-diff", "app-cd-registration", "app-uploads", "app-plan", "standalone-plan", "app-plan-stream", "vault", "vault-approval-plan", "vault-write-plan", "registries", "external-registries", "registry-credential", "image-builds", "build-zip-transfer", "check-build-context", "build-context-content", "image-build-cache", "image-build-logs", "image-build-job-plan", "build-draft", "save-build-git":
 		if r.Method == "raft-status" {
 			if c.AuthorizeSession(session, s.Policy.Cluster, policy, now, "", access.ManageCluster, "") != nil {
-				return reply
-			}
-			return Reply{Schema: 1, Code: "ok"}
-		}
-		if r.Method == "node-summary" || r.Method == "node-disks" || r.Method == "node-tenant-usage" || r.Method == "mesh-links" {
-			action := access.Read
-			if r.Tenant == "" || r.Method == "node-tenant-usage" {
-				action = access.ManageCluster
-			} else if r.Method == "node-disks" {
-				action = access.ManageVolumes
-			}
-			if r.Method == "node-tenant-usage" && (r.Node == "" || r.Tenant != "") || c.AuthorizeSession(session, s.Policy.Cluster, policy, now, r.Tenant, action, "") != nil {
 				return reply
 			}
 			return Reply{Schema: 1, Code: "ok"}
@@ -1335,9 +1190,6 @@ func (s Service) execute(c access.Catalog, binding userBinding, r Request, envel
 			if r.Tenant == "" || c.AuthorizeSession(session, s.Policy.Cluster, policy, now, r.Tenant, access.Read, "") != nil {
 				return reply
 			}
-			return Reply{Schema: 1, Code: "ok"}
-		}
-		if r.Method == "tasks" {
 			return Reply{Schema: 1, Code: "ok"}
 		}
 		if r.Method == "my-credentials" {
@@ -1389,12 +1241,6 @@ func (s Service) execute(c access.Catalog, binding userBinding, r Request, envel
 		}
 		if r.Method == "image-cache-plan" || r.Method == "image-cache-status" {
 			if r.ImageCache == nil || c.AuthorizeSession(session, s.Policy.Cluster, policy, now, "", access.ManageCluster, "") != nil {
-				return reply
-			}
-			return Reply{Schema: 1, Code: "ok"}
-		}
-		if r.Method == "tunnel-reconnect-plan" || r.Method == "tunnel-reconnect-status" {
-			if r.Tunnel == nil || c.AuthorizeSession(session, s.Policy.Cluster, policy, now, "", access.ManageCluster, "") != nil {
 				return reply
 			}
 			return Reply{Schema: 1, Code: "ok"}
@@ -1523,9 +1369,6 @@ func (s Service) execute(c access.Catalog, binding userBinding, r Request, envel
 		if r.Method == "registries" && (r.Tenant == "" || c.AuthorizeSession(session, s.Policy.Cluster, policy, now, r.Tenant, access.Read, "") != nil && c.AuthorizeSession(session, s.Policy.Cluster, policy, now, r.Tenant, access.ManageRegistry, "") != nil) {
 			return reply
 		}
-		if r.Method == "lifecycles" && (r.Tenant == "" || c.AuthorizeSessionCleanup(session, s.Policy.Cluster, policy, now, r.Tenant, access.ManageServices) != nil) {
-			return reply
-		}
 		if (r.Method == "node-storage" || r.Method == "node-storage-space") && (r.Tenant != "" || c.AuthorizeSession(session, s.Policy.Cluster, policy, now, "", access.ManageCluster, "") != nil) {
 			return reply
 		}
@@ -1550,7 +1393,7 @@ func (s Service) execute(c access.Catalog, binding userBinding, r Request, envel
 				return reply
 			}
 		}
-		if r.Method == "resources" || r.Method == "volumes" || r.Method == "volume-backups" || r.Method == "volume-restores" || r.Method == "volume-usage" || r.Method == "volume-backup-source" {
+		if r.Method == "volumes" {
 			if r.Tenant == "" {
 				if c.AuthorizeSession(session, s.Policy.Cluster, policy, now, "", access.ManageCluster, "") != nil {
 					return reply
@@ -1572,43 +1415,11 @@ func (s Service) execute(c access.Catalog, binding userBinding, r Request, envel
 		if (r.Method == "members" || r.Method == "node-invitation") && (c.AuthorizeSession(session, s.Policy.Cluster, policy, now, "", access.ManageCluster, "") != nil) {
 			return reply
 		}
-		if r.Method == "select-tenant" {
-			if r.Tenant == "" || c.AuthorizeSession(session, s.Policy.Cluster, policy, now, r.Tenant, access.Read, "") != nil {
-				return reply
-			}
-		} else if r.Tenant != "" && r.Method != "task-restart-plan" && r.Method != "task-restart-status" && r.Method != "container-observe" && r.Method != "app-log-clear-plan" && r.Method != "app-log-clear-status" && r.Method != "tenant-retirement" && r.Method != "resources" && r.Method != "volumes" && r.Method != "volume-backups" && r.Method != "volume-restores" && r.Method != "volume-usage" && r.Method != "volume-backup-source" && r.Method != "apps" && r.Method != "app-operation" && r.Method != "app-cd-field" && r.Method != "app-cd-history" && r.Method != "app-cd-diff" && r.Method != "app-cd-registration" && r.Method != "app-uploads" && r.Method != "app-plan" && r.Method != "standalone-plan" && r.Method != "app-plan-stream" && r.Method != "vault" && r.Method != "vault-approval-plan" && r.Method != "vault-write-plan" && r.Method != "lifecycles" && r.Method != "registries" && r.Method != "external-registries" && r.Method != "registry-credential" {
+		if r.Tenant != "" && r.Method != "task-restart-plan" && r.Method != "task-restart-status" && r.Method != "container-observe" && r.Method != "app-log-clear-plan" && r.Method != "app-log-clear-status" && r.Method != "tenant-retirement" && r.Method != "apps" && r.Method != "app-operation" && r.Method != "app-cd-field" && r.Method != "app-cd-history" && r.Method != "app-cd-diff" && r.Method != "app-cd-registration" && r.Method != "app-uploads" && r.Method != "app-plan" && r.Method != "standalone-plan" && r.Method != "app-plan-stream" && r.Method != "vault" && r.Method != "vault-approval-plan" && r.Method != "vault-write-plan" && r.Method != "registries" && r.Method != "external-registries" && r.Method != "registry-credential" {
 			return reply
 		}
 		u, _ := c.User(session.User)
 		reply = Reply{Schema: 1, Code: "ok", User: &UserView{u.ID, u.Username, u.Revision, u.SystemAdmin}, Tenant: r.Tenant}
-		if r.Method == "select-tenant" {
-			tenant, _ := c.Tenant(r.Tenant)
-			reply.TenantRevision = tenant.Revision
-			reply.TenantAllowedNodes = []string{}
-			for _, node := range tenant.AllowedNodes {
-				if c.AuthorizeSession(session, s.Policy.Cluster, policy, now, tenant.ID, access.Read, node) == nil {
-					reply.TenantAllowedNodes = append(reply.TenantAllowedNodes, node)
-				}
-			}
-		}
-		if r.Method == "tenants" {
-			for _, tenant := range c.VisibleTenants(u.ID) {
-				if c.AuthorizeSession(session, s.Policy.Cluster, policy, now, tenant.ID, access.Read, "") != nil {
-					continue
-				}
-				membership, _ := c.Membership(tenant.ID, u.ID)
-				if u.SystemAdmin {
-					membership.Role = access.Manager
-				}
-				view := TenantView{ID: tenant.ID, Revision: tenant.Revision, Role: membership.Role, AllowedNodes: []string{}}
-				for _, node := range tenant.AllowedNodes {
-					if c.AuthorizeSession(session, s.Policy.Cluster, policy, now, tenant.ID, access.Read, node) == nil {
-						view.AllowedNodes = append(view.AllowedNodes, node)
-					}
-				}
-				reply.Tenants = append(reply.Tenants, view)
-			}
-		}
 	default:
 		reply.Code = "unsupported"
 	}
@@ -1619,4 +1430,4 @@ var ErrPrivateState = errors.New("invalid or unavailable private user session st
 
 // ErrSessionExpired is a saved login that was valid but has expired. Only
 // a new login renews it; nothing is refreshed silently.
-var ErrSessionExpired = errors.New("your login has expired; run 'mydc login'")
+var ErrSessionExpired = errors.New("your login has expired; run 'sfcli login'")

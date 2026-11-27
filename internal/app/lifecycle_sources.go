@@ -8,14 +8,14 @@ import (
 	"errors"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/schema"
-	"github.com/jay94ks/mydcd/internal/storage"
-	checker "github.com/jay94ks/mydcd/internal/workload/lifecycle"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/storage"
+	checker "github.com/jay94ks/seafield/internal/workload/lifecycle"
 )
 
 func (b checkerSourceBackend) ValidatePublication(ctx context.Context, session access.Session, d checker.SourceDescriptor, id [32]byte, data []byte) (*checker.SourceFact, []checker.SourceDiagnostic, error) {
@@ -27,7 +27,7 @@ func (b checkerSourceBackend) ValidatePublication(ctx context.Context, session a
 	r.life.RLock()
 	defer r.life.RUnlock()
 	if r.closed || r.ctx.Err() != nil || r.checkerSources == nil {
-		return nil, nil, mydcp.ErrAdmission
+		return nil, nil, sfcp.ErrAdmission
 	}
 	diagnostics, err := r.checkerSources.ValidateSource(ctx, d, data, policy)
 	if err != nil {
@@ -35,7 +35,7 @@ func (b checkerSourceBackend) ValidatePublication(ctx context.Context, session a
 	}
 	latest, err := b.permit(ctx, session, d, false)
 	if err != nil || latest.Revision != policy.Revision {
-		return nil, nil, mydcp.ErrAdmission
+		return nil, nil, sfcp.ErrAdmission
 	}
 	if len(diagnostics) > 0 {
 		return nil, diagnostics, nil
@@ -61,7 +61,7 @@ func (r *Runtime) lifecycleSourceReadPermit(ctx context.Context, read control.Li
 	}
 	index, err := schema.Decode[uint64](reply.Data)
 	if err != nil || index == 0 || reply.Local || reply.RaftIndex == 0 || reply.CommandIndex < index {
-		return mydcp.ErrAdmission
+		return sfcp.ErrAdmission
 	}
 	return nil
 }
@@ -75,13 +75,13 @@ type lifecycleSourceOwnerReply struct {
 
 func (r *Runtime) readLifecycleSourceOwner(ctx context.Context, caller [32]byte, read control.LifecycleSourceRead) (checker.SourcePage, error) {
 	if caller == ([32]byte{}) || !r.acceptsResourceKey(ctx, read.Source.Owner) {
-		return checker.SourcePage{}, mydcp.ErrAdmission
+		return checker.SourcePage{}, sfcp.ErrAdmission
 	}
 	if owner, ok := r.nativeOwner(read.Source.Owner); ok && owner != r {
 		return owner.readLifecycleSourceOwner(ctx, caller, read)
 	}
 	if read.Source.Owner != r.Identity.Public {
-		return checker.SourcePage{}, mydcp.ErrAdmission
+		return checker.SourcePage{}, sfcp.ErrAdmission
 	}
 	if err := r.lifecycleSourceReadPermit(ctx, read); err != nil {
 		return checker.SourcePage{}, err
@@ -89,7 +89,7 @@ func (r *Runtime) readLifecycleSourceOwner(ctx context.Context, caller [32]byte,
 	r.life.RLock()
 	if r.closed || r.ctx.Err() != nil || r.checkerSources == nil {
 		r.life.RUnlock()
-		return checker.SourcePage{}, mydcp.ErrAdmission
+		return checker.SourcePage{}, sfcp.ErrAdmission
 	}
 	fact, data, err := r.checkerSources.SourceArtifact(ctx, read.Source.Descriptor())
 	r.life.RUnlock()
@@ -115,7 +115,7 @@ func (r *Runtime) readLifecycleSource(ctx context.Context, read control.Lifecycl
 	}
 	peer, ok := r.resourcePeerForKey(ctx, read.Source.Owner)
 	if !ok || !peer.Member {
-		return checker.SourcePage{}, mydcp.ErrAdmission
+		return checker.SourcePage{}, sfcp.ErrAdmission
 	}
 	raw, err := json.Marshal(read)
 	if err != nil {
@@ -127,28 +127,28 @@ func (r *Runtime) readLifecycleSource(ctx context.Context, read control.Lifecycl
 	}
 	result, err := schema.Decode[lifecycleSourceOwnerReply](reply.Data)
 	if err != nil {
-		return checker.SourcePage{}, mydcp.ErrFrame
+		return checker.SourcePage{}, sfcp.ErrFrame
 	}
 	if result.Code != "ok" {
 		if result.Page != nil {
-			return checker.SourcePage{}, mydcp.ErrFrame
+			return checker.SourcePage{}, sfcp.ErrFrame
 		}
 		switch result.Code {
 		case "missing":
 			return checker.SourcePage{}, storage.ErrMissing
 		case "denied":
-			return checker.SourcePage{}, mydcp.ErrAdmission
+			return checker.SourcePage{}, sfcp.ErrAdmission
 		case "invalid":
 			return checker.SourcePage{}, checker.ErrSourceStore
 		case "unavailable":
 			return checker.SourcePage{}, checker.ErrSourceUncertain
 		default:
-			return checker.SourcePage{}, mydcp.ErrFrame
+			return checker.SourcePage{}, sfcp.ErrFrame
 		}
 	}
 	page := result.Page
 	if page == nil || !page.Valid() || page.Tenant != read.Tenant || page.Name != read.Query.Name || page.Revision != read.Query.Revision || page.Offset != read.Query.Offset || page.Digest != read.Source.Digest || page.Total != read.Source.Length {
-		return checker.SourcePage{}, mydcp.ErrFrame
+		return checker.SourcePage{}, sfcp.ErrFrame
 	}
 	if err = r.lifecycleSourceReadPermit(ctx, read); err != nil {
 		return checker.SourcePage{}, err
@@ -166,7 +166,7 @@ func (r *Runtime) lifecycleSourceModule(ctx context.Context, method, key string,
 	}
 	if method == "lifecycle-source-version-permit" {
 		if view.Local {
-			return nil, mydcp.ErrAdmission
+			return nil, sfcp.ErrAdmission
 		}
 		index, err := r.controlPolicy.LifecycleSourceReadPermit(view.State, caller, read, time.Now().Unix())
 		if err != nil {
@@ -182,7 +182,7 @@ func (r *Runtime) lifecycleSourceModule(ctx context.Context, method, key string,
 		switch {
 		case errors.Is(err, storage.ErrMissing) && !errors.Is(err, checker.ErrSourceStore):
 			result.Code = "missing"
-		case errors.Is(err, mydcp.ErrAdmission), errors.Is(err, access.ErrDenied):
+		case errors.Is(err, sfcp.ErrAdmission), errors.Is(err, access.ErrDenied):
 			result.Code = "denied"
 		case errors.Is(err, checker.ErrSourceStore):
 			result.Code = "invalid"

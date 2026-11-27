@@ -5,8 +5,8 @@ package workload
 import (
 	"context"
 	"errors"
-	"github.com/jay94ks/mydcd/internal/containerops"
-	"github.com/jay94ks/mydcd/internal/engine"
+	"github.com/jay94ks/seafield/internal/containerops"
+	"github.com/jay94ks/seafield/internal/engine"
 	"github.com/moby/moby/client"
 	"io"
 	"sync"

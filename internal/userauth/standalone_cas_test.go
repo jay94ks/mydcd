@@ -7,8 +7,8 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/state"
 )
 
 // This is the actual signing tail called by Client.Prepare after its existing
@@ -36,8 +36,7 @@ func TestPrepareOperationStandaloneCASModeAndOriginalJournal(t *testing.T) {
 			}
 			var change control.Change
 			_ = json.Unmarshal(raw, &change)
-			view := Reply{RootRevision: 99, AppsRootRevision: 17, ModuleEpoch: 3}
-			op, err := c.prepareOperation(session, "once", change, view, session.IssuedAt)
+			op, err := c.prepareOperation(session, "once", change, 3, 17, session.IssuedAt)
 			command, commandErr := op.Command()
 			if err != nil || commandErr != nil || control.StandaloneCASAllowed(op.Change) != (action != "restart-task") || op.RootRevision != 17 || op.Epoch != 3 || command.Kind != state.ModuleAppCAS || op.VerifyOriginal(c.Cluster) != nil {
 				t.Fatal("Prepare signing mode/root/epoch/signature", err, commandErr)

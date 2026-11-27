@@ -8,8 +8,8 @@ import (
 	"maps"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/network"
-	"github.com/jay94ks/mydcd/internal/schema"
+	"github.com/jay94ks/seafield/internal/network"
+	"github.com/jay94ks/seafield/internal/schema"
 )
 
 // These are exact frozen metadata inputs, not permission to start a Task.

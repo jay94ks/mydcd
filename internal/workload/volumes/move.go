@@ -7,7 +7,7 @@ import (
 	"encoding/json"
 	"slices"
 
-	"github.com/jay94ks/mydcd/internal/access"
+	"github.com/jay94ks/seafield/internal/access"
 )
 
 type Phase string
@@ -174,7 +174,7 @@ type FenceProof struct {
 	Signature                                  []byte
 }
 
-func FenceBytes(p FenceProof) []byte { p.Signature = nil; return signedBytes("mydc-volume-fence-1", p) }
+func FenceBytes(p FenceProof) []byte { p.Signature = nil; return signedBytes("sfc-volume-fence-1", p) }
 func validFence(p FenceProof, b Binding) bool {
 	return p.Binding == b && p.FenceThrough == b.SourceOwnerRevision && p.Stopped && p.MountsGone && p.StartsSettled && p.Synced && verify(b.Source.Key, FenceBytes(p), p.Signature)
 }
@@ -220,7 +220,7 @@ type Manifest struct {
 
 func ManifestBytes(p Manifest) []byte {
 	p.Signature = nil
-	return signedBytes("mydc-volume-manifest-1", p)
+	return signedBytes("sfc-volume-manifest-1", p)
 }
 func validManifest(p Manifest, b Binding) bool {
 	return p.Binding == b && p.Artifact != ([32]byte{}) && p.Bytes <= b.MaxBytes && p.DataBytes <= p.Bytes && (p.Bytes == 0 || p.Files > 0) && p.Files <= 1000000 && p.ReadOnly && verify(b.Source.Key, ManifestBytes(p), p.Signature)
@@ -265,7 +265,7 @@ type CopyProof struct {
 	Signature                         []byte
 }
 
-func CopyBytes(p CopyProof) []byte { p.Signature = nil; return signedBytes("mydc-volume-copy-1", p) }
+func CopyBytes(p CopyProof) []byte { p.Signature = nil; return signedBytes("sfc-volume-copy-1", p) }
 func validCopy(p CopyProof, m Move) bool {
 	return m.Manifest != nil && p.Binding == m.Binding && p.Artifact == m.Manifest.Artifact && p.Bytes == m.Manifest.Bytes && p.DigestVerified && p.Synced && p.NoWriters && verify(m.Binding.Target.Key, CopyBytes(p), p.Signature)
 }
@@ -363,7 +363,7 @@ type ActiveProof struct {
 
 func ActiveBytes(p ActiveProof) []byte {
 	p.Signature = nil
-	return signedBytes("mydc-volume-active-1", p)
+	return signedBytes("sfc-volume-active-1", p)
 }
 func validActive(p ActiveProof, m Move) bool {
 	if p.Binding != m.Binding || !verify(m.Binding.Target.Key, ActiveBytes(p), p.Signature) {
@@ -412,7 +412,7 @@ type CleanupProof struct {
 
 func CleanupBytes(p CleanupProof) []byte {
 	p.Signature = nil
-	return signedBytes("mydc-volume-move-cleanup-1", p)
+	return signedBytes("sfc-volume-move-cleanup-1", p)
 }
 func validCleanup(p CleanupProof, m Move) bool {
 	source := p.Owner == m.Binding.Source && (p.RetainedFenced && !p.Unchanged && m.Fence != nil || p.Unchanged && !p.RetainedFenced && m.Fence == nil && m.Manifest == nil && m.Verified == nil && m.ReaderClosed == nil && (m.Phase == Cancelling || m.Phase == Cancelled))
@@ -490,7 +490,7 @@ type CancelProof struct {
 
 func CancelBytes(p CancelProof) []byte {
 	p.Signature = nil
-	return signedBytes("mydc-volume-cancel-target-1", p)
+	return signedBytes("sfc-volume-cancel-target-1", p)
 }
 func validCancel(p CancelProof, b Binding) bool {
 	return p.Binding == b && p.StagingGone && p.StartsSettled && p.MountsGone && p.TransferClosed && verify(b.Target.Key, CancelBytes(p), p.Signature)

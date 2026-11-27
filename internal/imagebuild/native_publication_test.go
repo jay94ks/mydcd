@@ -16,8 +16,8 @@ import (
 	"testing"
 
 	oci "github.com/google/go-containerregistry/pkg/registry"
-	"github.com/jay94ks/mydcd/internal/reconcile"
-	"github.com/jay94ks/mydcd/internal/registryclient"
+	"github.com/jay94ks/seafield/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/registryclient"
 	bolt "go.etcd.io/bbolt"
 )
 

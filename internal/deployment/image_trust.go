@@ -5,7 +5,7 @@ package deployment
 import (
 	"encoding/json"
 
-	"github.com/jay94ks/mydcd/internal/access"
+	"github.com/jay94ks/seafield/internal/access"
 )
 
 // ImageSourceNoLongerTrusted is a current diagnostic over accepted work and

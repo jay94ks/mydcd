@@ -7,7 +7,7 @@ Data 혼입은 거부하며 원 사용자 proof/Session Approval·scope/root/CAS
 User `build-zip-transfer`/member `image-build-owner`는 실제 Data 길이/SHA와 Spool receipt를
 계속 검사하며 이 조회로 native 쓰기·seal·publish가 발생하지 않는다. seal과 기존 fullData
 `image-build-io-permit`도 유지한다. 기존 frame/관리 입력 상한·목적/스키마1을 사용하며
-[MYDCP 계약](../protocol/mydcp.md)의 동일한 내부 경계를 따른다.
+[SFCP 계약](../protocol/sfcp.md)의 동일한 내부 경계를 따른다.
 
 User `image-builds Part:"cache-prunes"`와 member `image-build-cache-prune-work`는
 [수동 정리 수락·대기 형식](image-build-jobs/14-section.md)을 사용한다.
@@ -15,7 +15,7 @@ User `image-builds Part:"cache-prunes"`와 member `image-build-cache-prune-work`
 
 
 이미지 빌드 SDK의 `buildkit.sock`은 등록 root 아래 원 job의 private output 디렉터리에
-유한 rootless daemon이 만드는 내부 끝점이다. `/var/run/mydc.sock` 관리 API와 다르며
+유한 rootless daemon이 만드는 내부 끝점이다. `/run/sfcdp.sock` 관리 API와 다르며
 사용자/원격 노드 접속용 TCP listener가 아니다. 고정 BuildKit v0.35.1 SDK의 gRPC
 Info/Solve/Session/Status와 파일·Secret/auth session을 원 FD의 Unix 연결로 사용한다.
 [실행·원 결과·종료 경계](image-build-jobs/07-section.md)를 따른다.
@@ -44,7 +44,7 @@ key/password·다른 Vault 값은 반환하지 않으며 host OS·Docker trust�
 member `image-build-base-token-owner` 요청은
 `{Read:{Cluster,Builder,Query,Target,Index,Epoch},Challenge:{Host,Realm,Service,Scopes},Additional?:[ImageBuildBaseRead,...]}`이며
 보호된 응답은 `{Token,IssuedAt,ExpiresIn}`이다. [Bearer 교환의 정확한 제한](image-build-jobs/04-owner.md)을
-따른다. 일반 사용자 Unix API나 Secret 조회가 아니며 원 Builder→source owner의 MYDCP로만
+따른다. 일반 사용자 Unix API나 Secret 조회가 아니며 원 Builder→source owner의 SFCP로만
 전달한다. 현재 quorum·running/unknown의 원 source binding·실제 registry challenge를 확인하고
 동일 reader의 Additional(최대7개)도 같은 job/owner·credential generation/ReadSet·pull scope로 확인하며 token/password를 관측·Raft·로그에 기록하지 않는다.
 
@@ -96,9 +96,9 @@ User `build-draft {Tenant,ImageBuildDraft:{Context,Kind:"plan"|"tree"|"file"|"ed
 
 User `build-context-content {Tenant,ImageBuildContent:{Version:[32],Part:"tree"|"dockerfile"|"file",Path?,Offset?},After?}`와 `Reply.ImageBuildContent`는 [보존 버전 조회](image-build-contexts/04-dockerfile.md)를 사용한다. 현재 Read/ManageRegistry·owner/root/epoch·보존 version을 검사하며 원 bytes를 Raft에 넣지 않는다. `image-build-content-owner`는 같은 member Management의 native owner 조회이고 별도 socket을 열지 않는다.
 
-MyDC의 로컬 관리 끝점은 **`unix:///var/run/mydc.sock`**이다. `mydcd`가 생성하며 `mydc`와 로컬 관리 클라이언트가 접속한다. 프로토콜은 **AF_UNIX stream → TLS → MYDCP 인증 → Unix record → MYDCP frame/TLV → 업무 payload** 순서다.
+Sfc의 로컬 관리 끝점은 **`unix:///run/sfcdp.sock`**이다. `sfcd`가 생성하며 `sfcli`와 로컬 관리 클라이언트가 접속한다. 프로토콜은 **AF_UNIX stream → TLS → SFCP 인증 → Unix record → SFCP frame/TLV → 업무 payload** 순서다.
 
-이 문서는 현재 schema/Contract **1**의 구현을 설명한다. [명령 대상표](../architecture/command-targets.md)는 명령의 대상·권한을, [MYDCP](../protocol/mydcp.md)는 공통 메시지/서명을 규정한다.
+이 문서는 현재 schema/Contract **1**의 구현을 설명한다. [명령 대상표](../architecture/command-targets.md)는 명령의 대상·권한을, [SFCP](../protocol/sfcp.md)는 공통 메시지/서명을 규정한다.
 
 ## 절 목록
 
@@ -110,9 +110,9 @@ MyDC의 로컬 관리 끝점은 **`unix:///var/run/mydc.sock`**이다. `mydcd`�
 | 설정과 접속 | [unix-sockets/02-section.md](unix-sockets/02-section.md) |
 | 파일 권한과 소유권 | [unix-sockets/03-section.md](unix-sockets/03-section.md) |
 | 연결 수립과 최초 신뢰 | [unix-sockets/04-section.md](unix-sockets/04-section.md) |
-| MYDCP 인증 handshake | [unix-sockets/05-mydcp-handshake.md](unix-sockets/05-mydcp-handshake.md) |
+| SFCP 인증 handshake | [unix-sockets/05-sfcp-handshake.md](unix-sockets/05-sfcp-handshake.md) |
 | Unix record Contract1 | [unix-sockets/06-unix-record-contract1.md](unix-sockets/06-unix-record-contract1.md) |
-| 공통 MYDCP frame | [unix-sockets/07-mydcp-frame.md](unix-sockets/07-mydcp-frame.md) |
+| 공통 SFCP frame | [unix-sockets/07-sfcp-frame.md](unix-sockets/07-sfcp-frame.md) |
 | 허용 메시지와 payload | [unix-sockets/08-payload.md](unix-sockets/08-payload.md) |
 | 메시지 인코딩 규칙 | [unix-sockets/09-section.md](unix-sockets/09-section.md) |
 | User 메시지 목록 | [unix-sockets/10-user.md](unix-sockets/10-user.md) |

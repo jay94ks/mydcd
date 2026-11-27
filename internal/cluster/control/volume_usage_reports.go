@@ -5,9 +5,9 @@ package control
 import (
 	"slices"
 
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/observability"
-	"github.com/jay94ks/mydcd/internal/workload/volumes"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/observability"
+	"github.com/jay94ks/seafield/internal/workload/volumes"
 )
 
 // OwnedVolume is a current, converged volume whose native owner key is one

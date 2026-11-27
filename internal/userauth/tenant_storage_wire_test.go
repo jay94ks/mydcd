@@ -10,10 +10,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/nodestorage"
-	"github.com/jay94ks/mydcd/internal/schema"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/nodestorage"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/sfcp"
 )
 
 // Actual production Unix/QUIC framing, client selectors and connection proof.
@@ -23,19 +23,19 @@ func TestTenantStorageActualUserWireAndGenericQuery(t *testing.T) {
 		for _, mode := range []string{"ok", "foreign-cluster", "mismatched-node", "invalid-path", "missing-generation"} {
 			t.Run(network+"/"+mode, func(t *testing.T) {
 				_, client, session, node := journalFixture(t)
-				dir, err := os.MkdirTemp("", "mydc-tenant-storage-wire-")
+				dir, err := os.MkdirTemp("", "sfc-tenant-storage-wire-")
 				if err != nil {
 					t.Fatal(err)
 				}
 				defer os.RemoveAll(dir)
 				peer := client.Peers[0]
-				lookup := func(key mydcp.Identity) (mydcp.Peer, bool) {
-					if key == mydcp.Identity(client.Self.Public) {
-						return mydcp.Peer{ID: "user", Policy: mydcp.Policy{Key: key, UserAuth: true}}, true
+				lookup := func(key sfcp.Identity) (sfcp.Peer, bool) {
+					if key == sfcp.Identity(client.Self.Public) {
+						return sfcp.Peer{ID: "user", Policy: sfcp.Policy{Key: key, UserAuth: true}}, true
 					}
 					return peer, key == peer.Key
 				}
-				server, err := mydcp.NewTransport(node, client.Cluster, lookup)
+				server, err := sfcp.NewTransport(node, client.Cluster, lookup)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -54,7 +54,7 @@ func TestTenantStorageActualUserWireAndGenericQuery(t *testing.T) {
 				}
 				binding := Service{Self: node, Mesh: server, Policy: control.Policy{Cluster: client.Cluster}}
 				done := make(chan error, 1)
-				if err = server.OnManagement(mydcp.User, func(ctx context.Context, conn *mydcp.Session, stream mydcp.Stream, frame mydcp.Frame) error {
+				if err = server.OnManagement(sfcp.User, func(ctx context.Context, conn *sfcp.Session, stream sfcp.Stream, frame sfcp.Frame) error {
 					serve := func() error {
 						envelope, err := schema.Decode[Envelope](frame.Fields[0].Value)
 						if err != nil {
@@ -62,7 +62,7 @@ func TestTenantStorageActualUserWireAndGenericQuery(t *testing.T) {
 						}
 						request, err := schema.Decode[Request](envelope.Body)
 						if err != nil || !request.validMethodFields() || !request.validQuerySelectors() || request.Method != "tenant-storage" || request.Tenant != "tenant" {
-							return mydcp.ErrFrame
+							return sfcp.ErrFrame
 						}
 						if _, err = binding.binding(conn, frame.Kind, envelope); err != nil {
 							return err
@@ -89,7 +89,7 @@ func TestTenantStorageActualUserWireAndGenericQuery(t *testing.T) {
 					}
 					peer.Endpoint = server.Addr().String()
 				}
-				mesh, err := mydcp.NewTransport(client.Self, client.Cluster, lookup)
+				mesh, err := sfcp.NewTransport(client.Self, client.Cluster, lookup)
 				if err != nil {
 					t.Fatal(err)
 				}

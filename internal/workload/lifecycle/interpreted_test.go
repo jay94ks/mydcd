@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	contract "github.com/jay94ks/mydcd/lifecycle/v1"
+	contract "github.com/jay94ks/seafield/lifecycle/v1"
 )
 
 // Each interpreter case runs in a fresh test process. This exercises the real
@@ -30,7 +30,7 @@ func TestCheckerInterpreterUsesRealSDKInBoundedChildProcesses(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 			command := exec.CommandContext(ctx, binary, "-test.run=^TestCheckerInterpreterProcess$", "-test.count=1", "-test.timeout=4s")
-			command.Env = []string{"MYDC_INTERPRETER_CASE=" + scenario, "GOMAXPROCS=2", "GOTOOLCHAIN=local"}
+			command.Env = []string{"SFC_INTERPRETER_CASE=" + scenario, "GOMAXPROCS=2", "GOTOOLCHAIN=local"}
 			out, err := command.CombinedOutput()
 			if err != nil {
 				t.Fatalf("%s: %v: %s", scenario, err, out)
@@ -43,7 +43,7 @@ func TestCheckerInterpreterUsesRealSDKInBoundedChildProcesses(t *testing.T) {
 }
 
 func TestCheckerInterpreterProcess(t *testing.T) {
-	scenario := os.Getenv("MYDC_INTERPRETER_CASE")
+	scenario := os.Getenv("SFC_INTERPRETER_CASE")
 	if scenario == "" {
 		t.Skip("isolated interpreter case only")
 	}

@@ -13,16 +13,17 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/network/services"
-	"github.com/jay94ks/mydcd/internal/reconcile"
-	"github.com/jay94ks/mydcd/internal/schema"
-	"github.com/jay94ks/mydcd/internal/tenancy"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/network/services"
+	"github.com/jay94ks/seafield/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/tenancy"
 )
 
 var errNoAppLeader = errors.New("no current app leader")
@@ -52,12 +53,12 @@ func (r *Runtime) awaitAppLeader(ctx context.Context) {
 	}
 }
 
-var errAppLeaderPeerUnavailable = fmt.Errorf("current app leader peer unavailable: %w", mydcp.ErrAdmission)
+var errAppLeaderPeerUnavailable = fmt.Errorf("current app leader peer unavailable: %w", sfcp.ErrAdmission)
 
 func (r *Runtime) appCommand(method, caller string, input []byte, v cluster.View) (state.Command, error) {
 	key, err := identity.ParseKey(caller)
 	if err != nil || v.Local {
-		return state.Command{}, mydcp.ErrAdmission
+		return state.Command{}, sfcp.ErrAdmission
 	}
 	if method == "image-build-cache-automatic-report" {
 		cmd, err := r.controlPolicy.ResolveImageBuildCacheAutomaticReport(v.State, key, input)
@@ -67,8 +68,8 @@ func (r *Runtime) appCommand(method, caller string, input []byte, v cluster.View
 		if _, found := v.State.LookupResult(cmd); !found {
 			report, err := schema.Decode[control.ImageBuildCacheAutomaticReport](input)
 			now := uint64(time.Now().Unix())
-			if err != nil || report.At > now || now-report.At > 30 {
-				return cmd, mydcp.ErrAdmission
+			if err != nil || !access.Recent(report.At, now, 30) {
+				return cmd, sfcp.ErrAdmission
 			}
 		}
 		return cmd, nil
@@ -81,8 +82,8 @@ func (r *Runtime) appCommand(method, caller string, input []byte, v cluster.View
 		if _, found := v.State.LookupResult(cmd); !found {
 			report, err := schema.Decode[control.ImageBuildAutomaticGitReport](input)
 			now := uint64(time.Now().Unix())
-			if err != nil || report.At > now || now-report.At > 30 {
-				return cmd, mydcp.ErrAdmission
+			if err != nil || !access.Recent(report.At, now, 30) {
+				return cmd, sfcp.ErrAdmission
 			}
 		}
 		return cmd, nil
@@ -95,8 +96,8 @@ func (r *Runtime) appCommand(method, caller string, input []byte, v cluster.View
 		if _, found := v.State.LookupResult(cmd); !found {
 			report, err := schema.Decode[control.ImageBuildGitObservationReport](input)
 			now := uint64(time.Now().Unix())
-			if err != nil || report.At > now || now-report.At > 30 {
-				return cmd, mydcp.ErrAdmission
+			if err != nil || !access.Recent(report.At, now, 30) {
+				return cmd, sfcp.ErrAdmission
 			}
 		}
 		return cmd, nil
@@ -109,8 +110,8 @@ func (r *Runtime) appCommand(method, caller string, input []byte, v cluster.View
 		if _, found := v.State.LookupResult(cmd); !found {
 			report, err := schema.Decode[control.ImageBuildCachePruneReport](input)
 			now := uint64(time.Now().Unix())
-			if err != nil || report.At > now || now-report.At > 30 {
-				return cmd, mydcp.ErrAdmission
+			if err != nil || !access.Recent(report.At, now, 30) {
+				return cmd, sfcp.ErrAdmission
 			}
 		}
 		return cmd, nil
@@ -123,8 +124,8 @@ func (r *Runtime) appCommand(method, caller string, input []byte, v cluster.View
 		if _, found := v.State.LookupResult(cmd); !found {
 			report, err := schema.Decode[control.ImageBuildJobReport](input)
 			now := uint64(time.Now().Unix())
-			if err != nil || report.At > now || now-report.At > 30 {
-				return cmd, mydcp.ErrAdmission
+			if err != nil || !access.Recent(report.At, now, 30) {
+				return cmd, sfcp.ErrAdmission
 			}
 		}
 		return cmd, nil
@@ -132,8 +133,8 @@ func (r *Runtime) appCommand(method, caller string, input []byte, v cluster.View
 	if method == "image-build-owner-report" {
 		report, err := schema.Decode[control.ImageBuildOwnerReport](input)
 		now := time.Now().Unix()
-		if err != nil || report.Part != nil && (report.Part.At > now || now-report.Part.At > 30) {
-			return state.Command{}, mydcp.ErrAdmission
+		if err != nil || report.Part != nil && (!access.Recent(report.Part.At, now, 30)) {
+			return state.Command{}, sfcp.ErrAdmission
 		}
 		return r.controlPolicy.ResolveImageBuildOwnerReport(v.State, key, input)
 	}
@@ -145,8 +146,8 @@ func (r *Runtime) appCommand(method, caller string, input []byte, v cluster.View
 		if _, found := v.State.LookupResult(command); !found {
 			report, err := schema.Decode[control.RegistryMaintenanceReport](input)
 			now := uint64(time.Now().Unix())
-			if err != nil || report.At > now || now-report.At > 30 {
-				return command, mydcp.ErrAdmission
+			if err != nil || !access.Recent(report.At, now, 30) {
+				return command, sfcp.ErrAdmission
 			}
 		}
 		return command, nil
@@ -159,8 +160,8 @@ func (r *Runtime) appCommand(method, caller string, input []byte, v cluster.View
 		if _, found := v.State.LookupResult(command); !found {
 			report, err := schema.Decode[control.ImageCacheReport](input)
 			now := uint64(time.Now().Unix())
-			if err != nil || report.At > now || now-report.At > 30 {
-				return command, mydcp.ErrAdmission
+			if err != nil || !access.Recent(report.At, now, 30) {
+				return command, sfcp.ErrAdmission
 			}
 		}
 		return command, nil
@@ -173,8 +174,8 @@ func (r *Runtime) appCommand(method, caller string, input []byte, v cluster.View
 		if _, found := v.State.LookupResult(command); !found {
 			report, err := schema.Decode[control.TunnelReport](input)
 			now := uint64(time.Now().Unix())
-			if err != nil || report.At > now || now-report.At > 30 {
-				return command, mydcp.ErrAdmission
+			if err != nil || !access.Recent(report.At, now, 30) {
+				return command, sfcp.ErrAdmission
 			}
 		}
 		return command, nil
@@ -187,7 +188,7 @@ func (r *Runtime) appCommand(method, caller string, input []byte, v cluster.View
 		_, leader := r.Engine().Leader()
 		if report.Action == "begin" || report.Action == "skip" {
 			if report.Leader != string(leader) {
-				return state.Command{}, mydcp.ErrAdmission
+				return state.Command{}, sfcp.ErrAdmission
 			}
 		}
 		command, err := r.controlPolicy.ResolveCompactReport(v.State, key, input)
@@ -196,11 +197,53 @@ func (r *Runtime) appCommand(method, caller string, input []byte, v cluster.View
 		}
 		if _, found := v.State.LookupResult(command); !found {
 			now := uint64(time.Now().Unix())
-			if report.At > now || now-report.At > 30 {
-				return command, mydcp.ErrAdmission
+			if !access.Recent(report.At, now, 30) {
+				return command, sfcp.ErrAdmission
 			}
 		}
 		return command, nil
+	}
+	if method == "credential-store-report" {
+		cmd, err := r.controlPolicy.ResolveCredentialStoreReport(v.State, key, input)
+		if err != nil {
+			return cmd, err
+		}
+		if _, found := v.State.LookupResult(cmd); !found {
+			report, e := schema.Decode[control.CredentialStoreReport](input)
+			now := uint64(time.Now().Unix())
+			if e != nil || !access.Recent(report.At, now, 60) {
+				return cmd, sfcp.ErrAdmission
+			}
+		}
+		return cmd, nil
+	}
+	if method == "vault-holder-report" {
+		cmd, err := r.controlPolicy.ResolveVaultHolderReport(v.State, key, input)
+		if err != nil {
+			return cmd, err
+		}
+		if _, found := v.State.LookupResult(cmd); !found {
+			report, e := schema.Decode[control.VaultHolderReport](input)
+			now := uint64(time.Now().Unix())
+			if e != nil || !access.Recent(report.At, now, 60) {
+				return cmd, sfcp.ErrAdmission
+			}
+		}
+		return cmd, nil
+	}
+	if method == "vps-report" {
+		cmd, err := r.controlPolicy.ResolveVPSReport(v.State, key, input)
+		if err != nil {
+			return cmd, err
+		}
+		if _, found := v.State.LookupResult(cmd); !found {
+			report, e := schema.Decode[control.VPSReport](input)
+			now := uint64(time.Now().Unix())
+			if e != nil || !access.Recent(report.At, now, 60) {
+				return cmd, sfcp.ErrAdmission
+			}
+		}
+		return cmd, nil
 	}
 	if method == "certificate-expiry-report" {
 		cmd, err := r.controlPolicy.ResolveCertificateExpiry(v.State, key, input)
@@ -210,8 +253,8 @@ func (r *Runtime) appCommand(method, caller string, input []byte, v cluster.View
 		if _, found := v.State.LookupResult(cmd); !found {
 			report, e := schema.Decode[control.CertificateExpiryReport](input)
 			now := uint64(time.Now().Unix())
-			if e != nil || report.At > now || now-report.At > 60 {
-				return cmd, mydcp.ErrAdmission
+			if e != nil || !access.Recent(report.At, now, 60) {
+				return cmd, sfcp.ErrAdmission
 			}
 		}
 		return cmd, nil
@@ -224,8 +267,8 @@ func (r *Runtime) appCommand(method, caller string, input []byte, v cluster.View
 		if _, found := v.State.LookupResult(cmd); !found {
 			q, err := schema.Decode[control.StandalonePolicyReport](input)
 			now := time.Now().Unix()
-			if err != nil || q.At > now || now-q.At > 30 {
-				return cmd, mydcp.ErrAdmission
+			if err != nil || !access.Recent(q.At, now, 30) {
+				return cmd, sfcp.ErrAdmission
 			}
 		}
 		return cmd, nil
@@ -238,8 +281,8 @@ func (r *Runtime) appCommand(method, caller string, input []byte, v cluster.View
 		if _, found := v.State.LookupResult(cmd); !found {
 			report, err := schema.Decode[control.TaskRestartReport](input)
 			now := uint64(time.Now().Unix())
-			if err != nil || report.At > now || now-report.At > 30 {
-				return cmd, mydcp.ErrAdmission
+			if err != nil || !access.Recent(report.At, now, 30) {
+				return cmd, sfcp.ErrAdmission
 			}
 		}
 		return cmd, nil
@@ -253,7 +296,7 @@ func (r *Runtime) appCommand(method, caller string, input []byte, v cluster.View
 			report, decodeErr := schema.Decode[control.AppDeliveryProgress](input)
 			now := time.Now().Unix()
 			if decodeErr != nil || report.At > uint64(now) || uint64(now)-report.At > 30 {
-				return cmd, mydcp.ErrAdmission
+				return cmd, sfcp.ErrAdmission
 			}
 		}
 		return cmd, nil
@@ -262,10 +305,26 @@ func (r *Runtime) appCommand(method, caller string, input []byte, v cluster.View
 		return r.controlPolicy.ResolveNodeShellReport(v.State, key, input)
 	}
 	if method == "member-report" {
-		return r.controlPolicy.ResolveMemberReport(v.State, key, input)
+		cmd, err := r.controlPolicy.ResolveMemberReport(v.State, key, input)
+		if err != nil {
+			return cmd, err
+		}
+		if report, decodeErr := schema.Decode[control.MemberReport](input); decodeErr == nil && report.Action == "recovered" && report.Configuration != nil {
+			if _, found := v.State.LookupResult(cmd); !found {
+				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				if err = r.recoveredMatchesRaft(ctx, *report.Configuration); err != nil {
+					return cmd, sfcp.ErrAdmission
+				}
+			}
+		}
+		return cmd, nil
 	}
 	if method == "tenant-retirement-report" {
 		return r.controlPolicy.ResolveTenantRetirementReport(v.State, key, input)
+	}
+	if method == "virtual-bridge-closed" {
+		return r.controlPolicy.ResolveBridgeClosedReport(v.State, key, input)
 	}
 	if method == "system-network-report" {
 		return r.controlPolicy.ResolveSystemNetworkReport(v.State, key, input)
@@ -281,8 +340,8 @@ func (r *Runtime) appCommand(method, caller string, input []byte, v cluster.View
 		if _, found := v.State.LookupResult(cmd); !found {
 			q, err := schema.Decode[control.ExternalRegistryReaderClosed](input)
 			now := time.Now().Unix()
-			if err != nil || q.At > now || now-q.At > 30 {
-				return cmd, mydcp.ErrAdmission
+			if err != nil || !access.Recent(q.At, now, 30) {
+				return cmd, sfcp.ErrAdmission
 			}
 		}
 		return cmd, nil
@@ -295,8 +354,8 @@ func (r *Runtime) appCommand(method, caller string, input []byte, v cluster.View
 		if _, found := v.State.LookupResult(cmd); !found {
 			report, err := schema.Decode[control.RegistryReport](input)
 			now := time.Now().Unix()
-			if err != nil || report.At > now || now-report.At > 30 {
-				return cmd, mydcp.ErrAdmission
+			if err != nil || !access.Recent(report.At, now, 30) {
+				return cmd, sfcp.ErrAdmission
 			}
 		}
 		return cmd, nil
@@ -309,8 +368,8 @@ func (r *Runtime) appCommand(method, caller string, input []byte, v cluster.View
 		if _, found := v.State.LookupResult(cmd); !found {
 			report, err := schema.Decode[control.CheckerBuildReport](input)
 			now := time.Now().Unix()
-			if err != nil || report.At > now || now-report.At > 30 {
-				return cmd, mydcp.ErrAdmission
+			if err != nil || !access.Recent(report.At, now, 30) {
+				return cmd, sfcp.ErrAdmission
 			}
 		}
 		return cmd, nil
@@ -326,8 +385,8 @@ func (r *Runtime) appCommand(method, caller string, input []byte, v cluster.View
 		if _, found := v.State.LookupResult(cmd); !found {
 			report, err := schema.Decode[control.VolumeCreateReport](input)
 			now := time.Now().Unix()
-			if err != nil || report.At > now || now-report.At > 300 {
-				return cmd, mydcp.ErrAdmission
+			if err != nil || !access.Recent(report.At, now, 300) {
+				return cmd, sfcp.ErrAdmission
 			}
 		}
 		return cmd, nil
@@ -340,8 +399,8 @@ func (r *Runtime) appCommand(method, caller string, input []byte, v cluster.View
 		if _, found := v.State.LookupResult(cmd); !found {
 			report, err := schema.Decode[control.VolumeDeleteReport](input)
 			now := time.Now().Unix()
-			if err != nil || report.At > now || now-report.At > 300 {
-				return cmd, mydcp.ErrAdmission
+			if err != nil || !access.Recent(report.At, now, 300) {
+				return cmd, sfcp.ErrAdmission
 			}
 		}
 		return cmd, nil
@@ -354,8 +413,8 @@ func (r *Runtime) appCommand(method, caller string, input []byte, v cluster.View
 		if _, found := v.State.LookupResult(cmd); !found {
 			report, err := schema.Decode[control.VolumeBackupReport](input)
 			now := time.Now().Unix()
-			if err != nil || report.At > now || now-report.At > 300 {
-				return cmd, mydcp.ErrAdmission
+			if err != nil || !access.Recent(report.At, now, 300) {
+				return cmd, sfcp.ErrAdmission
 			}
 		}
 		return cmd, nil
@@ -368,8 +427,8 @@ func (r *Runtime) appCommand(method, caller string, input []byte, v cluster.View
 		if _, found := v.State.LookupResult(cmd); !found {
 			report, err := schema.Decode[control.VolumeMoveReport](input)
 			now := time.Now().Unix()
-			if err != nil || report.At > now || now-report.At > 300 {
-				return cmd, mydcp.ErrAdmission
+			if err != nil || !access.Recent(report.At, now, 300) {
+				return cmd, sfcp.ErrAdmission
 			}
 		}
 		return cmd, nil
@@ -382,8 +441,8 @@ func (r *Runtime) appCommand(method, caller string, input []byte, v cluster.View
 		if _, found := v.State.LookupResult(cmd); !found {
 			report, err := schema.Decode[control.VolumeRestoreReport](input)
 			now := time.Now().Unix()
-			if err != nil || report.At > now || now-report.At > 300 {
-				return cmd, mydcp.ErrAdmission
+			if err != nil || !access.Recent(report.At, now, 300) {
+				return cmd, sfcp.ErrAdmission
 			}
 		}
 		return cmd, nil
@@ -396,8 +455,8 @@ func (r *Runtime) appCommand(method, caller string, input []byte, v cluster.View
 		if _, found := v.State.LookupResult(cmd); !found {
 			report, err := schema.Decode[control.VaultApprovalReport]([]byte(cmd.Value))
 			now := time.Now().Unix()
-			if err != nil || report.At > now || now-report.At > 300 {
-				return cmd, mydcp.ErrAdmission
+			if err != nil || !access.Recent(report.At, now, 300) {
+				return cmd, sfcp.ErrAdmission
 			}
 		}
 		return cmd, nil
@@ -414,8 +473,8 @@ func (r *Runtime) appCommand(method, caller string, input []byte, v cluster.View
 		if report.Close != nil {
 			if _, found := v.State.LookupResult(cmd); !found {
 				now := uint64(time.Now().Unix())
-				if report.At > now || now-report.At > 300 {
-					return cmd, mydcp.ErrAdmission
+				if !access.Recent(report.At, now, 300) {
+					return cmd, sfcp.ErrAdmission
 				}
 			}
 		}
@@ -427,8 +486,8 @@ func (r *Runtime) appCommand(method, caller string, input []byte, v cluster.View
 		}
 		if _, found := v.State.LookupResult(cmd); !found {
 			now := uint64(time.Now().Unix())
-			if report.At > now || now-report.At > 300 {
-				return cmd, mydcp.ErrAdmission
+			if !access.Recent(report.At, now, 300) {
+				return cmd, sfcp.ErrAdmission
 			}
 		}
 	}
@@ -457,30 +516,39 @@ func (r *Runtime) appCall(ctx context.Context, method string, input []byte) (clu
 		reply.Data, err = r.readModule(ctx, method, r.commandIdentity().Actor(), input, v)
 		return reply, err
 	}
+	peer, err := r.leaderPeer(ctx)
+	if err != nil {
+		return cluster.ManagementReply{}, err
+	}
+	return cluster.CallManagement(ctx, r.Mesh, r.commandIdentity(), r.controlPolicy.Cluster, peer, cluster.ManagementRequest{Method: method, Latest: true, Input: input})
+}
+
+// leaderPeer is the current leader's authenticated member transport peer.
+func (r *Runtime) leaderPeer(ctx context.Context) (sfcp.Peer, error) {
 	_, id := r.Engine().Leader()
 	v, err := r.Engine().Read(ctx, false)
 	if err != nil {
-		return cluster.ManagementReply{}, err
+		return sfcp.Peer{}, err
 	}
 	members, err := r.controlPolicy.Members(v.State)
 	if err != nil {
-		return cluster.ManagementReply{}, err
+		return sfcp.Peer{}, err
 	}
 	entry, ok := members.Entry(string(id))
 	if !ok {
-		return cluster.ManagementReply{}, errNoAppLeader
+		return sfcp.Peer{}, errNoAppLeader
 	}
 	key, err := identity.ParseKey(entry.CurrentPeer().Key)
 	if err != nil {
-		return cluster.ManagementReply{}, err
+		return sfcp.Peer{}, err
 	}
-	peer, ok := r.Mesh.Peer(mydcp.Identity(key))
+	peer, ok := r.Mesh.Peer(sfcp.Identity(key))
 	if !ok || !peer.Member {
 		// A known leader without a current authenticated transport is not a
 		// source-policy revocation. Keep admission failure identity for callers.
-		return cluster.ManagementReply{}, errAppLeaderPeerUnavailable
+		return sfcp.Peer{}, errAppLeaderPeerUnavailable
 	}
-	return cluster.CallManagement(ctx, r.Mesh, r.commandIdentity(), r.controlPolicy.Cluster, peer, cluster.ManagementRequest{Method: method, Latest: true, Input: input})
+	return peer, nil
 }
 func (r *Runtime) appProgress(ctx context.Context, v cluster.View, app control.AppView, action, key string, observation *deployment.Observation) error {
 	return r.sendAppProgress(ctx, r.newAppProgress(v, app, action, key, observation))
@@ -504,7 +572,7 @@ func (r *Runtime) sendAppProgressAt(ctx context.Context, report control.AppProgr
 	report.RequestID = fmt.Sprintf("app/%x", digest)
 	report.Signature = ed25519.Sign(r.commandIdentity().Private, control.AppProgressBytes(report))
 	if report.Action == "observe" && report.Observation != nil {
-		// An unchanged fact is renewed over MyDCP, never written to Raft.
+		// An unchanged fact is renewed over SFCP, never written to Raft.
 		if renewed, err := r.renewAppObservation(ctx, report); renewed || err != nil {
 			return 0, err
 		}
@@ -644,7 +712,7 @@ func (r *Runtime) advanceApps(ctx context.Context, v cluster.View, apps control.
 				r.noteAppWait(app, e.Revision(), step.Key, "")
 				continue
 			}
-			if stage.Command == nil || stage.Journal.Pending != nil && stage.Journal.Pending.Phase == reconcile.Prepared {
+			if stage.Command == nil || stage.Sendable() {
 				if status := e.Status(); status == "Paused" || status == "Failed" {
 					wait("the deploy is %s", strings.ToLower(status))
 					continue
@@ -675,7 +743,7 @@ func (r *Runtime) advanceApps(ctx context.Context, v cluster.View, apps control.
 			if stage.Journal.Pending == nil {
 				continue
 			}
-			if stage.Journal.Pending.Phase == reconcile.Prepared {
+			if stage.Sendable() {
 				if _, _, err = e.Send(catalog, e.Revision(), step.Key, uint64(time.Now().Unix())); err != nil {
 					wait("send: %v%s", err, r.appDependencyWait(e, step.Key))
 					continue

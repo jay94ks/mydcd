@@ -7,11 +7,11 @@ import (
 	"encoding/json"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/lifecycle"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/containerops"
-	"github.com/jay94ks/mydcd/internal/workload"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/lifecycle"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/containerops"
+	"github.com/jay94ks/seafield/internal/workload"
 )
 
 // AppLogClearImpact exposes only public ownership/stop information. In
@@ -148,5 +148,5 @@ func logClearTarget(plan AppLogClearPlan, origin [32]byte) [32]byte {
 		Origin [32]byte
 	}{fingerprint, origin}
 	raw, _ := json.Marshal(input)
-	return sha256.Sum256(append([]byte("mydc-app-log-clear-target-1\x00"), raw...))
+	return sha256.Sum256(append([]byte("sfc-app-log-clear-target-1\x00"), raw...))
 }

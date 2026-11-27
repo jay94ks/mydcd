@@ -14,9 +14,9 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/jay94ks/mydcd/internal/cliprofile"
-	"github.com/jay94ks/mydcd/internal/localstore"
-	"github.com/jay94ks/mydcd/internal/schema"
+	"github.com/jay94ks/seafield/internal/cliprofile"
+	"github.com/jay94ks/seafield/internal/localstore"
+	"github.com/jay94ks/seafield/internal/schema"
 )
 
 var (

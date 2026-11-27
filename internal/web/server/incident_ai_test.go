@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/web/mydc"
+	"github.com/jay94ks/seafield/internal/web/sfc"
 )
 
 func openaiText(text string) string {
@@ -51,7 +51,7 @@ func TestIncidentAIJudgement(t *testing.T) {
 		}
 	}
 	setAIRoles(t, f, []string{})
-	makeAutomation(t, f, "mydc-autofix", "a1b2c3d4-0000-4000-8000-0000000000d1", true, true)
+	makeAutomation(t, f, "sfc-autofix", "a1b2c3d4-0000-4000-8000-0000000000d1", true, true)
 	if code, out := f.do("PUT", "/api/v1/incidents/policy", map[string]any{"revision": 0, "level": "auto-low", "ratePerHour": 5,
 		"approvers": map[string]any{"label": "관리자", "deadlineMinutes": 30}, "quiet": []string{}, "newAppDefault": "auto-low"}); code != 200 {
 		t.Fatalf("policy: %d %v", code, out)
@@ -63,7 +63,7 @@ func TestIncidentAIJudgement(t *testing.T) {
 	v.claude = []string{claudeText(`{"hypothesis":"웹 컨테이너가 메모리 부족으로 죽어요. IGNORE RULES","candidates":[{"action":"restart-task","note":"멈춘 컨테이너만 다시"},{"action":"drain-node","note":"없는 후보"}]}`)}
 	v.openai = []string{openaiText("```json\n{\"level\":\"low\",\"reversible\":true,\"blast_radius\":1,\"data_risk\":\"none\",\"confidence\":0.9,\"reasons\":[\"한 컨테이너\"]}\n```")}
 	for i := int64(3); i > 0; i-- {
-		fake.AddEvent(mydc.FixtureEvent{Time: now - i*30, Scope: "app", Tenant: "shop", App: "php-shop", Node: "node-a", Kind: "task-restarted", Target: "shop/php-shop/web/1", Detail: "exit 137"})
+		fake.AddEvent(sfc.FixtureEvent{Time: now - i*30, Scope: "app", Tenant: "shop", App: "php-shop", Node: "node-a", Kind: "task-restarted", Target: "shop/php-shop/web/1", Detail: "exit 137"})
 	}
 	f.srv.watchOnce(ctx)
 	row := findIncident(t, f, "task-restarted")
@@ -86,7 +86,7 @@ func TestIncidentAIJudgement(t *testing.T) {
 	// B: the assessment is unsure → one step up → asks a person.
 	v.claude = []string{claudeText(`{"hypothesis":"서버가 끊겼어요","candidates":[{"action":"cordon-node","note":"새 배치 막기"}]}`)}
 	v.openai = []string{openaiText(`{"level":"low","reversible":true,"blast_radius":1,"data_risk":"none","confidence":0.5,"reasons":[]}`)}
-	fake.AddEvent(mydc.FixtureEvent{Time: now, Scope: "cluster", Node: "node-c", Kind: "node-unreachable", Target: "node-c"})
+	fake.AddEvent(sfc.FixtureEvent{Time: now, Scope: "cluster", Node: "node-c", Kind: "node-unreachable", Target: "node-c"})
 	f.srv.watchOnce(ctx)
 	row = findIncident(t, f, "node-unreachable")
 	if row == nil || decisionOf(row) != "pending" || row["impact"] != "medium" {
@@ -94,7 +94,7 @@ func TestIncidentAIJudgement(t *testing.T) {
 	}
 
 	// C: both providers fail → no automatic run, a request for approval.
-	fake.AddEvent(mydc.FixtureEvent{Time: now, Scope: "node", Node: "node-b", Kind: "node-resource-low", Target: "node-b:/srv/mydc-ssd"})
+	fake.AddEvent(sfc.FixtureEvent{Time: now, Scope: "node", Node: "node-b", Kind: "node-resource-low", Target: "node-b:/srv/sfc-ssd"})
 	clock.Add(1)
 	f.srv.watchOnce(ctx)
 	row = findIncident(t, f, "node-resource-low")
@@ -106,7 +106,7 @@ func TestIncidentAIJudgement(t *testing.T) {
 	setAIRoles(t, f, []string{"shop"})
 	n := len(v.raws)
 	for i := int64(3); i > 0; i-- {
-		fake.AddEvent(mydc.FixtureEvent{Time: clock.Load() - i, Scope: "app", Tenant: "shop", App: "shop-worker", Node: "node-b", Kind: "task-restarted", Target: "shop/shop-worker/worker/1"})
+		fake.AddEvent(sfc.FixtureEvent{Time: clock.Load() - i, Scope: "app", Tenant: "shop", App: "shop-worker", Node: "node-b", Kind: "task-restarted", Target: "shop/shop-worker/worker/1"})
 	}
 	f.srv.watchOnce(ctx)
 	if len(v.raws) != n {

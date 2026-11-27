@@ -25,7 +25,7 @@ kind2의 TLV1은 `ContainerSessionReply{Schema:uint8=1,Code:string,Supported:boo
 | ExecSpec | Argv=string 배열, Stdin/TTY=bool, Rows/Cols=uint16. argv1–128개·각4096바이트·합계16KiB, 유효 UTF-8·NUL 금지. argv[0] 필수, 나머지 빈 문자열 보존. TTY 크기>0, 비TTY 크기0 |
 | Query | 기존 container-observe Query. Spec.Kind와 Query.Kind/Selection 일치. logs Until 비움·Interval=0, top/stats Interval=1초–1분 |
 
-Intent 서명은 `mydc-container-session-intent-1\0` + Signature를 nil로 둔 정규 JSON에 적용한다. Intent.Digest는 `mydc-container-session-record-1\0` + 서명까지 포함한 정규 JSON의 SHA-256이다. Session digest는 `mydc-exact-user-session-1\0` + 독립 Approval까지 포함한 원 grant JSON의 SHA-256이다. open의 At는 미래가 아니며 최대30초 전이다. status는 원 시각/서명을 유지하고 현재 로그인으로 인증한다. 설치 노드 키는 사용자의 intent 서명을 대신하지 못한다.
+Intent 서명은 `sfc-container-session-intent-1\0` + Signature를 nil로 둔 정규 JSON에 적용한다. Intent.Digest는 `sfc-container-session-record-1\0` + 서명까지 포함한 정규 JSON의 SHA-256이다. Session digest는 `sfc-exact-user-session-1\0` + 독립 Approval까지 포함한 원 grant JSON의 SHA-256이다. open의 At는 미래가 아니며 최대30초 전이다. status는 원 시각/서명을 유지하고 현재 로그인으로 인증한다. 설치 노드 키는 사용자의 intent 서명을 대신하지 못한다.
 
 ### kind5 record 목록·포맷
 
@@ -57,7 +57,7 @@ TLV1은 정규 `SessionRecord` JSON, TLV2는 Intent.Digest다. 바깥 Request와
 
 장수 client의 동일 proof key 재결합·다중 사용자/소스 예산·현재 상한·voter 직접 login과 `add-credential`/`disable-credential`의 payload·독립 승인/소유 증명 포맷은 [client 인증 명세](../client-authentication.md)를 따른다. Session은 연결 challenge 자체에 고정되지 않으며, `login`의 Ticket/Proof 교환만 원 연결에 고정된다.
 
-관리 operation의 선택 Reason metadata·동작 제한도 네트워크 MYDCP와 같다. [공통 서명 계약](../../protocol/mydcp.md)과 [credential 목록/동작 제한](../user-catalog.md)을 따르며 Unix socket이라는 이유로 권한을 넓히지 않는다.
+관리 operation의 선택 Reason metadata·동작 제한도 네트워크 SFCP와 같다. [공통 서명 계약](../../protocol/sfcp.md)과 [credential 목록/동작 제한](../user-catalog.md)을 따르며 Unix socket이라는 이유로 권한을 넓히지 않는다.
 
 ### 앱 Secret 전달 metadata
 
@@ -84,7 +84,7 @@ User 서명 action `cordon-node`/`uncordon-node`는 `{ID}`를 받고(cordon-node
 
 ### Raft 수동 유지보수 메시지
 
-관리 Unix 소켓에서도 기존 User 인증/서명 envelope 안의 같은 메시지를 사용한다. `raft-compact-plan`은 `Compact:{Selection:{Nodes?,Mode,Retain,Parallel},Operation:"",After:""}`을, `raft-compact-status`는 `Compact:{Operation,After:""}`을 받는다. Tenant/Node/바깥 After는 허용하지 않는다. 응답은 각각 CompactPlan(최대64개 대상), CompactStatus(최대4개 노드 결과)이며 Next는 다음 Compact.After에 전달한다. roster/root 변경은 conflict/COMPACT_VIEW_CHANGED다.
+관리 Unix 소켓에서도 기존 User 인증/서명 envelope 안의 같은 메시지를 사용한다. 둘 다 [typed method](10-user.md#typed-method)다. `raft-compact-plan`은 `Params:{Selection:{Nodes?,Mode,Retain,Parallel},After?}`을, `raft-compact-status`는 `Params:{Operation,After?}`을 받는다. 응답 `Data`는 각각 계획 페이지(최대64개 대상), 상태 페이지(최대4개 노드 결과)이며 Next는 다음 `Params.After`에 전달한다. roster/root 변경은 `Code:"conflict"`, `InputCode:"COMPACT_VIEW_CHANGED"`다.
 
 수동 실행은 별도 socket kind가 아닌 기존 UserOperation의 `Change.Action=raft-compact`, Expected=0, Payload `{Operation,Selection,Target}`와 현재 RootRevision/Epoch를 사용한다. 시스템 관리자·credential 제한·원 intent/result를 검사하고 수락을 SDK 완료로 표시하지 않는다. whoami의 CompactRootRevision과 raft-status의 전역/노드별 LastManualCompact를 함께 제공한다. 상세 Result/metrics·단위·내구/복구·예산은 [Raft 유지보수 API](../raft-maintenance.md)를 따른다.
 
@@ -94,11 +94,11 @@ User 서명 action `cordon-node`/`uncordon-node`는 `{ID}`를 받고(cordon-node
 
 기존 User 요청 `registry-action-plan`은 `Tenant`, `RegistryAction:{Action:"start-registry"|"stop-registry",ID}`를 받고 `RegistryActionPlan`을 반환한다. After/Node·다른 method selector는 비워 둔다. 응답의 Schema/Cluster/Action/Tenant/ID, Expected/RootRevision/Epoch, Current RegistryView, WouldEnable/DataPreserved는 [Registry 조치 API](../registry-actions.md)에 정의한다. 계획은 인증된 quorum read이며 실행 가능한 unsigned operation이 아니다.
 
-실행은 기존 서명 start-registry/stop-registry action, record/root CAS와 원 operation/result를 사용한다. Unix·네트워크 MYDCP가 같은 현재 사용자·credential 제한을 검사한다. 소켓 프로토콜·frame·schema 번호는1이며 새로운 노드 관리 권한을 부여하지 않는다.
+실행은 기존 서명 start-registry/stop-registry action, record/root CAS와 원 operation/result를 사용한다. Unix·네트워크 SFCP가 같은 현재 사용자·credential 제한을 검사한다. 소켓 프로토콜·frame·schema 번호는1이며 새로운 노드 관리 권한을 부여하지 않는다.
 
 ### Tunnel reconnect 메시지
 
-기존 User `tunnel-reconnect-plan`은 `Tunnel:{Node,Peer,Operation:""}`, `tunnel-reconnect-status`는 `Tunnel:{Node:"",Peer:"",Operation}`을 받는다. Tenant/Node/After 등 바깥 selector는 비워 둔다. 응답 TunnelPlan은 owner/peer 키·주소·PairID·원 서명 down 관측/Target이며, TunnelStatus는 원 job·사용자/이유·revision·실제 handshake 결과다. whoami는 TunnelRootRevision을 제공한다.
+User `tunnel-reconnect-plan`은 typed `Params:{Node,Peer}`, `tunnel-reconnect-status`는 typed `Params:{Operation}`을 받고 `Data`로 답한다([typed method](10-user.md#typed-method)). 응답 TunnelPlan은 owner/peer 키·주소·PairID·원 서명 down 관측/Target이며, TunnelStatus는 원 job·사용자/이유·revision·실제 handshake 결과다. whoami는 TunnelRootRevision을 제공한다.
 
 실행은 기존 UserOperation의 reconnect-tunnel, Expected=0, Payload `{Operation,Plan}`·현재 root/epoch를 사용한다. 노드 간 tunnel-reconnect-work/report는 네트워크 Management 경계이며 Unix 사용자 연결의 메시지로 허용하지 않는다. 전체 필드·서명 domain·정산/예산은 [Mesh 복구 API](../tunnel-reconnect.md)를 따른다. schema/frame/record 번호는1이다.
 

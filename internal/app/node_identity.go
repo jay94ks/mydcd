@@ -5,8 +5,8 @@ package app
 import (
 	"context"
 	"errors"
-	"github.com/jay94ks/mydcd/internal/bootstrap"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/bootstrap"
+	"github.com/jay94ks/seafield/internal/cluster/control"
 )
 
 // IdentityRestart becomes readable only after the original shared activation

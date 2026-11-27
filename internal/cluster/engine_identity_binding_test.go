@@ -9,10 +9,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/cluster/lifecycle"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/storage"
+	"github.com/jay94ks/seafield/internal/cluster/lifecycle"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/storage"
 )
 
 func engineIdentityProof(t *testing.T, cluster [32]byte, node, operation string, old, next *identity.Identity, index uint64) lifecycle.IdentityTransition {
@@ -33,9 +33,9 @@ func engineIdentityKey(t *testing.T) *identity.Identity {
 	return key
 }
 
-func engineIdentityMesh(t *testing.T, key *identity.Identity, cluster [32]byte) *mydcp.Transport {
+func engineIdentityMesh(t *testing.T, key *identity.Identity, cluster [32]byte) *sfcp.Transport {
 	t.Helper()
-	mesh, err := mydcp.NewTransport(key, cluster, func(mydcp.Identity) (mydcp.Peer, bool) { return mydcp.Peer{}, false })
+	mesh, err := sfcp.NewTransport(key, cluster, func(sfcp.Identity) (sfcp.Peer, bool) { return sfcp.Peer{}, false })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -52,7 +52,7 @@ func TestEngineIdentityBindingValidatesCompleteCurrentLineageAndOwnsProofs(t *te
 	rows := []lifecycle.IdentityTransition{engineIdentityProof(t, cluster, "node", "rotate-one", old, middle, 10), engineIdentityProof(t, cluster, "node", "rotate-two", middle, next, 20)}
 	o := Options{ID: "node", Cluster: cluster, Admin: "admin", Manifest: [32]byte{3}, Mesh: engineIdentityMesh(t, next, cluster), IdentityTransitions: rows}
 	owned, err := ownEngineIdentity(o)
-	if err != nil || !bytes.Equal(engineBinding(owned), engineBindingKey(o, mydcp.Identity(old.Public))) {
+	if err != nil || !bytes.Equal(engineBinding(owned), engineBindingKey(o, sfcp.Identity(old.Public))) {
 		t.Fatal("valid lineage did not preserve first binding", err)
 	}
 	rows[0].Proof.OldSignature[0]++
@@ -109,13 +109,13 @@ func TestEngineIdentityBindingReopensOriginalDBAndPreservesReceipt(t *testing.T)
 	root := f.options.Root
 	for i := 0; i < 2; i++ {
 		old := f.node
-		peer, _ := f.lookup(mydcp.Identity(old.Public))
+		peer, _ := f.lookup(sfcp.Identity(old.Public))
 		f.close()
 		next := engineIdentityKey(t)
 		f.options.IdentityTransitions = append(f.options.IdentityTransitions, engineIdentityProof(t, f.policy.Cluster, "node", []string{"rotation-one", "rotation-two"}[i], old, next, uint64(10+i)))
 		f.mu.Lock()
-		delete(f.peers, mydcp.Identity(old.Public))
-		peer.Key = mydcp.Identity(next.Public)
+		delete(f.peers, sfcp.Identity(old.Public))
+		peer.Key = sfcp.Identity(next.Public)
 		f.peers[peer.Key] = peer
 		f.mu.Unlock()
 		f.node = next

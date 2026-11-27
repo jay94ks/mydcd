@@ -20,23 +20,23 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/desired"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/network"
-	"github.com/jay94ks/mydcd/internal/schema"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/desired"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/network"
+	"github.com/jay94ks/seafield/internal/schema"
 	"github.com/vishvananda/netlink"
 )
 
 // The helper is an actual kernel UDP service/client. It never reads TUN or
 // implements packet forwarding; both daemon packet planes must carry the IP.
 func TestTunnelUDPHelper(t *testing.T) {
-	mode := os.Getenv("MYDC_TUN_HELPER")
+	mode := os.Getenv("SFC_TUN_HELPER")
 	if mode == "" {
 		t.Skip("isolated daemon TUN fixture only")
 	}
-	addresses := strings.Split(os.Getenv("MYDC_TUN_ADDRESSES"), ",")
+	addresses := strings.Split(os.Getenv("SFC_TUN_ADDRESSES"), ",")
 	if len(addresses) != 2 {
 		t.Fatal("two explicit addresses required")
 	}
@@ -109,9 +109,9 @@ func TestTunnelUDPHelper(t *testing.T) {
 }
 
 func TestRealBoundaryDaemonTunnelPathsAndRetirement(t *testing.T) {
-	host := os.Getenv("MYDC_KERNEL_HOST_NETNS")
-	tag := os.Getenv("MYDC_KERNEL_TEST_OWNER")
-	bin := os.Getenv("MYDC_TUNNEL_PRODUCTS")
+	host := os.Getenv("SFC_KERNEL_HOST_NETNS")
+	tag := os.Getenv("SFC_KERNEL_TEST_OWNER")
+	bin := os.Getenv("SFC_TUNNEL_PRODUCTS")
 	if host == "" || tag == "" || bin == "" {
 		t.Skip("requires isolated namespace, explicit products/owner and rollback prestate")
 	}
@@ -119,7 +119,7 @@ func TestRealBoundaryDaemonTunnelPathsAndRetirement(t *testing.T) {
 	if err != nil || current == host || os.Geteuid() != 0 {
 		t.Fatal("refusing namespace mutation", host, current, err)
 	}
-	for _, name := range []string{"mydc", "mydcd"} {
+	for _, name := range []string{"sfc", "sfcd"} {
 		if _, err = os.Stat(filepath.Join(bin, name)); err != nil {
 			t.Fatal(err)
 		}
@@ -166,7 +166,7 @@ func TestRealBoundaryDaemonTunnelPathsAndRetirement(t *testing.T) {
 	peers := fmt.Sprintf("    - {id: a, key: '%s', endpoint: '192.0.2.1:44101', voter: false}\n    - {id: b, key: '%s', endpoint: '192.0.2.2:44102', voter: true}\n", keys[0].Actor(), keys[1].Actor())
 	configs := make([]string, 2)
 	for i, id := range []string{"a", "b"} {
-		text := fmt.Sprintf("version: 1\ncommon:\n  cluster: '%x'\n  admin: '%s'\n  peers:\n%snode:\n  id: %s\n  state_dir: '%s'\n  identity_dir: '%s'\n  listen: '192.0.2.%d:%d'\n  bootstrap: %t\nmodules:\n  network: {enabled: true, docker_socket: 'unix:///var/run/docker.sock'}\n  workload: {enabled: false}\n  ingress: {enabled: false}\n", clusterID, keys[2].Actor(), peers, id, filepath.Join(root, "state-"+id), filepath.Join(root, fmt.Sprint("key-", i)), i+1, 44101+i, i == 1)
+		text := fmt.Sprintf("version: 1\ncommon:\n  cluster: '%x'\n  admin: '%s'\n  peers:\n%snode:\n  id: %s\n  state_dir: '%s'\n  identity_dir: '%s'\n  listen: '192.0.2.%d:%d'\n  bootstrap: %t\nmodules:\n  network: {enabled: true}\n  workload: {enabled: false}\n  ingress: {enabled: false}\n", clusterID, keys[2].Actor(), peers, id, filepath.Join(root, "state-"+id), filepath.Join(root, fmt.Sprint("key-", i)), i+1, 44101+i, i == 1)
 		configs[i] = filepath.Join(root, id+".yaml")
 		if err = os.WriteFile(configs[i], []byte(text), 0600); err != nil {
 			t.Fatal(err)
@@ -269,10 +269,10 @@ func TestRealBoundaryDaemonTunnelPathsAndRetirement(t *testing.T) {
 		}
 		var cmd *exec.Cmd
 		if fresh {
-			cmd = exec.CommandContext(ctx, "sh", "-c", "kill -STOP $$; exec \"$@\"", "mydc-netns", filepath.Join(bin, "mydcd"), "--config", configs[i], "run")
+			cmd = exec.CommandContext(ctx, "sh", append(append([]string{"-c", "kill -STOP $$; exec \"$@\"", "sfc-netns", filepath.Join(bin, "sfcd"), "--config", configs[i]}, sfcdEngineFlags(configs[i])...), "run")...)
 			cmd.SysProcAttr = &syscall.SysProcAttr{Cloneflags: syscall.CLONE_NEWNET, Pdeathsig: syscall.SIGKILL}
 		} else {
-			cmd = exec.CommandContext(ctx, "nsenter", "--net="+nsPath[i], "--", filepath.Join(bin, "mydcd"), "--config", configs[i], "run")
+			cmd = exec.CommandContext(ctx, "nsenter", append(append([]string{"--net=" + nsPath[i], "--", filepath.Join(bin, "sfcd"), "--config", configs[i]}, sfcdEngineFlags(configs[i])...), "run")...)
 			cmd.SysProcAttr = &syscall.SysProcAttr{Pdeathsig: syscall.SIGKILL}
 		}
 		cmd.Stdout, cmd.Stderr = log, log
@@ -352,7 +352,7 @@ func TestRealBoundaryDaemonTunnelPathsAndRetirement(t *testing.T) {
 	cli := func(peer string, args ...string) (cluster.ManagementReply, error) {
 		call, stop := context.WithTimeout(ctx, 5*time.Second)
 		defer stop()
-		argv := []string{"--net=" + nsPath[0], "--", filepath.Join(bin, "mydc"), "--config", client, "--peer", peer, "--timeout", "3s"}
+		argv := []string{"--net=" + nsPath[0], "--", filepath.Join(bin, "sfc"), "--config", client, "--peer", peer, "--timeout", "3s"}
 		argv = append(argv, args...)
 		cmd := exec.CommandContext(call, "nsenter", argv...)
 		out, e := cmd.Output()
@@ -467,7 +467,7 @@ func TestRealBoundaryDaemonTunnelPathsAndRetirement(t *testing.T) {
 			t.Fatal(e)
 		}
 		cmd := exec.CommandContext(ctx, "nsenter", "--net="+nsPath[i], "--", self, "-test.run=^TestTunnelUDPHelper$", "-test.v", "-test.timeout=70s")
-		cmd.Env = append(os.Environ(), "MYDC_TUN_HELPER=echo", "MYDC_TUN_ADDRESSES="+specs[i].Addresses[0].Addr().String()+","+specs[i].Addresses[1].Addr().String())
+		cmd.Env = append(os.Environ(), "SFC_TUN_HELPER=echo", "SFC_TUN_ADDRESSES="+specs[i].Addresses[0].Addr().String()+","+specs[i].Addresses[1].Addr().String())
 		cmd.Stdout, cmd.Stderr = log, log
 		cmd.SysProcAttr = &syscall.SysProcAttr{Pdeathsig: syscall.SIGKILL}
 		if e = cmd.Start(); e != nil {
@@ -483,7 +483,7 @@ func TestRealBoundaryDaemonTunnelPathsAndRetirement(t *testing.T) {
 		t.Helper()
 		other := 1 - i
 		cmd := exec.CommandContext(ctx, "nsenter", "--net="+nsPath[i], "--", self, "-test.run=^TestTunnelUDPHelper$", "-test.v", "-test.timeout=10s")
-		cmd.Env = append(os.Environ(), "MYDC_TUN_HELPER=probe", "MYDC_TUN_ADDRESSES="+specs[other].Addresses[0].Addr().String()+","+specs[other].Addresses[1].Addr().String())
+		cmd.Env = append(os.Environ(), "SFC_TUN_HELPER=probe", "SFC_TUN_ADDRESSES="+specs[other].Addresses[0].Addr().String()+","+specs[other].Addresses[1].Addr().String())
 		out, e := cmd.CombinedOutput()
 		if e != nil {
 			t.Fatalf("node %d actual packet plane: %v %s", i, e, out)
@@ -557,5 +557,5 @@ func TestRealBoundaryDaemonTunnelPathsAndRetirement(t *testing.T) {
 
 func mustJSON(v any) string { b, _ := json.Marshal(v); return string(b) }
 func shaCluster(tag string) [32]byte {
-	return sha256.Sum256([]byte("mydc-native-tunnel-test-1:" + tag))
+	return sha256.Sum256([]byte("sfc-native-tunnel-test-1:" + tag))
 }

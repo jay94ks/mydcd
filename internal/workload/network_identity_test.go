@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/reconcile"
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/api/types/mount"
 )
@@ -48,7 +48,7 @@ func TestNetworkIdentityKeepsOriginalOwnershipAndGeneration(t *testing.T) {
 		t.Fatal("a different allocation generation borrowed the original container", err)
 	}
 	for name, change := range map[string]func(*startFixture){
-		"owner": func(f *startFixture) { f.native.Config.Labels["org.mydc.owner"] = "foreign" },
+		"owner": func(f *startFixture) { f.native.Config.Labels["org.sfc.owner"] = "foreign" },
 		"address": func(f *startFixture) {
 			f.native.NetworkSettings.Networks["fixture-bridge"].IPAddress = netip.MustParseAddr("192.0.2.99")
 		},

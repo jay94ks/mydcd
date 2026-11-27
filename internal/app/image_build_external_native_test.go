@@ -14,12 +14,12 @@ import (
 	"os"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/imagebuild"
-	"github.com/jay94ks/mydcd/internal/imagesource"
-	"github.com/jay94ks/mydcd/tests/registryfixture"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/imagebuild"
+	"github.com/jay94ks/seafield/internal/imagesource"
+	"github.com/jay94ks/seafield/tests/registryfixture"
 	"github.com/moby/moby/api/types/container"
 )
 
@@ -78,14 +78,14 @@ func (f *managedRegistryNative) verifyImageBuildExternalNative(t *testing.T, ctx
 	t.Helper()
 	const userA, passwordA = "owned-reader-a", "private-rq6-external-a"
 	const userB, passwordB = "owned-reader-b", "private-rq6-external-b"
-	external := registryfixture.OpenPrivatePrepared(t, os.Getenv("MYDC_DOCKER_TEST_BACKEND"), container.Config{Labels: map[string]string{"org.mydc.test.owner": f.public["Tag"].(string)}}, map[string]registryfixture.BasicCredential{"fixture": {Username: userA, Password: passwordA}, "second": {Username: userB, Password: passwordB}})
+	external := registryfixture.OpenPrivatePrepared(t, os.Getenv("SFC_DOCKER_TEST_BACKEND"), container.Config{Labels: map[string]string{"org.sfc.test.owner": f.public["Tag"].(string)}}, map[string]registryfixture.BasicCredential{"fixture": {Username: userA, Password: passwordA}, "second": {Username: userB, Password: passwordB}})
 	f.externalNativeValues(t, root, map[string][]byte{"USER_A": []byte(userA), "PASS_A": []byte(passwordA), "USER_B": []byte(userB), "PASS_B": []byte(passwordB), "CA": external.Certificate})
 	users, err := p.Catalog(read().State)
 	if err != nil {
 		t.Fatal(err)
 	}
 	tenant, _ := users.Tenant("tenant")
-	change("rq6-external-trust", "set-trust", tenant.Revision, control.TrustAssignment{Tenant: "tenant", Rules: append(tenant.ImageSources, access.TrustRule{Registry: external.Registry, Repository: "fixture"}, access.TrustRule{Registry: external.Registry, Repository: "second"})})
+	change("rq6-external-trust", "set-trust", tenant.Revision, control.TrustChange{Tenant: "tenant", Add: []access.TrustRule{access.TrustRule{Registry: external.Registry, Repository: "fixture"}, access.TrustRule{Registry: external.Registry, Repository: "second"}}})
 	expectedReaders := map[string]control.ExternalRegistryReadSelection{}
 	for _, selection := range []struct{ id, repository, auth, user, password string }{{"external-a", "fixture", "password", "USER_A", "PASS_A"}, {"external-b", "second", "token", "USER_B", "PASS_B"}} {
 		source := imagesource.Source{Tenant: "tenant", ID: selection.id, Authority: external.Registry, Repository: selection.repository, Enabled: true, Auth: selection.auth, Credential: &imagesource.Credential{Realm: "tenant", ID: "registry-auth", UsernameKey: selection.user, PasswordKey: selection.password}, CA: &imagesource.CertificateAuthority{Realm: "tenant", ID: "registry-auth", Key: "CA"}}
@@ -138,7 +138,7 @@ func (f *managedRegistryNative) verifyImageBuildExternalNative(t *testing.T, ctx
 	spec.ID, spec.Secrets, spec.Tags = "native-external", nil, []string{"native-external"}
 	change("rq6-external-build-context", "put-build-context", 0, control.ImageBuildContextPut{Spec: spec})
 	const proof = "rq6-native-external-context"
-	dockerfile := fmt.Sprintf("FROM %s AS first\nFROM %s AS second\nFROM first\nCOPY --from=second /registry-repository /other-source-proof\nCOPY --chmod=0444 context-proof /build-context-proof\nLABEL org.mydc.test.owner=%q\n", external.Reference, second, f.public["Tag"])
+	dockerfile := fmt.Sprintf("FROM %s AS first\nFROM %s AS second\nFROM first\nCOPY --from=second /registry-repository /other-source-proof\nCOPY --chmod=0444 context-proof /build-context-proof\nLABEL org.sfc.test.owner=%q\n", external.Reference, second, f.public["Tag"])
 	version := f.uploadBuildNative(t, root, spec.ID, "rq6-external-upload", dockerfile, proof)
 	const jobID = "rq6-native-external-build"
 	f.cli(nil, "registry", "build", spec.ID, hex.EncodeToString(version[:]), "--tenant", "tenant", "--job", jobID, "--request-id", "rq6-external-submit", "--no-input")

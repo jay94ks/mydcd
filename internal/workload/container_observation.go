@@ -7,11 +7,10 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"strconv"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/containerops"
-	"github.com/jay94ks/mydcd/internal/engine"
+	"github.com/jay94ks/seafield/internal/containerops"
+	"github.com/jay94ks/seafield/internal/engine"
 	"github.com/moby/moby/api/pkg/stdcopy"
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/client"
@@ -43,7 +42,7 @@ func (m *Manager) ObserveContainer(ctx context.Context, target containerops.Targ
 }
 
 // ObserveContainerLogWindow is owner-local only. The runtime pages the already
-// filtered bounded window before any MYDCP response; no large wire frame or raw
+// filtered bounded window before any SFCP response; no large wire frame or raw
 // log cache is created. Oversized windows fail rather than imply gap-free data.
 func (m *Manager) ObserveContainerLogWindow(ctx context.Context, target containerops.Target, q containerops.Query) (containerops.Result, error) {
 	if q.Kind != "logs" || q.Cursor != "" {
@@ -83,7 +82,7 @@ func (m *Manager) observeContainer(ctx context.Context, target containerops.Targ
 			return out, engine.ErrOwnership
 		}
 		out.TTY = inspected.Container.Config.Tty
-		logs, e := api.ContainerLogs(ctx, actual.NativeID, client.ContainerLogsOptions{ShowStdout: q.Stdout, ShowStderr: q.Stderr, Since: q.Since, Until: q.Until, Timestamps: q.Timestamps, Tail: strconv.Itoa(q.Tail)})
+		logs, e := m.containerLogs(ctx, actual.NativeID, q, out.TTY, false)
 		if e != nil {
 			return out, e
 		}

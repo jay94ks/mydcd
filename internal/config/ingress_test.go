@@ -12,7 +12,7 @@ import (
 func TestRealBoundaryIngressLocalConfig(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, "node.yaml")
-	text := "version: 1\nnode:\n  id: a\n  state_dir: state\n  identity_dir: keys\n  listen: '127.0.0.1:40001'\nmodules:\n  network: {enabled: true, docker_socket: 'unix:///var/run/docker.sock'}\n  workload: {enabled: false}\n  ingress: {enabled: true}\n"
+	text := "version: 1\nnode:\n  id: a\n  state_dir: state\n  identity_dir: keys\n  listen: '127.0.0.1:40001'\nmodules:\n  network: {enabled: true}\n  workload: {enabled: false}\n  ingress: {enabled: true}\n"
 	if err := os.WriteFile(path, []byte(text), 0600); err != nil {
 		t.Fatal(err)
 	}

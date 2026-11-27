@@ -1,15 +1,15 @@
-# mydc certificate: ingress TLS 인증서
+# sfcli certificate: ingress TLS 인증서
 
 클러스터 인증서 보관함의 인증서다. 인증서에는 이름이 없다. ID는 leaf DER의 SHA-256 지문이고, 보관함이 leaf의 이름으로 호스트에 연결한다. ingress는 SNI 호스트로 고른다. 시스템 관리자 명령이다.
 
 | 명령 | 하는 일 |
 |---|---|
-| `mydc certificate list [--host H] [--pending] [--unlinked]` | 인증서 목록. `--host`는 그 호스트를 덮는 인증서만, `--pending`은 `파기 대기`만, `--unlinked`는 `미연결`만 |
-| `mydc certificate show ID\|HOST` | 인증서 하나. ID는 앞 12자 이상이면 된다. 호스트를 주면 그 호스트에 연결된 인증서(정확한 호스트, 없으면 한 단계 와일드카드) |
-| `mydc certificate show --issuer DN --serial N` | 발급자 DN(또는 CN)과 일련번호로 찾는다. 일련번호는 16진수이며 콜론을 넣어도 된다 |
-| `mydc certificate put --chain chain.pem --key key.pem` | 인증서를 올린다. `--key -`는 표준 입력에서 키를 읽는다 |
-| `mydc certificate disable ID` | 인증서의 연결을 모두 뗀다. 키가 샜을 때 쓴다 |
-| `mydc certificate delete ID` | 인증서를 지운다. `미연결`이나 `파기 대기`만 지울 수 있다 |
+| `sfcli certificate list [--host H] [--pending] [--unlinked]` | 인증서 목록. `--host`는 그 호스트를 덮는 인증서만, `--pending`은 `파기 대기`만, `--unlinked`는 `미연결`만 |
+| `sfcli certificate show ID\|HOST` | 인증서 하나. ID는 앞 12자 이상이면 된다. 호스트를 주면 그 호스트에 연결된 인증서(정확한 호스트, 없으면 한 단계 와일드카드) |
+| `sfcli certificate show --issuer DN --serial N` | 발급자 DN(또는 CN)과 일련번호로 찾는다. 일련번호는 16진수이며 콜론을 넣어도 된다 |
+| `sfcli certificate put --chain chain.pem --key key.pem` | 인증서를 올린다. `--key -`는 표준 입력에서 키를 읽는다 |
+| `sfcli certificate disable ID` | 인증서의 연결을 모두 뗀다. 키가 샜을 때 쓴다 |
+| `sfcli certificate delete ID` | 인증서를 지운다. `미연결`이나 `파기 대기`만 지울 수 있다 |
 
 바꾸는 명령은 `--id ID`를 받는다.
 

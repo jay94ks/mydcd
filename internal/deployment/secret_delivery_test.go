@@ -17,7 +17,7 @@ func TestComposeSecretEnvironmentPlanUsesOriginalBindingAndReplacementNotice(t *
 	f := makeFixture(t)
 	input := smallCompose(t)
 	service := input.Services["web"]
-	service.MyDC.SecretEnv = []SecretEnvironment{{Source: "db-password", Name: "REPORT_DB_PASS"}}
+	service.Sfc.SecretEnv = []SecretEnvironment{{Source: "db-password", Name: "REPORT_DB_PASS"}}
 	service.Secrets[0].Target = "/etc/app/password"
 	input.Services["web"] = service
 	plan, err := Compile(input, f.c, contextFor(t, f))
@@ -62,8 +62,8 @@ func TestComposeSecretEnvironmentPlanUsesOriginalBindingAndReplacementNotice(t *
 		code   string
 	}{
 		{"literal conflict", func(s *ComposeService) { s.Environment["REPORT_DB_PASS"] = "literal" }, "SECRET_ENV_CONFLICT"},
-		{"invalid name", func(s *ComposeService) { s.MyDC.SecretEnv[0].Name = "A=B" }, "INVALID_SECRET_ENV"},
-		{"missing alias", func(s *ComposeService) { s.MyDC.SecretEnv[0].Source = "missing" }, "SECRET_BINDING_REQUIRED"},
+		{"invalid name", func(s *ComposeService) { s.Sfc.SecretEnv[0].Name = "A=B" }, "INVALID_SECRET_ENV"},
+		{"missing alias", func(s *ComposeService) { s.Sfc.SecretEnv[0].Source = "missing" }, "SECRET_BINDING_REQUIRED"},
 	} {
 		t.Run(change.name, func(t *testing.T) {
 			var changed Compose

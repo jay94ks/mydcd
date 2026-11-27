@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// Package ai is mydc-web's AI gateway (W2.1): the Claude and OpenAI
+// Package ai is sfc-web's AI gateway (W2.1): the Claude and OpenAI
 // adapters behind one small interface (messages + usage with cache
 // counts), the provider model catalog, and the error classes the AI
 // settings screen shows. It holds no keys: the caller opens the sealed key

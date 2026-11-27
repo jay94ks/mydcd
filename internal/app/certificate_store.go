@@ -15,19 +15,19 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/certstore"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/cluster/membership"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/ingress"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/schema"
-	"github.com/jay94ks/mydcd/internal/storage"
-	"github.com/jay94ks/mydcd/internal/userauth"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/certstore"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/membership"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/ingress"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/storage"
+	"github.com/jay94ks/seafield/internal/userauth"
 )
 
 // certificateUnseal bounds wallet-KDF memory for master unseals across every
@@ -95,7 +95,7 @@ func (r *Runtime) recoverCertificate(ctx context.Context, user, request string) 
 			if owner != r {
 				owner.life.RUnlock()
 			}
-			return certstore.Certificate{}, mydcp.ErrAdmission
+			return certstore.Certificate{}, sfcp.ErrAdmission
 		}
 		v, err := owner.certificateNative().Recover(user, request)
 		if owner != r {
@@ -108,7 +108,7 @@ func (r *Runtime) recoverCertificate(ctx context.Context, user, request string) 
 			return certstore.Certificate{}, err
 		}
 		if !r.acceptsResourceKey(ctx, owner.Identity.Public) {
-			return certstore.Certificate{}, mydcp.ErrAdmission
+			return certstore.Certificate{}, sfcp.ErrAdmission
 		}
 		if found != nil {
 			return certstore.Certificate{}, certstore.ErrConflict
@@ -129,16 +129,16 @@ func (r *Runtime) writeCertificate(ctx context.Context, session access.Session, 
 	r.life.RLock()
 	defer r.life.RUnlock()
 	if r.closed || r.reports == nil {
-		return certstore.Certificate{}, mydcp.ErrAdmission
+		return certstore.Certificate{}, sfcp.ErrAdmission
 	}
 	view, err := r.physicalOwners()[0].currentView(ctx)
 	at := time.Now().Unix()
 	if err != nil || view.Local || r.controlPolicy.CertificateAllowed(view.State, session, at, "put-certificate") != nil {
-		return certstore.Certificate{}, mydcp.ErrAdmission
+		return certstore.Certificate{}, sfcp.ErrAdmission
 	}
 	members, err := r.controlPolicy.Members(view.State)
 	if err != nil || !members.MemberKey(r.commandIdentity().Public) || !q.Recover && (!members.WorkKey(r.commandIdentity().Public) || r.historicalOwner) {
-		return certstore.Certificate{}, mydcp.ErrAdmission
+		return certstore.Certificate{}, sfcp.ErrAdmission
 	}
 	if q.Recover {
 		v, err := r.recoverCertificate(ctx, session.User, q.Request)
@@ -147,11 +147,11 @@ func (r *Runtime) writeCertificate(ctx context.Context, session access.Session, 
 		}
 		latest, err := r.physicalOwners()[0].currentView(ctx)
 		if err != nil || latest.Local || r.controlPolicy.CertificateAllowed(latest.State, session, time.Now().Unix(), "put-certificate") != nil {
-			return certstore.Certificate{}, mydcp.ErrAdmission
+			return certstore.Certificate{}, sfcp.ErrAdmission
 		}
 		members, cause := r.controlPolicy.Members(latest.State)
 		if cause != nil || !members.MemberKey(r.commandIdentity().Public) {
-			return certstore.Certificate{}, mydcp.ErrAdmission
+			return certstore.Certificate{}, sfcp.ErrAdmission
 		}
 		return v, nil
 	}
@@ -187,11 +187,11 @@ func (r *Runtime) writeCertificate(ctx context.Context, session access.Session, 
 	}
 	latest, err := r.physicalOwners()[0].currentView(ctx)
 	if err != nil || latest.Local || r.controlPolicy.CertificateAllowed(latest.State, session, time.Now().Unix(), "put-certificate") != nil {
-		return certstore.Certificate{}, mydcp.ErrAdmission
+		return certstore.Certificate{}, sfcp.ErrAdmission
 	}
 	members, cause := r.controlPolicy.Members(latest.State)
 	if cause != nil || !members.WorkKey(r.commandIdentity().Public) {
-		return certstore.Certificate{}, mydcp.ErrAdmission
+		return certstore.Certificate{}, sfcp.ErrAdmission
 	}
 	return v, nil
 }
@@ -267,17 +267,17 @@ func (r *Runtime) askVoters(ctx context.Context, s state.State, q certificateReq
 	if err != nil {
 		return nil, err
 	}
-	peers := []mydcp.Peer{}
+	peers := []sfcp.Peer{}
 	for _, entry := range members.Entries {
 		key, err := identity.ParseKey(entry.CurrentPeer().Key)
 		if err != nil || key == r.commandIdentity().Public || !members.VoterKey(key) {
 			continue
 		}
-		if peer, ok := r.Mesh.Peer(mydcp.Identity(key)); ok && peer.Member {
+		if peer, ok := r.Mesh.Peer(sfcp.Identity(key)); ok && peer.Member {
 			peers = append(peers, peer)
 		}
 	}
-	slices.SortFunc(peers, func(a, b mydcp.Peer) int { return strings.Compare(a.ID, b.ID) })
+	slices.SortFunc(peers, func(a, b sfcp.Peer) int { return strings.Compare(a.ID, b.ID) })
 	for _, peer := range peers {
 		session, err := r.Mesh.Dial(ctx, peer)
 		if err != nil {
@@ -299,31 +299,31 @@ func (r *Runtime) askVoters(ctx context.Context, s state.State, q certificateReq
 }
 
 func (r *Runtime) serveCertificateMaterial() error {
-	return r.Mesh.OnCertificateMaterial(func(ctx context.Context, s *mydcp.Session, body []byte) ([]byte, error) {
+	return r.Mesh.OnCertificateMaterial(func(ctx context.Context, s *sfcp.Session, body []byte) ([]byte, error) {
 		ctx, cancel := context.WithCancel(ctx)
 		defer cancel()
 		stop := context.AfterFunc(r.ctx, cancel)
 		defer stop()
 		q, err := schema.Decode[certificateRequest](body)
 		if err != nil || !q.one() {
-			return nil, mydcp.ErrAdmission
+			return nil, sfcp.ErrAdmission
 		}
 		caller := [32]byte(s.Peer().Key)
 		r.life.RLock()
 		defer r.life.RUnlock()
 		if r.closed || r.reports == nil {
-			return nil, mydcp.ErrAdmission
+			return nil, sfcp.ErrAdmission
 		}
 		view, err := r.physicalOwners()[0].currentView(ctx)
 		if err != nil || view.Local {
-			return nil, mydcp.ErrAdmission
+			return nil, sfcp.ErrAdmission
 		}
 		now := time.Now().Unix()
 		var reply certificateKeyReply
 		switch {
 		case q.Read != nil:
 			if !r.resourceCaller(ctx, caller, q.Read.Consumer) {
-				return nil, mydcp.ErrAdmission
+				return nil, sfcp.ErrAdmission
 			}
 			v, err := r.controlPolicy.CertificateMaterial(view.State, caller, *q.Read, now)
 			if err != nil {
@@ -332,28 +332,28 @@ func (r *Runtime) serveCertificateMaterial() error {
 			key, err := r.voterKey(view.State, v.Metadata.ID)
 			if err != nil || sha256.Sum256(key) != v.KeyID {
 				clear(key)
-				return nil, mydcp.ErrAdmission
+				return nil, sfcp.ErrAdmission
 			}
 			reply = certificateKeyReply{1, v.Digest(), key}
 		case q.Seal != nil:
 			members, err := r.controlPolicy.Members(view.State)
 			if err != nil || !members.WorkKey(caller) || q.Seal.Member != caller || q.Seal.At > now+60 || now-q.Seal.At > 60 || q.Seal.Verify(r.controlPolicy.Cluster) != nil {
-				return nil, mydcp.ErrAdmission
+				return nil, sfcp.ErrAdmission
 			}
 			key, err := r.voterKey(view.State, q.Seal.ID)
 			if err != nil {
-				return nil, mydcp.ErrAdmission
+				return nil, sfcp.ErrAdmission
 			}
 			reply = certificateKeyReply{1, [32]byte(q.Seal.ID), key}
 		default:
 			members, err := r.controlPolicy.Members(view.State)
 			m := q.Master
 			if err != nil || m.Schema != 1 || m.Cluster != r.controlPolicy.Cluster || m.Voter != caller || m.At > now+60 || now-m.At > 60 || !members.VoterKey(caller) || !members.VoterKey(r.commandIdentity().Public) {
-				return nil, mydcp.ErrAdmission
+				return nil, sfcp.ErrAdmission
 			}
 			key, err := r.certificateMaster()
 			if err != nil {
-				return nil, mydcp.ErrAdmission
+				return nil, sfcp.ErrAdmission
 			}
 			reply = certificateKeyReply{Schema: 1, Key: key}
 		}
@@ -361,16 +361,16 @@ func (r *Runtime) serveCertificateMaterial() error {
 		// The answer stands only while this node is still a voter.
 		latest, err := r.physicalOwners()[0].currentView(ctx)
 		if err != nil || latest.Local {
-			return nil, mydcp.ErrAdmission
+			return nil, sfcp.ErrAdmission
 		}
 		members, err := r.controlPolicy.Members(latest.State)
 		if err != nil || !members.VoterKey(r.commandIdentity().Public) {
-			return nil, mydcp.ErrAdmission
+			return nil, sfcp.ErrAdmission
 		}
 		if q.Read != nil {
 			current, err := r.controlPolicy.CertificateMaterial(latest.State, caller, *q.Read, time.Now().Unix())
 			if err != nil || current.Digest() != reply.Certificate {
-				return nil, mydcp.ErrAdmission
+				return nil, sfcp.ErrAdmission
 			}
 		}
 		return json.Marshal(reply)
@@ -443,7 +443,7 @@ func (r *Runtime) certificateRead(ctx context.Context, v certstore.Certificate, 
 		return control.CertificateMaterialRead{}, err
 	}
 	if view.Local {
-		return control.CertificateMaterialRead{}, mydcp.ErrAdmission
+		return control.CertificateMaterialRead{}, sfcp.ErrAdmission
 	}
 	projection, err := r.controlPolicy.ProjectResources(view.State)
 	if err != nil {
@@ -490,7 +490,7 @@ func (r *Runtime) openStoreCertificate(ctx context.Context, v certstore.Certific
 	native := r.certificateNative()
 	view, err := r.physicalOwners()[0].currentView(ctx)
 	if err != nil || view.Local {
-		return ingress.CertificateVersion{}, mydcp.ErrAdmission
+		return ingress.CertificateVersion{}, sfcp.ErrAdmission
 	}
 	key, err := r.voterKey(view.State, v.Metadata.ID)
 	if errors.Is(err, storage.ErrMissing) {
@@ -505,7 +505,7 @@ func (r *Runtime) openStoreCertificate(ctx context.Context, v certstore.Certific
 		return ingress.CertificateVersion{}, err
 	}
 	if latest.Local {
-		return ingress.CertificateVersion{}, mydcp.ErrAdmission
+		return ingress.CertificateVersion{}, sfcp.ErrAdmission
 	}
 	current, err := r.controlPolicy.CertificateMaterial(latest.State, r.commandIdentity().Public, q, time.Now().Unix())
 	if errors.Is(err, access.ErrDenied) || err == nil && current.Digest() != v.Digest() {
@@ -523,7 +523,7 @@ func (r *Runtime) openStoreCertificate(ctx context.Context, v certstore.Certific
 		return ingress.CertificateVersion{}, err
 	}
 	if final.Local {
-		return ingress.CertificateVersion{}, mydcp.ErrAdmission
+		return ingress.CertificateVersion{}, sfcp.ErrAdmission
 	}
 	if current, err := r.controlPolicy.CertificateMaterial(final.State, r.commandIdentity().Public, q, time.Now().Unix()); err != nil || current.Digest() != v.Digest() {
 		if err != nil && !errors.Is(err, access.ErrDenied) {
@@ -544,15 +544,15 @@ func (r *Runtime) ingressCertificates(ctx context.Context, host string, previous
 	stop := context.AfterFunc(r.ctx, cancel)
 	defer stop()
 	if ctx.Err() != nil || !r.life.TryRLock() {
-		return nil, mydcp.ErrAdmission
+		return nil, sfcp.ErrAdmission
 	}
 	defer r.life.RUnlock()
 	if r.closed || r.reports == nil {
-		return nil, mydcp.ErrAdmission
+		return nil, sfcp.ErrAdmission
 	}
 	view, err := r.physicalOwners()[0].currentView(ctx)
 	if err != nil || view.Local {
-		return nil, mydcp.ErrAdmission
+		return nil, sfcp.ErrAdmission
 	}
 	catalog, err := r.controlPolicy.Certificates(view.State)
 	if err != nil {
@@ -585,7 +585,7 @@ func (r *Runtime) ingressCertificates(ctx context.Context, host string, previous
 func (r *Runtime) registryCertificate(ctx context.Context, row registryOwnerRecord, current [32]byte) (ingress.CertificateVersion, bool, error) {
 	view, err := r.physicalOwners()[0].currentView(ctx)
 	if err != nil || view.Local {
-		return ingress.CertificateVersion{}, false, mydcp.ErrAdmission
+		return ingress.CertificateVersion{}, false, sfcp.ErrAdmission
 	}
 	catalog, err := r.controlPolicy.Certificates(view.State)
 	if err != nil {

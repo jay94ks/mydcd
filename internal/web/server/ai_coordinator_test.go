@@ -14,8 +14,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/web/ai"
-	"github.com/jay94ks/mydcd/internal/web/seal"
+	"github.com/jay94ks/seafield/internal/web/ai"
+	"github.com/jay94ks/seafield/internal/web/seal"
 )
 
 // scriptVendor answers model calls from a queue and keeps the requests.
@@ -96,7 +96,7 @@ func (f *fixture) sse(path string, body any) (int, []sseEvent) {
 	f.t.Helper()
 	raw, _ := json.Marshal(body)
 	req, _ := http.NewRequest("POST", f.http.URL+path, bytes.NewReader(raw))
-	req.Header.Set("X-MyDC-Web", "1")
+	req.Header.Set("X-SFC-Web", "1")
 	resp, err := f.hc.Do(req)
 	if err != nil {
 		f.t.Fatal(err)
@@ -373,7 +373,7 @@ func TestAICoordinatorEditRejectAndFallback(t *testing.T) {
 		t.Fatalf("tools: %v", tools)
 	}
 	or := v.reqs[len(v.reqs)-1]
-	if or["prompt_cache_key"] != "mydc-coordinator-v1" || or["store"] != false || len(or["tools"].([]any)) != 3 {
+	if or["prompt_cache_key"] != "sfc-coordinator-v1" || or["store"] != false || len(or["tools"].([]any)) != 3 {
 		t.Fatalf("openai request: %v", or)
 	}
 	if !strings.Contains(v.raws[len(v.raws)-2], `"call_id":"c1"`) {

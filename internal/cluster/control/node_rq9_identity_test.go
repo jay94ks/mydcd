@@ -9,11 +9,11 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/cluster/lifecycle"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/tenancy"
-	"github.com/jay94ks/mydcd/internal/workload"
-	"github.com/jay94ks/mydcd/internal/workload/volumes"
+	"github.com/jay94ks/seafield/internal/cluster/lifecycle"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/tenancy"
+	"github.com/jay94ks/seafield/internal/workload"
+	"github.com/jay94ks/seafield/internal/workload/volumes"
 )
 
 // Reuses the original membership/identity reducers and an explicit modeled
@@ -25,7 +25,7 @@ func rotateRQ9CoreOwner(t *testing.T, f *backupCoreFixture) ed25519.PrivateKey {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, found := r.Quotas.Limit(tenant, "node-a"); !found {
+		if limit, found := r.Quotas.Limit(tenant, "node-a"); !found || limit.Default {
 			f.apply("rq9-quota-"+tenant, "set-node-quota", 0, tenancy.NodeLimit{Tenant: tenant, Node: "node-a", Owner: f.p.TrustRoot, Capacity: workload.Resources{CPU: 10_000_000_000, Memory: 1 << 30}, MaxConsumers: 128}, state.Applied)
 		}
 	}

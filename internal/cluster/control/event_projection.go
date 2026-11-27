@@ -8,10 +8,10 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/eventlog"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/eventlog"
 )
 
 // ProjectEvents uses only committed inputs and immutable before/after state.
@@ -228,86 +228,9 @@ func (p Policy) ProjectEvents(before, after state.State, command state.Command, 
 		}
 		emit(kind, "node", eventlog.Target{Node: target.ID}, base)
 	}
-	if command.Key == CompactKey && before.Object(CompactKey) != after.Object(CompactKey) {
-		old, err := p.Compactions(before)
-		if err != nil {
+	if book, ok := bookFor(command.Key); ok && book.Events != nil && before.Object(command.Key) != after.Object(command.Key) {
+		if err := book.Events(p, before, after, emit); err != nil {
 			return nil, err
-		}
-		next, err := p.Compactions(after)
-		if err != nil {
-			return nil, err
-		}
-		for _, job := range next.Records {
-			previous, _ := old.Record(job.Job.Operation)
-			for _, node := range job.Job.Nodes {
-				was, known := previous.Job.Node(node.Node)
-				if known && was.State == node.State {
-					continue
-				}
-				kind := ""
-				if node.State == "running" {
-					kind = "raft-compact-started"
-				} else if node.State == "done" || node.State == "failed" || node.State == "skipped" {
-					kind = "raft-compact-completed"
-				}
-				if kind != "" {
-					d := eventlog.Detail{Operation: job.Job.Operation, State: node.State, Code: node.Code}
-					eventReason(&d, job.Origin)
-					emit(kind, "cluster", eventlog.Target{Node: node.Node}, d)
-				}
-			}
-		}
-	}
-	if command.Key == ImageCacheKey && before.Object(ImageCacheKey) != after.Object(ImageCacheKey) {
-		old, err := p.ImageCacheJobs(before)
-		if err != nil {
-			return nil, err
-		}
-		next, err := p.ImageCacheJobs(after)
-		if err != nil {
-			return nil, err
-		}
-		for _, job := range next.Records {
-			previous, _ := old.Record(job.Operation)
-			for _, part := range job.Parts {
-				existed := false
-				for _, p := range previous.Parts {
-					if p.ID == part.ID {
-						existed = true
-						break
-					}
-				}
-				if existed {
-					continue
-				}
-				d := eventlog.Detail{Operation: job.Operation, State: part.State, Code: part.Code}
-				eventReason(&d, job.Origin)
-				emit("node-cache-cleaned", "cluster", eventlog.Target{Node: job.Plan.Node, Native: part.ID}, d)
-			}
-		}
-	}
-
-	if command.Key == TunnelReconnectKey && before.Object(TunnelReconnectKey) != after.Object(TunnelReconnectKey) {
-		old, err := p.TunnelReconnections(before)
-		if err != nil {
-			return nil, err
-		}
-		next, err := p.TunnelReconnections(after)
-		if err != nil {
-			return nil, err
-		}
-		for _, row := range next.Records {
-			previous, _ := old.Record(row.Operation)
-			if row.Result == nil || previous.Result != nil {
-				continue
-			}
-			kind := "tunnel-reconnected"
-			if row.Result.State == "failed" {
-				kind = "tunnel-down"
-			}
-			d := eventlog.Detail{Operation: row.Operation, State: row.Result.State, Code: row.Result.Code}
-			eventReason(&d, row.Origin)
-			emit(kind, "node", eventlog.Target{Node: row.Plan.Node, PairID: row.Plan.PairID}, d)
 		}
 	}
 	if command.Key == RegistriesKey && before.Object(RegistriesKey) != after.Object(RegistriesKey) {

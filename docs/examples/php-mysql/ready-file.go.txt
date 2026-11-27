@@ -4,7 +4,7 @@ package checker
 
 import (
 	"context"
-	lifecycle "github.com/jay94ks/mydcd/lifecycle/v1"
+	lifecycle "github.com/jay94ks/seafield/lifecycle/v1"
 )
 
 func Check(ctx context.Context, in lifecycle.Request, probe lifecycle.Probe) (lifecycle.Result, error) {

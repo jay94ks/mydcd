@@ -6,13 +6,12 @@ import (
 	"bytes"
 	"encoding/json"
 	"maps"
-	"net/netip"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/engine"
-	"github.com/jay94ks/mydcd/internal/tenancy"
-	"github.com/jay94ks/mydcd/internal/workload"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/engine"
+	"github.com/jay94ks/seafield/internal/tenancy"
+	"github.com/jay94ks/seafield/internal/workload"
 )
 
 func managedNetworkFixture(t *testing.T) (*fixture, Compose, PlanningContext) {
@@ -33,9 +32,9 @@ func managedNetworkFixture(t *testing.T) (*fixture, Compose, PlanningContext) {
 	}
 	d := tenancy.TUNDefinition{Tenant: "tenant", Name: "shared-services", Members: []tenancy.TUNNode{}}
 	for _, node := range []string{"node-a", "node-b"} {
-		declared := c.Networks["app"].MyDC
+		declared := c.Networks["app"].Sfc
 		pool := declared.Pools[node]
-		d.Members = append(d.Members, tenancy.TUNNode{Node: node, Owner: ctx.Nodes[node].Key, Pools: []tenancy.Subnet{{ID: "pool", Prefix: mustPrefix(pool.CIDR), Gateway: mustAddr(pool.Gateway), MTU: declared.MTU}}, Addresses: []netip.Prefix{mustPrefix(declared.TunnelAddresses[node])}})
+		d.Members = append(d.Members, tenancy.TUNNode{Node: node, Owner: ctx.Nodes[node].Key, Pools: []tenancy.Subnet{{ID: "pool", Prefix: mustPrefix(pool.CIDR), Gateway: mustAddr(pool.Gateway), MTU: declared.MTU}}})
 	}
 	var err error
 	ctx.Networks, err = ctx.Networks.CreateTUN(f.c, quotas, "alice", 0, d)
@@ -150,7 +149,7 @@ func TestP0ManagedNetworkRemoteIngressUsesOriginalBorrowedSources(t *testing.T) 
 	f, c, ctx := managedNetworkFixture(t)
 	i := &IngressDeclaration{Node: "node-b", Host: "generic.test", Listeners: []ListenerDeclaration{{Address: "192.0.2.12:8080"}}, Runtime: IngressRuntime{MaxRequests: 2, MaxConnections: 8, MaxHeaderBytes: 4096, MaxBodyBytes: 1 << 20, BufferBytes: 128 << 10, RequestTimeoutMS: 30000, DialTimeoutMS: 1000, ResponseHeaderTimeoutMS: 2000, HealthIntervalMS: 100}}
 	i.Backend.Service, i.Backend.Port, i.Backend.HealthPath = "web", 8080, "/readyz"
-	c.MyDC.Ingress = i
+	c.Sfc.Ingress = i
 	b, err := CompileApp(c, f.c, ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -191,7 +190,7 @@ func TestP0ManagedNetworkRemoteIngressUsesOriginalBorrowedSources(t *testing.T) 
 	delete(c.Services, "web")
 	c.Services["api"] = web
 	c.Name, ctx.Project = "generic-app", "generic-app"
-	c.MyDC.Ingress.Backend.Service, c.MyDC.Ingress.Backend.Port = "api", 9090
+	c.Sfc.Ingress.Backend.Service, c.Sfc.Ingress.Backend.Port = "api", 9090
 	b, err = CompileApp(c, f.c, ctx)
 	if err != nil {
 		t.Fatal(err)

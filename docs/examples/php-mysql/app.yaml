@@ -1,7 +1,7 @@
 # app.yaml은 tenant의 앱/서비스와 기존 망·Volume·Secret 참조만 정의한다.
 # CIDR·IPAM·DNS 등 클러스터 관리 자원은 cluster.yaml/관리 명령으로 미리 준비한다.
 # 컨테이너 앱 소스는 apps/php/, apps/mysql/에서 관리한다.
-# 범용 MyDC 엔진의 샘플 앱이다. PHP/MySQL의 이름·포트·데이터 경로·검사 조건을 제품 코어에 고정하지 않는다.
+# 범용 Seafield Cluster 엔진의 샘플 앱이다. PHP/MySQL의 이름·포트·데이터 경로·검사 조건을 제품 코어에 고정하지 않는다.
 # app.yaml 명세의 PHP + MySQL 두 노드 설계 예시(schema=1).
 # lifecycle/Yaegi/선택 컴파일의 별도 앱 예시는 lifecycle.example.app.yaml을 참고한다.
 # 고정 digest/profile/승인된 node와 이름 있는 tenant network·Secret Group을 먼저 준비한다.
@@ -14,7 +14,7 @@
 # DB 이동은 새 목표 app와 별도 명시 volume move operation으로 승인하며 up/CD만으로 시작하지 않는다.
 # aliases는 관리 DNS의 앱 이름 등록이다. 해당 망의 DNS 정책과 담당 node의 managed-dns capability가 없으면 계획을 거부한다.
 name: php-mysql-demo
-x-mydc:
+x-sfc:
   ingress:
     runtime:
       max_requests: 8
@@ -61,7 +61,7 @@ x-mydc:
       active_operations: 1
 services:
   web:
-    image: docker.io/mydc-example/php-demo@sha256:<WEB_IMAGE_DIGEST>
+    image: docker.io/sfc-example/php-demo@sha256:<WEB_IMAGE_DIGEST>
     stop_grace_period: 30s
     command:
     - apache2-foreground
@@ -74,7 +74,7 @@ services:
     cpus: 0.5
     mem_limit: 256m
     environment:
-      DB_HOST: db.php-mysql.mydc.test
+      DB_HOST: db.php-mysql.sfc.test
       DB_PORT: '3306'
       DB_DATABASE: demo
       DB_USER: demo
@@ -96,16 +96,16 @@ services:
       app:
         ipv4_address: 10.240.10.10
         aliases: [web]
-    x-mydc:
+    x-sfc:
       node: node-a
       ready: {http: /readyz, port: 8080}
       secrets_from: [tenant-defaults, group/common, web-runtime-overrides]
     dns:
     - 10.240.10.1
     dns_search:
-    - php-mysql.mydc.test
+    - php-mysql.sfc.test
   db:
-    image: docker.io/mydc-example/mysql-demo@sha256:<DB_IMAGE_DIGEST>
+    image: docker.io/sfc-example/mysql-demo@sha256:<DB_IMAGE_DIGEST>
     # 앱의 명시 정책 예시. 엔진은 이미지 이름으로 유예를 변경하지 않는다.
     stop_grace_period: 2m
     stop_signal: SIGTERM
@@ -147,7 +147,7 @@ services:
     healthcheck:
       test:
       - CMD
-      - /usr/local/bin/mydc-db-ready
+      - /usr/local/bin/sfc-db-ready
       interval: 5s
       timeout: 3s
       retries: 12
@@ -156,20 +156,20 @@ services:
       app:
         ipv4_address: 10.240.20.10
         aliases: [db]
-    x-mydc:
+    x-sfc:
       node: node-b
       secrets_from: [tenant-defaults, group/common, group/db-admin]
     dns:
     - 10.240.20.1
     dns_search:
-    - php-mysql.mydc.test
+    - php-mysql.sfc.test
 networks:
   app:
     external: true
     name: php-mysql-network
 volumes:
   mysql-data:
-    x-mydc:
+    x-sfc:
       node: node-b
       uid: 10001
       gid: 10001
@@ -177,8 +177,8 @@ volumes:
       size: 2GiB
 secrets:
   db-password:
-    x-mydc:
+    x-sfc:
       key: DB_PASSWORD
   db-root-password:
-    x-mydc:
+    x-sfc:
       key: MYSQL_ROOT_PASSWORD

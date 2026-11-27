@@ -12,7 +12,7 @@ import (
 )
 
 // CDFile is cd.yaml, the CD policy of one app as a person writes it
-// (`mydc cd set APP -f cd.yaml`). It is the desired state only; the server
+// (`sfcli cd set APP -f cd.yaml`). It is the desired state only; the server
 // keeps the policy, its revision and the app it belongs to. Values that have
 // one allowed setting today (runtime edits, queue limits) are not in the
 // file; the server keeps their defaults (30s fetch timeout, 4MiB file).
@@ -89,7 +89,7 @@ func (f CDFile) Declaration() (DeliveryDeclaration, error) {
 	return p, nil
 }
 
-// CDFileOf is the cd.yaml form of a stored policy (`mydc cd show -o yaml`
+// CDFileOf is the cd.yaml form of a stored policy (`sfcli cd show -o yaml`
 // prints it, so it can be edited and set again).
 func CDFileOf(p DeliveryDeclaration) CDFile {
 	f := CDFile{Version: 1, Repository: p.Source.Repository, Branch: p.Source.Ref, Path: p.Source.Path, Credential: p.Source.Credential, Prune: p.Sync.Prune}

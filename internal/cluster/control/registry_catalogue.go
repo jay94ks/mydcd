@@ -7,10 +7,10 @@ import (
 	"encoding/json"
 	"slices"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/imagesource"
-	"github.com/jay94ks/mydcd/internal/registryclient"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/imagesource"
+	"github.com/jay94ks/seafield/internal/registryclient"
 )
 
 type RegistryCatalogueQuery struct{ Kind, ID, Repository string }
@@ -55,7 +55,7 @@ func (r RegistryCatalogueRead) Basis() [32]byte {
 		Query        RegistryCatalogueQuery
 		Target       RegistryCatalogueTarget
 	}{r.Tenant, r.Session.User, r.Session.AccountRevision, r.Session.Scopes, r.Query, r.Target})
-	return sha256.Sum256(append([]byte("mydc-registry-catalogue-permission-1\x00"), raw...))
+	return sha256.Sum256(append([]byte("sfc-registry-catalogue-permission-1\x00"), raw...))
 }
 func (p Policy) PlanRegistryCatalogue(s state.State, session access.Session, at int64, tenant string, q RegistryCatalogueQuery, after string) (RegistryCatalogueRead, error) {
 	p, err := p.Current(s)

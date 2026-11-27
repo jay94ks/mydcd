@@ -7,11 +7,11 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/secrets"
-	"github.com/jay94ks/mydcd/internal/workload/volumes"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/secrets"
+	"github.com/jay94ks/seafield/internal/workload/volumes"
 )
 
 // VolumeMoveInputs contains only the original target's authorized public
@@ -43,7 +43,7 @@ type VolumeMoveInputProof struct {
 func VolumeMoveInputProofBytes(p VolumeMoveInputProof) []byte {
 	p.Signature = nil
 	raw, _ := json.Marshal(p)
-	return append([]byte("mydc-volume-move-inputs-1\x00"), raw...)
+	return append([]byte("sfc-volume-move-inputs-1\x00"), raw...)
 }
 
 func (p VolumeMoveInputProof) Verify(j VolumeMove, readSet, consumer [32]byte, now int64) error {
@@ -203,7 +203,7 @@ func movePreparationDigest(binding [32]byte, reads []AppInputRead, resources []V
 	if err != nil {
 		return [32]byte{}, err
 	}
-	return sha256.Sum256(append([]byte("mydc-volume-move-readset-1\x00"), raw...)), nil
+	return sha256.Sum256(append([]byte("sfc-volume-move-readset-1\x00"), raw...)), nil
 }
 
 func (p Policy) moveInputCaller(s state.State, inputs *VolumeMoveInputs, caller [32]byte) bool {

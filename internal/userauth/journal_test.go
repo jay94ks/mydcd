@@ -13,11 +13,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/mydcp"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/sfcp"
 )
 
 func journalFixture(t *testing.T) (string, Client, access.Session, *identity.Identity) {
@@ -31,7 +31,7 @@ func journalFixture(t *testing.T) (string, Client, access.Session, *identity.Ide
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { clear(issuer.Private); clear(self.Private) })
-	c := Client{Self: self, Cluster: [32]byte{84}, Peers: []mydcp.Peer{{ID: "node", Endpoint: "127.0.0.1:7443", Policy: mydcp.Policy{Key: mydcp.Identity(issuer.Public), Respond: true}}}}
+	c := Client{Self: self, Cluster: [32]byte{84}, Peers: []sfcp.Peer{{ID: "node", Endpoint: "127.0.0.1:7443", Policy: sfcp.Policy{Key: sfcp.Identity(issuer.Public), Respond: true}}}}
 	now := time.Now().Unix()
 	s := access.Session{Schema: 1, ID: "session", Cluster: c.Cluster, User: "alice", Credential: "key", AccountRevision: 1, Key: self.Public, Issuer: issuer.Public, IssuerEpoch: 1, IssuedAt: now, ExpiresAt: now + 3600, Scopes: []access.Scope{{Tenant: "*", Actions: []access.Action{access.Read}}}}
 	s.Signature = ed25519.Sign(issuer.Private, access.SessionBytes(s))
@@ -127,7 +127,7 @@ func TestManagementJournalConcurrentImmutableOriginalAndCurrentUser(t *testing.T
 		t.Fatal("another user inherited request")
 	}
 	wrongProfile := newClient
-	wrongProfile.Peers = append([]mydcp.Peer(nil), c.Peers...)
+	wrongProfile.Peers = append([]sfcp.Peer(nil), c.Peers...)
 	wrongProfile.Peers[0].Endpoint = "127.0.0.1:7444"
 	if _, err = LoadOperation(home, wrongProfile, current, op.RequestID); err != nil {
 		t.Fatal("a moved endpoint lost the cluster's request", err)

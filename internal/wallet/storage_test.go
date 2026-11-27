@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/localstore"
+	"github.com/jay94ks/seafield/internal/localstore"
 )
 
 // These actual crypto/filesystem boundary cases run in U0's final validation,
@@ -82,7 +82,7 @@ func TestU0WalletDiskPrivateOwnershipLockAndReadback(t *testing.T) {
 	if e = d.Save(password); e != nil {
 		t.Fatal(e)
 	}
-	saved, e := os.ReadFile(filepath.Join(home, ".mydc", "wallet.bin"))
+	saved, e := os.ReadFile(filepath.Join(home, ".sfc", "wallet.bin"))
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -91,12 +91,12 @@ func TestU0WalletDiskPrivateOwnershipLockAndReadback(t *testing.T) {
 		t.Fatal("private seed persisted unencrypted")
 	}
 	for _, name := range []string{"wallet.bin", "wallet.lock"} {
-		info, e := os.Stat(filepath.Join(home, ".mydc", name))
+		info, e := os.Stat(filepath.Join(home, ".sfc", name))
 		if e != nil || info.Mode().Perm() != 0600 {
 			t.Fatal("private file mode", name, e)
 		}
 	}
-	info, e := os.Stat(filepath.Join(home, ".mydc"))
+	info, e := os.Stat(filepath.Join(home, ".sfc"))
 	if e != nil || info.Mode().Perm() != 0700 {
 		t.Fatal("private directory mode", e)
 	}
@@ -195,7 +195,7 @@ func TestU0WalletCommitCutsRecoverOriginalCiphertext(t *testing.T) {
 			if e = d.Init(pass); e != nil {
 				t.Fatal(e)
 			}
-			original, e := os.ReadFile(filepath.Join(home, ".mydc", walletFile))
+			original, e := os.ReadFile(filepath.Join(home, ".sfc", walletFile))
 			if e != nil {
 				t.Fatal(e)
 			}
@@ -216,9 +216,9 @@ func TestU0WalletCommitCutsRecoverOriginalCiphertext(t *testing.T) {
 			if e != nil {
 				t.Fatal(e)
 			}
-			candidate, _ := os.ReadFile(filepath.Join(home, ".mydc", nextFile))
+			candidate, _ := os.ReadFile(filepath.Join(home, ".sfc", nextFile))
 			defer clear(candidate)
-			published, _ := os.ReadFile(filepath.Join(home, ".mydc", walletFile))
+			published, _ := os.ReadFile(filepath.Join(home, ".sfc", walletFile))
 			defer clear(published)
 			goal := sha256.Sum256(candidate)
 			if status.Published {
@@ -234,7 +234,7 @@ func TestU0WalletCommitCutsRecoverOriginalCiphertext(t *testing.T) {
 				if e = d.Recover(true); e != nil {
 					t.Fatal(e)
 				}
-				after, e := os.ReadFile(filepath.Join(home, ".mydc", walletFile))
+				after, e := os.ReadFile(filepath.Join(home, ".sfc", walletFile))
 				defer clear(after)
 				if e != nil || !bytes.Equal(after, original) {
 					t.Fatal("abort changed original", e)
@@ -259,7 +259,7 @@ func TestU0WalletCommitCutsRecoverOriginalCiphertext(t *testing.T) {
 				if e = d.Recover(false); e != nil {
 					t.Fatal(e)
 				}
-				after, e := os.ReadFile(filepath.Join(home, ".mydc", walletFile))
+				after, e := os.ReadFile(filepath.Join(home, ".sfc", walletFile))
 				defer clear(after)
 				if e != nil || sha256.Sum256(after) != goal {
 					t.Fatal("recovery reencrypted/replaced original goal", e)
@@ -292,7 +292,7 @@ func TestU0WalletRejectsSymlinkHardlinkAndUnsafeModes(t *testing.T) {
 		t.Fatal(e)
 	}
 	_ = d.Close()
-	root := filepath.Join(home, ".mydc")
+	root := filepath.Join(home, ".sfc")
 	file := filepath.Join(root, walletFile)
 	raw, e := os.ReadFile(file)
 	if e != nil {

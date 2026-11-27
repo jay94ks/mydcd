@@ -16,9 +16,9 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/imagebuild"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/imagebuild"
 )
 
 type imageBuildZeroReader struct{}
@@ -30,7 +30,7 @@ func (imageBuildZeroReader) Read(p []byte) (int, error) { clear(p); return len(p
 // Memory stays bounded; no extra builder, launcher or independent test DB.
 func (f *managedRegistryNative) verifyLargeImageBuildZIPNative(t *testing.T, ctx context.Context, root string, base imagebuild.ContextSpec, p control.Policy, read func() cluster.View, change func(string, string, uint64, any)) {
 	t.Helper()
-	if os.Getenv("MYDC_TEST_RQ6_REMAINING") != "large-context" {
+	if os.Getenv("SFC_TEST_RQ6_REMAINING") != "large-context" {
 		f.verifyTenantStorageNative(t, ctx, root, base.Root, p, read, change)
 	}
 	spec := base.Own()

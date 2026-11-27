@@ -1,0 +1,25 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: seafield <seafield@invalid>
+Date: Fri, 27 Nov 2026 07:54:43 +0000
+Subject: [PATCH 01/20] logdrivers: keep only json-file and local
+
+
+diff --git a/daemon/logdrivers_linux.go b/daemon/logdrivers_linux.go
+index 6fcc240..4a60b01 100644
+--- a/daemon/logdrivers_linux.go
++++ b/daemon/logdrivers_linux.go
+@@ -3,14 +3,7 @@
+ import (
+ 	// Importing packages here only to make sure their init gets called and
+ 	// therefore they register themselves to the logdriver factory.
+-	_ "github.com/moby/moby/v2/daemon/logger/awslogs"
+-	_ "github.com/moby/moby/v2/daemon/logger/fluentd"
+-	_ "github.com/moby/moby/v2/daemon/logger/gcplogs"
+-	_ "github.com/moby/moby/v2/daemon/logger/gelf"
+-	_ "github.com/moby/moby/v2/daemon/logger/journald"
+ 	_ "github.com/moby/moby/v2/daemon/logger/jsonfilelog"
+ 	_ "github.com/moby/moby/v2/daemon/logger/local"
+ 	_ "github.com/moby/moby/v2/daemon/logger/loggerutils/cache"
+-	_ "github.com/moby/moby/v2/daemon/logger/splunk"
+-	_ "github.com/moby/moby/v2/daemon/logger/syslog"
+ )

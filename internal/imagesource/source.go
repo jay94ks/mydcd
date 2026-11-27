@@ -6,7 +6,7 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/jay94ks/mydcd/internal/access"
+	"github.com/jay94ks/seafield/internal/access"
 )
 
 // Source contains public selectors only. Provider credentials are read

@@ -1,17 +1,17 @@
-# mydc lifecycle: lifecycle 스크립트와 정책
+# sfcli lifecycle: lifecycle 스크립트와 정책
 
-lifecycle 스크립트는 앱 서비스가 이름으로 부르는 Go 프로그램이다(app.yaml의 `x-mydc` lifecycle). `script put`을 할 때마다 새 revision이 생기고, 앱은 배포할 때의 revision을 계속 쓴다. 모든 명령은 작업 공간이 필요하다.
+lifecycle 스크립트는 앱 서비스가 이름으로 부르는 Go 프로그램이다(app.yaml의 `x-sfc` lifecycle). `script put`을 할 때마다 새 revision이 생기고, 앱은 배포할 때의 revision을 계속 쓴다. 모든 명령은 작업 공간이 필요하다.
 
 | 명령 | 하는 일 |
 |---|---|
-| `mydc lifecycle script list` | 스크립트 revision 목록. 상태는 active·retired·deleted |
-| `mydc lifecycle script show NAME [--revision N] [--source]` | revision 하나를 보여 준다. 기본은 가장 새 active revision. `--source`는 Go 원문을 출력한다 |
-| `mydc lifecycle script put NAME -f FILE.go [--modules modules.yaml] [--module PATH=FILE.zip]...` | 새 revision을 올린다. 모듈 ZIP이 서버에 없으면 `--module`로 함께 올린다 |
-| `mydc lifecycle script retire NAME --revision N` | 새 앱이 그 revision을 쓰지 못하게 한다. 실행 중인 앱은 계속 쓴다 |
-| `mydc lifecycle script delete NAME --revision N` | retire한 revision을 지운다 |
-| `mydc lifecycle policy show` | 작업 공간 정책을 lifecycle-policy.yaml 형식으로 출력한다 |
-| `mydc lifecycle policy set -f lifecycle-policy.yaml` | 정책을 바꾼다 |
-| `mydc lifecycle check FILE.go [--modules modules.yaml] [--node NODE]` | 서버에서 컴파일·타입 검사만 한다. 등록하지 않는다. 오류는 `파일:줄:열: 내용`으로 출력하고 종료 코드 3 |
+| `sfcli lifecycle script list` | 스크립트 revision 목록. 상태는 active·retired·deleted |
+| `sfcli lifecycle script show NAME [--revision N] [--source]` | revision 하나를 보여 준다. 기본은 가장 새 active revision. `--source`는 Go 원문을 출력한다 |
+| `sfcli lifecycle script put NAME -f FILE.go [--modules modules.yaml] [--module PATH=FILE.zip]...` | 새 revision을 올린다. 모듈 ZIP이 서버에 없으면 `--module`로 함께 올린다 |
+| `sfcli lifecycle script retire NAME --revision N` | 새 앱이 그 revision을 쓰지 못하게 한다. 실행 중인 앱은 계속 쓴다 |
+| `sfcli lifecycle script delete NAME --revision N` | retire한 revision을 지운다 |
+| `sfcli lifecycle policy show` | 작업 공간 정책을 lifecycle-policy.yaml 형식으로 출력한다 |
+| `sfcli lifecycle policy set -f lifecycle-policy.yaml` | 정책을 바꾼다 |
+| `sfcli lifecycle check FILE.go [--modules modules.yaml] [--node NODE]` | 서버에서 컴파일·타입 검사만 한다. 등록하지 않는다. 오류는 `파일:줄:열: 내용`으로 출력하고 종료 코드 3 |
 
 바꾸는 명령은 `--id ID`와 `--if-revision N`을 받는다. `script put`을 같은 `--id`로 다시 실행하면 저장한 진행 상태에서 이어 간다. 이미 올린 원문과 ZIP은 다시 읽지 않는다.
 
@@ -43,7 +43,7 @@ execution:
   probe: 4KiB
   capabilities: [file]   # connect, dependency, exec, file, healthz
 resolver:
-  allow_packages: [context, github.com/jay94ks/mydcd/lifecycle/v1]
+  allow_packages: [context, github.com/jay94ks/seafield/lifecycle/v1]
   deny_packages: []
   modules: []        # modules.yaml과 같은 항목
   source_cache: 1MiB

@@ -12,23 +12,23 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/web/mydc"
-	checker "github.com/jay94ks/mydcd/internal/workload/lifecycle"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/web/sfc"
+	checker "github.com/jay94ks/seafield/internal/workload/lifecycle"
 )
 
 // Lifecycle (state check) scripts and the tenant lifecycle policy (UI-90/91).
-// mydcd keeps the catalog (control.LifecycleKey): every rule (policy allows
+// sfcd keeps the catalog (control.LifecycleKey): every rule (policy allows
 // the source and its module lock, record CAS, delete only an inactive,
-// unpinned version) is mydcd's. The web daemon reads the `lifecycles`
+// unpinned version) is sfcd's. The web daemon reads the `lifecycles`
 // pages, shapes them per script, and builds the change payloads.
 
-const maxLifecyclePages = 4096 // mydcd returns one entry per page
+const maxLifecyclePages = 4096 // sfcd returns one entry per page
 
 // lifecycleEntries reads the tenant's entries after `after` while keep says
 // so (keys are sorted: "policy" < "script/{name}/{revision:%020d}").
-func lifecycleEntries(ctx context.Context, c mydc.Conn, tenant, after string, keep func(mydc.LifecycleEntry) bool) ([]mydc.LifecycleEntry, error) {
-	var out []mydc.LifecycleEntry
+func lifecycleEntries(ctx context.Context, c sfc.Conn, tenant, after string, keep func(sfc.LifecycleEntry) bool) ([]sfc.LifecycleEntry, error) {
+	var out []sfc.LifecycleEntry
 	for range maxLifecyclePages {
 		p, err := c.Lifecycles(ctx, tenant, after)
 		if err != nil {
@@ -49,7 +49,7 @@ func lifecycleEntries(ctx context.Context, c mydc.Conn, tenant, after string, ke
 }
 
 // currentLifecyclePolicy is the "policy" entry, if the tenant has one.
-func currentLifecyclePolicy(ctx context.Context, c mydc.Conn, tenant string) (*checker.TenantPolicy, error) {
+func currentLifecyclePolicy(ctx context.Context, c sfc.Conn, tenant string) (*checker.TenantPolicy, error) {
 	p, err := c.Lifecycles(ctx, tenant, "")
 	if err != nil {
 		return nil, err
@@ -61,9 +61,9 @@ func currentLifecyclePolicy(ctx context.Context, c mydc.Conn, tenant string) (*c
 	return nil, nil
 }
 
-func scriptEntries(ctx context.Context, c mydc.Conn, tenant, name string) ([]mydc.LifecycleEntry, error) {
+func scriptEntries(ctx context.Context, c sfc.Conn, tenant, name string) ([]sfc.LifecycleEntry, error) {
 	prefix := "script/" + name + "/"
-	return lifecycleEntries(ctx, c, tenant, prefix, func(e mydc.LifecycleEntry) bool { return strings.HasPrefix(e.Key, prefix) })
+	return lifecycleEntries(ctx, c, tenant, prefix, func(e sfc.LifecycleEntry) bool { return strings.HasPrefix(e.Key, prefix) })
 }
 
 type lcModuleView struct {
@@ -96,7 +96,7 @@ type lcScriptView struct {
 	Versions       []lcVersionView `json:"versions"`
 }
 
-func scriptViews(entries []mydc.LifecycleEntry) []lcScriptView {
+func scriptViews(entries []sfc.LifecycleEntry) []lcScriptView {
 	out := []lcScriptView{}
 	for _, e := range entries {
 		if e.Source == nil || e.Name == "" {
@@ -125,8 +125,8 @@ func scriptViews(entries []mydc.LifecycleEntry) []lcScriptView {
 // enabled, revision}}.
 func (s *Server) handleLifecycleScripts(w http.ResponseWriter, r *http.Request, ws *webSession) {
 	tenant := r.PathValue("t")
-	read(s, w, r, ws, func(ctx context.Context, c mydc.Conn) (map[string]any, error) {
-		all, err := lifecycleEntries(ctx, c, tenant, "", func(mydc.LifecycleEntry) bool { return true })
+	read(s, w, r, ws, func(ctx context.Context, c sfc.Conn) (map[string]any, error) {
+		all, err := lifecycleEntries(ctx, c, tenant, "", func(sfc.LifecycleEntry) bool { return true })
 		if err != nil {
 			return nil, err
 		}
@@ -154,7 +154,7 @@ func (s *Server) handleLifecycleScript(w http.ResponseWriter, r *http.Request, w
 		}
 		want = v
 	}
-	read(s, w, r, ws, func(ctx context.Context, c mydc.Conn) (map[string]any, error) {
+	read(s, w, r, ws, func(ctx context.Context, c sfc.Conn) (map[string]any, error) {
 		entries, err := scriptEntries(ctx, c, tenant, name)
 		if err != nil {
 			return nil, err
@@ -178,7 +178,7 @@ func (s *Server) handleLifecycleScript(w http.ResponseWriter, r *http.Request, w
 		}
 		out := map[string]any{"script": v, "revision": sel, "source": nil, "sourceAvailable": false, "usedBy": nil, "usedByAvailable": false}
 		if sel != 0 {
-			if src, err := mydc.ReadLifecycleSource(ctx, c, tenant, name, sel); err == nil {
+			if src, err := sfc.ReadLifecycleSource(ctx, c, tenant, name, sel); err == nil {
 				out["source"], out["sourceAvailable"] = src.Source, true
 			} else if ctx.Err() != nil {
 				return nil, err
@@ -202,16 +202,16 @@ func (s *Server) handleLifecycleScript(w http.ResponseWriter, r *http.Request, w
 }
 
 // lifecycleUpload: the CheckerUpload of one web operation. It is the same
-// on every retry of that opId (mydcd binds an upload to its first bytes and
+// on every retry of that opId (sfcd binds an upload to its first bytes and
 // keeps its original record), and differs between users and opIds.
 func lifecycleUpload(ws *webSession, opID string) [32]byte {
-	return sha256.Sum256([]byte("mydc-web-lifecycle-upload\x00" + ws.user.ID + "\x00" + opID))
+	return sha256.Sum256([]byte("sfc-web-lifecycle-upload\x00" + ws.user.ID + "\x00" + opID))
 }
 
-// lostReply: an error that is not one of mydcd's answers (the connection
+// lostReply: an error that is not one of sfcd's answers (the connection
 // or reply was lost), so the original record is read back.
 func lostReply(ctx context.Context, err error) bool {
-	var me *mydc.Error
+	var me *sfc.Error
 	return err != nil && ctx.Err() == nil && !errors.As(err, &me)
 }
 
@@ -237,7 +237,7 @@ func (s *Server) handleLifecyclePut(w http.ResponseWriter, r *http.Request, ws *
 		return
 	}
 	tenant, name := r.PathValue("t"), r.PathValue("name")
-	s.sharedCreate(w, r, ws, req.OpID, req, func(ctx context.Context, c mydc.Conn, _ mydc.Session) (string, any, uint64, string, error) {
+	s.sharedCreate(w, r, ws, req.OpID, req, func(ctx context.Context, c sfc.Conn, _ sfc.Session) (string, any, uint64, string, error) {
 		if !checker.ValidScriptName(name) {
 			return "", nil, 0, "", invalid("name: lowercase letters, digits and '-'")
 		}
@@ -279,7 +279,7 @@ func (s *Server) handleLifecyclePut(w http.ResponseWriter, r *http.Request, ws *
 		}
 		upload := lifecycleUpload(ws, req.OpID)
 		// Modules first, then the source, all on one provider and upload.
-		// node "" lets mydcd pick; its reply's Node is kept for the rest.
+		// node "" lets sfcd pick; its reply's Node is kept for the rest.
 		node := req.Node
 		for _, a := range archives {
 			m, err := c.LifecycleModuleStage(ctx, node, d, upload, a)
@@ -299,7 +299,7 @@ func (s *Server) handleLifecyclePut(w http.ResponseWriter, r *http.Request, ws *
 			// The reply was lost: read the original record, never resend.
 			staged, err = c.LifecycleSourceRecover(ctx, node, d, upload)
 		}
-		if isMydcCode(err, mydc.CodeMissing) && len(lock) > 0 {
+		if isSfcCode(err, sfc.CodeMissing) && len(lock) > 0 {
 			return "", nil, 0, "", &httpErr{http.StatusUnprocessableEntity, "module-missing", "a module of the lock is not on the provider server; send its ZIP in lock[].zip"}
 		}
 		if err != nil {
@@ -312,7 +312,7 @@ func (s *Server) handleLifecyclePut(w http.ResponseWriter, r *http.Request, ws *
 			}
 			return "", nil, 0, "", &compileErr{items}
 		}
-		return mydc.ActionPutLifecycleScript, control.LifecycleScriptPut{Tenant: tenant, Name: name, Source: *staged.Source},
+		return sfc.ActionPutLifecycleScript, control.LifecycleScriptPut{Tenant: tenant, Name: name, Source: *staged.Source},
 			expectedOr(req.Expected, current), "lifecycle/" + name, nil
 	})
 }
@@ -336,12 +336,12 @@ func (s *Server) handleLifecycleSelect(action string) func(http.ResponseWriter, 
 			Action string
 			Req    any
 		}{action, req}
-		s.sharedCreate(w, r, ws, req.OpID, body, func(ctx context.Context, c mydc.Conn, _ mydc.Session) (string, any, uint64, string, error) {
+		s.sharedCreate(w, r, ws, req.OpID, body, func(ctx context.Context, c sfc.Conn, _ sfc.Session) (string, any, uint64, string, error) {
 			entries, err := scriptEntries(ctx, c, tenant, name)
 			if err != nil {
 				return "", nil, 0, "", err
 			}
-			i := slices.IndexFunc(entries, func(e mydc.LifecycleEntry) bool { return e.SourceRevision == req.Revision })
+			i := slices.IndexFunc(entries, func(e sfc.LifecycleEntry) bool { return e.SourceRevision == req.Revision })
 			if len(entries) == 0 || i < 0 {
 				return "", nil, 0, "", &httpErr{http.StatusNotFound, "not-found", "no such script version"}
 			}
@@ -349,12 +349,12 @@ func (s *Server) handleLifecycleSelect(action string) func(http.ResponseWriter, 
 			switch {
 			case e.Deleted:
 				return "", nil, 0, "", &httpErr{http.StatusConflict, "deleted", "this version is already deleted"}
-			case action == mydc.ActionRetireLifecycleScript && !e.Active:
+			case action == sfc.ActionRetireLifecycleScript && !e.Active:
 				return "", nil, 0, "", &httpErr{http.StatusConflict, "not-active", "this version is already retired"}
-			case action == mydc.ActionDeleteLifecycleScript && e.Active:
+			case action == sfc.ActionDeleteLifecycleScript && e.Active:
 				return "", nil, 0, "", &httpErr{http.StatusConflict, "active", "retire this version before deleting it"}
 			}
-			if action == mydc.ActionDeleteLifecycleScript {
+			if action == sfc.ActionDeleteLifecycleScript {
 				uses, err := readLifecycleUses(ctx, c, tenant, name)
 				if err == nil && slices.ContainsFunc(uses, func(u control.PublicLifecycleUse) bool { return u.Revision == req.Revision }) {
 					return "", nil, 0, "", &httpErr{http.StatusConflict, "in-use", "accepted apps or build jobs still use this version"}
@@ -390,7 +390,7 @@ func defaultLifecyclePolicy(tenant string) checker.TenantPolicy {
 // one, or the default a first PUT starts from; module digests in hex).
 func (s *Server) handleLifecyclePolicy(w http.ResponseWriter, r *http.Request, ws *webSession) {
 	tenant := r.PathValue("t")
-	read(s, w, r, ws, func(ctx context.Context, c mydc.Conn) (map[string]any, error) {
+	read(s, w, r, ws, func(ctx context.Context, c sfc.Conn) (map[string]any, error) {
 		pol, err := currentLifecyclePolicy(ctx, c, tenant)
 		if err != nil {
 			return nil, err
@@ -407,7 +407,7 @@ func (s *Server) handleLifecyclePolicy(w http.ResponseWriter, r *http.Request, w
 // execution?, resolver?, compiledCacheBytes?} → set-lifecycle-policy with
 // the whole policy: omitted parts keep the current (or default) value.
 // Lists are sorted; the result must pass the policy rules (422 otherwise);
-// mydcd also checks the build image on every build node.
+// sfcd also checks the build image on every build node.
 func (s *Server) handleLifecyclePolicyPut(w http.ResponseWriter, r *http.Request, ws *webSession) {
 	var req struct {
 		OpID      string                   `json:"opId"`
@@ -427,7 +427,7 @@ func (s *Server) handleLifecyclePolicyPut(w http.ResponseWriter, r *http.Request
 		return
 	}
 	tenant := r.PathValue("t")
-	s.sharedCreate(w, r, ws, req.OpID, req, func(ctx context.Context, c mydc.Conn, _ mydc.Session) (string, any, uint64, string, error) {
+	s.sharedCreate(w, r, ws, req.OpID, req, func(ctx context.Context, c sfc.Conn, _ sfc.Session) (string, any, uint64, string, error) {
 		cur, err := currentLifecyclePolicy(ctx, c, tenant)
 		if err != nil {
 			return "", nil, 0, "", err
@@ -467,8 +467,8 @@ func (s *Server) handleLifecyclePolicyPut(w http.ResponseWriter, r *http.Request
 		if err := p.Validate(); err != nil {
 			return "", nil, 0, "", &httpErr{http.StatusUnprocessableEntity, "invalid-policy", lifecyclePolicyHint(p)}
 		}
-		p.Revision = 0 // mydcd assigns it
-		return mydc.ActionSetLifecyclePolicy, p, expectedOr(req.Expected, current), "lifecycle-policy", nil
+		p.Revision = 0 // sfcd assigns it
+		return sfc.ActionSetLifecyclePolicy, p, expectedOr(req.Expected, current), "lifecycle-policy", nil
 	})
 }
 

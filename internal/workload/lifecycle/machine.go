@@ -9,7 +9,7 @@ import (
 	"encoding/json"
 	"math"
 
-	contract "github.com/jay94ks/mydcd/lifecycle/v1"
+	contract "github.com/jay94ks/seafield/lifecycle/v1"
 )
 
 // Timing is normalized milliseconds supplied by the app/policy resolver.
@@ -57,7 +57,7 @@ func (d Definition) Validate() error {
 
 func (d Definition) Digest() [32]byte {
 	raw, _ := json.Marshal(d)
-	return sha256.Sum256(append([]byte("mydc-checker-binding-1\x00"), raw...))
+	return sha256.Sum256(append([]byte("sfc-checker-binding-1\x00"), raw...))
 }
 
 type RunPhase string
@@ -149,7 +149,7 @@ func expectedRun(d Definition, sequence uint64, at int64) (Run, error) {
 		return Run{}, ErrClock
 	}
 	binding := d.Digest()
-	raw := append([]byte("mydc-checker-run-1\x00"), binding[:]...)
+	raw := append([]byte("sfc-checker-run-1\x00"), binding[:]...)
 	raw = binary.LittleEndian.AppendUint64(raw, sequence)
 	r := ownRequest(d.Request)
 	runHash := sha256.Sum256(raw)

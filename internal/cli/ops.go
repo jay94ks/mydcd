@@ -18,7 +18,7 @@ type State string
 
 const (
 	// Sending: saved before sending; whether the server got it is unknown
-	// until `mydc op show` asks with the same ID.
+	// until `sfcli op show` asks with the same ID.
 	Sending State = "sending"
 	// Accepted: the server took it and the work is still running.
 	Accepted State = "accepted"
@@ -31,7 +31,7 @@ const (
 func (s State) Final() bool { return s == Done || s == Failed }
 
 // Op is one change the CLI sent, or saved just before sending. It is the
-// public index entry behind `mydc op`; the signed original and any private
+// public index entry behind `sfcli op`; the signed original and any private
 // recovery state stay in the journal of its kind.
 type Op struct {
 	ID      string    `json:"id"`
@@ -51,7 +51,7 @@ var (
 	errOpConflict  = errors.New("operation ID already names a different operation")
 )
 
-// Ops is the operation index in one private directory (~/.mydc/ops), one
+// Ops is the operation index in one private directory (~/.sfc/ops), one
 // file per operation. It is local to this computer and user.
 type Ops struct{ root *os.Root }
 

@@ -5,6 +5,7 @@ package access
 import (
 	"bytes"
 	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -31,9 +32,17 @@ func enrolled(t *testing.T) Catalog {
 }
 func put(t *testing.T, c Catalog, actor string, u User) Catalog {
 	t.Helper()
-	old, _ := c.User(u.ID)
+	old, exists := c.User(u.ID)
 	u.Revision = 0
-	n, err := c.PutUser(actor, old.Revision, u)
+	if !exists {
+		n, err := c.PutUser(actor, 0, u)
+		return must(t, n, err)
+	}
+	// a fixture's whole-record edit (the wire has only account changes)
+	if !c.SystemAllowed(actor) {
+		t.Fatal("not an administrator", actor)
+	}
+	n, err := c.replaceUser(old.Revision, u)
 	return must(t, n, err)
 }
 func tenant(t *testing.T, c Catalog, id string) Catalog {
@@ -131,16 +140,16 @@ func TestAccountCredentialAndLastAdminInvariants(t *testing.T) {
 	expected := a.Revision
 	a.Revision = 0
 	a.Enabled = false
-	if _, err := c.PutUser("admin", expected, a); err != ErrDenied {
+	if _, err := c.replaceUser(expected, a); err != ErrDenied {
 		t.Fatal("last admin disabled")
 	}
 	a.Enabled = true
 	a.SystemAdmin = false
-	if _, err := c.PutUser("admin", expected, a); err != ErrDenied {
+	if _, err := c.replaceUser(expected, a); err != ErrDenied {
 		t.Fatal("last admin demoted")
 	}
 	for _, method := range []Method{Password, PrivateKey, Token} {
-		u := user(string(method), false)
+		u := user(string(method), true)
 		u.Credentials[0].Method = method
 		if method != PrivateKey {
 			u.Credentials[0].PublicKey = [32]byte{}
@@ -149,8 +158,12 @@ func TestAccountCredentialAndLastAdminInvariants(t *testing.T) {
 		c = put(t, c, "admin", u)
 		u.Credentials[0].Enabled = false
 		old, _ := c.User(u.ID)
-		if _, err := c.PutUser("admin", old.Revision, u); err != ErrInvalid {
-			t.Fatal("last auth removed", method, err)
+		if _, err := c.replaceUser(old.Revision, u); err != ErrInvalid {
+			t.Fatal("last administrator auth removed", method, err)
+		}
+		u.SystemAdmin = false
+		if _, err := c.replaceUser(old.Revision, u); err != nil {
+			t.Fatal("an ordinary account may end with no method on", method, err)
 		}
 	}
 	u := user("duplicate", false)
@@ -205,7 +218,7 @@ func TestTrustDefaultRevocationAndNodeScope(t *testing.T) {
 		t.Fatal("trust diagnostic confused node grant with repository trust", err)
 	}
 	tenantNow, _ := c.Tenant("first")
-	next, err = c.SetTrust("alice", "first", tenantNow.Revision, nil)
+	next, err = c.ChangeTrust("alice", "first", tenantNow.Revision, nil, tenantNow.ImageSources)
 	c = must(t, next, err)
 	if _, err := c.CheckImage("alice", "first", "node-a", "alpine"+digest); err != ErrDenied {
 		t.Fatal("revoked cached source")
@@ -223,7 +236,7 @@ func TestTrustDefaultRevocationAndNodeScope(t *testing.T) {
 	}
 	tenantNow, _ = c.Tenant("first")
 	rules := []TrustRule{{"private.example:5443", "team/php"}}
-	next, err = c.SetTrust("alice", "first", tenantNow.Revision, rules)
+	next, err = c.ChangeTrust("alice", "first", tenantNow.Revision, rules, nil)
 	c = must(t, next, err)
 	rules[0].Repository = "**"
 	if _, err := c.CheckImage("alice", "first", "node-a", "private.example:5443/team/php"+digest); err != nil {
@@ -270,5 +283,40 @@ func TestCanonicalRestoreRejectsForgedState(t *testing.T) {
 		if _, err := CanonicalTrust(rules); err == nil {
 			t.Fatal("bad trust rule", rules)
 		}
+	}
+}
+
+// ChangeTrust carries only the changed rules. A delta made from an older
+// list (adding a trusted rule, removing an untrusted one) conflicts.
+func TestChangeTrustDelta(t *testing.T) {
+	c := tenant(t, enrolled(t), "first")
+	hub := TrustRule{"docker.io", "**"}
+	php := TrustRule{"private.example", "team/php"}
+	v, _ := c.Tenant("first")
+	if _, err := c.ChangeTrust("admin", "first", v.Revision, nil, nil); err != ErrInvalid {
+		t.Fatal("empty delta", err)
+	}
+	if _, err := c.ChangeTrust("admin", "first", v.Revision, []TrustRule{hub}, nil); err != ErrConflict {
+		t.Fatal("added a trusted rule", err)
+	}
+	if _, err := c.ChangeTrust("admin", "first", v.Revision, nil, []TrustRule{php}); err != ErrConflict {
+		t.Fatal("removed an untrusted rule", err)
+	}
+	if _, err := c.ChangeTrust("admin", "first", v.Revision, []TrustRule{php}, []TrustRule{php}); err != ErrConflict {
+		t.Fatal("added and removed the same rule", err)
+	}
+	if _, err := c.ChangeTrust("admin", "first", v.Revision+1, []TrustRule{php}, nil); err != ErrConflict {
+		t.Fatal("stale revision", err)
+	}
+	next, err := c.ChangeTrust("admin", "first", v.Revision, []TrustRule{php}, []TrustRule{hub})
+	c = must(t, next, err)
+	now, _ := c.Tenant("first")
+	if !slices.Equal(now.ImageSources, []TrustRule{php}) || now.Revision == v.Revision {
+		t.Fatal("swapped rules", now)
+	}
+	next, err = c.ChangeTrust("admin", "first", now.Revision, []TrustRule{hub}, nil)
+	c = must(t, next, err)
+	if now, _ = c.Tenant("first"); !slices.Equal(now.ImageSources, []TrustRule{hub, php}) {
+		t.Fatal("added rule kept canonical order", now.ImageSources)
 	}
 }

@@ -9,9 +9,10 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/imagebuild"
-	"github.com/jay94ks/mydcd/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/imagebuild"
+	"github.com/jay94ks/seafield/internal/reconcile"
 )
 
 func idleCacheAutomaticFixture(t *testing.T) (*nodeStorageFixture, ImageBuildJobPlan) {
@@ -184,9 +185,7 @@ func TestCacheAutomaticRevokedPolicyAuthorCannotAdmitOrExecuteButCanCloseOrigina
 	if !ok {
 		t.Fatal("missing original policy author")
 	}
-	expected := user.Revision
-	user.Revision, user.Enabled = 0, false
-	f.apply("admin", "put-user", expected, user, state.Applied)
+	f.changeAccount(user.ID, func(u *access.User) { u.Enabled = false })
 	work, err := f.p.ImageBuildCachePruneWork(f.s, r.Owner, ImageBuildCachePruneWorkQuery{Tenant: "tenant", ID: r.ID(), At: 2001})
 	if err != nil || work.Allowed || work.Blocked != "PERMISSION_REVOKED" {
 		t.Fatal("revoked author still executes", work.Blocked, err)

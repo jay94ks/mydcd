@@ -4,10 +4,10 @@ package deployment
 
 import (
 	"context"
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/desired"
-	"github.com/jay94ks/mydcd/internal/engine"
-	"github.com/jay94ks/mydcd/internal/workload"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/desired"
+	"github.com/jay94ks/seafield/internal/engine"
+	"github.com/jay94ks/seafield/internal/workload"
 	"slices"
 	"strconv"
 )
@@ -32,7 +32,7 @@ func (b Blueprint) ResolveTaskProcess(ctx context.Context, service string, bound
 		return workload.Process{}, ErrInputs
 	}
 	if s.Memory == "" {
-		s.Memory = strconv.FormatUint(b.d.Nodes[s.MyDC.Node].DefaultMemory, 10)
+		s.Memory = strconv.FormatUint(b.d.Nodes[s.Sfc.Node].DefaultMemory, 10)
 	}
 	var targets []string
 	for _, f := range bound.d.Needs.Files {
@@ -40,7 +40,7 @@ func (b Blueprint) ResolveTaskProcess(ctx context.Context, service string, bound
 			targets = append(targets, f.Target)
 		}
 	}
-	return s.resolveProcess(ctx, docker, catalog, b.d.Actor, b.d.Tenant, s.MyDC.Node, pull, targets, len(s.MyDC.SecretEnv), nil, nil)
+	return s.resolveProcess(ctx, docker, catalog, b.d.Actor, b.d.Tenant, s.Sfc.Node, pull, targets, len(s.Sfc.SecretEnv), nil, nil)
 }
 
 func (s ComposeService) resolveProcess(ctx context.Context, docker *engine.Client, catalog access.Catalog, actor, tenant, node string, pull bool, secretTargets []string, secretEnvs int, mounts []workload.VolumeMount, resolver *workload.Resolver, credentials ...engine.RegistryAuth) (workload.Process, error) {
@@ -62,7 +62,7 @@ func (s ComposeService) resolveProcess(ctx context.Context, docker *engine.Clien
 	if err != nil || (expected == nil) != (resolver == nil) || expected != nil && (!slices.Equal(expected.Servers, resolver.Servers) || !slices.Equal(expected.Search, resolver.Search)) {
 		return workload.Process{}, inputError("FEATURE_UNAVAILABLE", "unbound resolver inputs")
 	}
-	if docker == nil || len(s.Volumes) != len(mounts) || len(s.Secrets) != len(secretTargets) || len(s.MyDC.SecretEnv) != secretEnvs {
+	if docker == nil || len(s.Volumes) != len(mounts) || len(s.Secrets) != len(secretTargets) || len(s.Sfc.SecretEnv) != secretEnvs {
 		return workload.Process{}, inputError("FEATURE_UNAVAILABLE", "service process inputs")
 	}
 	stop, err := engine.ParseStopPolicy(s.StopGracePeriod, s.StopSignal)

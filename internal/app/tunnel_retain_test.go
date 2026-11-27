@@ -5,7 +5,7 @@ package app
 import (
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/network"
+	"github.com/jay94ks/seafield/internal/network"
 )
 
 func TestRetainedPlanRevokesOnlyTheMembersThatLeftOrRekeyed(t *testing.T) {

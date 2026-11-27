@@ -33,7 +33,7 @@ type Request struct {
 	Effort      string
 	ThinkingOff bool
 	// CacheKey is OpenAI's prompt_cache_key (per role and prompt version,
-	// e.g. "mydc-simple-v1"); Claude ignores it.
+	// e.g. "sfc-simple-v1"); Claude ignores it.
 	CacheKey string
 }
 

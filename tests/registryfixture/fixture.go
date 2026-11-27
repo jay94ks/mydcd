@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Package registryfixture serves a bounded local test image over the real
-// Registry V2 pull boundary. It is never linked into the MyDC products.
+// Registry V2 pull boundary. It is never linked into the Seafield Cluster products.
 package registryfixture
 
 import (
@@ -48,7 +48,7 @@ type privateRepository struct {
 	deletes              atomic.Int64
 }
 
-// PrivateStats reports only the owned remote's counters, never MyDC facts or
+// PrivateStats reports only the owned remote's counters, never Seafield Cluster facts or
 // credentials. Repository-specific challenges catch same-host key confusion.
 func (f *Fixture) PrivateStats(repository string) (authorized, rejected int64) {
 	p := f.private[repository]
@@ -59,7 +59,7 @@ func (f *Fixture) PrivateStats(repository string) (authorized, rejected int64) {
 }
 
 // PrivateDeleteStats exposes only native HTTP attempt/effect facts for the
-// owned repository, independently of MyDC's operation and result ledger.
+// owned repository, independently of Seafield Cluster's operation and result ledger.
 func (f *Fixture) PrivateDeleteStats(repository string) (attempts int64, deleted bool) {
 	p := f.private[repository]
 	if p == nil {
@@ -122,7 +122,7 @@ func prepareImage(t *testing.T, b []byte, config container.Config, repository st
 	if _, err = tw.Write(b); err != nil {
 		t.Fatal(err)
 	}
-	proof := []byte(config.Labels["org.mydc.test.owner"])
+	proof := []byte(config.Labels["org.sfc.test.owner"])
 	if len(proof) == 0 {
 		t.Fatal("explicit unique registry fixture ownership required")
 	}

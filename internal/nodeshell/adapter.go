@@ -28,7 +28,7 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-const Account = "mydc-shell"
+const Account = "sfc-shell"
 
 var ErrNotReady = errors.New("node-shell-not-ready")
 var ErrSession = errors.New("invalid node shell session")
@@ -64,7 +64,7 @@ func New(c Config) (*Adapter, error) {
 		c.Account = Account
 	}
 	if c.Home == "" {
-		c.Home = "/var/lib/mydc-shell"
+		c.Home = "/var/lib/sfc-shell"
 	}
 	if c.Endpoint == "" {
 		c.Endpoint = "127.0.0.1:22"
@@ -184,7 +184,7 @@ func (a *Adapter) Prepare(ctx context.Context, allowSudo bool) PublicReady {
 	if err := probe.RequestPty("xterm-256color", 24, 80, ssh.TerminalModes{}); err != nil {
 		return fail("ssh-probe-failed")
 	}
-	// The command is fixed; neither the MyDC username nor caller input is
+	// The command is fixed; neither the Seafield Cluster username nor caller input is
 	// interpolated into the readiness probe. A separate root-owned rule must
 	// not silently grant sudo when the effective node policy says disabled.
 	var out bytes.Buffer
@@ -252,7 +252,7 @@ func (a *Adapter) prepareAccount(ctx context.Context) error {
 		}
 		// A non-password credential avoids OpenSSH's locked-account prefix
 		// without enabling password login. Only our daemon's SSH key is used.
-		if err := a.run(ctx, "useradd", "--system", "--user-group", "--no-create-home", "--home-dir", a.config.Home, "--shell", "/bin/sh", "--comment", "MyDC node shell", "--password", "*", Account); err != nil {
+		if err := a.run(ctx, "useradd", "--system", "--user-group", "--no-create-home", "--home-dir", a.config.Home, "--shell", "/bin/sh", "--comment", "Seafield Cluster node shell", "--password", "*", Account); err != nil {
 			return err
 		}
 		u, lookupErr = a.lookup(Account)
@@ -262,7 +262,7 @@ func (a *Adapter) prepareAccount(ctx context.Context) error {
 	}
 	uid, uidErr := strconv.ParseUint(u.Uid, 10, 32)
 	gid, gidErr := strconv.ParseUint(u.Gid, 10, 32)
-	if uidErr != nil || gidErr != nil || uid == 0 || gid == 0 || u.Username != Account || u.HomeDir != a.config.Home || u.Name != "MyDC node shell" || record.UID != "" && (record.UID != u.Uid || record.GID != u.Gid) {
+	if uidErr != nil || gidErr != nil || uid == 0 || gid == 0 || u.Username != Account || u.HomeDir != a.config.Home || u.Name != "Seafield Cluster node shell" || record.UID != "" && (record.UID != u.Uid || record.GID != u.Gid) {
 		return ErrNotReady
 	}
 	if err := ownedDirectory(a.config.Home, 0755); err != nil {
@@ -287,7 +287,7 @@ func (a *Adapter) checkAccountIdentity() error {
 	}
 	uid, uidErr := strconv.ParseUint(u.Uid, 10, 32)
 	gid, gidErr := strconv.ParseUint(u.Gid, 10, 32)
-	if uidErr != nil || gidErr != nil || uid == 0 || gid == 0 || u.Username != Account || u.HomeDir != a.config.Home || u.Name != "MyDC node shell" || u.Uid != record.UID || u.Gid != record.GID {
+	if uidErr != nil || gidErr != nil || uid == 0 || gid == 0 || u.Username != Account || u.HomeDir != a.config.Home || u.Name != "Seafield Cluster node shell" || u.Uid != record.UID || u.Gid != record.GID {
 		return ErrNotReady
 	}
 	return nil
@@ -323,7 +323,7 @@ func (w *probeOutput) Write(p []byte) (int, error) {
 	return w.buffer.Write(p)
 }
 
-const sudoRule = "# Managed by MyDC node-shell; do not edit.\nmydc-shell ALL=(root) NOPASSWD: ALL\n"
+const sudoRule = "# Managed by Seafield Cluster node-shell; do not edit.\nsfc-shell ALL=(root) NOPASSWD: ALL\n"
 
 func (a *Adapter) prepareSudo(ctx context.Context, allow bool) error {
 	if _, err := os.Lstat(a.config.SudoersDir); errors.Is(err, os.ErrNotExist) && !allow {
@@ -458,7 +458,7 @@ func replaceOwned(path string, data []byte, mode os.FileMode) error {
 }
 
 func writeAtomic(path string, data []byte, mode os.FileMode, replace bool) error {
-	file, err := os.CreateTemp(filepath.Dir(path), ".mydc-shell-")
+	file, err := os.CreateTemp(filepath.Dir(path), ".sfc-shell-")
 	if err != nil {
 		return err
 	}

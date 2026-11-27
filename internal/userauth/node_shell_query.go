@@ -7,11 +7,11 @@ import (
 	"reflect"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/cluster/lifecycle"
-	"github.com/jay94ks/mydcd/internal/mydcp"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/lifecycle"
+	"github.com/jay94ks/seafield/internal/sfcp"
 )
 
 func nodeShellQuery(method string) bool {
@@ -25,14 +25,14 @@ func (r Request) validNodeShellQuery() bool {
 	}
 	return nodeShellQuery(r.Method) && len(r.After) <= 256 && (control.NodeShellSessionsQuery{State: r.State, Node: r.Node}).Valid() && reflect.DeepEqual(r, want)
 }
-func (c Client) NodeShellPolicy(ctx context.Context, peer mydcp.Peer, session access.Session) (Reply, error) {
+func (c Client) NodeShellPolicy(ctx context.Context, peer sfcp.Peer, session access.Session) (Reply, error) {
 	reply, err := c.query(ctx, peer, session, Request{Method: "node-shell-policy"})
 	if err == nil && (reply.NodeShellPolicy == nil || reply.NodeShellPolicy.Account != access.NodeShellAccount || reply.NodeShellPolicy.MaxSessions < 1 || reply.NodeShellPolicy.MaxSessions > 16 || reply.NodeShellPolicy.IdleSeconds < 60 || reply.NodeShellPolicy.IdleSeconds > 86400 || reply.NodeShellPolicy.RootRevision != reply.NodeShellRootRevision) {
-		return Reply{}, mydcp.ErrFrame
+		return Reply{}, sfcp.ErrFrame
 	}
 	return reply, err
 }
-func (c Client) NodeShellSessions(ctx context.Context, peer mydcp.Peer, session access.Session, after string, filters ...control.NodeShellSessionsQuery) (Reply, error) {
+func (c Client) NodeShellSessions(ctx context.Context, peer sfcp.Peer, session access.Session, after string, filters ...control.NodeShellSessionsQuery) (Reply, error) {
 	var q control.NodeShellSessionsQuery
 	if len(filters) > 1 {
 		return Reply{}, access.ErrInvalid
@@ -45,7 +45,7 @@ func (c Client) NodeShellSessions(ctx context.Context, peer mydcp.Peer, session 
 	}
 	reply, err := c.query(ctx, peer, session, Request{Method: "node-shell-sessions", After: after, State: q.State, Node: q.Node})
 	if err == nil && (reply.NodeShellSessions == nil || !validNodeShellSessionsPage(*reply.NodeShellSessions, q, after) || reply.NodeShellSessions.RootRevision != reply.NodeShellRootRevision) {
-		return Reply{}, mydcp.ErrFrame
+		return Reply{}, sfcp.ErrFrame
 	}
 	return reply, err
 }

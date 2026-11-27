@@ -4,7 +4,7 @@ package deployment
 
 import (
 	"encoding/json"
-	"github.com/jay94ks/mydcd/internal/workload"
+	"github.com/jay94ks/seafield/internal/workload"
 	"net/netip"
 	"slices"
 	"strconv"

@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	checker "github.com/jay94ks/mydcd/internal/workload/lifecycle"
+	checker "github.com/jay94ks/seafield/internal/workload/lifecycle"
 )
 
 func TestCheckerAcceptedSelectionBindsTaskRecipeAndPreservesLegacyNilBytes(t *testing.T) {

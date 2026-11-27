@@ -10,7 +10,8 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"github.com/jay94ks/mydcd/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/engineimage"
+	"github.com/jay94ks/seafield/internal/reconcile"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -29,6 +30,12 @@ type Client struct {
 	streamAPI *client.Client
 	execAPI   *client.Client
 	execIdle  func()
+	// Images holds the pull tickets the engine's image requests (purpose
+	// 37) are answered from. Without it the client pulls nothing.
+	Images *engineimage.Tickets
+	// Anonymous, when set, opens the source of a pull with no registry
+	// login instead of the image's registry (config.Node.AnonymousImages).
+	Anonymous func(authority string) (engineimage.Opener, error)
 }
 
 // Open permits only an explicit local UDS. DOCKER_HOST and ambient TLS/env
@@ -160,8 +167,8 @@ func (c *Client) IdentityDigest(kind, key string, generation uint64, digest [32]
 	}
 	gen := strconv.FormatUint(generation, 10)
 	nameHash := sha256.Sum256([]byte(c.Owner + "\x00" + kind + "\x00" + key + "\x00" + gen))
-	return Identity{Name: fmt.Sprintf("mydc-%s-%x", kind, nameHash[:12]), Labels: map[string]string{
-		"org.mydc.owner": c.Owner, "org.mydc.kind": kind, "org.mydc.key": key, "org.mydc.generation": gen, "org.mydc.spec": hex.EncodeToString(digest[:]),
+	return Identity{Name: fmt.Sprintf("sfc-%s-%x", kind, nameHash[:12]), Labels: map[string]string{
+		"org.sfc.owner": c.Owner, "org.sfc.kind": kind, "org.sfc.key": key, "org.sfc.generation": gen, "org.sfc.spec": hex.EncodeToString(digest[:]),
 	}}, nil
 }
 

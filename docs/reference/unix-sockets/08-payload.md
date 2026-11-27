@@ -1,6 +1,6 @@
 ## 허용 메시지와 payload
 
-Unix 관리 listener의 업무 목적은 **User=8**, **SecretInput=10**, **ContainerSession=15**, **ImageContent=16**, **VolumeFile=18**, **NodeShell=19**다. node 관리 명령도 사용자 관리 API를 통해 처리한다. node 간 `Management=2`, Raft, Snapshot, Observation, Packet, PathControl, Membership, SecretFetch, VolumeTransfer, CheckerArtifact, CheckerProbe, CertificateMaterial을 이 listener에 직접 dispatch하지 않는다. relay 수신도 Unix 로컬 관리 요청으로 허용하지 않는다.
+Unix 관리 listener의 업무 목적은 **User=8**, **SecretInput=10**, **ContainerSession=15**, **ImageContent=16**, **VolumeFile=18**, **NodeShell=19**, **ClusterBackup=20**, **ChangeWatch=22**이다. node 관리 명령도 사용자 관리 API를 통해 처리한다. node 간 `Management=2`, Raft, Snapshot, Observation, Packet, PathControl, Membership, SecretFetch, VolumeTransfer, CheckerArtifact, CheckerProbe, CertificateMaterial을 이 listener에 직접 dispatch하지 않는다. relay 수신도 Unix 로컬 관리 요청으로 허용하지 않는다.
 
 | purpose/kind | 필수 TLV | body 한도 |
 |---|---|---|

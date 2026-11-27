@@ -8,18 +8,22 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
+	"os"
+	"path/filepath"
+	"time"
 
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/nodestorage"
-	"github.com/jay94ks/mydcd/internal/schema"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/nodestorage"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/sfcp"
 )
 
 func (r *Runtime) observeNodeStorageSpace(ctx context.Context, root nodestorage.Root) (nodestorage.Space, error) {
 	if root.Definition.Key != r.Identity.Public {
-		return nodestorage.Space{}, mydcp.ErrAdmission
+		return nodestorage.Space{}, sfcp.ErrAdmission
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -32,7 +36,7 @@ func (r *Runtime) observeNodeStorageSpace(ctx context.Context, root nodestorage.
 	r.life.RLock()
 	if r.closed || r.nodeRoots == nil {
 		r.life.RUnlock()
-		return nodestorage.Space{}, mydcp.ErrAdmission
+		return nodestorage.Space{}, sfcp.ErrAdmission
 	}
 	err = r.nodeRoots.Desired(work.Root)
 	var value nodestorage.Space
@@ -56,7 +60,7 @@ func (r *Runtime) nodeStorageSpace(ctx context.Context, root nodestorage.Root) (
 	}
 	peer, ok := r.resourcePeer(ctx, root.Definition.Node, root.Definition.Key)
 	if !ok || !peer.Member || peer.ID != root.Definition.Node {
-		return nodestorage.Space{}, mydcp.ErrAdmission
+		return nodestorage.Space{}, sfcp.ErrAdmission
 	}
 	raw, _ := json.Marshal(root)
 	reply, err := cluster.CallManagement(ctx, r.Mesh, r.commandIdentity(), r.controlPolicy.Cluster, peer, cluster.ManagementRequest{Method: "node-storage-space-observe", Input: raw})
@@ -106,13 +110,75 @@ func (r *Runtime) publishNodeStorage(ctx context.Context, work control.NodeStora
 	return nil
 }
 
+// defaultStoragePath is the default storage root of a node whose state lives
+// in stateDir: its sibling "<state_dir>-storage" (/var/lib/sfc-storage for
+// the usual /var/lib/sfc). It is outside the state directory so wiping the
+// daemon state never deletes data kept there.
+func defaultStoragePath(stateDir string) string {
+	return filepath.Clean(stateDir) + "-storage"
+}
+
+// registerDefaultStorage registers this node's default storage root once:
+// every tenant may use it and it has no capacity limit. It does nothing once
+// the node has ever had a default root, so an operator who removes it (or
+// changes it) keeps that choice across restarts and rejoins. A filesystem
+// without a stable directory identity (not ext4) gets no default root.
+func (r *Runtime) registerDefaultStorage(ctx context.Context, roots nodestorage.Catalog) error {
+	self := r.defaultStorageNode
+	if r.defaultStorageDone || r.defaultStorage == "" || self == "" {
+		return nil
+	}
+	if _, ok := roots.Root(self, nodestorage.DefaultRootID); ok || roots.Registered(self, nodestorage.DefaultRootID) {
+		r.defaultStorageDone = true
+		return nil
+	}
+	if time.Now().Before(r.defaultStorageNext) {
+		return nil
+	}
+	r.defaultStorageNext = time.Now().Add(time.Minute)
+	if err := os.MkdirAll(r.defaultStorage, 0o755); err != nil {
+		return fmt.Errorf("default storage %s: %w", r.defaultStorage, err)
+	}
+	h, err := nodestorage.OpenDirectory(r.defaultStorage)
+	if err != nil {
+		if errors.Is(err, nodestorage.ErrUnsupported) {
+			log.Printf("default storage %s not registered: %v", r.defaultStorage, err)
+			r.defaultStorageDone = true
+			return nil
+		}
+		return fmt.Errorf("default storage %s: %w", r.defaultStorage, err)
+	}
+	_ = h.Close()
+	raw, _ := json.Marshal(control.NodeStorageSelection{Node: self, ID: nodestorage.DefaultRootID})
+	reply, err := r.appCall(ctx, "node-storage-permit", raw)
+	if err != nil {
+		return err
+	}
+	work, err := schema.Decode[control.NodeStorageWork](reply.Data)
+	if err != nil || reply.Local || reply.RaftIndex == 0 || work.Index == 0 || work.Epoch == 0 {
+		return errors.Join(nodestorage.ErrStorage, err)
+	}
+	if !work.Unregistered {
+		r.defaultStorageDone = true
+		return nil
+	}
+	d := nodestorage.DefaultDefinition(self, r.commandIdentity().Public, r.defaultStorage)
+	if err = r.publishNodeStorage(ctx, work, control.NodeStorageReport{Action: "default", Default: &d}); err != nil {
+		return fmt.Errorf("default storage %s: %w", r.defaultStorage, err)
+	}
+	r.defaultStorageDone = true
+	return nil
+}
+
 func (r *Runtime) reconcileNodeStorage(ctx context.Context, view cluster.View) error {
 	roots, err := r.controlPolicy.NodeStorage(view.State)
 	if err != nil {
 		return err
 	}
 	keys := map[string]bool{}
-	var failed error
+	// A failed default registration (leader unreachable, mkdir) must not stop
+	// the other roots' reconciliation in this pass; it is retried later.
+	failed := r.registerDefaultStorage(ctx, roots)
 	for _, root := range roots.Roots() {
 		if root.Definition.Key != r.Identity.Public {
 			continue

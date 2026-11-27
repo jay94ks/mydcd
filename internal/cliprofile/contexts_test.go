@@ -39,28 +39,35 @@ func TestStoreSavesContextsAndTrustPrivatelyAndStrictly(t *testing.T) {
 	}
 	cluster := [32]byte{5}
 	id := hex.EncodeToString(cluster[:])
-	trust, err := TrustNode(Trust{Version: 1, Cluster: id}, testPeer(t, 5, 8, "node-a", "mydcp://127.0.0.1:7443"), "fingerprint", time.Now())
+	trust, err := TrustNode(Trust{Version: 1, Cluster: id}, testPeer(t, 5, 8, "node-a", "sfcp://127.0.0.1:7443"), "fingerprint", time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if trust, err = TrustNode(trust, testPeer(t, 5, 8, "node-a", "unix:///run/mydc.sock"), "fingerprint", time.Now()); err != nil || len(trust.Nodes) != 1 || len(trust.Nodes[0].Endpoints) != 2 {
+	if trust, err = TrustNode(trust, testPeer(t, 5, 8, "node-a", "unix:///run/sfcdp.sock"), "fingerprint", time.Now()); err != nil || len(trust.Nodes) != 1 || len(trust.Nodes[0].Endpoints) != 2 {
 		t.Fatal("same key at a second endpoint", trust, err)
 	}
-	if _, err = TrustNode(trust, testPeer(t, 5, 9, "node-a", "mydcp://127.0.0.1:7443"), "fingerprint", time.Now()); !errors.Is(err, ErrTrust) {
+	if _, err = TrustNode(trust, testPeer(t, 5, 9, "node-a", "sfcp://127.0.0.1:7443"), "fingerprint", time.Now()); !errors.Is(err, ErrTrust) {
 		t.Fatal("changed key for a trusted node", err)
 	}
-	if _, err = TrustNode(trust, testPeer(t, 6, 9, "node-x", "mydcp://127.0.0.1:7443"), "fingerprint", time.Now()); !errors.Is(err, ErrTrust) {
+	if _, err = TrustNode(trust, testPeer(t, 6, 9, "node-x", "sfcp://127.0.0.1:7443"), "fingerprint", time.Now()); !errors.Is(err, ErrTrust) {
 		t.Fatal("node of another cluster", err)
+	}
+	// A session issuer named by a trusted node that relayed a login.
+	if trust, err = TrustNode(trust, testPeer(t, 5, 10, "node-b", "sfcp://10.0.0.2:7443"), "relayed-login", time.Now()); err != nil || len(trust.Nodes) != 2 || trust.Nodes[1].How != "relayed-login" {
+		t.Fatal("relayed-login trust", err)
+	}
+	if _, err = TrustNode(trust, testPeer(t, 5, 11, "node-c", "sfcp://10.0.0.3:7443"), "told", time.Now()); !errors.Is(err, ErrTrust) {
+		t.Fatal("unknown trust kind", err)
 	}
 	if err = st.SaveTrust(trust); err != nil {
 		t.Fatal(err)
 	}
-	cfg := Config{Version: 1, Current: "prod", Contexts: map[string]Context{"prod": {Endpoint: "unix:///run/mydc.sock", Cluster: id, User: "alice", Tenant: "shop"}}}
+	cfg := Config{Version: 1, Current: "prod", Contexts: map[string]Context{"prod": {Endpoint: "unix:///run/sfcdp.sock", Cluster: id, User: "alice", Tenant: "shop"}}}
 	if err = st.Save(cfg); err != nil {
 		t.Fatal(err)
 	}
 	for _, name := range []string{"config.yaml", filepath.Join("trust", id+".yaml")} {
-		info, err := os.Stat(filepath.Join(home, ".mydc", name))
+		info, err := os.Stat(filepath.Join(home, ".sfc", name))
 		if err != nil || info.Mode().Perm() != 0o600 {
 			t.Fatal(name, info, err)
 		}
@@ -69,12 +76,12 @@ func TestStoreSavesContextsAndTrustPrivatelyAndStrictly(t *testing.T) {
 	if err != nil || s.ClusterName != "prod" || s.Peer != "node-a" || s.Tenant != "shop" || s.Username != "alice" || s.Cluster != cluster {
 		t.Fatal(s, err)
 	}
-	if s.VerifyPeer(testPeer(t, 5, 8, "node-a", "unix:///run/mydc.sock")) != nil || s.VerifyPeer(testPeer(t, 5, 9, "node-a", "unix:///run/mydc.sock")) == nil {
+	if s.VerifyPeer(testPeer(t, 5, 8, "node-a", "unix:///run/sfcdp.sock")) != nil || s.VerifyPeer(testPeer(t, 5, 9, "node-a", "unix:///run/sfcdp.sock")) == nil {
 		t.Fatal("peer verification")
 	}
 
 	// A context whose endpoint has no trusted node does not resolve.
-	cfg.Contexts["moved"] = Context{Endpoint: "mydcp://10.0.0.1:7443", Cluster: id}
+	cfg.Contexts["moved"] = Context{Endpoint: "sfcp://10.0.0.1:7443", Cluster: id}
 	if err = st.Save(cfg); err != nil {
 		t.Fatal(err)
 	}
@@ -86,15 +93,15 @@ func TestStoreSavesContextsAndTrustPrivatelyAndStrictly(t *testing.T) {
 		{Version: 2},
 		{Version: 1, Current: "missing"},
 		{Version: 1, Contexts: map[string]Context{"default": cfg.Contexts["prod"]}},
-		{Version: 1, Contexts: map[string]Context{"x": {Endpoint: "unix:///run/mydc.sock", Cluster: "AB" + id[2:]}}},
-		{Version: 1, Contexts: map[string]Context{"x": {Endpoint: "mydcp://127.0.0.1:7443/path", Cluster: id}}},
-		{Version: 1, Contexts: map[string]Context{"x": {Endpoint: "unix:///run/mydc.sock", Cluster: id, User: "a b"}}},
+		{Version: 1, Contexts: map[string]Context{"x": {Endpoint: "unix:///run/sfcdp.sock", Cluster: "AB" + id[2:]}}},
+		{Version: 1, Contexts: map[string]Context{"x": {Endpoint: "sfcp://127.0.0.1:7443/path", Cluster: id}}},
+		{Version: 1, Contexts: map[string]Context{"x": {Endpoint: "unix:///run/sfcdp.sock", Cluster: id, User: "a b"}}},
 	} {
 		if st.Save(bad) == nil {
 			t.Fatal("invalid config saved", bad)
 		}
 	}
-	if err = os.WriteFile(filepath.Join(home, ".mydc", "config.yaml"), []byte("version: 1\nunknown: 1\n"), 0o600); err != nil {
+	if err = os.WriteFile(filepath.Join(home, ".sfc", "config.yaml"), []byte("version: 1\nunknown: 1\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = st.Load(); err == nil {
@@ -110,10 +117,10 @@ func TestStoreSavesContextsAndTrustPrivatelyAndStrictly(t *testing.T) {
 
 func TestOpenStoreRefusesSharedDirectory(t *testing.T) {
 	home := t.TempDir()
-	if err := os.Mkdir(filepath.Join(home, ".mydc"), 0o755); err != nil {
+	if err := os.Mkdir(filepath.Join(home, ".sfc"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := OpenStore(home, true); err == nil {
-		t.Fatal("group/world readable ~/.mydc accepted")
+		t.Fatal("group/world readable ~/.sfc accepted")
 	}
 }

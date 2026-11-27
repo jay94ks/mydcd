@@ -6,7 +6,7 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/json"
-	"github.com/jay94ks/mydcd/internal/access"
+	"github.com/jay94ks/seafield/internal/access"
 )
 
 const ArtifactPartBytes = 24 << 10

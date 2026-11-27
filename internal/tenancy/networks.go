@@ -16,8 +16,8 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/network"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/network"
 )
 
 var ErrPolicy = errors.New("tenant network policy, ownership or revision conflict")
@@ -47,7 +47,7 @@ type Network struct {
 	TunnelAddresses      []netip.Prefix `json:",omitempty"`
 	GatewayMode          string         `json:",omitempty"`
 	// System marks a member of the cluster-owned system network. It has no
-	// tenant; only mydcd's node app dependency controls it (CreateSystemTUN),
+	// tenant; only sfcd's cluster app dependency controls it (CreateSystemTUN),
 	// never the tenant network actions.
 	System bool `json:",omitempty"`
 	// Toggles are the network's options that are on (NetworkToggle, sorted),
@@ -55,14 +55,14 @@ type Network struct {
 	Toggles []NetworkToggle `json:",omitempty"`
 }
 
-// SystemNetwork is the name of the cluster-owned TUN network all node apps
+// SystemNetwork is the name of the cluster-owned TUN network all cluster apps
 // share. User apps cannot resolve it.
-const SystemNetwork = "mydc-system"
+const SystemNetwork = "sfc-system"
 
 // SystemScope stands for the system network where a tenant name is needed
 // (native consumer budgets, tenant isolation). It is not a valid tenant ID,
 // so no tenant shares it.
-const SystemScope = "mydc:system"
+const SystemScope = "sfc:system"
 
 // Scope is the network's tenant, or SystemScope for the system network.
 func (v Network) Scope() string {
@@ -88,14 +88,17 @@ type Networks struct {
 	networks map[string]Network
 	routes   map[string]Route
 	changes  map[string]NetworkChange
+	bridges  map[string]VirtualBridge
 	system   SystemPolicy
+	// servers are the servers' fixed addresses (WithServers); not stored.
+	servers map[string]netip.Addr
 }
 
 func New(cluster [32]byte) (Networks, error) {
 	if cluster == ([32]byte{}) {
 		return Networks{}, ErrPolicy
 	}
-	return Networks{cluster: cluster, networks: map[string]Network{}, routes: map[string]Route{}, changes: map[string]NetworkChange{}}, nil
+	return Networks{cluster: cluster, networks: map[string]Network{}, routes: map[string]Route{}, changes: map[string]NetworkChange{}, bridges: map[string]VirtualBridge{}}, nil
 }
 func validID(s string) bool {
 	if len(s) < 1 || len(s) > 63 || s[0] < 'a' || s[0] > 'z' {
@@ -121,6 +124,19 @@ func (n Networks) Network(tenant, id string) (Network, bool) {
 	v, ok := n.networks[key(tenant, id)]
 	return ownNetwork(v), ok
 }
+
+// LogicalName is a member network's logical name, the member ID for a plain
+// network, or "" when there is no such member.
+func (n Networks) LogicalName(tenant, id string) string {
+	v, ok := n.networks[key(tenant, id)]
+	switch {
+	case !ok:
+		return ""
+	case v.Logical != "":
+		return v.Logical
+	}
+	return v.ID
+}
 func (n Networks) VisibleNetworks(c access.Catalog, actor string) []Network {
 	var out []Network
 	for _, v := range n.networks {
@@ -132,10 +148,10 @@ func (n Networks) VisibleNetworks(c access.Catalog, actor string) []Network {
 	return out
 }
 func (n Networks) clone() (Networks, error) {
-	if n.cluster == ([32]byte{}) || n.networks == nil || n.routes == nil || n.changes == nil || n.revision == ^uint64(0) {
+	if n.cluster == ([32]byte{}) || n.networks == nil || n.routes == nil || n.changes == nil || n.bridges == nil || n.revision == ^uint64(0) {
 		return n, ErrPolicy
 	}
-	q := Networks{cluster: n.cluster, revision: n.revision + 1, networks: map[string]Network{}, routes: map[string]Route{}, changes: map[string]NetworkChange{}}
+	q := Networks{cluster: n.cluster, revision: n.revision + 1, networks: map[string]Network{}, routes: map[string]Route{}, changes: map[string]NetworkChange{}, bridges: map[string]VirtualBridge{}, servers: n.servers}
 	for k, v := range n.networks {
 		q.networks[k] = ownNetwork(v)
 	}
@@ -144,6 +160,9 @@ func (n Networks) clone() (Networks, error) {
 	}
 	for k, v := range n.changes {
 		q.changes[k] = ownChange(v)
+	}
+	for k, v := range n.bridges {
+		q.bridges[k] = ownBridge(v)
 	}
 	q.system = n.SystemPolicy()
 	return q, nil
@@ -304,7 +323,7 @@ type NetworkClosure struct {
 func NetworkClosureBytes(p NetworkClosure) []byte {
 	p.Signature = nil
 	b, _ := json.Marshal(p)
-	return append([]byte("mydc-network-closure-1\x00"), b...)
+	return append([]byte("sfc-network-closure-1\x00"), b...)
 }
 func (n Networks) Retire(c access.Catalog, actor string, p NetworkClosure) (Networks, error) {
 	if p.Tenant == "" {
@@ -339,11 +358,16 @@ func (n Networks) retire(p NetworkClosure) (Networks, error) {
 			return n, ErrPolicy
 		}
 	}
+	if n.lastMemberBridged(v) {
+		return n, ErrBridgeAttached
+	}
 	q, err := n.clone()
 	if err != nil {
 		return n, err
 	}
 	delete(q.networks, key(v.Tenant, v.ID))
+	// a closing bridge no longer waits for this server
+	q.settleBridges()
 	return q, nil
 }
 
@@ -354,6 +378,7 @@ type snapshot struct {
 	Networks []Network
 	Routes   []Route
 	Changes  []NetworkChange `json:",omitempty"`
+	Bridges  []VirtualBridge `json:",omitempty"`
 	System   *SystemPolicy   `json:",omitempty"`
 }
 
@@ -395,6 +420,12 @@ func (n Networks) Encode() ([]byte, error) {
 	})
 	slices.SortFunc(s.Networks, func(a, b Network) int { return strings.Compare(key(a.Tenant, a.ID), key(b.Tenant, b.ID)) })
 	slices.SortFunc(s.Routes, func(a, b Route) int { return strings.Compare(key(a.Source.Tenant, a.ID), key(b.Source.Tenant, b.ID)) })
+	if n.bridges == nil || !n.validBridges() {
+		return nil, ErrPolicy
+	}
+	if len(n.bridges) != 0 {
+		s.Bridges = n.AllBridges()
+	}
 	raw, e := json.Marshal(s)
 	if e != nil || len(raw) > 32<<20 {
 		return nil, ErrPolicy
@@ -403,7 +434,7 @@ func (n Networks) Encode() ([]byte, error) {
 }
 func Decode(b []byte) (Networks, error) {
 	var s snapshot
-	if len(b) > 32<<20 || json.Unmarshal(b, &s) != nil || s.Schema != 1 || len(s.Networks) > maxNetworks || len(s.Routes) > maxRoutes || len(s.Changes) > maxNetworks {
+	if len(b) > 32<<20 || json.Unmarshal(b, &s) != nil || s.Schema != 1 || len(s.Networks) > maxNetworks || len(s.Routes) > maxRoutes || len(s.Changes) > maxNetworks || len(s.Bridges) > maxBridges {
 		return Networks{}, ErrPolicy
 	}
 	n, err := New(s.Cluster)
@@ -415,7 +446,7 @@ func Decode(b []byte) (Networks, error) {
 		if s.System.empty() || !validSystemPolicy(*s.System) {
 			return Networks{}, ErrPolicy
 		}
-		n.system = SystemPolicy{Range: s.System.Range, Users: slices.Clone(s.System.Users)}
+		n.system = s.System.clone()
 	}
 	for _, v := range s.Networks {
 		k := key(v.Tenant, v.ID)
@@ -440,6 +471,13 @@ func Decode(b []byte) (Networks, error) {
 			return Networks{}, ErrPolicy
 		}
 		n.changes[k] = ownChange(v)
+	}
+	for _, b := range s.Bridges {
+		k := key(b.A.Tenant, b.ID)
+		if _, dup := n.bridges[k]; dup || b.Revision > n.revision {
+			return Networks{}, ErrPolicy
+		}
+		n.bridges[k] = ownBridge(b)
 	}
 	for k, v := range n.changes {
 		if !n.validChange(v) || changeActive(v) && n.reservedOverlap(v.Target, k) {

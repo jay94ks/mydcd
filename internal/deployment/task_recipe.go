@@ -15,14 +15,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/lifecycle"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/engine"
-	"github.com/jay94ks/mydcd/internal/network"
-	"github.com/jay94ks/mydcd/internal/tenancy"
-	"github.com/jay94ks/mydcd/internal/workload"
-	"github.com/jay94ks/mydcd/internal/workload/volumes"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/lifecycle"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/engine"
+	"github.com/jay94ks/seafield/internal/network"
+	"github.com/jay94ks/seafield/internal/tenancy"
+	"github.com/jay94ks/seafield/internal/workload"
+	"github.com/jay94ks/seafield/internal/workload/volumes"
 )
 
 // TaskMaterial is public, original committed metadata supplied by the app
@@ -62,7 +62,7 @@ func (b Blueprint) taskRecipe(service string, m TaskMaterial, owner string) (Com
 	case len(s.Networks) != 1:
 		return s, workload.ContainerSpec{}, inputError("TASK_MATERIAL_MISMATCH", fmt.Sprintf("%s.networks (%d, want 1)", service, len(s.Networks)))
 	}
-	n := b.d.Nodes[s.MyDC.Node]
+	n := b.d.Nodes[s.Sfc.Node]
 	if s.Memory == "" {
 		s.Memory = strconv.FormatUint(n.DefaultMemory, 10)
 	}
@@ -93,9 +93,21 @@ func (b Blueprint) taskRecipe(service string, m TaskMaterial, owner string) (Com
 		result.Inputs = &p
 	}
 	ready := map[string]volumes.NativeReady{}
+	remoteHome := map[string][32]byte{} // Volume key → home's current key
 	for _, r := range m.Volumes {
 		key := VolumeKey(r.Spec.Scope)
-		if r.Verify() != nil || r.Spec.Scope.Cluster != b.d.Cluster || r.Owner.Node != s.MyDC.Node || !n.resourceIdentity(b.d.Cluster, s.MyDC.Node, r.Owner.Key) {
+		if r.Verify() != nil || r.Spec.Scope.Cluster != b.d.Cluster {
+			return s, result, ErrInputs
+		}
+		if r.Owner.Node != s.Sfc.Node {
+			// A shared Volume whose home is another server; the pin below
+			// must be this server's remote consumer of it.
+			home, ok := b.d.Nodes[r.Owner.Node]
+			if !ok || !home.resourceIdentity(b.d.Cluster, r.Owner.Node, r.Owner.Key) {
+				return s, result, ErrInputs
+			}
+			remoteHome[key] = home.Key
+		} else if !n.resourceIdentity(b.d.Cluster, s.Sfc.Node, r.Owner.Key) {
 			return s, result, ErrInputs
 		}
 		if _, exists := ready[key]; exists {
@@ -107,9 +119,18 @@ func (b Blueprint) taskRecipe(service string, m TaskMaterial, owner string) (Com
 		pin := bound.d.Pins[i]
 		r, ok := ready[pin.Key]
 		definition := b.d.Input.Volumes[declared.Source]
-		v := definition.MyDC
+		v := definition.Sfc
 		if !ok || pin.Scope != r.Spec.Scope || pin.Consumer.Owner != r.Owner || pin.Key != b.volumeKey(declared.Source) || pin.Consumer.Writable == declared.ReadOnly || v.Node != r.Owner.Node || v.Retain == nil || !*v.Retain || v.Quota != "observe" {
 			return s, result, ErrInputs
+		}
+		if home, remote := remoteHome[pin.Key]; remote || pin.Consumer.Remote() {
+			ref, fixed := b.d.FixedVolumes[declared.Source]
+			runner, valid := pin.Consumer.GoneKey()
+			if !remote || !fixed || ref.Share == "" || !fixedVolumePolicy(definition) || !ref.Matches(r) || bound.d.Needs.FixedVolumes[pin.Key] != ref || pin.Consumer.Runner != s.Sfc.Node || !valid || !n.resourceIdentity(b.d.Cluster, s.Sfc.Node, runner) {
+				return s, result, ErrInputs
+			}
+			result.RemoteVolumes = append(result.RemoteVolumes, workload.RemoteVolumeMount{Scope: pin.Scope, Consumer: pin.Consumer, Home: home, Target: declared.Target})
+			continue
 		}
 		binding := ""
 		if ref, fixed := b.d.FixedVolumes[declared.Source]; fixed {
@@ -132,7 +153,7 @@ func (b Blueprint) taskRecipe(service string, m TaskMaterial, owner string) (Com
 	if err != nil {
 		return s, result, err
 	}
-	if r := s.MyDC.Readiness; r != nil && r.Kind == "http" {
+	if r := s.Sfc.Readiness; r != nil && r.Kind == "http" {
 		result.Readiness, err = r.httpProbe()
 		if err != nil {
 			return s, result, workload.ErrProcess
@@ -167,7 +188,7 @@ func (r Readiness) httpProbe() (*workload.HTTPReadiness, error) {
 func (b Blueprint) taskNetwork(service string, s ComposeService, m TaskMaterial, result *workload.ContainerSpec) error {
 	raw, _ := json.Marshal(m.Bridge)
 	bridge, err := network.DecodeBridge(string(raw))
-	if err != nil || !b.d.Nodes[s.MyDC.Node].resourceIdentity(b.d.Cluster, s.MyDC.Node, ownerKey(bridge.Owner, b.d.Cluster)) || bridge.Lifecycle.Drain || m.Network.Generation == 0 || m.Network.Revision < m.Network.Generation {
+	if err != nil || !b.d.Nodes[s.Sfc.Node].resourceIdentity(b.d.Cluster, s.Sfc.Node, ownerKey(bridge.Owner, b.d.Cluster)) || bridge.Lifecycle.Drain || m.Network.Generation == 0 || m.Network.Revision < m.Network.Generation {
 		return ErrInputs
 	}
 	if bridge.Owner != result.Node {
@@ -179,12 +200,12 @@ func (b Blueprint) taskNetwork(service string, s ComposeService, m TaskMaterial,
 			var ref NetworkReference
 			found := false
 			for _, step := range b.d.Steps {
-				if step.Key == ResourceKey("network-ref", b.d.Tenant, b.d.App, alias+"/"+s.MyDC.Node) && json.Unmarshal(step.Goal, &ref) == nil {
+				if step.Key == ResourceKey("network-ref", b.d.Tenant, b.d.App, alias+"/"+s.Sfc.Node) && json.Unmarshal(step.Goal, &ref) == nil {
 					found = true
 					break
 				}
 			}
-			if !found || ref.Schema != 1 || ref.Tenant != b.d.Tenant || ref.Node != s.MyDC.Node || !ref.RetainSource || !scopedBridgeKey(ref.Source.Key, b.d.Tenant) || ref.Source != m.Network || ref.Owner != ownerKey(bridge.Owner, b.d.Cluster) || ref.Network != bridge.Network || len(ref.Pools) != len(bridge.Pools) {
+			if !found || ref.Schema != 1 || ref.Tenant != b.d.Tenant || ref.Node != s.Sfc.Node || !ref.RetainSource || !scopedBridgeKey(ref.Source.Key, b.d.Tenant) || ref.Source != m.Network || ref.Owner != ownerKey(bridge.Owner, b.d.Cluster) || ref.Network != bridge.Network || len(ref.Pools) != len(bridge.Pools) {
 				return ErrInputs
 			}
 			for _, p := range bridge.Pools {
@@ -213,12 +234,12 @@ func (b Blueprint) taskNetwork(service string, s ComposeService, m TaskMaterial,
 				result.Routes = append(result.Routes, workload.ContainerRoute{Destination: destination, Gateway: gateway})
 			}
 		} else {
-			pool := declared.MyDC.Pools[s.MyDC.Node]
-			if m.Network.Key != ResourceKey("bridge", b.d.Tenant, b.d.App, alias+"/"+s.MyDC.Node) || bridge.Network != PoolID(b.d.Tenant, b.d.App, alias, s.MyDC.Node) || bridge.MTU != declared.MyDC.MTU || len(bridge.Pools) != 1 || bridge.Pools[0].Prefix != mustPrefix(pool.CIDR) || bridge.Pools[0].Gateway != mustAddr(pool.Gateway) {
+			pool := declared.Sfc.Pools[s.Sfc.Node]
+			if m.Network.Key != ResourceKey("bridge", b.d.Tenant, b.d.App, alias+"/"+s.Sfc.Node) || bridge.Network != PoolID(b.d.Tenant, b.d.App, alias, s.Sfc.Node) || bridge.MTU != declared.Sfc.MTU || len(bridge.Pools) != 1 || bridge.Pools[0].Prefix != mustPrefix(pool.CIDR) || bridge.Pools[0].Gateway != mustAddr(pool.Gateway) {
 				return ErrInputs
 			}
-			for node, remote := range declared.MyDC.Pools {
-				if node == s.MyDC.Node {
+			for node, remote := range declared.Sfc.Pools {
+				if node == s.Sfc.Node {
 					continue
 				}
 				prefix := mustPrefix(remote.CIDR)
@@ -230,8 +251,8 @@ func (b Blueprint) taskNetwork(service string, s ComposeService, m TaskMaterial,
 			// A remote node's Ingress originates backend connections from its
 			// TUN host address, not from a container pool. The return route is
 			// part of the same overlay contract as its remote container routes.
-			for node, address := range declared.MyDC.TunnelAddresses {
-				if node == s.MyDC.Node {
+			for node, address := range declared.Sfc.TunnelAddresses {
+				if node == s.Sfc.Node {
 					continue
 				}
 				prefix := mustPrefix(address)
@@ -298,7 +319,7 @@ func (b Blueprint) ResolveTask(ctx context.Context, service string, material Tas
 			targets = append(targets, f.Target)
 		}
 	}
-	process, err := s.resolveProcess(ctx, docker, catalog, b.d.Actor, b.d.Tenant, s.MyDC.Node, pull, targets, len(s.MyDC.SecretEnv), result.Volumes, result.Resolver, credentials...)
+	process, err := s.resolveProcess(ctx, docker, catalog, b.d.Actor, b.d.Tenant, s.Sfc.Node, pull, targets, len(s.Sfc.SecretEnv), result.Volumes, result.Resolver, credentials...)
 	if err != nil {
 		return workload.ContainerSpec{}, err
 	}

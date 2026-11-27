@@ -49,11 +49,12 @@ func imageClient(endpoint string, idle time.Duration) (*client.Client, error) {
 	}))
 }
 
-func (c *Client) pullImage(ctx context.Context, ref string, auth RegistryAuth) error {
+// pullImage asks the engine for ref; it sends no registry credential.
+func (c *Client) pullImage(ctx context.Context, ref string) error {
 	if c.imageAPI == nil {
 		return ErrOwnership
 	}
-	stream, err := c.imageAPI.ImagePull(ctx, ref, client.ImagePullOptions{RegistryAuth: auth.value})
+	stream, err := c.imageAPI.ImagePull(ctx, ref, client.ImagePullOptions{})
 	if err != nil {
 		return err
 	}

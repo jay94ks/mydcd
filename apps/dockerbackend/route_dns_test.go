@@ -19,7 +19,7 @@ func TestRouteDNSInvalidInputIsNotIsolationTimeout(t *testing.T) {
 
 func TestRouteDNSRequiresExactAuthoritativeSOA(t *testing.T) {
 	query := new(dns.Msg)
-	query.SetQuestion("near.mydc.test.", dns.TypeSOA)
+	query.SetQuestion("near.sfc.test.", dns.TypeSOA)
 	answer := new(dns.Msg)
 	answer.SetReply(query)
 	answer.Authoritative = true

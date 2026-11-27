@@ -15,12 +15,12 @@ import (
 	"time"
 
 	cerrdefs "github.com/containerd/errdefs"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/engine"
-	"github.com/jay94ks/mydcd/internal/workload/volumes"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/engine"
+	"github.com/jay94ks/seafield/internal/workload/volumes"
 	"github.com/moby/moby/client"
 	"gopkg.in/yaml.v3"
 )
@@ -61,7 +61,7 @@ func testManagedSQLColdMove(t *testing.T, ctx context.Context, a *Runtime, root,
 		t.Fatal(err)
 	}
 	db := input.Services["db"]
-	db.MyDC.Node = "node-a"
+	db.Sfc.Node = "node-a"
 	attachment := db.Networks["app"]
 	attachment.IPv4 = "198.19.80.3"
 	db.Networks["app"] = attachment
@@ -69,20 +69,20 @@ func testManagedSQLColdMove(t *testing.T, ctx context.Context, a *Runtime, root,
 	if err != nil {
 		t.Fatal(err)
 	}
-	network, exists := resources.Networks.NamedNetwork("tenant", input.Networks["app"].Name, db.MyDC.Node)
+	network, exists := resources.Networks.NamedNetwork("tenant", input.Networks["app"].Name, db.Sfc.Node)
 	if !exists || len(network.Pools) != 1 {
 		t.Fatal("explicit target-node managed resolver is required")
 	}
 	db.DNS = []string{network.Pools[0].Gateway.String()}
 	input.Services["db"] = db
 	volume := input.Volumes["data"]
-	volume.MyDC.Node = "node-a"
-	volume.MyDC.Capacity = deployment.VolumeSize(reserve)
+	volume.Sfc.Node = "node-a"
+	volume.Sfc.Capacity = deployment.VolumeSize(reserve)
 	input.Volumes["data"] = volume
-	if input.MyDC.Ingress == nil {
+	if input.Sfc.Ingress == nil {
 		t.Fatal("original SQL ingress declaration required")
 	}
-	input.MyDC.Ingress.Listeners = append(input.MyDC.Ingress.Listeners, deployment.ListenerDeclaration{Address: sqlMoveBlockedTCP}, deployment.ListenerDeclaration{Address: sqlMoveBlockedUDP, TLS: true, HTTP3: true})
+	input.Sfc.Ingress.Listeners = append(input.Sfc.Ingress.Listeners, deployment.ListenerDeclaration{Address: sqlMoveBlockedTCP}, deployment.ListenerDeclaration{Address: sqlMoveBlockedUDP, TLS: true, HTTP3: true})
 	target, err := yaml.Marshal(input)
 	if err != nil {
 		t.Fatal(err)
@@ -191,7 +191,7 @@ func testManagedSQLColdMove(t *testing.T, ctx context.Context, a *Runtime, root,
 						continue
 					}
 					inspectCtx, stop := context.WithTimeout(ctx, 2*time.Second)
-					rows, err := native.API.ContainerList(inspectCtx, client.ContainerListOptions{All: true, Filters: client.Filters{}.Add("label", "org.mydc.owner="+native.Owner, "org.mydc.key="+step.Key, "org.mydc.generation="+strconv.FormatUint(stage.Result.Generation, 10))})
+					rows, err := native.API.ContainerList(inspectCtx, client.ContainerListOptions{All: true, Filters: client.Filters{}.Add("label", "org.sfc.owner="+native.Owner, "org.sfc.key="+step.Key, "org.sfc.generation="+strconv.FormatUint(stage.Result.Generation, 10))})
 					stop()
 					if err != nil {
 						t.Fatal("original SQL target native progress read", step.Key, err)
@@ -337,7 +337,7 @@ func testManagedSQLColdMove(t *testing.T, ctx context.Context, a *Runtime, root,
 		t.Fatal(err)
 	}
 	returnVolume := returnInput.Volumes["data"]
-	returnVolume.MyDC.Capacity = deployment.VolumeSize(reserve)
+	returnVolume.Sfc.Capacity = deployment.VolumeSize(reserve)
 	returnInput.Volumes["data"] = returnVolume
 	returnRaw, err := yaml.Marshal(returnInput)
 	if err != nil {
@@ -473,7 +473,7 @@ func testManagedSQLColdMove(t *testing.T, ctx context.Context, a *Runtime, root,
 		return ok && core.Deleted()
 	})
 	for _, c := range docker {
-		rows, err := c.API.ContainerList(ctx, client.ContainerListOptions{All: true, Filters: client.Filters{}.Add("label", "org.mydc.owner="+c.Owner)})
+		rows, err := c.API.ContainerList(ctx, client.ContainerListOptions{All: true, Filters: client.Filters{}.Add("label", "org.sfc.owner="+c.Owner)})
 		if err != nil || len(rows.Items) != 0 {
 			t.Fatal("owned SQL containers remain", err)
 		}

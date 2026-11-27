@@ -14,7 +14,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/jay94ks/mydcd/internal/cliprofile"
+	"github.com/jay94ks/seafield/internal/cliprofile"
 )
 
 const (
@@ -29,7 +29,7 @@ const (
 
 var ErrWallet = errors.New("invalid or unavailable private wallet")
 
-const magic = "MYDCWLT1"
+const magic = "SFCWLT01"
 
 type Header struct {
 	Salt         [16]byte

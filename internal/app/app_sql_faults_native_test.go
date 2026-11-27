@@ -17,8 +17,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/engine"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/engine"
 	"github.com/moby/moby/client"
 	"github.com/vishvananda/netlink"
 )
@@ -29,7 +29,7 @@ func verifyE7SQLPauseAndUnderlay(t *testing.T, ctx context.Context, a *Runtime, 
 	t.Helper()
 	key := deployment.ResourceKey("task", "tenant", "app", "db")
 	initial, err := docker[1].API.ContainerInspect(ctx, old.NativeID, client.ContainerInspectOptions{})
-	if err != nil || initial.Container.State == nil || !initial.Container.State.Running || initial.Container.State.Paused || initial.Container.State.Restarting || initial.Container.State.Dead || initial.Container.Config == nil || initial.Container.Config.Labels["org.mydc.owner"] != docker[1].Owner || initial.Container.Config.Labels["org.mydc.key"] != key {
+	if err != nil || initial.Container.State == nil || !initial.Container.State.Running || initial.Container.State.Paused || initial.Container.State.Restarting || initial.Container.State.Dead || initial.Container.Config == nil || initial.Container.Config.Labels["org.sfc.owner"] != docker[1].Owner || initial.Container.Config.Labels["org.sfc.key"] != key {
 		t.Fatal("owned original SQL pause precondition", err)
 	}
 	started := initial.Container.State.StartedAt
@@ -38,7 +38,7 @@ func verifyE7SQLPauseAndUnderlay(t *testing.T, ctx context.Context, a *Runtime, 
 		if err != nil {
 			return err
 		}
-		if current.Container.State == nil || current.Container.Config == nil || current.Container.State.StartedAt != started || current.Container.Config.Labels["org.mydc.owner"] != docker[1].Owner || current.Container.Config.Labels["org.mydc.key"] != key {
+		if current.Container.State == nil || current.Container.Config == nil || current.Container.State.StartedAt != started || current.Container.Config.Labels["org.sfc.owner"] != docker[1].Owner || current.Container.Config.Labels["org.sfc.key"] != key {
 			return fmt.Errorf("original SQL pause identity changed")
 		}
 		if current.Container.State.Paused {
@@ -103,7 +103,7 @@ func verifyE7SQLPauseAndUnderlay(t *testing.T, ctx context.Context, a *Runtime, 
 	checkRows()
 	// The inherited parent fixture owns mda0 only inside this private namespace.
 	ownNS, err := os.Readlink("/proc/self/ns/net")
-	hostNS := os.Getenv("MYDC_KERNEL_HOST_NETNS")
+	hostNS := os.Getenv("SFC_KERNEL_HOST_NETNS")
 	if err != nil || hostNS == "" || ownNS == hostNS {
 		t.Fatal("underlay fault requires original private netns", err)
 	}

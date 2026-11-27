@@ -8,8 +8,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/containerops"
-	"github.com/jay94ks/mydcd/internal/mydcp"
+	"github.com/jay94ks/seafield/internal/containerops"
+	"github.com/jay94ks/seafield/internal/sfcp"
 )
 
 // ContainerChannel serializes bounded records on one authenticated original
@@ -19,8 +19,8 @@ type ContainerChannel struct {
 	cancel         context.CancelFunc
 	stop           func() bool
 	stopped        chan struct{}
-	conn           *mydcp.Session
-	stream         mydcp.DuplexStream
+	conn           *sfcp.Session
+	stream         sfcp.DuplexStream
 	request        uint64
 	intent         containerops.SessionIntent
 	client         bool
@@ -30,10 +30,10 @@ type ContainerChannel struct {
 	receiveStopped atomic.Bool
 }
 
-func newContainerChannel(ctx context.Context, conn *mydcp.Session, stream mydcp.Stream, request uint64, intent containerops.SessionIntent, expires int64, client bool) (*ContainerChannel, error) {
-	duplex, ok := stream.(mydcp.DuplexStream)
+func newContainerChannel(ctx context.Context, conn *sfcp.Session, stream sfcp.Stream, request uint64, intent containerops.SessionIntent, expires int64, client bool) (*ContainerChannel, error) {
+	duplex, ok := stream.(sfcp.DuplexStream)
 	if !ok || intent.Validate() != nil {
-		return nil, mydcp.ErrAdmission
+		return nil, sfcp.ErrAdmission
 	}
 	ctx, cancel := context.WithDeadline(ctx, time.Unix(expires, 0))
 	c := &ContainerChannel{ctx: ctx, cancel: cancel, conn: conn, stream: duplex, request: request, intent: intent, client: client, stopped: make(chan struct{}), sent: containerops.SessionFlow{Intent: intent.Digest()}, received: containerops.SessionFlow{Intent: intent.Digest()}}
@@ -60,11 +60,11 @@ func (c *ContainerChannel) Receive() (containerops.SessionRecord, error) {
 	if c.receiveStopped.Load() {
 		_ = c.stream.SetReadDeadline(time.Now())
 	}
-	r, err := mydcp.ReadSessionRecord(c.stream, c.request, c.intent.Digest())
+	r, err := sfcp.ReadSessionRecord(c.stream, c.request, c.intent.Digest())
 	if err != nil {
 		return zero, err
 	}
-	if err = c.conn.Admit(mydcp.Frame{Purpose: mydcp.ContainerSession, Kind: 5}, mydcp.ContainerSession, false); err != nil {
+	if err = c.conn.Admit(sfcp.Frame{Purpose: sfcp.ContainerSession, Kind: 5}, sfcp.ContainerSession, false); err != nil {
 		return zero, err
 	}
 	next, err := c.received.Accept(c.intent.Spec, c.intent.Target, r, !c.client)
@@ -89,7 +89,7 @@ func (c *ContainerChannel) Send(r containerops.SessionRecord) error {
 		c.cancel()
 		return err
 	}
-	if err = mydcp.WriteSessionRecord(c.stream, c.request, c.intent.Digest(), r); err != nil {
+	if err = sfcp.WriteSessionRecord(c.stream, c.request, c.intent.Digest(), r); err != nil {
 		// A partial frame cannot be followed by a fresh frame/sequence on
 		// the same byte stream. Close this I/O lifetime; status uses its
 		// separate original-ID request and never retries this send.

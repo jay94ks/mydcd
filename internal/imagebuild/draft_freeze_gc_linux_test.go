@@ -19,7 +19,7 @@ import (
 func unpreparedFreezeFixture(t *testing.T) (*DraftStore, *Spool, DraftFreezePlan, string) {
 	t.Helper()
 	store, spool, plan := frozenDraftFixture(t)
-	name := filepath.Join(plan.Scope.Root.Path, ".mydc-imagebuild", string(store.key), freezeName(plan))
+	name := filepath.Join(plan.Scope.Root.Path, ".sfc-imagebuild", string(store.key), freezeName(plan))
 	if err := os.WriteFile(name, []byte("partial ZIP"), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -118,7 +118,7 @@ func TestUnpreparedFreezeCollectionKeepsPreparedArchiveAndRejectsForeignEvidence
 				if _, err := store.PrepareFreeze(context.Background(), plan); err != nil {
 					t.Fatal(err)
 				}
-				name = filepath.Join(plan.Scope.Root.Path, ".mydc-imagebuild", string(store.key), freezeName(plan))
+				name = filepath.Join(plan.Scope.Root.Path, ".sfc-imagebuild", string(store.key), freezeName(plan))
 			case "replacement":
 				if err := os.Rename(name, name+".original"); err != nil {
 					t.Fatal(err)

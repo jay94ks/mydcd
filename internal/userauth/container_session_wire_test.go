@@ -12,32 +12,32 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/containerops"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/schema"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/containerops"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/sfcp"
 )
 
-// Real TLS/MYDCP/Unix-or-QUIC framing with an explicit simulated executor.
+// Real TLS/SFCP/Unix-or-QUIC framing with an explicit simulated executor.
 // Catalog/quorum/native effects are covered by their actual runtime fixture.
 func TestContainerSessionActualWirePreservesHalfCloseAndOutputChannels(t *testing.T) {
 	for _, network := range []string{"unix", "quic"} {
 		t.Run(network, func(t *testing.T) {
 			_, c, session, node := journalFixture(t)
-			root, err := os.MkdirTemp("", "mydc-rv5-wire-")
+			root, err := os.MkdirTemp("", "sfc-rv5-wire-")
 			if err != nil {
 				t.Fatal(err)
 			}
 			t.Cleanup(func() { _ = os.RemoveAll(root) })
 			peer := c.Peers[0]
-			lookup := func(key mydcp.Identity) (mydcp.Peer, bool) {
-				if key == mydcp.Identity(c.Self.Public) {
-					return mydcp.Peer{ID: "user", Policy: mydcp.Policy{Key: key, UserAuth: true}}, true
+			lookup := func(key sfcp.Identity) (sfcp.Peer, bool) {
+				if key == sfcp.Identity(c.Self.Public) {
+					return sfcp.Peer{ID: "user", Policy: sfcp.Policy{Key: key, UserAuth: true}}, true
 				}
 				return peer, key == peer.Key
 			}
-			server, err := mydcp.NewTransport(node, c.Cluster, lookup)
+			server, err := sfcp.NewTransport(node, c.Cluster, lookup)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -50,19 +50,19 @@ func TestContainerSessionActualWirePreservesHalfCloseAndOutputChannels(t *testin
 				}
 				peer.Endpoint = server.Addr().String()
 			}
-			mesh, err := mydcp.NewTransport(c.Self, c.Cluster, lookup)
+			mesh, err := sfcp.NewTransport(c.Self, c.Cluster, lookup)
 			if err != nil {
 				t.Fatal(err)
 			}
 			t.Cleanup(func() { _ = mesh.Close() })
 			c.Mesh = mesh
-			c.Peers = []mydcp.Peer{peer}
+			c.Peers = []sfcp.Peer{peer}
 			spec := containerops.SessionSpec{Kind: "exec", Exec: &containerops.ExecSpec{Argv: []string{"custom-cli"}, Stdin: true}}
 			intent := containerops.SessionIntent{Schema: 1, Request: "wire-original", User: session.User, Session: access.ExactSessionDigest(session), At: time.Now().Unix(), Target: containerops.Target{Cluster: c.Cluster, Owner: node.Public, Binding: [32]byte{1}, Tenant: "tenant", App: "app", Service: "web", Node: "node-a", Instance: "workload/task/tenant/app/web", Generation: 1, Revision: 1, NativeID: "native-original", StartedAt: "2026-01-01T00:00:00Z"}, Spec: spec}
 			intent.Signature = ed25519.Sign(c.Self.Private, containerops.SessionIntentBytes(intent))
 			finished := make(chan error, 2)
 			bindingService := Service{Mesh: server, Self: node, Policy: control.Policy{Cluster: c.Cluster}}
-			if err = server.OnManagement(mydcp.ContainerSession, func(ctx context.Context, conn *mydcp.Session, stream mydcp.Stream, frame mydcp.Frame) error {
+			if err = server.OnManagement(sfcp.ContainerSession, func(ctx context.Context, conn *sfcp.Session, stream sfcp.Stream, frame sfcp.Frame) error {
 				result := func() error {
 					envelope, err := schema.Decode[Envelope](frame.Fields[0].Value)
 					if err != nil {
@@ -70,7 +70,7 @@ func TestContainerSessionActualWirePreservesHalfCloseAndOutputChannels(t *testin
 					}
 					q, err := schema.Decode[ContainerSessionRequest](envelope.Body)
 					if err != nil || !q.valid() {
-						return mydcp.ErrFrame
+						return sfcp.ErrFrame
 					}
 					if _, err = bindingService.binding(conn, frame.Kind, envelope); err != nil {
 						return err
@@ -82,7 +82,7 @@ func TestContainerSessionActualWirePreservesHalfCloseAndOutputChannels(t *testin
 						return containerSessionReply(stream, frame, sha256.Sum256(frame.Fields[0].Value), ContainerSessionReply{Code: "ok", Supported: true, Target: &intent.Target})
 					}
 					if q.Intent == nil || q.Intent.Verify(session.Key) != nil {
-						return mydcp.ErrAdmission
+						return sfcp.ErrAdmission
 					}
 					if err = containerSessionReply(stream, frame, sha256.Sum256(frame.Fields[0].Value), ContainerSessionReply{Code: "ready", Supported: true, Target: &intent.Target}); err != nil {
 						return err

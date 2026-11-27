@@ -3,7 +3,7 @@
 package deployment
 
 import (
-	"github.com/jay94ks/mydcd/internal/workload/volumes"
+	"github.com/jay94ks/seafield/internal/workload/volumes"
 )
 
 // VolumeReference freezes one pre-registered tenant Volume without copying a
@@ -15,10 +15,15 @@ type VolumeReference struct {
 	Owner            volumes.Owner
 	NativeGeneration uint64
 	Native           [32]byte
+	// Share is the volume-shares mode (volumes.ShareSingleWriter or
+	// volumes.ShareShared) recorded for this exact Scope when planned. With
+	// it, a task may run on another server than Owner and reach the data
+	// over VolumeFS; Reserve checks the share again against current state.
+	Share string `json:",omitempty"`
 }
 
 func (r VolumeReference) Valid() bool {
-	return r.Schema == 1 && r.Scope.Cluster != ([32]byte{}) && r.Scope.TenantManaged() && identifier(r.Scope.Tenant) && identifier(r.Scope.ID) && r.Scope.Generation > 0 && identifier(r.Owner.Node) && r.Owner.Key != ([32]byte{}) && r.Owner.Native == volumes.FixedNativeName(r.Scope) && r.NativeGeneration == r.Scope.Generation && r.Native != ([32]byte{})
+	return (r.Share == "" || r.Share == volumes.ShareSingleWriter || r.Share == volumes.ShareShared) && r.Schema == 1 && r.Scope.Cluster != ([32]byte{}) && r.Scope.TenantManaged() && identifier(r.Scope.Tenant) && identifier(r.Scope.ID) && r.Scope.Generation > 0 && identifier(r.Owner.Node) && r.Owner.Key != ([32]byte{}) && r.Owner.Native == volumes.FixedNativeName(r.Scope) && r.NativeGeneration == r.Scope.Generation && r.Native != ([32]byte{})
 }
 func (r VolumeReference) Matches(ready volumes.NativeReady) bool {
 	return r.Valid() && ready.Verify() == nil && ready.Fixed != nil && ready.Spec.Scope == r.Scope && ready.Owner == r.Owner && ready.Generation == r.NativeGeneration && volumes.NativeBindingDigest(ready) == r.Native
@@ -28,8 +33,14 @@ func (r VolumeReference) MatchesState(s volumes.State) bool {
 	return r.Valid() && s.Fixed() && s.RetainsData() && s.DeleteRevision() == 0 && s.Scope() == r.Scope && owner == r.Owner
 }
 
+// VolumeShare is one committed volume-shares record as planning sees it.
+type VolumeShare struct {
+	Scope volumes.Scope
+	Mode  string
+}
+
 func fixedVolumePolicy(v ComposeVolume) bool {
-	return v.External && v.Driver == "" && v.MyDC.Driver == "local" && v.MyDC.Access == "single-writer" && v.MyDC.Retain != nil && *v.MyDC.Retain && v.MyDC.Quota == "observe" && v.MyDC.UID == 0 && v.MyDC.GID == 0 && v.MyDC.Mode == "" && v.MyDC.Capacity == 0 && v.MyDC.Backup == nil && v.MyDC.Migration == nil
+	return v.External && v.Driver == "" && v.Sfc.Driver == "local" && v.Sfc.Access == "single-writer" && v.Sfc.Retain != nil && *v.Sfc.Retain && v.Sfc.Quota == "observe" && v.Sfc.UID == 0 && v.Sfc.GID == 0 && v.Sfc.Mode == "" && v.Sfc.Capacity == 0 && v.Sfc.Backup == nil && v.Sfc.Migration == nil
 }
 
 func resolveFixedVolume(alias, tenant string, v ComposeVolume, ctx PlanningContext) (VolumeReference, bool, error) {
@@ -47,6 +58,9 @@ func resolveFixedVolume(alias, tenant string, v ComposeVolume, ctx PlanningConte
 	}
 	ready, ok := ctx.FixedVolumes[key]
 	ref := VolumeReference{Schema: 1, Scope: ready.Spec.Scope, Owner: ready.Owner, NativeGeneration: ready.Generation, Native: volumes.NativeBindingDigest(ready)}
+	if share, shared := ctx.Shares[key]; shared && share.Scope == ready.Spec.Scope {
+		ref.Share = share.Mode
+	}
 	if !ok || !fixedVolumePolicy(v) || !ref.Matches(ready) || !ref.MatchesState(current) || ref.Scope.Cluster != ctx.Cluster || ref.Scope.Tenant != tenant || ref.Scope.ID != name {
 		return ref, true, inputError("FIXED_VOLUME_REFERENCE_UNAVAILABLE", alias)
 	}

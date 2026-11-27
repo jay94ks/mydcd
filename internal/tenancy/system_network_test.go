@@ -7,7 +7,7 @@ import (
 	"net/netip"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/access"
+	"github.com/jay94ks/seafield/internal/access"
 )
 
 func systemDefinition(d TUNDefinition) TUNDefinition {
@@ -90,7 +90,7 @@ func TestSystemNetworkRefusesManualManagement(t *testing.T) {
 func TestSystemNetworkSourceKeysCannotNameATenant(t *testing.T) {
 	sys := SourceIdentity{Kind: "bridge", Network: SystemNetwork, Node: "node-a"}
 	key := sys.Key()
-	if key != ManagedNetworkSourcePrefix+"bridge/@system/mydc-system/node-a" {
+	if key != ManagedNetworkSourcePrefix+"bridge/@system/sfc-system/node-a" {
 		t.Fatalf("key %q", key)
 	}
 	if back, err := ParseSourceIdentity(key); err != nil || back != sys {
@@ -99,7 +99,7 @@ func TestSystemNetworkSourceKeysCannotNameATenant(t *testing.T) {
 	if (SourceIdentity{Kind: "bridge", Network: "other", Node: "node-a"}).Key() != "" {
 		t.Fatal("an empty tenant named a non-system network")
 	}
-	if PacketNamespace("", SystemNetwork) == PacketNamespace("mydc-system", SystemNetwork) {
+	if PacketNamespace("", SystemNetwork) == PacketNamespace("sfc-system", SystemNetwork) {
 		t.Fatal("system packet namespace collides with a tenant's")
 	}
 }

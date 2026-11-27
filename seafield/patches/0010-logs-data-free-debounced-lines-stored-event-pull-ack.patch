@@ -1,0 +1,481 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Fri, 27 Nov 2026 08:38:08 +0000
+Subject: [PATCH 10/20] logs: data-free debounced 'lines stored' event, pull +
+ ack deletes taken lines
+
+
+diff --git a/daemon/command/daemon.go b/daemon/command/daemon.go
+index f9e4ad2..15d0b09 100644
+--- a/daemon/command/daemon.go
++++ b/daemon/command/daemon.go
+@@ -11,8 +11,10 @@
+ 	"path/filepath"
+ 	"runtime"
+ 	"slices"
++	"strconv"
+ 	"strings"
+ 	"sync"
++	"sync/atomic"
+ 	"time"
+ 
+ 	containerddefaults "github.com/containerd/containerd/v2/defaults"
+@@ -309,6 +311,16 @@ func (cli *daemonCLI) start(ctx context.Context) (retErr error) {
+ 	eventfeed.Attach(feed)
+ 	defer feed.Close()
+ 	logqueue.Root = cli.Config.Root
++	var logEvents atomic.Pointer[daemon.Daemon]
++	logqueue.Notify = func(id string, seq uint64) {
++		// Before the daemon is up (restore) the event is dropped: sfcd
++		// pulls every queue once after it sees a new engine boot.
++		if d := logEvents.Load(); d != nil {
++			if c, err := d.GetContainer(id); err == nil {
++				d.LogContainerEventWithAttributes(c, logqueue.ActionLogs, map[string]string{"seq": strconv.FormatUint(seq, 10)})
++			}
++		}
++	}
+ 	volumedrv.Root = filepath.Join(cli.Config.ExecRoot, "volumes")
+ 	volumeservice.ExtraDrivers = append(volumeservice.ExtraDrivers, volumedrv.New(sfcd.New(sfcd.Socket(), peer.Allowed())))
+ 
+@@ -319,6 +331,7 @@ func (cli *daemonCLI) start(ctx context.Context) (retErr error) {
+ 	monitorCtx, stopMonitor := context.WithCancel(context.WithoutCancel(ctx))
+ 	defer stopMonitor()
+ 	monitor.Start(monitorCtx, d, feed)
++	logEvents.Store(d)
+ 
+ 	d.StoreHosts(hosts)
+ 
+diff --git a/daemon/seafield/logqueue/driver.go b/daemon/seafield/logqueue/driver.go
+index dbcd6ef..f4d21b3 100644
+--- a/daemon/seafield/logqueue/driver.go
++++ b/daemon/seafield/logqueue/driver.go
+@@ -6,8 +6,10 @@
+ 	"fmt"
+ 	"path/filepath"
+ 	"sync"
++	"time"
+ 
+ 	units "github.com/docker/go-units"
++	eventtypes "github.com/moby/moby/api/types/events"
+ 	"github.com/moby/moby/v2/daemon/logger"
+ )
+ 
+@@ -40,14 +42,44 @@ func validate(cfg map[string]string) error {
+ 			if n, err := units.RAMInBytes(v); err != nil || n < minSegment {
+ 				return fmt.Errorf("%s: max-size must be at least 256k, got %q", Name, v)
+ 			}
++		case "notify-quiet", "notify-max-wait":
+ 		default:
+ 			return fmt.Errorf("unknown log opt '%s' for %s log driver", k, Name)
+ 		}
+ 	}
+-	return nil
++	_, _, err := notifyTimes(cfg)
++	return err
++}
++
++// notifyTimes reads the debounce of the "lines stored" event. Defaults:
++// 500ms after the last line, at least once every 5s under a steady stream.
++// The bound exists so a chatty container cannot flood the event feed and
++// stall the engine and sfcd (Jay 2026-11-27). Seafield Cluster sets them per node (node.yaml).
++func notifyTimes(cfg map[string]string) (quiet, maxWait time.Duration, err error) {
++	quiet, maxWait = 500*time.Millisecond, 5*time.Second
++	if v := cfg["notify-quiet"]; v != "" {
++		if quiet, err = time.ParseDuration(v); err != nil || quiet < 10*time.Millisecond || quiet > 10*time.Second {
++			return 0, 0, fmt.Errorf("%s: notify-quiet must be 10ms..10s, got %q", Name, v)
++		}
++	}
++	if v := cfg["notify-max-wait"]; v != "" {
++		if maxWait, err = time.ParseDuration(v); err != nil || maxWait > time.Minute {
++			return 0, 0, fmt.Errorf("%s: notify-max-wait must be at most 1m, got %q", Name, v)
++		}
++	}
++	if maxWait < quiet {
++		return 0, 0, fmt.Errorf("%s: notify-max-wait (%s) is shorter than notify-quiet (%s)", Name, maxWait, quiet)
++	}
++	return quiet, maxWait, nil
+ }
+ 
+ // Dir is where the queue of container id lives.
++// Notify, set by the daemon, publishes "the queue of container id has
++// lines up to seq" as an engine event (action seafield.logs). The event
++// carries no log data; sfcd pulls the lines and acks them. It is debounced
++// per queue (notify-quiet, notify-max-wait).
++var Notify func(id string, seq uint64)
++
+ func Dir(id string) string { return filepath.Join(Root, "containers", id, "seafield-logs") }
+ 
+ type driver struct {
+@@ -70,6 +102,14 @@ func newDriver(info logger.Info) (logger.Logger, error) {
+ 	if err != nil {
+ 		return nil, err
+ 	}
++	if q.Quiet, q.MaxWait, err = notifyTimes(info.Config); err != nil {
++		_ = q.Close()
++		return nil, err
++	}
++	if n := Notify; n != nil {
++		id := info.ContainerID
++		q.OnData = func(seq uint64) { n(id, seq) }
++	}
+ 	liveMu.Lock()
+ 	live[info.ContainerID] = q
+ 	liveMu.Unlock()
+@@ -102,3 +142,6 @@ func lookup(id string) *Queue {
+ 	defer liveMu.Unlock()
+ 	return live[id]
+ }
++
++// ActionLogs is the container event action Notify publishes.
++const ActionLogs eventtypes.Action = "seafield.logs"
+diff --git a/daemon/seafield/logqueue/queue.go b/daemon/seafield/logqueue/queue.go
+index f964bd4..cb8f26d 100644
+--- a/daemon/seafield/logqueue/queue.go
++++ b/daemon/seafield/logqueue/queue.go
+@@ -63,8 +63,25 @@ type Queue struct {
+ 	next   uint64
+ 	notify chan struct{}
+ 	closed bool
++
++	// OnData, when set, says "lines up to seq are stored" without the data;
++	// the reader pulls the lines itself and acks them. It is debounced: it
++	// runs Quiet after the last Append, each Append within Quiet moves it
++	// later, and a steady stream still gets one at least every MaxWait.
++	// Close runs a pending one at once.
++	OnData  func(seq uint64)
++	Quiet   time.Duration
++	MaxWait time.Duration
++	timer   *time.Timer
++	gen     uint64
++	since   time.Time // first Append not yet announced
++	acked   uint64    // highest number the reader acknowledged; kept in ackFile
+ }
+ 
++// ackFile keeps the acknowledged number, so numbering continues after the
++// queue was emptied by an ack and the engine restarted.
++const ackFile = "acked"
++
+ // Open opens or creates the queue in dir, continuing its numbers.
+ func Open(dir string, maxSize int64) (*Queue, error) {
+ 	if maxSize <= 0 {
+@@ -73,7 +90,7 @@ func Open(dir string, maxSize int64) (*Queue, error) {
+ 	if err := os.MkdirAll(dir, 0o700); err != nil {
+ 		return nil, err
+ 	}
+-	q := &Queue{dir: dir, maxSize: maxSize, segSize: max(maxSize/8, minSegment), next: 1, notify: make(chan struct{})}
++	q := &Queue{dir: dir, maxSize: maxSize, segSize: max(maxSize/8, minSegment), next: 1, notify: make(chan struct{}), Quiet: 500 * time.Millisecond, MaxWait: 5 * time.Second}
+ 	if err := q.scan(); err != nil {
+ 		return nil, err
+ 	}
+@@ -101,6 +118,12 @@ func (q *Queue) scan() error {
+ 		q.segs = append(q.segs, first)
+ 		q.sizes = append(q.sizes, info.Size())
+ 	}
++	if b, err := os.ReadFile(filepath.Join(q.dir, ackFile)); err == nil {
++		if n, err := strconv.ParseUint(strings.TrimSpace(string(b)), 10, 64); err == nil {
++			q.acked = n
++			q.next = max(q.next, n+1)
++		}
++	}
+ 	if len(q.segs) == 0 {
+ 		return nil
+ 	}
+@@ -166,12 +189,44 @@ func (q *Queue) Append(t time.Time, stream string, partial bool, data []byte) er
+ 	}
+ 	q.sizes[len(q.sizes)-1] += int64(headerSize + len(data))
+ 	q.next++
++	q.scheduleLocked()
+ 	q.trimLocked()
+ 	close(q.notify)
+ 	q.notify = make(chan struct{})
+ 	return nil
+ }
+ 
++func (q *Queue) scheduleLocked() {
++	if q.OnData == nil {
++		return
++	}
++	now := time.Now()
++	if q.since.IsZero() {
++		q.since = now
++	}
++	delay := min(q.Quiet, q.since.Add(q.MaxWait).Sub(now))
++	if q.timer != nil {
++		q.timer.Stop()
++	}
++	q.gen++
++	gen := q.gen
++	q.timer = time.AfterFunc(max(delay, 0), func() { q.announce(gen) })
++}
++
++// announce runs OnData for the pending lines unless a later Append
++// rescheduled it (gen 0 = now, from Close).
++func (q *Queue) announce(gen uint64) {
++	q.mu.Lock()
++	if q.since.IsZero() || gen != 0 && gen != q.gen {
++		q.mu.Unlock()
++		return
++	}
++	q.since, q.timer = time.Time{}, nil
++	seq, f := q.next-1, q.OnData
++	q.mu.Unlock()
++	f(seq)
++}
++
+ func (q *Queue) rotate() error {
+ 	if q.cur != nil {
+ 		if err := q.cur.Close(); err != nil {
+@@ -206,10 +261,29 @@ func (q *Queue) trimLocked() {
+ func (q *Queue) Ack(upto uint64) {
+ 	q.mu.Lock()
+ 	defer q.mu.Unlock()
++	upto = min(upto, q.next-1)
++	if upto <= q.acked {
++		return
++	}
++	q.acked = upto
++	tmp := filepath.Join(q.dir, ackFile+".tmp")
++	if err := os.WriteFile(tmp, []byte(strconv.FormatUint(upto, 10)), 0o600); err == nil {
++		_ = os.Rename(tmp, filepath.Join(q.dir, ackFile))
++	}
+ 	for len(q.segs) > 1 && q.segs[1]-1 <= upto {
+ 		_ = os.Remove(filepath.Join(q.dir, segName(q.segs[0])))
+ 		q.segs, q.sizes = q.segs[1:], q.sizes[1:]
+ 	}
++	// Everything taken: drop the segment being written too. The next
++	// Append opens a new one at q.next.
++	if upto == q.next-1 && len(q.segs) == 1 {
++		if q.cur != nil {
++			_ = q.cur.Close()
++			q.cur = nil
++		}
++		_ = os.Remove(filepath.Join(q.dir, segName(q.segs[0])))
++		q.segs, q.sizes = nil, nil
++	}
+ }
+ 
+ // Read returns up to limit lines numbered after `after`, a Gap when some of
+@@ -220,14 +294,20 @@ func (q *Queue) Read(after uint64, limit int) ([]Line, *Gap, <-chan struct{}, er
+ 	segs := slices.Clone(q.segs)
+ 	next := q.next
+ 	changed := q.notify
++	after = max(after, q.acked) // acknowledged lines are gone, not a gap
+ 	q.mu.Unlock()
+ 	return readDir(q.dir, segs, next, after, limit, changed)
+ }
+ 
+ // Close closes the segment being written.
+ func (q *Queue) Close() error {
++	q.announce(0) // the container's last lines are not held back
+ 	q.mu.Lock()
+ 	defer q.mu.Unlock()
++	if q.timer != nil {
++		q.timer.Stop()
++		q.timer = nil
++	}
+ 	q.closed = true
+ 	close(q.notify)
+ 	q.notify = make(chan struct{})
+diff --git a/daemon/seafield/logqueue/queue_test.go b/daemon/seafield/logqueue/queue_test.go
+index 30d2b05..b2565c6 100644
+--- a/daemon/seafield/logqueue/queue_test.go
++++ b/daemon/seafield/logqueue/queue_test.go
+@@ -111,12 +111,86 @@ func TestAckDeletesWholeSegments(t *testing.T) {
+ 	if gap != nil || len(lines) != 50 || lines[0].Seq != 51 {
+ 		t.Fatalf("after ack: %d lines gap %+v", len(lines), gap)
+ 	}
+-	q.Ack(1000)
+-	if len(q.segs) != 1 {
+-		t.Fatalf("segment being written must stay: %d", len(q.segs))
++	q.Ack(1000) // everything taken: no segment is left
++	if len(q.segs) != 0 {
++		t.Fatalf("segments after full ack: %d", len(q.segs))
++	}
++	if lines, gap, _, _ := q.Read(0, 10); gap != nil || len(lines) != 0 {
++		t.Fatalf("acked lines are not a gap: %d %+v", len(lines), gap)
++	}
++	appendN(t, q, 1, 1)
++	if lines, _, _, _ := q.Read(0, 10); len(lines) != 1 || lines[0].Seq != 101 {
++		t.Fatalf("numbering after full ack: %+v", lines)
+ 	}
+ }
+ 
++func TestAckSurvivesReopen(t *testing.T) {
++	dir := t.TempDir()
++	q, _ := Open(dir, 0)
++	appendN(t, q, 10, 10)
++	q.Ack(10)
++	q.Close()
++	q, _ = Open(dir, 0)
++	defer q.Close()
++	appendN(t, q, 1, 1)
++	lines, gap, _, _ := q.Read(0, 10)
++	if gap != nil || len(lines) != 1 || lines[0].Seq != 11 {
++		t.Fatalf("after reopen: %+v %+v", lines, gap)
++	}
++}
++
++func TestOnDataDebounced(t *testing.T) {
++	q, _ := Open(t.TempDir(), 0)
++	defer q.Close()
++	q.Quiet, q.MaxWait = 100*time.Millisecond, 400*time.Millisecond
++	got := make(chan uint64, 16)
++	q.OnData = func(seq uint64) { got <- seq }
++	start := time.Now()
++	// a line every 40ms for 1s: Quiet never passes, MaxWait must still fire
++	for time.Since(start) < time.Second {
++		appendN(t, q, 1, 1)
++		time.Sleep(40 * time.Millisecond)
++	}
++	n := len(got)
++	if n < 2 || n > 3 {
++		t.Fatalf("steady stream: %d events in 1s with MaxWait 400ms", n)
++	}
++	// then quiet: one more event about Quiet after the last line, with it
++	select {
++	case seq := <-drain(got):
++		if seq != q.next-1 {
++			t.Fatalf("last event seq %d, stored %d", seq, q.next-1)
++		}
++	case <-time.After(time.Second):
++		t.Fatal("no event after the stream stopped")
++	}
++	appendN(t, q, 1, 1)
++	q.Close() // pending event fires at once
++	select {
++	case <-got:
++	case <-time.After(50 * time.Millisecond):
++		t.Fatal("Close held the pending event back")
++	}
++}
++
++// drain returns a channel yielding the last value sent on c within 300ms.
++func drain(c chan uint64) <-chan uint64 {
++	out := make(chan uint64, 1)
++	go func() {
++		var last uint64
++		for {
++			select {
++			case v := <-c:
++				last = v
++			case <-time.After(300 * time.Millisecond):
++				out <- last
++				return
++			}
++		}
++	}()
++	return out
++}
++
+ func TestWaitWakesOnAppend(t *testing.T) {
+ 	q, _ := Open(t.TempDir(), 0)
+ 	defer q.Close()
+@@ -128,3 +202,26 @@ func TestWaitWakesOnAppend(t *testing.T) {
+ 		t.Fatal("no wake")
+ 	}
+ }
++
++// A queue that stores nothing (and a container with logging off, which
++// never opens a queue at all) starts no timer and sends no event.
++func TestNoLinesNoEvent(t *testing.T) {
++	q, _ := Open(t.TempDir(), 0)
++	defer q.Close()
++	q.Quiet, q.MaxWait = 10*time.Millisecond, 20*time.Millisecond
++	fired := make(chan uint64, 1)
++	q.OnData = func(seq uint64) { fired <- seq }
++	time.Sleep(50 * time.Millisecond)
++	q.mu.Lock()
++	timer := q.timer
++	q.mu.Unlock()
++	if timer != nil {
++		t.Fatal("timer started without a line")
++	}
++	q.Close()
++	select {
++	case seq := <-fired:
++		t.Fatalf("event %d without a line", seq)
++	case <-time.After(30 * time.Millisecond):
++	}
++}
+diff --git a/daemon/seafield/logqueue/router.go b/daemon/seafield/logqueue/router.go
+index 017e9fc..f94cf15 100644
+--- a/daemon/seafield/logqueue/router.go
++++ b/daemon/seafield/logqueue/router.go
+@@ -8,7 +8,6 @@
+ 	"net/http"
+ 	"os"
+ 	"strconv"
+-	"time"
+ 
+ 	"github.com/moby/moby/v2/daemon/server/httputils"
+ 	"github.com/moby/moby/v2/daemon/server/router"
+@@ -30,7 +29,7 @@ type qRouter struct{
+ 
+ // NewRouter serves
+ //
+-//	GET  /seafield/logs/{name}?after=N[&limit=M][&wait=SECONDS]
++//	GET  /seafield/logs/{name}/lines?after=N[&limit=M]
+ //	POST /seafield/logs/{name}/ack?upto=N
+ func NewRouter(resolve ContainerResolver) router.Router { return qRouter{resolve: resolve} }
+ 
+@@ -70,44 +69,26 @@ func (r qRouter) get(ctx context.Context, w http.ResponseWriter, req *http.Reque
+ 		}
+ 		limit = min(n, 10_000)
+ 	}
+-	wait, err := parseUint(q.Get("wait"))
++	lq := lookup(id)
++	var (
++		lines []Line
++		gap   *Gap
++	)
++	if lq != nil {
++		lines, gap, _, err = lq.Read(after, limit)
++	} else {
++		lines, gap, err = ReadDir(Dir(id), after, limit)
++		if errors.Is(err, os.ErrNotExist) {
++			err = nil
++		}
++	}
+ 	if err != nil {
+ 		return err
+ 	}
+-	deadline := time.NewTimer(min(time.Duration(wait)*time.Second, 60*time.Second))
+-	defer deadline.Stop()
+-	for {
+-		lq := lookup(id)
+-		var (
+-			lines   []Line
+-			gap     *Gap
+-			changed <-chan struct{}
+-		)
+-		if lq != nil {
+-			lines, gap, changed, err = lq.Read(after, limit)
+-		} else {
+-			lines, gap, err = ReadDir(Dir(id), after, limit)
+-			if errors.Is(err, os.ErrNotExist) {
+-				err = nil
+-			}
+-		}
+-		if err != nil {
+-			return err
+-		}
+-		if len(lines) > 0 || gap != nil || wait == 0 || changed == nil {
+-			if lines == nil {
+-				lines = []Line{}
+-			}
+-			return httputils.WriteJSON(w, http.StatusOK, Page{Gap: gap, Lines: lines, Live: lq != nil})
+-		}
+-		select {
+-		case <-changed:
+-		case <-deadline.C:
+-			wait = 0
+-		case <-ctx.Done():
+-			return ctx.Err()
+-		}
++	if lines == nil {
++		lines = []Line{}
+ 	}
++	return httputils.WriteJSON(w, http.StatusOK, Page{Gap: gap, Lines: lines, Live: lq != nil})
+ }
+ 
+ func (r qRouter) ack(ctx context.Context, w http.ResponseWriter, req *http.Request, vars map[string]string) error {

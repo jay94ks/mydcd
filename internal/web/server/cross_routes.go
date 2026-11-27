@@ -10,31 +10,26 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/tenancy"
-	"github.com/jay94ks/mydcd/internal/web/mydc"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/tenancy"
+	"github.com/jay94ks/seafield/internal/web/sfc"
 )
 
-// Cross-tenant routes (UI-53). mydcd keeps them in `resources` as
+// Cross-tenant routes (UI-53). sfcd keeps them in `resources` as
 // route/<source tenant>/<id> rows, visible to readers of either side, and
 // takes propose-route / approve-route / withdraw-route. The daemon fills
-// the endpoint node and pool from the network rows it can read; mydcd
+// the endpoint node and pool from the network rows it can read; sfcd
 // decides permission, freshness and approval.
-
-type routeSideView struct {
-	Name string `json:"name,omitempty"` // network name, when this session can read that side
-	mydc.RouteSide
-}
 
 type routeView struct {
 	Key         string        `json:"key"` // route/<source tenant>/<id>
-	Source      routeSideView `json:"source"`
-	Destination routeSideView `json:"destination"`
+	Source      sfc.RouteSide `json:"source"`
+	Destination sfc.RouteSide `json:"destination"`
 	// Side is this tenant's side; State: active, waiting-me (this side has
 	// not approved), waiting-peer, revoking.
 	Side  string `json:"side"`
 	State string `json:"state"`
-	mydc.Route
+	sfc.Route
 }
 
 type routesPage struct {
@@ -43,44 +38,35 @@ type routesPage struct {
 	NetworksRevision uint64      `json:"networksRevision"`
 }
 
-// tenantRoutes reads the tenant's resources: its route rows, the member
-// network ID → name map and the networks revision.
-func tenantRoutes(ctx context.Context, c mydc.Conn, tenant string) ([]mydc.Route, map[string]string, uint64, error) {
-	var routes []mydc.Route
-	names := map[string]string{}
+// tenantRoutes reads the tenant's resources: its route rows (with both
+// sides' network names, and the other tenant's CIDR left out by sfcd) and
+// the networks revision.
+func tenantRoutes(ctx context.Context, c sfc.Conn, tenant string) ([]sfc.Route, uint64, error) {
+	var routes []sfc.Route
 	rev := uint64(0)
 	after := ""
 	for {
-		p, err := c.Resources(ctx, tenant, after)
+		p, err := screenResources(ctx, c, tenant, after)
 		if err != nil {
-			return nil, nil, 0, err
+			return nil, 0, err
 		}
 		rev = p.Collection
 		for _, e := range p.Items {
 			if e.Route != nil {
 				routes = append(routes, *e.Route)
 			}
-			if n := e.Network; n != nil && e.Tenant == tenant {
-				for _, m := range n.Members {
-					names[m.ID] = n.Name
-				}
-			}
 		}
 		if p.Next == "" {
-			return routes, names, rev, nil
+			return routes, rev, nil
 		}
 		after = p.Next
 	}
 }
 
-func viewRoute(tenant string, r mydc.Route, names map[string]string) routeView {
-	v := routeView{Key: "route/" + r.SourceTenant + "/" + r.ID, Route: r, Source: routeSideView{RouteSide: r.Source}, Destination: routeSideView{RouteSide: r.Destination}, Side: "source"}
-	if r.Source.Tenant == tenant {
-		v.Source.Name = names[r.Source.Network]
-	}
+func viewRoute(tenant string, r sfc.Route) routeView {
+	v := routeView{Key: "route/" + r.SourceTenant + "/" + r.ID, Route: r, Source: r.Source, Destination: r.Destination, Side: "source"}
 	if r.Destination.Tenant == tenant {
 		v.Side = "destination"
-		v.Destination.Name = names[r.Destination.Network]
 	}
 	mine := false
 	for _, a := range r.Approvals {
@@ -102,14 +88,14 @@ func viewRoute(tenant string, r mydc.Route, names map[string]string) routeView {
 // GET /t/{t}/routes
 func (s *Server) handleRouteList(w http.ResponseWriter, r *http.Request, ws *webSession) {
 	tenant := r.PathValue("t")
-	read(s, w, r, ws, func(ctx context.Context, c mydc.Conn) (routesPage, error) {
-		routes, names, rev, err := tenantRoutes(ctx, c, tenant)
+	read(s, w, r, ws, func(ctx context.Context, c sfc.Conn) (routesPage, error) {
+		routes, rev, err := tenantRoutes(ctx, c, tenant)
 		if err != nil {
 			return routesPage{}, err
 		}
 		out := routesPage{Items: []routeView{}, NetworksRevision: rev}
 		for _, x := range routes {
-			out.Items = append(out.Items, viewRoute(tenant, x, names))
+			out.Items = append(out.Items, viewRoute(tenant, x))
 		}
 		return out, nil
 	})
@@ -156,8 +142,8 @@ func parsePorts(raw []json.RawMessage) ([]tenancy.Ports, error) {
 
 // endpointOn picks the member of n (on node, or its only member) and its
 // first pool.
-func endpointOn(tenant string, n *mydc.Network, node string) (control.RouteEndpoint, error) {
-	var m *mydc.NetworkMember
+func endpointOn(tenant string, n *sfc.Network, node string) (control.RouteEndpoint, error) {
+	var m *sfc.NetworkMember
 	if node != "" {
 		mm, err := memberOn(n, node)
 		if err != nil {
@@ -202,7 +188,7 @@ func (s *Server) handleRoutePropose(w http.ResponseWriter, r *http.Request, ws *
 		return
 	}
 	tenant := r.PathValue("t")
-	s.sharedCreate(w, r, ws, req.OpID, req, func(ctx context.Context, c mydc.Conn, _ mydc.Session) (string, any, uint64, string, error) {
+	s.sharedCreate(w, r, ws, req.OpID, req, func(ctx context.Context, c sfc.Conn, _ sfc.Session) (string, any, uint64, string, error) {
 		id := req.ID
 		if id == "" {
 			id = "rt-" + req.OpID[:8]
@@ -256,7 +242,7 @@ func (s *Server) handleRoutePropose(w http.ResponseWriter, r *http.Request, ws *
 			rev = req.Expected
 		}
 		q := control.RouteProposal{ID: id, Source: src, Destination: dst, Protocol: proto, Ports: ports}
-		return mydc.ActionProposeRoute, q, rev, "route/" + id, nil
+		return sfc.ActionProposeRoute, q, rev, "route/" + id, nil
 	})
 }
 
@@ -277,8 +263,8 @@ func (s *Server) handleRouteSelect(action string) func(http.ResponseWriter, *htt
 			Action string
 			Req    any
 		}{action, req}
-		s.sharedCreate(w, r, ws, req.OpID, body, func(ctx context.Context, c mydc.Conn, _ mydc.Session) (string, any, uint64, string, error) {
-			routes, _, _, err := tenantRoutes(ctx, c, tenant)
+		s.sharedCreate(w, r, ws, req.OpID, body, func(ctx context.Context, c sfc.Conn, _ sfc.Session) (string, any, uint64, string, error) {
+			routes, _, err := tenantRoutes(ctx, c, tenant)
 			if err != nil {
 				return "", nil, 0, "", err
 			}
@@ -289,7 +275,7 @@ func (s *Server) handleRouteSelect(action string) func(http.ResponseWriter, *htt
 				if x.Phase == string(tenancy.Revoking) {
 					return "", nil, 0, "", &httpErr{http.StatusConflict, "revoking", "this route is being withdrawn"}
 				}
-				if action == mydc.ActionApproveRoute {
+				if action == sfc.ActionApproveRoute {
 					for _, a := range x.Approvals {
 						if a.Tenant == tenant {
 							return "", nil, 0, "", &httpErr{http.StatusConflict, "already-approved", "this workspace already approved the route"}
@@ -306,14 +292,14 @@ func (s *Server) handleRouteSelect(action string) func(http.ResponseWriter, *htt
 // unreadable: the other side's rows are hidden from this session (denied)
 // or not there; transport and session errors are not this.
 func unreadable(err error) bool {
-	var me *mydc.Error
+	var me *sfc.Error
 	var he *httpErr
-	return errors.As(err, &me) && me.Code == mydc.CodeDenied || errors.As(err, &he) && he.status == http.StatusNotFound
+	return errors.As(err, &me) && me.Code == sfc.CodeDenied || errors.As(err, &he) && he.status == http.StatusNotFound
 }
 
 // openEndpoint picks the destination among the tenant's open route
 // endpoints: the named network (on node, when given; pool, when given).
-func openEndpoint(ctx context.Context, c mydc.Conn, tenant, network, node, pool string) (control.RouteEndpoint, error) {
+func openEndpoint(ctx context.Context, c sfc.Conn, tenant, network, node, pool string) (control.RouteEndpoint, error) {
 	endpoints, err := readRouteEndpoints(ctx, c, tenant)
 	if err != nil {
 		return control.RouteEndpoint{}, err
@@ -339,7 +325,7 @@ func openEndpoint(ctx context.Context, c mydc.Conn, tenant, network, node, pool 
 // node, pool}]}: what another workspace offers as route destinations.
 func (s *Server) handleRouteEndpoints(w http.ResponseWriter, r *http.Request, ws *webSession) {
 	other := r.URL.Query().Get("tenant")
-	read(s, w, r, ws, func(ctx context.Context, c mydc.Conn) (map[string]any, error) {
+	read(s, w, r, ws, func(ctx context.Context, c sfc.Conn) (map[string]any, error) {
 		if other == "" || other == r.PathValue("t") {
 			return nil, invalid("tenant: another workspace")
 		}

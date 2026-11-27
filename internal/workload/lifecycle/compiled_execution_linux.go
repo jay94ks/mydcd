@@ -19,7 +19,7 @@ import (
 	"syscall"
 	"time"
 
-	contract "github.com/jay94ks/mydcd/lifecycle/v1"
+	contract "github.com/jay94ks/seafield/lifecycle/v1"
 	"golang.org/x/sys/unix"
 )
 
@@ -81,11 +81,11 @@ func (m *SourceStore) RunCachedCompiled(ctx context.Context, descriptor SourceDe
 // cache without creating an executable in a global or user-writable directory.
 // This is an artifact transport, not a sandbox or process supervisor.
 func compiledExecutable(data []byte) (*os.File, error) {
-	fd, err := unix.MemfdCreate("mydc-checker", unix.MFD_CLOEXEC|unix.MFD_ALLOW_SEALING)
+	fd, err := unix.MemfdCreate("sfc-checker", unix.MFD_CLOEXEC|unix.MFD_ALLOW_SEALING)
 	if err != nil {
 		return nil, err
 	}
-	f := os.NewFile(uintptr(fd), "mydc-checker")
+	f := os.NewFile(uintptr(fd), "sfc-checker")
 	n, err := f.Write(data)
 	if err == nil && n != len(data) {
 		err = io.ErrShortWrite

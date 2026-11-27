@@ -14,7 +14,7 @@ func TestNetworkClosurePreflightReusesTheSameAddressAndReferenceFence(t *testing
 	if !f.a.NetworkReferencesSettled(n) {
 		t.Fatal("empty original network")
 	}
-	cfg := DNSConfig{Tenant: "first", ID: "dns", Network: "lan", Pool: "pool", Source: 1, Serial: 1, Enabled: true, Zone: "app.mydc.test.", TTL: 1, NegativeTTL: 1, QuerySeconds: 2, MaxQueries: 4, MaxCacheEntries: 2, MaxResponseBytes: 4096}
+	cfg := DNSConfig{Tenant: "first", ID: "dns", Network: "lan", Pool: "pool", Source: 1, Serial: 1, Enabled: true, Zone: "app.sfc.test.", TTL: 1, NegativeTTL: 1, QuerySeconds: 2, MaxQueries: 4, MaxCacheEntries: 2, MaxResponseBytes: 4096}
 	a, ref, err := f.a.GrantDNSInstance(f.c, f.n, "admin", 0, cfg)
 	if err != nil || a.NetworkReferencesSettled(n) {
 		t.Fatal("empty names hid an original live DNS instance", err)

@@ -12,11 +12,11 @@ import (
 	"io/fs"
 	"path"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/localstore"
-	"github.com/jay94ks/mydcd/internal/mydcp"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/localstore"
+	"github.com/jay94ks/seafield/internal/sfcp"
 )
 
 var ErrLegacyAccountUnbound = errors.New("original login retained in wallet; its username must be verified before selecting an account")
@@ -192,7 +192,7 @@ func mergeLegacy(r *loginCredential, legacy *legacyLogin) error {
 // pinned user handler. It is used only when there are no named wallet accounts
 // and --user was omitted. An explicit missing user NEVER triggers this query.
 // Expired/revoked sessions need explicit login; they are not refreshed/replayed.
-func (s *CredentialStore) ImportLegacy(ctx context.Context, c Client, peer mydcp.Peer) (Stored, error) {
+func (s *CredentialStore) ImportLegacy(ctx context.Context, c Client, peer sfcp.Peer) (Stored, error) {
 	legacy, err := s.migrateLegacy(c)
 	if err != nil {
 		return Stored{}, err
@@ -220,23 +220,23 @@ func (s *CredentialStore) ImportLegacy(ctx context.Context, c Client, peer mydcp
 	if c.Verify(legacy.record.Session) != nil {
 		return Stored{}, ErrLoginRequired
 	}
-	c.Mesh, err = mydcp.NewTransport(c.Self, c.Cluster, func(key mydcp.Identity) (mydcp.Peer, bool) {
+	c.Mesh, err = sfcp.NewTransport(c.Self, c.Cluster, func(key sfcp.Identity) (sfcp.Peer, bool) {
 		for _, candidate := range c.Peers {
 			if candidate.Key == key {
 				return candidate, true
 			}
 		}
-		return mydcp.Peer{}, false
+		return sfcp.Peer{}, false
 	})
 	if err != nil {
 		return Stored{}, err
 	}
 	defer c.Mesh.Close()
-	reply, err := c.Query(ctx, peer, legacy.record.Session, "whoami", "")
+	reply, err := c.Whoami(ctx, peer, legacy.record.Session)
 	if err != nil {
 		return Stored{}, err
 	}
-	if reply.User == nil || reply.User.ID != legacy.record.Session.User {
+	if reply.User.ID != legacy.record.Session.User {
 		return Stored{}, ErrPrivateState
 	}
 	if err := s.activate(c, reply.User.Username, legacy.record.Session); err != nil {

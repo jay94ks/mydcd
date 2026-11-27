@@ -5,7 +5,7 @@ package deployment
 import (
 	"bytes"
 	"encoding/json"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/cluster/state"
 )
 
 func (d Delivery) validCandidate(c deliveryCandidate) bool {
@@ -95,7 +95,7 @@ func (d Delivery) validate() error {
 	} else {
 		model = r.Running.Candidate.Plan.Input
 	}
-	model.MyDC.Delivery = &r.Policy
+	model.Sfc.Delivery = &r.Policy
 	if model.validateExtensions() != nil {
 		return ErrInputs
 	}

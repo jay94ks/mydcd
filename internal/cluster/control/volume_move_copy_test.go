@@ -8,9 +8,9 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/workload/volumes"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/workload/volumes"
 )
 
 func TestVolumeMoveCopyProofTargetAuthorityAndInactiveStaging(t *testing.T) {
@@ -130,10 +130,10 @@ func TestVolumeMoveCopyProofTargetAuthorityAndInactiveStaging(t *testing.T) {
 	// This fixed Goal tests storage projection, not a fabricated App claim.
 	retained := true
 	config := deployment.ComposeVolume{}
-	config.MyDC.Node = j.Binding.Source.Node
-	config.MyDC.Retain = &retained
-	config.MyDC.Quota = "observe"
-	config.MyDC.Capacity = deployment.VolumeSize(j.SourceCapacity)
+	config.Sfc.Node = j.Binding.Source.Node
+	config.Sfc.Retain = &retained
+	config.Sfc.Quota = "observe"
+	config.Sfc.Capacity = deployment.VolumeSize(j.SourceCapacity)
 	goal := deployment.GoalCommand{Schema: 1, Cluster: f.p.Cluster, Tenant: f.scope.Tenant, App: f.scope.App, Kind: "volume", Node: j.Binding.Source.Node, Owner: j.Binding.Source.Key}
 	goal.Config, _ = json.Marshal(config)
 	goalRaw, _ := json.Marshal(goal)

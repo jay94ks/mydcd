@@ -14,17 +14,17 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/config"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/storage"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/config"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/storage"
 )
 
 // The frozen original state is input to product reducers only. The outer
 // report admission is injected for this candidate-validation check; no member
 // signature, live quorum, DB write or native success is claimed here.
 func TestClosedOriginalManualCDContinuationCheckpoint(t *testing.T) {
-	prefix := os.Getenv("MYDC_E8_CLOSED_SOURCE_PREFIX")
+	prefix := os.Getenv("SFC_E8_CLOSED_SOURCE_PREFIX")
 	if prefix == "" {
 		t.Skip("explicit stopped E8 state")
 	}

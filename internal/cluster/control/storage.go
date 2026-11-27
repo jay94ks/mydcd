@@ -7,8 +7,8 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/jay94ks/mydcd/internal/cluster/lifecycle"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/cluster/lifecycle"
+	"github.com/jay94ks/seafield/internal/cluster/state"
 )
 
 const StorageKey = "control/storage"
@@ -146,11 +146,7 @@ func (p Policy) storageQuiescent(s state.State) bool {
 		}
 		_, managedSource := projection.ManagedSources[key]
 		_, dnsSource := dns[key]
-		known := key == StorageKey || managedSource || dnsSource
-		for _, root := range []string{NodeShellKey, IngressManagementKey, CertificatesKey, RegistryMaintenanceKey, ImageCacheKey, TunnelReconnectKey, CompactKey, CatalogKey, MembersKey, ResourcesKey, VolumesKey, AppsKey, VaultKey, NodeStorageKey, LifecycleKey, RegistriesKey, ExternalRegistriesKey} {
-			known = known || key == root || strings.HasPrefix(key, root+"/")
-		}
-		if !known {
+		if !managedSource && !dnsSource && !bookStateKey(key) {
 			return false
 		}
 	}
@@ -191,4 +187,18 @@ func (p Policy) reduceStorage(s state.State, cmd state.Command) (map[string][]by
 		return nil, state.Invalid
 	}
 	return map[string][]byte{StorageKey: raw}, state.Applied
+}
+
+// bookStateKey reports whether key belongs to a book (its root or under it)
+// or is the storage key itself. Ledger rotation refuses any other key.
+func bookStateKey(key string) bool {
+	if key == StorageKey {
+		return true
+	}
+	for _, root := range bookRoots {
+		if key == root || strings.HasPrefix(key, root+"/") {
+			return true
+		}
+	}
+	return false
 }

@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/registryclient"
+	"github.com/jay94ks/seafield/internal/registryclient"
 )
 
 func TestNativeContentUsesOriginalStoreAndReaderBlocksGCJoin(t *testing.T) {
@@ -53,5 +53,45 @@ func TestNativeContentUsesOriginalStoreAndReaderBlocksGCJoin(t *testing.T) {
 	q.Digest = "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
 	if _, body, err = s.OpenContent(context.Background(), q); err == nil || body != nil {
 		t.Fatal("unwitnessed native blob opened", body, err)
+	}
+}
+
+func TestNativeContentResumesFromOffset(t *testing.T) {
+	s, _, _, _, _, _, image, digest := nativeImageFixture(t)
+	root := "registry.example/team/app@" + digest
+	for _, q := range []registryclient.GraphContentQuery{
+		{Root: root, Kind: "layer", Digest: image.Layers[0].Digest.String()},
+		{Root: root, Kind: "manifest"},
+	} {
+		info, body, err := s.OpenGraphContentAt(context.Background(), q, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		whole, _ := io.ReadAll(body)
+		body.Close()
+		cut := int64(len(whole) / 3)
+		info2, body, err := s.OpenGraphContentAt(context.Background(), q, cut)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rest, _ := io.ReadAll(body)
+		body.Close()
+		joined := append(whole[:cut:cut], rest...)
+		if info2 != info || info.Bytes != int64(len(whole)) || fmt.Sprintf("sha256:%x", sha256.Sum256(joined)) != info.Digest {
+			t.Fatal("resumed read differs", q.Kind, info, info2)
+		}
+		_, body, err = s.OpenGraphContentAt(context.Background(), q, info.Bytes)
+		if err != nil {
+			t.Fatal("offset at the end", err)
+		}
+		if tail, _ := io.ReadAll(body); len(tail) != 0 {
+			t.Fatal("read past the end")
+		}
+		body.Close()
+		for _, bad := range []int64{-1, info.Bytes + 1} {
+			if _, body, err = s.OpenGraphContentAt(context.Background(), q, bad); err == nil || body != nil {
+				t.Fatal("offset outside the item accepted", bad)
+			}
+		}
 	}
 }

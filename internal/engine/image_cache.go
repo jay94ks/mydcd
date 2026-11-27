@@ -11,7 +11,7 @@ import (
 	"unicode/utf8"
 
 	cerrdefs "github.com/containerd/errdefs"
-	"github.com/jay94ks/mydcd/internal/imagecache"
+	"github.com/jay94ks/seafield/internal/imagecache"
 	"github.com/moby/moby/client"
 )
 

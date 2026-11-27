@@ -13,14 +13,14 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/cluster/lifecycle"
-	"github.com/jay94ks/mydcd/internal/web/mydc"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/lifecycle"
+	"github.com/jay94ks/seafield/internal/web/sfc"
 )
 
-// REQ-51/52 (RQ12, real shape: docs/protocol/mydcp.md 노드 운영,
+// REQ-51/52 (RQ12, real shape: docs/protocol/sfcp.md 노드 운영,
 // control/node_*.go): the advanced server actions of UI-12 '고급 ▾' and the
-// removal check (system admin). Each plan is mydcd's: the web shows it and
+// removal check (system admin). Each plan is sfcd's: the web shows it and
 // signs the op with a fresh plan only when it says the same as the one shown
 // (the plan token), and never decides itself whether a server may be
 // drained, demoted or removed.
@@ -72,7 +72,7 @@ func planOperation(r *http.Request, prefix string) (string, error) {
 	return op, nil
 }
 
-func memberOr404(ctx context.Context, c mydc.Conn, node string) (*memberView, error) {
+func memberOr404(ctx context.Context, c sfc.Conn, node string) (*memberView, error) {
 	m, err := findMember(ctx, c, node)
 	if err == nil && m == nil {
 		err = &httpErr{http.StatusNotFound, "not-found", "no such server"}
@@ -92,7 +92,7 @@ func blockersShape(bs []control.NodeBlocker) []map[string]any {
 	return out
 }
 
-// firstBlocker: the code mydcd refuses with first ("" = none).
+// firstBlocker: the code sfcd refuses with first ("" = none).
 func firstBlocker(bs []control.NodeBlocker) any {
 	if len(bs) == 0 {
 		return nil
@@ -153,7 +153,7 @@ func (s *Server) handleNodeDrainPlan(w http.ResponseWriter, r *http.Request, ws 
 		s.writeBackendError(w, ws, err)
 		return
 	}
-	read(s, w, r, ws, func(ctx context.Context, c mydc.Conn) (map[string]any, error) {
+	read(s, w, r, ws, func(ctx context.Context, c sfc.Conn) (map[string]any, error) {
 		p, err := c.PlanNodeDrain(ctx, control.NodeDrainQuery{Node: r.PathValue("node"), Operation: op})
 		if err != nil {
 			return nil, err
@@ -180,7 +180,7 @@ func drainToken(p control.NodeDrainPlan) string {
 
 // POST /nodes/{node}/drain {opId, plan, operation, leaveBlocked?} →
 // drain-node (control.NodeDrainChange of a fresh plan that says the same,
-// Expected = its Expected; mydcd takes a plan read in the last 30 s).
+// Expected = its Expected; sfcd takes a plan read in the last 30 s).
 // Progress: GET /nodes/{node}/drain-status?operation=.
 func (s *Server) handleDrainNode(w http.ResponseWriter, r *http.Request, ws *webSession) {
 	var req struct {
@@ -193,7 +193,7 @@ func (s *Server) handleDrainNode(w http.ResponseWriter, r *http.Request, ws *web
 		return
 	}
 	node := r.PathValue("node")
-	s.sharedCreate(w, r, ws, req.OpID, actionBody{mydc.ActionDrainNode, req}, func(ctx context.Context, c mydc.Conn, _ mydc.Session) (string, any, uint64, string, error) {
+	s.sharedCreate(w, r, ws, req.OpID, actionBody{sfc.ActionDrainNode, req}, func(ctx context.Context, c sfc.Conn, _ sfc.Session) (string, any, uint64, string, error) {
 		op, err := nodeOperation(req.Operation, "drain", req.OpID)
 		if err != nil {
 			return "", nil, 0, "", err
@@ -208,7 +208,7 @@ func (s *Server) handleDrainNode(w http.ResponseWriter, r *http.Request, ws *web
 		if err := samePlan(req.Plan, drainToken(p), "server's tasks"); err != nil {
 			return "", nil, 0, "", err
 		}
-		return mydc.ActionDrainNode, control.NodeDrainChange{At: p.At, ID: node, Operation: op, LeaveBlocked: req.LeaveBlocked, AppsRoot: p.AppsRoot,
+		return sfc.ActionDrainNode, control.NodeDrainChange{At: p.At, ID: node, Operation: op, LeaveBlocked: req.LeaveBlocked, AppsRoot: p.AppsRoot,
 			Plan: p.Digest, Jobs: p.Jobs}, p.Expected, "node/" + node, nil
 	})
 }
@@ -224,7 +224,7 @@ func (s *Server) handleNodeDrainStatus(w http.ResponseWriter, r *http.Request, w
 		writeError(w, http.StatusBadRequest, "bad-request", "operation: the drain's operation")
 		return
 	}
-	read(s, w, r, ws, func(ctx context.Context, c mydc.Conn) (control.NodeDrainStatus, error) {
+	read(s, w, r, ws, func(ctx context.Context, c sfc.Conn) (control.NodeDrainStatus, error) {
 		st, err := c.NodeDrainStatus(ctx, control.NodeDrainQuery{Node: r.PathValue("node"), Operation: op})
 		if st.Jobs == nil {
 			st.Jobs = []control.NodeDrainJobStatus{}
@@ -238,7 +238,7 @@ func (s *Server) handleNodeDrainStatus(w http.ResponseWriter, r *http.Request, w
 // pendingOperation?} (node-demote-plan). quorum / tolerates repeat
 // quorumAfter / faultToleranceAfter for older screens.
 func (s *Server) handleNodeVoterPlan(w http.ResponseWriter, r *http.Request, ws *webSession) {
-	read(s, w, r, ws, func(ctx context.Context, c mydc.Conn) (map[string]any, error) {
+	read(s, w, r, ws, func(ctx context.Context, c sfc.Conn) (map[string]any, error) {
 		p, err := c.PlanNodeDemotion(ctx, r.PathValue("node"))
 		if err != nil {
 			return nil, err
@@ -255,7 +255,7 @@ func (s *Server) handleNodeVoterPlan(w http.ResponseWriter, r *http.Request, ws 
 
 // POST /nodes/{node}/demote {opId, expected?} → demote-node
 // (control.NodeSelection{ID}, Expected default the plan's). A refusal is
-// mydcd's and comes back as the op result.
+// sfcd's and comes back as the op result.
 func (s *Server) handleDemoteNode(w http.ResponseWriter, r *http.Request, ws *webSession) {
 	var req struct {
 		OpID     string `json:"opId"`
@@ -265,7 +265,7 @@ func (s *Server) handleDemoteNode(w http.ResponseWriter, r *http.Request, ws *we
 		return
 	}
 	node := r.PathValue("node")
-	s.sharedCreate(w, r, ws, req.OpID, actionBody{mydc.ActionDemoteNode, req}, func(ctx context.Context, c mydc.Conn, _ mydc.Session) (string, any, uint64, string, error) {
+	s.sharedCreate(w, r, ws, req.OpID, actionBody{sfc.ActionDemoteNode, req}, func(ctx context.Context, c sfc.Conn, _ sfc.Session) (string, any, uint64, string, error) {
 		if _, err := memberOr404(ctx, c, node); err != nil {
 			return "", nil, 0, "", err
 		}
@@ -273,7 +273,7 @@ func (s *Server) handleDemoteNode(w http.ResponseWriter, r *http.Request, ws *we
 		if err != nil {
 			return "", nil, 0, "", err
 		}
-		return mydc.ActionDemoteNode, control.NodeSelection{ID: node}, expectedOr(req.Expected, p.Expected), "node/" + node, nil
+		return sfc.ActionDemoteNode, control.NodeSelection{ID: node}, expectedOr(req.Expected, p.Expected), "node/" + node, nil
 	})
 }
 
@@ -290,7 +290,7 @@ func (s *Server) handleRotateNodeIdentity(w http.ResponseWriter, r *http.Request
 		return
 	}
 	node := r.PathValue("node")
-	s.sharedCreate(w, r, ws, req.OpID, actionBody{mydc.ActionRotateNodeIdentity, req}, func(ctx context.Context, c mydc.Conn, _ mydc.Session) (string, any, uint64, string, error) {
+	s.sharedCreate(w, r, ws, req.OpID, actionBody{sfc.ActionRotateNodeIdentity, req}, func(ctx context.Context, c sfc.Conn, _ sfc.Session) (string, any, uint64, string, error) {
 		op, err := nodeOperation(req.Operation, "rotate", req.OpID)
 		if err != nil {
 			return "", nil, 0, "", err
@@ -299,9 +299,9 @@ func (s *Server) handleRotateNodeIdentity(w http.ResponseWriter, r *http.Request
 		if err != nil {
 			return "", nil, 0, "", err
 		}
-		// the membership entry's revision (as `mydc node rotate-key`), not the
+		// the membership entry's revision (as `sfcli node rotate-key`), not the
 		// lifecycle row's
-		return mydc.ActionRotateNodeIdentity, control.NodeIdentityChange{ID: node, Operation: op}, expectedOr(req.Expected, m.JoinRevision), "node/" + node, nil
+		return sfc.ActionRotateNodeIdentity, control.NodeIdentityChange{ID: node, Operation: op}, expectedOr(req.Expected, m.JoinRevision), "node/" + node, nil
 	})
 }
 
@@ -314,7 +314,7 @@ func forceToken(p control.NodeForcePlan) string {
 
 // GET /nodes/{node}/force-remove-plan?operation= → removePlanShape plus
 // {operation, forceable, code?, plan, probe?:{responding, startedAt,
-// finishedAt}} (node-force-remove-plan: mydcd probes the server). Without
+// finishedAt}} (node-force-remove-plan: sfcd probes the server). Without
 // operation the web picks force-<12 hex>; send it back.
 func (s *Server) handleNodeForceRemovePlan(w http.ResponseWriter, r *http.Request, ws *webSession) {
 	op, err := planOperation(r, "force")
@@ -322,7 +322,7 @@ func (s *Server) handleNodeForceRemovePlan(w http.ResponseWriter, r *http.Reques
 		s.writeBackendError(w, ws, err)
 		return
 	}
-	read(s, w, r, ws, func(ctx context.Context, c mydc.Conn) (map[string]any, error) {
+	read(s, w, r, ws, func(ctx context.Context, c sfc.Conn) (map[string]any, error) {
 		p, err := c.PlanNodeForceRemoval(ctx, control.NodeForceQuery{Node: r.PathValue("node"), Operation: op})
 		if err != nil {
 			return nil, err
@@ -338,7 +338,7 @@ func (s *Server) handleNodeForceRemovePlan(w http.ResponseWriter, r *http.Reques
 
 // POST /nodes/{node}/force-remove {opId, plan, operation} →
 // force-remove-node (control.NodeForceChange with a fresh plan's probe,
-// Expected = its Expected). 409 not-forceable when mydcd gives no probe.
+// Expected = its Expected). 409 not-forceable when sfcd gives no probe.
 func (s *Server) handleForceRemoveNode(w http.ResponseWriter, r *http.Request, ws *webSession) {
 	var req struct {
 		OpID      string `json:"opId"`
@@ -349,7 +349,7 @@ func (s *Server) handleForceRemoveNode(w http.ResponseWriter, r *http.Request, w
 		return
 	}
 	node := r.PathValue("node")
-	s.sharedCreate(w, r, ws, req.OpID, actionBody{mydc.ActionForceRemoveNode, req}, func(ctx context.Context, c mydc.Conn, _ mydc.Session) (string, any, uint64, string, error) {
+	s.sharedCreate(w, r, ws, req.OpID, actionBody{sfc.ActionForceRemoveNode, req}, func(ctx context.Context, c sfc.Conn, _ sfc.Session) (string, any, uint64, string, error) {
 		op, err := nodeOperation(req.Operation, "force", req.OpID)
 		if err != nil {
 			return "", nil, 0, "", err
@@ -362,9 +362,9 @@ func (s *Server) handleForceRemoveNode(w http.ResponseWriter, r *http.Request, w
 			return "", nil, 0, "", err
 		}
 		if p.Probe == nil {
-			return "", nil, 0, "", &httpErr{http.StatusConflict, "not-forceable", "mydcd gave no removal probe for this server"}
+			return "", nil, 0, "", &httpErr{http.StatusConflict, "not-forceable", "sfcd gave no removal probe for this server"}
 		}
-		return mydc.ActionForceRemoveNode, control.NodeForceChange{ID: node, Operation: op, Epoch: p.Epoch, Probe: *p.Probe}, p.Expected, "node/" + node, nil
+		return sfc.ActionForceRemoveNode, control.NodeForceChange{ID: node, Operation: op, Epoch: p.Epoch, Probe: *p.Probe}, p.Expected, "node/" + node, nil
 	})
 }
 
@@ -372,7 +372,7 @@ func (s *Server) handleForceRemoveNode(w http.ResponseWriter, r *http.Request, w
 // check before remove-node). A blocker code is the code remove-node
 // refuses with.
 func (s *Server) handleNodeRemovePlan(w http.ResponseWriter, r *http.Request, ws *webSession) {
-	read(s, w, r, ws, func(ctx context.Context, c mydc.Conn) (map[string]any, error) {
+	read(s, w, r, ws, func(ctx context.Context, c sfc.Conn) (map[string]any, error) {
 		p, err := c.PlanNodeRemoval(ctx, r.PathValue("node"))
 		if err != nil {
 			return nil, err
@@ -383,7 +383,7 @@ func (s *Server) handleNodeRemovePlan(w http.ResponseWriter, r *http.Request, ws
 
 var diagTimeRE = regexp.MustCompile(`[^0-9A-Za-z]+`)
 
-// GET /nodes/{node}/diagnostics → mydcd's diagnostics bundle (tar+gzip, at
+// GET /nodes/{node}/diagnostics → sfcd's diagnostics bundle (tar+gzip, at
 // most 64 KiB) as a download. The web checks its digest, relays it and
 // keeps no copy.
 func (s *Server) handleNodeDiagnostics(w http.ResponseWriter, r *http.Request, ws *webSession) {
@@ -391,7 +391,7 @@ func (s *Server) handleNodeDiagnostics(w http.ResponseWriter, r *http.Request, w
 	ctx, cancel := s.callCtx(r)
 	defer cancel()
 	var d control.NodeDiagnosticsBundle
-	err := ws.do(ctx, func(ctx context.Context, c mydc.Conn) error {
+	err := ws.do(ctx, func(ctx context.Context, c sfc.Conn) error {
 		var err error
 		d, err = c.ReadNodeDiagnostics(ctx, node)
 		if err == nil && !d.Valid(node) {
@@ -403,17 +403,17 @@ func (s *Server) handleNodeDiagnostics(w http.ResponseWriter, r *http.Request, w
 		s.writeBackendError(w, ws, err)
 		return
 	}
-	name := "mydcd-diag-" + node + "-" + strings.Trim(diagTimeRE.ReplaceAllString(d.CreatedAt, ""), "-") + ".tar.gz"
+	name := "sfcd-diag-" + node + "-" + strings.Trim(diagTimeRE.ReplaceAllString(d.CreatedAt, ""), "-") + ".tar.gz"
 	s.log.Info("node diagnostics", "user", ws.user.Username, "node", node, "bytes", len(d.Data))
 	h := w.Header()
 	h.Set("Content-Type", "application/gzip")
 	h.Set("Content-Disposition", `attachment; filename="`+name+`"`)
 	h.Set("Content-Length", strconv.Itoa(len(d.Data)))
 	h.Set("Cache-Control", "no-store")
-	h.Set("X-MyDC-Created-At", d.CreatedAt)
-	h.Set("X-MyDC-Digest", hex.EncodeToString(d.Digest[:]))
+	h.Set("X-SFC-Created-At", d.CreatedAt)
+	h.Set("X-SFC-Digest", hex.EncodeToString(d.Digest[:]))
 	if d.Truncated {
-		h.Set("X-MyDC-Truncated", "true")
+		h.Set("X-SFC-Truncated", "true")
 	}
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(d.Data)

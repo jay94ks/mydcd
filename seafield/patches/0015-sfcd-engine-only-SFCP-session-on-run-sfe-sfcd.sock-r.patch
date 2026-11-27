@@ -1,0 +1,1998 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Fri, 27 Nov 2026 09:25:45 +0000
+Subject: [PATCH 15/20] sfcd: engine-only SFCP session on /run/sfe/sfcd.sock
+ replaces the HTTP engine socket (events 32, log bulk 33, ack 34 served;
+ volume 35, network 36 called)
+
+
+diff --git a/daemon/command/daemon.go b/daemon/command/daemon.go
+index 3687049..abb6654 100644
+--- a/daemon/command/daemon.go
++++ b/daemon/command/daemon.go
+@@ -335,6 +335,36 @@ func (cli *daemonCLI) start(ctx context.Context) (retErr error) {
+ 		}
+ 		return "", nil
+ 	}
++	resolve := func(name string) (string, error) {
++		d := upDaemon.Load()
++		if d == nil {
++			return "", errors.New("engine is starting")
++		}
++		c, err := d.GetContainer(name)
++		if err != nil {
++			return "", err
++		}
++		return c.ID, nil
++	}
++	sessionCtx, stopSession := context.WithCancel(context.WithoutCancel(ctx))
++	defer stopSession()
++	sfcdClient.Handle(sfcd.Events, eventfeed.Serve(feed))
++	sfcdClient.Handle(sfcd.Log, logqueue.ServeBulk(resolve))
++	sfcdClient.Handle(sfcd.LogAck, logqueue.ServeAck(resolve))
++	sfcdClient.OnConnect(func() {
++		if d := upDaemon.Load(); d != nil {
++			restartBlocked(sessionCtx, d)
++		}
++	})
++	sfcdClient.Start(sessionCtx)
++	// Containers restored below join sfc networks and mount sfc volumes
++	// through sfcd: give it a moment to be there (restartBlocked retries
++	// the ones that still failed once it is).
++	waitCtx, cancelWait := context.WithTimeout(ctx, sfcdWait)
++	if err := sfcdClient.Wait(waitCtx); err != nil {
++		log.G(ctx).Warn("seafield: sfcd is not up yet; containers that need it start once it is")
++	}
++	cancelWait()
+ 
+ 	d, err := daemon.NewDaemon(ctx, cli.Config, pluginStore, cli.authzMiddleware, cli.containerdDialer)
+ 	if err != nil {
+@@ -344,6 +374,9 @@ func (cli *daemonCLI) start(ctx context.Context) (retErr error) {
+ 	defer stopMonitor()
+ 	monitor.Start(monitorCtx, d, feed)
+ 	upDaemon.Store(d)
++	if sfcdClient.Connected() {
++		go restartBlocked(sessionCtx, d)
++	}
+ 
+ 	d.StoreHosts(hosts)
+ 
+@@ -878,14 +911,6 @@ func buildRouters(opts routerOptions) []router.Router {
+ 		distributionrouter.NewRouter(opts.daemon.ImageBackend()),
+ 		network.NewRouter(opts.daemon, opts.cluster),
+ 		debugrouter.NewRouter(),
+-		eventfeed.NewRouter(opts.feed),
+-		logqueue.NewRouter(func(name string) (string, error) {
+-			c, err := opts.daemon.GetContainer(name)
+-			if err != nil {
+-				return "", err
+-			}
+-			return c.ID, nil
+-		}),
+ 	}
+ 
+ 	if opts.builder.backend != nil {
+diff --git a/daemon/seafield/eventfeed/router.go b/daemon/seafield/eventfeed/router.go
+deleted file mode 100644
+index f766e3b..0000000
+--- a/daemon/seafield/eventfeed/router.go
++++ /dev/null
+@@ -1,93 +0,0 @@
+-// SPDX-License-Identifier: Apache-2.0
+-
+-package eventfeed
+-
+-import (
+-	"context"
+-	"net/http"
+-	"strconv"
+-	"time"
+-
+-	"github.com/moby/moby/v2/daemon/server/httputils"
+-	"github.com/moby/moby/v2/daemon/server/router"
+-	"github.com/moby/moby/v2/errdefs"
+-)
+-
+-// Page is the answer to GET /seafield/events.
+-type Page struct {
+-	Boot    string   `json:"boot"`
+-	Gap     *Gap     `json:"gap,omitempty"`
+-	Records []Record `json:"records"`
+-}
+-
+-const (
+-	defaultLimit = 1000
+-	maxLimit     = 10_000
+-	maxWait      = 60 * time.Second
+-)
+-
+-type feedRouter struct{ f *Feed }
+-
+-// NewRouter serves the feed:
+-//
+-//	GET /seafield/events?after=N[&limit=M][&wait=SECONDS]
+-//
+-// returns records numbered after N (oldest first). With wait, an empty
+-// answer is held until a record arrives or the wait ends (at most 60s).
+-func NewRouter(f *Feed) router.Router { return feedRouter{f: f} }
+-
+-func (r feedRouter) Routes() []router.Route {
+-	return []router.Route{router.NewGetRoute("/seafield/events", r.get)}
+-}
+-
+-func (r feedRouter) get(ctx context.Context, w http.ResponseWriter, req *http.Request, _ map[string]string) error {
+-	q := req.URL.Query()
+-	after, err := strconv.ParseUint(q.Get("after"), 10, 64)
+-	if q.Get("after") != "" && err != nil {
+-		return errdefs.InvalidParameter(err)
+-	}
+-	limit := defaultLimit
+-	if v := q.Get("limit"); v != "" {
+-		if limit, err = strconv.Atoi(v); err != nil || limit <= 0 {
+-			return errdefs.InvalidParameter(errBadLimit{})
+-		}
+-		limit = min(limit, maxLimit)
+-	}
+-	var wait time.Duration
+-	if v := q.Get("wait"); v != "" {
+-		s, err := strconv.Atoi(v)
+-		if err != nil || s < 0 {
+-			return errdefs.InvalidParameter(errBadWait{})
+-		}
+-		wait = min(time.Duration(s)*time.Second, maxWait)
+-	}
+-	deadline := time.NewTimer(wait)
+-	defer deadline.Stop()
+-	for {
+-		recs, gap, changed, err := r.f.Read(after, limit)
+-		if err != nil {
+-			return err
+-		}
+-		if len(recs) > 0 || gap != nil || wait == 0 {
+-			if recs == nil {
+-				recs = []Record{}
+-			}
+-			return httputils.WriteJSON(w, http.StatusOK, Page{Boot: r.f.Boot(), Gap: gap, Records: recs})
+-		}
+-		select {
+-		case <-changed:
+-		case <-deadline.C:
+-			wait = 0
+-		case <-ctx.Done():
+-			return ctx.Err()
+-		}
+-	}
+-}
+-
+-type errBadLimit struct{}
+-
+-func (errBadLimit) Error() string { return "limit must be a positive number" }
+-
+-type errBadWait struct{}
+-
+-func (errBadWait) Error() string { return "wait must be a number of seconds" }
+diff --git a/daemon/seafield/eventfeed/session.go b/daemon/seafield/eventfeed/session.go
+new file mode 100644
+index 0000000..684af2b
+--- /dev/null
++++ b/daemon/seafield/eventfeed/session.go
+@@ -0,0 +1,88 @@
++// SPDX-License-Identifier: Apache-2.0
++
++package eventfeed
++
++import (
++	"context"
++	"encoding/json"
++
++	"github.com/moby/moby/v2/daemon/seafield/sfcd"
++)
++
++// Purpose 32 EngineEvents: sfcd subscribes once per session; the engine
++// answers and then pushes kind 16 batches as records are stored.
++type (
++	SubscribeQ struct {
++		sfcd.Request
++		After uint64
++	}
++	SubscribeA struct {
++		sfcd.Reply
++		Boot string
++		Last uint64
++	}
++	// Range is a run of numbers that are gone.
++	Range struct{ From, To uint64 }
++	// Batch is one push. Records keep the upstream event encoding.
++	Batch struct {
++		Boot    string
++		Gap     *Range
++		Records []Record
++	}
++)
++
++const batchRecords = 200
++
++// batchBytes keeps one batch under the kind 16 budget.
++const batchBytes = sfcd.MaxAnswer - 8<<10
++
++// Serve answers purpose 32 from f.
++func Serve(f *Feed) sfcd.Handler {
++	return func(ctx context.Context, st *sfcd.Stream, req sfcd.Request, body []byte) error {
++		if req.Op != "subscribe" {
++			return st.Answer(&sfcd.Reply{OpID: req.OpID, Result: sfcd.NotApplied, Reason: sfcd.Invalid})
++		}
++		var q SubscribeQ
++		if err := json.Unmarshal(body, &q); err != nil {
++			return st.Answer(&sfcd.Reply{OpID: req.OpID, Result: sfcd.NotApplied, Reason: sfcd.Invalid})
++		}
++		if err := st.Answer(&SubscribeA{Reply: sfcd.Reply{OpID: req.OpID}, Boot: f.Boot(), Last: f.Last()}); err != nil {
++			return err
++		}
++		after := q.After
++		for {
++			recs, gap, changed, err := f.Read(after, batchRecords)
++			if err != nil {
++				st.Cancel()
++				return err
++			}
++			if len(recs) == 0 && gap == nil {
++				select {
++				case <-changed:
++					continue
++				case <-ctx.Done():
++					st.Cancel()
++					return ctx.Err()
++				}
++			}
++			b := Batch{Boot: f.Boot(), Records: []Record{}}
++			if gap != nil {
++				b.Gap = &Range{From: gap.From, To: gap.To}
++				after = max(after, gap.To)
++			}
++			size := 0
++			for _, r := range recs {
++				raw, _ := json.Marshal(r)
++				if len(b.Records) > 0 && size+len(raw) > batchBytes {
++					break
++				}
++				b.Records = append(b.Records, r)
++				size += len(raw) + 1
++				after = r.Seq
++			}
++			if err := st.Batch(b); err != nil {
++				return err
++			}
++		}
++	}
++}
+diff --git a/daemon/seafield/logqueue/router.go b/daemon/seafield/logqueue/router.go
+deleted file mode 100644
+index 769ff48..0000000
+--- a/daemon/seafield/logqueue/router.go
++++ /dev/null
+@@ -1,142 +0,0 @@
+-// SPDX-License-Identifier: Apache-2.0
+-
+-package logqueue
+-
+-import (
+-	"context"
+-	"errors"
+-	"net/http"
+-	"os"
+-	"strconv"
+-
+-	"github.com/moby/moby/v2/daemon/server/router"
+-	"github.com/moby/moby/v2/errdefs"
+-)
+-
+-// ContainerResolver maps a name or id prefix to a full container id.
+-type ContainerResolver func(nameOrID string) (string, error)
+-
+-type qRouter struct{ resolve ContainerResolver }
+-
+-// NewRouter serves
+-//
+-//	GET  /seafield/logs/{name}/bulk?after=N[&max_bytes=M]
+-//	POST /seafield/logs/{name}/ack?upto=N
+-func NewRouter(resolve ContainerResolver) router.Router { return qRouter{resolve: resolve} }
+-
+-func (r qRouter) Routes() []router.Route {
+-	return []router.Route{
+-		router.NewGetRoute("/seafield/logs/{name:.*}/bulk", r.get),
+-		router.NewPostRoute("/seafield/logs/{name:.*}/ack", r.ack),
+-	}
+-}
+-
+-func parseUint(v string) (uint64, error) {
+-	if v == "" {
+-		return 0, nil
+-	}
+-	n, err := strconv.ParseUint(v, 10, 64)
+-	if err != nil {
+-		return 0, errdefs.InvalidParameter(err)
+-	}
+-	return n, nil
+-}
+-
+-const (
+-	defaultBulk = 4 << 20
+-	maxBulk     = 16 << 20
+-)
+-
+-// get answers one bulk of records after `after`, in the segment record
+-// encoding (AppendRecord), up to max_bytes (at least one record). There is
+-// no per-line read and no waiting: the seafield.logs event says when to come.
+-func (r qRouter) get(ctx context.Context, w http.ResponseWriter, req *http.Request, vars map[string]string) error {
+-	id, err := r.resolve(vars["name"])
+-	if err != nil {
+-		return err
+-	}
+-	q := req.URL.Query()
+-	after, err := parseUint(q.Get("after"))
+-	if err != nil {
+-		return err
+-	}
+-	limit := defaultBulk
+-	if v := q.Get("max_bytes"); v != "" {
+-		n, err := strconv.Atoi(v)
+-		if err != nil || n <= 0 {
+-			return errdefs.InvalidParameter(errors.New("max_bytes must be a positive number"))
+-		}
+-		limit = min(n, maxBulk)
+-	}
+-	lq := lookup(id)
+-	read := func(after uint64) ([]Line, *Gap, error) {
+-		if lq != nil {
+-			l, g, _, err := lq.Read(after, 1000)
+-			return l, g, err
+-		}
+-		l, g, err := ReadDir(Dir(id), after, 1000)
+-		if errors.Is(err, os.ErrNotExist) {
+-			err = nil
+-		}
+-		return l, g, err
+-	}
+-	var (
+-		body        []byte
+-		first, last uint64
+-		count       int
+-	)
+-	lines, gap, err := read(after)
+-	if err != nil {
+-		return err
+-	}
+-fill:
+-	for len(lines) > 0 {
+-		for _, l := range lines {
+-			if count > 0 && len(body)+headerSize+len(l.Data) > limit {
+-				break fill
+-			}
+-			body = AppendRecord(body, l)
+-			if count == 0 {
+-				first = l.Seq
+-			}
+-			last, count = l.Seq, count+1
+-		}
+-		if lines, _, err = read(last); err != nil {
+-			return err
+-		}
+-	}
+-	h := w.Header()
+-	h.Set("Content-Type", "application/vnd.seafield.log-records")
+-	h.Set("Seafield-Live", strconv.FormatBool(lq != nil))
+-	h.Set("Seafield-Count", strconv.Itoa(count))
+-	if count > 0 {
+-		h.Set("Seafield-First", strconv.FormatUint(first, 10))
+-		h.Set("Seafield-Last", strconv.FormatUint(last, 10))
+-	}
+-	if gap != nil {
+-		h.Set("Seafield-Gap", strconv.FormatUint(gap.From, 10)+"-"+strconv.FormatUint(gap.To, 10))
+-	}
+-	h.Set("Content-Length", strconv.Itoa(len(body)))
+-	w.WriteHeader(http.StatusOK)
+-	_, err = w.Write(body)
+-	return err
+-}
+-
+-func (r qRouter) ack(ctx context.Context, w http.ResponseWriter, req *http.Request, vars map[string]string) error {
+-	id, err := r.resolve(vars["name"])
+-	if err != nil {
+-		return err
+-	}
+-	upto, err := parseUint(req.URL.Query().Get("upto"))
+-	if err != nil {
+-		return err
+-	}
+-	if lq := lookup(id); lq != nil {
+-		lq.Ack(upto)
+-	} else if q, err := Open(Dir(id), 0); err == nil {
+-		q.Ack(upto)
+-		_ = q.Close()
+-	}
+-	w.WriteHeader(http.StatusNoContent)
+-	return nil
+-}
+diff --git a/daemon/seafield/logqueue/session.go b/daemon/seafield/logqueue/session.go
+new file mode 100644
+index 0000000..6660ad9
+--- /dev/null
++++ b/daemon/seafield/logqueue/session.go
+@@ -0,0 +1,147 @@
++// SPDX-License-Identifier: Apache-2.0
++
++package logqueue
++
++import (
++	"context"
++	"encoding/json"
++	"errors"
++	"os"
++
++	"github.com/moby/moby/v2/daemon/seafield/sfcd"
++)
++
++// ContainerResolver maps a name or id prefix to a full container id.
++type ContainerResolver func(nameOrID string) (string, error)
++
++// Purpose 33 EngineLog (bulk) and 34 EngineLogAck, asked by sfcd.
++type (
++	BulkQ struct {
++		sfcd.Request
++		Container string
++		After     uint64
++		MaxBytes  int
++	}
++	// Range is a run of numbers that are gone.
++	Range struct{ From, To uint64 }
++	// BulkA is followed by Size bytes of records in the segment record
++	// encoding (AppendRecord) as kind 4 chunks, then FIN.
++	BulkA struct {
++		sfcd.Reply
++		Count       int
++		First, Last uint64
++		Gap         *Range
++		Live        bool
++		Size        int
++	}
++	AckQ struct {
++		sfcd.Request
++		Container string
++		Upto      uint64
++	}
++)
++
++const (
++	defaultBulk = 4 << 20
++	maxBulk     = 16 << 20
++)
++
++func refuse(st *sfcd.Stream, opID, reason string) error {
++	return st.Answer(&sfcd.Reply{OpID: opID, Result: sfcd.NotApplied, Reason: reason})
++}
++
++// ServeBulk answers purpose 33: one bulk of records after After, up to
++// MaxBytes (at least one record). There is no per-line read and no waiting:
++// the seafield.logs event says when to come.
++func ServeBulk(resolve ContainerResolver) sfcd.Handler {
++	return func(ctx context.Context, st *sfcd.Stream, req sfcd.Request, body []byte) error {
++		var q BulkQ
++		if req.Op != "bulk" || json.Unmarshal(body, &q) != nil || q.MaxBytes < 0 {
++			return refuse(st, req.OpID, sfcd.Invalid)
++		}
++		id, err := resolve(q.Container)
++		if err != nil {
++			return refuse(st, req.OpID, sfcd.NotFound)
++		}
++		limit := defaultBulk
++		if q.MaxBytes > 0 {
++			limit = min(q.MaxBytes, maxBulk)
++		}
++		a, data, err := bulk(id, q.After, limit)
++		if err != nil {
++			return st.Answer(&sfcd.Reply{OpID: req.OpID, Result: sfcd.Unknown})
++		}
++		a.OpID = req.OpID
++		if err := st.Answer(&a); err != nil {
++			return err
++		}
++		if _, err := st.Write(data); err != nil {
++			return err
++		}
++		return st.Done()
++	}
++}
++
++func bulk(id string, after uint64, limit int) (BulkA, []byte, error) {
++	lq := lookup(id)
++	read := func(after uint64) ([]Line, *Gap, error) {
++		if lq != nil {
++			l, g, _, err := lq.Read(after, 1000)
++			return l, g, err
++		}
++		l, g, err := ReadDir(Dir(id), after, 1000)
++		if errors.Is(err, os.ErrNotExist) {
++			err = nil
++		}
++		return l, g, err
++	}
++	a := BulkA{Live: lq != nil}
++	var body []byte
++	lines, gap, err := read(after)
++	if err != nil {
++		return a, nil, err
++	}
++	if gap != nil {
++		a.Gap = &Range{From: gap.From, To: gap.To}
++	}
++fill:
++	for len(lines) > 0 {
++		for _, l := range lines {
++			if a.Count > 0 && len(body)+headerSize+len(l.Data) > limit {
++				break fill
++			}
++			body = AppendRecord(body, l)
++			if a.Count == 0 {
++				a.First = l.Seq
++			}
++			a.Last, a.Count = l.Seq, a.Count+1
++		}
++		if lines, _, err = read(a.Last); err != nil {
++			return a, nil, err
++		}
++	}
++	a.Size = len(body)
++	return a, body, nil
++}
++
++// ServeAck answers purpose 34: records up to Upto were taken; the queue
++// deletes the segments they cover.
++func ServeAck(resolve ContainerResolver) sfcd.Handler {
++	return func(ctx context.Context, st *sfcd.Stream, req sfcd.Request, body []byte) error {
++		var q AckQ
++		if req.Op != "ack" || json.Unmarshal(body, &q) != nil {
++			return refuse(st, req.OpID, sfcd.Invalid)
++		}
++		id, err := resolve(q.Container)
++		if err != nil {
++			return refuse(st, req.OpID, sfcd.NotFound)
++		}
++		if lq := lookup(id); lq != nil {
++			lq.Ack(q.Upto)
++		} else if qq, err := Open(Dir(id), 0); err == nil {
++			qq.Ack(q.Upto)
++			_ = qq.Close()
++		}
++		return st.Answer(&sfcd.Reply{OpID: req.OpID})
++	}
++}
+diff --git a/daemon/seafield/netdrv/driver_linux.go b/daemon/seafield/netdrv/driver_linux.go
+index e7a8cf1..77f4103 100644
+--- a/daemon/seafield/netdrv/driver_linux.go
++++ b/daemon/seafield/netdrv/driver_linux.go
+@@ -10,13 +10,9 @@
+ 
+ import (
+ 	"context"
+-	"crypto/rand"
+-	"encoding/hex"
+ 	"errors"
+ 	"fmt"
+ 	"net"
+-	"net/http"
+-	"net/url"
+ 	"regexp"
+ 	"strconv"
+ 	"sync"
+@@ -54,8 +50,7 @@ type inner interface {
+ // Driver wraps the bridge driver instance.
+ type Driver struct {
+ 	inner
+-	c    *sfcd.Client
+-	boot string
++	c *sfcd.Client
+ 
+ 	mu   sync.Mutex
+ 	nets map[string]netInfo // nid
+@@ -82,48 +77,113 @@ func Wrap(c *sfcd.Client) func(driverapi.Driver) (string, driverapi.Driver) {
+ 		if !ok {
+ 			panic("seafield: bridge driver lost a capability the sfc driver forwards")
+ 		}
+-		b := make([]byte, 8)
+-		_, _ = rand.Read(b)
+-		return Name, &Driver{inner: in, c: c, boot: hex.EncodeToString(b), nets: map[string]netInfo{}, eps: map[string]epInfo{}}
++		return Name, &Driver{inner: in, c: c, nets: map[string]netInfo{}, eps: map[string]epInfo{}}
+ 	}
+ }
+ 
+ func (d *Driver) Type() string { return Name }
+ 
+-func (d *Driver) call(method, path string, body map[string]any, out any) error {
++// Op requests and answers of purpose 36, mirroring sfcd's structs field for
++// field (sfcd decodes strictly and canonically). Maps and slices are never
++// nil on the wire.
++type (
++	pool    struct{ Subnet, Gateway string }
++	createQ struct {
++		sfcd.Request
++		NetworkID, Name string
++		Labels          map[string]string
++		Options         map[string]string
++		IPAM            []pool
++	}
++	createA struct {
++		sfcd.Reply
++		Bridge string
++		MTU    int
++	}
++	createdQ struct {
++		sfcd.Request
++		NetworkID, Name string
++		Labels          map[string]string
++		Bridge          string
++		MTU             int
++		Gateway         []string
++	}
++	deleteQ struct {
++		sfcd.Request
++		NetworkID, Name string
++		Labels          map[string]string
++	}
++	joinQ struct {
++		sfcd.Request
++		NetworkID, Endpoint, ContainerID, ContainerName string
++		ContainerLabels                                 map[string]string
++		Addresses                                       []string
++		MAC, SandboxKey, HostVeth                       string
++	}
++	route struct{ Destination, NextHop string }
++	joinA struct {
++		sfcd.Reply
++		Allow   bool
++		MTU     int
++		Routes  []route
++		Sysctls map[string]string
++	}
++	leaveQ struct {
++		sfcd.Request
++		NetworkID, Endpoint, ContainerID string
++		Addresses                        []string
++	}
++)
++
++func nonNil[K comparable, V any](m map[K]V) map[K]V {
++	if m == nil {
++		return map[K]V{}
++	}
++	return m
++}
++
++func strs(v []string) []string {
++	if v == nil {
++		return []string{}
++	}
++	return v
++}
++
++func (d *Driver) call(op, opID string, q sfcd.Requester, a sfcd.Replier) error {
+ 	ctx, cancel := context.WithTimeout(context.Background(), callTimeout)
+ 	defer cancel()
+-	body["boot_id"] = d.boot
+-	err := d.c.Do(ctx, method, path, body, out)
+-	if e, ok := err.(*sfcd.Error); ok {
+-		switch {
+-		case e.Status == http.StatusNotFound:
+-			return errdefs.NotFound(e)
+-		case e.Status == http.StatusConflict:
+-			return errdefs.Conflict(e)
+-		case e.Status == http.StatusForbidden:
+-			return errdefs.Forbidden(e)
+-		case e.Status/100 == 4:
+-			return errdefs.InvalidParameter(e)
+-		}
+-		return errdefs.Unavailable(e)
++	q.Envelope().OpID = opID
++	_, err := d.c.Call(ctx, sfcd.Network, op, q, a)
++	var e *sfcd.Error
++	if !errors.As(err, &e) {
++		return err
+ 	}
+-	return err
++	switch e.Code {
++	case sfcd.NotFound:
++		return errdefs.NotFound(e)
++	case sfcd.Conflict:
++		return errdefs.Conflict(e)
++	case sfcd.NotOwner, sfcd.Refused:
++		return errdefs.Forbidden(e)
++	case sfcd.Invalid:
++		return errdefs.InvalidParameter(e)
++	}
++	return errdefs.Unavailable(e)
+ }
+ 
+ var bridgeName = regexp.MustCompile(`^[a-z][a-z0-9-]{1,14}$`)
+ 
+-func ipam(data []driverapi.IPAMData) []map[string]string {
+-	out := make([]map[string]string, 0, len(data))
++func ipam(data []driverapi.IPAMData) []pool {
++	out := make([]pool, 0, len(data))
+ 	for _, d := range data {
+-		m := map[string]string{}
++		var p pool
+ 		if d.Pool != nil {
+-			m["subnet"] = d.Pool.String()
++			p.Subnet = d.Pool.String()
+ 		}
+ 		if d.Gateway != nil {
+-			m["gateway"] = d.Gateway.String()
++			p.Gateway = d.Gateway.String()
+ 		}
+-		out = append(out, m)
++		out = append(out, p)
+ 	}
+ 	return out
+ }
+@@ -146,18 +206,12 @@ func (d *Driver) CreateNetwork(ctx context.Context, nid string, options map[stri
+ 	default:
+ 		return errdefs.InvalidParameter(fmt.Errorf("sfc network options of type %T", g))
+ 	}
+-	var ans struct {
+-		Bridge string `json:"bridge"`
+-		MTU    int    `json:"mtu"`
+-	}
+-	path := "/networks/" + url.PathEscape(nid)
+-	if err := d.call(http.MethodPost, path+"/create", map[string]any{
+-		"op_id": "create:" + nid, "name": ni.Name, "labels": ni.Labels, "options": gen, "ipam": ipam(append(v4, v6...)),
+-	}, &ans); err != nil {
++	var ans createA
++	if err := d.call("create", "create:"+nid, &createQ{NetworkID: nid, Name: ni.Name, Labels: nonNil(ni.Labels), Options: nonNil(gen), IPAM: ipam(append(v4, v6...))}, &ans); err != nil {
+ 		return err
+ 	}
+ 	undo := func() {
+-		_ = d.call(http.MethodPost, path+"/delete", map[string]any{"op_id": "delete:" + nid, "name": ni.Name, "labels": ni.Labels}, nil)
++		_ = d.call("delete", "delete:"+nid, &deleteQ{NetworkID: nid, Name: ni.Name, Labels: nonNil(ni.Labels)}, &sfcd.Reply{})
+ 	}
+ 	if !bridgeName.MatchString(ans.Bridge) || ans.MTU < 1280 || ans.MTU > 65535 {
+ 		undo()
+@@ -182,7 +236,7 @@ func (d *Driver) CreateNetwork(ctx context.Context, nid string, options map[stri
+ 	d.mu.Lock()
+ 	d.nets[nid] = ni
+ 	d.mu.Unlock()
+-	return d.call(http.MethodPost, path+"/created", map[string]any{"op_id": "created:" + nid, "name": ni.Name, "labels": ni.Labels, "bridge": ans.Bridge, "mtu": linkMTU(ans.Bridge), "gateway": linkAddrs(ans.Bridge)}, nil)
++	return d.call("created", "created:"+nid, &createdQ{NetworkID: nid, Name: ni.Name, Labels: nonNil(ni.Labels), Bridge: ans.Bridge, MTU: linkMTU(ans.Bridge), Gateway: strs(linkAddrs(ans.Bridge))}, &sfcd.Reply{})
+ }
+ 
+ func linkMTU(name string) int {
+@@ -221,7 +275,7 @@ func (d *Driver) DeleteNetwork(nid string) error {
+ 	delete(d.nets, nid)
+ 	d.mu.Unlock()
+ 	// after the bridge is gone: sfcd removes isolation last
+-	return d.call(http.MethodPost, "/networks/"+url.PathEscape(nid)+"/delete", map[string]any{"op_id": "delete:" + nid, "name": ni.Name, "labels": ni.Labels}, nil)
++	return d.call("delete", "delete:"+nid, &deleteQ{NetworkID: nid, Name: ni.Name, Labels: nonNil(ni.Labels)}, &sfcd.Reply{})
+ }
+ 
+ func (d *Driver) CreateEndpoint(ctx context.Context, nid, eid string, ifInfo driverapi.InterfaceInfo, opts map[string]any) error {
+@@ -252,16 +306,6 @@ func (d *Driver) DeleteEndpoint(nid, eid string) error {
+ 	return err
+ }
+ 
+-type joinAnswer struct {
+-	Allow  bool `json:"allow"`
+-	MTU    int  `json:"mtu"`
+-	Routes []struct {
+-		Destination string `json:"destination"`
+-		NextHop     string `json:"next_hop,omitempty"`
+-	} `json:"routes"`
+-	Sysctls map[string]string `json:"sysctls"`
+-}
+-
+ func (d *Driver) Join(ctx context.Context, nid, eid string, sboxKey string, jinfo driverapi.JoinInfo, epOpts, sbOpts map[string]any) error {
+ 	cid := driverapi.ContainerFrom(ctx)
+ 	if cid == "" {
+@@ -277,11 +321,10 @@ func (d *Driver) Join(ctx context.Context, nid, eid string, sboxKey string, jinf
+ 	e.container = cid
+ 	d.eps[eid] = e
+ 	d.mu.Unlock()
+-	path := "/networks/" + url.PathEscape(nid)
+-	var ans joinAnswer
+-	if err := d.call(http.MethodPost, path+"/join", map[string]any{
+-		"op_id": "join:" + eid, "endpoint": eid, "container_id": cid, "container_name": name, "container_labels": labels,
+-		"addresses": e.addrs, "mac": e.mac, "sandbox_key": sboxKey, "host_veth": e.hostVeth,
++	var ans joinA
++	if err := d.call("join", "join:"+eid, &joinQ{
++		NetworkID: nid, Endpoint: eid, ContainerID: cid, ContainerName: name, ContainerLabels: nonNil(labels),
++		Addresses: strs(e.addrs), MAC: e.mac, SandboxKey: sboxKey, HostVeth: e.hostVeth,
+ 	}, &ans); err != nil {
+ 		return err
+ 	}
+@@ -344,5 +387,5 @@ func (d *Driver) leave(nid, eid string) error {
+ 		d.eps[eid] = e
+ 	}
+ 	d.mu.Unlock()
+-	return d.call(http.MethodPost, "/networks/"+url.PathEscape(nid)+"/leave", map[string]any{"op_id": "leave:" + eid, "endpoint": eid, "container_id": e.container, "addresses": e.addrs}, nil)
++	return d.call("leave", "leave:"+eid, &leaveQ{NetworkID: nid, Endpoint: eid, ContainerID: e.container, Addresses: strs(e.addrs)}, &sfcd.Reply{})
+ }
+diff --git a/daemon/seafield/sfcd/client.go b/daemon/seafield/sfcd/client.go
+index fcb16c2..42fcc37 100644
+--- a/daemon/seafield/sfcd/client.go
++++ b/daemon/seafield/sfcd/client.go
+@@ -1,32 +1,149 @@
+ // SPDX-License-Identifier: Apache-2.0
+ 
+-// Package sfcd is Seafield's client for the sfcd engine socket: the
+-// direction in which the engine asks sfcd (volume paths, network hooks,
+-// image blobs). See seafield/docs/sfcd-socket.md in the Seafield repository.
++// Package sfcd is Seafield's side of the engine-only SFCP session with the
++// node daemon (sfcd) on /run/sfe/sfcd.sock. One session carries both
++// directions: the engine calls sfcd (35 volume, 36 network, 37 image) and
++// sfcd calls the engine (32 events, 33 log bulk, 34 log ack). Frames and
++// bodies: seafield/docs/sfcd-socket.md, "프레임과 본문".
+ package sfcd
+ 
+ import (
+-	"bytes"
+ 	"context"
++	"crypto/rand"
++	"crypto/sha256"
++	"encoding/binary"
++	"encoding/hex"
+ 	"encoding/json"
++	"errors"
+ 	"fmt"
+ 	"io"
+ 	"net"
+-	"net/http"
+ 	"os"
++	"sync"
+ 	"time"
+ 
++	"github.com/containerd/log"
+ 	"github.com/moby/moby/v2/daemon/seafield/peer"
++	"github.com/moby/moby/v2/daemon/seafield/sfcp/enginemux"
++	"github.com/moby/moby/v2/daemon/seafield/sfcp/wire"
+ )
+ 
+ // DefaultSocket is where sfcd listens for the engine.
+ const DefaultSocket = "/run/sfe/sfcd.sock"
+ 
+-// Client talks to sfcd. Every new connection checks, through the kernel,
+-// that the process listening on the socket is an allowed sfcd binary.
++// Engine-only purposes (32..47).
++const (
++	Events   wire.Purpose = 32
++	Log      wire.Purpose = 33
++	LogAck   wire.Purpose = 34
++	Volume   wire.Purpose = 35
++	Network  wire.Purpose = 36
++	Image    wire.Purpose = 37
++	KindReq  uint8        = 1
++	KindResp uint8        = 2
++	KindData uint8        = 4
++	// KindBatch is purpose 32's pushed event batch.
++	KindBatch uint8 = 16
++
++	MaxRequest = 64 << 10
++	MaxAnswer  = 128 << 10
++	ChunkSize  = 24 << 10
++	Schema     = 1
++)
++
++// Results and reasons of every answer.
++const (
++	Applied    = "applied"
++	NotApplied = "not-applied"
++	Unknown    = "unknown"
++
++	Invalid  = "invalid"
++	NotFound = "not-found"
++	Conflict = "conflict"
++	NotOwner = "not-owner"
++	NotReady = "not-ready"
++	Refused  = "refused"
++)
++
++// Rules is the engine's frame table; sfcd keeps the same one.
++var Rules = wire.Rules(func(p wire.Purpose, kind uint8) (wire.Rule, bool) {
++	if p < Events || p > Image {
++		return wire.Rule{}, false
++	}
++	switch {
++	case kind == KindReq:
++		return wire.Rule{Fields: []int{-1}, Budget: 8 + MaxRequest}, true
++	case kind == KindResp:
++		return wire.Rule{Fields: []int{-1}, Budget: 8 + MaxAnswer}, true
++	case kind == KindData:
++		return wire.Rule{Fields: []int{8, -1, 32}, Budget: 24 + 8 + ChunkSize + 32}, true
++	case kind == KindBatch && p == Events:
++		return wire.Rule{Fields: []int{-1}, Budget: 8 + MaxAnswer}, true
++	}
++	return wire.Rule{}, false
++})
++
++// Request is the envelope every request embeds as its first field.
++type Request struct {
++	Schema uint8
++	Op     string
++	OpID   string
++	BootID string
++}
++
++func (r *Request) Envelope() *Request { return r }
++
++// Reply is the envelope every answer embeds as its first field.
++type Reply struct {
++	Schema uint8
++	OpID   string
++	Result string
++	Reason string `json:",omitempty"`
++	Fds    []int  `json:",omitempty"`
++}
++
++func (r *Reply) reply() *Reply { return r }
++
++// Requester and Replier are structs that embed Request / Reply first.
++type (
++	Requester interface{ Envelope() *Request }
++	Replier   interface{ reply() *Reply }
++)
++
++// Error is a not-applied or unknown answer, or a call that failed.
++// Sent false means the request never left, so it had no effect.
++type Error struct {
++	Result  string
++	Code    string // the Reason of a not-applied answer
++	Message string
++	Sent    bool
++}
++
++func (e *Error) Error() string {
++	if e.Code != "" {
++		return fmt.Sprintf("sfcd: %s (%s): %s", e.Result, e.Code, e.Message)
++	}
++	return fmt.Sprintf("sfcd: %s: %s", e.Result, e.Message)
++}
++
++// Handler serves one stream sfcd opened: req is the decoded envelope of the
++// first frame, body its field 1.
++type Handler func(ctx context.Context, st *Stream, req Request, body []byte) error
++
++// Client keeps the session to sfcd: it dials, checks the peer, redials when
++// the session ends, and serves the purposes registered with Handle.
+ type Client struct {
+-	http *http.Client
+-	dial func(ctx context.Context, _, _ string) (net.Conn, error)
++	path    string
++	allowed []string
++	boot    string
++
++	mu       sync.Mutex
++	sess     *enginemux.Session
++	up       chan struct{} // closed while sess is set
++	handlers map[wire.Purpose]Handler
++	onUp     []func()
++
++	connect func(ctx context.Context) (net.Conn, error) // tests
+ }
+ 
+ // Socket is DefaultSocket unless SEAFIELD_SFCD_SOCKET names another path
+@@ -39,83 +156,395 @@ func Socket() string {
+ }
+ 
+ // New returns a client for the socket at path, accepting only the allowed
+-// peers (see peer.Allowed).
++// peers (see peer.Allowed). Call Start to connect.
+ func New(path string, allowed []string) *Client {
+-	dial := func(ctx context.Context, _, _ string) (net.Conn, error) {
+-		var d net.Dialer
+-		c, err := d.DialContext(ctx, "unix", path)
++	var b [8]byte
++	_, _ = rand.Read(b[:])
++	return &Client{path: path, allowed: allowed, boot: hex.EncodeToString(b[:]), up: make(chan struct{}), handlers: map[wire.Purpose]Handler{}}
++}
++
++// BootID changes every time the engine starts.
++func (c *Client) BootID() string { return c.boot }
++
++// Handle serves purpose p on streams sfcd opens. Register before Start.
++func (c *Client) Handle(p wire.Purpose, h Handler) {
++	c.mu.Lock()
++	c.handlers[p] = h
++	c.mu.Unlock()
++}
++
++// OnConnect runs f (in its own goroutine) each time a session comes up.
++func (c *Client) OnConnect(f func()) {
++	c.mu.Lock()
++	c.onUp = append(c.onUp, f)
++	c.mu.Unlock()
++}
++
++// Start keeps a session until ctx ends.
++func (c *Client) Start(ctx context.Context) { go c.run(ctx) }
++
++func (c *Client) run(ctx context.Context) {
++	backoff := 100 * time.Millisecond
++	for ctx.Err() == nil {
++		s, err := c.dial(ctx)
++		if err != nil {
++			log.G(ctx).WithError(err).Debug("seafield: sfcd session not up")
++			select {
++			case <-time.After(backoff):
++			case <-ctx.Done():
++				return
++			}
++			backoff = min(backoff*2, 2*time.Second)
++			continue
++		}
++		backoff = 100 * time.Millisecond
++		c.mu.Lock()
++		c.sess = s
++		close(c.up)
++		hooks := append([]func(){}, c.onUp...)
++		c.mu.Unlock()
++		log.G(ctx).Info("seafield: sfcd session up")
++		for _, f := range hooks {
++			go f()
++		}
++		go c.accept(ctx, s)
++		select {
++		case <-s.Done():
++		case <-ctx.Done():
++			_ = s.Close()
++		}
++		c.mu.Lock()
++		c.sess = nil
++		c.up = make(chan struct{})
++		c.mu.Unlock()
++		log.G(ctx).WithError(s.Err()).Warn("seafield: sfcd session ended")
++	}
++}
++
++func (c *Client) dial(ctx context.Context) (*enginemux.Session, error) {
++	if c.connect != nil {
++		conn, err := c.connect(ctx)
+ 		if err != nil {
+ 			return nil, err
+ 		}
+-		if exe, err := peer.Check(c, allowed); err != nil {
+-			_ = c.Close()
+-			return nil, fmt.Errorf("sfcd socket %s is served by %q: %w", path, exe, err)
++		return enginemux.Client(conn), nil
++	}
++	var d net.Dialer
++	conn, err := d.DialContext(ctx, "unix", c.path)
++	if err != nil {
++		return nil, err
++	}
++	if exe, err := peer.Check(conn, c.allowed); err != nil {
++		_ = conn.Close()
++		return nil, fmt.Errorf("sfcd socket %s is served by %q: %w", c.path, exe, err)
++	}
++	return enginemux.Client(conn), nil
++}
++
++// session waits for a session until ctx ends.
++func (c *Client) session(ctx context.Context) (*enginemux.Session, error) {
++	for {
++		c.mu.Lock()
++		s, up := c.sess, c.up
++		c.mu.Unlock()
++		if s != nil {
++			return s, nil
++		}
++		select {
++		case <-up:
++		case <-ctx.Done():
++			return nil, &Error{Result: NotApplied, Code: NotReady, Message: "no session with sfcd"}
+ 		}
+-		return c, nil
+ 	}
+-	return &Client{dial: dial, http: &http.Client{Transport: &http.Transport{DialContext: dial, MaxIdleConns: 4, IdleConnTimeout: 30 * time.Second}}}
+ }
+ 
+-// Error is a non-2xx answer from sfcd.
+-type Error struct {
+-	Status  int
+-	Code    string `json:"code,omitempty"` // e.g. not-ready, not-owner
+-	Message string `json:"message"`
++// Wait waits until a session is up or ctx ends.
++func (c *Client) Wait(ctx context.Context) error {
++	_, err := c.session(ctx)
++	return err
+ }
+ 
+-func (e *Error) Error() string { return fmt.Sprintf("sfcd: %d %s", e.Status, e.Message) }
++// Connected reports whether a session is up now.
++func (c *Client) Connected() bool {
++	c.mu.Lock()
++	defer c.mu.Unlock()
++	return c.sess != nil
++}
+ 
+-// Do sends method path with body (JSON, or nil) and decodes a JSON answer
+-// into out (or discards it when out is nil).
+-func (c *Client) Do(ctx context.Context, method, path string, body, out any) error {
+-	var rd io.Reader
+-	if body != nil {
+-		b, err := json.Marshal(body)
++func (c *Client) accept(ctx context.Context, s *enginemux.Session) {
++	ctx, cancel := context.WithCancel(ctx)
++	defer cancel()
++	go func() {
++		select {
++		case <-s.Done():
++			cancel()
++		case <-ctx.Done():
++		}
++	}()
++	for {
++		st, err := s.Accept()
+ 		if err != nil {
+-			return err
++			return
+ 		}
+-		rd = bytes.NewReader(b)
++		go c.serve(ctx, &Stream{st: st})
+ 	}
+-	req, err := http.NewRequestWithContext(ctx, method, "http://sfcd/v1"+path, rd)
++}
++
++func (c *Client) serve(ctx context.Context, st *Stream) {
++	defer st.st.Close()
++	f, err := st.ReadFrame()
++	if err != nil || f.Kind != KindReq {
++		st.st.CancelRead(0)
++		return
++	}
++	body := f.Fields[0].Value
++	st.purpose, st.header = f.Purpose, sha256.Sum256(body)
++	var req Request
++	if err := json.Unmarshal(body, &req); err != nil || req.Schema != Schema {
++		_ = st.Answer(&Reply{OpID: req.OpID, Result: NotApplied, Reason: Invalid})
++		return
++	}
++	c.mu.Lock()
++	h := c.handlers[f.Purpose]
++	c.mu.Unlock()
++	if h == nil {
++		_ = st.Answer(&Reply{OpID: req.OpID, Result: NotApplied, Reason: Refused})
++		return
++	}
++	if err := h(ctx, st, req, body); err != nil {
++		log.G(ctx).WithError(err).WithField("purpose", f.Purpose).WithField("op", req.Op).Debug("seafield: sfcd request")
++	}
++}
++
++// Stream is one SFCP stream of the session.
++type Stream struct {
++	st      *enginemux.Stream
++	purpose wire.Purpose
++	header  [32]byte // sha256 of the request body, binding chunks
++	offset  uint64
++	opID    string
++}
++
++// ReadFrame reads the next frame of the stream.
++func (s *Stream) ReadFrame() (wire.Frame, error) {
++	return Rules.ReadFrame(s.st, wire.HeaderSize+8+MaxAnswer+8)
++}
++
++func (s *Stream) write(kind uint8, fields ...[]byte) error {
++	f := wire.Frame{Purpose: s.purpose, Kind: kind, Request: s.st.ID()}
++	for i, v := range fields {
++		f.Fields = append(f.Fields, wire.Field{Tag: uint16(i + 1), Required: true, Value: v})
++	}
++	return Rules.WriteFrame(s.st, f)
++}
++
++// Answer sends the kind 2 answer v (a struct embedding Reply first), with
++// fds attached to that frame. The stream owns fds from now on.
++func (s *Stream) Answer(v Replier, fds ...int) error {
++	r := v.reply()
++	r.Schema = Schema
++	if r.Result == "" {
++		r.Result = Applied
++	}
++	r.Fds = nil
++	for i := range fds {
++		r.Fds = append(r.Fds, i)
++	}
++	b, err := json.Marshal(v)
+ 	if err != nil {
++		closeAll(fds)
+ 		return err
+ 	}
+-	if body != nil {
+-		req.Header.Set("Content-Type", "application/json")
++	if len(fds) > 0 {
++		if err := s.st.Attach(fds...); err != nil {
++			return err
++		}
+ 	}
+-	resp, err := c.http.Do(req)
++	return s.write(KindResp, b)
++}
++
++// Batch sends one kind 16 frame (purpose 32 event batches).
++func (s *Stream) Batch(v any) error {
++	b, err := json.Marshal(v)
+ 	if err != nil {
+ 		return err
+ 	}
+-	defer resp.Body.Close()
+-	if resp.StatusCode/100 != 2 {
+-		e := &Error{Status: resp.StatusCode}
+-		_ = json.NewDecoder(io.LimitReader(resp.Body, 64<<10)).Decode(e)
+-		return e
++	return s.write(KindBatch, b)
++}
++
++// Write sends p as kind 4 chunks bound to the request.
++func (s *Stream) Write(p []byte) (int, error) {
++	n := 0
++	for len(p) > 0 {
++		take := min(len(p), ChunkSize)
++		var off [8]byte
++		binary.LittleEndian.PutUint64(off[:], s.offset)
++		if err := s.write(KindData, off[:], p[:take], s.header[:]); err != nil {
++			return n, err
++		}
++		s.offset += uint64(take)
++		p, n = p[take:], n+take
++	}
++	return n, nil
++}
++
++// Done ends this side of the stream (FIN).
++func (s *Stream) Done() error { return s.st.Close() }
++
++// Cancel resets the stream (RST).
++func (s *Stream) Cancel() { s.st.CancelRead(0) }
++
++// Call sends req (a struct embedding Request first) on purpose p as op and
++// decodes the answer into out (a struct embedding Reply first). The answer's
++// descriptors are returned in Fds order; the caller owns them.
++func (c *Client) Call(ctx context.Context, p wire.Purpose, op string, req Requester, out Replier) ([]int, error) {
++	st, err := c.open(ctx, p, op, req)
++	if err != nil {
++		return nil, err
+ 	}
+-	if out == nil || resp.StatusCode == http.StatusNoContent {
+-		_, _ = io.Copy(io.Discard, resp.Body)
+-		return nil
++	defer st.st.Close()
++	fds, err := st.answer(out)
++	if err != nil {
++		st.Cancel()
++		return nil, err
+ 	}
+-	return json.NewDecoder(resp.Body).Decode(out)
++	return fds, nil
+ }
+ 
+-// Stream sends a GET and returns the answer body for the caller to read
+-// and close (image blobs).
+-func (c *Client) Stream(ctx context.Context, path string) (io.ReadCloser, error) {
+-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://sfcd/v1"+path, nil)
++// CallStream is Call for an answer followed by kind 4 chunks (image blob):
++// the returned reader yields the chunk bytes in order and ends at the
++// peer's FIN. Close it when done.
++func (c *Client) CallStream(ctx context.Context, p wire.Purpose, op string, req Requester, out Replier) (io.ReadCloser, error) {
++	st, err := c.open(ctx, p, op, req)
+ 	if err != nil {
+ 		return nil, err
+ 	}
+-	resp, err := c.http.Do(req)
++	fds, err := st.answer(out)
++	closeAll(fds)
++	if err != nil {
++		st.Cancel()
++		return nil, err
++	}
++	return &chunkReader{s: st}, nil
++}
++
++func (c *Client) open(ctx context.Context, p wire.Purpose, op string, req Requester) (*Stream, error) {
++	env := req.Envelope()
++	env.Schema, env.Op, env.BootID = Schema, op, c.boot
++	b, err := json.Marshal(req)
++	if err != nil {
++		return nil, &Error{Result: NotApplied, Code: Invalid, Message: err.Error()}
++	}
++	if len(b) > MaxRequest {
++		return nil, &Error{Result: NotApplied, Code: Invalid, Message: "request too large"}
++	}
++	wait, cancel := context.WithTimeout(ctx, 5*time.Second)
++	s, err := c.session(wait)
++	cancel()
+ 	if err != nil {
+ 		return nil, err
+ 	}
+-	if resp.StatusCode/100 != 2 {
+-		defer resp.Body.Close()
+-		e := &Error{Status: resp.StatusCode}
+-		_ = json.NewDecoder(io.LimitReader(resp.Body, 64<<10)).Decode(e)
+-		return nil, e
++	es, err := s.Open()
++	if err != nil {
++		return nil, &Error{Result: NotApplied, Code: NotReady, Message: err.Error()}
++	}
++	if dl, ok := ctx.Deadline(); ok {
++		_ = es.SetDeadline(dl)
++	}
++	st := &Stream{st: es, purpose: p, header: sha256.Sum256(b)}
++	st.opID = env.OpID
++	if err := st.write(KindReq, b); err != nil {
++		es.CancelRead(0)
++		return nil, &Error{Result: Unknown, Message: err.Error(), Sent: true}
++	}
++	if err := es.Close(); err != nil {
++		return nil, &Error{Result: Unknown, Message: err.Error(), Sent: true}
++	}
++	return st, nil
++}
++
++func (s *Stream) answer(out Replier) ([]int, error) {
++	f, err := s.ReadFrame()
++	if err != nil || f.Kind != KindResp || f.Purpose != s.purpose {
++		closeAll(s.st.TakeFDs())
++		if err == nil {
++			err = errors.New("unexpected frame")
++		}
++		return nil, &Error{Result: Unknown, Message: err.Error(), Sent: true}
++	}
++	fds := s.st.TakeFDs()
++	if err := json.Unmarshal(f.Fields[0].Value, out); err != nil {
++		closeAll(fds)
++		return nil, &Error{Result: Unknown, Message: "answer: " + err.Error(), Sent: true}
++	}
++	r := out.reply()
++	switch {
++	case r.Schema != Schema || r.OpID != s.opID:
++		closeAll(fds)
++		return nil, &Error{Result: Unknown, Message: "answer does not match the request", Sent: true}
++	case r.Result == NotApplied:
++		closeAll(fds)
++		return nil, &Error{Result: NotApplied, Code: r.Reason, Message: "not applied", Sent: true}
++	case r.Result != Applied:
++		closeAll(fds)
++		return nil, &Error{Result: Unknown, Code: r.Reason, Message: "outcome unknown", Sent: true}
++	case len(r.Fds) != len(fds):
++		closeAll(fds)
++		return nil, &Error{Result: Unknown, Message: "answer descriptors do not match", Sent: true}
++	}
++	ordered := make([]int, len(fds))
++	for i, ix := range r.Fds {
++		if ix < 0 || ix >= len(fds) {
++			closeAll(fds)
++			return nil, &Error{Result: Unknown, Message: "bad descriptor index", Sent: true}
++		}
++		ordered[i] = fds[ix]
++	}
++	return ordered, nil
++}
++
++type chunkReader struct {
++	s    *Stream
++	buf  []byte
++	err  error
++	done bool
++}
++
++func (r *chunkReader) Read(p []byte) (int, error) {
++	for len(r.buf) == 0 {
++		if r.err != nil {
++			return 0, r.err
++		}
++		f, err := r.s.ReadFrame()
++		if err != nil {
++			r.err = err
++			if errors.Is(err, io.EOF) {
++				r.done = true
++			}
++			continue
++		}
++		if f.Kind != KindData || f.Purpose != r.s.purpose || len(f.Fields) != 3 ||
++			binary.LittleEndian.Uint64(f.Fields[0].Value) != r.s.offset || string(f.Fields[2].Value) != string(r.s.header[:]) {
++			r.err = errors.New("sfcd: bad chunk")
++			continue
++		}
++		r.buf = f.Fields[1].Value
++		r.s.offset += uint64(len(r.buf))
++	}
++	n := copy(p, r.buf)
++	r.buf = r.buf[n:]
++	return n, nil
++}
++
++func (r *chunkReader) Close() error {
++	if !r.done {
++		r.s.Cancel()
++	}
++	return r.s.st.Close()
++}
++
++func closeAll(fds []int) {
++	for _, fd := range fds {
++		_ = closeFD(fd)
+ 	}
+-	return resp.Body, nil
+ }
+diff --git a/daemon/seafield/sfcd/client_test.go b/daemon/seafield/sfcd/client_test.go
+index 33b7551..3345d06 100644
+--- a/daemon/seafield/sfcd/client_test.go
++++ b/daemon/seafield/sfcd/client_test.go
+@@ -4,52 +4,200 @@
+ 
+ import (
+ 	"context"
++	"crypto/sha256"
++	"encoding/binary"
++	"encoding/json"
+ 	"errors"
++	"io"
+ 	"net"
+-	"net/http"
+ 	"os"
+-	"path/filepath"
++	"syscall"
+ 	"testing"
++	"time"
++
++	"github.com/moby/moby/v2/daemon/seafield/sfcp/enginemux"
++	"github.com/moby/moby/v2/daemon/seafield/sfcp/wire"
+ )
+ 
+-func serve(t *testing.T) string {
++type pingReq struct {
++	Request
++	Name string
++}
++
++type pingReply struct {
++	Reply
++	Echo string
++}
++
++// pair returns an engine client and the fake sfcd's session over a socketpair.
++func pair(t *testing.T) (*Client, *enginemux.Session) {
+ 	t.Helper()
+-	sock := filepath.Join(t.TempDir(), "engine.sock")
+-	l, err := net.Listen("unix", sock)
++	fds, err := syscall.Socketpair(syscall.AF_UNIX, syscall.SOCK_STREAM|syscall.SOCK_CLOEXEC, 0)
+ 	if err != nil {
+ 		t.Fatal(err)
+ 	}
+-	mux := http.NewServeMux()
+-	mux.HandleFunc("GET /v1/ping", func(w http.ResponseWriter, _ *http.Request) { w.Write([]byte(`{"ok":true}`)) })
+-	mux.HandleFunc("GET /v1/nope", func(w http.ResponseWriter, _ *http.Request) {
+-		w.WriteHeader(http.StatusForbidden)
+-		w.Write([]byte(`{"message":"no"}`))
+-	})
+-	srv := &http.Server{Handler: mux}
+-	go srv.Serve(l)
+-	t.Cleanup(func() { srv.Close() })
+-	return sock
++	conn := func(fd int) net.Conn {
++		f := os.NewFile(uintptr(fd), "sp")
++		c, err := net.FileConn(f)
++		f.Close()
++		if err != nil {
++			t.Fatal(err)
++		}
++		return c
++	}
++	engineEnd, sfcdEnd := conn(fds[0]), conn(fds[1])
++	used := false
++	c := New("unused", nil)
++	c.connect = func(context.Context) (net.Conn, error) {
++		if used {
++			return nil, errors.New("one connection only")
++		}
++		used = true
++		return engineEnd, nil
++	}
++	srv := enginemux.Server(sfcdEnd)
++	ctx, cancel := context.WithCancel(context.Background())
++	t.Cleanup(func() { cancel(); srv.Close() })
++	c.Start(ctx)
++	return c, srv
+ }
+ 
+-func TestAllowedPeer(t *testing.T) {
+-	if os.Getuid() != 0 {
+-		t.Skip("peer check requires root")
++func readReq(t *testing.T, st *enginemux.Stream) (wire.Frame, pingReq) {
++	f, err := Rules.ReadFrame(st, 1<<20)
++	if err != nil {
++		t.Error(err)
++		return f, pingReq{}
+ 	}
+-	self, _ := os.Executable()
+-	c := New(serve(t), []string{self})
+-	var out struct{ OK bool }
+-	if err := c.Do(context.Background(), http.MethodGet, "/ping", nil, &out); err != nil || !out.OK {
+-		t.Fatalf("ping: %v %v", out, err)
++	var q pingReq
++	_ = json.Unmarshal(f.Fields[0].Value, &q)
++	return f, q
++}
++
++func answer(st *enginemux.Stream, p wire.Purpose, v any) error {
++	b, _ := json.Marshal(v)
++	return Rules.WriteFrame(st, wire.Frame{Purpose: p, Kind: KindResp, Request: st.ID(), Fields: []wire.Field{{Tag: 1, Required: true, Value: b}}})
++}
++
++func TestCallWithFD(t *testing.T) {
++	c, srv := pair(t)
++	go func() {
++		st, err := srv.Accept()
++		if err != nil {
++			return
++		}
++		f, q := readReq(t, st)
++		if f.Purpose != Volume || q.Op != "mount" || q.Schema != 1 || q.BootID != c.BootID() || q.Name != "v1" {
++			t.Errorf("request %+v %+v", f, q)
++		}
++		r, w, _ := os.Pipe()
++		w.Close()
++		fd, _ := syscall.Dup(int(r.Fd()))
++		r.Close()
++		_ = st.Attach(fd)
++		_ = answer(st, Volume, pingReply{Reply: Reply{Schema: 1, OpID: q.OpID, Result: Applied, Fds: []int{0}}, Echo: q.Name})
++		st.Close()
++	}()
++	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
++	defer cancel()
++	var out pingReply
++	fds, err := c.Call(ctx, Volume, "mount", &pingReq{Request: Request{OpID: "op1"}, Name: "v1"}, &out)
++	if err != nil || len(fds) != 1 || out.Echo != "v1" {
++		t.Fatalf("call: %v %v %+v", err, fds, out)
+ 	}
++	syscall.Close(fds[0])
++}
++
++func TestNotApplied(t *testing.T) {
++	c, srv := pair(t)
++	go func() {
++		st, _ := srv.Accept()
++		_, q := readReq(t, st)
++		_ = answer(st, Network, pingReply{Reply: Reply{Schema: 1, OpID: q.OpID, Result: NotApplied, Reason: NotOwner}})
++		st.Close()
++	}()
++	var out pingReply
++	_, err := c.Call(context.Background(), Network, "create", &pingReq{Request: Request{OpID: "x"}}, &out)
+ 	var e *Error
+-	if err := c.Do(context.Background(), http.MethodGet, "/nope", nil, nil); !errors.As(err, &e) || e.Status != 403 || e.Message != "no" {
+-		t.Fatalf("error answer: %v", err)
++	if !errors.As(err, &e) || e.Result != NotApplied || e.Code != NotOwner || !e.Sent {
++		t.Fatalf("got %v", err)
+ 	}
+ }
+ 
+-func TestRefusesOtherPeer(t *testing.T) {
+-	c := New(serve(t), []string{"/usr/lib/sfc/sfcd"})
+-	if err := c.Do(context.Background(), http.MethodGet, "/ping", nil, nil); err == nil {
+-		t.Fatal("a socket served by another executable was accepted")
++func TestCallStream(t *testing.T) {
++	c, srv := pair(t)
++	data := make([]byte, 100_000)
++	for i := range data {
++		data[i] = byte(i)
++	}
++	go func() {
++		st, _ := srv.Accept()
++		f, q := readReq(t, st)
++		h := sha256.Sum256(f.Fields[0].Value)
++		_ = answer(st, Image, pingReply{Reply: Reply{Schema: 1, OpID: q.OpID, Result: Applied}})
++		for off := 0; off < len(data); off += ChunkSize {
++			end := min(off+ChunkSize, len(data))
++			var o [8]byte
++			binary.LittleEndian.PutUint64(o[:], uint64(off))
++			_ = Rules.WriteFrame(st, wire.Frame{Purpose: Image, Kind: KindData, Request: st.ID(), Fields: []wire.Field{{Tag: 1, Required: true, Value: o[:]}, {Tag: 2, Required: true, Value: data[off:end]}, {Tag: 3, Required: true, Value: h[:]}}})
++		}
++		st.Close()
++	}()
++	var out pingReply
++	rc, err := c.CallStream(context.Background(), Image, "blob", &pingReq{Request: Request{OpID: "b"}}, &out)
++	if err != nil {
++		t.Fatal(err)
++	}
++	got, err := io.ReadAll(rc)
++	rc.Close()
++	if err != nil || string(got) != string(data) {
++		t.Fatalf("stream: %v len %d", err, len(got))
++	}
++}
++
++func TestServeFromSfcd(t *testing.T) {
++	c, srv := pair(t)
++	got := make(chan Request, 1)
++	c.Handle(LogAck, func(ctx context.Context, st *Stream, req Request, body []byte) error {
++		got <- req
++		if err := st.Answer(&Reply{OpID: req.OpID}); err != nil {
++			return err
++		}
++		_, err := st.Write([]byte("hello"))
++		return err
++	})
++	deadline := time.Now().Add(5 * time.Second)
++	for !c.Connected() && time.Now().Before(deadline) {
++		time.Sleep(10 * time.Millisecond)
++	}
++	st, err := srv.Open()
++	if err != nil {
++		t.Fatal(err)
++	}
++	b, _ := json.Marshal(Request{Schema: 1, Op: "ack", OpID: "a1", BootID: "s"})
++	if err := Rules.WriteFrame(st, wire.Frame{Purpose: LogAck, Kind: KindReq, Request: st.ID(), Fields: []wire.Field{{Tag: 1, Required: true, Value: b}}}); err != nil {
++		t.Fatal(err)
++	}
++	st.Close()
++	if r := <-got; r.Op != "ack" || r.OpID != "a1" {
++		t.Fatalf("request %+v", r)
++	}
++	var data []byte
++	for {
++		f, err := Rules.ReadFrame(st, 1<<20)
++		if err != nil {
++			break
++		}
++		if f.Kind == KindResp {
++			var r Reply
++			_ = json.Unmarshal(f.Fields[0].Value, &r)
++			if r.Result != Applied || r.OpID != "a1" || r.Schema != 1 {
++				t.Fatalf("answer %+v", r)
++			}
++		} else {
++			data = append(data, f.Fields[1].Value...)
++		}
++	}
++	if string(data) != "hello" {
++		t.Fatalf("chunks %q", data)
+ 	}
+ }
+diff --git a/daemon/seafield/sfcd/fd.go b/daemon/seafield/sfcd/fd.go
+new file mode 100644
+index 0000000..88f6ebd
+--- /dev/null
++++ b/daemon/seafield/sfcd/fd.go
+@@ -0,0 +1,7 @@
++// SPDX-License-Identifier: Apache-2.0
++
++package sfcd
++
++import "syscall"
++
++func closeFD(fd int) error { return syscall.Close(fd) }
+diff --git a/daemon/seafield/sfcd/fd_linux.go b/daemon/seafield/sfcd/fd_linux.go
+deleted file mode 100644
+index 64b150b..0000000
+--- a/daemon/seafield/sfcd/fd_linux.go
++++ /dev/null
+@@ -1,95 +0,0 @@
+-// SPDX-License-Identifier: Apache-2.0
+-
+-package sfcd
+-
+-import (
+-	"bufio"
+-	"bytes"
+-	"context"
+-	"encoding/json"
+-	"errors"
+-	"io"
+-	"net"
+-	"net/http"
+-
+-	"golang.org/x/sys/unix"
+-)
+-
+-// DoFD is Do for an answer that carries one descriptor (SCM_RIGHTS on the
+-// first bytes of the response): the volume Mount answer. It uses its own
+-// connection, which sfcd closes after the answer. The caller owns the
+-// returned fd; it is -1 when err is not nil.
+-func (c *Client) DoFD(ctx context.Context, method, path string, body, out any) (int, error) {
+-	b, err := json.Marshal(body)
+-	if err != nil {
+-		return -1, err
+-	}
+-	req, err := http.NewRequestWithContext(ctx, method, "http://sfcd/v1"+path, bytes.NewReader(b))
+-	if err != nil {
+-		return -1, err
+-	}
+-	req.Header.Set("Content-Type", "application/json")
+-	conn, err := c.dial(ctx, "unix", "")
+-	if err != nil {
+-		return -1, err
+-	}
+-	defer conn.Close()
+-	if dl, ok := ctx.Deadline(); ok {
+-		_ = conn.SetDeadline(dl)
+-	}
+-	uc := conn.(*net.UnixConn)
+-	if err = req.Write(uc); err != nil {
+-		return -1, err
+-	}
+-	buf, oob := make([]byte, 64<<10), make([]byte, unix.CmsgSpace(4*4))
+-	n, oobn, _, _, err := uc.ReadMsgUnix(buf, oob)
+-	if err != nil {
+-		return -1, err
+-	}
+-	fd := -1
+-	if oobn > 0 {
+-		msgs, err := unix.ParseSocketControlMessage(oob[:oobn])
+-		if err != nil {
+-			return -1, err
+-		}
+-		for i := range msgs {
+-			fds, err := unix.ParseUnixRights(&msgs[i])
+-			if err != nil {
+-				continue
+-			}
+-			for _, f := range fds {
+-				if fd < 0 {
+-					fd = f
+-				} else {
+-					_ = unix.Close(f)
+-				}
+-			}
+-		}
+-	}
+-	ok := false
+-	defer func() {
+-		if !ok && fd >= 0 {
+-			_ = unix.Close(fd)
+-		}
+-	}()
+-	resp, err := http.ReadResponse(bufio.NewReader(io.MultiReader(bytes.NewReader(buf[:n]), uc)), req)
+-	if err != nil {
+-		return -1, err
+-	}
+-	defer resp.Body.Close()
+-	if resp.StatusCode/100 != 2 {
+-		e := &Error{Status: resp.StatusCode}
+-		_ = json.NewDecoder(io.LimitReader(resp.Body, 64<<10)).Decode(e)
+-		return -1, e
+-	}
+-	if fd < 0 {
+-		return -1, errors.New("sfcd answer carried no descriptor")
+-	}
+-	if out != nil {
+-		if err = json.NewDecoder(io.LimitReader(resp.Body, 64<<10)).Decode(out); err != nil {
+-			return -1, err
+-		}
+-	}
+-	ok = true
+-	return fd, nil
+-}
+diff --git a/daemon/seafield/volumedrv/driver.go b/daemon/seafield/volumedrv/driver.go
+index adaf451..0e3fc90 100644
+--- a/daemon/seafield/volumedrv/driver.go
++++ b/daemon/seafield/volumedrv/driver.go
+@@ -8,9 +8,9 @@
+ 
+ import (
+ 	"context"
++	"crypto/rand"
++	"encoding/hex"
+ 	"errors"
+-	"net/http"
+-	"net/url"
+ 	"time"
+ 
+ 	"github.com/moby/moby/v2/daemon/seafield/sfcd"
+@@ -33,86 +33,134 @@ type Driver struct{
+ // New returns the driver using client c.
+ func New(c *sfcd.Client) *Driver { return &Driver{c: c} }
+ 
+-type info struct {
+-	Name      string         `json:"name"`
+-	CreatedAt time.Time      `json:"created_at"`
+-	Status    map[string]any `json:"status,omitempty"`
+-}
++// Op requests and answers of purpose 35, mirroring sfcd's structs field for
++// field (sfcd decodes strictly and canonically).
++type (
++	mountQ struct {
++		sfcd.Request
++		Name, MountID, ContainerID string
++	}
++	mountA struct {
++		sfcd.Reply
++		ReadOnly bool
++		Dev, Ino uint64
++	}
++	unmountQ struct {
++		sfcd.Request
++		Name, MountID string
++	}
++	createQ struct {
++		sfcd.Request
++		Name string
++		Opts map[string]string
++	}
++	createA struct {
++		sfcd.Reply
++		Name string
++	}
++	nameQ struct {
++		sfcd.Request
++		Name string
++	}
++	getA struct {
++		sfcd.Reply
++		Name, Status string
++	}
++	listA struct {
++		sfcd.Reply
++		Volumes []string
++	}
++)
+ 
+ func (d *Driver) Name() string  { return Name }
+ func (d *Driver) Scope() string { return volume.LocalScope }
+ 
+-func call(c *sfcd.Client, method, path string, body, out any) error {
++func call(c *sfcd.Client, op string, q sfcd.Requester, a sfcd.Replier) error {
+ 	ctx, cancel := context.WithTimeout(context.Background(), callTimeout)
+ 	defer cancel()
+-	return mapErr(c.Do(ctx, method, path, body, out))
++	_, err := c.Call(ctx, sfcd.Volume, op, q, a)
++	return mapErr(err)
+ }
+ 
+ func mapErr(err error) error {
+-	if e, ok := err.(*sfcd.Error); ok {
+-		switch e.Code {
+-		case "not-ready":
+-			return errdefs.Unavailable(e)
+-		case "not-owner":
+-			return errdefs.Forbidden(e)
+-		}
+-		switch e.Status {
+-		case http.StatusNotFound:
+-			return errdefs.NotFound(e)
+-		case http.StatusConflict:
+-			return errdefs.Conflict(e)
+-		case http.StatusForbidden, http.StatusBadRequest:
+-			return errdefs.InvalidParameter(e)
+-		}
+-	}
+-	return err
++	var e *sfcd.Error
++	if !errors.As(err, &e) {
++		return err
++	}
++	switch e.Code {
++	case sfcd.NotReady:
++		return errdefs.Unavailable(e)
++	case sfcd.NotOwner, sfcd.Refused:
++		return errdefs.Forbidden(e)
++	case sfcd.NotFound:
++		return errdefs.NotFound(e)
++	case sfcd.Conflict:
++		return errdefs.Conflict(e)
++	case sfcd.Invalid:
++		return errdefs.InvalidParameter(e)
++	}
++	return errdefs.Unavailable(e)
++}
++
++func opID(op string) string {
++	b := make([]byte, 8)
++	_, _ = rand.Read(b)
++	return op + ":" + hex.EncodeToString(b)
+ }
+ 
+ func (d *Driver) Create(name string, opts map[string]string) (volume.Volume, error) {
+-	var in info
+-	if err := call(d.c, http.MethodPost, "/volumes/create", map[string]any{"name": name, "opts": opts}, &in); err != nil {
++	if opts == nil {
++		opts = map[string]string{}
++	}
++	var a createA
++	if err := call(d.c, "create", &createQ{Request: sfcd.Request{OpID: "create:" + name}, Name: name, Opts: opts}, &a); err != nil {
+ 		return nil, err
+ 	}
+-	return d.vol(in), nil
++	return d.vol(a.Name, nil), nil
+ }
+ 
+ func (d *Driver) Get(name string) (volume.Volume, error) {
+-	var in info
+-	if err := call(d.c, http.MethodGet, "/volumes/"+url.PathEscape(name), nil, &in); err != nil {
++	var a getA
++	if err := call(d.c, "get", &nameQ{Request: sfcd.Request{OpID: opID("get")}, Name: name}, &a); err != nil {
+ 		return nil, err
+ 	}
+-	return d.vol(in), nil
++	return d.vol(a.Name, map[string]any{"status": a.Status}), nil
+ }
+ 
+ func (d *Driver) List() ([]volume.Volume, error) {
+-	var in []info
+-	if err := call(d.c, http.MethodGet, "/volumes", nil, &in); err != nil {
++	var a listA
++	if err := call(d.c, "list", &struct{ sfcd.Request }{sfcd.Request{OpID: opID("list")}}, &a); err != nil {
+ 		return nil, err
+ 	}
+-	out := make([]volume.Volume, len(in))
+-	for i := range in {
+-		out[i] = d.vol(in[i])
++	out := make([]volume.Volume, len(a.Volumes))
++	for i, n := range a.Volumes {
++		out[i] = d.vol(n, nil)
+ 	}
+ 	return out, nil
+ }
+ 
++// Remove asks sfcd, which refuses volumes it placed (it removes them itself
++// when it retires them).
+ func (d *Driver) Remove(v volume.Volume) error {
+-	return call(d.c, http.MethodDelete, "/volumes/"+url.PathEscape(v.Name()), nil, nil)
++	return call(d.c, "remove", &nameQ{Request: sfcd.Request{OpID: opID("remove")}, Name: v.Name()}, &sfcd.Reply{})
+ }
+ 
+-func (d *Driver) vol(in info) *vol { return &vol{d: d, info: in} }
++func (d *Driver) vol(name string, status map[string]any) *vol {
++	return &vol{d: d, name: name, status: status}
++}
+ 
+ type vol struct {
+-	d    *Driver
+-	info info
+-	path string // last path sfcd returned for a mount
++	d      *Driver
++	name   string
++	status map[string]any
++	path   string // last engine path of a mount
+ }
+ 
+-func (v *vol) Name() string                  { return v.info.Name }
++func (v *vol) Name() string                  { return v.name }
+ func (v *vol) DriverName() string            { return Name }
+ func (v *vol) Path() string                  { return v.path }
+-func (v *vol) CreatedAt() (time.Time, error) { return v.info.CreatedAt, nil }
+-func (v *vol) Status() map[string]any        { return v.info.Status }
++func (v *vol) CreatedAt() (time.Time, error) { return time.Time{}, nil }
++func (v *vol) Status() map[string]any        { return v.status }
+ 
+ // Mount without a container is refused: sfcd answers only for containers
+ // it created (see MountFor).
+@@ -132,15 +180,21 @@ func (v *vol) MountFor(ctx context.Context, id string) (string, error) {
+ 	if err != nil {
+ 		return "", errdefs.InvalidParameter(err)
+ 	}
+-	var out mountAnswer
++	var a mountA
+ 	ctx, cancel := context.WithTimeout(context.Background(), callTimeout)
+ 	defer cancel()
+-	fd, err := v.d.c.DoFD(ctx, http.MethodPost, "/volumes/"+url.PathEscape(v.info.Name)+"/mount", map[string]string{"mount_id": id, "container_id": cid}, &out)
++	fds, err := v.d.c.Call(ctx, sfcd.Volume, "mount", &mountQ{Request: sfcd.Request{OpID: "mount:" + id}, Name: v.name, MountID: id, ContainerID: cid}, &a)
+ 	if err != nil {
+ 		return "", mapErr(err)
+ 	}
+-	defer unix.Close(fd)
+-	if err = attach(fd, target, out); err != nil {
++	for _, fd := range fds[min(1, len(fds)):] {
++		_ = unix.Close(fd)
++	}
++	if len(fds) != 1 {
++		return "", errdefs.System(errors.New("sfcd mount answer carried no descriptor"))
++	}
++	defer unix.Close(fds[0])
++	if err = attach(fds[0], target, mountAnswer{ReadOnly: a.ReadOnly, Dev: a.Dev, Ino: a.Ino}); err != nil {
+ 		return "", errdefs.System(err)
+ 	}
+ 	v.path = target
+@@ -155,7 +209,7 @@ func (v *vol) Unmount(id string) error {
+ 	if err = detach(target); err != nil {
+ 		return errdefs.System(err)
+ 	}
+-	return call(v.d.c, http.MethodPost, "/volumes/"+url.PathEscape(v.info.Name)+"/unmount", map[string]string{"mount_id": id}, nil)
++	return call(v.d.c, "unmount", &unmountQ{Request: sfcd.Request{OpID: "unmount:" + id}, Name: v.name, MountID: id}, &sfcd.Reply{})
+ }
+ 
+ type errNoPath struct{}

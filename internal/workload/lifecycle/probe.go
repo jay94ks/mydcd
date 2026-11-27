@@ -8,7 +8,7 @@ import (
 	"slices"
 	"time"
 
-	contract "github.com/jay94ks/mydcd/lifecycle/v1"
+	contract "github.com/jay94ks/seafield/lifecycle/v1"
 )
 
 // GuardProbe shares the builtin validators with interpreted and compiled SDK

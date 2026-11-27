@@ -11,8 +11,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/web/acme"
-	"github.com/jay94ks/mydcd/internal/web/provlog"
+	"github.com/jay94ks/seafield/internal/web/acme"
+	"github.com/jay94ks/seafield/internal/web/provlog"
 )
 
 // ACME HTTP-01 responder (devel/design certificate-store §8). Ingress

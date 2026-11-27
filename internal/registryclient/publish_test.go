@@ -23,7 +23,7 @@ import (
 	"github.com/google/go-containerregistry/pkg/v1/types"
 )
 
-// Actual private HTTPS + pinned SDK/OCI protocol, not MyDC's member/quorum or
+// Actual private HTTPS + pinned SDK/OCI protocol, not Seafield Cluster's member/quorum or
 // registry Volume/BuildKit integration. No real Docker or host trust changes.
 func TestPublishImageAndIndexUseExplicitAuthAndBeforeRootGate(t *testing.T) {
 	for _, multi := range []bool{false, true} {

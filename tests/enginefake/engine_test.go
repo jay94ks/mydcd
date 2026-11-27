@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/engine"
+	"github.com/jay94ks/seafield/internal/engine"
 
 	dockerspec "github.com/moby/docker-image-spec/specs-go/v1"
 	"github.com/moby/moby/api/pkg/stdcopy"
@@ -45,7 +45,7 @@ func start(t *testing.T) *Engine {
 	return e
 }
 
-// The SDK client mydcd uses talks to the fake: one container's life with a
+// The SDK client sfcd uses talks to the fake: one container's life with a
 // network address, a volume and logs.
 func TestContainerLife(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
@@ -60,20 +60,20 @@ func TestContainerLife(t *testing.T) {
 	events := api.Events(ctx, client.EventsListOptions{Filters: client.Filters{}.Add("type", "container")})
 
 	subnet := netip.MustParsePrefix("10.77.0.0/24")
-	if _, err = api.NetworkCreate(ctx, "app", client.NetworkCreateOptions{Driver: "bridge", IPAM: &network.IPAM{Config: []network.IPAMConfig{{Subnet: subnet}}}, Labels: map[string]string{"org.mydc.owner": "node-a"}}); err != nil {
+	if _, err = api.NetworkCreate(ctx, "app", client.NetworkCreateOptions{Driver: "bridge", IPAM: &network.IPAM{Config: []network.IPAMConfig{{Subnet: subnet}}}, Labels: map[string]string{"org.sfc.owner": "node-a"}}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = api.NetworkCreate(ctx, "other", client.NetworkCreateOptions{IPAM: &network.IPAM{Config: []network.IPAMConfig{{Subnet: netip.MustParsePrefix("10.77.0.128/25")}}}}); err == nil {
 		t.Fatal("overlapping subnet accepted")
 	}
-	if _, err = api.VolumeCreate(ctx, client.VolumeCreateOptions{Name: "data", Labels: map[string]string{"org.mydc.owner": "node-a"}}); err != nil {
+	if _, err = api.VolumeCreate(ctx, client.VolumeCreateOptions{Name: "data", Labels: map[string]string{"org.sfc.owner": "node-a"}}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = api.VolumeCreate(ctx, client.VolumeCreateOptions{Name: "../escape"}); err == nil {
 		t.Fatal("volume name with a path accepted")
 	}
 	imageID := e.AddImage(dockerspec.DockerOCIImage{}, "registry.test/web:1")
-	labels := map[string]string{"org.mydc.owner": "node-a", "org.mydc.key": "task/web"}
+	labels := map[string]string{"org.sfc.owner": "node-a", "org.sfc.key": "task/web"}
 	created, err := api.ContainerCreate(ctx, client.ContainerCreateOptions{Name: "web", Config: &container.Config{Image: "registry.test/web:1", Labels: labels}, HostConfig: &container.HostConfig{NetworkMode: "app", Mounts: []mount.Mount{{Type: mount.TypeVolume, Source: "data", Target: "/data"}}, NanoCPUs: 1e9, Memory: 1 << 28}})
 	if err != nil {
 		t.Fatal(err)
@@ -99,11 +99,11 @@ func TestContainerLife(t *testing.T) {
 	if st, err := os.Stat(vol.Volume.Mountpoint); err != nil || !st.IsDir() {
 		t.Fatal("volume data directory", err)
 	}
-	listed, err := api.ContainerList(ctx, client.ContainerListOptions{All: true, Filters: client.Filters{}.Add("label", "org.mydc.owner=node-a")})
+	listed, err := api.ContainerList(ctx, client.ContainerListOptions{All: true, Filters: client.Filters{}.Add("label", "org.sfc.owner=node-a")})
 	if err != nil || len(listed.Items) != 1 || listed.Items[0].ID != created.ID {
 		t.Fatalf("list: %+v %v", listed.Items, err)
 	}
-	if listed, _ = api.ContainerList(ctx, client.ContainerListOptions{All: true, Filters: client.Filters{}.Add("label", "org.mydc.owner=node-b")}); len(listed.Items) != 0 {
+	if listed, _ = api.ContainerList(ctx, client.ContainerListOptions{All: true, Filters: client.Filters{}.Add("label", "org.sfc.owner=node-b")}); len(listed.Items) != 0 {
 		t.Fatal("label filter")
 	}
 
@@ -148,7 +148,9 @@ func TestContainerLife(t *testing.T) {
 	for len(actions) < 4 {
 		select {
 		case m := <-events.Messages:
-			actions = append(actions, string(m.Action))
+			if m.Action != "seafield.logs" { // the log queue's "lines stored", as sfed sends
+				actions = append(actions, string(m.Action))
+			}
 		case err = <-events.Err:
 			t.Fatal(err)
 		case <-ctx.Done():

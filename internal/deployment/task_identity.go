@@ -58,17 +58,17 @@ func ResourceIDFromKey(kind, tenant, app, key string) (string, error) {
 
 func TaskInstanceForKey(tenant, app, key string, service ComposeService) (TaskInstance, error) {
 	id, err := ResourceIDFromKey("task", tenant, app, key)
-	if err != nil || !identifier(service.MyDC.Node) {
+	if err != nil || !identifier(service.Sfc.Node) {
 		return TaskInstance{}, ErrInputs
 	}
-	instance := TaskInstance{Service: id, Node: service.MyDC.Node}
-	if service.MyDC.Instance != nil {
-		instance = *service.MyDC.Instance
+	instance := TaskInstance{Service: id, Node: service.Sfc.Node}
+	if service.Sfc.Instance != nil {
+		instance = *service.Sfc.Instance
 		if instance.Ordinal == 0 {
 			return TaskInstance{}, ErrInputs
 		}
 	}
-	if instance.Node != service.MyDC.Node || instance.ResourceID() != id {
+	if instance.Node != service.Sfc.Node || instance.ResourceID() != id {
 		return TaskInstance{}, ErrInputs
 	}
 	return instance, nil
@@ -78,7 +78,7 @@ func (b Blueprint) taskInput(id string) (ComposeService, string, error) {
 	// Explicit singleton addresses retain their original normalization/wire
 	// behavior. A dynamic declaration instead consumes the same frozen Task
 	// goal as its native adapter, never the still-unspecified public input.
-	if service, ok := b.d.Input.Services[id]; ok && service.MyDC.Instance == nil && len(service.MyDC.Nodes) == 0 && !dynamicTaskAddresses(service) {
+	if service, ok := b.d.Input.Services[id]; ok && service.Sfc.Instance == nil && len(service.Sfc.Nodes) == 0 && !dynamicTaskAddresses(service) {
 		return service, id, nil
 	}
 	key := ResourceKey("task", b.d.Tenant, b.d.App, id)

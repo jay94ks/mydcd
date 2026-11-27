@@ -13,17 +13,17 @@ import (
 	"slices"
 	"strconv"
 
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/imagebuild"
-	"github.com/jay94ks/mydcd/internal/web/mydc"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/imagebuild"
+	"github.com/jay94ks/seafield/internal/web/sfc"
 )
 
-// Context zip uploads (upload kind) on mydcd's real REQ-47 contract
+// Context zip uploads (upload kind) on sfcd's real REQ-47 contract
 // (docs/reference/image-build-contexts.md 'ZIP 전송과 버전 생성'). The
 // bytes never go through submit:
 //
 //  1. begin-build-zip-upload {Tenant, Context, Upload, Length, Digest,
-//     ExpiresAt}, Expected 0; mydcd fixes the upload scope, read back from
+//     ExpiresAt}, Expected 0; sfcd fixes the upload scope, read back from
 //     image-builds Part uploads.
 //  2. per part: the Conn sends it over build-zip-transfer as a Record part
 //     (signed with the session key); the owner records the slot and
@@ -90,7 +90,7 @@ func (u zipUpload) view() zipUploadView {
 // readZipUpload reads the caller's upload (image-builds Part uploads, then
 // its missing parts) and checks it is open and belongs to the context; ok
 // is false when there is no such upload.
-func readZipUpload(ctx context.Context, c mydc.Conn, tenant, buildCtx, upload string) (zipUpload, bool, error) {
+func readZipUpload(ctx context.Context, c sfc.Conn, tenant, buildCtx, upload string) (zipUpload, bool, error) {
 	var out zipUpload
 	p, err := c.ImageBuilds(ctx, tenant, control.ImageBuildQuery{Part: "uploads", Upload: upload}, "")
 	if err != nil {
@@ -119,7 +119,7 @@ func readZipUpload(ctx context.Context, c mydc.Conn, tenant, buildCtx, upload st
 	return out, true, nil
 }
 
-func mustZipUpload(ctx context.Context, c mydc.Conn, tenant, buildCtx, upload string) (zipUpload, error) {
+func mustZipUpload(ctx context.Context, c sfc.Conn, tenant, buildCtx, upload string) (zipUpload, error) {
 	u, ok, err := readZipUpload(ctx, c, tenant, buildCtx, upload)
 	if err == nil && !ok {
 		err = &httpErr{http.StatusNotFound, "not-found", "no such open upload for this build context"}
@@ -128,7 +128,7 @@ func mustZipUpload(ctx context.Context, c mydc.Conn, tenant, buildCtx, upload st
 }
 
 // zipBegin checks the request and builds begin-build-zip-upload.
-func zipBegin(ctx context.Context, c mydc.Conn, now uint64, tenant, id, upload string, length int64, digest [32]byte) (control.ImageBuildUploadBegin, error) {
+func zipBegin(ctx context.Context, c sfc.Conn, now uint64, tenant, id, upload string, length int64, digest [32]byte) (control.ImageBuildUploadBegin, error) {
 	if length <= 0 || length > imagebuild.MaxZIPBytes {
 		return control.ImageBuildUploadBegin{}, invalid("length: 1 byte to 500 MB")
 	}
@@ -142,7 +142,7 @@ func zipBegin(ctx context.Context, c mydc.Conn, now uint64, tenant, id, upload s
 	if x.Spec.Kind != "upload" {
 		return control.ImageBuildUploadBegin{}, &httpErr{http.StatusConflict, "not-upload", "only an upload context takes a zip"}
 	}
-	// a little under mydcd's 24 h so clock skew between the hosts cannot
+	// a little under sfcd's 24 h so clock skew between the hosts cannot
 	// push it over
 	return control.ImageBuildUploadBegin{Tenant: tenant, Context: id, Upload: upload, Length: length, Digest: digest, ExpiresAt: now + imagebuild.MaxUploadLifetime - 600,
 		ChunkBytes: imagebuild.UploadPartBytes}, nil
@@ -153,9 +153,9 @@ func zipBegin(ctx context.Context, c mydc.Conn, now uint64, tenant, id, upload s
 // These are the exceptions to "store the signed original before sending":
 // a part is the same bytes at the same index, and the one-change begin
 // opens the upload "web-<opId>", which a retry with the same opId finds
-// and carries on with (mydcd never opens one ID twice). Either way a lost
+// and carries on with (sfcd never opens one ID twice). Either way a lost
 // answer is settled by reading the upload, not by the stored op.
-func submitUnstored(ctx context.Context, c mydc.Conn, ws *webSession, action string, expected uint64, payload any) (mydc.ResultCode, error) {
+func submitUnstored(ctx context.Context, c sfc.Conn, ws *webSession, action string, expected uint64, payload any) (sfc.ResultCode, error) {
 	raw, _ := json.Marshal(payload)
 	doc, _ := json.Marshal(control.ChangeDocument{Schema: 1, Action: action, Expected: expected, Payload: raw})
 	ch, err := control.InputChange(doc, ws.user.ID)
@@ -196,7 +196,7 @@ func ioRefused(what, code string) error {
 // stages (Recorded false) gets the part's receipt as put-build-zip-part.
 // A conflict is an error, never retried with another revision here: the
 // browser sends the chunk again, which reads the upload afresh.
-func sendZipParts(ctx context.Context, c mydc.Conn, ws *webSession, u zipUpload, first uint32, data []byte) (zipUpload, error) {
+func sendZipParts(ctx context.Context, c sfc.Conn, ws *webSession, u zipUpload, first uint32, data []byte) (zipUpload, error) {
 	s := u.Scope
 	size := int(s.PartSize())
 	for i := first; i < s.Parts() && int(i-first)*size < len(data); i++ {
@@ -217,14 +217,14 @@ func sendZipParts(ctx context.Context, c mydc.Conn, ws *webSession, u zipUpload,
 		case tr.Recorded:
 			u.Revision = tr.UploadRevision
 		default:
-			code, err := submitUnstored(ctx, c, ws, mydc.ActionPutBuildZipPart, u.Revision, control.ImageBuildUploadPart{Tenant: s.Tenant, Upload: s.Upload, Receipt: *tr.Part})
+			code, err := submitUnstored(ctx, c, ws, sfc.ActionPutBuildZipPart, u.Revision, control.ImageBuildUploadPart{Tenant: s.Tenant, Upload: s.Upload, Receipt: *tr.Part})
 			if err != nil {
 				return u, err
 			}
-			if code == mydc.ResultConditionFailed {
+			if code == sfc.ResultConditionFailed {
 				return u, &httpErr{http.StatusConflict, "conflict", fmt.Sprintf("part %d: the upload changed; send the chunk again", i)}
 			}
-			if code != mydc.ResultApplied {
+			if code != sfc.ResultApplied {
 				return u, &httpErr{http.StatusUnprocessableEntity, "part-refused", fmt.Sprintf("part %d was refused (result %d)", i, code)}
 			}
 			u.Revision++
@@ -236,7 +236,7 @@ func sendZipParts(ctx context.Context, c mydc.Conn, ws *webSession, u zipUpload,
 
 // sealZip asks for the seal receipt of a complete upload and builds
 // upload-build-zip.
-func sealZip(ctx context.Context, c mydc.Conn, u zipUpload) (control.ImageBuildZIPConsume, error) {
+func sealZip(ctx context.Context, c sfc.Conn, u zipUpload) (control.ImageBuildZIPConsume, error) {
 	if len(u.Missing) > 0 {
 		return control.ImageBuildZIPConsume{}, &httpErr{http.StatusConflict, "incomplete", fmt.Sprintf("%d parts are still missing", len(u.Missing))}
 	}
@@ -272,7 +272,7 @@ func (s *Server) handleUploadBuildZip(w http.ResponseWriter, r *http.Request, ws
 	sum := sha256.Sum256(zip)
 	body := struct{ Zip string }{hex.EncodeToString(sum[:])}
 	tenant, id := r.PathValue("t"), r.PathValue("id")
-	s.sharedCreate(w, r, ws, opID, body, func(ctx context.Context, c mydc.Conn, _ mydc.Session) (string, any, uint64, string, error) {
+	s.sharedCreate(w, r, ws, opID, body, func(ctx context.Context, c sfc.Conn, _ sfc.Session) (string, any, uint64, string, error) {
 		upload := "web-" + opID
 		u, ok, err := readZipUpload(ctx, c, tenant, id, upload)
 		if err != nil {
@@ -283,12 +283,12 @@ func (s *Server) handleUploadBuildZip(w http.ResponseWriter, r *http.Request, ws
 			if err != nil {
 				return "", nil, 0, "", err
 			}
-			code, err := submitUnstored(ctx, c, ws, mydc.ActionBeginBuildZipUpload, 0, q)
+			code, err := submitUnstored(ctx, c, ws, sfc.ActionBeginBuildZipUpload, 0, q)
 			if err != nil {
 				return "", nil, 0, "", err
 			}
-			if code != mydc.ResultApplied {
-				return "", nil, 0, "", &httpErr{http.StatusConflict, "upload-refused", fmt.Sprintf("mydcd did not open the upload (result %d): check the build policy, its space and open uploads", code)}
+			if code != sfc.ResultApplied {
+				return "", nil, 0, "", &httpErr{http.StatusConflict, "upload-refused", fmt.Sprintf("sfcd did not open the upload (result %d): check the build policy, its space and open uploads", code)}
 			}
 			if u, err = mustZipUpload(ctx, c, tenant, id, upload); err != nil {
 				return "", nil, 0, "", err
@@ -304,7 +304,7 @@ func (s *Server) handleUploadBuildZip(w http.ResponseWriter, r *http.Request, ws
 		if err != nil {
 			return "", nil, 0, "", err
 		}
-		return mydc.ActionUploadBuildZip, q, u.Revision, "build-context/" + id, nil
+		return sfc.ActionUploadBuildZip, q, u.Revision, "build-context/" + id, nil
 	})
 }
 
@@ -321,7 +321,7 @@ func (s *Server) handleBeginZipUpload(w http.ResponseWriter, r *http.Request, ws
 		return
 	}
 	tenant, id := r.PathValue("t"), r.PathValue("id")
-	s.sharedCreate(w, r, ws, req.OpID, req, func(ctx context.Context, c mydc.Conn, _ mydc.Session) (string, any, uint64, string, error) {
+	s.sharedCreate(w, r, ws, req.OpID, req, func(ctx context.Context, c sfc.Conn, _ sfc.Session) (string, any, uint64, string, error) {
 		dg, ok := parseHex32(req.Digest)
 		if !ok || dg == ([32]byte{}) {
 			return "", nil, 0, "", invalid("digest: sha256 of the whole zip (64 hex)")
@@ -330,7 +330,7 @@ func (s *Server) handleBeginZipUpload(w http.ResponseWriter, r *http.Request, ws
 		if err != nil {
 			return "", nil, 0, "", err
 		}
-		return mydc.ActionBeginBuildZipUpload, q, 0, "build-context/" + id, nil
+		return sfc.ActionBeginBuildZipUpload, q, 0, "build-context/" + id, nil
 	})
 }
 
@@ -338,7 +338,7 @@ func (s *Server) handleBeginZipUpload(w http.ResponseWriter, r *http.Request, ws
 // length, digest, revision, expiresAt, partBytes, chunkBytes, chunks,
 // missingChunks, complete} (the uploader only; 404 once finished or aborted).
 func (s *Server) handleZipUpload(w http.ResponseWriter, r *http.Request, ws *webSession) {
-	read(s, w, r, ws, func(ctx context.Context, c mydc.Conn) (zipUploadView, error) {
+	read(s, w, r, ws, func(ctx context.Context, c sfc.Conn) (zipUploadView, error) {
 		u, err := mustZipUpload(ctx, c, r.PathValue("t"), r.PathValue("id"), r.PathValue("upload"))
 		return u.view(), err
 	})
@@ -347,7 +347,7 @@ func (s *Server) handleZipUpload(w http.ResponseWriter, r *http.Request, ws *web
 // PUT /t/{t}/build-contexts/{id}/zip-uploads/{upload}/chunks/{n} with the
 // chunk as the body (exactly chunkBytes, the last one the rest) → the
 // upload view. Chunks go in any order and again after a lost answer; the
-// last missing part makes mydcd check the whole zip's digest (422
+// last missing part makes sfcd check the whole zip's digest (422
 // part-refused).
 func (s *Server) handleZipUploadChunk(w http.ResponseWriter, r *http.Request, ws *webSession) {
 	n, err := strconv.Atoi(r.PathValue("n"))
@@ -364,7 +364,7 @@ func (s *Server) handleZipUploadChunk(w http.ResponseWriter, r *http.Request, ws
 	ctx, cancel := s.callCtx(r)
 	defer cancel()
 	var view zipUploadView
-	err = ws.do(ctx, func(ctx context.Context, c mydc.Conn) error {
+	err = ws.do(ctx, func(ctx context.Context, c sfc.Conn) error {
 		u, err := mustZipUpload(ctx, c, tenant, id, upload)
 		if err != nil {
 			return err
@@ -388,7 +388,7 @@ func (s *Server) handleZipUploadChunk(w http.ResponseWriter, r *http.Request, ws
 }
 
 // POST /t/{t}/build-contexts/{id}/zip-uploads/{upload}/finish {opId} → the
-// daemon seals the upload (mydcd checks the zip: 422 part-refused when it
+// daemon seals the upload (sfcd checks the zip: 422 part-refused when it
 // is not a context zip), then upload-build-zip: the context's new version
 // (409 incomplete while parts are missing).
 func (s *Server) handleFinishZipUpload(w http.ResponseWriter, r *http.Request, ws *webSession) {
@@ -399,7 +399,7 @@ func (s *Server) handleFinishZipUpload(w http.ResponseWriter, r *http.Request, w
 		return
 	}
 	tenant, id, upload := r.PathValue("t"), r.PathValue("id"), r.PathValue("upload")
-	s.sharedCreate(w, r, ws, req.OpID, req, func(ctx context.Context, c mydc.Conn, _ mydc.Session) (string, any, uint64, string, error) {
+	s.sharedCreate(w, r, ws, req.OpID, req, func(ctx context.Context, c sfc.Conn, _ sfc.Session) (string, any, uint64, string, error) {
 		u, err := mustZipUpload(ctx, c, tenant, id, upload)
 		if err != nil {
 			return "", nil, 0, "", err
@@ -408,7 +408,7 @@ func (s *Server) handleFinishZipUpload(w http.ResponseWriter, r *http.Request, w
 		if err != nil {
 			return "", nil, 0, "", err
 		}
-		return mydc.ActionUploadBuildZip, q, u.Revision, "build-context/" + id, nil
+		return sfc.ActionUploadBuildZip, q, u.Revision, "build-context/" + id, nil
 	})
 }
 
@@ -422,11 +422,11 @@ func (s *Server) handleAbortZipUpload(w http.ResponseWriter, r *http.Request, ws
 		return
 	}
 	tenant, id, upload := r.PathValue("t"), r.PathValue("id"), r.PathValue("upload")
-	s.sharedCreate(w, r, ws, req.OpID, req, func(ctx context.Context, c mydc.Conn, _ mydc.Session) (string, any, uint64, string, error) {
+	s.sharedCreate(w, r, ws, req.OpID, req, func(ctx context.Context, c sfc.Conn, _ sfc.Session) (string, any, uint64, string, error) {
 		u, err := mustZipUpload(ctx, c, tenant, id, upload)
 		if err != nil {
 			return "", nil, 0, "", err
 		}
-		return mydc.ActionAbortBuildZipUpload, control.ImageBuildUploadSelection{Tenant: tenant, Upload: upload}, u.Revision, "build-context/" + id, nil
+		return sfc.ActionAbortBuildZipUpload, control.ImageBuildUploadSelection{Tenant: tenant, Upload: upload}, u.Revision, "build-context/" + id, nil
 	})
 }

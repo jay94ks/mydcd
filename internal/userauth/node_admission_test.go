@@ -9,14 +9,14 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/cluster/lifecycle"
-	"github.com/jay94ks/mydcd/internal/cluster/membership"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/config"
-	"github.com/jay94ks/mydcd/internal/network/services"
-	"github.com/jay94ks/mydcd/internal/tenancy"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/lifecycle"
+	"github.com/jay94ks/seafield/internal/cluster/membership"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/config"
+	"github.com/jay94ks/seafield/internal/network/services"
+	"github.com/jay94ks/seafield/internal/tenancy"
 )
 
 // The product filter is tested directly. Configuration/ACK/Origin inputs here
@@ -32,7 +32,7 @@ func nodeAdmissionFixture(t *testing.T) (membership.Directory, access.Catalog, [
 	peer := config.Peer{ID: "node-b", Key: hex.EncodeToString(bk[:]), Endpoint: "127.0.0.1:9002"}
 	d, err := membership.New(cluster, genesis)
 	if err == nil {
-		d, err = d.Invite(peer, "join-b")
+		d, err = d.Invite(peer, "join-b", nil)
 	}
 	entry, _ := d.Entry(peer.ID)
 	if err == nil {
@@ -138,7 +138,7 @@ func TestNodeIngressSeparatesActiveAttestationRecoveryAndOriginalReceipts(t *tes
 		t.Fatal("isolated voter or installed non-voter issued a session")
 	}
 	for _, method := range []string{"challenge", "credential-challenge"} {
-		if nodeIngressAllowed(ak, d, catalog, Request{Method: method, Username: "ordinary"}, Envelope{}, false) || nodeIngressAllowed(ak, d, catalog, Request{Method: method, Username: "admin"}, Envelope{}, false) {
+		if nodeIngressAllowed(ak, d, catalog, Request{Method: method}, Envelope{}, false) {
 			t.Fatal("credential issuance survived isolation", method)
 		}
 	}
@@ -151,7 +151,7 @@ func TestLoginIngressRequiresActiveInstalledVoterForEveryAuthenticationMethod(t 
 	d, catalog, ak, bk := nodeAdmissionFixture(t)
 	for _, method := range []string{"challenge", "credential-challenge", "login", "credential-login"} {
 		for _, user := range []string{"admin", "ordinary"} {
-			request := Request{Method: method, Username: user, Ticket: &Ticket{User: user}}
+			request := Request{Method: method}
 			if !nodeIngressAllowed(ak, d, catalog, request, Envelope{}, false) || nodeIngressAllowed(bk, d, catalog, request, Envelope{}, false) {
 				t.Fatal("voter/non-voter login authority was confused", method, user)
 			}
@@ -208,5 +208,26 @@ func TestNodeApprovalRecoveryRequiresOriginalAppliedReceiptAndOperationSelector(
 				}
 			}
 		})
+	}
+}
+
+// The backup stream admits on its own: this server and any relaying server
+// must be members, the same as the Request-named admission it replaces.
+func TestClusterBackupAdmitsMembersOnly(t *testing.T) {
+	d, _, ak, bk := nodeAdmissionFixture(t)
+	stranger := [32]byte{99}
+	if !clusterBackupAdmits(ak, d, Envelope{}) || !clusterBackupAdmits(bk, d, Envelope{}) {
+		t.Fatal("member refused the backup stream")
+	}
+	if !clusterBackupAdmits(ak, d, Envelope{Relay: &Relay{Node: bk}}) {
+		t.Fatal("member relay refused")
+	}
+	if clusterBackupAdmits(stranger, d, Envelope{}) || clusterBackupAdmits(ak, d, Envelope{Relay: &Relay{Node: stranger}}) {
+		t.Fatal("non-member admitted to the backup stream")
+	}
+	for _, relay := range []*Relay{nil, {Node: bk}, {Node: stranger}} {
+		if got, want := clusterBackupAdmits(ak, d, Envelope{Relay: relay}), nodeIngressAllowed(ak, d, access.Catalog{}, Request{Method: "volumes"}, Envelope{Relay: relay}, false); got != want {
+			t.Fatal("backup admission differs from the read admission it replaces", relay, got, want)
+		}
 	}
 }

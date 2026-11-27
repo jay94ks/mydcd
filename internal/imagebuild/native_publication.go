@@ -7,8 +7,8 @@ import (
 	"errors"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/reconcile"
-	"github.com/jay94ks/mydcd/internal/registryclient"
+	"github.com/jay94ks/seafield/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/registryclient"
 )
 
 func (n *NativeJobs) publicationAuthority(ctx context.Context, r *NativeRecord, write bool) error {

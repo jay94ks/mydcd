@@ -14,21 +14,21 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/network/services"
-	"github.com/jay94ks/mydcd/internal/tenancy"
-	"github.com/jay94ks/mydcd/internal/workload"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/network/services"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/tenancy"
+	"github.com/jay94ks/seafield/internal/workload"
 
 	"github.com/hashicorp/raft"
 )
 
 // Native observations and the accepted graph are explicit fixtures here.
-// Reports, committed Goal generations, MYDCP, Raft, DB and Snapshot are real.
+// Reports, committed Goal generations, SFCP, Raft, DB and Snapshot are real.
 func TestRealAppDNSProjectionReportSerialAndSnapshotSameDB(t *testing.T) {
 	testRealAppDNSProjection(t, false)
 }
@@ -47,9 +47,9 @@ func testRealAppDNSProjection(t *testing.T, archived bool) {
 		t.Fatal(err)
 	}
 	defer clear(self.Private)
-	peer := mydcp.Peer{ID: "source", Policy: mydcp.Policy{Key: mydcp.Identity(p.TrustRoot), Member: true, Read: true, Snapshot: true, Respond: true}}
-	lookup := func(key mydcp.Identity) (mydcp.Peer, bool) { return peer, key == peer.Key }
-	server, err := mydcp.NewTransport(self, p.Cluster, lookup)
+	peer := sfcp.Peer{ID: "source", Policy: sfcp.Policy{Key: sfcp.Identity(p.TrustRoot), Member: true, Read: true, Snapshot: true, Respond: true}}
+	lookup := func(key sfcp.Identity) (sfcp.Peer, bool) { return peer, key == peer.Key }
+	server, err := sfcp.NewTransport(self, p.Cluster, lookup)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -58,7 +58,7 @@ func testRealAppDNSProjection(t *testing.T, archived bool) {
 		t.Fatal(err)
 	}
 	peer.Endpoint, p.Genesis.Endpoint = server.Addr().String(), server.Addr().String()
-	caller, err := mydcp.NewTransport(self, p.Cluster, lookup)
+	caller, err := sfcp.NewTransport(self, p.Cluster, lookup)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,7 +66,7 @@ func testRealAppDNSProjection(t *testing.T, archived bool) {
 	seeds := map[string]map[string][]byte{}
 	options := cluster.Options{ID: "source", Root: filepath.Join(t.TempDir(), "node"), Admin: "legacy-admin", Cluster: p.Cluster, Mesh: server, Bootstrap: true, ModuleID: p.ID(), Validate: p.ValidateManaged, AdmitModule: p.AdmitModule, AdmitMutation: p.AdmitAppMutation, AdmitModulePatch: p.AdmitAppPatch}
 	options.Servers = []raft.Server{{ID: "source", Address: raft.ServerAddress(peer.Endpoint), Suffrage: raft.Voter}}
-	options.Resolve = func(id raft.ServerID, address raft.ServerAddress) (mydcp.Peer, bool) {
+	options.Resolve = func(id raft.ServerID, address raft.ServerAddress) (sfcp.Peer, bool) {
 		return peer, id == "source" && string(address) == peer.Endpoint
 	}
 	options.Reduce = func(s state.State, command state.Command) (map[string][]byte, state.Code) {
@@ -152,7 +152,7 @@ func testRealAppDNSProjection(t *testing.T, archived bool) {
 	resources.Revision = resources.Quotas.Revision()
 	writes, _ = p.resourceCheckpoint(view(), resources)
 	seed(ResourcesKey, "seed-quota", writes)
-	document := fmt.Sprintf("name: app\nservices:\n  db:\n    image: docker.io/library/php@sha256:%s\n    cpus: 0.1\n    mem_limit: 16m\n    networks: {lan: {ipv4_address: 10.78.0.10}}\n    x-mydc: {node: source}\nnetworks:\n  lan:\n    x-mydc:\n      mtu: 1280\n      pools: {source: {cidr: 10.78.0.0/24, gateway: 10.78.0.1}}\n      dns:\n        enabled: true\n        zone: app.mydc.test.\n        ttl_seconds: 30\n        negative_ttl_seconds: 5\n        transports: [udp, tcp]\n        limits: {cache_entries: 8, queries_inflight: 8, tcp_connections: 4, request_timeout_ms: 2000}\n", string(bytes.Repeat([]byte{'a'}, 64)))
+	document := fmt.Sprintf("name: app\nservices:\n  db:\n    image: docker.io/library/php@sha256:%s\n    cpus: 0.1\n    mem_limit: 16m\n    networks: {lan: {ipv4_address: 10.78.0.10}}\n    x-sfc: {node: source}\nnetworks:\n  lan:\n    x-sfc:\n      mtu: 1280\n      pools: {source: {cidr: 10.78.0.0/24, gateway: 10.78.0.1}}\n      dns:\n        enabled: true\n        zone: app.sfc.test.\n        ttl_seconds: 30\n        negative_ttl_seconds: 5\n        transports: [udp, tcp]\n        limits: {cache_entries: 8, queries_inflight: 8, tcp_connections: 4, request_timeout_ms: 2000}\n", string(bytes.Repeat([]byte{'a'}, 64)))
 	input, err := deployment.ParseCompose([]byte(document))
 	if err != nil {
 		t.Fatal(err)
@@ -344,14 +344,14 @@ func testRealAppDNSProjection(t *testing.T, archived bool) {
 	if err = server.Close(); err != nil {
 		t.Fatal(err)
 	}
-	server, err = mydcp.NewTransport(self, p.Cluster, lookup)
+	server, err = sfcp.NewTransport(self, p.Cluster, lookup)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err = server.Listen(peer.Endpoint); err != nil {
 		t.Fatal(err)
 	}
-	caller, err = mydcp.NewTransport(self, p.Cluster, lookup)
+	caller, err = sfcp.NewTransport(self, p.Cluster, lookup)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -372,5 +372,5 @@ func testRealAppDNSProjection(t *testing.T, archived bool) {
 	if err != nil || !found || retained != allocation || projection.AddressSources[allocation.Address.String()].Revision != 0 {
 		t.Fatal("missing Goal released original address", err)
 	}
-	t.Log("real signed member report/MYDCP/N1 Raft/bbolt: empty pre-task view -> exact committed task/serial2 -> original A3 lifetime and Book hold -> no native Applied -> duplicate denial/Snapshot/same DB; accepted graph/Bridge observation are fixtures, no DNS socket or CLI acceptance claimed")
+	t.Log("real signed member report/SFCP/N1 Raft/bbolt: empty pre-task view -> exact committed task/serial2 -> original A3 lifetime and Book hold -> no native Applied -> duplicate denial/Snapshot/same DB; accepted graph/Bridge observation are fixtures, no DNS socket or CLI acceptance claimed")
 }

@@ -7,7 +7,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/reconcile"
 )
 
 // Real native DB/files and SDK fixture, with explicitly injected RootManager

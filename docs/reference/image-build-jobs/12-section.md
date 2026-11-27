@@ -1,6 +1,6 @@
 ## 노드·컨텍스트별 캐시 목록
 
-`mydc build cache list [CONTEXT] [--node NODE]`는 현재 tenant에서
+`sfcli build cache list [CONTEXT] [--node NODE]`는 현재 tenant에서
 조회 가능한 모든 알려진 cache namespace를 나열한다. 원 job의 tenant/context/root/
 builder digest로 묶어 여러 job이 같은 cache를 재사용해도 중복 합산하지 않는다.
 삭제된 job/컨텍스트의 namespace도 보존한 원 공유 기록과 현재 조회 권한 아래 표시한다.

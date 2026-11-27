@@ -9,12 +9,12 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/lifecycle"
-	"github.com/jay94ks/mydcd/internal/cluster/membership"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/workload/volumes"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/lifecycle"
+	"github.com/jay94ks/seafield/internal/cluster/membership"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/workload/volumes"
 )
 
 type NodeDrainQuery struct{ Node, Operation string }
@@ -83,7 +83,7 @@ func drainAppOperation(operation, tenant, app string) string {
 func drainPlanDigest(plan NodeDrainPlan) [32]byte {
 	plan.Digest = [32]byte{}
 	raw, _ := json.Marshal(plan)
-	return sha256.Sum256(append([]byte("mydc-node-drain-plan-1\x00"), raw...))
+	return sha256.Sum256(append([]byte("sfc-node-drain-plan-1\x00"), raw...))
 }
 
 func (p Policy) PlanNodeDrain(s state.State, session access.Session, at int64, q NodeDrainQuery) (NodeDrainPlan, error) {

@@ -8,16 +8,38 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/jay94ks/mydcd/internal/access"
+	"github.com/jay94ks/seafield/internal/access"
 )
 
+// Definition is a storage root's registration and policy. AllTenants lets
+// every tenant use the root (Tenants is then empty). CapacityBytes bounds the
+// sum of the reservations of the fixed volumes registered on the root; zero is
+// no limit. It is admission accounting, not a filesystem quota.
 type Definition struct {
-	Node       string
-	Key        [32]byte
-	ID, Path   string
-	Tenants    []string
-	MaxVolumes int
+	Node          string
+	Key           [32]byte
+	ID, Path      string
+	Tenants       []string
+	AllTenants    bool   `json:",omitempty"`
+	CapacityBytes uint64 `json:",omitempty"`
 }
+
+// Allows reports whether the root's policy lets tenant use it.
+func (d Definition) Allows(tenant string) bool {
+	return d.AllTenants || slices.Contains(d.Tenants, tenant)
+}
+
+// DefaultRootID names the root each node registers for itself once, on its
+// first run in a cluster (RegisterDefault). An operator may change or remove
+// it like any other root; a removed default root is never registered again.
+const DefaultRootID = "default"
+
+// RootPinCapacity bounds the native pins (volumes, build artifacts) one root
+// holds at a time. It is not a user policy.
+const RootPinCapacity = maxRoots
+
+// MaxCapacityBytes bounds a root's capacity so reservation sums cannot overflow.
+const MaxCapacityBytes = 1 << 60
 
 type Root struct {
 	Definition           Definition
@@ -97,7 +119,7 @@ func (c Catalog) clone() (Catalog, error) {
 }
 
 func validDefinition(d Definition) bool {
-	if !identifier(d.Node) || d.Key == ([32]byte{}) || !identifier(d.ID) || !cleanPath(d.Path) || d.MaxVolumes < 1 || d.MaxVolumes > maxVolumes || len(d.Tenants) > maxRoots {
+	if !identifier(d.Node) || d.Key == ([32]byte{}) || !identifier(d.ID) || !cleanPath(d.Path) || d.CapacityBytes > MaxCapacityBytes || len(d.Tenants) > maxRoots || d.AllTenants && len(d.Tenants) != 0 {
 		return false
 	}
 	for i, t := range d.Tenants {
@@ -120,7 +142,38 @@ func (c Catalog) Add(users access.Catalog, actor string, expected uint64, d Defi
 	if !users.SystemAllowed(actor) {
 		return c, access.ErrDenied
 	}
-	if expected != 0 || !validDefinition(d) || !policyTenants(users, d.Tenants) || c.next == ^uint64(0) || len(c.roots) >= maxRoots || len(c.floors) >= maxRoots && c.floors[rootKey(d.Node, d.ID)] == 0 {
+	if expected != 0 || !policyTenants(users, d.Tenants) {
+		return c, ErrStorage
+	}
+	return c.add(d)
+}
+
+// Registered reports whether node ever registered a root named id in this
+// cluster, including one an operator has since removed.
+func (c Catalog) Registered(node, id string) bool {
+	_, ok := c.floors[rootKey(node, id)]
+	return ok
+}
+
+// DefaultDefinition is the root a node registers for itself: every tenant may
+// use it and it has no capacity limit.
+func DefaultDefinition(node string, key [32]byte, path string) Definition {
+	return Definition{Node: node, Key: key, ID: DefaultRootID, Path: path, AllTenants: true}
+}
+
+// RegisterDefault adds the node's own default root. The caller has already
+// proven the reporter is the node's current owner. It refuses once the node
+// has ever registered a root by that name, so an operator's removal sticks
+// across restarts and rejoins.
+func (c Catalog) RegisterDefault(d Definition) (Catalog, error) {
+	if d.ID != DefaultRootID || !d.AllTenants || len(d.Tenants) != 0 || d.CapacityBytes != 0 || c.Registered(d.Node, d.ID) {
+		return c, ErrStorage
+	}
+	return c.add(d)
+}
+
+func (c Catalog) add(d Definition) (Catalog, error) {
+	if !validDefinition(d) || c.next == ^uint64(0) || len(c.roots) >= maxRoots || len(c.floors) >= maxRoots && c.floors[rootKey(d.Node, d.ID)] == 0 {
 		return c, ErrStorage
 	}
 	if _, ok := c.roots[rootKey(d.Node, d.ID)]; ok {
@@ -143,15 +196,72 @@ func (c Catalog) Add(users access.Catalog, actor string, expected uint64, d Defi
 	return n, nil
 }
 
-func (c Catalog) SetPolicy(users access.Catalog, actor, node, id string, expected uint64, tenants []string, max int, registered int) (Catalog, error) {
+// Policy is a delta to a root's policy. AllTenants, when set, switches between
+// "every tenant" and an explicit list; switching to the list starts it from
+// Add. Capacity, when set, replaces the capacity limit (0 = no limit).
+type Policy struct {
+	Add, Remove []string
+	AllTenants  *bool
+	Capacity    *uint64
+}
+
+func (p Policy) Empty() bool {
+	return len(p.Add) == 0 && len(p.Remove) == 0 && p.AllTenants == nil && p.Capacity == nil
+}
+
+// ChangePolicy applies a policy delta. Expected is the root's revision. Adding
+// a tenant that is already allowed, removing one that is not, or editing the
+// list while every tenant is allowed is a conflict. reserved is the sum of the
+// reservations already held on the root; a limit below it is refused.
+func (c Catalog) ChangePolicy(users access.Catalog, actor, node, id string, expected uint64, q Policy, reserved uint64) (Catalog, error) {
 	if !users.SystemAllowed(actor) {
 		return c, access.ErrDenied
 	}
 	r, ok := c.roots[rootKey(node, id)]
+	if !ok || r.Revision != expected || r.Draining || q.Empty() {
+		return c, ErrStorage
+	}
 	d := r.Definition
-	d.Tenants = slices.Clone(tenants)
-	d.MaxVolumes = max
-	if !ok || r.Revision != expected || r.Draining || !validDefinition(d) || !policyTenants(users, tenants) || registered < 0 || registered > max {
+	all := d.AllTenants
+	if q.AllTenants != nil {
+		if *q.AllTenants == all {
+			return c, ErrStorage
+		}
+		all = *q.AllTenants
+	}
+	tenants := slices.Clone(d.Tenants)
+	switch {
+	case all && (len(q.Add) != 0 || len(q.Remove) != 0):
+		return c, ErrStorage
+	case all:
+		tenants = nil
+	case d.AllTenants: // switching to an explicit list
+		if len(q.Remove) != 0 {
+			return c, ErrStorage
+		}
+		tenants = nil
+	}
+	if !all {
+		for _, t := range q.Remove {
+			i := slices.Index(tenants, t)
+			if i < 0 {
+				return c, ErrStorage
+			}
+			tenants = slices.Delete(tenants, i, i+1)
+		}
+		for _, t := range q.Add {
+			if slices.Contains(tenants, t) || slices.Contains(d.Tenants, t) {
+				return c, ErrStorage
+			}
+			tenants = append(tenants, t)
+		}
+		slices.Sort(tenants)
+	}
+	d.AllTenants, d.Tenants = all, tenants
+	if q.Capacity != nil {
+		d.CapacityBytes = *q.Capacity
+	}
+	if !validDefinition(d) || !policyTenants(users, q.Add) || d.CapacityBytes != 0 && reserved > d.CapacityBytes {
 		return c, ErrStorage
 	}
 	n, err := c.clone()
@@ -262,7 +372,7 @@ func (c Catalog) CanBuild(users access.Catalog, actor, tenant, node, id string, 
 }
 func (c Catalog) canUse(users access.Catalog, actor, tenant, node, id string, generation uint64, action access.Action) (Root, error) {
 	r, ok := c.roots[rootKey(node, id)]
-	if !ok || r.Generation != generation || r.Draining || r.Closed != nil || r.Attestation == nil || !slices.Contains(r.Definition.Tenants, tenant) {
+	if !ok || r.Generation != generation || r.Draining || r.Closed != nil || r.Attestation == nil || !r.Definition.Allows(tenant) {
 		return Root{}, ErrStorage
 	}
 	if users.Authorize(actor, tenant, action, node) != nil {

@@ -4,7 +4,7 @@ package deployment
 
 import (
 	"encoding/json"
-	"github.com/jay94ks/mydcd/internal/access"
+	"github.com/jay94ks/seafield/internal/access"
 	"slices"
 )
 
@@ -46,16 +46,16 @@ func (b Blueprint) relocateNode(c access.Catalog, ctx PlanningContext, from, to 
 		if !found {
 			return Blueprint{}, ErrInputs
 		}
-		if service.MyDC.Node == from || service.MyDC.Node == "" && len(service.MyDC.Nodes) == 0 && b.d.DefaultNode == from {
-			service.MyDC.Node = to
-		} else if slices.Contains(service.MyDC.Nodes, from) {
-			if slices.Contains(service.MyDC.Nodes, to) {
+		if service.Sfc.Node == from || service.Sfc.Node == "" && len(service.Sfc.Nodes) == 0 && b.d.DefaultNode == from {
+			service.Sfc.Node = to
+		} else if slices.Contains(service.Sfc.Nodes, from) {
+			if slices.Contains(service.Sfc.Nodes, to) {
 				return Blueprint{}, inputError("INSTANCE_NODE_CONFLICT", name)
 			}
-			service.MyDC.Nodes = slices.Clone(service.MyDC.Nodes)
-			for i, node := range service.MyDC.Nodes {
+			service.Sfc.Nodes = slices.Clone(service.Sfc.Nodes)
+			for i, node := range service.Sfc.Nodes {
 				if node == from {
-					service.MyDC.Nodes[i] = to
+					service.Sfc.Nodes[i] = to
 				}
 			}
 		} else {
@@ -85,7 +85,7 @@ func (b Blueprint) relocateNode(c access.Catalog, ctx PlanningContext, from, to 
 			if !ok || row.Scope.Cluster != ctx.Cluster || row.Scope.Tenant != b.d.Tenant || row.Scope.App != b.d.App || row.Source.Node != from || row.Target.Node != to {
 				return Blueprint{}, ErrInputs
 			}
-			definition.MyDC.Node = to
+			definition.Sfc.Node = to
 			input.Volumes[row.Scope.ID] = definition
 		}
 	}

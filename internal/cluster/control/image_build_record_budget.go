@@ -8,8 +8,8 @@ import (
 	"math"
 	"strings"
 
-	"github.com/jay94ks/mydcd/internal/imagebuild"
-	"github.com/jay94ks/mydcd/internal/secrets"
+	"github.com/jay94ks/seafield/internal/imagebuild"
+	"github.com/jay94ks/seafield/internal/secrets"
 )
 
 // Size-only envelopes reserve room for future terminal evidence. They are

@@ -7,13 +7,14 @@ import (
 	"crypto/ed25519"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/network/services"
-	"github.com/jay94ks/mydcd/internal/workload"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/network/services"
+	"github.com/jay94ks/seafield/internal/workload"
 )
 
 // The accepted app graph and native observations are explicit Mock fixtures.
@@ -36,7 +37,7 @@ func managedDNSTaskCoreFixture(t *testing.T) *backupCoreFixture {
 
 func managedDNSTaskCoreBegin(t *testing.T, f *backupCoreFixture, app, address, alias string, configure ...func(*deployment.Compose, *deployment.PlanningContext)) string {
 	t.Helper()
-	raw := fmt.Sprintf("name: %s\nservices:\n  web:\n    image: docker.io/library/php@sha256:%s\n    cpus: '0.1'\n    mem_limit: 16m\n    networks: {lan: {ipv4_address: %s, aliases: [%s]}}\n    dns: [10.80.1.1]\n    x-mydc: {node: node-a}\nnetworks:\n  lan: {external: true, name: services}\n", app, string(bytes.Repeat([]byte{'a'}, 64)), address, alias)
+	raw := fmt.Sprintf("name: %s\nservices:\n  web:\n    image: docker.io/library/php@sha256:%s\n    cpus: '0.1'\n    mem_limit: 16m\n    networks: {lan: {ipv4_address: %s, aliases: [%s]}}\n    dns: [10.80.1.1]\n    x-sfc: {node: node-a}\nnetworks:\n  lan: {external: true, name: services}\n", app, string(bytes.Repeat([]byte{'a'}, 64)), address, alias)
 	input, err := deployment.ParseApp([]byte(raw))
 	if err != nil {
 		t.Fatal(err)
@@ -210,7 +211,7 @@ func TestManagedDNSTaskCoreRequiresItsExactPublishedAddressAndCurrentSource(t *t
 	if err != nil || len(rows) != 1 || rows[0].Managed == nil || rows[0].Managed.Node != "node-a" {
 		t.Fatal("exact Task material", len(rows), err)
 	}
-	for _, name := range []string{"web.first.apps.mydc.test.", "shared.apps.mydc.test."} {
+	for _, name := range []string{"web.first.apps.sfc.test.", "shared.apps.sfc.test."} {
 		found := false
 		for _, actual := range rows[0].Config.Names {
 			found = found || actual.Name == name && actual.Endpoint == task+"/lan/0" && actual.Generation == ref.Generation
@@ -237,5 +238,59 @@ func TestManagedDNSTaskCoreRequiresItsExactPublishedAddressAndCurrentSource(t *t
 	applyDNSCoreReport(t, f, managedDNSCoreReport(t, f, f.node), state.Applied)
 	if _, err := f.p.ManagedTaskDNS(f.s, ref); err != nil {
 		t.Fatal("fresh current policy/view did not restore exact requirement", err)
+	}
+}
+
+func TestNetworkDNSNamesReadsServedNamesWithAddresses(t *testing.T) {
+	f := managedDNSTaskCoreFixture(t)
+	task := managedDNSTaskCoreBegin(t, f, "first", "10.80.1.10", "shared")
+	managedDNSTaskCoreSubmit(t, f, "first", deployment.ResourceKey("network-ref", "tenant", "first", "lan/node-a"), true, state.Applied)
+	managedDNSTaskCoreSubmit(t, f, "first", task, false, state.Applied)
+	now := f.session.IssuedAt + 1
+	got, err := f.p.NetworkDNSNames(f.s, f.session, now, "tenant", NetworkDNSNamesQuery{Network: "services"})
+	if err != nil || !got.Managed || got.Zone != "apps.sfc.test." || len(got.Names) != 2 {
+		t.Fatalf("names = %+v, %v", got, err)
+	}
+	for _, n := range got.Names {
+		if n.App != "first" || n.Service != "web" || n.Family != "ipv4" || n.Address != "10.80.1.10" || n.Name != "shared.apps.sfc.test." && n.Name != "web.first.apps.sfc.test." {
+			t.Fatalf("row = %+v", n)
+		}
+	}
+	if none, err := f.p.NetworkDNSNames(f.s, f.session, now, "tenant", NetworkDNSNamesQuery{Network: "other"}); err != nil || none.Managed || len(none.Names) != 0 {
+		t.Fatalf("unmanaged network = %+v, %v", none, err)
+	}
+	if _, err := f.p.NetworkDNSNames(f.s, f.session, now, "elsewhere", NetworkDNSNamesQuery{Network: "services"}); err == nil {
+		t.Fatal("names read without Read on the tenant")
+	}
+	if _, err := f.p.NetworkDNSNames(f.s, f.session, now, "tenant", NetworkDNSNamesQuery{Network: "Bad Name"}); err == nil {
+		t.Fatal("invalid network accepted")
+	}
+}
+
+func TestNetworkDNSNamesReadsHandRecords(t *testing.T) {
+	f := managedDNSTaskCoreFixture(t)
+	task := managedDNSTaskCoreBegin(t, f, "first", "10.80.1.10", "shared")
+	managedDNSTaskCoreSubmit(t, f, "first", deployment.ResourceKey("network-ref", "tenant", "first", "lan/node-a"), true, state.Applied)
+	managedDNSTaskCoreSubmit(t, f, "first", task, false, state.Applied)
+	key := services.ManagedDNSKey("tenant", "services")
+	sources, err := f.p.ManagedDNS(f.s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	definition := sources[key].Definition
+	definition.Policy.Records = []services.DNSRecord{{Name: "www.apps.sfc.test.", Type: "CNAME", Value: "shared.apps.sfc.test."}, {Name: "x.apps.sfc.test.", Type: "A", Value: "2001:db8::1"}}
+	managedDNSChange(t, f, "dns-records-bad", "configure-network-dns", f.s.Object(key).Revision, definition, state.ConditionFailed)
+	definition.Policy.Records = []services.DNSRecord{
+		{Name: "www.apps.sfc.test.", Type: "CNAME", Value: "shared.apps.sfc.test."},
+		{Name: "shared.apps.sfc.test.", Type: "A", Value: "192.0.2.9"}, // the app's alias
+	}
+	managedDNSChange(t, f, "dns-records", "configure-network-dns", f.s.Object(key).Revision, definition, state.Applied)
+	got, err := f.p.NetworkDNSNames(f.s, f.session, f.session.IssuedAt+1, "tenant", NetworkDNSNamesQuery{Network: "services"})
+	if err != nil || len(got.Names) != 2 || len(got.Records) != 2 {
+		t.Fatalf("names = %+v, %v", got, err)
+	}
+	want := []NetworkDNSRecord{{Name: "shared.apps.sfc.test.", Type: "A", Value: "192.0.2.9"}, {Name: "www.apps.sfc.test.", Type: "CNAME", Value: "shared.apps.sfc.test.", Served: true}}
+	if !slices.Equal(got.Records, want) {
+		t.Fatalf("records = %+v", got.Records)
 	}
 }

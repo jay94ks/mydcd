@@ -5,7 +5,7 @@ package deployment
 import (
 	"bytes"
 	"encoding/json"
-	"github.com/jay94ks/mydcd/internal/workload/volumes"
+	"github.com/jay94ks/seafield/internal/workload/volumes"
 	"testing"
 )
 

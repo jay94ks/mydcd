@@ -8,10 +8,10 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/reconcile"
-	"github.com/jay94ks/mydcd/internal/workload/volumes"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/workload/volumes"
 )
 
 type Claim struct {
@@ -298,11 +298,7 @@ func (a Inventory) begin(expected uint64, c access.Catalog, ctx PlanningContext,
 }
 
 func summarize(e Execution, status string) OperationSummary {
-	failed := false
-	for _, s := range e.d.Stages {
-		failed = failed || s.Result != nil && s.Result.Code != state.Applied
-	}
-	return OperationSummary{ID: e.d.Operation, Status: status, Plan: (Blueprint{e.d.Plan}).Digest(), CompletedAt: e.d.CompletedAt, Submitter: e.d.Submitter, Epoch: e.d.Epoch, Failed: failed}
+	return OperationSummary{ID: e.d.Operation, Status: status, Plan: (Blueprint{e.d.Plan}).Digest(), CompletedAt: e.d.CompletedAt, Submitter: e.d.Submitter, Epoch: e.d.Epoch, Failed: e.failed()}
 }
 
 // OperationExpired uses only this inventory's consumed committed ledger floor.
@@ -376,7 +372,12 @@ func progress(old, next Execution) bool {
 		if prior.Command != nil && (s.Command == nil || *s.Command != *prior.Command) || prior.Result != nil && (s.Result == nil || *s.Result != *prior.Result) {
 			return false
 		}
-		if prior.Journal.Pending != nil && prior.Journal.Pending.Phase >= reconcile.Dispatched && s.Journal.Pending != nil && s.Journal.Pending.Phase < prior.Journal.Pending.Phase {
+		if prior.Replay != nil && (s.Replay == nil || s.Replay.Request == prior.Replay.Request && prior.Replay.Dispatched && !s.Replay.Dispatched || s.Replay.Request != prior.Replay.Request && !prior.Replay.Dispatched) {
+			return false
+		}
+		// Only the dispatch of a new replay grant moves Unknown back to Dispatched.
+		replayed := prior.Replay != nil && !prior.Replay.Dispatched && s.Replay != nil && s.Replay.Dispatched && s.Replay.Request == prior.Replay.Request
+		if prior.Journal.Pending != nil && prior.Journal.Pending.Phase >= reconcile.Dispatched && s.Journal.Pending != nil && s.Journal.Pending.Phase < prior.Journal.Pending.Phase && !replayed {
 			return false
 		}
 		if prior.Observation != nil && (s.Observation == nil || s.Observation.Sequence < prior.Observation.Sequence || s.Observation.Sequence == prior.Observation.Sequence && !sameOrExpired(*prior.Observation, *s.Observation)) {

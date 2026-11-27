@@ -12,7 +12,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/jay94ks/mydcd/internal/maintenance"
+	"github.com/jay94ks/seafield/internal/maintenance"
 
 	"github.com/hashicorp/raft"
 )

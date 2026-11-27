@@ -12,12 +12,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/lifecycle"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/containerops"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/observability"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/lifecycle"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/containerops"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/observability"
 )
 
 type TaskSelection struct {
@@ -73,7 +73,7 @@ func taskCursorBasis(s state.State, session access.Session, q TaskSelection) [32
 		Scopes                               []access.Scope
 		Query                                TaskSelection
 	}{s.Index(), s.Object(AppsKey).Revision, s.Object(CatalogKey).Revision, s.Object(MembersKey).Revision, s.Object(VaultKey).Revision, session.User, session.Scopes, q})
-	return sha256.Sum256(append([]byte("mydc-task-page-1\x00"), raw...))
+	return sha256.Sum256(append([]byte("sfc-task-page-1\x00"), raw...))
 }
 
 func taskCursor(after string, basis [32]byte) (uint32, error) {

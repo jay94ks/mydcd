@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/access"
+	"github.com/jay94ks/seafield/internal/access"
 )
 
 func TestGitResultPurposeAllowsOnlyReadAfterPlanExpiryAndPreservesLegacyProofBytes(t *testing.T) {
@@ -22,7 +22,7 @@ func TestGitResultPurposeAllowsOnlyReadAfterPlanExpiryAndPreservesLegacyProofByt
 		Signature     []byte
 	}{q.Proof.Schema, q.Proof.Plan, q.Proof.At, q.Proof.ExpiresAt, q.Proof.Nonce, nil}
 	raw, err := json.Marshal(legacy)
-	if err != nil || !bytes.Equal(GitSaveProofBytes(q.Proof), append([]byte("mydc-imagebuild-git-request-1\x00"), raw...)) {
+	if err != nil || !bytes.Equal(GitSaveProofBytes(q.Proof), append([]byte("sfc-imagebuild-git-request-1\x00"), raw...)) {
 		t.Fatal("optional false result flag changed original proof bytes", err)
 	}
 	q.Plan.ExpiresAt = 105

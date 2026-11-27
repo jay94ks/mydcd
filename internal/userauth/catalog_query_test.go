@@ -12,13 +12,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/config"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/mydcp"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/config"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/sfcp"
 
 	"github.com/hashicorp/raft"
 )
@@ -58,16 +58,16 @@ func TestCatalogQueriesActualRaftUnixAndQUIC(t *testing.T) {
 		defer clear(key.Private)
 	}
 	clusterID := [32]byte{201}
-	peer := mydcp.Peer{ID: "node", Policy: mydcp.Policy{Key: mydcp.Identity(node.Public), Member: true, Read: true, Respond: true}}
-	lookup := func(key mydcp.Identity) (mydcp.Peer, bool) {
+	peer := sfcp.Peer{ID: "node", Policy: sfcp.Policy{Key: sfcp.Identity(node.Public), Member: true, Read: true, Respond: true}}
+	lookup := func(key sfcp.Identity) (sfcp.Peer, bool) {
 		for _, self := range keys {
-			if key == mydcp.Identity(self.Public) {
-				return mydcp.Peer{ID: "user", Policy: mydcp.Policy{Key: key, UserAuth: true}}, true
+			if key == sfcp.Identity(self.Public) {
+				return sfcp.Peer{ID: "user", Policy: sfcp.Policy{Key: key, UserAuth: true}}, true
 			}
 		}
 		return peer, key == peer.Key
 	}
-	server, err := mydcp.NewTransport(node, clusterID, lookup)
+	server, err := sfcp.NewTransport(node, clusterID, lookup)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -78,7 +78,7 @@ func TestCatalogQueriesActualRaftUnixAndQUIC(t *testing.T) {
 	peer.Endpoint = server.Addr().String()
 	policy := control.Policy{Cluster: clusterID, BootstrapKey: keys["admin"].Public, Issuers: [][32]byte{node.Public}, TrustRoot: node.Public, Genesis: config.Peer{ID: "node", Key: node.Actor(), Endpoint: peer.Endpoint, Voter: true}}
 	e, err := cluster.Open(cluster.Options{ID: "node", Root: filepath.Join(root, "db"), Admin: keys["admin"].Actor(), Cluster: clusterID, Mesh: server, Bootstrap: true,
-		Servers: []raft.Server{{ID: "node", Address: raft.ServerAddress(peer.Endpoint), Suffrage: raft.Voter}}, Resolve: func(id raft.ServerID, _ raft.ServerAddress) (mydcp.Peer, bool) { return peer, id == "node" },
+		Servers: []raft.Server{{ID: "node", Address: raft.ServerAddress(peer.Endpoint), Suffrage: raft.Voter}}, Resolve: func(id raft.ServerID, _ raft.ServerAddress) (sfcp.Peer, bool) { return peer, id == "node" },
 		ModuleID: policy.ID(), Validate: policy.Validate, Reduce: policy.Reduce, AdmitModule: policy.AdmitModule, TrackConfiguration: true})
 	if err != nil {
 		t.Fatal(err)
@@ -132,7 +132,7 @@ func TestCatalogQueriesActualRaftUnixAndQUIC(t *testing.T) {
 	if err = service.Serve(); err != nil {
 		t.Fatal(err)
 	}
-	socket := filepath.Join(root, "mydc.sock")
+	socket := filepath.Join(root, "sfcdp.sock")
 	if err = server.ListenUnix(socket); err != nil {
 		t.Fatal(err)
 	}
@@ -145,18 +145,18 @@ func TestCatalogQueriesActualRaftUnixAndQUIC(t *testing.T) {
 			clients := map[string]Client{}
 			sessions := map[string]access.Session{}
 			for _, name := range []string{"admin", "manager", "viewer"} {
-				clientLookup := func(key mydcp.Identity) (mydcp.Peer, bool) {
+				clientLookup := func(key sfcp.Identity) (sfcp.Peer, bool) {
 					if key == target.Key {
 						return target, true
 					}
 					return lookup(key)
 				}
-				mesh, err := mydcp.NewTransport(keys[name], clusterID, clientLookup)
+				mesh, err := sfcp.NewTransport(keys[name], clusterID, clientLookup)
 				if err != nil {
 					t.Fatal(err)
 				}
 				defer mesh.Close()
-				c := Client{Mesh: mesh, Self: keys[name], Cluster: clusterID, Peers: []mydcp.Peer{target}}
+				c := Client{Mesh: mesh, Self: keys[name], Cluster: clusterID, Peers: []sfcp.Peer{target}}
 				s, err := c.Login(ctx, target, name, keys[name].Private)
 				if err != nil {
 					t.Fatal("actual login", name, err)

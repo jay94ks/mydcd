@@ -8,9 +8,9 @@ import (
 	"errors"
 
 	cerrdefs "github.com/containerd/errdefs"
-	"github.com/jay94ks/mydcd/internal/engine"
-	"github.com/jay94ks/mydcd/internal/reconcile"
-	"github.com/jay94ks/mydcd/internal/schema"
+	"github.com/jay94ks/seafield/internal/engine"
+	"github.com/jay94ks/seafield/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/schema"
 	"github.com/moby/moby/client"
 )
 
@@ -28,7 +28,7 @@ func (d nativeDriver) Retire(ctx context.Context, key string, op reconcile.Opera
 	if err != nil || op.Kind != reconcile.Apply || op.Phase != reconcile.Retiring {
 		return false, errors.Join(reconcile.ErrOperation, err)
 	}
-	want := nativeRetirement{Schema: 1, Name: id.Name, Spec: id.Labels["org.mydc.spec"]}
+	want := nativeRetirement{Schema: 1, Name: id.Name, Spec: id.Labels["org.sfc.spec"]}
 	observed := false
 	if len(raw) > 0 {
 		proof, e := schema.Decode[nativeRetirement](raw)

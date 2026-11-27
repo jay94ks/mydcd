@@ -51,7 +51,7 @@ func (p PacketRoutePolicy) valid(spec TunnelSpec) bool {
 // identities own separate tables. Hash collisions are ownership errors.
 func routeMark(spec TunnelSpec) uint32 {
 	cluster, _, _ := strings.Cut(spec.Owner, "/")
-	digest := sha256.Sum256([]byte("mydc-route-mark-1\x00" + cluster + "\x00" + spec.Network))
+	digest := sha256.Sum256([]byte("sfc-route-mark-1\x00" + cluster + "\x00" + spec.Network))
 	return binary.BigEndian.Uint32(digest[:4]) | 0x80000000
 }
 
@@ -59,7 +59,7 @@ func routeTable(spec TunnelSpec) int {
 	if spec.RoutePolicy == nil || spec.RoutePolicy.Bridge == "" {
 		return unix.RT_TABLE_MAIN
 	}
-	digest := sha256.Sum256([]byte("mydc-route-table-1\x00" + spec.Owner + "\x00" + spec.Network + "\x00" + spec.RoutePolicy.Bridge))
+	digest := sha256.Sum256([]byte("sfc-route-table-1\x00" + spec.Owner + "\x00" + spec.Network + "\x00" + spec.RoutePolicy.Bridge))
 	return int(binary.BigEndian.Uint32(digest[:4])&0x3fffffff | 0x40000000)
 }
 
@@ -97,6 +97,8 @@ func (p PacketRoutePolicy) allows(localPacket bool, packet []byte) bool {
 func (s TunnelSpec) Clone() TunnelSpec {
 	s.Addresses = slices.Clone(s.Addresses)
 	s.Routes = slices.Clone(s.Routes)
+	s.HostRoutes = slices.Clone(s.HostRoutes)
+	s.HostSources = slices.Clone(s.HostSources)
 	s.Lifecycle.Proof = slices.Clone(s.Lifecycle.Proof)
 	if s.RoutePolicy != nil {
 		policy := *s.RoutePolicy

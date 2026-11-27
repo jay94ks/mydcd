@@ -8,11 +8,11 @@ import (
 	"net/http"
 	"slices"
 
-	"github.com/jay94ks/mydcd/internal/web/mydc"
-	"github.com/jay94ks/mydcd/internal/web/store"
+	"github.com/jay94ks/seafield/internal/web/sfc"
+	"github.com/jay94ks/seafield/internal/web/store"
 )
 
-// Build-secret approvals (mydcd f4e1a7e, as `mydc registry build-job
+// Build-secret approvals (sfcd f4e1a7e, as `sfcli registry build-job
 // start`): when a build context mounts a Secret whose Group needs the
 // requester's approval, the begin-image-build original is signed once and
 // kept unsent in web bbolt; each realm of the context's secrets is planned
@@ -22,7 +22,7 @@ import (
 // stored. When every Group is approved the same original is sent.
 
 // buildRealms are the realms a context's secrets read from.
-func buildRealms(ctx context.Context, c mydc.Conn, tenant, id string) ([]string, error) {
+func buildRealms(ctx context.Context, c sfc.Conn, tenant, id string) ([]string, error) {
 	x, err := realContext(ctx, c, tenant, id)
 	if err != nil || x == nil {
 		return nil, err
@@ -38,9 +38,9 @@ func buildRealms(ctx context.Context, c mydc.Conn, tenant, id string) ([]string,
 }
 
 // refreshBuildApprovals plans the job's Groups again for its original.
-func refreshBuildApprovals(ctx context.Context, c mydc.Conn, o *store.Op) (bool, error) {
+func refreshBuildApprovals(ctx context.Context, c sfc.Conn, o *store.Op) (bool, error) {
 	j := o.BuildApproval
-	origin, err := mydc.DecodeOperation(mydc.SignedOp(o.Signed))
+	origin, err := sfc.DecodeOperation(sfc.SignedOp(o.Signed))
 	if err != nil {
 		return false, err
 	}
@@ -59,7 +59,7 @@ func refreshBuildApprovals(ctx context.Context, c mydc.Conn, o *store.Op) (bool,
 // holdBuild keeps a begin-image-build original unsent while a Group of the
 // context's secrets still needs the requester's approval.
 func holdBuild(tenant, buildCtx, job string) holdFunc {
-	return func(ctx context.Context, c mydc.Conn, o *store.Op, op mydc.SignedOp) (bool, error) {
+	return func(ctx context.Context, c sfc.Conn, o *store.Op, op sfc.SignedOp) (bool, error) {
 		o.Signed = op
 		o.BuildApproval = &store.BuildApprovalJob{Tenant: tenant, Context: buildCtx, Job: job}
 		ready, err := refreshBuildApprovals(ctx, c, o)
@@ -73,16 +73,16 @@ func holdBuild(tenant, buildCtx, job string) holdFunc {
 }
 
 // sendHeldBuild sends the kept original once every Group is approved.
-func (s *Server) sendHeldBuild(ctx context.Context, c mydc.Conn, o *store.Op) error {
+func (s *Server) sendHeldBuild(ctx context.Context, c sfc.Conn, o *store.Op) error {
 	ready, err := refreshBuildApprovals(ctx, c, o)
 	if err != nil || !ready {
 		return err
 	}
-	res, err := c.Submit(ctx, mydc.SignedOp(o.Signed))
+	res, err := c.Submit(ctx, sfc.SignedOp(o.Signed))
 	o.State, o.ErrorCode = store.OpPending, ""
 	settleSubmit(o, res, err, s.now())
 	if o.State == store.OpFailed && o.ErrorCode == "" {
-		// mydcd checks the approvals together at one ApprovedAt; a late
+		// sfcd checks the approvals together at one ApprovedAt; a late
 		// approval can leave an earlier one past MaxApprovalAge. The result
 		// is final for this original: start the build again.
 		o.ErrorCode = "approval-rejected"
@@ -119,7 +119,7 @@ func heldApprovals(o *store.Op) []store.DeployApproval {
 // for the held op {op} of this kind; when none is still required, send
 // re-plans and sends the kept original → {op}.
 func (s *Server) approveHeld(w http.ResponseWriter, r *http.Request, ws *webSession, kind string, rows func(*store.Op) ([]store.DeployApproval, bool),
-	send func(ctx context.Context, c mydc.Conn, o *store.Op) error) {
+	send func(ctx context.Context, c sfc.Conn, o *store.Op) error) {
 	req, pw, ok := readApprove(w, r)
 	if !ok {
 		return
@@ -148,7 +148,7 @@ func (s *Server) approveHeld(w http.ResponseWriter, r *http.Request, ws *webSess
 		writeError(w, http.StatusConflict, "already-approved", "this Group is already approved")
 		return
 	}
-	origin, err := mydc.DecodeOperation(mydc.SignedOp(o.Signed))
+	origin, err := sfc.DecodeOperation(sfc.SignedOp(o.Signed))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal", "stored approval")
 		return
@@ -156,7 +156,7 @@ func (s *Server) approveHeld(w http.ResponseWriter, r *http.Request, ws *webSess
 	ctx, cancel := s.callCtx(r)
 	defer cancel()
 	var state string
-	err = ws.do(ctx, func(ctx context.Context, c mydc.Conn) error {
+	err = ws.do(ctx, func(ctx context.Context, c sfc.Conn) error {
 		err := approveGroup(ctx, c, r.PathValue("t"), a, &origin, pw)
 		state = a.State
 		o.UpdatedAt = s.now()

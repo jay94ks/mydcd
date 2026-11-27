@@ -8,9 +8,9 @@ import (
 	"encoding/json"
 	"math"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/registryclient"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/registryclient"
 )
 
 type RegistryMaintenanceReport struct {
@@ -25,7 +25,7 @@ type RegistryMaintenanceReport struct {
 func RegistryMaintenanceReportBytes(r RegistryMaintenanceReport) []byte {
 	r.Signature = nil
 	raw, _ := json.Marshal(r)
-	return append([]byte("mydc-registry-maintenance-report-1\x00"), raw...)
+	return append([]byte("sfc-registry-maintenance-report-1\x00"), raw...)
 }
 func (r RegistryMaintenanceReport) Command() (state.Command, error) {
 	raw, err := json.Marshal(r)

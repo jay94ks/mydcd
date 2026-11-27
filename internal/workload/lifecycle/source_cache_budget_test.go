@@ -13,7 +13,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/storage"
+	"github.com/jay94ks/seafield/internal/storage"
 )
 
 func groupedSourceStore(t *testing.T, group *SourceCacheBudget, cluster [32]byte, seed byte) (*SourceStore, *storage.DB, ed25519.PrivateKey) {

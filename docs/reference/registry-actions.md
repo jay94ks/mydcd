@@ -3,19 +3,19 @@
 현재 RQ4 연결 단계이며 마지막 실행 검증 전이다. 기존 내장 registry의 `start-registry`·`stop-registry` action을 사용한다. 별도 실행기나 데이터 삭제 경로를 만들지 않는다.
 
 ```sh
-mydc --tenant team-a --reason '이미지 저장소 점검' registry stop private   # stopped까지 기다린다
-mydc --tenant team-a registry start private                               # serving까지 기다린다
-mydc --tenant team-a registry start private --no-wait --id start-private-43
-mydc op show start-private-43
+sfcli --tenant team-a --reason '이미지 저장소 점검' registry stop private   # stopped까지 기다린다
+sfcli --tenant team-a registry start private                               # serving까지 기다린다
+sfcli --tenant team-a registry start private --no-wait --id start-private-43
+sfcli op show start-private-43
 ```
 
-재시작은 정지 완료 후 명시 시작으로 수행한다. `stop` 응답 유실이나 deadline만으로 정지 완료를 가정하지 않으며 원 `mydc op show ID`·`registry show/wait`로 확인한다. `registry start/stop`의 같은 request ID는 원 journal·서명·record CAS를 사용하고 현재 revision으로 바꿔 재제출하지 않는다. `--resume-original`은 그 원 요청만 명시 재개한다. `--expected-revision`을 지정하면 원/현재 계획의 record revision과 같아야 한다. 전역 reason metadata는 원 서명에 포함한다.
+재시작은 정지 완료 후 명시 시작으로 수행한다. `stop` 응답 유실이나 deadline만으로 정지 완료를 가정하지 않으며 원 `sfcli op show ID`·`registry show/wait`로 확인한다. `registry start/stop`의 같은 request ID는 원 journal·서명·record CAS를 사용하고 현재 revision으로 바꿔 재제출하지 않는다. `--resume-original`은 그 원 요청만 명시 재개한다. `--expected-revision`을 지정하면 원/현재 계획의 record revision과 같아야 한다. 전역 reason metadata는 원 서명에 포함한다.
 
 권한은 기존 action과 같다. 정지는 현재 tenant `ManageRegistry`의 cleanup 계약, 시작은 tenant/대상 node의 `ManageRegistry`·`ManageVolumes`와 현재 node 업무 권한을 검사한다. credential 동작 제한에는 각각 `stop-registry`·`start-registry`가 필요하다. `restart-registry`라는 별도 권한으로 자동 승격하지 않는다. 기존 typed `manage apply` 경로도 같은 reducer를 사용한다.
 
 ## API
 
-기존 Unix/네트워크 MYDCP User purpose와 서명 envelope를 사용한다. 미리보기는 실행 가능한 UserOperation을 만들거나 서명하지 않는 인증된 quorum read다.
+기존 Unix/네트워크 SFCP User purpose와 서명 envelope를 사용한다. 미리보기는 실행 가능한 UserOperation을 만들거나 서명하지 않는 인증된 quorum read다.
 
 | 필드 | 내용 |
 |---|---|

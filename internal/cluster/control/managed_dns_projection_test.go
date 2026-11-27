@@ -10,14 +10,14 @@ import (
 	"net/netip"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/membership"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/config"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/network/services"
-	"github.com/jay94ks/mydcd/internal/tenancy"
-	"github.com/jay94ks/mydcd/internal/workload"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/membership"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/config"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/network/services"
+	"github.com/jay94ks/seafield/internal/tenancy"
+	"github.com/jay94ks/seafield/internal/workload"
 )
 
 // Configuration/install observations below are injected algorithm facts. No
@@ -25,6 +25,33 @@ import (
 func managedDNSProjectionFixture(t *testing.T) (*backupCoreFixture, ed25519.PrivateKey, services.ManagedDNSDefinition) {
 	t.Helper()
 	f := newBackupCore(t)
+	b := joinTestNodeB(t, f)
+	f.session.Scopes[0].Actions = append(f.session.Scopes[0].Actions, access.ManageNetwork, access.ManageServices)
+	f.session.Signature = ed25519.Sign(f.node, access.SessionBytes(f.session))
+	c, err := f.p.Catalog(f.s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tenant, _ := c.Tenant("tenant")
+	f.apply("dns-two-nodes", "set-nodes", tenant.Revision, NodeChangeTo("tenant", tenant.AllowedNodes, []string{"node-a", "node-b"}), state.Applied)
+	for _, scope := range []string{"", "tenant"} {
+		for _, node := range []string{"node-a", "node-b"} {
+			f.apply("dns-two-limit-"+scope+node, "set-node-quota", 0, tenancy.NodeLimit{Tenant: scope, Node: node, Capacity: workload.Resources{CPU: 8, Memory: 80}, Networks: 4, MaxConsumers: 8, PacketQueuePackets: 4, PacketQueueBytes: 8192}, state.Applied)
+		}
+	}
+	network := tenancy.TUNDefinition{Tenant: "tenant", Name: "services", Members: []tenancy.TUNNode{
+		{Node: "node-a", Pools: []tenancy.Subnet{{ID: "pool", Prefix: netip.MustParsePrefix("10.80.1.0/24"), Gateway: netip.MustParseAddr("10.80.1.1"), MTU: 1280}}},
+		{Node: "node-b", Pools: []tenancy.Subnet{{ID: "pool", Prefix: netip.MustParsePrefix("10.80.2.0/24"), Gateway: netip.MustParseAddr("10.80.2.1"), MTU: 1280}}},
+	}}
+	managedDNSChange(t, f, "dns-two-network", "create-tun-network", 0, network, state.Applied)
+	definition := services.ManagedDNSDefinition{Schema: 1, Tenant: "tenant", Network: "services", Policy: services.ManagedDNSPolicy{Enabled: true, Zone: "apps.sfc.test.", TTL: 30, NegativeTTL: 5, Transports: []string{"udp", "tcp"}, Upstreams: []netip.AddrPort{}, MaxQueries: 8, MaxCacheEntries: 8, MaxResponseBytes: 4096, MaxConnections: 4, RequestTimeoutMS: 1000}}
+	managedDNSChange(t, f, "dns-two-policy", "configure-network-dns", 0, definition, state.Applied)
+	return f, b, definition
+}
+
+// joinTestNodeB makes node-b a full member of the fixture's cluster.
+func joinTestNodeB(t *testing.T, f *backupCoreFixture) ed25519.PrivateKey {
+	t.Helper()
 	b := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{125}, 32))
 	bkey := [32]byte(b.Public().(ed25519.PublicKey))
 	akey := [32]byte(f.node.Public().(ed25519.PublicKey))
@@ -33,7 +60,7 @@ func managedDNSProjectionFixture(t *testing.T) (*backupCoreFixture, ed25519.Priv
 		t.Fatal(err)
 	}
 	peer := config.Peer{ID: "node-b", Key: hex.EncodeToString(bkey[:]), Endpoint: "127.0.0.1:8002"}
-	d, err = d.Invite(peer, "mock-join-b")
+	d, err = d.Invite(peer, "mock-join-b", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,27 +89,7 @@ func managedDNSProjectionFixture(t *testing.T) (*backupCoreFixture, ed25519.Priv
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.session.Scopes[0].Actions = append(f.session.Scopes[0].Actions, access.ManageNetwork, access.ManageServices)
-	f.session.Signature = ed25519.Sign(f.node, access.SessionBytes(f.session))
-	c, err := f.p.Catalog(f.s)
-	if err != nil {
-		t.Fatal(err)
-	}
-	tenant, _ := c.Tenant("tenant")
-	f.apply("dns-two-nodes", "set-nodes", tenant.Revision, NodeAssignment{Tenant: "tenant", Nodes: []string{"node-a", "node-b"}}, state.Applied)
-	for _, scope := range []string{"", "tenant"} {
-		for _, node := range []string{"node-a", "node-b"} {
-			f.apply("dns-two-limit-"+scope+node, "set-node-quota", 0, tenancy.NodeLimit{Tenant: scope, Node: node, Capacity: workload.Resources{CPU: 8, Memory: 80}, Networks: 4, MaxConsumers: 8, PacketQueuePackets: 4, PacketQueueBytes: 8192}, state.Applied)
-		}
-	}
-	network := tenancy.TUNDefinition{Tenant: "tenant", Name: "services", Members: []tenancy.TUNNode{
-		{Node: "node-a", Pools: []tenancy.Subnet{{ID: "pool", Prefix: netip.MustParsePrefix("10.80.1.0/24"), Gateway: netip.MustParseAddr("10.80.1.1"), MTU: 1280}}, Addresses: []netip.Prefix{netip.MustParsePrefix("10.80.3.1/32")}},
-		{Node: "node-b", Pools: []tenancy.Subnet{{ID: "pool", Prefix: netip.MustParsePrefix("10.80.2.0/24"), Gateway: netip.MustParseAddr("10.80.2.1"), MTU: 1280}}, Addresses: []netip.Prefix{netip.MustParsePrefix("10.80.3.2/32")}},
-	}}
-	managedDNSChange(t, f, "dns-two-network", "create-tun-network", 0, network, state.Applied)
-	definition := services.ManagedDNSDefinition{Schema: 1, Tenant: "tenant", Network: "services", Policy: services.ManagedDNSPolicy{Enabled: true, Zone: "apps.mydc.test.", TTL: 30, NegativeTTL: 5, Transports: []string{"udp", "tcp"}, Upstreams: []netip.AddrPort{}, MaxQueries: 8, MaxCacheEntries: 8, MaxResponseBytes: 4096, MaxConnections: 4, RequestTimeoutMS: 1000}}
-	managedDNSChange(t, f, "dns-two-policy", "configure-network-dns", 0, definition, state.Applied)
-	return f, b, definition
+	return b
 }
 
 func managedDNSCoreReport(t *testing.T, f *backupCoreFixture, key ed25519.PrivateKey) NetworkDNSProgress {

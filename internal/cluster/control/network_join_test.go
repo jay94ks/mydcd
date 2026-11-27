@@ -7,8 +7,8 @@ import (
 	"net/netip"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/tenancy"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/tenancy"
 )
 
 func TestJoinTUNNetworkAddsAServerWithoutRewritingTheOthers(t *testing.T) {
@@ -16,13 +16,13 @@ func TestJoinTUNNetworkAddsAServerWithoutRewritingTheOthers(t *testing.T) {
 	pool := func(prefix, gateway string) []tenancy.Subnet {
 		return []tenancy.Subnet{{ID: "pool", Prefix: netip.MustParsePrefix(prefix), Gateway: netip.MustParseAddr(gateway), MTU: 1280}}
 	}
-	lone := tenancy.TUNDefinition{Tenant: "tenant", Name: "edge", Members: []tenancy.TUNNode{{Node: "node-a", Pools: pool("10.81.1.0/24", "10.81.1.1"), Addresses: []netip.Prefix{netip.MustParsePrefix("10.81.3.1/32")}}}}
+	lone := tenancy.TUNDefinition{Tenant: "tenant", Name: "edge", Members: []tenancy.TUNNode{{Node: "node-a", Pools: pool("10.81.1.0/24", "10.81.1.1")}}}
 	resources, _ := f.p.Resources(f.s)
 	managedDNSChange(t, f, "edge-create", "create-tun-network", resources.Networks.Revision(), lone, state.Applied)
 	bridgeA := (tenancy.SourceIdentity{Kind: "bridge", Tenant: "tenant", Network: "edge", Node: "node-a"}).Key()
 	before := f.s.Objects(tenancy.ManagedNetworkSourcePrefix)
 	resources, _ = f.p.Resources(f.s)
-	join := NetworkJoin{Tenant: "tenant", Name: "edge", Member: tenancy.TUNNode{Node: "node-b", Pools: pool("10.81.2.0/24", "10.81.2.1"), Addresses: []netip.Prefix{netip.MustParsePrefix("10.81.3.2/32")}}}
+	join := NetworkJoin{Tenant: "tenant", Name: "edge", Member: tenancy.TUNNode{Node: "node-b", Pools: pool("10.81.2.0/24", "10.81.2.1")}}
 	managedDNSChange(t, f, "edge-join", "join-tun-network", resources.Networks.Revision(), join, state.Applied)
 	tunA := (tenancy.SourceIdentity{Kind: "tun", Tenant: "tenant", Network: "edge", Node: "node-a"}).Key()
 	for key, old := range before {
@@ -56,11 +56,11 @@ func TestLeaveTUNNetworkRemovesOneServerAndRewritesOnlyTheOthersRoutes(t *testin
 	pool := func(prefix, gateway string) []tenancy.Subnet {
 		return []tenancy.Subnet{{ID: "pool", Prefix: netip.MustParsePrefix(prefix), Gateway: netip.MustParseAddr(gateway), MTU: 1280}}
 	}
-	lone := tenancy.TUNDefinition{Tenant: "tenant", Name: "edge", Members: []tenancy.TUNNode{{Node: "node-a", Pools: pool("10.81.1.0/24", "10.81.1.1"), Addresses: []netip.Prefix{netip.MustParsePrefix("10.81.3.1/32")}}}}
+	lone := tenancy.TUNDefinition{Tenant: "tenant", Name: "edge", Members: []tenancy.TUNNode{{Node: "node-a", Pools: pool("10.81.1.0/24", "10.81.1.1")}}}
 	r, _ := f.p.Resources(f.s)
 	managedDNSChange(t, f, "edge-create", "create-tun-network", r.Networks.Revision(), lone, state.Applied)
 	r, _ = f.p.Resources(f.s)
-	managedDNSChange(t, f, "edge-join", "join-tun-network", r.Networks.Revision(), NetworkJoin{Tenant: "tenant", Name: "edge", Member: tenancy.TUNNode{Node: "node-b", Pools: pool("10.81.2.0/24", "10.81.2.1"), Addresses: []netip.Prefix{netip.MustParsePrefix("10.81.3.2/32")}}}, state.Applied)
+	managedDNSChange(t, f, "edge-join", "join-tun-network", r.Networks.Revision(), NetworkJoin{Tenant: "tenant", Name: "edge", Member: tenancy.TUNNode{Node: "node-b", Pools: pool("10.81.2.0/24", "10.81.2.1")}}, state.Applied)
 	key := func(kind, node string) string {
 		return (tenancy.SourceIdentity{Kind: kind, Tenant: "tenant", Network: "edge", Node: node}).Key()
 	}
@@ -114,10 +114,10 @@ func TestSetNetworkToggleGatesJoinWithoutTouchingSources(t *testing.T) {
 	pool := func(prefix, gateway string) []tenancy.Subnet {
 		return []tenancy.Subnet{{ID: "pool", Prefix: netip.MustParsePrefix(prefix), Gateway: netip.MustParseAddr(gateway), MTU: 1280}}
 	}
-	lone := tenancy.TUNDefinition{Tenant: "tenant", Name: "edge", Toggles: []tenancy.NetworkToggle{tenancy.ToggleLocal}, Members: []tenancy.TUNNode{{Node: "node-a", Pools: pool("10.81.1.0/24", "10.81.1.1"), Addresses: []netip.Prefix{netip.MustParsePrefix("10.81.3.1/32")}}}}
+	lone := tenancy.TUNDefinition{Tenant: "tenant", Name: "edge", Toggles: []tenancy.NetworkToggle{tenancy.ToggleLocal}, Members: []tenancy.TUNNode{{Node: "node-a", Pools: pool("10.81.1.0/24", "10.81.1.1")}}}
 	r, _ := f.p.Resources(f.s)
 	managedDNSChange(t, f, "edge-create", "create-tun-network", r.Networks.Revision(), lone, state.Applied)
-	join := NetworkJoin{Tenant: "tenant", Name: "edge", Member: tenancy.TUNNode{Node: "node-b", Pools: pool("10.81.2.0/24", "10.81.2.1"), Addresses: []netip.Prefix{netip.MustParsePrefix("10.81.3.2/32")}}}
+	join := NetworkJoin{Tenant: "tenant", Name: "edge", Member: tenancy.TUNNode{Node: "node-b", Pools: pool("10.81.2.0/24", "10.81.2.1")}}
 	r, _ = f.p.Resources(f.s)
 	managedDNSChange(t, f, "edge-join-local", "join-tun-network", r.Networks.Revision(), join, state.ConditionFailed)
 	before := f.s.Objects(tenancy.ManagedNetworkSourcePrefix)
@@ -136,7 +136,7 @@ func TestSetNetworkToggleGatesJoinWithoutTouchingSources(t *testing.T) {
 
 func TestLeaveTUNNetworkOfTheLastServerDeletesTheNetwork(t *testing.T) {
 	f, _, _ := managedDNSProjectionFixture(t)
-	lone := tenancy.TUNDefinition{Tenant: "tenant", Name: "edge", Members: []tenancy.TUNNode{{Node: "node-a", Pools: []tenancy.Subnet{{ID: "pool", Prefix: netip.MustParsePrefix("10.81.1.0/24"), Gateway: netip.MustParseAddr("10.81.1.1"), MTU: 1280}}, Addresses: []netip.Prefix{netip.MustParsePrefix("10.81.3.1/32")}}}}
+	lone := tenancy.TUNDefinition{Tenant: "tenant", Name: "edge", Members: []tenancy.TUNNode{{Node: "node-a", Pools: []tenancy.Subnet{{ID: "pool", Prefix: netip.MustParsePrefix("10.81.1.0/24"), Gateway: netip.MustParseAddr("10.81.1.1"), MTU: 1280}}}}}
 	r, _ := f.p.Resources(f.s)
 	managedDNSChange(t, f, "edge-create", "create-tun-network", r.Networks.Revision(), lone, state.Applied)
 	r, _ = f.p.Resources(f.s)

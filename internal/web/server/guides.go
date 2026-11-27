@@ -16,9 +16,9 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/jay94ks/mydcd/internal/web/ai"
-	"github.com/jay94ks/mydcd/internal/web/mydc"
-	"github.com/jay94ks/mydcd/internal/web/store"
+	"github.com/jay94ks/seafield/internal/web/ai"
+	"github.com/jay94ks/seafield/internal/web/sfc"
+	"github.com/jay94ks/seafield/internal/web/store"
 )
 
 // Incident response guidelines (W2.3a, UI-BA). Cluster guidelines are the
@@ -76,13 +76,13 @@ func guideStack(in *store.Incident) []guideScope {
 	return []guideScope{{Scope: "cluster"}, {"tenant/" + in.Tenant, in.Tenant, ""}, {"app/" + in.Tenant + "/" + in.App, in.Tenant, in.App}}
 }
 
-// canGuide: read (manage=false) or change a scope, as mydcd says.
+// canGuide: read (manage=false) or change a scope, as sfcd says.
 func (a incidentAccess) canGuide(g guideScope, manage bool) bool {
 	if g.Tenant == "" {
 		return a.admin
 	}
 	role := a.roles[g.Tenant]
-	return role != "" && (!manage || role == mydc.RoleManager)
+	return role != "" && (!manage || role == sfc.RoleManager)
 }
 
 func (s *Server) guideAccess(w http.ResponseWriter, r *http.Request, ws *webSession, g guideScope, manage bool) bool {
@@ -190,8 +190,8 @@ func (s *Server) guideChoices(ctx context.Context, ws *webSession, g guideScope)
 	}
 	services := []string{}
 	if g.App != "" {
-		var src mydc.AppSource
-		if err := ws.do(ctx, func(ctx context.Context, c mydc.Conn) error {
+		var src sfc.AppSource
+		if err := ws.do(ctx, func(ctx context.Context, c sfc.Conn) error {
 			var err error
 			src, err = c.AppSource(ctx, g.Tenant, g.App, 0)
 			return err
@@ -479,6 +479,8 @@ func (s *Server) handleDeleteGuide(w http.ResponseWriter, r *http.Request, ws *w
 		writeError(w, http.StatusUnprocessableEntity, "confirm-name", "type the scope ("+g.Scope+") to delete it")
 		return
 	}
+	cur, _ := s.opt.Store.GetGuide(g.Scope)
+	versions, _ := s.opt.Store.ListGuideVersions(g.Scope)
 	if err := s.opt.Store.DeleteGuide(g.Scope); errors.Is(err, store.ErrNotFound) {
 		writeError(w, http.StatusNotFound, "not-found", "no guidelines here")
 		return
@@ -487,7 +489,11 @@ func (s *Server) handleDeleteGuide(w http.ResponseWriter, r *http.Request, ws *w
 		return
 	}
 	s.audit(ws, g.Tenant, "guides", "delete", g.Scope, nil, nil)
-	w.WriteHeader(http.StatusNoContent)
+	var it *store.TrashItem
+	if cur != nil {
+		it = s.putTrash(ws.user.ID, ws.user.Username, store.TrashGuide, g.Tenant, g.Scope, "", "", store.TrashGuideData{Current: *cur, Versions: versions})
+	}
+	writeDeleted(w, it)
 }
 
 // incidentGuides is the guidance an incident gets from its stack.

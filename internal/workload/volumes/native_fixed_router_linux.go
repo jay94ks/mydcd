@@ -8,7 +8,7 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/jay94ks/mydcd/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/reconcile"
 )
 
 func fixedNativeKey(key string) bool { return strings.HasPrefix(key, "fixed-volume/") }
@@ -66,7 +66,9 @@ func (m *NativeManager) MountSource(key string, scope Scope, owner Owner, genera
 		if err != nil || binding != hex.EncodeToString(digest[:]) {
 			return "", false, errors.Join(ErrNativeVolume, err)
 		}
-		return m.fixed.projector.sourcePath(NativeSpec{Scope: scope}), true, nil
+		// The engine mounts fixed volumes through its "sfc" driver by this
+		// name; the Mount answer hands over the held projection directory.
+		return FixedNativeName(scope), true, nil
 	}
 	if binding != "" {
 		return "", false, ErrNativeVolume

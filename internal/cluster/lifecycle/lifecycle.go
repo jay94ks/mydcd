@@ -112,10 +112,10 @@ type Root struct {
 }
 
 func Prepare(intent Intent, cluster, trust [32]byte, self Member, operation string) (Root, error) {
-	if intent != Init && intent != Join || cluster == ([32]byte{}) || trust == ([32]byte{}) || !validID(self.ID) || self.Key == ([32]byte{}) || !validID(operation) {
+	if intent != Init && intent != Join && intent != RestoreIntent || cluster == ([32]byte{}) || trust == ([32]byte{}) || !validID(self.ID) || self.Key == ([32]byte{}) || !validID(operation) {
 		return Root{}, ErrLifecycle
 	}
-	if intent == Init && (!self.Voter || trust != self.Key) || intent == Join && self.Voter {
+	if intent == Init && (!self.Voter || trust != self.Key) || intent == Join && self.Voter || intent == RestoreIntent && (!self.Voter || trust == self.Key) {
 		return Root{}, ErrLifecycle
 	}
 	return Root{Schema: 1, Intent: intent, Cluster: cluster, TrustRoot: trust, Self: self, Operation: operation}, nil
@@ -163,7 +163,7 @@ func (r Root) Install(cluster [32]byte, c Configuration, applied uint64) (Root, 
 	if !ok || m.Key != r.Self.Key {
 		return r, ErrLifecycle
 	}
-	if r.Installed.Index == 0 && r.Intent == Init && !c.Standalone(r.Self.ID) {
+	if r.Installed.Index == 0 && (r.Intent == Init || r.Intent == RestoreIntent) && !c.Standalone(r.Self.ID) {
 		return r, ErrLifecycle
 	}
 	if r.Installed.Index == 0 && r.Intent == Join && m.Voter {
@@ -206,8 +206,14 @@ type Operation struct {
 	Epoch                                    uint64
 }
 type Node struct {
-	Keys                 []IdentityTransition `json:",omitempty"`
-	Retirement           *RemovalProbe        `json:",omitempty"`
+	Keys       []IdentityTransition `json:",omitempty"`
+	Retirement *RemovalProbe        `json:",omitempty"`
+	// Recovery is the signed `sfcd recover` plan that retired this member
+	// when the cluster lost its voter majority (instead of a Retirement probe).
+	Recovery *Recovery `json:",omitempty"`
+	// Restored is the restore generation that retired this member when the
+	// cluster was rebuilt from a backup on a new server.
+	Restored             uint64 `json:",omitempty"`
 	Member               Member
 	Generation, Revision uint64
 	Phase                Phase
@@ -223,6 +229,8 @@ type Topology struct {
 	// Completed operation identities remain reserved. They must not silently
 	// become a different request after a process restart or node re-admission.
 	operations map[string]Operation
+	// restores are the `sfcd restore` records, oldest first.
+	restores []ClusterRestore
 }
 
 func New(cluster [32]byte, c Configuration) (Topology, error) {
@@ -237,6 +245,7 @@ func New(cluster [32]byte, c Configuration) (Topology, error) {
 }
 func ownNode(n Node) Node {
 	n.Keys = OwnIdentityTransitions(n.Keys)
+	n.Recovery = ownRecovery(n.Recovery)
 	if n.Retirement != nil {
 		v := *n.Retirement
 		v.Signature = slices.Clone(v.Signature)
@@ -281,6 +290,9 @@ func (t Topology) clone() (Topology, error) {
 	}
 	for id, v := range t.operations {
 		n.operations[id] = v
+	}
+	for _, r := range t.restores {
+		n.restores = append(n.restores, ownRestore(r))
 	}
 	return n, nil
 }
@@ -404,7 +416,7 @@ type Proof struct {
 func ProofBytes(p Proof) []byte {
 	p.Signature = nil
 	b, _ := json.Marshal(p)
-	return append([]byte("mydc-node-lifecycle-1\x00"), b...)
+	return append([]byte("sfc-node-lifecycle-1\x00"), b...)
 }
 func (t Topology) Observe(p Proof) (Topology, error) {
 	v, ok := t.nodes[p.Node]
@@ -507,6 +519,7 @@ type topologyRecord struct {
 	Configuration Configuration
 	Nodes         []Node
 	Operations    []Operation
+	Restores      []ClusterRestore `json:",omitempty"`
 }
 
 func (t Topology) Encode() ([]byte, error) {
@@ -519,6 +532,9 @@ func (t Topology) Encode() ([]byte, error) {
 	}
 	slices.SortFunc(r.Nodes, func(a, b Node) int { return strings.Compare(a.Member.ID, b.Member.ID) })
 	slices.SortFunc(r.Operations, func(a, b Operation) int { return strings.Compare(a.ID, b.ID) })
+	for _, v := range t.restores {
+		r.Restores = append(r.Restores, ownRestore(v))
+	}
 	return json.Marshal(r)
 }
 func Decode(b []byte) (Topology, error) {
@@ -529,6 +545,15 @@ func Decode(b []byte) (Topology, error) {
 		return Topology{}, ErrLifecycle
 	}
 	t := Topology{cluster: r.Cluster, revision: r.Revision, epoch: r.Epoch, configuration: ownConfig(r.Configuration), nodes: map[string]Node{}, operations: map[string]Operation{}}
+	if len(r.Restores) > maxRestores {
+		return Topology{}, ErrLifecycle
+	}
+	for i, v := range r.Restores {
+		if !v.Valid() || v.Cluster != r.Cluster || v.Generation != uint64(i)+1 || v.Index() > r.Configuration.Index || i > 0 && v.Index() <= r.Restores[i-1].Index() {
+			return Topology{}, ErrLifecycle
+		}
+		t.restores = append(t.restores, ownRestore(v))
+	}
 	for _, op := range r.Operations {
 		if op.Epoch == 0 || op.Epoch > r.Epoch || !validID(op.ID) || op.Generation == 0 || op.Revision == 0 || op.Revision > r.Revision || op.ConfigurationIndex == 0 || op.ConfigurationIndex > r.Configuration.Index || op.Action != Isolate && op.Action != Restore && op.Action != Remove && op.Action != ForceRemove {
 			return Topology{}, ErrLifecycle
@@ -607,7 +632,16 @@ func Decode(b []byte) (Topology, error) {
 				return Topology{}, ErrLifecycle
 			}
 		}
-		if v.Phase == Retiring || v.Phase == Retired {
+		if v.Restored != 0 {
+			if v.Phase != Retired || v.Retirement != nil || v.Closure != nil || v.Recovery != nil || v.Restored > uint64(len(r.Restores)) {
+				return Topology{}, ErrLifecycle
+			}
+		} else if v.Recovery != nil {
+			rec := v.Recovery
+			if v.Phase != Retired || v.Retirement != nil || v.Closure != nil || !rec.Valid() || rec.Cluster != r.Cluster || rec.Index() > r.Configuration.Index || slices.Contains(rec.Voters, v.Member.ID) {
+				return Topology{}, ErrLifecycle
+			}
+		} else if v.Phase == Retiring || v.Phase == Retired {
 			p := v.Retirement
 			if p == nil || !p.Valid() || p.Responding || p.Cluster != r.Cluster || p.Node != v.Member.ID || p.Target != v.Member.Key || p.Expected >= v.Revision || p.ConfigurationIndex > r.Configuration.Index || v.Closure != nil {
 				return Topology{}, ErrLifecycle
@@ -634,4 +668,27 @@ func Decode(b []byte) (Topology, error) {
 		return Topology{}, ErrLifecycle
 	}
 	return t, nil
+}
+
+// DropUnjoined forgets id from the installed configuration prefix: a
+// non-voter whose join was aborted (and removed from Raft) before it ever
+// acknowledged its installation, so it holds no work and no records. The
+// next real configuration (already without it) is committed as usual. Its
+// node is forgotten; a later join under the same name starts anew.
+func (t Topology) DropUnjoined(id string) (Topology, error) {
+	old, present := t.configuration.Member(id)
+	node, exists := t.nodes[id]
+	if !present || !exists || old.Voter || node.Pending != nil || node.Phase != Active {
+		return t, ErrLifecycle
+	}
+	n, err := t.clone()
+	if err != nil {
+		return t, err
+	}
+	n.configuration.Members = slices.DeleteFunc(n.configuration.Members, func(m Member) bool { return m.ID == id })
+	if n.configuration.Validate() != nil {
+		return t, ErrLifecycle
+	}
+	delete(n.nodes, id) // it never joined: no closure, no history to keep
+	return n, nil
 }

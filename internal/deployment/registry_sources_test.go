@@ -8,8 +8,8 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/imagesource"
-	"github.com/jay94ks/mydcd/internal/secrets"
+	"github.com/jay94ks/seafield/internal/imagesource"
+	"github.com/jay94ks/seafield/internal/secrets"
 )
 
 func addRegistryInputFixture(t *testing.T, f *fixture) Source {

@@ -16,7 +16,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/reconcile"
 )
 
 // This exercises the real SDK over TLS against a scripted KV HTTP boundary;
@@ -119,7 +119,7 @@ func TestVaultLibraryOriginalCASUnknownReadbackAndFixedRevision(t *testing.T) {
 }
 
 func TestVaultLibraryRejectsAmbientOverridesAndForeignProfileWithoutIO(t *testing.T) {
-	p := VaultProfile{ID: "vault", Address: "https://vault.mydc.test", Mount: "kv", Prefix: "tenant", Token: "private", Timeout: time.Second, MaxBytes: 1024}
+	p := VaultProfile{ID: "vault", Address: "https://vault.sfc.test", Mount: "kv", Prefix: "tenant", Token: "private", Timeout: time.Second, MaxBytes: 1024}
 	t.Setenv("VAULT_ADDR", "https://unapproved.invalid")
 	if _, err := NewVault(p); err == nil {
 		t.Fatal("ambient SDK override accepted")
@@ -135,7 +135,7 @@ func TestVaultLibraryRejectsAmbientOverridesAndForeignProfileWithoutIO(t *testin
 			t.Fatal("unapproved provider scope accepted")
 		}
 	}
-	p.Address = "http://vault.mydc.test"
+	p.Address = "http://vault.sfc.test"
 	if _, err = NewVault(p); err == nil {
 		t.Fatal("plaintext provider accepted")
 	}
@@ -182,7 +182,7 @@ func TestWriterRefusesObjectOutsidePrefixAsNotCovered(t *testing.T) {
 	f = prepare(t, f, q)
 	f = dispatch(t, f, q.ID)
 	record, _ := f.t.Write(q.ID)
-	v, err := NewVault(VaultProfile{ID: record.Request.Profile, Address: "https://vault.mydc.test", Mount: "kv", Prefix: "elsewhere", Token: "private", Timeout: time.Second, MaxBytes: 1024})
+	v, err := NewVault(VaultProfile{ID: record.Request.Profile, Address: "https://vault.sfc.test", Mount: "kv", Prefix: "elsewhere", Token: "private", Timeout: time.Second, MaxBytes: 1024})
 	if err != nil {
 		t.Fatal(err)
 	}

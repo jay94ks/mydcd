@@ -5,7 +5,7 @@ package deployment
 import (
 	"slices"
 
-	"github.com/jay94ks/mydcd/internal/access"
+	"github.com/jay94ks/seafield/internal/access"
 )
 
 // CD approvers: users who may approve or reject this app's candidates

@@ -50,7 +50,7 @@ func TestLoadImageLoadsOnceAndInspectsTheVerifiedID(t *testing.T) {
 			http.NotFound(w, r)
 		}
 	})
-	root, err := os.MkdirTemp("", "mydc-local-image-")
+	root, err := os.MkdirTemp("", "sfc-local-image-")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -63,7 +63,7 @@ func TestLoadImageLoadsOnceAndInspectsTheVerifiedID(t *testing.T) {
 	done := make(chan struct{})
 	go func() { _ = server.Serve(listener); close(done) }()
 	defer func() { _ = server.Close(); <-done }()
-	engine, err := open(ctx, "unix://"+listener.Addr().String(), "node-app-fixture", 3*time.Second)
+	engine, err := open(ctx, "unix://"+listener.Addr().String(), "cluster-app-fixture", 3*time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -6,7 +6,7 @@ import (
 	"crypto/sha256"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/cluster/state"
 )
 
 func TestVolumeFileWorkRechecksCurrentAuthorityWithoutReturningOriginalWriter(t *testing.T) {
@@ -29,10 +29,10 @@ func TestVolumeFileWorkRechecksCurrentAuthorityWithoutReturningOriginalWriter(t 
 	}
 	catalog, _ := f.p.Catalog(f.s)
 	u, _ := catalog.User("admin")
-	u.Credentials[0].Label = "account-revision-changed"
+	u.Username = "account-revision-changed"
 	expected := u.Revision
 	u.Revision = 0 // put-user carries expected CAS separately from replacement input.
-	f.apply("change-original-user", "put-user", expected, u, state.Applied)
+	f.apply("change-original-user", "put-user", expected, accountFields(u), state.Applied)
 	if _, err := f.p.VolumeFileWork(f.s, job.Native.Owner.Key, f.session, job.ID, 3); err == nil {
 		t.Fatal("old user revision authorized further file I/O")
 	}

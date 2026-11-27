@@ -10,14 +10,14 @@ import (
 	"errors"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/network/services"
-	"github.com/jay94ks/mydcd/internal/schema"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/network/services"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/sfcp"
 )
 
-// This is owner-local MYDCP metadata, never a reliable packet fallback. Nil
+// This is owner-local SFCP metadata, never a reliable packet fallback. Nil
 // Tuple queries native proof; a tuple queries its ORIGINAL stored pin. Receipt
 // confirms that pin. Native+Receipt may admit a destination pin from that exact
 // source claim; missing source pins and original native state are never rebuilt.
@@ -43,7 +43,7 @@ type routeFlowReply struct {
 // publication signature, including when saveRouteCore had no changed bytes.
 func (r *Runtime) storedRouteFlowReceipt(ref services.ReferenceConsumer, flow services.RouteFlow) (services.RouteFlowReceipt, error) {
 	if r.Identity == nil || r.Identity.Public != ref.Local.Owner {
-		return services.RouteFlowReceipt{}, mydcp.ErrAdmission
+		return services.RouteFlowReceipt{}, sfcp.ErrAdmission
 	}
 	record, found, err := r.loadRouteOwner(ref)
 	if err != nil || !found || !record.NativeStarted || record.BridgeReturned || record.Report != nil || record.Retirement != nil || record.NeverDispatched {
@@ -77,19 +77,19 @@ func (r *Runtime) routeFlowAuthority(ctx context.Context, reference, caller [32]
 func (r *Runtime) validateRouteFlowCaller(view cluster.View, work control.RouteWork, caller [32]byte) error {
 	peer, peerErr := r.tunnelWireKey(view.State, work.Peer.Local.Owner)
 	if peerErr != nil || peer != caller && caller != r.commandIdentity().Public || !work.PrepareAllowed || work.Tunnel.RoutePolicy == nil || work.Tunnel.RoutePolicy.Bridge == "" {
-		return mydcp.ErrAdmission
+		return sfcp.ErrAdmission
 	}
 	return nil
 }
 
 func (r *Runtime) observeRouteFlow(ctx context.Context, caller [32]byte, input []byte) (result json.RawMessage, err error) {
 	if r.Engine() == nil || r.Identity == nil {
-		return nil, mydcp.ErrAdmission
+		return nil, sfcp.ErrAdmission
 	}
 	// Select the exact retained native owner from this committed reference.
 	request, err := schema.Decode[routeFlowRequest](input)
 	if err != nil {
-		return nil, mydcp.ErrAdmission
+		return nil, sfcp.ErrAdmission
 	}
 	view, err := r.Engine().Read(ctx, false)
 	if err != nil {
@@ -97,37 +97,37 @@ func (r *Runtime) observeRouteFlow(ctx context.Context, caller [32]byte, input [
 	}
 	projection, err := r.controlPolicy.ProjectResources(view.State)
 	if err != nil || projection.NetworkAuthority == nil {
-		return nil, mydcp.ErrAdmission
+		return nil, sfcp.ErrAdmission
 	}
 	ref, found := projection.NetworkAuthority.ReferenceConsumer(request.Reference)
 	if !found || ref.Route == nil {
-		return nil, mydcp.ErrAdmission
+		return nil, sfcp.ErrAdmission
 	}
 	owner, local := r.nativeOwner(ref.Local.Owner)
 	if !local {
-		return nil, mydcp.ErrAdmission
+		return nil, sfcp.ErrAdmission
 	}
 	return owner.observeRouteFlowForAdmission(ctx, caller, input, nil)
 }
 
 // A source may consume its own latest native read within this SAME admission.
-// The private scope never travels on MYDCP or survives the calling packet.
+// The private scope never travels on SFCP or survives the calling packet.
 func (r *Runtime) observeRouteFlowForAdmission(ctx context.Context, caller [32]byte, input []byte, admission *routeAdmissionAuthority) (result json.RawMessage, err error) {
 	request, err := schema.Decode[routeFlowRequest](input)
 	if err != nil || request.Schema != 1 || request.Reference == ([32]byte{}) || request.Receipt != nil && request.Tuple == nil || request.Native != nil && (request.Tuple == nil || request.Receipt == nil) || r.Engine() == nil || r.Identity == nil {
-		return nil, mydcp.ErrAdmission
+		return nil, sfcp.ErrAdmission
 	}
 	if request.CloseQuery && request.Close == nil {
-		return nil, mydcp.ErrAdmission
+		return nil, sfcp.ErrAdmission
 	}
 	if request.Close != nil {
 		if request.Tuple == nil || request.Receipt != nil || request.Native != nil {
-			return nil, mydcp.ErrAdmission
+			return nil, sfcp.ErrAdmission
 		}
 		return r.closePeerRouteFlow(ctx, caller, request)
 	}
 	if admission != nil && (caller != r.Identity.Public || request.Tuple != nil || !time.Now().Before(admission.until)) {
-		return nil, mydcp.ErrAdmission
+		return nil, sfcp.ErrAdmission
 	}
 	until := time.Now().Add(routeFlowPermitDuration)
 	r.routeMu.Lock()
@@ -158,7 +158,7 @@ func (r *Runtime) observeRouteFlowForAdmission(ctx context.Context, caller [32]b
 	}
 	core, err := services.DecodeRouteRuntime(record.Core)
 	if err != nil || core.Journal().Pending != nil || !core.Journal().Desired.Present || !core.Journal().Applied.Present {
-		return nil, mydcp.ErrAdmission
+		return nil, sfcp.ErrAdmission
 	}
 	// This metadata call observes existing native state. Recovery belongs to
 	// the owner loop: it may issue link/firewall writes and invalidate packet
@@ -182,11 +182,11 @@ func (r *Runtime) observeRouteFlowForAdmission(ctx context.Context, caller [32]b
 	// too. Unrelated root advancement is allowed; changed authority is not.
 	currentView, currentProjection, currentWork, err := r.routeFlowAuthority(ctx, request.Reference, caller)
 	if err != nil || !sameRouteWorkPermission(work, currentWork) {
-		return nil, errors.Join(err, mydcp.ErrAdmission)
+		return nil, errors.Join(err, sfcp.ErrAdmission)
 	}
 	permit, err := r.controlPolicy.RouteNativePermit(currentView.State, r.commandIdentity().Public, control.RouteNativeRequest{Reference: ref.ID, Nonce: record.Nonce, Operation: 1, At: time.Now().Unix()})
 	if err != nil || permit.Reference != record.Dispatch.Reference || permit.Journal != record.Dispatch.Journal || permit.NativeSpec != record.Dispatch.NativeSpec || permit.Operation != record.Dispatch.Operation {
-		return nil, errors.Join(err, mydcp.ErrAdmission)
+		return nil, errors.Join(err, sfcp.ErrAdmission)
 	}
 	view, projection, work = currentView, currentProjection, currentWork
 	catalog, err := r.controlPolicy.Catalog(view.State)

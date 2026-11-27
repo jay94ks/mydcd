@@ -5,7 +5,7 @@ package services
 import (
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/reconcile"
 )
 
 // Mirrors the real owner's full Retire path: stop, collect original views and

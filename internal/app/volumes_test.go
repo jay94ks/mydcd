@@ -13,22 +13,22 @@ import (
 	"time"
 
 	"github.com/hashicorp/raft"
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/cluster/membership"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/config"
-	"github.com/jay94ks/mydcd/internal/engine"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/reconcile"
-	"github.com/jay94ks/mydcd/internal/userauth"
-	"github.com/jay94ks/mydcd/internal/workload/volumes"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/membership"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/config"
+	"github.com/jay94ks/seafield/internal/engine"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/userauth"
+	"github.com/jay94ks/seafield/internal/workload/volumes"
 )
 
 // Native modules are disabled. NativeReady/Gone are signed node-fact fixtures;
-// this test proves actual authentication/MYDCP/Raft/storage, not Docker closure.
+// this test proves actual authentication/SFCP/Raft/storage, not Docker closure.
 func TestRealManagedVolumePermitQuorumCurrentPolicyAndSameDB(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
@@ -75,19 +75,19 @@ func TestRealManagedVolumePermitQuorumCurrentPolicyAndSameDB(t *testing.T) {
 	}
 	clusterID := initialized.Installation.Root.Cluster
 	policy := control.Policy{Cluster: clusterID, BootstrapKey: adminKey.Public, TrustRoot: a.Identity.Public, Genesis: initialized.Installation.Genesis}
-	peer := mydcp.Peer{ID: cfg.Node.ID, Endpoint: cfg.Node.Listen, Policy: mydcp.Policy{Key: mydcp.Identity(a.Identity.Public), Respond: true}}
+	peer := sfcp.Peer{ID: cfg.Node.ID, Endpoint: cfg.Node.Listen, Policy: sfcp.Policy{Key: sfcp.Identity(a.Identity.Public), Respond: true}}
 	clientFor := func() *userauth.Client {
 		t.Helper()
 		id, e := identity.Ephemeral()
 		if e != nil {
 			t.Fatal(e)
 		}
-		mesh, e := mydcp.NewTransport(id, clusterID, func(k mydcp.Identity) (mydcp.Peer, bool) { return peer, k == peer.Key })
+		mesh, e := sfcp.NewTransport(id, clusterID, func(k sfcp.Identity) (sfcp.Peer, bool) { return peer, k == peer.Key })
 		if e != nil {
 			t.Fatal(e)
 		}
 		t.Cleanup(func() { _ = mesh.Close(); clear(id.Private) })
-		return &userauth.Client{Mesh: mesh, Self: id, Cluster: clusterID, Peers: []mydcp.Peer{peer}}
+		return &userauth.Client{Mesh: mesh, Self: id, Cluster: clusterID, Peers: []sfcp.Peer{peer}}
 	}
 	admin := clientFor()
 	enrolled, err := admin.Enroll(ctx, peer, control.Enrollment{Schema: 1, RequestID: "enroll-volume", User: access.User{ID: "admin", Username: "admin", SystemAdmin: true, Enabled: true, Credentials: []access.Credential{{ID: "key", Method: access.PrivateKey, PublicKey: adminKey.Public, Enabled: true}}}}, adminKey.Private)
@@ -150,7 +150,7 @@ func TestRealManagedVolumePermitQuorumCurrentPolicyAndSameDB(t *testing.T) {
 	for _, tenant := range []string{"tenant", "other"} {
 		submit("create-"+tenant, "create-tenant", 0, control.TenantID{ID: tenant}, state.Applied)
 		v, _ := catalog().Tenant(tenant)
-		submit("nodes-"+tenant, "set-nodes", v.Revision, control.NodeAssignment{Tenant: tenant, Nodes: []string{cfg.Node.ID}}, state.Applied)
+		submit("nodes-"+tenant, "set-nodes", v.Revision, control.NodeChangeTo(tenant, v.AllowedNodes, []string{cfg.Node.ID}), state.Applied)
 	}
 	submit("bob-user", "put-user", 0, access.User{ID: "bob", Username: "bob", Enabled: true, Credentials: []access.Credential{{ID: "key", Method: access.PrivateKey, PublicKey: bobKey.Public, Enabled: true}}}, state.Applied)
 	submit("bob-role", "set-membership", 0, access.Membership{Tenant: "other", User: "bob", Role: access.Manager, Enabled: true}, state.Applied)
@@ -202,10 +202,10 @@ func TestRealManagedVolumePermitQuorumCurrentPolicyAndSameDB(t *testing.T) {
 		t.Fatal("user impersonated native member")
 	}
 	page, err := admin.VolumePage(ctx, peer, adminSession, "tenant", "")
-	if err != nil || len(page.Volumes) != 1 || page.Volumes[0].Consumers != 1 {
+	if err != nil || len(page.Items) != 1 || page.Items[0].Consumers != 1 {
 		t.Fatal("volume page", err)
 	}
-	if page, err = bob.VolumePage(ctx, peer, bobSession, "other", ""); err != nil || len(page.Volumes) != 0 {
+	if page, err = bob.VolumePage(ctx, peer, bobSession, "other", ""); err != nil || len(page.Items) != 0 {
 		t.Fatal("cross-tenant page leaked", err)
 	}
 	if _, err = bob.VolumePage(ctx, peer, bobSession, "tenant", ""); err == nil {
@@ -227,12 +227,12 @@ func TestRealManagedVolumePermitQuorumCurrentPolicyAndSameDB(t *testing.T) {
 		t.Fatal("same DB original grant/consumer", err)
 	}
 	tenant, _ := catalog().Tenant("tenant")
-	submit("revoke-node", "set-nodes", tenant.Revision, control.NodeAssignment{Tenant: "tenant"}, state.Applied)
+	submit("revoke-node", "set-nodes", tenant.Revision, control.NodeChangeTo("tenant", tenant.AllowedNodes, nil), state.Applied)
 	if _, err = cluster.CallVolumePermit(ctx, a.Mesh, a.Identity, clusterID, peer, request); err == nil {
 		t.Fatal("current revoked grant bypassed")
 	}
 	tenant, _ = catalog().Tenant("tenant")
-	submit("restore-node", "set-nodes", tenant.Revision, control.NodeAssignment{Tenant: "tenant", Nodes: []string{cfg.Node.ID}}, state.Applied)
+	submit("restore-node", "set-nodes", tenant.Revision, control.NodeChangeTo("tenant", tenant.AllowedNodes, []string{cfg.Node.ID}), state.Applied)
 	// Dynamic real N3/Q2 supplies the read barrier, not a mock permission bit.
 	defer func() {
 		for _, r := range others {
@@ -288,7 +288,7 @@ func TestRealManagedVolumePermitQuorumCurrentPolicyAndSameDB(t *testing.T) {
 			}
 		}
 	}
-	target, _ := a.Mesh.Peer(mydcp.Identity(others[0].Identity.Public))
+	target, _ := a.Mesh.Peer(sfcp.Identity(others[0].Identity.Public))
 	if _, err = cluster.CallVolumePermit(ctx, a.Mesh, a.Identity, clusterID, target, request); err != nil {
 		t.Fatal("authenticated member relay changed original caller", err)
 	}
@@ -318,7 +318,7 @@ func TestRealManagedVolumePermitQuorumCurrentPolicyAndSameDB(t *testing.T) {
 	if _, err = cluster.CallVolumePermit(ctx, a.Mesh, a.Identity, clusterID, peer, request); err == nil {
 		t.Fatal("returned consumer got permission")
 	}
-	t.Log("actual user/MYDCP/Raft/bbolt volume grants, original node caller/relay, current tenant/node policy, bounded tenant pages, Snapshot/same DB, dynamic N3/Q2 minority denial/restoration, original signed fact release; no native writer was started")
+	t.Log("actual user/SFCP/Raft/bbolt volume grants, original node caller/relay, current tenant/node policy, bounded tenant pages, Snapshot/same DB, dynamic N3/Q2 minority denial/restoration, original signed fact release; no native writer was started")
 }
 
 func topologyVoter(d membership.Directory, id string) bool {

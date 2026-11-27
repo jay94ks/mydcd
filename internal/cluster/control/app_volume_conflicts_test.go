@@ -9,14 +9,14 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/workload/volumes"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/workload/volumes"
 )
 
 func volumeConflictDocument(app string, readOnly bool) []byte {
-	return []byte(fmt.Sprintf("name: %s\nservices:\n  debug:\n    image: docker.io/library/php@sha256:%s\n    cpus: '0.1'\n    mem_limit: 16m\n    networks: {lan: {ipv4_address: 10.80.1.40}}\n    volumes: [{type: volume, source: data, target: /data, read_only: %t}]\n    x-mydc: {node: node-a}\nnetworks:\n  lan: {external: true, name: services}\nvolumes:\n  data:\n    external: true\n    x-mydc: {node: node-a, uid: 10001, gid: 10001, mode: '0750'}\n", app, string(bytes.Repeat([]byte{'a'}, 64)), readOnly))
+	return []byte(fmt.Sprintf("name: %s\nservices:\n  debug:\n    image: docker.io/library/php@sha256:%s\n    cpus: '0.1'\n    mem_limit: 16m\n    networks: {lan: {ipv4_address: 10.80.1.40}}\n    volumes: [{type: volume, source: data, target: /data, read_only: %t}]\n    x-sfc: {node: node-a}\nnetworks:\n  lan: {external: true, name: services}\nvolumes:\n  data:\n    external: true\n    x-sfc: {node: node-a, uid: 10001, gid: 10001, mode: '0750'}\n", app, string(bytes.Repeat([]byte{'a'}, 64)), readOnly))
 }
 
 func TestStandaloneVolumePreflightRejectsCurrentForeignWriterWithoutReservation(t *testing.T) {

@@ -14,31 +14,31 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/config"
-	"github.com/jay94ks/mydcd/internal/engine"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/reconcile"
-	"github.com/jay94ks/mydcd/internal/schema"
-	"github.com/jay94ks/mydcd/internal/userauth"
-	"github.com/jay94ks/mydcd/internal/workload"
-	"github.com/jay94ks/mydcd/internal/workload/volumes"
-	"github.com/jay94ks/mydcd/tests/enginefixture"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/config"
+	"github.com/jay94ks/seafield/internal/engine"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/userauth"
+	"github.com/jay94ks/seafield/internal/workload"
+	"github.com/jay94ks/seafield/internal/workload/volumes"
+	"github.com/jay94ks/seafield/tests/enginefixture"
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/api/types/mount"
 	"github.com/moby/moby/client"
 )
 
-func verifyAutomaticBackupBoundary(t *testing.T, ctx context.Context, a *Runtime, owner **Runtime, cfg config.Node, root string, admin userauth.Client, peer mydcp.Peer, session access.Session, p control.Policy, read func() cluster.View, change func(string, string, uint64, any), ready volumes.NativeReady, docker *engine.Client, gate *volumeUsageGate, withRestore bool, scenario volumeOwnerScenario) {
+func verifyAutomaticBackupBoundary(t *testing.T, ctx context.Context, a *Runtime, owner **Runtime, cfg config.Node, root string, admin userauth.Client, peer sfcp.Peer, session access.Session, p control.Policy, read func() cluster.View, change func(string, string, uint64, any), ready volumes.NativeReady, docker *engine.Client, gate *volumeUsageGate, withRestore bool, scenario volumeOwnerScenario) {
 	t.Helper()
-	backend := os.Getenv("MYDC_DOCKER_TEST_BACKEND")
+	backend := os.Getenv("SFC_DOCKER_TEST_BACKEND")
 	if backend == "" {
 		t.Fatal("explicit user-prebuilt writer required")
 	}
-	fixture := enginefixture.OpenPrepared(t, ctx, docker.Owner, os.Getenv("MYDC_DOCKER_TEST_OWNER"), []string{`USER 10001:10001`}, backend)
+	fixture := enginefixture.OpenPrepared(t, ctx, docker.Owner, os.Getenv("SFC_DOCKER_TEST_OWNER"), []string{`USER 10001:10001`}, backend)
 	registry := func() control.Volumes {
 		t.Helper()
 		v, e := p.Volumes(read().State)
@@ -64,7 +64,7 @@ func verifyAutomaticBackupBoundary(t *testing.T, ctx context.Context, a *Runtime
 		t.Fatal(err)
 	}
 	defer clear(key.Private)
-	mesh, err := mydcp.NewTransport(key, admin.Cluster, func(k mydcp.Identity) (mydcp.Peer, bool) { return peer, k == peer.Key })
+	mesh, err := sfcp.NewTransport(key, admin.Cluster, func(k sfcp.Identity) (sfcp.Peer, bool) { return peer, k == peer.Key })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -191,7 +191,7 @@ func verifyAutomaticBackupBoundary(t *testing.T, ctx context.Context, a *Runtime
 	cli := func(args ...string) {
 		t.Helper()
 		args = withTenant(selectedTenant, args)
-		stdout, stderr, err := runManagedCLICommand(ctx, os.Getenv("MYDC_TEST_CLI"), home, profile, args, nil)
+		stdout, stderr, err := runManagedCLICommand(ctx, os.Getenv("SFC_TEST_CLI"), home, profile, args, nil)
 		if err != nil {
 			t.Fatal(args, err, string(stderr))
 		}
@@ -204,15 +204,15 @@ func verifyAutomaticBackupBoundary(t *testing.T, ctx context.Context, a *Runtime
 	selectedTenant = ready.Spec.Scope.Tenant
 	selection := control.VolumeBackupSelection{Scope: ready.Spec.Scope, ID: "automatic"}
 	preflight, err := admin.VolumeBackupSource(ctx, peer, session, ready.Spec.Scope.Tenant, control.VolumeSelector{App: ready.Spec.Scope.App, ID: ready.Spec.Scope.ID})
-	if err != nil || preflight.VolumeSource == nil || preflight.VolumeSource.Compatibility != backupCompatibility(source) || preflight.VolumeSource.Image != fixture.Image {
+	if err != nil || preflight.Source.Compatibility != backupCompatibility(source) || preflight.Source.Image != fixture.Image {
 		t.Fatal("actual original source recipe", err)
 	}
 	if scenario == volumeOwnerBackupMount {
-		verifyBackupMountBoundary(t, ctx, *owner, root, p, read, ready, *preflight.VolumeSource, cli)
+		verifyBackupMountBoundary(t, ctx, *owner, root, p, read, ready, preflight.Source, cli)
 		return
 	}
 	if scenario == volumeOwnerMoveSource || scenario == volumeOwnerMoveCommit {
-		verifyAutomaticMoveSource(t, ctx, a, owner, cfg, root, p, read, change, ready, *preflight.VolumeSource, docker, cli, scenario == volumeOwnerMoveCommit, admin, peer, session)
+		verifyAutomaticMoveSource(t, ctx, a, owner, cfg, root, p, read, change, ready, preflight.Source, docker, cli, scenario == volumeOwnerMoveCommit, admin, peer, session)
 		return
 	}
 	if scenario == volumeOwnerBackupIntentIO {

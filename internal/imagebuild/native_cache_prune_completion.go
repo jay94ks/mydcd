@@ -51,7 +51,7 @@ func cachePruneNativeStopped(r NativeCachePruneRecord) bool {
 	return !e.CreateSent || e.CreateNotSent || e.Removed
 }
 func cachePruneNativeWitness(r NativeCachePruneRecord) [32]byte {
-	return digestJSON("mydc-native-cache-prune-completion-witness-1", struct {
+	return digestJSON("sfc-native-cache-prune-completion-witness-1", struct {
 		Spec                                   [32]byte
 		Root, Cache                            NativeDirectory
 		Claimed, CleanupOnly, Removing, Closed bool
@@ -74,7 +74,7 @@ type NativeCachePruneCompletion struct {
 func cachePruneCompletionBytes(c NativeCachePruneCompletion) []byte {
 	c.Signature = nil
 	raw, _ := json.Marshal(c)
-	return append([]byte("mydc-native-cache-prune-completion-1\x00"), raw...)
+	return append([]byte("sfc-native-cache-prune-completion-1\x00"), raw...)
 }
 func (c NativeCachePruneCompletion) Valid(s NativeCachePruneSpec) bool {
 	return s.Valid() && c.Schema == 1 && c.Intent == s.Intent && c.Native != ([32]byte{}) && c.At >= s.At && c.At <= math.MaxInt64 && c.Result.Valid() && (s.Automatic != nil || c.Result.RemovedCount <= MaxCacheEntries) && ed25519.Verify(s.Source.Scope.Root.Key[:], cachePruneCompletionBytes(c), c.Signature)

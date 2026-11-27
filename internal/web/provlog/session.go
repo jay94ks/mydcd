@@ -71,13 +71,13 @@ func (l *Log) Enable(by string) (string, State, error) {
 	l.sess = session{enabled: true, at: now, by: by, activity: now, token: sha256.Sum256([]byte(tok))}
 	st := l.stateLocked(now)
 	l.mu.Unlock()
-	l.Add(Entry{Provider: "mydc-web", Op: "diag-enable", Msg: "provider log collection on", Attrs: map[string]string{"by": by}})
+	l.Add(Entry{Provider: "sfc-web", Op: "diag-enable", Msg: "provider log collection on", Attrs: map[string]string{"by": by}})
 	return tok, st, nil
 }
 
 // Disable stops collection; the token stops working.
 func (l *Log) Disable(by string) State {
-	l.Add(Entry{Provider: "mydc-web", Op: "diag-disable", Msg: "provider log collection off", Attrs: map[string]string{"by": by}})
+	l.Add(Entry{Provider: "sfc-web", Op: "diag-disable", Msg: "provider log collection off", Attrs: map[string]string{"by": by}})
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	now := l.now().UTC()

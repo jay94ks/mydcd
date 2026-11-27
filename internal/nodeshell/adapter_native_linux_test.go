@@ -28,7 +28,7 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// RQ14 OS adapter boundary, opt-in MYDC_TEST_NODE_SHELL_NATIVE=1.
+// RQ14 OS adapter boundary, opt-in SFC_TEST_NODE_SHELL_NATIVE=1.
 //
 // Preconditions: root with NEWNS/NEWNET/NEWPID/mount/chroot capability; installed
 // root-owned sshd/useradd/visudo/sudo and ordinary POSIX/coreutils binaries,
@@ -54,7 +54,7 @@ import (
 // only persistent recovery resource is the logged owned temporary directory;
 // no host account deletion or sudoers/sshd restoration command is appropriate.
 //
-// Scope: actual adapter Prepare/Open, dedicated nonroot whoami, literal MyDC
+// Scope: actual adapter Prepare/Open, dedicated nonroot whoami, literal Seafield Cluster
 // attribution, sudo -i off/on/revoked, host pin, PTY size/resize, half-close,
 // output EOF/exit Wait and Close. PTY half-close is SSH input EOF; this test does
 // not assert that every shell command interprets it as a POSIX terminal EOF or
@@ -66,12 +66,12 @@ func TestRQ14NodeShellOwnedRootFS(t *testing.T) {
 }
 
 func nodeShellOwnedRootFS(t *testing.T, runtimeTest bool) {
-	if os.Getenv("MYDC_NODE_SHELL_NATIVE_CHILD") == "1" {
+	if os.Getenv("SFC_NODE_SHELL_NATIVE_CHILD") == "1" {
 		nodeShellNativeChild(t)
 		return
 	}
-	if !runtimeTest && os.Getenv("MYDC_TEST_NODE_SHELL_NATIVE") != "1" {
-		t.Skip("set MYDC_TEST_NODE_SHELL_NATIVE=1 for isolated installed SSH/account adapter")
+	if !runtimeTest && os.Getenv("SFC_TEST_NODE_SHELL_NATIVE") != "1" {
+		t.Skip("set SFC_TEST_NODE_SHELL_NATIVE=1 for isolated installed SSH/account adapter")
 	}
 	if os.Geteuid() != 0 {
 		t.Fatal("isolated native adapter requires root and namespace/mount capabilities")
@@ -84,7 +84,7 @@ func nodeShellOwnedRootFS(t *testing.T, runtimeTest bool) {
 	}
 	baseline := nodeShellHostDigest(t)
 	parentNet, parentMount := nodeShellNativeNS(t, "net"), nodeShellNativeNS(t, "mnt")
-	root, err := os.MkdirTemp("", "mydc-node-shell-rootfs-")
+	root, err := os.MkdirTemp("", "sfc-node-shell-rootfs-")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -114,9 +114,9 @@ func nodeShellOwnedRootFS(t *testing.T, runtimeTest bool) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), budget)
 	command := exec.CommandContext(ctx, self, "-test.run="+selector, "-test.v", "-test.timeout="+timeout)
-	command.Env = []string{"PATH=/usr/sbin:/usr/bin:/sbin:/bin", "LANG=C", "GOMAXPROCS=4", "MYDC_NODE_SHELL_NATIVE_CHILD=1", "MYDC_NODE_SHELL_ROOTFS=" + root, "MYDC_NODE_SHELL_PARENT_NET=" + nodeShellNativeNS(t, "net"), "MYDC_NODE_SHELL_PARENT_MNT=" + nodeShellNativeNS(t, "mnt"), "MYDC_NODE_SHELL_PARENT_PID=" + nodeShellNativeNS(t, "pid")}
+	command.Env = []string{"PATH=/usr/sbin:/usr/bin:/sbin:/bin", "LANG=C", "GOMAXPROCS=4", "SFC_NODE_SHELL_NATIVE_CHILD=1", "SFC_NODE_SHELL_ROOTFS=" + root, "SFC_NODE_SHELL_PARENT_NET=" + nodeShellNativeNS(t, "net"), "SFC_NODE_SHELL_PARENT_MNT=" + nodeShellNativeNS(t, "mnt"), "SFC_NODE_SHELL_PARENT_PID=" + nodeShellNativeNS(t, "pid")}
 	if runtimeTest {
-		command.Env = append(command.Env, "MYDC_NODE_SHELL_RUNTIME_CHILD=1", "MYDC_TEST_NODE_SHELL_DAEMON="+os.Getenv("MYDC_TEST_NODE_SHELL_DAEMON"), "MYDC_TEST_NODE_SHELL_CLI="+os.Getenv("MYDC_TEST_NODE_SHELL_CLI"))
+		command.Env = append(command.Env, "SFC_NODE_SHELL_RUNTIME_CHILD=1", "SFC_TEST_NODE_SHELL_DAEMON="+os.Getenv("SFC_TEST_NODE_SHELL_DAEMON"), "SFC_TEST_NODE_SHELL_CLI="+os.Getenv("SFC_TEST_NODE_SHELL_CLI"))
 	}
 	command.SysProcAttr = &syscall.SysProcAttr{Cloneflags: syscall.CLONE_NEWNS | syscall.CLONE_NEWNET | syscall.CLONE_NEWPID | syscall.CLONE_NEWUTS | syscall.CLONE_NEWIPC, Pdeathsig: syscall.SIGKILL}
 	var output bytes.Buffer
@@ -200,7 +200,7 @@ func nodeShellHostDigest(t *testing.T) [32]byte {
 	t.Helper()
 	hash := sha256.New()
 	count, total := 0, int64(0)
-	roots := []string{"/etc/passwd", "/etc/shadow", "/etc/group", "/etc/gshadow", "/etc/subuid", "/etc/subgid", "/etc/sudoers", "/etc/sudoers.d", "/etc/ssh", "/var/lib/mydc-shell/.ssh/authorized_keys"}
+	roots := []string{"/etc/passwd", "/etc/shadow", "/etc/group", "/etc/gshadow", "/etc/subuid", "/etc/subgid", "/etc/sudoers", "/etc/sudoers.d", "/etc/ssh", "/var/lib/sfc-shell/.ssh/authorized_keys"}
 	for _, root := range roots {
 		err := filepath.WalkDir(root, func(path string, e fs.DirEntry, walkErr error) error {
 			if errors.Is(walkErr, os.ErrNotExist) {
@@ -264,15 +264,15 @@ func nodeShellNativeChild(t *testing.T) {
 	if os.Getpid() != 1 || os.Geteuid() != 0 {
 		t.Fatal("child must be root PID1 in its new PID namespace")
 	}
-	for name, env := range map[string]string{"net": "MYDC_NODE_SHELL_PARENT_NET", "mnt": "MYDC_NODE_SHELL_PARENT_MNT", "pid": "MYDC_NODE_SHELL_PARENT_PID"} {
+	for name, env := range map[string]string{"net": "SFC_NODE_SHELL_PARENT_NET", "mnt": "SFC_NODE_SHELL_PARENT_MNT", "pid": "SFC_NODE_SHELL_PARENT_PID"} {
 		parent := os.Getenv(env)
 		if parent == "" || nodeShellNativeNS(t, name) == parent {
 			t.Fatal("private namespace was not installed", name)
 		}
 	}
-	root := os.Getenv("MYDC_NODE_SHELL_ROOTFS")
+	root := os.Getenv("SFC_NODE_SHELL_ROOTFS")
 	info, err := os.Lstat(root)
-	if err != nil || !filepath.IsAbs(root) || filepath.Clean(root) != root || !strings.HasPrefix(filepath.Base(root), "mydc-node-shell-rootfs-") || !info.IsDir() || info.Mode().Perm() != 0700 {
+	if err != nil || !filepath.IsAbs(root) || filepath.Clean(root) != root || !strings.HasPrefix(filepath.Base(root), "sfc-node-shell-rootfs-") || !info.IsDir() || info.Mode().Perm() != 0700 {
 		t.Fatal("owned rootfs identity invalid", err)
 	}
 	st, ok := info.Sys().(*syscall.Stat_t)
@@ -334,7 +334,7 @@ func nodeShellNativeChild(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if os.Getenv("MYDC_NODE_SHELL_RUNTIME_CHILD") == "1" {
+	if os.Getenv("SFC_NODE_SHELL_RUNTIME_CHILD") == "1" {
 		nodeShellRuntimeBindInputs(t, root)
 	}
 	if err = unix.Chroot(root); err != nil {
@@ -446,7 +446,7 @@ func (w *nodeShellNativeLog) Write(p []byte) (int, error) {
 }
 
 func nodeShellNativeAssertions(t *testing.T) {
-	runtimeTest := os.Getenv("MYDC_NODE_SHELL_RUNTIME_CHILD") == "1"
+	runtimeTest := os.Getenv("SFC_NODE_SHELL_RUNTIME_CHILD") == "1"
 	budget, endpoint := 60*time.Second, "127.0.0.1:22022"
 	if runtimeTest {
 		budget, endpoint = 210*time.Second, "127.0.0.1:22"
@@ -484,7 +484,7 @@ PasswordAuthentication no
 KbdInteractiveAuthentication no
 PubkeyAuthentication yes
 PermitRootLogin no
-AllowUsers mydc-shell
+AllowUsers sfc-shell
 AuthorizedKeysFile .ssh/authorized_keys
 StrictModes yes
 PermitTTY yes
@@ -546,7 +546,7 @@ LogLevel VERBOSE
 		nodeShellRuntimeNativeAssertions(t, ctx)
 		return
 	}
-	config := Config{StateDir: "/var/lib/mydc-shell-state", Home: "/var/lib/mydc-shell", Endpoint: "127.0.0.1:22022", HostPublicKeyFile: "/etc/ssh/ssh_host_ed25519_key.pub", SudoersDir: "/etc/sudoers.d"}
+	config := Config{StateDir: "/var/lib/sfc-shell-state", Home: "/var/lib/sfc-shell", Endpoint: "127.0.0.1:22022", HostPublicKeyFile: "/etc/ssh/ssh_host_ed25519_key.pub", SudoersDir: "/etc/sudoers.d"}
 	adapter, err := New(config)
 	if err != nil {
 		t.Fatal(err)
@@ -658,7 +658,7 @@ func nodeShellNativeCommand(t *testing.T, ctx context.Context, adapter *Adapter,
 	}
 	// Actual commands report fixed markers. No caller name is interpolated into
 	// a shell command: it is read back from the adapter-provided environment.
-	program := "stty -echo; printf '\\n__WHO__'; whoami; printf '__UID__'; id -u; printf '__USER__%s\\n' \"$MYDC_USER\"; printf '__SIZE__'; stty size; if value=$(sudo -n -i /usr/bin/id -u 2>/dev/null); then printf '__SUDO__%s\\n' \"$value\"; else printf '__SUDO__denied\\n'; fi; exit 7\n"
+	program := "stty -echo; printf '\\n__WHO__'; whoami; printf '__UID__'; id -u; printf '__USER__%s\\n' \"$SFC_USER\"; printf '__SIZE__'; stty size; if value=$(sudo -n -i /usr/bin/id -u 2>/dev/null); then printf '__SUDO__%s\\n' \"$value\"; else printf '__SUDO__denied\\n'; fi; exit 7\n"
 	if _, err = session.Write([]byte(program)); err != nil {
 		t.Fatal(err)
 	}

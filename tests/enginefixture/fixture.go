@@ -9,7 +9,7 @@ import (
 	"context"
 	"debug/elf"
 	"encoding/json"
-	"github.com/jay94ks/mydcd/internal/engine"
+	"github.com/jay94ks/seafield/internal/engine"
 	"io"
 	"os"
 	"os/exec"
@@ -67,7 +67,7 @@ func open(t *testing.T, ctx context.Context, owner, tag string, changes []string
 	if err != nil {
 		t.Fatal(err)
 	}
-	f := &Fixture{Client: c, ImageRef: "mydc-boundary/" + tag + ":local"}
+	f := &Fixture{Client: c, ImageRef: "sfc-boundary/" + tag + ":local"}
 	t.Cleanup(func() {
 		if err := c.Close(); err != nil {
 			t.Error(err)
@@ -82,13 +82,13 @@ func open(t *testing.T, ctx context.Context, owner, tag string, changes []string
 		t.Cleanup(func() {
 			clean, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
-			filters := client.Filters{}.Add("label", "org.mydc.owner="+owner)
+			filters := client.Filters{}.Add("label", "org.sfc.owner="+owner)
 			containers, e := c.API.ContainerList(clean, client.ContainerListOptions{All: true, Filters: filters})
 			if e != nil {
 				t.Error("rollback list containers", e)
 			}
 			for _, item := range containers.Items {
-				if item.Labels["org.mydc.owner"] != owner || item.Labels["org.mydc.kind"] != "container" {
+				if item.Labels["org.sfc.owner"] != owner || item.Labels["org.sfc.kind"] != "container" {
 					t.Error("rollback ownership mismatch")
 					continue
 				}
@@ -104,7 +104,7 @@ func open(t *testing.T, ctx context.Context, owner, tag string, changes []string
 				t.Error("rollback list networks", e)
 			}
 			for _, item := range networks.Items {
-				if item.Labels["org.mydc.owner"] != owner || item.Labels["org.mydc.kind"] != "bridge" {
+				if item.Labels["org.sfc.owner"] != owner || item.Labels["org.sfc.kind"] != "bridge" {
 					t.Error("rollback network ownership mismatch")
 					continue
 				}
@@ -117,7 +117,7 @@ func open(t *testing.T, ctx context.Context, owner, tag string, changes []string
 			}
 			image, e := c.API.ImageInspect(clean, f.ImageRef)
 			if e == nil {
-				if image.Config == nil || image.Config.Labels["org.mydc.test.owner"] != tag {
+				if image.Config == nil || image.Config.Labels["org.sfc.test.owner"] != tag {
 					t.Error("rollback image ownership mismatch")
 				} else if _, e = c.API.ImageRemove(clean, f.ImageRef, client.ImageRemoveOptions{}); e != nil {
 					t.Error("rollback image", e)
@@ -149,7 +149,7 @@ func ImportPrepared(t *testing.T, ctx context.Context, c *engine.Client, tag, bi
 	if c == nil || c.API == nil || c.Owner == "" || binary == "" || !filepath.IsAbs(binary) {
 		t.Fatal("explicit caller-owned Engine and prebuilt backend required")
 	}
-	f := &Fixture{Client: c, ImageRef: "mydc-boundary/" + tag + ":local"}
+	f := &Fixture{Client: c, ImageRef: "sfc-boundary/" + tag + ":local"}
 	if _, err := c.API.ImageInspect(ctx, f.ImageRef); !cerrdefs.IsNotFound(err) {
 		t.Fatal("prepared image must initially be absent", err)
 	}
@@ -236,7 +236,7 @@ func importLocalImage(t *testing.T, ctx context.Context, f *Fixture, tag string,
 		beforeImport()
 	}
 	configured := append([]string{`CMD ["/backend"]`}, changes...)
-	configured = append(configured, "LABEL org.mydc.test.owner="+tag)
+	configured = append(configured, "LABEL org.sfc.test.owner="+tag)
 	stream, err := c.API.ImageImport(ctx, client.ImageImportSource{Source: archive, SourceName: "-"}, f.ImageRef, client.ImageImportOptions{Changes: configured})
 	if err != nil {
 		t.Fatal(err)

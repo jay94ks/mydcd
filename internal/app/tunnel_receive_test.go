@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/mydcp"
+	"github.com/jay94ks/seafield/internal/sfcp"
 )
 
 func TestTunnelPacketReceiverDoesNotWaitForControlIO(t *testing.T) {
@@ -17,7 +17,7 @@ func TestTunnelPacketReceiverDoesNotWaitForControlIO(t *testing.T) {
 	i.mu.Lock()
 	defer i.mu.Unlock()
 	done := make(chan error, 1)
-	go func() { done <- i.receive(nil, mydcp.Frame{}) }()
+	go func() { done <- i.receive(nil, sfcp.Frame{}) }()
 	select {
 	case err := <-done:
 		if !errors.Is(err, errTunnelPending) {

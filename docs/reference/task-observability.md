@@ -4,15 +4,15 @@
 
 ## 요청과 페이지
 
-MYDCP User kind1의 Request는 다음 필드를 사용한다. 인증·record·서명은 [Unix API](unix-sockets.md)의 사용자 조회와 같다. 네트워크 MYDCP에서도 같은 메시지를 쓴다.
+SFCP User kind1의 Request는 다음 필드를 사용한다. 인증·record·서명은 [Unix API](unix-sockets.md)의 사용자 조회와 같다. 네트워크 SFCP에서도 같은 메시지를 쓴다.
 
 ```json
-{"Schema":1,"Method":"tasks","Tenant":"shop","App":"store","Node":"node-a","After":""}
+{"Schema":1,"Method":"tasks","Params":{"Node":"node-a","Tenant":"shop","App":"store"}}
 ```
 
-`Tenant`, `App`, `Node`는 선택 필터다. tenant를 생략하면 현재 사용자가 읽을 수 있는 tenant만 모은다. `TargetUser` 등 다른 method의 선택자는 허용하지 않는다. 현재 계정·서명된 Read scope·tenant membership·허용 node를 먼저 검사한 다음 정렬하고 페이지를 만든다. system admin도 Session의 Read scope가 있어야 한다. 일반 사용자가 Node만 지정해도 다른 tenant의 Task 수나 페이지 위치는 노출하지 않는다.
+`tasks`는 [typed method](unix-sockets/10-user.md#typed-method)다. `Params`의 `Node`, `Tenant`, `App`은 선택 필터이고(빈 문자열도 그대로 보낸다), `Standalone`(App과 함께 쓰지 않음)·`After`는 비면 뺀다. tenant를 생략하면 현재 사용자가 읽을 수 있는 tenant만 모은다. `TargetUser` 등 다른 method의 선택자는 허용하지 않는다. 현재 계정·서명된 Read scope·tenant membership·허용 node를 먼저 검사한 다음 정렬하고 페이지를 만든다. system admin도 Session의 Read scope가 있어야 한다. 일반 사용자가 Node만 지정해도 다른 tenant의 Task 수나 페이지 위치는 노출하지 않는다.
 
-응답은 `Schema:1`, `Code`, `Tasks`, `TasksNext`, `TasksRootRevision`을 포함한다. 한 페이지는 최대16행, 행 JSON 합계96KiB다. Task key→generation→revision 순으로 정렬한다. cursor는 현재 상태 index·Apps/Catalog/Members/Vault root·사용자·서명 scope·전체 필터에 결합된다. 상태가 바뀌면 `conflict`로 거부하므로 빈 cursor에서 다시 시작하고 이전 페이지와 섞지 않는다. 총 Task 개수나 숨긴 행의 위치는 반환하지 않는다.
+성공 응답의 `Data`는 `{Tasks,Next,RootRevision}`이다. 한 페이지는 최대16행, 행 JSON 합계96KiB다. Task key→generation→revision 순으로 정렬한다. cursor는 현재 상태 index·Apps/Catalog/Members/Vault root·사용자·서명 scope·전체 필터에 결합된다. 상태가 바뀌면 `conflict`로 거부하므로 빈 cursor에서 다시 시작하고 이전 페이지와 섞지 않는다. 총 Task 개수나 숨긴 행의 위치는 반환하지 않는다.
 
 ## Task 행
 
@@ -37,15 +37,15 @@ MYDCP User kind1의 Request는 다음 필드를 사용한다. 인증·record·�
 
 설정 변경에서 Task를 `Keep`으로 재사용하면 원 효과의 claim·작업 ID·native는 보존한다. Task 조회·replica health·DNS 가용성은 동일 객체와 native에 대한 현재 실행의 검증된 서명 관측을 사용한다. 이전 작업의 관측 만료가 현재 관측을 가리지는 않으며, 현재 관측 자체의 만료나 노드 격리는 계속 적용한다.
 
-실시간 상태는 정확한 원 컨테이너를 검사한 소유자가 서명한 task 측정에서 읽는다. 기존 lifecycle Observation의 공개 `TaskFact`는 원 실행의 마지막 증거로 재사용할 수 있다. task 측정은 기존 node-private observations DB와 MYDCP Observation 경로를 사용하며 현재 member/원 Task key·generation·revision·native를 대조한다. 설치 키 교체 뒤에도 원 Task/native 사실은 유지하고, 새 측정 봉투만 현재 논리 노드 키로 서명해 현재 observations DB에 저장한다. 과거 DB의 기존 서명 보고를 다시 쓰거나 폐기 키의 외부 보고를 허용하지 않는다. 소유자 로컬 저장은 즉시, 다른 node 전달은 기존30초 보고 주기다. 조회 cursor는 현재 권한으로 거른 측정 행도 고정하므로 값이 바뀐 페이지를 섞을 수 없다. 외부 Docker 재시작의 새 process 시각이 보이더라도 원 제어 Start/Exit 증거·종료·Gone·Volume fence·관리 승인을 바꾸지 않는다. 이름만 사라졌다는 사실이나 Docker 조회 실패를 실제 native 종료 증거로 취급하지 않는다. Resource에는 환경 변수·provider 경로·credential·가져온 Secret 값·서명 원문을 넣지 않는다.
+실시간 상태는 정확한 원 컨테이너를 검사한 소유자가 서명한 task 측정에서 읽는다. 기존 lifecycle Observation의 공개 `TaskFact`는 원 실행의 마지막 증거로 재사용할 수 있다. task 측정은 기존 node-private observations DB와 SFCP Observation 경로를 사용하며 현재 member/원 Task key·generation·revision·native를 대조한다. 설치 키 교체 뒤에도 원 Task/native 사실은 유지하고, 새 측정 봉투만 현재 논리 노드 키로 서명해 현재 observations DB에 저장한다. 과거 DB의 기존 서명 보고를 다시 쓰거나 폐기 키의 외부 보고를 허용하지 않는다. 소유자 로컬 저장은 즉시, 다른 node 전달은 기존30초 보고 주기다. 조회 cursor는 현재 권한으로 거른 측정 행도 고정하므로 값이 바뀐 페이지를 섞을 수 없다. 외부 Docker 재시작의 새 process 시각이 보이더라도 원 제어 Start/Exit 증거·종료·Gone·Volume fence·관리 승인을 바꾸지 않는다. 이름만 사라졌다는 사실이나 Docker 조회 실패를 실제 native 종료 증거로 취급하지 않는다. Resource에는 환경 변수·provider 경로·credential·가져온 Secret 값·서명 원문을 넣지 않는다.
 
 ## CLI
 
 ```sh
-mydc --tenant shop manage tasks
-mydc --tenant shop manage tasks --app store --node node-a
-mydc manage tasks --all-tenants --node node-a
-mydc --tenant shop manage tasks --after '<TasksNext>'
+sfcli --tenant shop manage tasks
+sfcli --tenant shop manage tasks --app store --node node-a
+sfcli manage tasks --all-tenants --node node-a
+sfcli --tenant shop manage tasks --after '<Next>'
 ```
 
 기본은 CLI에서 선택한 tenant다. `--all-tenants`도 현재 권한을 확대하지 않는다. 로그·통계·프로세스·exec는 반환된 TaskID를 사용하여 [컨테이너 운영 API](container-operations.md)를 호출한다.

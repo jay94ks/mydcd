@@ -8,14 +8,14 @@ func TestComposeDNSReversePrefixBudgetsAndDisabledNoOwner(t *testing.T) {
 	f := makeFixture(t)
 	c := smallCompose(t)
 	n := c.Networks["app"]
-	d := &DNSDeclaration{Enabled: true, Reverse: true, Zone: "app.mydc.test", TTL: 30, NegativeTTL: 5, Transports: []string{"udp", "tcp"}}
+	d := &DNSDeclaration{Enabled: true, Reverse: true, Zone: "app.sfc.test", TTL: 30, NegativeTTL: 5, Transports: []string{"udp", "tcp"}}
 	d.Limits.Cache, d.Limits.Inflight, d.Limits.TCP, d.Limits.Timeout = 4, 4, 2, 2000
-	n.MyDC.DNS = d
+	n.Sfc.DNS = d
 	c.Networks["app"] = n
 	if err := c.validate(); err != nil {
 		t.Fatal("declared /24 reverse", err)
 	}
-	for _, invalid := range []func(){func() { d.TTL = 3601 }, func() { d.NegativeTTL = 31 }, func() { d.Limits.Cache = 4097 }, func() { p := n.MyDC.Pools["node-a"]; p.CIDR = "10.240.10.0/28"; n.MyDC.Pools["node-a"] = p }} {
+	for _, invalid := range []func(){func() { d.TTL = 3601 }, func() { d.NegativeTTL = 31 }, func() { d.Limits.Cache = 4097 }, func() { p := n.Sfc.Pools["node-a"]; p.CIDR = "10.240.10.0/28"; n.Sfc.Pools["node-a"] = p }} {
 		invalid()
 		c.Networks["app"] = n
 		if err := c.validate(); err == nil {

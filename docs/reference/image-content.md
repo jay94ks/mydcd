@@ -4,11 +4,11 @@
 
 ```sh
 # 원 바이트는 새 0600 파일에, stderr에는 검증된 공개 정보만 출력한다.
-mydc --tenant payments image pull-content registry.example/team/app@sha256:ROOT_DIGEST \
+sfcli --tenant payments image pull-content registry.example/team/app@sha256:ROOT_DIGEST \
   --kind manifest -O manifest.json
 
 # manifest의 config/layer descriptor에서 읽은 digest를 지정한다.
-mydc --tenant payments --timeout 5m image pull-content registry.example/team/app@sha256:IMAGE_DIGEST \
+sfcli --tenant payments --timeout 5m image pull-content registry.example/team/app@sha256:IMAGE_DIGEST \
   --kind layer --digest sha256:LAYER_DIGEST -O layer.bin
 ```
 
@@ -16,9 +16,9 @@ mydc --tenant payments --timeout 5m image pull-content registry.example/team/app
 
 FD는3 이상인 pipe/socket 또는 현재 Linux user 소유의 private regular file이다. pipe/socket은 write deadline을 지원해야 한다. CLI는 복제한 FD만 닫으며 원 FD를 소유하지 않는다. regular file은 성공 후 fsync한다. 받은 원문을 stdout·공개 진단 JSON으로 출력하지 않는다. consumer writer는 caller context/취소를 준수해야 한다.
 
-## MYDCP 메시지
+## SFCP 메시지
 
-일반 User8 JSON method와 구분하여 **ImageContent 목적16**을 사용한다. schema/ABI는1이며 Unix TLS와 QUIC에서 동일하다. 공통24바이트 header와 TLV/LE 규칙은 [MYDCP](../protocol/mydcp.md), 로컬 TLS record는 [Unix API](unix-sockets/23-purpose16.md)를 따른다.
+일반 User8 JSON method와 구분하여 **ImageContent 목적16**을 사용한다. schema/ABI는1이며 Unix TLS와 QUIC에서 동일하다. 공통24바이트 header와 TLV/LE 규칙은 [SFCP](../protocol/sfcp.md), 로컬 TLS record는 [Unix API](unix-sockets/23-purpose16.md)를 따른다.
 
 | Kind | 방향 | 필수 TLV | body 한도 |
 |---|---|---|---|
@@ -51,7 +51,7 @@ ready 뒤 data offset은0부터 정확히 이어져야 하며 선언 Bytes를 �
 
 ## 수락된 빌드의 FROM 본문
 
-kind5는 수락된 빌드가 고정한 FROM의 본문을 읽는 내부 실행 경계다. 현재 설치된 builder member가 원 source owner에 직접 QUIC로 요청한다. 일반 사용자·Unix listener의 kind5 요청은 거부한다. 별도 사용자 관리 명령이나 새 session을 발급하지 않으며, 원 job의 signed begin·현재 job/권한·원 source reader 세대/ReadSet을 다시 검사한다. 원 로그인 session의 만료가 이미 수락된 job의 권한을 대신 결정하지 않는다.
+kind16은 수락된 빌드가 고정한 FROM의 본문을 읽는 내부 실행 경계다. 현재 설치된 builder member가 원 source owner에 직접 QUIC로 요청한다. 일반 사용자·Unix listener의 kind16 요청은 거부한다. 별도 사용자 관리 명령이나 새 session을 발급하지 않으며, 원 job의 signed begin·현재 job/권한·원 source reader 세대/ReadSet을 다시 검사한다. 원 로그인 session의 만료가 이미 수락된 job의 권한을 대신 결정하지 않는다.
 
 Envelope는 `{Body}`이며 Session/Signature/Relay는 없다. Body는 다음 JSON을 base64로 담는다.
 

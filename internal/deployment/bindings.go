@@ -9,9 +9,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/secrets"
-	"github.com/jay94ks/mydcd/internal/workload/volumes"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/secrets"
+	"github.com/jay94ks/seafield/internal/workload/volumes"
 )
 
 const maxBindings = 4096
@@ -72,7 +72,7 @@ func (b Bindings) clone() (Bindings, error) {
 // Reserve protects complete recipes, including file projections. A returned
 // generation cannot be borrowed again; changed recipes require new task/native
 // lifecycles. This method reads no provider values and creates no native object.
-func (b Bindings) Reserve(expected uint64, c access.Catalog, trees map[string]secrets.Tree, a secrets.Approvals, v map[string]volumes.State, needs []Needs, now int64) (Reservation, error) {
+func (b Bindings) Reserve(expected uint64, c access.Catalog, trees map[string]secrets.Tree, a secrets.Approvals, v map[string]volumes.State, needs []Needs, now int64, shares ShareMode) (Reservation, error) {
 	if expected != b.revision {
 		return Reservation{}, access.ErrConflict
 	}
@@ -95,7 +95,7 @@ func (b Bindings) Reserve(expected uint64, c access.Catalog, trees map[string]se
 	if len(b.live)+added > maxBindings {
 		return Reservation{}, ErrInputs
 	}
-	r, e := reserve(b.cluster, c, trees, a, v, needs, now)
+	r, e := reserve(b.cluster, c, trees, a, v, needs, now, shares)
 	if e != nil {
 		return Reservation{}, e
 	}

@@ -17,7 +17,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/containerops"
+	"github.com/jay94ks/seafield/internal/containerops"
 	"golang.org/x/sys/unix"
 )
 
@@ -83,7 +83,7 @@ func verifyManagedSessionCLITerminal(t *testing.T, parent context.Context, root 
 	if err != nil {
 		t.Fatal(err)
 	}
-	child := exec.CommandContext(ctx, os.Getenv("MYDC_TEST_CLI"), "--config", filepath.Join(root, "cli.yaml"), "--wallet-password-fd", "3", "--no-input", "--tenant", "tenant", "compose", "exec", "-p", "app", "--operation", "cli-tty-original", "-it", "web", "--", "/backend", "--exec-io-fixture")
+	child := exec.CommandContext(ctx, os.Getenv("SFC_TEST_CLI"), "--config", filepath.Join(root, "cli.yaml"), "--wallet-password-fd", "3", "--no-input", "--tenant", "tenant", "compose", "exec", "-p", "app", "--operation", "cli-tty-original", "-it", "web", "--", "/backend", "--exec-io-fixture")
 	child.Env = append(os.Environ(), "HOME="+filepath.Join(root, "cli-home"))
 	child.ExtraFiles = []*os.File{password}
 	child.Stdin, child.Stdout, child.Stderr = slave, slave, slave
@@ -188,7 +188,7 @@ func verifyManagedSessionCLIWatch(t *testing.T, parent context.Context, root str
 			} else {
 				args = append(args, "--watch", "--interval", "1s", "--json")
 			}
-			child := exec.CommandContext(ctx, os.Getenv("MYDC_TEST_CLI"), args...)
+			child := exec.CommandContext(ctx, os.Getenv("SFC_TEST_CLI"), args...)
 			child.Env = append(os.Environ(), "HOME="+filepath.Join(root, "cli-home"))
 			child.ExtraFiles = []*os.File{password}
 			var output, diagnostic sessionCLIOutput

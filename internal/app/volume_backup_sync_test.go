@@ -10,7 +10,7 @@ import (
 	"syscall"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/reconcile"
 )
 
 func TestBackupArtifactSyncFailureKeepsOriginalUntilDurableRecoveryOrCancel(t *testing.T) {

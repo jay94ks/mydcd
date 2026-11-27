@@ -15,9 +15,9 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/web/mydc"
-	"github.com/jay94ks/mydcd/internal/web/seal"
-	"github.com/jay94ks/mydcd/internal/web/store"
+	"github.com/jay94ks/seafield/internal/web/seal"
+	"github.com/jay94ks/seafield/internal/web/sfc"
+	"github.com/jay94ks/seafield/internal/web/store"
 )
 
 // Web app settings (UI-C1), the web settings change log (UI-A3) and the
@@ -63,6 +63,9 @@ func (s *Server) settings() store.Settings {
 	if v.MCPCallRetentionDays == 0 {
 		v.MCPCallRetentionDays = defaultMCPDays
 	}
+	if v.TrashRetentionDays == 0 {
+		v.TrashRetentionDays = defaultTrashDays
+	}
 	return v
 }
 
@@ -103,15 +106,18 @@ func (s *Server) prune() {
 	if _, err := s.opt.Store.PruneNotifications(now.Add(-days(v.NotificationRetentionDays))); err != nil {
 		s.log.Error("prune notifications", "err", err)
 	}
+	if _, err := s.opt.Store.PruneTrash(now); err != nil {
+		s.log.Error("prune deleted", "err", err)
+	}
 }
 
-// requireAdmin asks mydcd whether the user is a system administrator now
+// requireAdmin asks sfcd whether the user is a system administrator now
 // (not only at login).
 func (s *Server) requireAdmin(w http.ResponseWriter, r *http.Request, ws *webSession) bool {
 	ctx, cancel := s.callCtx(r)
 	defer cancel()
-	var who mydc.Whoami
-	err := ws.do(ctx, func(ctx context.Context, c mydc.Conn) error {
+	var who sfc.Whoami
+	err := ws.do(ctx, func(ctx context.Context, c sfc.Conn) error {
 		var err error
 		who, err = c.Whoami(ctx)
 		return err
@@ -195,7 +201,7 @@ func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request, ws *w
 	writeJSON(w, http.StatusOK, map[string]any{
 		"settings": v,
 		"defaults": map[string]any{"sessionMaxHours": 0, "sessionIdleMinutes": 0, "opRetentionDays": int(s.opt.OpRetention / (24 * time.Hour)), "auditRetentionDays": defaultAuditDays, "notificationRetentionDays": defaultNotifyDays,
-			"allowKeyLogin": true, "maxSessionsPerUser": 0, "webhookDeliveryRetentionDays": defaultHookDays, "mcpCallRetentionDays": defaultMCPDays},
+			"allowKeyLogin": true, "maxSessionsPerUser": 0, "webhookDeliveryRetentionDays": defaultHookDays, "mcpCallRetentionDays": defaultMCPDays, "trashRetentionDays": defaultTrashDays},
 		"info": map[string]any{
 			"version":        s.opt.Version,
 			"schema":         store.SchemaVersion,
@@ -203,14 +209,14 @@ func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request, ws *w
 			"dbPath":         s.opt.DBPath,
 			"socket":         s.opt.Socket,
 			"connected":      connected,
-			"mydcdVersion":   ver,
+			"sfcdVersion":    ver,
 			"restorePending": s.opt.DataDir != "" && restoreErr == nil,
 		},
 		"seal": s.sealSummary(),
 	})
 }
 
-type mydcdVersionView struct {
+type sfcdVersionView struct {
 	Version   string `json:"version"`
 	Commit    string `json:"commit,omitempty"`
 	BuildTime string `json:"buildTime,omitempty"`
@@ -218,9 +224,9 @@ type mydcdVersionView struct {
 	Node      string `json:"node,omitempty"`
 }
 
-// backendVersion: whether a new mydcd connection opens now and, if so, the
+// backendVersion: whether a new sfcd connection opens now and, if so, the
 // server-version it answers (REQ-48; read before login, then closed).
-func (s *Server) backendVersion(ctx context.Context) (bool, *mydcdVersionView) {
+func (s *Server) backendVersion(ctx context.Context) (bool, *sfcdVersionView) {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 	c, err := s.opt.Client.Dial(ctx)
@@ -232,9 +238,9 @@ func (s *Server) backendVersion(ctx context.Context) (bool, *mydcdVersionView) {
 	if err != nil {
 		return true, nil
 	}
-	// mydcd's own answer: Protocol is the MYDCP number, BuildTime
+	// sfcd's own answer: Protocol is the SFCP number, BuildTime
 	// its vcs.time (RFC 3339) when known; it names no node.
-	return true, &mydcdVersionView{Version: v.Version, Commit: v.Commit, Protocol: strconv.Itoa(int(v.Protocol)), BuildTime: v.BuildTime}
+	return true, &sfcdVersionView{Version: v.Version, Commit: v.Commit, Protocol: strconv.Itoa(int(v.Protocol)), BuildTime: v.BuildTime}
 }
 
 func checkRange(name string, v, lo, hi int) error {
@@ -265,6 +271,7 @@ func (s *Server) handlePutSettings(w http.ResponseWriter, r *http.Request, ws *w
 		checkRange("maxSessionsPerUser", n.MaxSessionsPerUser, 0, 50),
 		checkRange("webhookDeliveryRetentionDays", n.WebhookDeliveryRetentionDays, 0, 3650),
 		checkRange("mcpCallRetentionDays", n.MCPCallRetentionDays, 0, 3650),
+		checkRange("trashRetentionDays", n.TrashRetentionDays, 0, 30),
 	} {
 		if err != nil {
 			writeError(w, http.StatusUnprocessableEntity, "invalid", err.Error())
@@ -307,7 +314,7 @@ func (s *Server) handleSealReset(w http.ResponseWriter, r *http.Request, ws *web
 	before, _ := s.opt.Seal.Status()
 	if err := s.opt.Seal.Reset(); err != nil {
 		if errors.Is(err, seal.ErrUnavailable) {
-			writeError(w, http.StatusConflict, "no-key", "start the daemon with MYDC_WEB_SEAL_KEY first")
+			writeError(w, http.StatusConflict, "no-key", "start the daemon with SFC_WEB_SEAL_KEY first")
 			return
 		}
 		if errors.Is(err, seal.ErrReady) {
@@ -327,7 +334,7 @@ func (s *Server) handleBackup(w http.ResponseWriter, r *http.Request, ws *webSes
 	if !s.requireAdmin(w, r, ws) {
 		return
 	}
-	name := "mydc-web-" + s.now().UTC().Format("20060102-150405") + ".db"
+	name := "sfc-web-" + s.now().UTC().Format("20060102-150405") + ".db"
 	// Size and content come from the same read transaction, so a write
 	// committed meanwhile cannot make the length disagree with the body.
 	_, err := s.opt.Store.Backup(func(size int64) io.Writer {
@@ -407,9 +414,9 @@ func (s *Server) handleAudit(w http.ResponseWriter, r *http.Request, ws *webSess
 		before = t
 	}
 	ctx, cancel := s.callCtx(r)
-	var who mydc.Whoami
-	var tenants []mydc.TenantView
-	err := ws.do(ctx, func(ctx context.Context, c mydc.Conn) error {
+	var who sfc.Whoami
+	var tenants []sfc.TenantView
+	err := ws.do(ctx, func(ctx context.Context, c sfc.Conn) error {
 		var err error
 		if who, err = c.Whoami(ctx); err != nil {
 			return err

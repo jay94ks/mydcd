@@ -8,7 +8,7 @@ import (
 	"net/netip"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/access"
+	"github.com/jay94ks/seafield/internal/access"
 )
 
 // A local network stays on one server: join is refused while it is on, it
@@ -87,7 +87,7 @@ func TestToggleKeepsRoutesBoundToTheNetworkActive(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	second := TUNDefinition{Tenant: "second", Name: "db", Members: []TUNNode{{Node: "node-b", Owner: public(f.b), Pools: definition("second", "unused", "node-b", "10.2.0.0/24", f.b).Pools, Addresses: []netip.Prefix{netip.MustParsePrefix("10.72.1.2/32")}}}}
+	second := TUNDefinition{Tenant: "second", Name: "db", Members: []TUNNode{{Node: "node-b", Owner: public(f.b), Pools: definition("second", "unused", "node-b", "10.2.0.0/24", f.b).Pools}}}
 	if n, err = n.CreateTUN(f.c, q, "admin", n.Revision(), second); err != nil {
 		t.Fatal(err)
 	}

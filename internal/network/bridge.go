@@ -7,16 +7,14 @@ import (
 	"errors"
 	"maps"
 	"sort"
-	"strconv"
 
-	"github.com/jay94ks/mydcd/internal/engine"
-	"github.com/jay94ks/mydcd/internal/reconcile"
-	"github.com/jay94ks/mydcd/internal/schema"
+	"github.com/jay94ks/seafield/internal/engine"
+	"github.com/jay94ks/seafield/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/schema"
 
 	cerrdefs "github.com/containerd/errdefs"
 	dockernet "github.com/moby/moby/api/types/network"
 	"github.com/moby/moby/client"
-	"github.com/vishvananda/netlink"
 )
 
 type BridgeSpec struct {
@@ -58,9 +56,9 @@ type BridgeProtection func(context.Context, string, reconcile.Resource) error
 type BridgeDriver struct {
 	Engine  *engine.Client
 	Protect BridgeProtection
-	// Nil uses the native netlink query. Tests inject only this OS boundary;
-	// it supplies absence, never a successful SDK/native creation result.
-	lookupBridge func(string) (netlink.Link, error)
+	// Hooks answers the engine's sfc network driver. Execute registers each
+	// create with it before sending; without it nothing is created.
+	Hooks *EngineHooks
 }
 
 func (d *BridgeDriver) Recover(ctx context.Context, key string, op reconcile.Operation) (reconcile.Outcome, error) {
@@ -76,12 +74,11 @@ func bridgeOptions(s BridgeSpec, id engine.Identity) client.NetworkCreateOptions
 		config := dockernet.IPAMConfig{Subnet: p.Prefix, Gateway: p.Gateway, IPRange: p.IPAM.Dynamic}
 		ipam.Config = append(ipam.Config, config)
 	}
-	// A deterministic kernel name fits IFNAMSIZ and remains tied to this exact
-	// Engine object. Full labels/spec and readback establish ownership.
-	bridgeName := bridgeDeviceName(id)
-	options := map[string]string{"com.docker.network.bridge.name": bridgeName, "com.docker.network.driver.mtu": strconv.Itoa(s.MTU)}
+	// The sfc driver takes the device name and MTU from the create hook
+	// (EngineHooks.Create) and never masquerades; only the gateway mode is
+	// asked for here.
+	options := map[string]string{}
 	if s.GatewayMode == ManagedGatewayMode {
-		options["com.docker.network.bridge.enable_ip_masquerade"] = "false"
 		if v4 {
 			options["com.docker.network.bridge.gateway_mode_ipv4"] = s.GatewayMode
 		}
@@ -89,8 +86,12 @@ func bridgeOptions(s BridgeSpec, id engine.Identity) client.NetworkCreateOptions
 			options["com.docker.network.bridge.gateway_mode_ipv6"] = s.GatewayMode
 		}
 	}
-	return client.NetworkCreateOptions{Driver: "bridge", Scope: "local", EnableIPv4: &v4, EnableIPv6: &v6, IPAM: ipam, Internal: s.Internal, Options: options, Labels: id.Labels}
+	return client.NetworkCreateOptions{Driver: EngineDriver, Scope: "local", EnableIPv4: &v4, EnableIPv6: &v6, IPAM: ipam, Internal: s.Internal, Options: options, Labels: id.Labels}
 }
+
+// EngineDriver is the engine's built-in network driver: the bridge driver
+// with a synchronous call to sfcd around each step (seafield patch 0011).
+const EngineDriver = "sfc"
 
 func bridgeDeviceName(id engine.Identity) string { return "md" + id.Name[len(id.Name)-12:] }
 
@@ -109,7 +110,7 @@ func BridgeDeviceName(owner, key string, generation uint64, digest [32]byte) (st
 
 func matchBridge(n dockernet.Inspect, s BridgeSpec, id engine.Identity) bool {
 	options := bridgeOptions(s, id)
-	if !id.Matches(n.Name, n.Labels) || n.ID == "" || n.Driver != "bridge" || n.Scope != "local" || n.Internal != s.Internal || n.EnableIPv4 != *options.EnableIPv4 || n.EnableIPv6 != *options.EnableIPv6 || n.Ingress || n.ConfigOnly || n.IPAM.Driver != "default" || len(n.IPAM.Options) != 0 || len(n.IPAM.Config) != len(options.IPAM.Config) {
+	if !id.Matches(n.Name, n.Labels) || n.ID == "" || n.Driver != EngineDriver || n.Scope != "local" || n.Internal != s.Internal || n.EnableIPv4 != *options.EnableIPv4 || n.EnableIPv6 != *options.EnableIPv6 || n.Ingress || n.ConfigOnly || n.IPAM.Driver != "default" || len(n.IPAM.Options) != 0 || len(n.IPAM.Config) != len(options.IPAM.Config) {
 		return false
 	}
 	for k, v := range options.Options {
@@ -182,24 +183,26 @@ func (d *BridgeDriver) Execute(ctx context.Context, key string, op reconcile.Ope
 					return reconcile.EffectNotApplied, err // SDK create positively not sent.
 				}
 			}
-			lookup := d.lookupBridge
-			if lookup == nil {
-				lookup = netlink.LinkByName
-			}
-			if _, err := lookup(bridgeDeviceName(id)); err == nil {
-				// Docker may configure an existing user-created bridge even
-				// when it has no corresponding network record. Never adopt it.
-				return reconcile.EffectNotApplied, engine.ErrOwnership
-			} else {
-				var missing netlink.LinkNotFoundError
-				if !errors.As(err, &missing) {
-					return reconcile.EffectNotApplied, err
-				}
+			if d.Hooks == nil {
+				return reconcile.EffectNotApplied, errors.New("no engine network hooks: the sfc driver would refuse the create")
 			}
 			if err := ctx.Err(); err != nil {
 				return reconcile.EffectNotApplied, err
 			}
-			if _, err = api.NetworkCreate(ctx, id.Name, bridgeOptions(s, id)); err != nil {
+			stage, err := d.Hooks.Expect(key, op, s, id)
+			if err != nil {
+				return reconcile.EffectNotApplied, err
+			}
+			_, err = api.NetworkCreate(ctx, id.Name, bridgeOptions(s, id))
+			// The sfc driver asks the create hook before it makes anything,
+			// so what the hook saw decides: never asked, refused or undone
+			// by the engine means nothing was made. After done, a late
+			// create hook for this name is answered not-owner, so even a
+			// cancelled call that never reached the hook made nothing.
+			if reached := stage(); err != nil {
+				if hookRefusedCreate(reached) {
+					return reconcile.EffectNotApplied, err
+				}
 				return reconcile.EffectUnknown, err
 			}
 		}
@@ -217,15 +220,8 @@ func (d *BridgeDriver) Inspect(ctx context.Context, key string, op reconcile.Ope
 	got, err := d.Engine.API.NetworkInspect(ctx, id.Name, client.NetworkInspectOptions{})
 	if cerrdefs.IsNotFound(err) {
 		if op.Kind == reconcile.Remove {
-			name := bridgeOptions(s, id).Options["com.docker.network.bridge.name"]
-			if _, linkErr := netlink.LinkByName(name); linkErr == nil {
-				return reconcile.EffectUnknown, nil
-			} else {
-				var missing netlink.LinkNotFoundError
-				if !errors.As(linkErr, &missing) {
-					return reconcile.EffectUnknown, linkErr
-				}
-			}
+			// The sfc driver removes the device before the engine drops
+			// the network record, so an absent record means it is gone.
 			return reconcile.EffectApplied, nil
 		}
 		// An absent network cannot prove an accepted create terminated.
@@ -238,38 +234,12 @@ func (d *BridgeDriver) Inspect(ctx context.Context, key string, op reconcile.Ope
 		return reconcile.EffectUnknown, engine.ErrOwnership
 	}
 	if op.Kind == reconcile.Apply {
-		if err := inspectBridgeKernel(s, id); err != nil {
-			return reconcile.EffectUnknown, err
+		// The created hook checked the device when it was made; after a
+		// restart the engine's record is what the joins are matched to.
+		if d.Hooks != nil {
+			d.Hooks.Adopt(got.Network.ID, key, op.Target.Generation, s.MTU)
 		}
 		return reconcile.EffectApplied, nil
 	}
 	return reconcile.EffectUnknown, nil
-}
-
-func inspectBridgeKernel(s BridgeSpec, id engine.Identity) error {
-	name := bridgeOptions(s, id).Options["com.docker.network.bridge.name"]
-	link, err := netlink.LinkByName(name)
-	if err != nil {
-		return err
-	}
-	if link.Type() != "bridge" || link.Attrs().MTU != s.MTU {
-		return engine.ErrOwnership
-	}
-	addresses, err := netlink.AddrList(link, netlink.FAMILY_ALL)
-	if err != nil {
-		return err
-	}
-	for _, p := range s.Pools {
-		found := false
-		for _, a := range addresses {
-			bits, _ := a.Mask.Size()
-			if a.IP.String() == p.Gateway.String() && bits == p.Prefix.Bits() {
-				found = true
-			}
-		}
-		if !found {
-			return errors.New("Engine bridge gateway absent from kernel")
-		}
-	}
-	return nil
 }

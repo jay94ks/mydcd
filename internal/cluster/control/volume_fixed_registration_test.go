@@ -9,11 +9,11 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/nodestorage"
-	"github.com/jay94ks/mydcd/internal/tenancy"
-	"github.com/jay94ks/mydcd/internal/workload"
-	"github.com/jay94ks/mydcd/internal/workload/volumes"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/nodestorage"
+	"github.com/jay94ks/seafield/internal/tenancy"
+	"github.com/jay94ks/seafield/internal/workload"
+	"github.com/jay94ks/seafield/internal/workload/volumes"
 )
 
 // These tests use the PRODUCT FSM/Volume cores with simulated signed native
@@ -21,7 +21,7 @@ import (
 func fixedRegistrationFixture(t *testing.T) (*nodeStorageFixture, VolumeFixedRegister) {
 	t.Helper()
 	f := newNodeStorageFixture(t)
-	f.apply("admin", "add-node-storage", 0, nodestorage.Definition{Node: "node-a", ID: "hdd", Path: "/mnt/hdd", MaxVolumes: 2, Tenants: []string{"tenant"}}, state.Applied)
+	f.apply("admin", "add-node-storage", 0, nodestorage.Definition{Node: "node-a", ID: "hdd", Path: "/mnt/hdd", Tenants: []string{"tenant"}}, state.Applied)
 	f.observe()
 	for _, tenant := range []string{"", "tenant"} {
 		f.apply("admin", "set-node-quota", 0, tenancy.NodeLimit{Tenant: tenant, Node: "node-a", Owner: f.p.TrustRoot, Capacity: workload.Resources{CPU: 100, Memory: 1 << 20}, Networks: 1, MaxConsumers: 4}, state.Applied)

@@ -10,12 +10,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/lifecycle"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/containerops"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/observability"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/lifecycle"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/containerops"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/observability"
 )
 
 func TestPublicReadProjectionUsesCurrentTasksAndKeepsUnknownNativeFactsUnknown(t *testing.T) {
@@ -54,7 +54,7 @@ func TestPublicReadProjectionUsesCurrentTasksAndKeepsUnknownNativeFactsUnknown(t
 	user.Enabled = false
 	expected := user.Revision
 	user.Revision = 0
-	f.apply("public-read-disable", "put-user", expected, user, state.Applied)
+	f.apply("public-read-disable", "put-user", expected, accountFields(user), state.Applied)
 	if _, err = f.p.PublicRead(f.s, f.session, 10, "network-users", "tenant", PublicReadQuery{Name: "services"}, ""); !errors.Is(err, access.ErrDenied) {
 		t.Fatal("old session kept metadata authority", err)
 	}

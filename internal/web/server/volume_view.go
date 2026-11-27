@@ -5,14 +5,14 @@ package server
 import (
 	"context"
 
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/web/mydc"
-	"github.com/jay94ks/mydcd/internal/workload/volumes"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/web/sfc"
+	"github.com/jay94ks/seafield/internal/workload/volumes"
 )
 
-// volumeView: a data store row as the screens read it, built from mydcd's
+// volumeView: a data store row as the screens read it, built from sfcd's
 // `volumes` row (control.VolumeView): Tenant/App/Name from Scope, Node from
-// Owner.Node, Kind fixed (mydcd "node-fixed") or shared. Writer (the one
+// Owner.Node, Kind fixed (sfcd "node-fixed") or shared. Writer (the one
 // writing app service or standalone) comes from the volume-users read and
 // is filled only where a screen shows it. UsedBytes is the owner's last
 // periodic scan (absent = unknown, never zero) taken at UsageObservedAt
@@ -35,7 +35,7 @@ type volumeView struct {
 	TargetNode        string           `json:",omitempty"`
 	MovePhase         string           `json:",omitempty"`
 	Retained          []volumeRetained `json:",omitempty"`
-	// Scope and NativeBinding go back to mydcd in change payloads.
+	// Scope and NativeBinding go back to sfcd in change payloads.
 	Scope         volumes.Scope `json:"-"`
 	NativeBinding [32]byte      `json:"-"`
 }
@@ -59,12 +59,12 @@ func volumeRow(v control.VolumeView) volumeView {
 	return out
 }
 
-// volumePage reads one `volumes` page as screen rows. mydcd keeps a deleted
+// volumePage reads one `volumes` page as screen rows. sfcd keeps a deleted
 // volume's row (phase Deleted) as a record; it is no data store any more,
 // so the screens do not list it.
-func volumePage(ctx context.Context, c mydc.Conn, tenant, after string) (mydc.Page[volumeView], error) {
+func volumePage(ctx context.Context, c sfc.Conn, tenant, after string) (sfc.Page[volumeView], error) {
 	p, err := c.Volumes(ctx, tenant, after)
-	out := mydc.Page[volumeView]{Items: make([]volumeView, 0, len(p.Items)), Next: p.Next, Revision: p.Revision, Collection: p.Collection, ApprovalRevision: p.ApprovalRevision}
+	out := sfc.Page[volumeView]{Items: make([]volumeView, 0, len(p.Items)), Next: p.Next, Revision: p.Revision, Collection: p.Collection, ApprovalRevision: p.ApprovalRevision}
 	for _, v := range p.Items {
 		if v.Phase == "Deleted" {
 			continue
@@ -74,10 +74,10 @@ func volumePage(ctx context.Context, c mydc.Conn, tenant, after string) (mydc.Pa
 	return out, err
 }
 
-// fillWriters sets each row's Writer from mydcd's volume-users rows: the
+// fillWriters sets each row's Writer from sfcd's volume-users rows: the
 // one user that writes (an app service "app/service" or a standalone
 // name); none or several leave it empty. A failed read leaves it empty too.
-func fillWriters(ctx context.Context, c mydc.Conn, rows []volumeView) {
+func fillWriters(ctx context.Context, c sfc.Conn, rows []volumeView) {
 	for i := range rows {
 		v := &rows[i]
 		_, users, err := publicReadAll(ctx, c, "volume-users", v.Tenant, control.PublicReadQuery{Name: v.Name, App: v.App})
@@ -92,14 +92,14 @@ func fillWriters(ctx context.Context, c mydc.Conn, rows []volumeView) {
 func volumeWriter(us []resourceUser) string {
 	w := ""
 	for _, u := range us {
-		if u.ReadOnly || u.Kind != mydc.NetworkUserService && u.Kind != mydc.NetworkUserStandalone {
+		if u.ReadOnly || u.Kind != sfc.NetworkUserService && u.Kind != sfc.NetworkUserStandalone {
 			continue
 		}
 		if w != "" {
 			return ""
 		}
 		w = u.Standalone
-		if u.Kind == mydc.NetworkUserService {
+		if u.Kind == sfc.NetworkUserService {
 			w = u.App + "/" + u.Service
 		}
 	}

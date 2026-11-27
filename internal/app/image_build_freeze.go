@@ -8,8 +8,8 @@ import (
 	"runtime"
 	"slices"
 
-	"github.com/jay94ks/mydcd/internal/imagebuild"
-	"github.com/jay94ks/mydcd/internal/mydcp"
+	"github.com/jay94ks/seafield/internal/imagebuild"
+	"github.com/jay94ks/seafield/internal/sfcp"
 )
 
 // Only the immutable, sealed original is inspected. No missing archive/root
@@ -18,13 +18,13 @@ func (r *Runtime) imageBuildDockerfile(ctx context.Context, spec imagebuild.JobS
 	r.life.RLock()
 	defer r.life.RUnlock()
 	if r.closed || r.ctx.Err() != nil || r.nodeRoots == nil || r.reports == nil {
-		return nil, mydcp.ErrAdmission
+		return nil, sfcp.ErrAdmission
 	}
 	r.imageBuildMu.Lock()
 	defer r.imageBuildMu.Unlock()
 	grant, err := r.imageBuildAuthority(ctx, spec, true)
 	if err != nil || !grant.Allowed {
-		return nil, mydcp.ErrAdmission
+		return nil, sfcp.ErrAdmission
 	}
 	pin, err := r.nodeRoots.OpenRecordedPin(spec.Scope.Root, buildArtifactConsumer(spec.Scope))
 	if pin.Directory != nil {
@@ -55,7 +55,7 @@ func (r *Runtime) freezeImageBuildInputs(ctx context.Context, spec imagebuild.Jo
 	defer stop()
 	grant, err := r.imageBuildAuthority(ctx, spec, true)
 	if err != nil || !grant.Allowed {
-		return nil, mydcp.ErrAdmission
+		return nil, sfcp.ErrAdmission
 	}
 	if grant.Run.Phase != "queued" {
 		return slices.Clone(grant.Run.Inputs), nil
@@ -103,7 +103,7 @@ func (r *Runtime) freezeImageBuildInputs(ctx context.Context, spec imagebuild.Jo
 	}
 	grant, err = r.imageBuildAuthority(ctx, spec, true)
 	if err != nil || !grant.Allowed {
-		return nil, mydcp.ErrAdmission
+		return nil, sfcp.ErrAdmission
 	}
 	if grant.Run.Phase != "queued" {
 		return slices.Clone(grant.Run.Inputs), nil

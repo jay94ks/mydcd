@@ -66,7 +66,7 @@ func TestHistoricalAppFieldsReuseOverlayCoreWithoutForgingCurrentOwnerAnchors(t 
 		t.Fatal("missing current owner anchors accepted by compile path")
 	}
 	bad := field
-	bad.Path = []string{"x-mydc", "tenant"}
+	bad.Path = []string{"x-sfc", "tenant"}
 	if _, err = RestoreAppInput(f.body, nil, scope, []AppFieldOverlay{bad}); err == nil {
 		t.Fatal("historical field reader expanded to cluster scope")
 	}

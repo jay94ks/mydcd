@@ -6,11 +6,11 @@ import (
 	"crypto/ed25519"
 	"encoding/hex"
 	"encoding/json"
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/lifecycle"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	checker "github.com/jay94ks/mydcd/internal/workload/lifecycle"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/lifecycle"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/deployment"
+	checker "github.com/jay94ks/seafield/internal/workload/lifecycle"
 	"math"
 )
 
@@ -89,7 +89,7 @@ type TaskRestartReport struct {
 func TaskRestartReportBytes(r TaskRestartReport) []byte {
 	r.Signature = nil
 	raw, _ := json.Marshal(r)
-	return append([]byte("mydc-task-restart-report-1\x00"), raw...)
+	return append([]byte("sfc-task-restart-report-1\x00"), raw...)
 }
 func (r TaskRestartReport) Command() (state.Command, error) {
 	raw, err := json.Marshal(r)

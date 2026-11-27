@@ -6,11 +6,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/desired"
-	"github.com/jay94ks/mydcd/internal/ingress"
-	"github.com/jay94ks/mydcd/internal/network"
-	"github.com/jay94ks/mydcd/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/desired"
+	"github.com/jay94ks/seafield/internal/ingress"
+	"github.com/jay94ks/seafield/internal/network"
+	"github.com/jay94ks/seafield/internal/reconcile"
 	"strings"
 )
 
@@ -36,7 +36,9 @@ func (r *Runtime) reconcileIngress(v cluster.View, g desired.Graph) error {
 		return nil
 	}
 	for _, key := range r.ingress.Keys() {
-		keys[key] = true
+		if !clusterAppIngressKey(key) {
+			keys[key] = true
+		}
 	}
 	var result error
 	for _, key := range desired.Sorted(keys) {

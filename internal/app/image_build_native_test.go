@@ -20,11 +20,11 @@ import (
 	"time"
 
 	cerrdefs "github.com/containerd/errdefs"
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/imagebuild"
-	"github.com/jay94ks/mydcd/internal/nodestorage"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/imagebuild"
+	"github.com/jay94ks/seafield/internal/nodestorage"
 	"github.com/moby/moby/api/pkg/authconfig"
 	"github.com/moby/moby/api/pkg/stdcopy"
 	"github.com/moby/moby/api/types/container"
@@ -37,17 +37,17 @@ import (
 // downloaded by the test. The root uses the existing S1 rollback baseline.
 func (f *managedRegistryNative) verifyImageBuildNative(t *testing.T, ctx context.Context, owner **Runtime, root string, p control.Policy, read func() cluster.View, change func(string, string, uint64, any)) {
 	t.Helper()
-	if os.Getenv("MYDC_TEST_RQ6_REMAINING") == "image-content" {
+	if os.Getenv("SFC_TEST_RQ6_REMAINING") == "image-content" {
 		f.verifyRegistryContent(t)
 		f.save()
 		return
 	}
-	if os.Getenv("MYDC_TEST_RQ6_REMAINING") == "image-queries" {
+	if os.Getenv("SFC_TEST_RQ6_REMAINING") == "image-queries" {
 		f.verifyManagedImageQueriesNative(t, ctx, *owner, p, read, change)
 		return
 	}
 	r := *owner
-	builder := os.Getenv("MYDC_TEST_BUILDKIT_IMAGE")
+	builder := os.Getenv("SFC_TEST_BUILDKIT_IMAGE")
 	builderImage, err := access.PinImage(builder)
 	if err != nil || builderImage.Reference != builder {
 		t.Fatal("explicit canonical digest-pinned BuildKit v0.35.1 rootless image required")
@@ -55,12 +55,12 @@ func (f *managedRegistryNative) verifyImageBuildNative(t *testing.T, ctx context
 	if _, err = r.docker.API.ImageInspect(ctx, builder); err != nil {
 		t.Fatal("builder must already be installed; no implicit preparation", err)
 	}
-	parent, tag := os.Getenv("MYDC_STORAGE_TEST_ROOT"), os.Getenv("MYDC_STORAGE_TEST_OWNER")
+	parent, tag := os.Getenv("SFC_STORAGE_TEST_ROOT"), os.Getenv("SFC_STORAGE_TEST_OWNER")
 	ns, err := os.Readlink("/proc/self/ns/mnt")
-	if err != nil || ns == os.Getenv("MYDC_STORAGE_HOST_MOUNT_NS") {
+	if err != nil || ns == os.Getenv("SFC_STORAGE_HOST_MOUNT_NS") {
 		t.Fatal("BuildKit fixture requires the owned private mount namespace", err)
 	}
-	marker, err := os.ReadFile(filepath.Join(parent, ".mydc-storage-test-owner"))
+	marker, err := os.ReadFile(filepath.Join(parent, ".sfc-storage-test-owner"))
 	if err != nil || string(marker) != tag {
 		t.Fatal("BuildKit fixture requires the exact owned ext4 root marker", err)
 	}
@@ -115,11 +115,11 @@ func (f *managedRegistryNative) verifyImageBuildNative(t *testing.T, ctx context
 		t.Fatal(err)
 	}
 	tenant, _ := users.Tenant("tenant")
-	change("rq6-builder-trust", "set-trust", tenant.Revision, control.TrustAssignment{Tenant: "tenant", Rules: append(tenant.ImageSources, access.TrustRule{Registry: builderImage.Registry, Repository: builderImage.Repository})})
+	change("rq6-builder-trust", "set-trust", tenant.Revision, control.TrustChange{Tenant: "tenant", Add: []access.TrustRule{access.TrustRule{Registry: builderImage.Registry, Repository: builderImage.Repository}}})
 	policy := imagebuild.Policy{Schema: 1, Tenant: "tenant", Nodes: []imagebuild.NodeRoot{{Node: "node-a", Root: storage.Reference(p.Cluster)}}, Concurrency: 1, Seconds: 180, CPUMillis: 750, MemoryBytes: 512 << 20, WorkspaceBytes: 128 << 20, CacheBytes: 256 << 20, Registry: "private", Platforms: []string{"linux/amd64"}, BuilderImage: builder, Cleanup: imagebuild.CleanupPolicy{HighWaterPercent: 90, UnusedDays: 1}}
 	change("rq6-build-policy", "set-image-build-policy", 0, control.ImageBuildPolicyPut{Spec: policy})
 	spec := imagebuild.ContextSpec{Tenant: "tenant", ID: "native-build", Kind: "upload", Root: storage.Reference(p.Cluster), Dockerfile: "Dockerfile", Repository: "fixture", Tags: []string{"native-build"}, Platforms: []string{"linux/amd64"}, Secrets: []imagebuild.SecretMount{{ID: "native-secret", Realm: "tenant", Secret: "data", Key: "DB_PASSWORD"}}}
-	remaining := os.Getenv("MYDC_TEST_RQ6_REMAINING")
+	remaining := os.Getenv("SFC_TEST_RQ6_REMAINING")
 	if remaining == "cancel-runtime" {
 		f.verifyImageBuildCancelNative(t, ctx, r, root, spec, p, read, change)
 		return
@@ -148,7 +148,7 @@ func (f *managedRegistryNative) verifyImageBuildNative(t *testing.T, ctx context
 	if remaining != "1" && remaining != "large-context" {
 		const contextProof = "rq6-native-upload-context"
 		secretDigest := sha256.Sum256([]byte("private-db-value"))
-		dockerfile := fmt.Sprintf("FROM %s\nUSER 0:0\nCOPY --chmod=0444 context-proof /build-context-proof\nRUN --mount=type=secret,id=native-secret,required=true [\"/backend\",\"--build-secret-fixture\",\"%x\"]\nLABEL org.mydc.test.owner=%q\nUSER 10001:10001\n", f.reference, secretDigest, f.public["Tag"])
+		dockerfile := fmt.Sprintf("FROM %s\nUSER 0:0\nCOPY --chmod=0444 context-proof /build-context-proof\nRUN --mount=type=secret,id=native-secret,required=true [\"/backend\",\"--build-secret-fixture\",\"%x\"]\nLABEL org.sfc.test.owner=%q\nUSER 10001:10001\n", f.reference, secretDigest, f.public["Tag"])
 		version := f.uploadBuildNative(t, root, spec.ID, "rq6-native-upload", dockerfile, contextProof)
 		password := filepath.Join(root, "build-group-password")
 		if err = os.WriteFile(password, []byte("private-native-group-password"), 0600); err != nil {
@@ -245,7 +245,7 @@ func (f *managedRegistryNative) verifyImageBuildNative(t *testing.T, ctx context
 	if remaining != "large-context" {
 		f.verifyImageBuildExternalNative(t, ctx, r, root, spec, p, read, change)
 	}
-	if os.Getenv("MYDC_TEST_RQ6_LARGE_CONTEXT") == "1" {
+	if os.Getenv("SFC_TEST_RQ6_LARGE_CONTEXT") == "1" {
 		f.verifyLargeImageBuildZIPNative(t, ctx, root, spec, p, read, change)
 	}
 	book, err := p.ImageBuilds(read().State)
@@ -367,7 +367,7 @@ func (f *managedRegistryNative) executeImageBuildResult(t *testing.T, ctx contex
 	}
 	// Record stable owned identities before sending effects; a lost create
 	// response must not make the test container undiscoverable at rollback.
-	containerID := "mydc-" + f.public["Tag"].(string) + "-build-proof"
+	containerID := "sfc-" + f.public["Tag"].(string) + "-build-proof"
 	if _, err := r.docker.API.ContainerInspect(ctx, containerID, client.ContainerInspectOptions{}); !cerrdefs.IsNotFound(err) {
 		t.Fatal("result fixture name must be absent before create", err)
 	}
@@ -385,7 +385,7 @@ func (f *managedRegistryNative) executeImageBuildResult(t *testing.T, ctx contex
 		if containerID != "" {
 			got, err := r.docker.API.ContainerInspect(clean, containerID, client.ContainerInspectOptions{})
 			if !cerrdefs.IsNotFound(err) {
-				if err != nil || got.Container.Config == nil || got.Container.Config.Image != image || got.Container.Config.Labels["org.mydc.test.owner"] != f.public["Tag"] {
+				if err != nil || got.Container.Config == nil || got.Container.Config.Image != image || got.Container.Config.Labels["org.sfc.test.owner"] != f.public["Tag"] {
 					t.Error("result container ownership changed; retain", err)
 					return
 				}
@@ -400,7 +400,7 @@ func (f *managedRegistryNative) executeImageBuildResult(t *testing.T, ctx contex
 			cleaned = true
 			return
 		}
-		if err != nil || imageID != "" && got.ID != imageID || got.Config == nil || got.Config.Labels["org.mydc.test.owner"] != f.public["Tag"] {
+		if err != nil || imageID != "" && got.ID != imageID || got.Config == nil || got.Config.Labels["org.sfc.test.owner"] != f.public["Tag"] {
 			t.Error("result image identity changed; retain", err)
 			return
 		}
@@ -421,11 +421,11 @@ func (f *managedRegistryNative) executeImageBuildResult(t *testing.T, ctx contex
 		t.Fatal("result pull stream failed", err, closeErr)
 	}
 	inspected, err := r.docker.API.ImageInspect(ctx, image)
-	if err != nil || inspected.Config == nil || inspected.Config.Labels["org.mydc.test.owner"] != f.public["Tag"] {
+	if err != nil || inspected.Config == nil || inspected.Config.Labels["org.sfc.test.owner"] != f.public["Tag"] {
 		t.Fatal("actual build result image ownership", err)
 	}
 	imageID = inspected.ID
-	created, err := r.docker.API.ContainerCreate(ctx, client.ContainerCreateOptions{Name: containerID, Config: &container.Config{Image: image, Entrypoint: []string{"/backend"}, Cmd: command, Labels: map[string]string{"org.mydc.test.owner": f.public["Tag"].(string)}}, HostConfig: &container.HostConfig{NetworkMode: "none", ReadonlyRootfs: true, CapDrop: []string{"ALL"}, SecurityOpt: []string{"no-new-privileges:true"}, Resources: container.Resources{NanoCPUs: 100_000_000, Memory: 32 << 20}}})
+	created, err := r.docker.API.ContainerCreate(ctx, client.ContainerCreateOptions{Name: containerID, Config: &container.Config{Image: image, Entrypoint: []string{"/backend"}, Cmd: command, Labels: map[string]string{"org.sfc.test.owner": f.public["Tag"].(string)}}, HostConfig: &container.HostConfig{NetworkMode: "none", ReadonlyRootfs: true, CapDrop: []string{"ALL"}, SecurityOpt: []string{"no-new-privileges:true"}, Resources: container.Resources{NanoCPUs: 100_000_000, Memory: 32 << 20}}})
 	if err != nil {
 		t.Fatal("result fixture create", err)
 	}

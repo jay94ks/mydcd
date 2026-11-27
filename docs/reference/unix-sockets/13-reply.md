@@ -5,6 +5,7 @@
 | 필드 | 타입·의미 |
 |---|---|
 | `Node`, `RelayedBy`, `Leader`, `InputCode`, `Tenant` | string: 처리/전달 node, leader 힌트, 계획 입력 오류 분류, 선택 tenant |
+| `Data` | JSON: [typed method](10-user.md#typed-method)의 응답. 그 method의 응답 타입 하나만 담는다 |
 | `Ticket`, `Session` | 위 인증 객체 |
 | `User`, `Tenants` | `{ID,Username,Revision,SystemAdmin}`, `{ID,Revision,Role}[]`; Role=`manager`/`viewer` |
 | `Result`, `Found` | `{Code:uint8,Index:uint64,Revision:uint64,Generation:uint64}`, bool 원 결과 존재 여부 |
@@ -46,7 +47,7 @@
 아래는 인증 자료를 붙이기 전 `whoami`의 **내부 Request**다. 영 UserKey도 포함하며 예시 Nonce는 실제 호출마다 새 난수로 바꾼다.
 
 ```json
-{"Schema":1,"Method":"whoami","UserKey":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"Nonce":[1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]}
+{"Params":{},"Schema":1,"Method":"whoami","UserKey":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"Nonce":[1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]}
 ```
 
 이 바이트를 base64로 인코딩해 Envelope.Body에 넣고 Session/Signature를 붙인 다음, Envelope 전체를 두 TLV로 포장한다. SecretInput execute의 내부 JSON은 다음 형태다. 예시 값 `demo`의 base64=`ZGVtbw==`이며 실제 Secret을 문서/로그에 출력하지 않는다.

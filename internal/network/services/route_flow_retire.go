@@ -23,7 +23,7 @@ type RoutePeerFlowClose struct {
 func RoutePeerFlowCloseBytes(p RoutePeerFlowClose) []byte {
 	p.Signature = nil
 	raw, _ := json.Marshal(p)
-	return append([]byte("mydc-route-peer-flow-close-1\x00"), raw...)
+	return append([]byte("sfc-route-peer-flow-close-1\x00"), raw...)
 }
 
 func sameRouteFlowClaim(a, b RouteFlowReceipt) bool {

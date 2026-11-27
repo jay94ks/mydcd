@@ -7,10 +7,10 @@ import (
 	"encoding/json"
 	"slices"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/secrets"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/secrets"
 )
 
 type AppLocalChange struct {
@@ -156,7 +156,7 @@ func appLocalTarget(entry appEntry) [32]byte {
 		Revision uint64
 		Grant    *AppLocalGrant
 	}{appSyncTarget(entry), entry.Delivery.LocalRevision(), entry.Local})
-	return sha256.Sum256(append([]byte("mydc-app-local-target-1\x00"), raw...))
+	return sha256.Sum256(append([]byte("sfc-app-local-target-1\x00"), raw...))
 }
 
 func AppLocalCASAllowed(change Change) bool {

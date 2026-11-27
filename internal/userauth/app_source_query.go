@@ -8,21 +8,21 @@ import (
 	"errors"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/mydcp"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/sfcp"
 )
 
-func (c Client) AppSource(ctx context.Context, peer mydcp.Peer, session access.Session, tenant string, q control.AppSourceSelection) (Reply, error) {
+func (c Client) AppSource(ctx context.Context, peer sfcp.Peer, session access.Session, tenant string, q control.AppSourceSelection) (Reply, error) {
 	if tenant == "" || !q.Valid(false) {
 		return Reply{}, access.ErrInvalid
 	}
 	return c.query(ctx, peer, session, Request{Method: "app-source", Tenant: tenant, AppSource: &q})
 }
 
-func (c Client) AppRevisions(ctx context.Context, peer mydcp.Peer, session access.Session, tenant string, q control.AppSourceSelection, after string) (Reply, error) {
+func (c Client) AppRevisions(ctx context.Context, peer sfcp.Peer, session access.Session, tenant string, q control.AppSourceSelection, after string) (Reply, error) {
 	if tenant == "" || !q.Valid(true) {
 		return Reply{}, access.ErrInvalid
 	}
@@ -65,7 +65,7 @@ func (s Service) appSourceQueryReply(view cluster.View, session access.Session, 
 
 // ReadAppSource assembles immutable, bounded parts. A new current version or
 // leader cannot splice another document into the first part's revision/digest.
-func (c Client) ReadAppSource(ctx context.Context, peer mydcp.Peer, session access.Session, tenant string, q control.AppSourceSelection) ([]byte, control.AppRevisionView, error) {
+func (c Client) ReadAppSource(ctx context.Context, peer sfcp.Peer, session access.Session, tenant string, q control.AppSourceSelection) ([]byte, control.AppRevisionView, error) {
 	if q.Part != 0 || !q.Valid(false) {
 		return nil, control.AppRevisionView{}, access.ErrInvalid
 	}
@@ -87,7 +87,7 @@ func (c Client) ReadAppSource(ctx context.Context, peer mydcp.Peer, session acce
 		p := reply.AppSource
 		pending := section == "pending-local"
 		if p == nil || p.Part != part || p.Section != section || p.Version.Revision == 0 || p.Version.Tenant != tenant || (q.Standalone == "" && p.Version.App != q.App || q.Standalone != "" && p.Standalone != q.Standalone) || q.Deployment != "" && p.Version.Deployment != q.Deployment || q.Revision != 0 && p.Version.Revision != q.Revision || !pending && !p.Version.OriginalRetained || pending != (p.Pending != nil) {
-			return nil, control.AppRevisionView{}, mydcp.ErrFrame
+			return nil, control.AppRevisionView{}, sfcp.ErrFrame
 		}
 		if part == 0 {
 			version = p.Version
@@ -102,24 +102,24 @@ func (c Client) ReadAppSource(ctx context.Context, peer mydcp.Peer, session acce
 				length, digest, first = p.Pending.Length, p.Pending.Digest, *p.Pending
 			}
 			if length <= 0 || length > deployment.ArtifactMaxBytes || digest == ([32]byte{}) || q.Digest != ([32]byte{}) && q.Digest != digest {
-				return nil, control.AppRevisionView{}, mydcp.ErrFrame
+				return nil, control.AppRevisionView{}, sfcp.ErrFrame
 			}
 			q.Digest, q.Deployment = digest, version.Deployment
 			if !pending {
 				q.Revision = version.Revision
 			}
 		} else if pending && *p.Pending != first {
-			return nil, control.AppRevisionView{}, mydcp.ErrFrame
+			return nil, control.AppRevisionView{}, sfcp.ErrFrame
 		} else if p.Version.Digest != version.Digest || p.Version.Length != version.Length || p.Version.OverlayDigest != version.OverlayDigest || p.Version.OverlayLength != version.OverlayLength || p.Version.LocalDigest != version.LocalDigest || p.Version.LocalLength != version.LocalLength || p.Version.LocalRevision != version.LocalRevision || p.Version.LocalActor != version.LocalActor {
-			return nil, control.AppRevisionView{}, mydcp.ErrFrame
+			return nil, control.AppRevisionView{}, sfcp.ErrFrame
 		}
 		if len(p.Data) != min(deployment.ArtifactPartBytes, length-len(raw)) {
-			return nil, control.AppRevisionView{}, mydcp.ErrFrame
+			return nil, control.AppRevisionView{}, sfcp.ErrFrame
 		}
 		raw = append(raw, p.Data...)
 		if len(raw) == length {
 			if sha256.Sum256(raw) != digest {
-				return nil, control.AppRevisionView{}, mydcp.ErrFrame
+				return nil, control.AppRevisionView{}, sfcp.ErrFrame
 			}
 			return raw, version, nil
 		}

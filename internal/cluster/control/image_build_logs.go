@@ -8,10 +8,10 @@ import (
 	"fmt"
 	"slices"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/imagebuild"
-	"github.com/jay94ks/mydcd/internal/registryclient"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/imagebuild"
+	"github.com/jay94ks/seafield/internal/registryclient"
 )
 
 type ImageBuildLogRead struct {
@@ -37,7 +37,7 @@ func ImageBuildLogCursorRoot(cluster [32]byte, tenant string, job [32]byte, epoc
 		Tenant       string
 		Epoch        uint64
 	}{cluster, job, tenant, epoch})
-	return sha256.Sum256(append([]byte("mydc-imagebuild-log-cursor-1\x00"), raw...))
+	return sha256.Sum256(append([]byte("sfc-imagebuild-log-cursor-1\x00"), raw...))
 }
 func ImageBuildLogOffset(after string) ([32]byte, uint32, error) {
 	root, key, err := registryclient.CatalogueCursor(after)

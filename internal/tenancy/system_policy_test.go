@@ -10,8 +10,8 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/network"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/network"
 )
 
 func TestSystemPolicyUsersAreSortedAndKeptAcrossDecode(t *testing.T) {
@@ -38,7 +38,7 @@ func TestSystemPolicyUsersAreSortedAndKeptAcrossDecode(t *testing.T) {
 		t.Fatal(err)
 	}
 	back, err := Decode(raw)
-	if err != nil || !slices.Equal(back.SystemPolicy().Users, []string{"node-a", "node-b"}) || back.SystemPolicy().RangeOrDefault() != DefaultSystemRange {
+	if err != nil || !slices.Equal(back.SystemPolicy().Users, []string{"node-a", "node-b"}) {
 		t.Fatalf("decode: %+v %v", back.SystemPolicy(), err)
 	}
 	if n, err = back.SetSystemUse("node-a", false); err != nil || !slices.Equal(n.SystemPolicy().Users, []string{"node-b"}) {
@@ -52,45 +52,11 @@ func TestSystemPolicyUsersAreSortedAndKeptAcrossDecode(t *testing.T) {
 	}
 }
 
-func TestSystemRangeChangesOnlyWithoutMembers(t *testing.T) {
-	f, q, _ := logicalFixture(t)
-	for _, bad := range []string{"10.20.0.0/23", "10.20.1.0/16", "fd00::/48", "10.0.0.0/7"} {
-		if _, err := f.n.SetSystemRange(f.n.Revision(), netip.MustParsePrefix(bad)); !errors.Is(err, ErrPolicy) {
-			t.Fatalf("%s: %v", bad, err)
-		}
-	}
-	if _, err := f.n.SetSystemRange(f.n.Revision(), DefaultSystemRange); !errors.Is(err, access.ErrConflict) {
-		t.Fatalf("same range: %v", err)
-	}
-	if _, err := f.n.SetSystemRange(f.n.Revision()+1, netip.MustParsePrefix("10.20.0.0/16")); !errors.Is(err, access.ErrConflict) {
-		t.Fatalf("stale revision: %v", err)
-	}
-	n, err := f.n.SetSystemRange(f.n.Revision(), netip.MustParsePrefix("10.20.0.0/22"))
-	if err != nil || n.SystemPolicy().RangeOrDefault() != netip.MustParsePrefix("10.20.0.0/22") {
-		t.Fatalf("set: %+v %v", n.SystemPolicy(), err)
-	}
-	// Setting the default again stores nothing.
-	if back, err := n.SetSystemRange(n.Revision(), DefaultSystemRange); err != nil || back.SystemPolicy().Range.IsValid() {
-		t.Fatalf("default: %+v %v", back.SystemPolicy(), err)
-	}
-	member, err := n.NextSystemMember("node-a", public(f.a))
-	if err != nil {
-		t.Fatal(err)
-	}
-	sys := TUNDefinition{Name: SystemNetwork, System: true, GatewayMode: network.ManagedGatewayMode, Members: []TUNNode{member}}
-	if n, err = n.CreateSystemTUN(q, n.Revision(), sys); err != nil {
-		t.Fatal(err)
-	}
-	if _, err = n.SetSystemRange(n.Revision(), netip.MustParsePrefix("10.30.0.0/16")); !errors.Is(err, ErrPolicy) {
-		t.Fatalf("range moved under a member: %v", err)
-	}
-}
-
 func TestNextSystemMemberTakesTheFirstFreeAddresses(t *testing.T) {
 	f, q, _ := logicalFixture(t)
 	n := f.n
 	a, err := n.NextSystemMember("node-a", public(f.a))
-	if err != nil || a.Addresses[0] != netip.MustParsePrefix("10.254.0.1/32") || a.Pools[0].Prefix != netip.MustParsePrefix("10.254.1.0/24") || a.Pools[0].MTU != SystemMTU || a.Pools[0].Gateway != netip.MustParseAddr("10.254.1.1") {
+	if err != nil || len(a.Addresses) != 0 || a.Pools[0].Prefix != netip.MustParsePrefix("10.254.1.0/24") || a.Pools[0].MTU != SystemMTU || a.Pools[0].Gateway != netip.MustParseAddr("10.254.1.1") || a.Pools[0].IPAM.Dynamic != netip.MustParsePrefix("10.254.1.128/25") {
 		t.Fatalf("first: %+v %v", a, err)
 	}
 	sys := TUNDefinition{Name: SystemNetwork, System: true, GatewayMode: network.ManagedGatewayMode, Members: []TUNNode{a}}
@@ -98,20 +64,17 @@ func TestNextSystemMemberTakesTheFirstFreeAddresses(t *testing.T) {
 		t.Fatal(err)
 	}
 	b, err := n.NextSystemMember("node-b", public(f.b))
-	if err != nil || b.Addresses[0] != netip.MustParsePrefix("10.254.0.2/32") || b.Pools[0].Prefix != netip.MustParsePrefix("10.254.2.0/24") {
+	if err != nil || b.Pools[0].Prefix != netip.MustParsePrefix("10.254.2.0/24") {
 		t.Fatalf("second: %+v %v", b, err)
 	}
 	if n, err = n.JoinSystemTUN(q, n.Revision(), b); err != nil {
 		t.Fatal(err)
 	}
-	if got := n.SystemMembers(); len(got) != 2 || got[0].Node != "node-a" || got[1].Node != "node-b" {
+	if got := n.SystemMembers(); len(got) != 2 || got[0].Node != "node-a" || got[1].Node != "node-b" || got[0].TunnelAddresses[0] != netip.MustParsePrefix("10.254.240.1/32") || got[1].TunnelAddresses[0] != netip.MustParsePrefix("10.254.240.2/32") {
 		t.Fatalf("members: %+v", got)
 	}
-	// A full range has no pool for another member.
-	small, err := f.n.SetSystemRange(f.n.Revision(), netip.MustParsePrefix("10.40.0.0/22"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	// A third server takes the next pool.
+	small := f.n
 	for i, node := range []string{"node-a", "node-b"} {
 		k := []ed25519.PrivateKey{f.a, f.b}[i]
 		m, err := small.NextSystemMember(node, public(k))
@@ -128,7 +91,7 @@ func TestNextSystemMemberTakesTheFirstFreeAddresses(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if m, err := small.NextSystemMember("node-c", public(f.a)); err != nil || m.Pools[0].Prefix != netip.MustParsePrefix("10.40.3.0/24") {
+	if m, err := small.NextSystemMember("node-c", public(f.a)); err != nil || m.Pools[0].Prefix != netip.MustParsePrefix("10.254.3.0/24") {
 		t.Fatalf("last pool: %+v %v", m, err)
 	}
 }
@@ -178,8 +141,9 @@ func TestTenantNetworksStayOutOfTheSystemRange(t *testing.T) {
 	pool.Members[1].Pools[0].Prefix = netip.MustParsePrefix("10.254.9.0/24")
 	pool.Members[1].Pools[0].Gateway = netip.MustParseAddr("10.254.9.1")
 	tunnel := copyTUN(d)
-	tunnel.Members[0].Addresses = []netip.Prefix{netip.MustParsePrefix("10.254.200.1/32")}
-	for name, bad := range map[string]TUNDefinition{"pool": pool, "tunnel": tunnel} {
+	tunnel.Members[1].Pools[0].Prefix = netip.MustParsePrefix("10.254.244.0/24") // the server block
+	tunnel.Members[1].Pools[0].Gateway = netip.MustParseAddr("10.254.244.1")
+	for name, bad := range map[string]TUNDefinition{"pool": pool, "server block": tunnel} {
 		if _, err := f.n.CreateTUN(f.c, q, "admin", f.n.Revision(), bad); !errors.Is(err, ErrPolicy) {
 			t.Fatalf("create with a %s in the system range: %v", name, err)
 		}
@@ -202,16 +166,87 @@ func TestTenantNetworksStayOutOfTheSystemRange(t *testing.T) {
 	if _, err = n.Create(f.c, "admin", n.Revision(), definition("first", "lan", "node-a", "10.73.40.0/24", f.a)); err != nil {
 		t.Fatalf("plain network outside the system range: %v", err)
 	}
-	// The range cannot move onto 10.71.1.0/24 (one's pool).
-	if _, err = n.SetSystemRange(n.Revision(), netip.MustParsePrefix("10.71.0.0/16")); !errors.Is(err, ErrPolicy) {
-		t.Fatalf("range moved onto a tenant network: %v", err)
-	}
-	moved, err := n.SetSystemRange(n.Revision(), netip.MustParsePrefix("10.90.0.0/16"))
+}
+
+// A cluster app runs on one server: the first claim wins while its
+// runner uses the network; another server's claim is refused. Its address
+// is the cluster-wide one, its container sits at the fixed host in the
+// runner's pool, and the other members' TUNs route the address to it.
+func TestClusterAppRunsOnOneServer(t *testing.T) {
+	f, q, _ := logicalFixture(t)
+	a, err := f.n.NextSystemMember("node-a", public(f.a))
 	if err != nil {
 		t.Fatal(err)
 	}
-	// 10.254 is free once the range moves.
-	if _, err = moved.JoinTUN(f.c, q, "admin", moved.Revision(), one.Tenant, one.Name, pool.Members[1]); err != nil {
-		t.Fatalf("join after the range moved: %v", err)
+	n, err := f.n.CreateSystemTUN(q, f.n.Revision(), TUNDefinition{Name: SystemNetwork, System: true, GatewayMode: network.ManagedGatewayMode, Members: []TUNNode{a}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := n.NextSystemMember("node-b", public(f.b))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n, err = n.JoinSystemTUN(q, n.Revision(), b); err != nil {
+		t.Fatal(err)
+	}
+	both := []string{"node-a", "node-b"}
+	for _, node := range both {
+		if n, err = n.SetSystemUse(node, true); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// only a server that uses the network
+	if _, err = n.ClaimClusterApp(n.Revision(), "node-a", "web", []string{"node-b"}); !errors.Is(err, ErrPolicy) {
+		t.Fatalf("not a user: %v", err)
+	}
+	if _, err = n.ClaimClusterApp(n.Revision()+1, "node-a", "web", both); !errors.Is(err, access.ErrConflict) {
+		t.Fatalf("stale: %v", err)
+	}
+	if n, err = n.ClaimClusterApp(n.Revision(), "node-b", "web", both); err != nil {
+		t.Fatal(err)
+	}
+	for _, node := range both {
+		if _, err = n.ClaimClusterApp(n.Revision(), node, "web", both); !errors.Is(err, access.ErrConflict) {
+			t.Fatalf("%s claims a running app: %v", node, err)
+		}
+	}
+	if node, addr, ok := n.ClusterAppAddress("web", both); !ok || node != "node-b" || addr != netip.MustParseAddr("10.254.0.2") {
+		t.Fatalf("address: %s %v %v", node, addr, ok)
+	}
+	if node, addr, ok := n.ClusterAppPoolAddress("web", both); !ok || node != "node-b" || addr != netip.MustParseAddr("10.254.2.2") {
+		t.Fatalf("pool address: %s %v %v", node, addr, ok)
+	}
+	rows, err := n.TUNSources("", SystemNetwork)
+	if err != nil || len(rows) != 2 {
+		t.Fatal(rows, err)
+	}
+	cluster := netip.MustParsePrefix("10.254.0.2/32")
+	for _, row := range rows {
+		if got := slices.Contains(row.Tunnel.Routes, cluster); got != (row.Network.Node == "node-a") {
+			t.Fatalf("%s routes %v", row.Network.Node, row.Tunnel.Routes)
+		}
+	}
+	// stopping clears the record and the route
+	if off, err := n.SetSystemUse("node-b", false); err != nil || len(off.ClusterAppHosts()) != 0 {
+		t.Fatal(off.ClusterAppHosts(), err)
+	}
+	raw, err := n.Encode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	back, err := Decode(raw)
+	if want := []ClusterAppRunner{{App: "web", Node: "node-b"}}; err != nil || !slices.Equal(back.SystemPolicy().Runners, want) {
+		t.Fatalf("decode: %+v %v", back.SystemPolicy(), err)
+	}
+	// node-b left the cluster (no longer a user): node-a may claim
+	if _, ok := back.ClusterAppRunner("web", []string{"node-a"}); ok {
+		t.Fatal("a server that left still runs it")
+	}
+	if n, err = back.ClaimClusterApp(back.Revision(), "node-a", "web", []string{"node-a"}); err != nil {
+		t.Fatal(err)
+	}
+	// stopping cluster apps drops the server's runs
+	if n, err = n.SetSystemUse("node-a", false); err != nil || len(n.SystemPolicy().Runners) != 0 {
+		t.Fatalf("off: %+v %v", n.SystemPolicy(), err)
 	}
 }

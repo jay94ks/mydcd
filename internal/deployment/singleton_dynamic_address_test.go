@@ -9,8 +9,8 @@ import (
 	"net/netip"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/engine"
-	"github.com/jay94ks/mydcd/internal/network"
+	"github.com/jay94ks/seafield/internal/engine"
+	"github.com/jay94ks/seafield/internal/network"
 )
 
 // All native/network observations are explicit model inputs. These tests use
@@ -20,7 +20,7 @@ func singletonDynamicFixture(t *testing.T) (*fixture, Compose, PlanningContext) 
 	t.Helper()
 	f, input, ctx := managedNetworkFixture(t)
 	web := input.Services["web"]
-	web.DependsOn, web.Secrets, web.MyDC.Sources = nil, nil, nil
+	web.DependsOn, web.Secrets, web.Sfc.Sources = nil, nil, nil
 	web.Environment = map[string]string{"MODE": "generic"}
 	web.Networks = map[string]Attachment{"app": {}}
 	input.Services = map[string]ComposeService{"web": web, "other": web}
@@ -69,7 +69,7 @@ func TestSingletonDynamicAddressFrozenGoalSurvivesArtifactInputsAndTaskRecipe(t 
 		}
 		service, logical, err := b.TaskInput(name)
 		address, parseErr := netip.ParseAddr(service.Networks["app"].IPv4)
-		if err != nil || parseErr != nil || logical != name || service.MyDC.Instance != nil || service.MyDC.Node != "node-a" || addresses[address] {
+		if err != nil || parseErr != nil || logical != name || service.Sfc.Instance != nil || service.Sfc.Node != "node-a" || addresses[address] {
 			t.Fatal("singleton lost its frozen independent address or original key", name, service, err)
 		}
 		addresses[address] = true
@@ -154,7 +154,7 @@ func TestSingletonDynamicRelocationUsesDestinationPoolAndRetainsAddressIntent(t 
 	}
 	declared, _ := next.DeclaredService("web")
 	target, _, err := next.TaskInput("web")
-	if err != nil || declared.Networks["app"].IPv4 != "" || target.MyDC.Node != "node-b" || target.Networks["app"].IPv4 == from.Networks["app"].IPv4 {
+	if err != nil || declared.Networks["app"].IPv4 != "" || target.Sfc.Node != "node-b" || target.Networks["app"].IPv4 == from.Networks["app"].IPv4 {
 		t.Fatal("relocation reused a source-node address or fixed declaration", err)
 	}
 	material := singletonDynamicMaterial(t, f, next, ctx, "web", "web-target", 12)
@@ -171,7 +171,7 @@ func TestSingletonDynamicRelocationUsesDestinationPoolAndRetainsAddressIntent(t 
 	}
 	originalTask, _, _ := original.TaskInput("web")
 	originalDeclared, _ := original.DeclaredService("web")
-	if originalTask.Networks["app"].IPv4 != from.Networks["app"].IPv4 || originalDeclared.MyDC.Node != "node-a" || originalDeclared.Networks["app"].IPv4 != "" {
+	if originalTask.Networks["app"].IPv4 != from.Networks["app"].IPv4 || originalDeclared.Sfc.Node != "node-a" || originalDeclared.Networks["app"].IPv4 != "" {
 		t.Fatal("relocation mutated the original artifact")
 	}
 }
@@ -290,7 +290,7 @@ func TestSingletonStaticAddressPreservesLegacyTaskShape(t *testing.T) {
 		service, logical, err := b.TaskInput(name)
 		want, _ := json.Marshal(b.d.Input.Services[name])
 		got, _ := json.Marshal(service)
-		if err != nil || logical != name || service.MyDC.Instance != nil || !bytes.Equal(want, got) {
+		if err != nil || logical != name || service.Sfc.Instance != nil || !bytes.Equal(want, got) {
 			t.Fatal("static singleton changed its legacy public Task input", name, err)
 		}
 	}

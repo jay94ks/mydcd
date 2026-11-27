@@ -8,8 +8,8 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/jay94ks/mydcd/internal/cluster/lifecycle"
-	"github.com/jay94ks/mydcd/internal/nodestorage"
+	"github.com/jay94ks/seafield/internal/cluster/lifecycle"
+	"github.com/jay94ks/seafield/internal/nodestorage"
 )
 
 // Native metadata is bounded independently of file bytes. The same bound is
@@ -44,7 +44,7 @@ func (s DraftScope) Data() DraftData {
 	}
 	return DraftData{Tenant: s.Tenant, Context: s.Context, Root: s.Root, Generation: g}
 }
-func (d DraftData) Digest() [32]byte { return digestJSON("mydc-imagebuild-draft-data-1", d) }
+func (d DraftData) Digest() [32]byte { return digestJSON("sfc-imagebuild-draft-data-1", d) }
 
 func (s DraftScope) Validate() error {
 	if s.Schema != 1 || !lifecycle.ValidID(s.Tenant) || !lifecycle.ValidID(s.Context) || s.Root.Validate() != nil || s.ContextRevision == 0 || s.PolicyRevision == 0 || s.Generation > s.ContextRevision || !ContextPath(s.Dockerfile) || s.ExpandedLimit <= 0 || s.ExpandedLimit > MaxExpandedBytes {
@@ -52,7 +52,7 @@ func (s DraftScope) Validate() error {
 	}
 	return nil
 }
-func (s DraftScope) Digest() [32]byte { return digestJSON("mydc-imagebuild-draft-scope-1", s) }
+func (s DraftScope) Digest() [32]byte { return digestJSON("sfc-imagebuild-draft-scope-1", s) }
 
 // Draft stores only immutable file descriptors. Bytes stay below the pinned
 // node root; this same transition is consumed by the real DraftStore adapter.
@@ -68,7 +68,7 @@ type DraftEdit struct {
 	File               *Entry `json:",omitempty"`
 }
 
-func (e DraftEdit) Digest() [32]byte { return digestJSON("mydc-imagebuild-draft-edit-1", e) }
+func (e DraftEdit) Digest() [32]byte { return digestJSON("sfc-imagebuild-draft-edit-1", e) }
 func (e DraftEdit) Validate() error {
 	if !lifecycle.ValidID(e.ID) || e.Expected == 0 || e.Expected == math.MaxUint64 || !ContextPath(e.Path) {
 		return ErrInvalid
@@ -214,4 +214,4 @@ func (d Draft) Edit(e DraftEdit) (Draft, error) {
 	return next, nil
 }
 
-func (d Draft) Digest() [32]byte { return digestJSON("mydc-imagebuild-draft-1", d) }
+func (d Draft) Digest() [32]byte { return digestJSON("sfc-imagebuild-draft-1", d) }

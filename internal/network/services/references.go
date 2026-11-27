@@ -10,10 +10,10 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/network"
-	"github.com/jay94ks/mydcd/internal/reconcile"
-	"github.com/jay94ks/mydcd/internal/tenancy"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/network"
+	"github.com/jay94ks/seafield/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/tenancy"
 )
 
 // ReferenceMember records when this instance acquired responsibility for a
@@ -93,14 +93,14 @@ type ReferenceClose struct {
 func ReferenceCloseBytes(p ReferenceClose) []byte {
 	p.Signature = nil
 	raw, _ := json.Marshal(p)
-	return append([]byte("mydc-network-reference-close-1\x00"), raw...)
+	return append([]byte("sfc-network-reference-close-1\x00"), raw...)
 }
 func ReferenceTargetID(t ReferenceTarget) [32]byte {
 	raw, _ := json.Marshal(t)
-	return sha256.Sum256(append([]byte("mydc-network-reference-target-1\x00"), raw...))
+	return sha256.Sum256(append([]byte("sfc-network-reference-target-1\x00"), raw...))
 }
 func referenceID(scope string, generation uint64) [32]byte {
-	return sha256.Sum256([]byte("mydc-network-reference-consumer-1\x00" + scope + "/" + generationText(generation)))
+	return sha256.Sum256([]byte("sfc-network-reference-consumer-1\x00" + scope + "/" + generationText(generation)))
 }
 func dnsReferenceScope(p dnsProjection) string {
 	return "dns/" + dnsKey(p.Config.Tenant, p.Config.ID) + "/" + fullPool(p.Local)
@@ -471,7 +471,7 @@ type AddressOwnerClose struct {
 func AddressOwnerCloseBytes(p AddressOwnerClose) []byte {
 	p.Signature = nil
 	raw, _ := json.Marshal(p)
-	return append([]byte("mydc-address-owner-close-1\x00"), raw...)
+	return append([]byte("sfc-address-owner-close-1\x00"), raw...)
 }
 func validAddressOwnerClose(cluster [32]byte, f ReferenceRetirement, p AddressOwnerClose, now int64) bool {
 	return p.Cluster == cluster && p.Target == f.ID && p.Epoch == f.Epoch && p.Owner == f.Target.Source.Owner && p.Boot != ([32]byte{}) && p.At >= f.At && p.At <= now && p.Fenced && p.Stopped && p.PendingFlows == 0 && p.PendingPins == 0 && p.Native != "" && len(p.Native) <= 256 && ed25519.Verify(ed25519.PublicKey(p.Owner[:]), AddressOwnerCloseBytes(p), p.Signature)

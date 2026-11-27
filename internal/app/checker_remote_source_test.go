@@ -14,16 +14,16 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/engine"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/reconcile"
-	"github.com/jay94ks/mydcd/internal/schema"
-	"github.com/jay94ks/mydcd/internal/storage"
-	"github.com/jay94ks/mydcd/internal/workload"
-	checker "github.com/jay94ks/mydcd/internal/workload/lifecycle"
-	contract "github.com/jay94ks/mydcd/lifecycle/v1"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/engine"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/storage"
+	"github.com/jay94ks/seafield/internal/workload"
+	checker "github.com/jay94ks/seafield/internal/workload/lifecycle"
+	contract "github.com/jay94ks/seafield/lifecycle/v1"
 )
 
 // The actual reusable Machine constructs this original run. Target/native
@@ -214,12 +214,12 @@ func TestCheckerRemoteSourceActualRecoveryWireKeepsParentUntilProviderClosure(t 
 	if err != nil || len(local.Consumers) != 1 || local.Consumers["workload/unrelated"] != unrelated || driver.calls != 1 {
 		t.Fatal("remote pending retained joined local reader or changed workload", err)
 	}
-	peers := map[mydcp.Identity]mydcp.Peer{
-		mydcp.Identity(source.Public):   {ID: "source", Policy: mydcp.Policy{Key: mydcp.Identity(source.Public), Member: true, Respond: true}},
-		mydcp.Identity(provider.Public): {ID: "provider", Policy: mydcp.Policy{Key: mydcp.Identity(provider.Public), Member: true, Respond: true}},
+	peers := map[sfcp.Identity]sfcp.Peer{
+		sfcp.Identity(source.Public):   {ID: "source", Policy: sfcp.Policy{Key: sfcp.Identity(source.Public), Member: true, Respond: true}},
+		sfcp.Identity(provider.Public): {ID: "provider", Policy: sfcp.Policy{Key: sfcp.Identity(provider.Public), Member: true, Respond: true}},
 	}
-	lookup := func(key mydcp.Identity) (mydcp.Peer, bool) { peer, ok := peers[key]; return peer, ok }
-	server, err := mydcp.NewTransport(provider, cluster, lookup)
+	lookup := func(key sfcp.Identity) (sfcp.Peer, bool) { peer, ok := peers[key]; return peer, ok }
+	server, err := sfcp.NewTransport(provider, cluster, lookup)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -227,14 +227,14 @@ func TestCheckerRemoteSourceActualRecoveryWireKeepsParentUntilProviderClosure(t 
 	var lookups atomic.Int32
 	// Quorum/native provider is simulated HERE. This exercises the actual
 	// source wire/DB/parent recovery, not production provider execution.
-	if err = server.OnCheckerProbe(func(_ context.Context, s *mydcp.Session, wire mydcp.CheckerProbeRequest) (mydcp.CheckerProbeHandler, error) {
+	if err = server.OnCheckerProbe(func(_ context.Context, s *sfcp.Session, wire sfcp.CheckerProbeRequest) (sfcp.CheckerProbeHandler, error) {
 		q, err := schema.Decode[control.CheckerProbeRequest](wire.Metadata)
 		if err != nil || wire.Action != "recover" || wire.Bytes != 0 || wire.Digest != e.Payload || q.HeaderDigest() != e.Header || q.Run.Request.RunID != active.Request.RunID || [32]byte(s.Peer().Key) != source.Public {
-			return mydcp.CheckerProbeHandler{}, mydcp.ErrAdmission
+			return sfcp.CheckerProbeHandler{}, sfcp.ErrAdmission
 		}
-		return mydcp.CheckerProbeHandler{Execute: func(context.Context, []byte) (mydcp.CheckerProbeResult, error) {
+		return sfcp.CheckerProbeHandler{Execute: func(context.Context, []byte) (sfcp.CheckerProbeResult, error) {
 			lookups.Add(1)
-			return mydcp.CheckerProbeResult{Closed: true}, nil
+			return sfcp.CheckerProbeResult{Closed: true}, nil
 		}}, nil
 	}); err != nil {
 		t.Fatal(err)
@@ -242,10 +242,10 @@ func TestCheckerRemoteSourceActualRecoveryWireKeepsParentUntilProviderClosure(t 
 	if err = server.Listen("127.0.0.1:0"); err != nil {
 		t.Fatal(err)
 	}
-	peer := peers[mydcp.Identity(provider.Public)]
+	peer := peers[sfcp.Identity(provider.Public)]
 	peer.Endpoint = server.Addr().String()
 	peers[peer.Key] = peer
-	r.Mesh, err = mydcp.NewTransport(source, cluster, lookup)
+	r.Mesh, err = sfcp.NewTransport(source, cluster, lookup)
 	if err != nil {
 		t.Fatal(err)
 	}

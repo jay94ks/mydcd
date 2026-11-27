@@ -8,7 +8,7 @@ import (
 	"encoding/json"
 	"slices"
 
-	"github.com/jay94ks/mydcd/internal/deployment"
+	"github.com/jay94ks/seafield/internal/deployment"
 )
 
 // StandaloneCASAllowed selects the standalone target mode from the signed
@@ -92,7 +92,7 @@ func (entry appEntry) standaloneTarget() [32]byte {
 	if err != nil {
 		return [32]byte{}
 	}
-	return sha256.Sum256(append([]byte("mydc-standalone-target-1\x00"), raw...))
+	return sha256.Sum256(append([]byte("sfc-standalone-target-1\x00"), raw...))
 }
 
 func standaloneChangeMatches(entry appEntry, op UserOperation, q StandaloneChange) bool {

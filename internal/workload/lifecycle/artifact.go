@@ -11,7 +11,7 @@ import (
 
 	"golang.org/x/mod/module"
 
-	contract "github.com/jay94ks/mydcd/lifecycle/v1"
+	contract "github.com/jay94ks/seafield/lifecycle/v1"
 )
 
 type ModulePin struct {
@@ -62,7 +62,7 @@ func (d SourceDescriptor) ContentDigest() [32]byte {
 		Length  uint64
 		Modules []ModulePin
 	}{1, d.SDK, d.Digest, d.Length, modules})
-	return sha256.Sum256(append([]byte("mydc-checker-content-1\x00"), raw...))
+	return sha256.Sum256(append([]byte("sfc-checker-content-1\x00"), raw...))
 }
 
 func (p ModulePin) valid() bool {
@@ -91,7 +91,7 @@ func (f SourceFact) Descriptor() SourceDescriptor {
 func SourceFactBytes(f SourceFact) []byte {
 	f.Signature = nil
 	raw, _ := json.Marshal(f)
-	return append([]byte("mydc-checker-source-fact-1\x00"), raw...)
+	return append([]byte("sfc-checker-source-fact-1\x00"), raw...)
 }
 
 func (f SourceFact) Verify() error {

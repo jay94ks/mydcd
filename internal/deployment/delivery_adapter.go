@@ -9,7 +9,7 @@ import (
 	"errors"
 	"slices"
 
-	"github.com/jay94ks/mydcd/internal/access"
+	"github.com/jay94ks/seafield/internal/access"
 	"gopkg.in/yaml.v3"
 )
 
@@ -149,7 +149,7 @@ func (d Delivery) sync(expected uint64, c access.Catalog, ctx PlanningContext, a
 // The caller has validated this Blueprint and its original signed delegation
 // in the same management transaction that accepted the Inventory.
 func NewAcceptedDelivery(b Blueprint, i Inventory, catalog access.Catalog) (Delivery, error) {
-	policy := b.d.Input.MyDC.Delivery
+	policy := b.d.Input.Sfc.Delivery
 	if policy == nil {
 		return Delivery{}, ErrInputs
 	}
@@ -165,12 +165,12 @@ func AttachDelivery(i Inventory, catalog access.Catalog, actor string, policy De
 		return Delivery{}, ErrInputs
 	}
 	b := e.Blueprint()
-	if b.d.Input.MyDC.Delivery != nil {
+	if b.d.Input.Sfc.Delivery != nil {
 		return Delivery{}, ErrInputs
 	}
 	model := b.d.Input
-	model.MyDC.Delivery = &policy
-	if model.normalize() != nil || !bytes.Equal(goal(*model.MyDC.Delivery), goal(policy)) {
+	model.Sfc.Delivery = &policy
+	if model.normalize() != nil || !bytes.Equal(goal(*model.Sfc.Delivery), goal(policy)) {
 		return Delivery{}, ErrInputs
 	}
 	return newDelivery(b, i, catalog, actor, policy)
@@ -266,10 +266,10 @@ func (d Delivery) AcceptedPlan() (Blueprint, bool) {
 }
 func (d Delivery) Paused() bool { return d.d.Paused }
 func (b Blueprint) DeliveryPolicy() (DeliveryDeclaration, bool) {
-	if b.d.Input.MyDC.Delivery == nil || !b.d.Input.MyDC.Delivery.Enabled {
+	if b.d.Input.Sfc.Delivery == nil || !b.d.Input.Sfc.Delivery.Enabled {
 		return DeliveryDeclaration{}, false
 	}
-	raw, _ := json.Marshal(b.d.Input.MyDC.Delivery)
+	raw, _ := json.Marshal(b.d.Input.Sfc.Delivery)
 	var policy DeliveryDeclaration
 	_ = json.Unmarshal(raw, &policy)
 	return policy, true

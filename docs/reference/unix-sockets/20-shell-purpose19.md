@@ -1,6 +1,6 @@
 ## 노드 shell purpose19
 
-사용법·로컬 계정·sudo·종료 해석은 [노드 shell](../node-shell.md)을 따른다. 관리 socket은 기존 TLS/MYDCP 사용자 인증을 사용한다. purpose19의 Unix 접속은 전용 TLS/local 연결 하나를 끝까지 소유하며 일반 User RPC나 Docker API로 바꾸지 않는다. UDP/QUIC에서는 같은 frame/payload를 인증된 reliable stream으로 전달한다. 별도 일반 TCP MYDCP 또는 원격 SSH fallback은 없다.
+사용법·로컬 계정·sudo·종료 해석은 [노드 shell](../node-shell.md)을 따른다. 관리 socket은 기존 TLS/SFCP 사용자 인증을 사용한다. purpose19의 Unix 접속은 전용 TLS/local 연결 하나를 끝까지 소유하며 일반 User RPC나 Docker API로 바꾸지 않는다. UDP/QUIC에서는 같은 frame/payload를 인증된 reliable stream으로 전달한다. 별도 일반 TCP SFCP 또는 원격 SSH fallback은 없다.
 
 ### User 조회와 서명된 관리 변경
 
@@ -88,7 +88,7 @@ End.Code는 0–255다. `Reason=closed|policy`에는 비어 있지 않은 유효
 | `node-shell-permit` | `{SessionID}` | `{Record,IdleSeconds,PolicyRevision}`. 현재 사용자·정책·원 owner·준비 검사, 새 SSH 실행 전/계속 실행 권한 |
 | `node-shell-report` | 서명된 NodeShellReport | 기존 ModuleReport 결과. 준비/open/activity/실제 종료 관측 게시 |
 
-NodeShellReport 필드는 `Schema:1,Cluster:[32],Reporter:[32],Node,PolicyRevision,Epoch,RootRevision,RequestID,At,LastActivity,Kind,SessionID,Ready,NotReady,Sudo,BytesIn,BytesOut,Sequence,Code,Reason,Signature`다. 시각은 Unix 초, Kind는 `ready|opened|activity|closed`이고 Signature는 `mydc-node-shell-report-1\0` 뒤 Signature=nil인 정규 JSON의 Ed25519 서명이다. 준비에는 SessionID/byte 수/종료 payload를 섞지 않고, session 보고에는 Ready/NotReady/Sudo를 섞지 않는다. 새 보고는 현재 설치 키만 제출하고, 원 수락/보고 bytes와 알려진 결과는 재개에서 보존한다. 보고 payload의 `RequestID`와 Raft command ID는 구분한다. ModuleReport command의 `RequestID`는 공통 `state.ReportRequestID(command)`가 산출하는 `checkpoint/<digest>`이며 원 서명이 포함된 전체 payload/CAS에 결합한다.
+NodeShellReport 필드는 `Schema:1,Cluster:[32],Reporter:[32],Node,PolicyRevision,Epoch,RootRevision,RequestID,At,LastActivity,Kind,SessionID,Ready,NotReady,Sudo,BytesIn,BytesOut,Sequence,Code,Reason,Signature`다. 시각은 Unix 초, Kind는 `ready|opened|activity|closed`이고 Signature는 `sfc-node-shell-report-1\0` 뒤 Signature=nil인 정규 JSON의 Ed25519 서명이다. 준비에는 SessionID/byte 수/종료 payload를 섞지 않고, session 보고에는 Ready/NotReady/Sudo를 섞지 않는다. 새 보고는 현재 설치 키만 제출하고, 원 수락/보고 bytes와 알려진 결과는 재개에서 보존한다. 보고 payload의 `RequestID`와 Raft command ID는 구분한다. ModuleReport command의 `RequestID`는 공통 `state.ReportRequestID(command)`가 산출하는 `checkpoint/<digest>`이며 원 서명이 포함된 전체 payload/CAS에 결합한다.
 
 공개 event의 kind는 `node-shell-denied|node-shell-opened|node-shell-closed`다. Detail에는 기존 `Actor,Operation,Code?,Reason?,ExitCode?`와 선택 `BytesIn,BytesOut,ClosedBy:{User,Username}`만 담는다. 0 byte 수·nil ClosedBy는 생략하여 해당 필드가 없던 event JSON을 유지한다. closed/policy의 종료 actor는 서명된 원 변경에서 도출하며 화면·stdin·명령문·키·원 SSH 오류를 event에 넣지 않는다.
 

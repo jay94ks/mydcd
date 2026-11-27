@@ -10,15 +10,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/tenancy"
-	"github.com/jay94ks/mydcd/internal/userauth"
-	"github.com/jay94ks/mydcd/internal/workload"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/tenancy"
+	"github.com/jay94ks/seafield/internal/userauth"
+	"github.com/jay94ks/seafield/internal/workload"
 )
 
-func verifyAppPlanStreamRelay(t *testing.T, ctx context.Context, leader, follower *Runtime, client userauth.Client, session access.Session, target mydcp.Peer, p control.Policy, submit func(string, string, uint64, any), wait func(string, func() bool)) {
+func verifyAppPlanStreamRelay(t *testing.T, ctx context.Context, leader, follower *Runtime, client userauth.Client, session access.Session, target sfcp.Peer, p control.Policy, submit func(string, string, uint64, any), wait func(string, func() bool)) {
 	t.Helper()
 	submit("stream-tenant", "create-tenant", 0, control.TenantID{ID: "tenant"})
 	shared, err := leader.Engine().Read(ctx, true)
@@ -27,7 +27,7 @@ func verifyAppPlanStreamRelay(t *testing.T, ctx context.Context, leader, followe
 	}
 	catalog, _ := p.Catalog(shared.State)
 	tenant, _ := catalog.Tenant("tenant")
-	submit("stream-nodes", "set-nodes", tenant.Revision, control.NodeAssignment{Tenant: "tenant", Nodes: []string{"node-a"}})
+	submit("stream-nodes", "set-nodes", tenant.Revision, control.NodeChangeTo("tenant", tenant.AllowedNodes, []string{"node-a"}))
 	for _, scope := range []string{"", "tenant"} {
 		id := "stream-global"
 		if scope != "" {
@@ -39,7 +39,7 @@ func verifyAppPlanStreamRelay(t *testing.T, ctx context.Context, leader, followe
 	if err != nil {
 		t.Fatal(err)
 	}
-	submit("stream-network", "create-tun-network", resources.Networks.Revision(), tenancy.TUNDefinition{Tenant: "tenant", Name: "existing", Members: []tenancy.TUNNode{{Node: "node-a", Pools: []tenancy.Subnet{{ID: "pool", Prefix: netip.MustParsePrefix("10.199.0.0/24"), Gateway: netip.MustParseAddr("10.199.0.1"), MTU: 1280}}, Addresses: []netip.Prefix{netip.MustParsePrefix("10.199.2.1/32")}}}})
+	submit("stream-network", "create-tun-network", resources.Networks.Revision(), tenancy.TUNDefinition{Tenant: "tenant", Name: "existing", Members: []tenancy.TUNNode{{Node: "node-a", Pools: []tenancy.Subnet{{ID: "pool", Prefix: netip.MustParsePrefix("10.199.0.0/24"), Gateway: netip.MustParseAddr("10.199.0.1"), MTU: 1280}}}}})
 	shared, err = leader.Engine().Read(ctx, true)
 	if err != nil {
 		t.Fatal(err)
@@ -52,7 +52,7 @@ func verifyAppPlanStreamRelay(t *testing.T, ctx context.Context, leader, followe
 	if follower.Engine().IsLeader() {
 		t.Fatal("relay target must be non-leader")
 	}
-	document := []byte("#" + strings.Repeat("large-input", 8<<10) + "\nname: app\nservices:\n web:\n  image: docker.io/library/php@sha256:" + strings.Repeat("a", 64) + "\n  cpus: 0.1\n  mem_limit: 16m\n  networks: {app: {ipv4_address: 10.199.0.10}}\n  x-mydc: {node: node-a}\nnetworks:\n app: {external: true, name: existing}\n")
+	document := []byte("#" + strings.Repeat("large-input", 8<<10) + "\nname: app\nservices:\n web:\n  image: docker.io/library/php@sha256:" + strings.Repeat("a", 64) + "\n  cpus: 0.1\n  mem_limit: 16m\n  networks: {app: {ipv4_address: 10.199.0.10}}\n  x-sfc: {node: node-a}\nnetworks:\n app: {external: true, name: existing}\n")
 	p, err = p.Current(shared.State)
 	if err != nil {
 		t.Fatal(err)

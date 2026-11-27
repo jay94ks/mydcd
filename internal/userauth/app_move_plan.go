@@ -7,11 +7,11 @@ import (
 	"encoding/json"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/observability"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/observability"
+	"github.com/jay94ks/seafield/internal/sfcp"
 )
 
 func (s Service) appPlanArtifact(ctx context.Context, view cluster.View, session access.Session, tenant string, r control.AppPlanRequest) ([]byte, error) {
@@ -19,7 +19,7 @@ func (s Service) appPlanArtifact(ctx context.Context, view cluster.View, session
 		return s.Policy.AppPlanArtifact(view.State, session, time.Now().Unix(), tenant, r)
 	}
 	if s.VolumeMoveObserver == nil {
-		return nil, mydcp.ErrAdmission
+		return nil, sfcp.ErrAdmission
 	}
 	before, err := s.Policy.AppMovePlanSource(view.State, session, time.Now().Unix(), tenant, r)
 	if err != nil {
@@ -42,7 +42,7 @@ func (s Service) appPlanArtifact(ctx context.Context, view cluster.View, session
 	// then validate the same materialization AND original shared writer again.
 	latest, err := s.Engine.Read(ctx, true)
 	if err != nil || latest.Local || !s.Engine.IsLeader() {
-		return nil, mydcp.ErrAdmission
+		return nil, sfcp.ErrAdmission
 	}
 	policy, err := s.Policy.Current(latest.State)
 	if err != nil {

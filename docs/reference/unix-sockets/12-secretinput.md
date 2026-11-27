@@ -16,6 +16,7 @@ SecretInput kind1도 같은 Envelope를 사용하되 Body가 아래 SecretReques
 |---|---|---|
 | `execute` | 이미 확정/dispatch된 원 ID; Values 1..128개, 키 길이1..128바이트, 값 합계 최대16KiB. Target/Password/Origin/Selection 없음 | VaultObservation: 원 provider 쓰기 관측 |
 | `recover` | 같은 Realm/ID. Values/Target/Password/Origin/Selection 없음 | VaultObservation: 원문 없이 원 쓰기 결과 복구 |
+| `vps-credential` | `VPSCredential:{Request,Account,AccessKey,SecretKey}`, ID=Request. 받는 서버가 현재 투표 서버여야 함. 다른 필드 없음 | `VPSCredential`: 그 투표 서버가 봉인·서명한 `SealedCredential`(새로 만든 계정 SSH 키를 함께 봉인하고 공개키는 `SSHPublic`).  상태를 바꾸지 않으므로 결과를 모르면 다시 보낸다 |
 | `approve` | Target 필수, ID=Target.approval_id, Realm=Target.vault_tenant_id, Values 없음; 해당 Password/Origin/Selection | VaultApproval: 승인 시점·사실·대상의 서명된 기록 |
 
 Target은 다음 **snake_case** 이름을 사용한다. 배열 안 PolicyRef는 `{ID:string,Generation:uint64,PolicyRevision:uint64,AuthPolicy:uint64}`, NodeScope는 `{ID:string,Key:key32}`다.

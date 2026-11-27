@@ -8,8 +8,8 @@ import (
 	"net/netip"
 	"slices"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/tenancy"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/tenancy"
 	"github.com/miekg/dns"
 )
 
@@ -127,11 +127,81 @@ func (m DNSManager) Answer(c access.Catalog, n tenancy.Networks, a Authority, h 
 			response.Answer = append(response.Answer, &dns.NS{Hdr: header(zone, dns.TypeNS, p.Config.TTL), Ns: "ns." + serverZone})
 		}
 	}
-	if q.Name == "ns."+zone && zone != p.ReverseZone {
+	answers, found, failed, e := m.zoneAnswer(a, p, zone, q.Name, q.Qtype, hidden)
+	if e != nil {
+		return DNSResult{}, e
+	}
+	// Follow hand CNAMEs that stay in this zone, so a client gets the target's
+	// records in the same answer. A target outside the zone is the client's
+	// own next question.
+	last, inZone := q.Name, true
+	for i := 0; i < maxCNAMEChain && !failed && q.Qtype != dns.TypeCNAME && zone == p.Config.Zone; i++ {
+		target := cnameTarget(answers, last)
+		if target == "" {
+			break
+		}
+		if inZone = dns.IsSubDomain(zone, target); !inZone || target == last || cnameTarget(answers, target) != "" || hasOwner(answers, target) {
+			break
+		}
+		more, _, fail, e := m.zoneAnswer(a, p, zone, target, q.Qtype, hidden)
+		if e != nil {
+			return DNSResult{}, e
+		}
+		answers, failed, last = append(answers, more...), fail, target
+	}
+	if failed {
+		response.Answer = nil
+		response.Rcode = dns.RcodeServerFailure
+		return dnsResponse(p, response), nil
+	}
+	exists = exists || found
+	response.Answer = append(response.Answer, answers...)
+	if !exists {
+		response.Rcode = dns.RcodeNameError
+	}
+	if len(response.Answer) == 0 || inZone && q.Qtype != dns.TypeCNAME && cnameTarget(response.Answer, last) != "" && !hasType(response.Answer, q.Qtype) {
+		response.Ns = []dns.RR{soa(p, zone, true)}
+	}
+	return dnsResponse(p, response), nil
+}
+
+func cnameTarget(answers []dns.RR, owner string) string {
+	for _, rr := range answers {
+		if c, ok := rr.(*dns.CNAME); ok && c.Hdr.Name == owner {
+			return c.Target
+		}
+	}
+	return ""
+}
+
+func hasOwner(answers []dns.RR, owner string) bool {
+	for _, rr := range answers {
+		if rr.Header().Name == owner {
+			return true
+		}
+	}
+	return false
+}
+
+func hasType(answers []dns.RR, kind uint16) bool {
+	for _, rr := range answers {
+		if rr.Header().Rrtype == kind {
+			return true
+		}
+	}
+	return false
+}
+
+// zoneAnswer is qname's own records of qtype in zone: the name server's
+// address, registered names and hand records. exists reports that qname (or
+// a name under it) is in the zone; failed that a registered address is no
+// longer held, so the answer is SERVFAIL.
+func (m DNSManager) zoneAnswer(a Authority, p dnsProjection, zone, qname string, qtype uint16, hidden map[DNSAddressReference]bool) (answers []dns.RR, exists, failed bool, err error) {
+	if qname == "ns."+zone && zone != p.ReverseZone {
 		exists = true
 		for _, member := range p.Members {
-			if q.Qtype == dns.TypeA && member.Gateway.Is4() || q.Qtype == dns.TypeAAAA && member.Gateway.Is6() {
-				response.Answer = append(response.Answer, addressRR(q.Name, member.Gateway, p.Config.TTL))
+			if qtype == dns.TypeA && member.Gateway.Is4() || qtype == dns.TypeAAAA && member.Gateway.Is6() {
+				answers = append(answers, addressRR(qname, member.Gateway, p.Config.TTL))
 			}
 		}
 	}
@@ -141,12 +211,13 @@ func (m DNSManager) Answer(c access.Catalog, n tenancy.Networks, a Authority, h 
 			if !p.Local.Prefix.Contains(r.Address) {
 				continue
 			}
+			var e error
 			name, e = dns.ReverseAddr(r.Address.String())
 			if e != nil {
-				return DNSResult{}, ErrProtocol
+				return nil, false, false, ErrProtocol
 			}
 		}
-		if !dns.IsSubDomain(zone, name) || !dns.IsSubDomain(q.Name, name) {
+		if !dns.IsSubDomain(zone, name) || !dns.IsSubDomain(qname, name) {
 			continue
 		}
 		if hidden[DNSAddressReference{Endpoint: r.Allocation.Endpoint, Generation: r.Allocation.Generation}] {
@@ -155,29 +226,46 @@ func (m DNSManager) Answer(c access.Catalog, n tenancy.Networks, a Authority, h 
 		}
 		alloc, held := a.book.Allocation(r.Allocation.Endpoint)
 		if !held || alloc != r.Allocation || m.addressBlocked(a, r.Allocation) {
-			response.Answer = nil
-			response.Rcode = dns.RcodeServerFailure
-			return dnsResponse(p, response), nil
+			return nil, true, true, nil
 		}
 		ttl := p.Config.TTL
 		exists = true
-		if name != q.Name {
+		if name != qname {
 			continue
 		}
 		switch {
-		case zone == p.ReverseZone && q.Qtype == dns.TypePTR:
-			response.Answer = append(response.Answer, &dns.PTR{Hdr: header(name, dns.TypePTR, ttl), Ptr: r.Name})
-		case zone != p.ReverseZone && (q.Qtype == dns.TypeA && r.Address.Is4() || q.Qtype == dns.TypeAAAA && r.Address.Is6()):
-			response.Answer = append(response.Answer, addressRR(name, r.Address, ttl))
+		case zone == p.ReverseZone && qtype == dns.TypePTR:
+			answers = append(answers, &dns.PTR{Hdr: header(name, dns.TypePTR, ttl), Ptr: r.Name})
+		case zone != p.ReverseZone && (qtype == dns.TypeA && r.Address.Is4() || qtype == dns.TypeAAAA && r.Address.Is6()):
+			answers = append(answers, addressRR(name, r.Address, ttl))
 		}
 	}
-	if !exists {
-		response.Rcode = dns.RcodeNameError
+	if zone != p.Config.Zone {
+		return answers, exists, false, nil
 	}
-	if len(response.Answer) == 0 {
-		response.Ns = []dns.RR{soa(p, zone, true)}
+	for _, r := range p.Config.Records {
+		if !dns.IsSubDomain(qname, r.Name) {
+			continue
+		}
+		exists = true
+		if r.Name != qname {
+			continue
+		}
+		if r.Type != "CNAME" && dns.StringToType[r.Type] != qtype {
+			continue
+		}
+		_, rr, e := ParseDNSRecord(r)
+		if e != nil {
+			return nil, false, false, ErrProtocol
+		}
+		ttl := p.Config.TTL
+		if r.TTL != 0 {
+			ttl = min(ttl, r.TTL)
+		}
+		rr.Header().Ttl = ttl
+		answers = append(answers, rr)
 	}
-	return dnsResponse(p, response), nil
+	return answers, exists, false, nil
 }
 
 // DNSForward/Exchange bind the response to the original view, query and selected

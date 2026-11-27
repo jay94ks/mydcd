@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/web/dns"
+	"github.com/jay94ks/seafield/internal/web/dns"
 )
 
 // GET /dns/domains/{domain}/propagation?name=&type=: what the domain's

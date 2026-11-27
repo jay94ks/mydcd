@@ -14,11 +14,11 @@ import (
 	"slices"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	checker "github.com/jay94ks/mydcd/internal/workload/lifecycle"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	checker "github.com/jay94ks/seafield/internal/workload/lifecycle"
 )
 
 // ComposeSourcePreparation precedes ComposeIntent: source effects need an
@@ -50,7 +50,7 @@ func (ComposeSourcePreparation) Format(s fmt.State, _ rune) {
 func composeSourceBytes(i ComposeSourcePreparation) []byte {
 	i.Signature = nil
 	raw, _ := json.Marshal(composeSourcePreparation(i))
-	return append([]byte("mydc-compose-source-preparation-1\x00"), raw...)
+	return append([]byte("sfc-compose-source-preparation-1\x00"), raw...)
 }
 
 func (i ComposeSourcePreparation) Digest() [32]byte {
@@ -62,7 +62,7 @@ func composeCheckerID(parent [32]byte, alias string) string {
 		Parent [32]byte
 		Alias  string
 	}{parent, alias})
-	digest := sha256.Sum256(append([]byte("mydc-compose-source-child-1\x00"), raw...))
+	digest := sha256.Sum256(append([]byte("sfc-compose-source-child-1\x00"), raw...))
 	return "compose-source/" + hex.EncodeToString(digest[:])
 }
 
@@ -108,7 +108,7 @@ func prepareComposeSources(i ComposeSourcePreparation) (ComposeSourcePreparation
 		parse = deployment.ParseStandalone
 	}
 	c, err := parse(i.Document)
-	if err != nil || c.MyDC.Tenant != "" && c.MyDC.Tenant != i.Tenant {
+	if err != nil || c.Sfc.Tenant != "" && c.Sfc.Tenant != i.Tenant {
 		return ComposeSourcePreparation{}, ErrPrivateState
 	}
 	if i.Standalone != nil {
@@ -116,7 +116,7 @@ func prepareComposeSources(i ComposeSourcePreparation) (ComposeSourcePreparation
 			return ComposeSourcePreparation{}, ErrPrivateState
 		}
 	}
-	if c.Name != "" && i.Project != "" && c.Name != i.Project || c.MyDC.Deployment != "" && i.Deployment != "" && c.MyDC.Deployment != i.Deployment || c.Name == "" && i.Project == "" {
+	if c.Name != "" && i.Project != "" && c.Name != i.Project || c.Sfc.Deployment != "" && i.Deployment != "" && c.Sfc.Deployment != i.Deployment || c.Name == "" && i.Project == "" {
 		return ComposeSourcePreparation{}, ErrPrivateState
 	}
 	program, _, err := c.LifecycleProgram()
@@ -164,7 +164,7 @@ func LoadComposeSources(home string, c Client, current access.Session, id string
 	return readComposeSources(r, c, current.User, id)
 }
 
-func StageComposeSources(home string, c Client, current access.Session, id, tenant, project, deploymentID, node string, provider mydcp.Peer, document []byte, standalone ...*control.StandaloneDefinition) (ComposeSourcePreparation, error) {
+func StageComposeSources(home string, c Client, current access.Session, id, tenant, project, deploymentID, node string, provider sfcp.Peer, document []byte, standalone ...*control.StandaloneDefinition) (ComposeSourcePreparation, error) {
 	if c.Verify(current) != nil || c.Self == nil {
 		return ComposeSourcePreparation{}, ErrPrivateState
 	}
@@ -274,7 +274,7 @@ func checkPreparedComposePlan(home string, c Client, current access.Session, par
 	if err != nil {
 		return ErrPrivateState
 	}
-	app, deploymentID := doc.Name, doc.MyDC.Deployment
+	app, deploymentID := doc.Name, doc.Sfc.Deployment
 	if app == "" {
 		app = parent.Project
 	}

@@ -8,11 +8,11 @@ import (
 	"errors"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/imagebuild"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/schema"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/imagebuild"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/sfcp"
 )
 
 // One bounded immutable tree, guarded by imageBuildMu together with native
@@ -37,7 +37,7 @@ func (c *imageBuildContentCache) Close() error {
 func (r *Runtime) imageBuildContent(ctx context.Context, read control.ImageBuildContentRead) (control.ImageBuildContentPage, error) {
 	view, err := r.currentView(ctx)
 	if err != nil || view.Local {
-		return control.ImageBuildContentPage{}, mydcp.ErrAdmission
+		return control.ImageBuildContentPage{}, sfcp.ErrAdmission
 	}
 	current, err := r.controlPolicy.CurrentImageBuildContentRead(view.State, read, time.Now().Unix())
 	if err != nil {
@@ -46,14 +46,14 @@ func (r *Runtime) imageBuildContent(ctx context.Context, read control.ImageBuild
 	if current.Scope.Root.Key == r.Identity.Public {
 		return r.imageBuildContentOwner(ctx, current)
 	}
-	peer, ok := r.Mesh.Peer(mydcp.Identity(current.Scope.Root.Key))
+	peer, ok := r.Mesh.Peer(sfcp.Identity(current.Scope.Root.Key))
 	if !ok || !peer.Member || peer.ID != current.Scope.Root.Node {
-		return control.ImageBuildContentPage{}, mydcp.ErrAdmission
+		return control.ImageBuildContentPage{}, sfcp.ErrAdmission
 	}
 	raw, _ := json.Marshal(current)
 	reply, err := cluster.CallManagement(ctx, r.Mesh, r.Identity, r.controlPolicy.Cluster, peer, cluster.ManagementRequest{Method: "image-build-content-owner", Input: raw})
 	if err != nil || reply.Code != "ok" {
-		return control.ImageBuildContentPage{}, mydcp.ErrAdmission
+		return control.ImageBuildContentPage{}, sfcp.ErrAdmission
 	}
 	if current.Query.Part == "file" {
 		return decodeImageBuildFileContent(reply.Data, current)
@@ -61,7 +61,7 @@ func (r *Runtime) imageBuildContent(ctx context.Context, read control.ImageBuild
 
 	out, err := schema.Decode[control.ImageBuildContentPage](reply.Data)
 	if err != nil || !out.Valid(current) {
-		return control.ImageBuildContentPage{}, mydcp.ErrAdmission
+		return control.ImageBuildContentPage{}, sfcp.ErrAdmission
 	}
 	return out, nil
 }
@@ -73,14 +73,14 @@ func (r *Runtime) imageBuildContentOwner(ctx context.Context, read control.Image
 	current := func() error {
 		view, err := r.currentView(ctx)
 		if err != nil || view.Local {
-			return mydcp.ErrAdmission
+			return sfcp.ErrAdmission
 		}
 		now, err := r.controlPolicy.CurrentImageBuildContentRead(view.State, read, time.Now().Unix())
 		if err != nil {
 			return err
 		}
 		if now.Scope.Root.Key != r.Identity.Public {
-			return mydcp.ErrAdmission
+			return sfcp.ErrAdmission
 		}
 		return nil
 	}
@@ -90,7 +90,7 @@ func (r *Runtime) imageBuildContentOwner(ctx context.Context, read control.Image
 	r.life.RLock()
 	defer r.life.RUnlock()
 	if r.closed || r.ctx.Err() != nil || r.nodeRoots == nil || r.reports == nil {
-		return control.ImageBuildContentPage{}, mydcp.ErrAdmission
+		return control.ImageBuildContentPage{}, sfcp.ErrAdmission
 	}
 	r.imageBuildMu.Lock()
 	defer r.imageBuildMu.Unlock()

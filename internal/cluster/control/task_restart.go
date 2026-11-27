@@ -9,14 +9,14 @@ import (
 	"slices"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/lifecycle"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/containerops"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/engine"
-	checker "github.com/jay94ks/mydcd/internal/workload/lifecycle"
-	contract "github.com/jay94ks/mydcd/lifecycle/v1"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/lifecycle"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/containerops"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/engine"
+	checker "github.com/jay94ks/seafield/internal/workload/lifecycle"
+	contract "github.com/jay94ks/seafield/lifecycle/v1"
 )
 
 type TaskRestartPlan struct {
@@ -94,10 +94,10 @@ func taskRestartTarget(plan TaskRestartPlan) [32]byte {
 		plan.StandaloneRevision = 0
 	}
 	raw, _ := json.Marshal(plan)
-	return sha256.Sum256(append([]byte("mydc-task-restart-target-1\x00"), raw...))
+	return sha256.Sum256(append([]byte("sfc-task-restart-target-1\x00"), raw...))
 }
 func taskRestartRequest(op UserOperation) [32]byte {
-	return sha256.Sum256(append([]byte("mydc-task-restart-request-1\x00"), OperationBytes(op)...))
+	return sha256.Sum256(append([]byte("sfc-task-restart-request-1\x00"), OperationBytes(op)...))
 }
 
 func (r TaskRestartRecord) InitialControl() (checker.ContainerControl, error) {

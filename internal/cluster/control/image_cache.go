@@ -4,11 +4,12 @@ package control
 
 import (
 	"encoding/json"
+	"github.com/jay94ks/seafield/internal/eventlog"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/imagecache"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/imagecache"
 )
 
 const ImageCacheKey = "control/image-cache"
@@ -190,4 +191,47 @@ func (p Policy) reduceImageCache(s state.State, cmd state.Command) (map[string][
 		return nil, state.ConditionFailed
 	}
 	return p.imageCacheCheckpoint(s, jobs)
+}
+
+// imageCacheBook is the ImageCacheKey Raft book (see book.go).
+var imageCacheBook = Book{
+	Key:       ImageCacheKey,
+	Actions:   []string{"prune-node-images"},
+	Reduce:    Policy.reduceImageCache,
+	Authorize: authorizeCluster,
+	AdmitReport: func(p Policy, s state.State, cmd state.Command) error {
+		_, err := p.imageCacheReport(s, cmd)
+		return err
+	},
+	Events: imageCacheEvents,
+}
+
+func imageCacheEvents(p Policy, before, after state.State, emit eventEmitter) error {
+	old, err := p.ImageCacheJobs(before)
+	if err != nil {
+		return err
+	}
+	next, err := p.ImageCacheJobs(after)
+	if err != nil {
+		return err
+	}
+	for _, job := range next.Records {
+		previous, _ := old.Record(job.Operation)
+		for _, part := range job.Parts {
+			existed := false
+			for _, p := range previous.Parts {
+				if p.ID == part.ID {
+					existed = true
+					break
+				}
+			}
+			if existed {
+				continue
+			}
+			d := eventlog.Detail{Operation: job.Operation, State: part.State, Code: part.Code}
+			eventReason(&d, job.Origin)
+			emit("node-cache-cleaned", "cluster", eventlog.Target{Node: job.Plan.Node, Native: part.ID}, d)
+		}
+	}
+	return nil
 }

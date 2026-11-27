@@ -8,10 +8,10 @@ import (
 	"encoding/json"
 	"math"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/imagebuild"
-	"github.com/jay94ks/mydcd/internal/nodestorage"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/imagebuild"
+	"github.com/jay94ks/seafield/internal/nodestorage"
 )
 
 type ImageBuildArtifactSelection struct{ Tenant, Upload string }
@@ -79,7 +79,7 @@ type ImageBuildOwnerReport struct {
 func ImageBuildOwnerReportBytes(r ImageBuildOwnerReport) []byte {
 	r.Signature = nil
 	raw, _ := json.Marshal(r)
-	return append([]byte("mydc-imagebuild-owner-report-1\x00"), raw...)
+	return append([]byte("sfc-imagebuild-owner-report-1\x00"), raw...)
 }
 func (r ImageBuildOwnerReport) Command() (state.Command, error) {
 	raw, err := json.Marshal(r)

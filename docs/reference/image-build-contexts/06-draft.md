@@ -16,18 +16,18 @@ RQ6 구현 중인 경계다. 파일/metadata 편집·조각 전송 경로와 보
 
 `Edit`는 `{ID,Kind,Path,To?,Expected,File?}`다. ID는 안정적인 원 편집 ID, Expected는 원 draft revision이다. 최초 편집의 Expected는1이며 성공은2다. `mkdir`은 빈 폴더 생성, `delete`는 해당 파일/하위 트리 삭제, `move`는 To로 전체 하위 트리를 이동한다. 이동 목적지 병합·덮어쓰기·자기 하위 이동·파일 아래 자식·경로 탈출을 거부한다. `put`의 File은 `{Path,Directory:false,Executable,Bytes,Digest:[32]}`이며 Data는 JSON base64다. 현재 inline put은24,576 bytes 이하의 완전한 파일만 받는다. 더 큰 파일은 아래 file-part/status/seal을 사용하며 부분 파일을 완성 파일로 등록하지 않는다. metadata 편집에는 File/Data가 없다.
 
-`Proof`는 `{Schema:1,Scope:[32],Edit:[32],At,ExpiresAt,Nonce:[32],Signature:base64}`다. Scope/Edit는 도메인이 분리된 원 scope/편집 지문이다. 사용자 session key가 `mydc-imagebuild-draft-request-1\0`과 Signature=null인 표준 JSON의 연결을 Ed25519로 서명한다. 최대120초·session 만료 이내이며 owner가 서명과 현재 계정/권한을 다시 검사한다. 원 edit의 path/CAS/body 지문을 relay가 변경하지 못한다. proof 갱신은 같은 edit ID/내용의 재조회를 허용하는 것이며 다른 입력으로 바꾸지 않는다.
+`Proof`는 `{Schema:1,Scope:[32],Edit:[32],At,ExpiresAt,Nonce:[32],Signature:base64}`다. Scope/Edit는 도메인이 분리된 원 scope/편집 지문이다. 사용자 session key가 `sfc-imagebuild-draft-request-1\0`과 Signature=null인 표준 JSON의 연결을 Ed25519로 서명한다. 최대120초·session 만료 이내이며 owner가 서명과 현재 계정/권한을 다시 검사한다. 원 edit의 path/CAS/body 지문을 relay가 변경하지 못한다. proof 갱신은 같은 edit ID/내용의 재조회를 허용하는 것이며 다른 입력으로 바꾸지 않는다.
 
 `DraftResponse`는 `{Schema:1,Scope,Code,Revision,Digest?,Offset,Total,Next,Entries?,Edit?,Content?}`다. Edit 결과는 `{Edit:[32],Draft:[32],Revision}`이며 같은 ID/내용은 이후 편집 뒤에도 원 결과를 반환한다. 같은 ID의 다른 내용은 pending 단계부터 거부한다. native 단절/응답 유실은 새 ID/빈 draft로 초기화하지 않는다. 원 inode나 journal이 유실됐으면 미생성으로 숨기지 않는다. 인자·CPU/메모리·Dockerfile 선택 등의 설정 변경은 편집 파일과 native revision을 초기화하지 않는다. 새 plan의 현재 Scope로 요청하면 같은 파일을 읽고 편집할 수 있다. snapshot 지문은 현재 Scope도 포함하므로 새 Scope에서 달라지며 이전 cursor를 자동 갱신하지 않는다. 과거 Scope의 요청은 현재 revision/권한을 우회하지 못한다. Generation 필드가 없던 서명 형식은 현재 설정과 유효 데이터 수명이 모두 일치할 때만 원 표현 그대로 확인한다. 원 edit ID/내용의 결과는 보존하고 자동으로 새로운 CAS에 맞추지 않는다. 과거 편집의 결과는 아래 result 경로로 조회한다. freeze/Git archive는 아래 과거 보관 결과 조회 경계를 따른다.
 
-CLI([mydc build draft](../../cli/build.md#초안draft)):
+CLI([sfcli build draft](../../cli/build.md#초안draft)):
 
 ```sh
-mydc build draft ls editable
-mydc build draft cat editable Dockerfile
-mydc build draft put editable Dockerfile ./Dockerfile
-mydc build draft mv editable assets/old.png assets/new.png
-mydc build draft rm editable assets/new.png
+sfcli build draft ls editable
+sfcli build draft cat editable Dockerfile
+sfcli build draft put editable Dockerfile ./Dockerfile
+sfcli build draft mv editable assets/old.png assets/new.png
+sfcli build draft rm editable assets/new.png
 ```
 
 ### draft regular file 읽기

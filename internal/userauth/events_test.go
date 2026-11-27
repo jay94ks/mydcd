@@ -6,9 +6,9 @@ import (
 	"context"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/eventlog"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/eventlog"
 )
 
 func TestEventSelectorsDoNotBorrowAnotherQueryOrOuterCursor(t *testing.T) {
@@ -21,7 +21,7 @@ func TestEventSelectorsDoNotBorrowAnotherQueryOrOuterCursor(t *testing.T) {
 		func(r *Request) { r.Tenant = "other" },
 		func(r *Request) { r.After = "outer-cursor" },
 		func(r *Request) { r.Node = "node-a" },
-		func(r *Request) { r.App = "shop" },
+		func(r *Request) { r.TargetUser = "shop" },
 		func(r *Request) { r.Method = "whoami" },
 		func(r *Request) { r.Events = nil },
 		func(r *Request) { r.Secret = []byte("private") },

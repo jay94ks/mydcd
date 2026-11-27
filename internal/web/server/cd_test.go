@@ -27,7 +27,7 @@ func TestCD(t *testing.T) {
 	if code, out := f.do("GET", "/api/v1/t/shop/apps/nope/cd", nil); code != 404 {
 		t.Fatalf("not cd: %d %v", code, out)
 	}
-	// a stale expected: strict CAS fails in mydcd
+	// a stale expected: strict CAS fails in sfcd
 	if code, out := f.do("POST", "/api/v1/t/shop/apps/php-shop/cd/replan", map[string]any{"opId": op(), "expected": rev - 1}); opState(t, code, out) != "failed" {
 		t.Fatalf("stale: %d %v", code, out)
 	}
@@ -99,7 +99,7 @@ func TestCD(t *testing.T) {
 		t.Fatalf("released: %v", c)
 	}
 
-	bobLogin(t, f) // a reader: mydcd refuses the change
+	bobLogin(t, f) // a reader: sfcd refuses the change
 	if code, out := f.do("POST", "/api/v1/t/shop/apps/php-shop/cd/replan", map[string]any{"opId": op()}); code != 403 && opState(t, code, out) != "failed" {
 		t.Fatalf("bob: %d %v", code, out)
 	}

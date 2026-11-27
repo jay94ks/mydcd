@@ -10,13 +10,13 @@ import (
 	"slices"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/imagebuild"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/nodestorage"
-	"github.com/jay94ks/mydcd/internal/reconcile"
-	"github.com/jay94ks/mydcd/internal/schema"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/imagebuild"
+	"github.com/jay94ks/seafield/internal/nodestorage"
+	"github.com/jay94ks/seafield/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/sfcp"
 )
 
 func draftConsumer(scope imagebuild.DraftScope) string {
@@ -27,7 +27,7 @@ func (r *Runtime) imageBuildDraft(ctx context.Context, call control.ImageBuildDr
 	call.At = time.Now().Unix()
 	view, err := r.currentView(ctx)
 	if err != nil || view.Local {
-		return imagebuild.DraftResponse{}, mydcp.ErrAdmission
+		return imagebuild.DraftResponse{}, sfcp.ErrAdmission
 	}
 	work, err := r.controlPolicy.ImageBuildDraftWork(view.State, call)
 	if err != nil {
@@ -39,14 +39,14 @@ func (r *Runtime) imageBuildDraft(ctx context.Context, call control.ImageBuildDr
 	if work.Scope.Root.Key == r.Identity.Public {
 		return r.imageBuildDraftOwner(ctx, call)
 	}
-	peer, ok := r.Mesh.Peer(mydcp.Identity(work.Scope.Root.Key))
+	peer, ok := r.Mesh.Peer(sfcp.Identity(work.Scope.Root.Key))
 	if !ok || !peer.Member || peer.ID != work.Scope.Root.Node {
-		return imagebuild.DraftResponse{}, mydcp.ErrAdmission
+		return imagebuild.DraftResponse{}, sfcp.ErrAdmission
 	}
 	raw, _ := json.Marshal(call)
 	reply, err := cluster.CallManagement(ctx, r.Mesh, r.Identity, r.controlPolicy.Cluster, peer, cluster.ManagementRequest{Method: "image-build-draft-owner", Input: raw})
 	if err != nil || reply.Code != "ok" {
-		return imagebuild.DraftResponse{}, mydcp.ErrAdmission
+		return imagebuild.DraftResponse{}, sfcp.ErrAdmission
 	}
 	if call.Request.Kind == "file" {
 		return decodeImageBuildFileDraft(reply.Data, call.Request, work.Scope)
@@ -54,7 +54,7 @@ func (r *Runtime) imageBuildDraft(ctx context.Context, call control.ImageBuildDr
 
 	out, err := schema.Decode[imagebuild.DraftResponse](reply.Data)
 	if err != nil || !out.Valid(call.Request) || out.Scope != work.Scope {
-		return imagebuild.DraftResponse{}, mydcp.ErrAdmission
+		return imagebuild.DraftResponse{}, sfcp.ErrAdmission
 	}
 	return out, nil
 }
@@ -67,12 +67,12 @@ func (r *Runtime) imageBuildDraftOwner(ctx context.Context, call control.ImageBu
 	current := func() (control.ImageBuildDraftWork, error) {
 		view, err := r.currentView(ctx)
 		if err != nil || view.Local {
-			return control.ImageBuildDraftWork{}, mydcp.ErrAdmission
+			return control.ImageBuildDraftWork{}, sfcp.ErrAdmission
 		}
 		call.At = time.Now().Unix()
 		work, err := r.controlPolicy.ImageBuildDraftWork(view.State, call)
 		if err != nil || work.Scope.Root.Key != r.Identity.Public {
-			return control.ImageBuildDraftWork{}, mydcp.ErrAdmission
+			return control.ImageBuildDraftWork{}, sfcp.ErrAdmission
 		}
 		return work, nil
 	}
@@ -83,13 +83,13 @@ func (r *Runtime) imageBuildDraftOwner(ctx context.Context, call control.ImageBu
 	r.life.RLock()
 	defer r.life.RUnlock()
 	if r.closed || r.ctx.Err() != nil || !call.Request.Result() && r.nodeRoots == nil || r.reports == nil {
-		return imagebuild.DraftResponse{}, mydcp.ErrAdmission
+		return imagebuild.DraftResponse{}, sfcp.ErrAdmission
 	}
 	r.imageBuildMu.Lock()
 	defer r.imageBuildMu.Unlock()
 	now, err := current()
 	if err != nil || now.Scope != work.Scope || now.Epoch != work.Epoch {
-		return imagebuild.DraftResponse{}, mydcp.ErrAdmission
+		return imagebuild.DraftResponse{}, sfcp.ErrAdmission
 	}
 	out := imagebuild.DraftResponse{Schema: 1, Scope: work.Scope, Code: "NOT_INITIALIZED"}
 	if call.Request.Kind == "plan" {
@@ -109,7 +109,7 @@ func (r *Runtime) imageBuildDraftOwner(ctx context.Context, call control.ImageBu
 		}
 		fresh, cause := current()
 		if cause != nil || fresh.Scope != work.Scope || fresh.Epoch != work.Epoch || !result.Valid(call.Request) {
-			return imagebuild.DraftResponse{}, mydcp.ErrAdmission
+			return imagebuild.DraftResponse{}, sfcp.ErrAdmission
 		}
 		return result, nil
 	}
@@ -173,7 +173,7 @@ func (r *Runtime) imageBuildDraftOwner(ctx context.Context, call control.ImageBu
 		} else {
 			fresh, cause := current()
 			if cause != nil || fresh.Scope != work.Scope || fresh.Epoch != work.Epoch {
-				return imagebuild.DraftResponse{}, mydcp.ErrAdmission
+				return imagebuild.DraftResponse{}, sfcp.ErrAdmission
 			}
 			archivePin, cause := r.retainBuildRoot(ctx, scope.Root, fresh.Root, buildArtifactConsumer(scope))
 			if archivePin.Directory != nil {
@@ -264,7 +264,7 @@ func (r *Runtime) imageBuildDraftOwner(ctx context.Context, call control.ImageBu
 	}
 	now, err = current()
 	if err != nil || now.Scope != work.Scope || now.Epoch != work.Epoch || !out.Valid(call.Request) {
-		return imagebuild.DraftResponse{}, mydcp.ErrAdmission
+		return imagebuild.DraftResponse{}, sfcp.ErrAdmission
 	}
 	return out, nil
 }

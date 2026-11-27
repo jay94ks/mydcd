@@ -26,7 +26,7 @@ func (g TunnelTopology) Peers(key string) ([]string, error) {
 		return nil, ErrPolicy
 	}
 	peers := map[string]bool{}
-	for _, route := range t.Routes {
+	for _, route := range t.Overlay() {
 		owner := ""
 		assign := func(candidate string) bool {
 			if owner != "" && owner != candidate {

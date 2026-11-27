@@ -9,9 +9,9 @@ import (
 	"net/netip"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/network"
-	"github.com/jay94ks/mydcd/internal/reconcile"
-	"github.com/jay94ks/mydcd/internal/tenancy"
+	"github.com/jay94ks/seafield/internal/network"
+	"github.com/jay94ks/seafield/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/tenancy"
 )
 
 type routeFixture struct {
@@ -604,11 +604,11 @@ func TestRouteRuntimeAtomicPolicyAndInstanceRetirementPreservesOriginalRootOnFai
 
 func TestRouteRuntimeMixedDNSAndRouteConsumersMustAllClose(t *testing.T) {
 	r := routeBoth(t)
-	m, e := NewDNSManager(r.f.a.cluster, pub(r.f.key), []string{"mydc.test."}, 8, 8)
+	m, e := NewDNSManager(r.f.a.cluster, pub(r.f.key), []string{"sfc.test."}, 8, 8)
 	if e != nil {
 		t.Fatal(e)
 	}
-	cfg := DNSConfig{Tenant: "first", ID: "dns", Network: "lan", Pool: "pool", Source: 100, Serial: 1, Enabled: true, Zone: "app.mydc.test.", ClientZone: "clients.app.mydc.test.", TTL: 30, NegativeTTL: 5, QuerySeconds: 2, MaxQueries: 2, MaxCacheEntries: 2, MaxResponseBytes: 4096, Names: []DNSName{{"php", "php", 1}}}
+	cfg := DNSConfig{Tenant: "first", ID: "dns", Network: "lan", Pool: "pool", Source: 100, Serial: 1, Enabled: true, Zone: "app.sfc.test.", ClientZone: "clients.app.sfc.test.", TTL: 30, NegativeTTL: 5, QuerySeconds: 2, MaxQueries: 2, MaxCacheEntries: 2, MaxResponseBytes: 4096, Names: []DNSName{{"php", "php", 1}}}
 	d := publishDNS(t, dnsFixture{f: r.f, m: m, cfg: cfg, origin: r.tuple.Source}, cfg, 190)
 	r.f = d.f
 	dnsRef := dnsConsumer(t, d)

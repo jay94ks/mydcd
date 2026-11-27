@@ -10,11 +10,11 @@ import (
 	"math"
 	"strings"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/reconcile"
-	"github.com/jay94ks/mydcd/internal/workload/volumes"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/workload/volumes"
 )
 
 const AppObservationMaxAge uint64 = 30
@@ -129,7 +129,7 @@ func StageReport(action string) bool {
 func AppProgressBytes(r AppProgress) []byte {
 	r.Signature = nil
 	b, _ := json.Marshal(r)
-	return append([]byte("mydc-app-progress-1\x00"), b...)
+	return append([]byte("sfc-app-progress-1\x00"), b...)
 }
 func (r AppProgress) Command() (state.Command, error) {
 	raw, err := json.Marshal(r)
@@ -379,7 +379,7 @@ func (p Policy) reduceAppProgress(s state.State, cmd state.Command) (map[string]
 		e, _, err = e.Prepare(c, e.Revision(), r.Key, s.Object(r.Key), r.At)
 	case "send":
 		stage, ok := e.Stage(r.Key)
-		if !ok || stage.Journal.Pending == nil || stage.Journal.Pending.Phase != reconcile.Prepared {
+		if !ok || !stage.Sendable() {
 			return nil, state.ConditionFailed
 		}
 		e, _, err = e.Send(c, e.Revision(), r.Key, r.At)

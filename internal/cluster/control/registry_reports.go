@@ -8,11 +8,11 @@ import (
 	"encoding/json"
 	"slices"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/registry"
-	"github.com/jay94ks/mydcd/internal/tenancy"
-	"github.com/jay94ks/mydcd/internal/workload/volumes"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/registry"
+	"github.com/jay94ks/seafield/internal/tenancy"
+	"github.com/jay94ks/seafield/internal/workload/volumes"
 )
 
 type RegistryReport struct {
@@ -30,7 +30,7 @@ type RegistryReport struct {
 func RegistryReportBytes(r RegistryReport) []byte {
 	r.Signature = nil
 	raw, _ := json.Marshal(r)
-	return append([]byte("mydc-registry-report-1\x00"), raw...)
+	return append([]byte("sfc-registry-report-1\x00"), raw...)
 }
 func (r RegistryReport) Command() (state.Command, error) {
 	raw, err := json.Marshal(r)

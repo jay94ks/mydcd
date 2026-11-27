@@ -7,12 +7,12 @@ import (
 	"encoding/hex"
 	"net/http"
 
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/web/mydc"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/web/sfc"
 )
 
 // CD history, field values and candidate changes (UI-40 이력 표·변경점,
-// UI-43 Git 값·지금 값; REQ-46 mock). Read-only views of what mydcd keeps;
+// UI-43 Git 값·지금 값; REQ-46 mock). Read-only views of what sfcd keeps;
 // a value from a secret projection never comes back, only its selectors.
 
 // GET /t/{t}/apps/{app}/cd/history?after= → {items:[{commit,
@@ -21,7 +21,7 @@ import (
 // succeeded / failed / abandoned / blocked (reason = cd.blocked).
 // checks?: {pre-sync?, post-sync?} — the webhook checks of that candidate.
 func (s *Server) handleCDHistory(w http.ResponseWriter, r *http.Request, ws *webSession) {
-	read(s, w, r, ws, func(ctx context.Context, c mydc.Conn) (listPage, error) {
+	read(s, w, r, ws, func(ctx context.Context, c sfc.Conn) (listPage, error) {
 		p, err := c.AppDeliveryHistory(ctx, r.PathValue("t"), r.PathValue("app"), r.URL.Query().Get("after"))
 		if err != nil {
 			return listPage{}, err
@@ -44,7 +44,7 @@ func (s *Server) handleCDHistory(w http.ResponseWriter, r *http.Request, ws *web
 }
 
 type cdHistoryItem struct {
-	mydc.CDHistoryRow
+	sfc.CDHistoryRow
 	Checks map[string]any `json:",omitempty"`
 }
 
@@ -58,7 +58,7 @@ func (s *Server) handleCDValues(w http.ResponseWriter, r *http.Request, ws *webS
 		s.writeOpOutcome(w, ws, nil, 0, err)
 		return
 	}
-	read(s, w, r, ws, func(ctx context.Context, c mydc.Conn) (mydc.CDFieldValues, error) {
+	read(s, w, r, ws, func(ctx context.Context, c sfc.Conn) (sfc.CDFieldValues, error) {
 		v, err := c.AppDeliveryValues(ctx, r.PathValue("t"), control.AppCDFieldRequest{App: r.PathValue("app"), Path: path})
 		if v.Path == nil {
 			v.Path = path
@@ -72,14 +72,14 @@ func (s *Server) handleCDValues(w http.ResponseWriter, r *http.Request, ws *webS
 // count}: what the candidate changes against the running commit; count
 // equals cd.changeCount.
 func (s *Server) handleCDChanges(w http.ResponseWriter, r *http.Request, ws *webSession) {
-	read(s, w, r, ws, func(ctx context.Context, c mydc.Conn) (mydc.CDChanges, error) {
+	read(s, w, r, ws, func(ctx context.Context, c sfc.Conn) (sfc.CDChanges, error) {
 		v, err := c.AppDeliveryChanges(ctx, r.PathValue("t"), r.PathValue("app"))
 		if v.Services == nil {
-			v.Services = []mydc.CDServiceChange{}
+			v.Services = []sfc.CDServiceChange{}
 		}
 		for i := range v.Services {
 			if v.Services[i].Fields == nil {
-				v.Services[i].Fields = []mydc.CDFieldChange{}
+				v.Services[i].Fields = []sfc.CDFieldChange{}
 			}
 		}
 		if v.Added == nil {

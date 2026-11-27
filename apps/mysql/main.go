@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // mysqlapp is the real sample application's nonroot bootstrap/health command.
-// MyDC still owns its container, writer gate, Volume and Secret lifecycle.
+// Seafield Cluster still owns its container, writer gate, Volume and Secret lifecycle.
 package main
 
 import (
@@ -17,11 +17,11 @@ import (
 	"time"
 )
 
-const socket = "/run/mydc/mysql.sock"
-const clientFile = "/run/mydc/client.cnf"
+const socket = "/run/sfc/mysql.sock"
+const clientFile = "/run/sfc/client.cnf"
 
 func serverArgs() []string {
-	return []string{"--no-defaults", "--datadir=/var/lib/mysql", "--socket=" + socket, "--pid-file=/run/mydc/mysql.pid", "--tmpdir=/tmp", "--mysqlx=OFF", "--skip-log-bin", "--innodb-buffer-pool-size=64M", "--innodb-redo-log-capacity=16M", "--max-connections=16", "--performance-schema=OFF", "--skip-name-resolve"}
+	return []string{"--no-defaults", "--datadir=/var/lib/mysql", "--socket=" + socket, "--pid-file=/run/sfc/mysql.pid", "--tmpdir=/tmp", "--mysqlx=OFF", "--skip-log-bin", "--innodb-buffer-pool-size=64M", "--innodb-redo-log-capacity=16M", "--max-connections=16", "--performance-schema=OFF", "--skip-name-resolve"}
 }
 func secret(name string) ([]byte, error) {
 	b, err := os.ReadFile("/run/secrets/" + name)
@@ -54,7 +54,7 @@ func run() error {
 	if len(os.Args) == 2 && os.Args[1] == "--health" {
 		c, stop := context.WithTimeout(ctx, 2*time.Second)
 		defer stop()
-		return sql(c, false, []byte("SELECT 1 FROM mydc.records LIMIT 1;"))
+		return sql(c, false, []byte("SELECT 1 FROM sfc.records LIMIT 1;"))
 	}
 	if os.Geteuid() == 0 {
 		return fmt.Errorf("explicit nonroot user required")
@@ -125,9 +125,9 @@ func run() error {
 			case <-time.After(50 * time.Millisecond):
 			}
 		}
-		setup := []byte("CREATE DATABASE mydc; CREATE TABLE mydc.records(id VARCHAR(64) PRIMARY KEY,value MEDIUMBLOB NOT NULL) ENGINE=InnoDB; CREATE TABLE mydc.operations(operation_id VARCHAR(64) PRIMARY KEY,payload_hash CHAR(64) NOT NULL,result MEDIUMBLOB NULL) ENGINE=InnoDB; CREATE USER 'mydc'@'%' IDENTIFIED BY '")
+		setup := []byte("CREATE DATABASE sfc; CREATE TABLE sfc.records(id VARCHAR(64) PRIMARY KEY,value MEDIUMBLOB NOT NULL) ENGINE=InnoDB; CREATE TABLE sfc.operations(operation_id VARCHAR(64) PRIMARY KEY,payload_hash CHAR(64) NOT NULL,result MEDIUMBLOB NULL) ENGINE=InnoDB; CREATE USER 'sfc'@'%' IDENTIFIED BY '")
 		setup = append(setup, password...)
-		setup = append(setup, []byte("'; GRANT SELECT,INSERT,UPDATE,DELETE ON mydc.* TO 'mydc'@'%'; ALTER USER 'root'@'localhost' IDENTIFIED BY '")...)
+		setup = append(setup, []byte("'; GRANT SELECT,INSERT,UPDATE,DELETE ON sfc.* TO 'sfc'@'%'; ALTER USER 'root'@'localhost' IDENTIFIED BY '")...)
 		setup = append(setup, root...)
 		setup = append(setup, []byte("';\n")...)
 		err = sql(ctx, true, setup)
@@ -147,7 +147,7 @@ func run() error {
 		case <-ctx.Done():
 			return ctx.Err()
 		}
-		marker, err := os.OpenFile("/var/lib/mysql/.mydc-app-initialized", os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+		marker, err := os.OpenFile("/var/lib/mysql/.sfc-app-initialized", os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
 		if err != nil {
 			return err
 		}
@@ -175,7 +175,7 @@ func run() error {
 		return err
 	}
 	// Existing datadirs are never initialized or assigned new credentials.
-	marker, err := os.ReadFile("/var/lib/mysql/.mydc-app-initialized")
+	marker, err := os.ReadFile("/var/lib/mysql/.sfc-app-initialized")
 	if err != nil || string(marker) != "1\n" {
 		return fmt.Errorf("incomplete offline initialization requires explicit recovery")
 	}

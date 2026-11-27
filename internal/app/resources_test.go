@@ -16,16 +16,16 @@ import (
 	"time"
 
 	"github.com/hashicorp/raft"
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/config"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/tenancy"
-	"github.com/jay94ks/mydcd/internal/userauth"
-	"github.com/jay94ks/mydcd/internal/workload"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/config"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/tenancy"
+	"github.com/jay94ks/seafield/internal/userauth"
+	"github.com/jay94ks/seafield/internal/workload"
 )
 
 // Native modules stay disabled. Owner closure signatures below verify committed
@@ -71,19 +71,19 @@ func TestRealManagedResourceAuthorityQuotasCIDRAndSameDB(t *testing.T) {
 	}
 	clusterID := initialized.Installation.Root.Cluster
 	policy := control.Policy{Cluster: clusterID, BootstrapKey: adminKey.Public, TrustRoot: runtime.Identity.Public, Genesis: initialized.Installation.Genesis}
-	peer := mydcp.Peer{ID: cfg.Node.ID, Endpoint: address, Policy: mydcp.Policy{Key: mydcp.Identity(runtime.Identity.Public), Respond: true}}
+	peer := sfcp.Peer{ID: cfg.Node.ID, Endpoint: address, Policy: sfcp.Policy{Key: sfcp.Identity(runtime.Identity.Public), Respond: true}}
 	clientFor := func() *userauth.Client {
 		t.Helper()
 		self, err := identity.Ephemeral()
 		if err != nil {
 			t.Fatal(err)
 		}
-		mesh, err := mydcp.NewTransport(self, clusterID, func(k mydcp.Identity) (mydcp.Peer, bool) { return peer, k == peer.Key })
+		mesh, err := sfcp.NewTransport(self, clusterID, func(k sfcp.Identity) (sfcp.Peer, bool) { return peer, k == peer.Key })
 		if err != nil {
 			t.Fatal(err)
 		}
 		t.Cleanup(func() { _ = mesh.Close(); clear(self.Private) })
-		return &userauth.Client{Mesh: mesh, Self: self, Cluster: clusterID, Peers: []mydcp.Peer{peer}}
+		return &userauth.Client{Mesh: mesh, Self: self, Cluster: clusterID, Peers: []sfcp.Peer{peer}}
 	}
 	admin := clientFor()
 	enrolled, err := admin.Enroll(ctx, peer, control.Enrollment{Schema: 1, RequestID: "enroll-resources", User: access.User{ID: "admin", Username: "admin", SystemAdmin: true, Enabled: true, Credentials: []access.Credential{{ID: "key", Method: access.PrivateKey, PublicKey: adminKey.Public, Enabled: true}}}}, adminKey.Private)
@@ -158,7 +158,7 @@ func TestRealManagedResourceAuthorityQuotasCIDRAndSameDB(t *testing.T) {
 	for _, id := range []string{"first", "second"} {
 		propose("tenant-"+id, "create-tenant", 0, control.TenantID{ID: id})
 		v, _ := catalog().Tenant(id)
-		propose("node-grant-"+id, "set-nodes", v.Revision, control.NodeAssignment{Tenant: id, Nodes: []string{cfg.Node.ID}})
+		propose("node-grant-"+id, "set-nodes", v.Revision, control.NodeChangeTo(id, v.AllowedNodes, []string{cfg.Node.ID}))
 	}
 	for _, entry := range []struct {
 		id, tenant string
@@ -188,12 +188,11 @@ func TestRealManagedResourceAuthorityQuotasCIDRAndSameDB(t *testing.T) {
 	fakeOwner := tenancy.Reservation{Key: "workload/task/first/app/spoof", Tenant: "first", Node: cfg.Node.ID, Owner: aliceKey.Public, Need: workload.Resources{CPU: 1, Memory: 1}}
 	apply(alice, prepare(alice, aliceSession, "spoof-owner", "reserve-task", resources().Quotas.Revision(), fakeOwner), state.Forbidden)
 	// Each caller gets only its own resources, while collisions use the full view.
-	network := tenancy.TUNDefinition{Tenant: "first", Name: "private", Members: []tenancy.TUNNode{{Node: cfg.Node.ID, Pools: []tenancy.Subnet{{ID: "v4", Prefix: netip.MustParsePrefix("10.70.0.0/24"), Gateway: netip.MustParseAddr("10.70.0.1"), MTU: 1400}}, Addresses: []netip.Prefix{netip.MustParsePrefix("10.71.0.1/32")}}}}
+	network := tenancy.TUNDefinition{Tenant: "first", Name: "private", Members: []tenancy.TUNNode{{Node: cfg.Node.ID, Pools: []tenancy.Subnet{{ID: "v4", Prefix: netip.MustParsePrefix("10.70.0.0/24"), Gateway: netip.MustParseAddr("10.70.0.1"), MTU: 1400}}}}}
 	apply(alice, prepare(alice, aliceSession, "network-first", "create-tun-network", resources().Networks.Revision(), network), state.Applied)
 	overlap := network
 	overlap.Tenant, overlap.Name = "second", "other"
 	overlap.Members = []tenancy.TUNNode{network.Members[0]}
-	overlap.Members[0].Addresses = []netip.Prefix{netip.MustParsePrefix("10.72.0.1/32")}
 	conflict := apply(bob, prepare(bob, bobSession, "overlap-other-tenant", "create-tun-network", resources().Networks.Revision(), overlap), state.ConditionFailed)
 	if conflict.Code != state.ConditionFailed || len(resources().Networks.VisibleNetworks(catalog(), "bob")) != 0 {
 		t.Fatal("global CIDR conflict did not retain existing owner")
@@ -229,24 +228,24 @@ func TestRealManagedResourceAuthorityQuotasCIDRAndSameDB(t *testing.T) {
 	if _, err = policy.PlanningResources(read().State, "bob", "first"); err == nil {
 		t.Fatal("foreign tenant planning view")
 	}
-	page, err := alice.ResourcePage(ctx, peer, aliceSession, "first", "")
-	if err != nil || page.ResourcesRootRevision == 0 || page.QuotaRevision == 0 {
+	page, err := alice.Resources(ctx, peer, aliceSession, userauth.ResourcesQuery{Tenant: "first"})
+	if err != nil || page.RootRevision == 0 || page.QuotaRevision == 0 {
 		t.Fatal("resource query/CAS", err)
 	}
-	for _, e := range page.Resources {
+	for _, e := range page.Items {
 		if e.Limit != nil && e.Limit.Tenant != "first" || e.Network != nil && e.Network.Tenant != "first" || e.Reservation != nil && e.Reservation.Tenant != "first" {
 			t.Fatal("cross-tenant resource disclosure")
 		}
 	}
-	if _, err = alice.ResourcePage(ctx, peer, aliceSession, "second", ""); err == nil {
+	if _, err = alice.Resources(ctx, peer, aliceSession, userauth.ResourcesQuery{Tenant: "second"}); err == nil {
 		t.Fatal("foreign tenant query accepted")
 	}
-	if _, err = alice.ResourcePage(ctx, peer, aliceSession, "", ""); err == nil {
+	if _, err = alice.Resources(ctx, peer, aliceSession, userauth.ResourcesQuery{}); err == nil {
 		t.Fatal("manager obtained global resource catalog")
 	}
 	// Revoked placement does not strand cleanup or release its old budget early.
 	tenant, _ := catalog().Tenant("first")
-	propose("revoke-node-first", "set-nodes", tenant.Revision, control.NodeAssignment{Tenant: "first"})
+	propose("revoke-node-first", "set-nodes", tenant.Revision, control.NodeChangeTo("first", tenant.AllowedNodes, nil))
 	apply(alice, prepare(alice, aliceSession, "revoked-node-create", "reserve-task", resources().Quotas.Revision(), extra), state.Forbidden)
 	held, _ := resources().Quotas.Reservation(first.Key)
 	apply(alice, prepare(alice, aliceSession, "drain-first", "drain-reservation", held.Revision, control.ReservationSelection{Tenant: "first", Key: first.Key}), state.Applied)
@@ -296,15 +295,15 @@ func TestRealManagedResourceAuthorityQuotasCIDRAndSameDB(t *testing.T) {
 		v.Need = workload.Resources{CPU: 1, Memory: 1}
 		apply(bob, prepare(bob, bobSession, "reserve-small-"+id, "reserve-task", resources().Quotas.Revision(), v), state.Applied)
 	}
-	page, err = bob.ResourcePage(ctx, peer, bobSession, "second", "")
-	if err != nil || len(page.Resources) != 8 || page.ResourcesNext == "" {
+	page, err = bob.Resources(ctx, peer, bobSession, userauth.ResourcesQuery{Tenant: "second"})
+	if err != nil || len(page.Items) != 8 || page.Next == "" {
 		t.Fatal("first resource page", err)
 	}
-	last, err := bob.ResourcePage(ctx, peer, bobSession, "second", page.ResourcesNext)
-	if err != nil || len(last.Resources) == 0 || last.ResourcesRootRevision != page.ResourcesRootRevision || last.ResourcesNext != "" {
+	last, err := bob.Resources(ctx, peer, bobSession, userauth.ResourcesQuery{Tenant: "second", After: page.Next})
+	if err != nil || len(last.Items) == 0 || last.RootRevision != page.RootRevision || last.Next != "" {
 		t.Fatal("resource continuation", err)
 	}
-	for _, e := range append(page.Resources, last.Resources...) {
+	for _, e := range append(page.Items, last.Items...) {
 		if strings.Contains(e.Key, "/first/") {
 			t.Fatal("pagination leaked another tenant")
 		}
@@ -340,5 +339,5 @@ func TestRealManagedResourceAuthorityQuotasCIDRAndSameDB(t *testing.T) {
 	if read().State.Index() != beforeView.State.Index() {
 		t.Fatal("reopen/result read mutated shared state")
 	}
-	t.Log("actual MYDCP current user/tenant scopes -> one Raft/FSM quota+CIDR root/receipt -> scoped planning/paging -> indexed Snapshot/same DB; owner closure inputs are fixtures, no native success claimed")
+	t.Log("actual SFCP current user/tenant scopes -> one Raft/FSM quota+CIDR root/receipt -> scoped planning/paging -> indexed Snapshot/same DB; owner closure inputs are fixtures, no native success claimed")
 }

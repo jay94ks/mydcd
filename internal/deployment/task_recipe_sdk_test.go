@@ -13,13 +13,12 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/engine"
+	"github.com/jay94ks/seafield/internal/engine"
 )
 
 func TestTaskRecipeSDKResolvesAllMountsAndCurrentTrust(t *testing.T) {
 	f, b, material := taskMaterialFixture(t)
-	root, err := os.MkdirTemp("/tmp", "mydc-recipe-sdk-")
+	root, err := os.MkdirTemp("/tmp", "sfc-recipe-sdk-")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -61,7 +60,7 @@ func TestTaskRecipeSDKResolvesAllMountsAndCurrentTrust(t *testing.T) {
 		t.Fatal("missing original materialization admitted")
 	}
 	tenant, _ := f.c.Tenant("tenant")
-	current, err := f.c.SetTrust("alice", "tenant", tenant.Revision, []access.TrustRule{})
+	current, err := f.c.ChangeTrust("alice", "tenant", tenant.Revision, nil, tenant.ImageSources)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -6,8 +6,8 @@ import (
 	"bytes"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/state"
 )
 
 func completedRegisteredApp(t *testing.T) (*fixture, PlanningContext, Delivery, *executionFixture) {
@@ -81,12 +81,12 @@ func TestAppOverrideRejectsManagementFieldsBadAnchorsAndInvalidValue(t *testing.
 	refs := []ObjectRef{{key, object.Revision, object.Generation}}
 	before, _ := d.Encode()
 	for _, path := range [][]string{
-		{"networks", "app", "x-mydc", "mtu"},
-		{"networks", "app", "x-mydc", "dns", "ttl_seconds"},
-		{"services", "web", "x-mydc", "node"},
+		{"networks", "app", "x-sfc", "mtu"},
+		{"networks", "app", "x-sfc", "dns", "ttl_seconds"},
+		{"services", "web", "x-sfc", "node"},
 		{"services", "web", "volumes"}, {"services", "web", "secrets"},
 		{"services", "web", "read_only"}, {"services", "web", "environment"},
-		{"x-mydc", "delivery", "source", "credential_profile"},
+		{"x-sfc", "delivery", "source", "credential_profile"},
 	} {
 		if AllowedAppOverride(path) {
 			t.Fatal("non-app/whole-subtree field whitelisted", path)

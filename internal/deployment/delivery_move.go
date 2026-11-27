@@ -6,8 +6,8 @@ import (
 	"bytes"
 	"crypto/sha256"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/workload/volumes"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/workload/volumes"
 )
 
 // AppInputDigest binds an explicit move's public input separately from the CAS
@@ -24,7 +24,7 @@ func (b Blueprint) AppInputDigest() [32]byte {
 }
 
 func (d Delivery) movePolicy(input Compose) bool {
-	return input.MyDC.Delivery != nil && bytes.Equal(goal(*input.MyDC.Delivery), goal(d.d.Policy))
+	return input.Sfc.Delivery != nil && bytes.Equal(goal(*input.Sfc.Delivery), goal(d.d.Policy))
 }
 
 // PlanMoved retains the registered principal/source policy while using the

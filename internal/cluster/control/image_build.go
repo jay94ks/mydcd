@@ -9,10 +9,10 @@ import (
 	"math"
 	"strings"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/imagebuild"
-	"github.com/jay94ks/mydcd/internal/nodestorage"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/imagebuild"
+	"github.com/jay94ks/seafield/internal/nodestorage"
 )
 
 func buildChangeSelection(change Change) (tenant, node string, err error) {
@@ -692,3 +692,6 @@ func buildJSONEqual(a, b any) bool {
 	y, _ := json.Marshal(b)
 	return string(x) == string(y)
 }
+
+// imageBuildBook is the ImageBuildKey book (books.go).
+var imageBuildBook = Book{Key: ImageBuildKey, Reduce: Policy.reduceImageBuilds}

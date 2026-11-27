@@ -14,14 +14,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/engine"
-	"github.com/jay94ks/mydcd/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/engine"
+	"github.com/jay94ks/seafield/internal/reconcile"
 	"github.com/moby/moby/client"
 )
 
 func realNativeVolume(t *testing.T) (context.Context, *engine.Client, NativeSpec) {
 	t.Helper()
-	tag := os.Getenv("MYDC_DOCKER_TEST_OWNER")
+	tag := os.Getenv("SFC_DOCKER_TEST_OWNER")
 	if tag == "" || os.Geteuid() != 0 {
 		t.Skip("requires owned Docker prestate and prebuilt test binary with root directory permission")
 	}
@@ -37,7 +37,7 @@ func realNativeVolume(t *testing.T) (context.Context, *engine.Client, NativeSpec
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = c.Close() })
-	filter := client.Filters{}.Add("label", "org.mydc.owner="+owner)
+	filter := client.Filters{}.Add("label", "org.sfc.owner="+owner)
 	before, err := c.API.VolumeList(ctx, client.VolumeListOptions{Filters: filter})
 	if err != nil || len(before.Items) != 0 {
 		t.Fatal("owner must initially have zero volumes", err)
@@ -51,7 +51,7 @@ func realNativeVolume(t *testing.T) (context.Context, *engine.Client, NativeSpec
 			return
 		}
 		for _, volume := range v.Items {
-			if volume.Labels["org.mydc.owner"] != owner || volume.Labels["org.mydc.kind"] != "volume" {
+			if volume.Labels["org.sfc.owner"] != owner || volume.Labels["org.sfc.kind"] != "volume" {
 				t.Error("rollback ownership mismatch")
 				continue
 			}
@@ -190,7 +190,7 @@ func TestRealBoundaryManagedVolumeForeignIdentity(t *testing.T) {
 		t.Fatal(err)
 	}
 	labels := id.Labels
-	labels["org.mydc.spec"] = "foreign-spec"
+	labels["org.sfc.spec"] = "foreign-spec"
 	v, err := c.API.VolumeCreate(ctx, client.VolumeCreateOptions{Name: id.Name, Driver: "local", Labels: labels})
 	if err != nil {
 		t.Fatal(err)
@@ -216,7 +216,7 @@ func TestRealBoundaryManagedVolumeForeignIdentity(t *testing.T) {
 		t.Fatal("known precreate rejection stranded original operation", err)
 	}
 	read, err := c.API.VolumeInspect(ctx, id.Name, client.VolumeInspectOptions{})
-	if err != nil || read.Volume.Labels["org.mydc.spec"] != "foreign-spec" {
+	if err != nil || read.Volume.Labels["org.sfc.spec"] != "foreign-spec" {
 		t.Fatal("foreign labels changed", err)
 	}
 	if data, e := os.ReadFile(marker); e != nil || string(data) != "foreign original" {
@@ -228,7 +228,7 @@ func TestRealBoundaryManagedVolumeForeignIdentity(t *testing.T) {
 	}
 	// This is fixture-owned foreign data, not a product deletion. Preserve
 	// that distinction and remove only its exact original ID.
-	if read.Volume.Labels["org.mydc.owner"] != c.Owner {
+	if read.Volume.Labels["org.sfc.owner"] != c.Owner {
 		t.Fatal("fixture ownership changed")
 	}
 	if _, err = c.API.VolumeRemove(ctx, id.Name, client.VolumeRemoveOptions{}); err != nil {

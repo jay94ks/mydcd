@@ -7,8 +7,8 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	contract "github.com/jay94ks/mydcd/lifecycle/v1"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	contract "github.com/jay94ks/seafield/lifecycle/v1"
 )
 
 // Existing planner/signatures/FSM/snapshot boundary; native checks are facts

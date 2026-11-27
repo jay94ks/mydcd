@@ -10,13 +10,13 @@ import (
 	"time"
 
 	"github.com/go-git/go-git/v5"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/imagebuild"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/reconcile"
-	"github.com/jay94ks/mydcd/internal/schema"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/imagebuild"
+	"github.com/jay94ks/seafield/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/sfcp"
 )
 
 func gitSaveConsumer(plan imagebuild.GitSavePlan) string {
@@ -26,7 +26,7 @@ func (r *Runtime) saveImageBuildGit(ctx context.Context, call control.ImageBuild
 	call.At = time.Now().Unix()
 	view, err := r.currentView(ctx)
 	if err != nil || view.Local {
-		return imagebuild.GitSaveResponse{}, mydcp.ErrAdmission
+		return imagebuild.GitSaveResponse{}, sfcp.ErrAdmission
 	}
 	work, err := r.controlPolicy.ImageBuildGitWork(view.State, call)
 	if err != nil {
@@ -35,18 +35,18 @@ func (r *Runtime) saveImageBuildGit(ctx context.Context, call control.ImageBuild
 	if work.Read.Spec.Root.Key == r.Identity.Public {
 		return r.saveImageBuildGitOwner(ctx, call)
 	}
-	peer, ok := r.Mesh.Peer(mydcp.Identity(work.Read.Spec.Root.Key))
+	peer, ok := r.Mesh.Peer(sfcp.Identity(work.Read.Spec.Root.Key))
 	if !ok || !peer.Member || peer.ID != work.Read.Spec.Root.Node {
-		return imagebuild.GitSaveResponse{}, mydcp.ErrAdmission
+		return imagebuild.GitSaveResponse{}, sfcp.ErrAdmission
 	}
 	raw, _ := json.Marshal(call)
 	reply, err := cluster.CallManagement(ctx, r.Mesh, r.Identity, r.controlPolicy.Cluster, peer, cluster.ManagementRequest{Method: "image-build-git-owner", Input: raw})
 	if err != nil || reply.Code != "ok" {
-		return imagebuild.GitSaveResponse{}, mydcp.ErrAdmission
+		return imagebuild.GitSaveResponse{}, sfcp.ErrAdmission
 	}
 	out, err := schema.Decode[imagebuild.GitSaveResponse](reply.Data)
 	if err != nil || !out.Valid(call.Request) {
-		return imagebuild.GitSaveResponse{}, mydcp.ErrAdmission
+		return imagebuild.GitSaveResponse{}, sfcp.ErrAdmission
 	}
 	return out, nil
 }
@@ -58,12 +58,12 @@ func (r *Runtime) saveImageBuildGitOwner(ctx context.Context, call control.Image
 	current := func() (control.ImageBuildGitWork, error) {
 		view, err := r.currentView(ctx)
 		if err != nil || view.Local {
-			return control.ImageBuildGitWork{}, mydcp.ErrAdmission
+			return control.ImageBuildGitWork{}, sfcp.ErrAdmission
 		}
 		call.At = time.Now().Unix()
 		work, err := r.controlPolicy.ImageBuildGitWork(view.State, call)
 		if err != nil || work.Read.Spec.Root.Key != r.Identity.Public {
-			return control.ImageBuildGitWork{}, mydcp.ErrAdmission
+			return control.ImageBuildGitWork{}, sfcp.ErrAdmission
 		}
 		return work, nil
 	}
@@ -80,14 +80,14 @@ func (r *Runtime) saveImageBuildGitOwnerWork(ctx context.Context, call control.I
 	r.life.RLock()
 	defer r.life.RUnlock()
 	if r.closed || r.ctx.Err() != nil || !call.Request.Result && (r.gitFetcher == nil || r.nodeRoots == nil) || r.reports == nil {
-		return imagebuild.GitSaveResponse{}, mydcp.ErrAdmission
+		return imagebuild.GitSaveResponse{}, sfcp.ErrAdmission
 	}
 	if call.Request.Result {
 		r.imageBuildMu.Lock()
 		defer r.imageBuildMu.Unlock()
 		fresh, err := current()
 		if err != nil || fresh.Read.Epoch != work.Read.Epoch {
-			return imagebuild.GitSaveResponse{}, mydcp.ErrAdmission
+			return imagebuild.GitSaveResponse{}, sfcp.ErrAdmission
 		}
 		out, err := imagebuild.StoredGitSaveResult(r.reports, call.Request.Plan, r.Identity.Private)
 		if err != nil {
@@ -95,7 +95,7 @@ func (r *Runtime) saveImageBuildGitOwnerWork(ctx context.Context, call control.I
 		}
 		fresh, err = current()
 		if err != nil || fresh.Read.Epoch != work.Read.Epoch || !out.Valid(call.Request) {
-			return imagebuild.GitSaveResponse{}, mydcp.ErrAdmission
+			return imagebuild.GitSaveResponse{}, sfcp.ErrAdmission
 		}
 		return out, nil
 	}
@@ -182,11 +182,11 @@ func (r *Runtime) writeImageBuildGit(ctx context.Context, call control.ImageBuil
 		}
 		fresh, err := current()
 		if err != nil || fresh.Read.Epoch != work.Read.Epoch {
-			return out, false, mydcp.ErrAdmission
+			return out, false, sfcp.ErrAdmission
 		}
 		out.Code, out.Saved = "SAVED", &saved
 		if !out.Valid(call.Request) {
-			return out, false, mydcp.ErrAdmission
+			return out, false, sfcp.ErrAdmission
 		}
 		return out, false, nil
 	}
@@ -243,7 +243,7 @@ func (r *Runtime) writeImageBuildGit(ctx context.Context, call control.ImageBuil
 	}
 	fresh, err := current()
 	if err != nil || fresh.Read.Epoch != work.Read.Epoch {
-		return out, false, mydcp.ErrAdmission
+		return out, false, sfcp.ErrAdmission
 	}
 	archivePin, err := r.retainBuildRoot(ctx, scope.Root, fresh.Root, buildArtifactConsumer(scope))
 	if archivePin.Directory != nil {
@@ -261,11 +261,11 @@ func (r *Runtime) writeImageBuildGit(ctx context.Context, call control.ImageBuil
 	}
 	fresh, err = current()
 	if err != nil || fresh.Read.Epoch != work.Read.Epoch {
-		return out, false, mydcp.ErrAdmission
+		return out, false, sfcp.ErrAdmission
 	}
 	out.Code, out.Saved = "SAVED", &saved
 	if !out.Valid(call.Request) {
-		return out, false, mydcp.ErrAdmission
+		return out, false, sfcp.ErrAdmission
 	}
 	return out, false, nil
 }

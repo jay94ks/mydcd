@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/engine"
-	contract "github.com/jay94ks/mydcd/lifecycle/v1"
+	"github.com/jay94ks/seafield/internal/engine"
+	contract "github.com/jay94ks/seafield/lifecycle/v1"
 )
 
 func serviceProbeRequest() contract.Request {

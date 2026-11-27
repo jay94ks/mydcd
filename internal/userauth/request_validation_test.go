@@ -11,13 +11,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/containerops"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/registryclient"
-	checker "github.com/jay94ks/mydcd/internal/workload/lifecycle"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/containerops"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/registryclient"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	checker "github.com/jay94ks/seafield/internal/workload/lifecycle"
 	quic "github.com/quic-go/quic-go"
 )
 
@@ -57,8 +57,6 @@ func TestRequestValidationRequiredPayloadsCannotCrossMethods(t *testing.T) {
 		}},
 		{"app-cd-history", func(r *Request) { r.AppCDRead = &control.AppCDReadRequest{App: "app"} }},
 		{"app-cd-diff", func(r *Request) { r.AppCDRead = &control.AppCDReadRequest{App: "app"} }},
-		{"volume-usage", func(r *Request) { r.VolumeUsage = &control.VolumeSelector{App: "app", ID: "data"} }},
-		{"volume-backup-source", func(r *Request) { r.VolumeSource = &control.VolumeSelector{App: "app", ID: "data"} }},
 		{"vault-approval-plan", func(r *Request) { r.VaultPlan = &control.VaultApprovalPlanRequest{} }},
 		{"vault-write-plan", func(r *Request) { r.VaultWritePlan = &control.VaultWritePlanRequest{Realm: "tenant"} }},
 		{"registry-credential", func(r *Request) { r.Registry = &RegistryCredentialRequest{} }},
@@ -94,8 +92,6 @@ func TestRequestValidationRequiredPayloadsCannotCrossMethods(t *testing.T) {
 		{Method: "app-operation", AppOperation: &control.AppOperationRequest{}, After: "cursor"},
 		{Method: "app-cd-registration", AppCDApproval: &control.AppCDApprovalRequest{}},
 		{Method: "app-cd-field", Tenant: "tenant", AppCDField: &control.AppCDFieldRequest{}, After: "cursor"},
-		{Method: "volume-usage", Tenant: "tenant", VolumeUsage: &control.VolumeSelector{}},
-		{Method: "volume-backup-source", VolumeSource: &control.VolumeSelector{App: "app", ID: "data"}},
 		{Method: "vault-write-plan", Tenant: "other", VaultWritePlan: &control.VaultWritePlanRequest{Realm: "tenant"}},
 		{Method: "checker-source-stage", CheckerSource: &checker.SourceDescriptor{}, CheckerUpload: &[32]byte{}},
 		{Method: "whoami", CheckerUpload: &[32]byte{1}},
@@ -119,24 +115,18 @@ func TestRequestValidationRequiredPayloadsCannotCrossMethods(t *testing.T) {
 
 func TestRequestValidationCredentialAndSelectorBoundaries(t *testing.T) {
 	for _, method := range []string{"credential-challenge", "credential-login"} {
-		r := Request{Method: method, AuthMethod: access.Password, Secret: []byte("private")}
+		r := Request{Method: method}
 		if !r.validCredentialFields(Envelope{}, 1) || r.validCredentialFields(Envelope{Session: &access.Session{}}, 1) || r.validCredentialFields(Envelope{}, 3) {
 			t.Fatal("credential entry/relay contract changed", method)
 		}
 	}
-	for _, r := range []Request{
-		{Method: "whoami", AuthMethod: access.Password}, {Method: "whoami", Credential: "id"},
-		{Method: "whoami", Secret: []byte{}}, {Method: "login", Ticket: &Ticket{AuthMethod: access.Token}},
-		{Method: "login", Ticket: &Ticket{VerifierRef: "private-ref"}},
-	} {
-		if r.validCredentialFields(Envelope{}, 1) {
-			t.Fatal("credential-only fields accepted on ordinary request")
-		}
+	if (Request{Method: "whoami", Secret: []byte{}}).validCredentialFields(Envelope{}, 1) {
+		t.Fatal("credential-only fields accepted on ordinary request")
 	}
-	if !(Request{Method: "login", Ticket: &Ticket{}}).validCredentialFields(Envelope{}, 1) {
-		t.Fatal("private-key ticket rejected")
+	if !(Request{Method: "login"}).validCredentialFields(Envelope{}, 1) {
+		t.Fatal("private-key login rejected")
 	}
-	for _, method := range []string{"tenant-retirement", "members", "node-storage", "resources", "volumes", "volume-backups", "volume-restores", "apps", "app-uploads", "vault", "lifecycles", "registries"} {
+	for _, method := range []string{"tenant-retirement", "members", "node-storage", "apps", "app-uploads", "vault", "registries"} {
 		if !(Request{Method: method, After: "next"}).validQuerySelectors() {
 			t.Fatal("valid cursor rejected", method)
 		}
@@ -179,19 +169,19 @@ func TestRequestValidationRejectsBeforeBindingAndClearsCredentialEnvelope(t *tes
 		private bool
 	}{
 		{r: Request{Method: "whoami", AppOperation: &control.AppOperationRequest{}}},
-		{r: Request{Method: "credential-login", AuthMethod: access.Password, Secret: []byte("private-password")}, e: Envelope{Session: &access.Session{}}, private: true},
+		{r: Request{Method: "credential-login", Params: []byte(`{"Ticket":{"AuthMethod":"password"},"Secret":"cHJpdmF0ZS1wYXNzd29yZA=="}`)}, e: Envelope{Session: &access.Session{}}, private: true},
 	} {
 		tc.r.Schema = 1
 		tc.r.Nonce = [32]byte{1}
 		tc.e.Body, _ = json.Marshal(tc.r)
 		raw, _ := json.Marshal(tc.e)
 		digest := sha256.Sum256(raw)
-		frame := mydcp.Frame{Purpose: mydcp.User, Kind: 1, Request: 55, Fields: []mydcp.Field{{Tag: 1, Required: true, Value: raw}, {Tag: 2, Required: true, Value: digest[:]}}}
+		frame := sfcp.Frame{Purpose: sfcp.User, Kind: 1, Request: 55, Fields: []sfcp.Field{{Tag: 1, Required: true, Value: raw}, {Tag: 2, Required: true, Value: digest[:]}}}
 		stream := new(validationStream)
 		if err := service.handle(context.Background(), nil, stream, frame); err != nil {
 			t.Fatal(err)
 		}
-		response, err := mydcp.ReadFrame(stream, mydcp.MaxBody)
+		response, err := sfcp.ReadFrame(stream, sfcp.MaxBody)
 		var reply Reply
 		if err != nil || json.Unmarshal(response.Fields[0].Value, &reply) != nil || reply.Code != "denied" || response.Request != 55 {
 			t.Fatal("invalid request crossed guard", err)

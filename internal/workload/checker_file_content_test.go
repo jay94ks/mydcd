@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	contract "github.com/jay94ks/mydcd/lifecycle/v1"
+	contract "github.com/jay94ks/seafield/lifecycle/v1"
 )
 
 func fileArchive(t *testing.T, headers []*tar.Header, data [][]byte) []byte {

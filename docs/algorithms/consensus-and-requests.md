@@ -18,7 +18,7 @@
 | 전송 뒤 timeout·단절·취소 | Unknown일 수 있으므로 원 작업을 관측/정산 |
 | 새로운 의도가 필요 | 기존 결과를 보존하고 명시된 새 변경으로 처리 |
 
-[MYDCP 요청 수명 코어](../../internal/mydcp/request.go)는 `Prepared → InFlight → Completed`와 `NotSent/Unknown`을 구분한다. frame의 `Request`는 통신 교환 ID이고, 업무 request/operation ID의 내구 식별과 별개다.
+[SFCP 요청 수명 코어](../../internal/sfcp/request.go)는 `Prepared → InFlight → Completed`와 `NotSent/Unknown`을 구분한다. frame의 `Request`는 통신 교환 ID이고, 업무 request/operation ID의 내구 식별과 별개다.
 
 ## 비교 좌표
 
@@ -26,4 +26,4 @@
 
 상태 전이 안에서는 외부 시각·난수·네트워크·OS 관측을 새로 생성하지 않는다. 필요한 외부 사실은 검증된 입력으로 전달하고, 외부 효과 수행과 관리 상태 커밋을 구분한다.
 
-구체적 명령별 좌표·권한은 [명령 대상표](../architecture/command-targets.md), wire/서명은 [MYDCP](../protocol/mydcp.md), 구현은 [cluster/state](../../internal/cluster/state/)를 따른다.
+구체적 명령별 좌표·권한은 [명령 대상표](../architecture/command-targets.md), wire/서명은 [SFCP](../protocol/sfcp.md), 구현은 [cluster/state](../../internal/cluster/state/)를 따른다.

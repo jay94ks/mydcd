@@ -8,18 +8,18 @@ import (
 	"crypto/rand"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/cluster/lifecycle"
-	"github.com/jay94ks/mydcd/internal/imagebuild"
-	"github.com/jay94ks/mydcd/internal/mydcp"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/lifecycle"
+	"github.com/jay94ks/seafield/internal/imagebuild"
+	"github.com/jay94ks/seafield/internal/sfcp"
 )
 
 // PlanGitSave reuses source inspection and metadata queries. A raced
 // definition/policy fails instead of combining different source snapshots.
-func (c Client) PlanGitSave(ctx context.Context, target mydcp.Peer, session access.Session, tenant, contextID, id string) (imagebuild.GitSavePlan, error) {
+func (c Client) PlanGitSave(ctx context.Context, target sfcp.Peer, session access.Session, tenant, contextID, id string) (imagebuild.GitSavePlan, error) {
 	if !lifecycle.ValidID(id) {
-		return imagebuild.GitSavePlan{}, mydcp.ErrAdmission
+		return imagebuild.GitSavePlan{}, sfcp.ErrAdmission
 	}
 	checked, err := c.CheckBuildContext(ctx, target, session, tenant, control.ImageBuildSourceQuery{ID: contextID})
 	if err != nil {
@@ -52,23 +52,23 @@ func (c Client) PlanGitSave(ctx context.Context, target mydcp.Peer, session acce
 	at := uint64(time.Now().Unix())
 	plan := imagebuild.GitSavePlan{Schema: 1, Tenant: tenant, Context: contextID, ID: id, Creator: session.User, Root: spec.Root, ContextRevision: checked.ContextRevision, PolicyRevision: checked.PolicyRevision, Dockerfile: spec.Dockerfile, ExpandedLimit: policies.Policies[0].Spec.WorkspaceBytes, Commit: checked.Commit, Tree: checked.Tree, CreatedAt: at, ExpiresAt: at + 3600}
 	if plan.Validate() != nil {
-		return imagebuild.GitSavePlan{}, mydcp.ErrFrame
+		return imagebuild.GitSavePlan{}, sfcp.ErrFrame
 	}
 	return plan, nil
 }
 
 // A renewed short proof retries the same plan/ID/commit, never replans it.
-func (c Client) SaveGitContext(ctx context.Context, target mydcp.Peer, session access.Session, plan imagebuild.GitSavePlan) (imagebuild.GitSaveResponse, error) {
+func (c Client) SaveGitContext(ctx context.Context, target sfcp.Peer, session access.Session, plan imagebuild.GitSavePlan) (imagebuild.GitSaveResponse, error) {
 	return c.requestGitSave(ctx, target, session, plan, false)
 }
 
-func (c Client) GitSaveResult(ctx context.Context, target mydcp.Peer, session access.Session, plan imagebuild.GitSavePlan) (imagebuild.GitSaveResponse, error) {
+func (c Client) GitSaveResult(ctx context.Context, target sfcp.Peer, session access.Session, plan imagebuild.GitSavePlan) (imagebuild.GitSaveResponse, error) {
 	return c.requestGitSave(ctx, target, session, plan, true)
 }
 
-func (c Client) requestGitSave(ctx context.Context, target mydcp.Peer, session access.Session, plan imagebuild.GitSavePlan, result bool) (imagebuild.GitSaveResponse, error) {
+func (c Client) requestGitSave(ctx context.Context, target sfcp.Peer, session access.Session, plan imagebuild.GitSavePlan, result bool) (imagebuild.GitSaveResponse, error) {
 	if c.Self == nil || c.Self.Public != session.Key || plan.Validate() != nil || plan.Root.Cluster != c.Cluster || plan.Creator != session.User {
-		return imagebuild.GitSaveResponse{}, mydcp.ErrAdmission
+		return imagebuild.GitSaveResponse{}, sfcp.ErrAdmission
 	}
 	at := time.Now().Unix()
 	proof := imagebuild.GitSaveProof{Schema: 1, Plan: plan.Digest(), At: at, ExpiresAt: min(at+120, session.ExpiresAt), Result: result}
@@ -82,7 +82,7 @@ func (c Client) requestGitSave(ctx context.Context, target mydcp.Peer, session a
 		return imagebuild.GitSaveResponse{}, err
 	}
 	if reply.ImageBuildGit == nil || !reply.ImageBuildGit.Valid(q) {
-		return imagebuild.GitSaveResponse{}, mydcp.ErrFrame
+		return imagebuild.GitSaveResponse{}, sfcp.ErrFrame
 	}
 	return *reply.ImageBuildGit, nil
 }

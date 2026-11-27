@@ -26,7 +26,7 @@ type Tree struct {
 }
 
 func (t Tree) Digest() [32]byte {
-	return digestJSON("mydc-imagebuild-tree-1", struct {
+	return digestJSON("sfc-imagebuild-tree-1", struct {
 		Entries []Entry
 		Bytes   int64
 	}{t.Entries, t.Bytes})

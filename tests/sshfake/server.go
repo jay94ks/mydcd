@@ -4,7 +4,7 @@
 
 // Package sshfake is a test SSH server on loopback standing in for a node's
 // sshd in the node shell tests (devel/refactor/16-fake-host-layer.md). It
-// takes only the mydc-shell account's key from that account's
+// takes only the sfc-shell account's key from that account's
 // authorized_keys and runs the session as that account with a real PTY, as
 // sshd does. It needs root (to run as another user).
 package sshfake
@@ -30,7 +30,7 @@ import (
 )
 
 // Account is the only user the server lets in.
-const Account = "mydc-shell"
+const Account = "sfc-shell"
 
 // Server is a running test SSH server.
 type Server struct {
@@ -163,6 +163,10 @@ func session(u *user.User, channel ssh.Channel, reqs <-chan *ssh.Request) {
 		}
 	}()
 	var size [2]uint32 // cols, rows
+	// The PTY's descriptor, read once before any copy starts: File.Fd
+	// changes the file's blocking state, so calling it beside a running
+	// io.Copy (window-change after shell) is a data race.
+	ptyFD := -1
 	term := "xterm"
 	for req := range reqs {
 		switch req.Type {
@@ -182,11 +186,12 @@ func session(u *user.User, channel ssh.Channel, reqs <-chan *ssh.Request) {
 				_ = req.Reply(false, nil)
 				continue
 			}
-			resize(ptmx, size)
+			ptyFD = int(ptmx.Fd())
+			resize(ptyFD, size)
 			_ = req.Reply(true, nil)
 		case "window-change":
-			if len(req.Payload) >= 8 && ptmx != nil {
-				resize(ptmx, [2]uint32{binary.BigEndian.Uint32(req.Payload), binary.BigEndian.Uint32(req.Payload[4:])})
+			if len(req.Payload) >= 8 && ptyFD >= 0 {
+				resize(ptyFD, [2]uint32{binary.BigEndian.Uint32(req.Payload), binary.BigEndian.Uint32(req.Payload[4:])})
 			}
 			_ = req.Reply(false, nil)
 		case "shell", "exec":
@@ -207,8 +212,8 @@ func session(u *user.User, channel ssh.Channel, reqs <-chan *ssh.Request) {
 			_ = req.Reply(true, nil)
 			go func() {
 				for r := range reqs {
-					if r.Type == "window-change" && len(r.Payload) >= 8 && ptmx != nil {
-						resize(ptmx, [2]uint32{binary.BigEndian.Uint32(r.Payload), binary.BigEndian.Uint32(r.Payload[4:])})
+					if r.Type == "window-change" && len(r.Payload) >= 8 && ptyFD >= 0 {
+						resize(ptyFD, [2]uint32{binary.BigEndian.Uint32(r.Payload), binary.BigEndian.Uint32(r.Payload[4:])})
 					}
 					if r.WantReply {
 						_ = r.Reply(false, nil)
@@ -293,6 +298,6 @@ func openTTY(ptmx *os.File) (*os.File, error) {
 	return os.OpenFile(fmt.Sprintf("/dev/pts/%d", n), os.O_RDWR|unix.O_NOCTTY, 0)
 }
 
-func resize(ptmx *os.File, size [2]uint32) {
-	_ = unix.IoctlSetWinsize(int(ptmx.Fd()), unix.TIOCSWINSZ, &unix.Winsize{Col: uint16(size[0]), Row: uint16(size[1])})
+func resize(fd int, size [2]uint32) {
+	_ = unix.IoctlSetWinsize(fd, unix.TIOCSWINSZ, &unix.Winsize{Col: uint16(size[0]), Row: uint16(size[1])})
 }

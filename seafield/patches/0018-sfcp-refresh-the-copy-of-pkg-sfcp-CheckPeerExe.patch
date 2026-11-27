@@ -1,0 +1,35 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Fri, 27 Nov 2026 11:01:59 +0000
+Subject: [PATCH 18/20] sfcp: refresh the copy of pkg/sfcp (CheckPeerExe)
+
+
+diff --git a/daemon/seafield/sfcp/enginemux/peercheck_linux.go b/daemon/seafield/sfcp/enginemux/peercheck_linux.go
+index f609738..2a56fa9 100644
+--- a/daemon/seafield/sfcp/enginemux/peercheck_linux.go
++++ b/daemon/seafield/sfcp/enginemux/peercheck_linux.go
+@@ -27,6 +27,15 @@
+ // exchanged: only root can open these 0600 root-owned sockets, and root can
+ // read any key file anyway.
+ func CheckPeer(c *net.UnixConn, name string) error {
++	return CheckPeerExe(c, func(exe string) bool { return Installed(exe, name) })
++}
++
++// CheckPeerExe is CheckPeer with the executable rule given by allowed. The
++// root and pidfd checks are the same.
++func CheckPeerExe(c *net.UnixConn, allowed func(exe string) bool) error {
++	if allowed == nil {
++		return ErrPeer
++	}
+ 	raw, err := c.SyscallConn()
+ 	if err != nil {
+ 		return err
+@@ -56,7 +65,7 @@ func CheckPeer(c *net.UnixConn, name string) error {
+ 	if err = unix.PidfdSendSignal(pidfd, 0, nil, 0); err != nil {
+ 		return errors.Join(ErrPeer, err)
+ 	}
+-	if !Installed(exe, name) {
++	if !allowed(exe) {
+ 		return ErrPeer
+ 	}
+ 	return nil

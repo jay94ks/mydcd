@@ -8,7 +8,7 @@ import (
 	"net/netip"
 	"os"
 
-	"github.com/jay94ks/mydcd/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/reconcile"
 	"github.com/vishvananda/netlink"
 )
 

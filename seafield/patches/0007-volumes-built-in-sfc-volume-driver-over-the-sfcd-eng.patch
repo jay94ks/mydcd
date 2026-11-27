@@ -1,0 +1,618 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: seafield <seafield@invalid>
+Date: Fri, 27 Nov 2026 08:18:14 +0000
+Subject: [PATCH 07/20] volumes: built-in sfc volume driver over the sfcd
+ engine socket
+
+
+diff --git a/daemon/command/daemon.go b/daemon/command/daemon.go
+index 7ec2bb5..da89cf1 100644
+--- a/daemon/command/daemon.go
++++ b/daemon/command/daemon.go
+@@ -38,6 +38,9 @@
+ 	"github.com/moby/moby/v2/daemon/seafield/eventfeed"
+ 	"github.com/moby/moby/v2/daemon/seafield/logqueue"
+ 	"github.com/moby/moby/v2/daemon/seafield/monitor"
++	"github.com/moby/moby/v2/daemon/seafield/peer"
++	"github.com/moby/moby/v2/daemon/seafield/sfcd"
++	"github.com/moby/moby/v2/daemon/seafield/volumedrv"
+ 	apiserver "github.com/moby/moby/v2/daemon/server"
+ 	"github.com/moby/moby/v2/daemon/server/middleware"
+ 	"github.com/moby/moby/v2/daemon/server/router"
+@@ -51,6 +54,7 @@
+ 	sessionrouter "github.com/moby/moby/v2/daemon/server/router/session"
+ 	systemrouter "github.com/moby/moby/v2/daemon/server/router/system"
+ 	"github.com/moby/moby/v2/daemon/server/router/volume"
++	volumeservice "github.com/moby/moby/v2/daemon/volume/service"
+ 	"github.com/moby/moby/v2/dockerversion"
+ 	"github.com/moby/moby/v2/pkg/authorization"
+ 	"github.com/moby/moby/v2/pkg/homedir"
+@@ -306,6 +310,7 @@ func (cli *daemonCLI) start(ctx context.Context) (retErr error) {
+ 	eventfeed.Attach(feed)
+ 	defer feed.Close()
+ 	logqueue.Root = cli.Config.Root
++	volumeservice.ExtraDrivers = append(volumeservice.ExtraDrivers, volumedrv.New(sfcd.New(sfcd.Socket(), peer.Allowed())))
+ 
+ 	d, err := daemon.NewDaemon(ctx, cli.Config, pluginStore, cli.authzMiddleware, cli.containerdDialer)
+ 	if err != nil {
+diff --git a/daemon/command/seafield_peer_linux.go b/daemon/command/seafield_peer_linux.go
+index ae65415..90e4717 100644
+--- a/daemon/command/seafield_peer_linux.go
++++ b/daemon/command/seafield_peer_linux.go
+@@ -3,39 +3,18 @@
+ package command
+ 
+ import (
+-	"bufio"
+ 	"context"
+-	"errors"
+-	"fmt"
+ 	"net"
+-	"os"
+-	"slices"
+-	"strconv"
+-	"strings"
+ 
+ 	"github.com/containerd/log"
+-	"golang.org/x/sys/unix"
++	"github.com/moby/moby/v2/daemon/seafield/peer"
+ )
+ 
+-// defaultSeafieldPeers is where the sfc node package installs sfcd.
+-const defaultSeafieldPeers = "/usr/lib/sfc/sfcd"
+-
+-// seafieldPeers lists the executables allowed to talk to the engine API.
+-// SEAFIELD_ALLOWED_PEERS (colon separated absolute paths) replaces the
+-// default, for tests and diagnostics.
+-func seafieldPeers() []string {
+-	v := os.Getenv("SEAFIELD_ALLOWED_PEERS")
+-	if v == "" {
+-		v = defaultSeafieldPeers
+-	}
+-	return strings.Split(v, ":")
+-}
+-
+ // guardListeners accepts only unix-socket peers that the kernel reports as
+ // root running one of the allowed executables. Anything else is closed
+ // before a single byte of the API is read.
+ func guardListeners(ls []net.Listener) []net.Listener {
+-	peers := seafieldPeers()
++	peers := peer.Allowed()
+ 	out := make([]net.Listener, len(ls))
+ 	for i, l := range ls {
+ 		out[i] = &peerListener{Listener: l, peers: peers}
+@@ -54,7 +33,7 @@ func (l *peerListener) Accept() (net.Conn, error) {
+ 		if err != nil {
+ 			return nil, err
+ 		}
+-		exe, err := checkPeer(c, l.peers)
++		exe, err := peer.Check(c, l.peers)
+ 		if err == nil {
+ 			return c, nil
+ 		}
+@@ -62,73 +41,3 @@ func (l *peerListener) Accept() (net.Conn, error) {
+ 		_ = c.Close()
+ 	}
+ }
+-
+-// checkPeer identifies the process on the other end of c with SO_PEERCRED
+-// and SO_PEERPIDFD. The pidfd pins that exact process: after reading its
+-// executable, a signal-0 probe through the pidfd proves the process did not
+-// exit in between, so a reused pid cannot be mistaken for the peer.
+-func checkPeer(c net.Conn, allowed []string) (string, error) {
+-	uc, ok := c.(*net.UnixConn)
+-	if !ok {
+-		return "", errors.New("not a unix socket")
+-	}
+-	raw, err := uc.SyscallConn()
+-	if err != nil {
+-		return "", err
+-	}
+-	var (
+-		cred  *unix.Ucred
+-		pidfd int
+-		serr  error
+-	)
+-	if err = raw.Control(func(fd uintptr) {
+-		cred, serr = unix.GetsockoptUcred(int(fd), unix.SOL_SOCKET, unix.SO_PEERCRED)
+-		if serr == nil {
+-			pidfd, serr = unix.GetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_PEERPIDFD)
+-		}
+-	}); err != nil {
+-		return "", err
+-	}
+-	if serr != nil {
+-		return "", fmt.Errorf("peer credentials: %w", serr)
+-	}
+-	defer unix.Close(pidfd)
+-	if cred.Uid != 0 {
+-		return "", fmt.Errorf("peer uid %d is not root", cred.Uid)
+-	}
+-	pid, err := pidfdPid(pidfd)
+-	if err != nil {
+-		return "", err
+-	}
+-	exe, err := os.Readlink("/proc/" + strconv.Itoa(pid) + "/exe")
+-	if err != nil {
+-		return "", fmt.Errorf("peer executable: %w", err)
+-	}
+-	if err = unix.PidfdSendSignal(pidfd, 0, nil, 0); err != nil {
+-		return exe, fmt.Errorf("peer exited while being checked: %w", err)
+-	}
+-	if !slices.Contains(allowed, exe) {
+-		return exe, errors.New("peer executable is not allowed")
+-	}
+-	return exe, nil
+-}
+-
+-// pidfdPid reads the pid a pidfd refers to from /proc/self/fdinfo.
+-func pidfdPid(pidfd int) (int, error) {
+-	f, err := os.Open("/proc/self/fdinfo/" + strconv.Itoa(pidfd))
+-	if err != nil {
+-		return 0, err
+-	}
+-	defer f.Close()
+-	s := bufio.NewScanner(f)
+-	for s.Scan() {
+-		if v, ok := strings.CutPrefix(s.Text(), "Pid:"); ok {
+-			pid, err := strconv.Atoi(strings.TrimSpace(v))
+-			if err != nil || pid <= 0 {
+-				return 0, errors.New("peer process is gone")
+-			}
+-			return pid, nil
+-		}
+-	}
+-	return 0, errors.New("pidfd has no pid")
+-}
+diff --git a/daemon/seafield/peer/peer_linux.go b/daemon/seafield/peer/peer_linux.go
+new file mode 100644
+index 0000000..afd8c8a
+--- /dev/null
++++ b/daemon/seafield/peer/peer_linux.go
+@@ -0,0 +1,103 @@
++// SPDX-License-Identifier: Apache-2.0
++
++// Package peer identifies the process on the other end of a unix socket.
++package peer
++
++import (
++	"bufio"
++	"errors"
++	"fmt"
++	"net"
++	"os"
++	"slices"
++	"strconv"
++	"strings"
++
++	"golang.org/x/sys/unix"
++)
++
++// DefaultSfcd lists where Seafield Cluster installs the node daemon sfcd:
++// the package, a tar install, and the current manual layout. They are the
++// resolved paths /proc/<pid>/exe shows; symlinks such as /usr/bin/sfcd do
++// not count.
++var DefaultSfcd = []string{"/usr/lib/sfc/bin/sfcd", "/usr/local/lib/sfc/bin/sfcd", "/usr/local/bin/sfcd"}
++
++// Allowed lists the executables allowed to talk to the engine.
++// SEAFIELD_ALLOWED_PEERS (colon separated absolute paths) replaces the
++// default, for tests and diagnostics.
++func Allowed() []string {
++	if v := os.Getenv("SEAFIELD_ALLOWED_PEERS"); v != "" {
++		return strings.Split(v, ":")
++	}
++	return DefaultSfcd
++}
++
++// Check identifies the process on the other end of c with SO_PEERCRED
++// and SO_PEERPIDFD. The pidfd pins that exact process: after reading its
++// executable, a signal-0 probe through the pidfd proves the process did not
++// exit in between, so a reused pid cannot be mistaken for the peer.
++func Check(c net.Conn, allowed []string) (string, error) {
++	uc, ok := c.(*net.UnixConn)
++	if !ok {
++		return "", errors.New("not a unix socket")
++	}
++	raw, err := uc.SyscallConn()
++	if err != nil {
++		return "", err
++	}
++	var (
++		cred  *unix.Ucred
++		pidfd int
++		serr  error
++	)
++	if err = raw.Control(func(fd uintptr) {
++		cred, serr = unix.GetsockoptUcred(int(fd), unix.SOL_SOCKET, unix.SO_PEERCRED)
++		if serr == nil {
++			pidfd, serr = unix.GetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_PEERPIDFD)
++		}
++	}); err != nil {
++		return "", err
++	}
++	if serr != nil {
++		return "", fmt.Errorf("peer credentials: %w", serr)
++	}
++	defer unix.Close(pidfd)
++	if cred.Uid != 0 {
++		return "", fmt.Errorf("peer uid %d is not root", cred.Uid)
++	}
++	pid, err := pidfdPid(pidfd)
++	if err != nil {
++		return "", err
++	}
++	exe, err := os.Readlink("/proc/" + strconv.Itoa(pid) + "/exe")
++	if err != nil {
++		return "", fmt.Errorf("peer executable: %w", err)
++	}
++	if err = unix.PidfdSendSignal(pidfd, 0, nil, 0); err != nil {
++		return exe, fmt.Errorf("peer exited while being checked: %w", err)
++	}
++	if !slices.Contains(allowed, exe) {
++		return exe, errors.New("peer executable is not allowed")
++	}
++	return exe, nil
++}
++
++// pidfdPid reads the pid a pidfd refers to from /proc/self/fdinfo.
++func pidfdPid(pidfd int) (int, error) {
++	f, err := os.Open("/proc/self/fdinfo/" + strconv.Itoa(pidfd))
++	if err != nil {
++		return 0, err
++	}
++	defer f.Close()
++	s := bufio.NewScanner(f)
++	for s.Scan() {
++		if v, ok := strings.CutPrefix(s.Text(), "Pid:"); ok {
++			pid, err := strconv.Atoi(strings.TrimSpace(v))
++			if err != nil || pid <= 0 {
++				return 0, errors.New("peer process is gone")
++			}
++			return pid, nil
++		}
++	}
++	return 0, errors.New("pidfd has no pid")
++}
+diff --git a/daemon/seafield/sfcd/client.go b/daemon/seafield/sfcd/client.go
+new file mode 100644
+index 0000000..8e50c6d
+--- /dev/null
++++ b/daemon/seafield/sfcd/client.go
+@@ -0,0 +1,119 @@
++// SPDX-License-Identifier: Apache-2.0
++
++// Package sfcd is Seafield's client for the sfcd engine socket: the
++// direction in which the engine asks sfcd (volume paths, network hooks,
++// image blobs). See seafield/docs/sfcd-socket.md in the Seafield repository.
++package sfcd
++
++import (
++	"bytes"
++	"context"
++	"encoding/json"
++	"fmt"
++	"io"
++	"net"
++	"net/http"
++	"os"
++	"time"
++
++	"github.com/moby/moby/v2/daemon/seafield/peer"
++)
++
++// DefaultSocket is where sfcd listens for the engine.
++const DefaultSocket = "/run/sfe/sfcd.sock"
++
++// Client talks to sfcd. Every new connection checks, through the kernel,
++// that the process listening on the socket is an allowed sfcd binary.
++type Client struct {
++	http *http.Client
++}
++
++// Socket is DefaultSocket unless SEAFIELD_SFCD_SOCKET names another path
++// (tests).
++func Socket() string {
++	if v := os.Getenv("SEAFIELD_SFCD_SOCKET"); v != "" {
++		return v
++	}
++	return DefaultSocket
++}
++
++// New returns a client for the socket at path, accepting only the allowed
++// peers (see peer.Allowed).
++func New(path string, allowed []string) *Client {
++	dial := func(ctx context.Context, _, _ string) (net.Conn, error) {
++		var d net.Dialer
++		c, err := d.DialContext(ctx, "unix", path)
++		if err != nil {
++			return nil, err
++		}
++		if exe, err := peer.Check(c, allowed); err != nil {
++			_ = c.Close()
++			return nil, fmt.Errorf("sfcd socket %s is served by %q: %w", path, exe, err)
++		}
++		return c, nil
++	}
++	return &Client{http: &http.Client{Transport: &http.Transport{DialContext: dial, MaxIdleConns: 4, IdleConnTimeout: 30 * time.Second}}}
++}
++
++// Error is a non-2xx answer from sfcd.
++type Error struct {
++	Status  int
++	Message string `json:"message"`
++}
++
++func (e *Error) Error() string { return fmt.Sprintf("sfcd: %d %s", e.Status, e.Message) }
++
++// Do sends method path with body (JSON, or nil) and decodes a JSON answer
++// into out (or discards it when out is nil).
++func (c *Client) Do(ctx context.Context, method, path string, body, out any) error {
++	var rd io.Reader
++	if body != nil {
++		b, err := json.Marshal(body)
++		if err != nil {
++			return err
++		}
++		rd = bytes.NewReader(b)
++	}
++	req, err := http.NewRequestWithContext(ctx, method, "http://sfcd/v1"+path, rd)
++	if err != nil {
++		return err
++	}
++	if body != nil {
++		req.Header.Set("Content-Type", "application/json")
++	}
++	resp, err := c.http.Do(req)
++	if err != nil {
++		return err
++	}
++	defer resp.Body.Close()
++	if resp.StatusCode/100 != 2 {
++		e := &Error{Status: resp.StatusCode}
++		_ = json.NewDecoder(io.LimitReader(resp.Body, 64<<10)).Decode(e)
++		return e
++	}
++	if out == nil || resp.StatusCode == http.StatusNoContent {
++		_, _ = io.Copy(io.Discard, resp.Body)
++		return nil
++	}
++	return json.NewDecoder(resp.Body).Decode(out)
++}
++
++// Stream sends a GET and returns the answer body for the caller to read
++// and close (image blobs).
++func (c *Client) Stream(ctx context.Context, path string) (io.ReadCloser, error) {
++	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://sfcd/v1"+path, nil)
++	if err != nil {
++		return nil, err
++	}
++	resp, err := c.http.Do(req)
++	if err != nil {
++		return nil, err
++	}
++	if resp.StatusCode/100 != 2 {
++		defer resp.Body.Close()
++		e := &Error{Status: resp.StatusCode}
++		_ = json.NewDecoder(io.LimitReader(resp.Body, 64<<10)).Decode(e)
++		return nil, e
++	}
++	return resp.Body, nil
++}
+diff --git a/daemon/seafield/sfcd/client_test.go b/daemon/seafield/sfcd/client_test.go
+new file mode 100644
+index 0000000..33b7551
+--- /dev/null
++++ b/daemon/seafield/sfcd/client_test.go
+@@ -0,0 +1,55 @@
++// SPDX-License-Identifier: Apache-2.0
++
++package sfcd
++
++import (
++	"context"
++	"errors"
++	"net"
++	"net/http"
++	"os"
++	"path/filepath"
++	"testing"
++)
++
++func serve(t *testing.T) string {
++	t.Helper()
++	sock := filepath.Join(t.TempDir(), "engine.sock")
++	l, err := net.Listen("unix", sock)
++	if err != nil {
++		t.Fatal(err)
++	}
++	mux := http.NewServeMux()
++	mux.HandleFunc("GET /v1/ping", func(w http.ResponseWriter, _ *http.Request) { w.Write([]byte(`{"ok":true}`)) })
++	mux.HandleFunc("GET /v1/nope", func(w http.ResponseWriter, _ *http.Request) {
++		w.WriteHeader(http.StatusForbidden)
++		w.Write([]byte(`{"message":"no"}`))
++	})
++	srv := &http.Server{Handler: mux}
++	go srv.Serve(l)
++	t.Cleanup(func() { srv.Close() })
++	return sock
++}
++
++func TestAllowedPeer(t *testing.T) {
++	if os.Getuid() != 0 {
++		t.Skip("peer check requires root")
++	}
++	self, _ := os.Executable()
++	c := New(serve(t), []string{self})
++	var out struct{ OK bool }
++	if err := c.Do(context.Background(), http.MethodGet, "/ping", nil, &out); err != nil || !out.OK {
++		t.Fatalf("ping: %v %v", out, err)
++	}
++	var e *Error
++	if err := c.Do(context.Background(), http.MethodGet, "/nope", nil, nil); !errors.As(err, &e) || e.Status != 403 || e.Message != "no" {
++		t.Fatalf("error answer: %v", err)
++	}
++}
++
++func TestRefusesOtherPeer(t *testing.T) {
++	c := New(serve(t), []string{"/usr/lib/sfc/sfcd"})
++	if err := c.Do(context.Background(), http.MethodGet, "/ping", nil, nil); err == nil {
++		t.Fatal("a socket served by another executable was accepted")
++	}
++}
+diff --git a/daemon/seafield/volumedrv/driver.go b/daemon/seafield/volumedrv/driver.go
+new file mode 100644
+index 0000000..d744693
+--- /dev/null
++++ b/daemon/seafield/volumedrv/driver.go
+@@ -0,0 +1,125 @@
++// SPDX-License-Identifier: Apache-2.0
++
++// Package volumedrv is the built-in volume driver "sfc": every call goes
++// straight to sfcd over its engine socket. sfcd decides where a volume
++// lives (storage root, shared volume mount) and prepares the directory; the
++// engine only bind-mounts the path sfcd returns. No plugin protocol.
++package volumedrv
++
++import (
++	"context"
++	"net/http"
++	"net/url"
++	"time"
++
++	"github.com/moby/moby/v2/daemon/seafield/sfcd"
++	"github.com/moby/moby/v2/daemon/volume"
++	"github.com/moby/moby/v2/errdefs"
++)
++
++// Name is the driver name.
++const Name = "sfc"
++
++// callTimeout bounds one call to sfcd. A mount that needs longer (a shared
++// volume coming up) answers when ready; sfcd keeps the same mount_id.
++const callTimeout = 2 * time.Minute
++
++// Driver is the sfc volume driver.
++type Driver struct{ c *sfcd.Client }
++
++// New returns the driver using client c.
++func New(c *sfcd.Client) *Driver { return &Driver{c: c} }
++
++type info struct {
++	Name      string         `json:"name"`
++	CreatedAt time.Time      `json:"created_at"`
++	Status    map[string]any `json:"status,omitempty"`
++}
++
++func (d *Driver) Name() string  { return Name }
++func (d *Driver) Scope() string { return volume.LocalScope }
++
++func call(c *sfcd.Client, method, path string, body, out any) error {
++	ctx, cancel := context.WithTimeout(context.Background(), callTimeout)
++	defer cancel()
++	err := c.Do(ctx, method, path, body, out)
++	if e, ok := err.(*sfcd.Error); ok {
++		switch e.Status {
++		case http.StatusNotFound:
++			return errdefs.NotFound(e)
++		case http.StatusConflict:
++			return errdefs.Conflict(e)
++		case http.StatusForbidden, http.StatusBadRequest:
++			return errdefs.InvalidParameter(e)
++		}
++	}
++	return err
++}
++
++func (d *Driver) Create(name string, opts map[string]string) (volume.Volume, error) {
++	var in info
++	if err := call(d.c, http.MethodPost, "/volumes/create", map[string]any{"name": name, "opts": opts}, &in); err != nil {
++		return nil, err
++	}
++	return d.vol(in), nil
++}
++
++func (d *Driver) Get(name string) (volume.Volume, error) {
++	var in info
++	if err := call(d.c, http.MethodGet, "/volumes/"+url.PathEscape(name), nil, &in); err != nil {
++		return nil, err
++	}
++	return d.vol(in), nil
++}
++
++func (d *Driver) List() ([]volume.Volume, error) {
++	var in []info
++	if err := call(d.c, http.MethodGet, "/volumes", nil, &in); err != nil {
++		return nil, err
++	}
++	out := make([]volume.Volume, len(in))
++	for i := range in {
++		out[i] = d.vol(in[i])
++	}
++	return out, nil
++}
++
++func (d *Driver) Remove(v volume.Volume) error {
++	return call(d.c, http.MethodDelete, "/volumes/"+url.PathEscape(v.Name()), nil, nil)
++}
++
++func (d *Driver) vol(in info) *vol { return &vol{d: d, info: in} }
++
++type vol struct {
++	d    *Driver
++	info info
++	path string // last path sfcd returned for a mount
++}
++
++func (v *vol) Name() string                  { return v.info.Name }
++func (v *vol) DriverName() string            { return Name }
++func (v *vol) Path() string                  { return v.path }
++func (v *vol) CreatedAt() (time.Time, error) { return v.info.CreatedAt, nil }
++func (v *vol) Status() map[string]any        { return v.info.Status }
++
++func (v *vol) Mount(id string) (string, error) {
++	var out struct {
++		Path string `json:"path"`
++	}
++	if err := call(v.d.c, http.MethodPost, "/volumes/"+url.PathEscape(v.info.Name)+"/mount", map[string]string{"mount_id": id}, &out); err != nil {
++		return "", err
++	}
++	if out.Path == "" {
++		return "", errdefs.System(errNoPath{})
++	}
++	v.path = out.Path
++	return out.Path, nil
++}
++
++func (v *vol) Unmount(id string) error {
++	return call(v.d.c, http.MethodPost, "/volumes/"+url.PathEscape(v.info.Name)+"/unmount", map[string]string{"mount_id": id}, nil)
++}
++
++type errNoPath struct{}
++
++func (errNoPath) Error() string { return "sfcd returned no path for the volume mount" }
+diff --git a/daemon/volume/service/default_driver.go b/daemon/volume/service/default_driver.go
+index e0539ac..27d9c8a 100644
+--- a/daemon/volume/service/default_driver.go
++++ b/daemon/volume/service/default_driver.go
+@@ -10,6 +10,10 @@
+ 	"github.com/pkg/errors"
+ )
+ 
++// ExtraDrivers are built-in drivers registered next to the default one
++// (Seafield: the "sfc" driver).
++var ExtraDrivers []volume.Driver
++
+ func setupDefaultDriver(store *drivers.Store, root string, rootIDs idtools.Identity) error {
+ 	d, err := local.New(root, rootIDs)
+ 	if err != nil {
+@@ -18,5 +22,10 @@ func setupDefaultDriver(store *drivers.Store, root string, rootIDs idtools.Ident
+ 	if !store.Register(d, volume.DefaultDriverName) {
+ 		return errors.New("local volume driver could not be registered")
+ 	}
++	for _, x := range ExtraDrivers {
++		if !store.Register(x, x.Name()) {
++			return errors.Errorf("%s volume driver could not be registered", x.Name())
++		}
++	}
+ 	return nil
+ }

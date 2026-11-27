@@ -6,7 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 
-	"github.com/jay94ks/mydcd/internal/config"
+	"github.com/jay94ks/seafield/internal/config"
 )
 
 // ManagedManifest identifies the managed runtime policy of one cluster.

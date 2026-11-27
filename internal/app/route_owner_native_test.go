@@ -18,19 +18,18 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/config"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/engine"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/network"
-	"github.com/jay94ks/mydcd/internal/network/services"
-	"github.com/jay94ks/mydcd/internal/tenancy"
-	"github.com/jay94ks/mydcd/internal/workload"
-	"github.com/jay94ks/mydcd/tests/registryfixture"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/engine"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/network"
+	"github.com/jay94ks/seafield/internal/network/services"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/tenancy"
+	"github.com/jay94ks/seafield/internal/workload"
+	"github.com/jay94ks/seafield/tests/registryfixture"
 	"github.com/moby/moby/api/pkg/stdcopy"
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/client"
@@ -122,11 +121,11 @@ func testManagedCrossTenantRoutes(t *testing.T, ctx context.Context, a *Runtime,
 	if !faults && !discoveryOnly {
 		verifyLegacyBridgeGatewayNative(t, ctx, root, sockets[0], manifest)
 	}
-	backend := os.Getenv("MYDC_DOCKER_TEST_BACKEND")
+	backend := os.Getenv("SFC_DOCKER_TEST_BACKEND")
 	if backend == "" || !filepath.IsAbs(backend) {
 		t.Fatal("explicit prebuilt static route backend required")
 	}
-	registry := registryfixture.OpenPreparedAt(t, backend, container.Config{Cmd: []string{"/backend", "--route-serve"}, User: "10001:10001", Labels: map[string]string{"org.mydc.test.owner": os.Getenv("MYDC_KERNEL_TEST_OWNER")}}, "192.0.2.1:0")
+	registry := registryfixture.OpenPreparedAt(t, backend, container.Config{Cmd: []string{"/backend", "--route-serve"}, User: "10001:10001", Labels: map[string]string{"org.sfc.test.owner": os.Getenv("SFC_KERNEL_TEST_OWNER")}}, "192.0.2.1:0")
 	policy := a.controlPolicy
 	resources := func() control.Resources {
 		t.Helper()
@@ -142,7 +141,7 @@ func testManagedCrossTenantRoutes(t *testing.T, ctx context.Context, a *Runtime,
 		t.Fatal(err)
 	}
 	other, _ := catalog.Tenant("other")
-	change("route-other-nodes", "set-nodes", other.Revision, control.NodeAssignment{Tenant: "other", Nodes: []string{"node-a", "node-b"}})
+	change("route-other-nodes", "set-nodes", other.Revision, control.NodeChangeTo("other", other.AllowedNodes, []string{"node-a", "node-b"}))
 	for _, node := range []string{"node-a", "node-b"} {
 		change("route-other-quota/"+node, "set-node-quota", 0, tenancy.NodeLimit{Tenant: "other", Node: node, Capacity: workload.Resources{CPU: 2e9, Memory: 256 << 20}, Networks: 8, MaxConsumers: 32, PacketQueuePackets: 32, PacketQueueBytes: 128 << 10})
 	}
@@ -152,12 +151,12 @@ func testManagedCrossTenantRoutes(t *testing.T, ctx context.Context, a *Runtime,
 			t.Fatal(err)
 		}
 		value, _ := catalog.Tenant(tenant)
-		change("route-image-trust/"+tenant, "set-trust", value.Revision, control.TrustAssignment{Tenant: tenant, Rules: append(value.ImageSources, access.TrustRule{Registry: registry.Registry, Repository: "fixture"})})
+		change("route-image-trust/"+tenant, "set-trust", value.Revision, control.TrustChange{Tenant: tenant, Add: []access.TrustRule{access.TrustRule{Registry: registry.Registry, Repository: "fixture"}}})
 	}
 	public := sqlPublicFixture{Images: map[string]string{registry.Reference: registry.ConfigDigest}}
 	var docker [2]*engine.Client
 	for n, path := range configs {
-		cfg, err := config.LoadNode(path)
+		cfg, err := loadTestNode(path)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -212,12 +211,12 @@ func testManagedCrossTenantRoutes(t *testing.T, ctx context.Context, a *Runtime,
 	}
 	cleanupInputs := inputs
 	var dnsDefinitions []services.ManagedDNSDefinition
-	for n, input := range inputs {
-		definition := tenancy.TUNDefinition{Tenant: input.tenant, Name: input.network, Members: []tenancy.TUNNode{{Node: input.node, Pools: []tenancy.Subnet{{ID: "pool", Prefix: netip.MustParsePrefix(input.cidr), Gateway: netip.MustParseAddr(input.gateway), MTU: 1280}}, Addresses: []netip.Prefix{netip.MustParsePrefix(fmt.Sprintf("198.19.85.%d/32", n+1))}}}}
+	for _, input := range inputs {
+		definition := tenancy.TUNDefinition{Tenant: input.tenant, Name: input.network, Members: []tenancy.TUNNode{{Node: input.node, Pools: []tenancy.Subnet{{ID: "pool", Prefix: netip.MustParsePrefix(input.cidr), Gateway: netip.MustParseAddr(input.gateway), MTU: 1280}}}}}
 		change("route-network/"+input.network, "create-tun-network", resources().Networks.Revision(), definition)
 		// This /28 fixture checks forward-zone authority and gateway isolation.
 		// Reverse ownership is a separate explicit /24 (or IPv6 nibble) contract.
-		dns := services.ManagedDNSDefinition{Schema: 1, Tenant: input.tenant, Network: input.network, Policy: services.ManagedDNSPolicy{Enabled: true, Reverse: false, Zone: input.network + ".mydc.test.", TTL: 30, NegativeTTL: 5, Transports: []string{"udp", "tcp"}, Upstreams: []netip.AddrPort{}, MaxQueries: 8, MaxCacheEntries: 8, MaxResponseBytes: 4096, MaxConnections: 4, RequestTimeoutMS: 1000}}
+		dns := services.ManagedDNSDefinition{Schema: 1, Tenant: input.tenant, Network: input.network, Policy: services.ManagedDNSPolicy{Enabled: true, Reverse: false, Zone: input.network + ".sfc.test.", TTL: 30, NegativeTTL: 5, Transports: []string{"udp", "tcp"}, Upstreams: []netip.AddrPort{}, MaxQueries: 8, MaxCacheEntries: 8, MaxResponseBytes: 4096, MaxConnections: 4, RequestTimeoutMS: 1000}}
 		dnsDefinitions = append(dnsDefinitions, dns)
 	}
 	profile, home := filepath.Join(root, "route-client.yaml"), filepath.Join(root, "route-home")
@@ -229,7 +228,7 @@ func testManagedCrossTenantRoutes(t *testing.T, ctx context.Context, a *Runtime,
 	}
 	cliCode := func(want int, args ...string) []byte {
 		t.Helper()
-		out, diagnostic, err := runManagedCLICommand(ctx, filepath.Join(products, "mydc"), home, profile, args, nil)
+		out, diagnostic, err := runManagedCLICommand(ctx, filepath.Join(products, "sfc"), home, profile, args, nil)
 		code := 0
 		if err != nil {
 			var exited *exec.ExitError
@@ -256,7 +255,7 @@ func testManagedCrossTenantRoutes(t *testing.T, ctx context.Context, a *Runtime,
 	}
 	for _, input := range inputs {
 		path := filepath.Join(root, input.name+"-app.yaml")
-		document := fmt.Sprintf("name: %s\nservices:\n endpoint:\n  image: %s\n  command: [/backend, --route-serve]\n  user: '10001:10001'\n  cpus: 0.1\n  mem_limit: 16m\n  healthcheck: {test: [CMD, /backend, --tcp-probe, '127.0.0.1:33100'], interval: 1s, timeout: 2s, retries: 3}\n  networks: {lan: {ipv4_address: %s}}\n  x-mydc: {node: %s}\nnetworks:\n lan: {external: true, name: %s}\n", input.name, registry.Reference, input.address, input.node, input.network)
+		document := fmt.Sprintf("name: %s\nservices:\n endpoint:\n  image: %s\n  command: [/backend, --route-serve]\n  user: '10001:10001'\n  cpus: 0.1\n  mem_limit: 16m\n  healthcheck: {test: [CMD, /backend, --tcp-probe, '127.0.0.1:33100'], interval: 1s, timeout: 2s, retries: 3}\n  networks: {lan: {ipv4_address: %s}}\n  x-sfc: {node: %s}\nnetworks:\n lan: {external: true, name: %s}\n", input.name, registry.Reference, input.address, input.node, input.network)
 		if err := os.WriteFile(path, []byte(document), 0600); err != nil {
 			t.Fatal(err)
 		}
@@ -283,7 +282,7 @@ func testManagedCrossTenantRoutes(t *testing.T, ctx context.Context, a *Runtime,
 		if node == "node-b" {
 			current, known := a.resourcePeerForKey(ctx, remoteIdentity.Public)
 			if !known {
-				return out, mydcp.ErrAdmission
+				return out, sfcp.ErrAdmission
 			}
 			reply, err := cluster.CallManagement(ctx, a.Mesh, a.commandIdentity(), policy.Cluster, current, cluster.ManagementRequest{Method: "observe", Key: key, Latest: false})
 			if err != nil {
@@ -314,7 +313,7 @@ func testManagedCrossTenantRoutes(t *testing.T, ctx context.Context, a *Runtime,
 			return true
 		})
 		inspection, err := docker[input.engine].API.ContainerInspect(ctx, ids[input.name], client.ContainerInspectOptions{})
-		if err != nil || inspection.Container.State == nil || !inspection.Container.State.Running || inspection.Container.Config == nil || inspection.Container.Config.Labels["org.mydc.owner"] != docker[input.engine].Owner {
+		if err != nil || inspection.Container.State == nil || !inspection.Container.State.Running || inspection.Container.Config == nil || inspection.Container.Config.Labels["org.sfc.owner"] != docker[input.engine].Owner {
 			t.Fatal("actual route container identity", input.name, err)
 		}
 		if inspection.Container.NetworkSettings == nil || len(inspection.Container.NetworkSettings.Networks) != 1 {
@@ -393,9 +392,9 @@ func testManagedCrossTenantRoutes(t *testing.T, ctx context.Context, a *Runtime,
 		// refused listener or malformed CLI (exit 1), can establish this denial.
 		for _, protocol := range []string{"udp", "tcp"} {
 			for index, input := range inputs {
-				execProbe(index, 0, "/backend", "--route-dns", protocol, net.JoinHostPort(input.gateway, "53"), input.network+".mydc.test.")
+				execProbe(index, 0, "/backend", "--route-dns", protocol, net.JoinHostPort(input.gateway, "53"), input.network+".sfc.test.")
 			}
-			execProbe(0, 2, "/backend", "--route-dns", protocol, net.JoinHostPort(inputs[2].gateway, "53"), inputs[2].network+".mydc.test.")
+			execProbe(0, 2, "/backend", "--route-dns", protocol, net.JoinHostPort(inputs[2].gateway, "53"), inputs[2].network+".sfc.test.")
 		}
 		// Both allowed and denied ports have a real responding application; a
 		// refused/missing listener cannot manufacture a successful deny check.
@@ -478,10 +477,10 @@ func testManagedCrossTenantRoutes(t *testing.T, ctx context.Context, a *Runtime,
 	}
 	if !faults {
 		for _, protocol := range []string{"udp", "tcp"} {
-			execProbe(2, 0, "/backend", "--route-dns", protocol, net.JoinHostPort(inputs[2].gateway, "53"), inputs[2].network+".mydc.test.")
-			execProbe(0, 2, "/backend", "--route-dns", protocol, net.JoinHostPort(inputs[2].gateway, "53"), inputs[2].network+".mydc.test.")
+			execProbe(2, 0, "/backend", "--route-dns", protocol, net.JoinHostPort(inputs[2].gateway, "53"), inputs[2].network+".sfc.test.")
+			execProbe(0, 2, "/backend", "--route-dns", protocol, net.JoinHostPort(inputs[2].gateway, "53"), inputs[2].network+".sfc.test.")
 		}
-		testRouteUnderlayIsolation(t, backend, inputs[0].cidr, inputs[0].gateway, inputs[0].address, inputs[0].network+".mydc.test.", run)
+		testRouteUnderlayIsolation(t, backend, inputs[0].cidr, inputs[0].gateway, inputs[0].address, inputs[0].network+".sfc.test.", run)
 	}
 
 	type originalFlow struct {
@@ -586,7 +585,7 @@ func testManagedCrossTenantRoutes(t *testing.T, ctx context.Context, a *Runtime,
 						Family, Table, Chain string
 						Expr                 json.RawMessage
 					}
-					if len(row["rule"]) == 0 || json.Unmarshal(row["rule"], &rule) != nil || rule.Family != "inet" || !strings.HasPrefix(rule.Table, "mydc_i_") || !bytes.Contains(rule.Expr, token) {
+					if len(row["rule"]) == 0 || json.Unmarshal(row["rule"], &rule) != nil || rule.Family != "inet" || !strings.HasPrefix(rule.Table, "sfc_i_") || !bytes.Contains(rule.Expr, token) {
 						continue
 					}
 					if table != "" && table != rule.Table {
@@ -674,7 +673,7 @@ func testManagedCrossTenantRoutes(t *testing.T, ctx context.Context, a *Runtime,
 		nativeSourceKey := group[0].BridgeKey
 		nativeSource := beforeState.Object(nativeSourceKey)
 		path := filepath.Join(root, target.name+"-app.yaml")
-		document := fmt.Sprintf("name: %s\nservices:\n endpoint:\n  image: %s\n  command: [/backend, --route-serve]\n  user: '10001:10001'\n  cpus: 0.1\n  mem_limit: 16m\n  healthcheck: {test: [CMD, /backend, --tcp-probe, '127.0.0.1:33100'], interval: 1s, timeout: 2s, retries: 3}\n  networks: {lan: {ipv4_address: %s, aliases: [current]}}\n  x-mydc: {node: %s}\nnetworks:\n lan: {external: true, name: %s}\n", target.name, registry.Reference, target.address, target.node, target.network)
+		document := fmt.Sprintf("name: %s\nservices:\n endpoint:\n  image: %s\n  command: [/backend, --route-serve]\n  user: '10001:10001'\n  cpus: 0.1\n  mem_limit: 16m\n  healthcheck: {test: [CMD, /backend, --tcp-probe, '127.0.0.1:33100'], interval: 1s, timeout: 2s, retries: 3}\n  networks: {lan: {ipv4_address: %s, aliases: [current]}}\n  x-sfc: {node: %s}\nnetworks:\n lan: {external: true, name: %s}\n", target.name, registry.Reference, target.address, target.node, target.network)
 		if err := os.WriteFile(path, []byte(document), 0600); err != nil {
 			t.Fatal(err)
 		}
@@ -741,7 +740,7 @@ func testManagedCrossTenantRoutes(t *testing.T, ctx context.Context, a *Runtime,
 			}
 		}
 		actual, err := docker[target.engine].API.ContainerInspect(ctx, newNative, client.ContainerInspectOptions{})
-		if err != nil || actual.Container.State == nil || !actual.Container.State.Running || actual.Container.Config == nil || actual.Container.Config.Labels["org.mydc.owner"] != engine.Owner(policy.Cluster, newGoal.Owner) || actual.Container.NetworkSettings == nil || len(actual.Container.NetworkSettings.Networks) != 1 {
+		if err != nil || actual.Container.State == nil || !actual.Container.State.Running || actual.Container.Config == nil || actual.Container.Config.Labels["org.sfc.owner"] != engine.Owner(policy.Cluster, newGoal.Owner) || actual.Container.NetworkSettings == nil || len(actual.Container.NetworkSettings.Networks) != 1 {
 			t.Fatal("additional native Task did not belong to current installed identity", err)
 		}
 		for _, endpoint := range actual.Container.NetworkSettings.Networks {
@@ -750,7 +749,7 @@ func testManagedCrossTenantRoutes(t *testing.T, ctx context.Context, a *Runtime,
 			}
 		}
 		for _, protocol := range []string{"udp", "tcp"} {
-			execNativeProbe(target, newNative, 0, "/backend", "--route-dns", protocol, net.JoinHostPort(target.gateway, "53"), target.network+".mydc.test.")
+			execNativeProbe(target, newNative, 0, "/backend", "--route-dns", protocol, net.JoinHostPort(target.gateway, "53"), target.network+".sfc.test.")
 		}
 		for _, route := range routes {
 			ready(route.id)
@@ -856,7 +855,7 @@ func testManagedCrossTenantRoutes(t *testing.T, ctx context.Context, a *Runtime,
 			t.Fatal(err)
 		}
 		other, _ = catalog.Tenant("other")
-		change("route-revoke-target-node", "set-nodes", other.Revision, control.NodeAssignment{Tenant: "other", Nodes: []string{"node-a"}})
+		change("route-revoke-target-node", "set-nodes", other.Revision, control.NodeChangeTo("other", other.AllowedNodes, []string{"node-a"}))
 		wait("both remote route instance closures after node grant revocation", func() bool { return len(refs("remote-tcp")) == 0 && len(refs("remote-udp")) == 0 })
 		probe(0, "tcp", inputs[1].address, 33100, 40021, 1)
 		probe(0, "udp", inputs[2].address, 53100, 41024, 0)
@@ -865,7 +864,7 @@ func testManagedCrossTenantRoutes(t *testing.T, ctx context.Context, a *Runtime,
 			t.Fatal(err)
 		}
 		other, _ = catalog.Tenant("other")
-		change("route-restore-target-node", "set-nodes", other.Revision, control.NodeAssignment{Tenant: "other", Nodes: []string{"node-a", "node-b"}})
+		change("route-restore-target-node", "set-nodes", other.Revision, control.NodeChangeTo("other", other.AllowedNodes, []string{"node-a", "node-b"}))
 		if len(refs("remote-tcp")) != 0 || len(refs("remote-udp")) != 0 {
 			t.Fatal("restored grant reopened old route instances")
 		}
@@ -1034,7 +1033,7 @@ func testRouteUnderlayIsolation(t *testing.T, backend, cidr, gateway, containerA
 	if err != nil || len(before) != 0 {
 		t.Fatal("underlay route negative input has an existing foreign route", err)
 	}
-	// This exact selector is private to the fixture and cannot match a MyDC
+	// This exact selector is private to the fixture and cannot match a Seafield Cluster
 	// route's separate policy table. Register cleanup BEFORE the first add.
 	selector := []string{cidr, "via", "192.0.2.1", "proto", "static", "metric", "42701"}
 	cleanup := func() {

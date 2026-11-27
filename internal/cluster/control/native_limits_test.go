@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/tenancy"
+	"github.com/jay94ks/seafield/internal/tenancy"
 )
 
 // A refused native permit names the limit that refused it, and stays ErrCatalog.

@@ -12,15 +12,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/bootstrap"
-	"github.com/jay94ks/mydcd/internal/config"
-	"github.com/jay94ks/mydcd/internal/engine"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/ingress"
-	"github.com/jay94ks/mydcd/internal/network"
-	"github.com/jay94ks/mydcd/internal/reconcile"
-	"github.com/jay94ks/mydcd/internal/schema"
-	"github.com/jay94ks/mydcd/internal/storage"
+	"github.com/jay94ks/seafield/internal/bootstrap"
+	"github.com/jay94ks/seafield/internal/engine"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/ingress"
+	"github.com/jay94ks/seafield/internal/network"
+	"github.com/jay94ks/seafield/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/storage"
 	"github.com/moby/moby/client"
 )
 
@@ -95,15 +94,15 @@ func (d sqlIngressCleanup) Release(_ context.Context, b ingress.BackendSpec, con
 }
 
 func TestManagedSQLCleanupHelper(t *testing.T) {
-	cleanupManagedPrivateApp(t, os.Getenv("MYDC_SQL_CLEANUP"), "sql-fixture.json")
+	cleanupManagedPrivateApp(t, os.Getenv("SFC_SQL_CLEANUP"), "sql-fixture.json")
 }
 
 func TestManagedRouteAppCleanupHelper(t *testing.T) {
-	cleanupManagedPrivateApp(t, os.Getenv("MYDC_ROUTE_CLEANUP"), "route-fixture.json")
+	cleanupManagedPrivateApp(t, os.Getenv("SFC_ROUTE_CLEANUP"), "route-fixture.json")
 }
 
 func TestManagedDNSAppCleanupHelper(t *testing.T) {
-	cleanupManagedPrivateApp(t, os.Getenv("MYDC_DNS_CLEANUP"), "dns-fixture.json")
+	cleanupManagedPrivateApp(t, os.Getenv("SFC_DNS_CLEANUP"), "dns-fixture.json")
 }
 
 func cleanupManagedPrivateApp(t *testing.T, path, manifest string) {
@@ -111,7 +110,7 @@ func cleanupManagedPrivateApp(t *testing.T, path, manifest string) {
 	if path == "" {
 		t.Skip("owned private app fixture cleanup only")
 	}
-	cfg, err := config.LoadNode(path)
+	cfg, err := loadTestNode(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -136,17 +135,13 @@ func cleanupManagedPrivateApp(t *testing.T, path, manifest string) {
 	if json.Unmarshal(raw, &public) != nil {
 		t.Fatal("original private app manifest")
 	}
-	var local config.NetworkLocal
-	if err = cfg.Modules["network"].Decode(&local); err != nil {
-		t.Fatal(err)
-	}
-	if !strings.HasPrefix(local.DockerSocket, "unix://"+filepath.Join(root, "engine-")) {
+	if !strings.HasPrefix(cfg.EngineAPI, "unix://"+filepath.Join(root, "engine-")) {
 		t.Fatal("refuse non-private Engine cleanup")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 40*time.Second)
 	defer cancel()
 	owner := engine.Owner(installed.Root.Cluster, self.Public)
-	c, err := engine.Open(ctx, local.DockerSocket, owner)
+	c, err := engine.Open(ctx, cfg.EngineAPI, owner)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -200,7 +195,7 @@ func cleanupManagedPrivateApp(t *testing.T, path, manifest string) {
 			if row.Gone {
 				continue
 			}
-			if os.Getenv("MYDC_TEST_EXPECT_GONE") == "1" {
+			if os.Getenv("SFC_TEST_EXPECT_GONE") == "1" {
 				t.Error("product left Ingress before cleanup")
 			}
 			if !row.Spec.Lifecycle.Drain {
@@ -217,7 +212,7 @@ func cleanupManagedPrivateApp(t *testing.T, path, manifest string) {
 		_ = m.Close()
 	}
 	if cfg.Modules["workload"].Enabled {
-		cleanupManagedTaskVolumes(t, ctx, c, cfg, bridges, map[string]any{"Cluster": installed.Root.Cluster, "NodeKey": self.Public, "PrivateEngineVerified": true, "PrivateImages": public.Images, "Tag": "private-engine-sql-only", "ExpectGone": os.Getenv("MYDC_TEST_EXPECT_GONE") == "1"})
+		cleanupManagedTaskVolumes(t, ctx, c, cfg, bridges, map[string]any{"Cluster": installed.Root.Cluster, "NodeKey": self.Public, "PrivateEngineVerified": true, "PrivateImages": public.Images, "Tag": "private-engine-sql-only", "ExpectGone": os.Getenv("SFC_TEST_EXPECT_GONE") == "1"})
 	}
 	t.Log(fmt.Sprintf("original private app owner %s cleanup complete", cfg.Node.ID))
 }

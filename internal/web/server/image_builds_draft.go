@@ -10,12 +10,12 @@ import (
 	"net/http"
 	"unicode/utf8"
 
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/imagebuild"
-	"github.com/jay94ks/mydcd/internal/web/mydc"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/imagebuild"
+	"github.com/jay94ks/seafield/internal/web/sfc"
 )
 
-// Draft contexts (kind draft) on mydcd's build-draft: the daemon opens the
+// Draft contexts (kind draft) on sfcd's build-draft: the daemon opens the
 // draft scope (plan) for each request, edits with the Conn signing a
 // DraftProof with the session key (as userauth.Client does; the browser
 // never sees it), sends files over one part in parts, and commit freezes
@@ -33,7 +33,7 @@ type draftTree struct {
 	Entries     []imagebuild.Entry
 }
 
-func readDraft(ctx context.Context, c mydc.Conn, tenant, id string) (draftTree, error) {
+func readDraft(ctx context.Context, c sfc.Conn, tenant, id string) (draftTree, error) {
 	var out draftTree
 	plan, err := c.BuildDraft(ctx, tenant, imagebuild.DraftRequest{Context: id, Kind: "plan"})
 	if err != nil {
@@ -82,7 +82,7 @@ func (s *Server) handleDraftTree(w http.ResponseWriter, r *http.Request, ws *web
 		Entries     []imagebuild.Entry `json:"entries"`
 		Dockerfile  string             `json:"dockerfile"`
 	}
-	read(s, w, r, ws, func(ctx context.Context, c mydc.Conn) (view, error) {
+	read(s, w, r, ws, func(ctx context.Context, c sfc.Conn) (view, error) {
 		d, err := readDraft(ctx, c, r.PathValue("t"), r.PathValue("id"))
 		if err != nil {
 			return view{}, err
@@ -96,7 +96,7 @@ func (s *Server) handleDraftTree(w http.ResponseWriter, r *http.Request, ws *web
 }
 
 // draftFile reads one file of the current draft (REQ-57 draft file).
-func draftFile(ctx context.Context, c mydc.Conn, tenant, id, path string) ([]byte, bool, error) {
+func draftFile(ctx context.Context, c sfc.Conn, tenant, id, path string) ([]byte, bool, error) {
 	d, err := readDraft(ctx, c, tenant, id)
 	if err != nil {
 		return nil, false, err
@@ -199,7 +199,7 @@ func (s *Server) draftEdit(kind string) func(http.ResponseWriter, *http.Request,
 			Code     string `json:"code"`
 			Revision uint64 `json:"revision"`
 		}
-		read(s, w, r, ws, func(ctx context.Context, c mydc.Conn) (result, error) {
+		read(s, w, r, ws, func(ctx context.Context, c sfc.Conn) (result, error) {
 			d, err := readDraft(ctx, c, tenant, id)
 			if err != nil {
 				return result{}, err
@@ -244,7 +244,7 @@ func (s *Server) handlePublishDraft(w http.ResponseWriter, r *http.Request, ws *
 		return
 	}
 	tenant, id := r.PathValue("t"), r.PathValue("id")
-	s.sharedCreate(w, r, ws, req.OpID, req, func(ctx context.Context, c mydc.Conn, sess mydc.Session) (string, any, uint64, string, error) {
+	s.sharedCreate(w, r, ws, req.OpID, req, func(ctx context.Context, c sfc.Conn, sess sfc.Session) (string, any, uint64, string, error) {
 		d, err := readDraft(ctx, c, tenant, id)
 		if err != nil {
 			return "", nil, 0, "", err
@@ -266,7 +266,7 @@ func (s *Server) handlePublishDraft(w http.ResponseWriter, r *http.Request, ws *
 		if fr.Code != "FROZEN" || fr.Frozen == nil {
 			return "", nil, 0, "", &httpErr{http.StatusConflict, "draft-" + fr.Code, "the draft could not be frozen (" + fr.Code + ")"}
 		}
-		return mydc.ActionPublishBuildDraft, control.ImageBuildDraftPublish{Tenant: tenant, Context: id, Frozen: *fr.Frozen}, fp.Revision, "build-context/" + id, nil
+		return sfc.ActionPublishBuildDraft, control.ImageBuildDraftPublish{Tenant: tenant, Context: id, Frozen: *fr.Frozen}, fp.Revision, "build-context/" + id, nil
 	})
 }
 

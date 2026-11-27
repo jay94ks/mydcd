@@ -4,10 +4,10 @@ package app
 
 import (
 	"context"
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/userauth"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/userauth"
 	"testing"
 	"time"
 )
@@ -42,7 +42,7 @@ func TestRealControlOnlyTenantRetirementRetriesBusyCensus(t *testing.T) {
 	testRealManagedJoin(t, false, "tenant-retirement")
 }
 
-func verifyControlOnlyTenantRetirement(t *testing.T, ctx context.Context, r *Runtime, c userauth.Client, peer mydcp.Peer, session access.Session, _ control.Policy, submit func(string, string, uint64, any), wait func(string, func() bool)) {
+func verifyControlOnlyTenantRetirement(t *testing.T, ctx context.Context, r *Runtime, c userauth.Client, peer sfcp.Peer, session access.Session, _ control.Policy, submit func(string, string, uint64, any), wait func(string, func() bool)) {
 	t.Helper()
 	if r.network != nil || r.workload != nil || r.ingress != nil {
 		t.Fatal("control-only boundary has native adapters")
@@ -97,5 +97,5 @@ func verifyControlOnlyTenantRetirement(t *testing.T, ctx context.Context, r *Run
 	if err = r.Engine().Snapshot(ctx); err != nil {
 		t.Fatal(err)
 	}
-	t.Log("actual N1 Runtime/MYDCP/Raft/bbolt owner report after temporary census barrier, no native adapters/new user submission; explicit finish and snapshot")
+	t.Log("actual N1 Runtime/SFCP/Raft/bbolt owner report after temporary census barrier, no native adapters/new user submission; explicit finish and snapshot")
 }

@@ -8,23 +8,21 @@ import (
 	"errors"
 	"fmt"
 	"maps"
-	"net/http"
-	"net/url"
 	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/web/mydc"
-	"github.com/jay94ks/mydcd/internal/web/store"
+	"github.com/jay94ks/seafield/internal/web/sfc"
+	"github.com/jay94ks/seafield/internal/web/store"
 )
 
-// The incident watcher (W2.3): reads mydcd's events as the automation
+// The incident watcher (W2.3): reads sfcd's events as the automation
 // account, opens incidents with deterministic rules (no AI), picks a
 // temporary action from the fixed list, and either runs it as the
 // automation account (low impact, policy allows) or asks a person.
-// mydcd judges every action; the automation account's scope is
+// sfcd judges every action; the automation account's scope is
 // the outer limit.
 
 const (
@@ -80,7 +78,7 @@ var incidentRules = map[string]incidentRule{
 	"node-unreachable":  {"node-unreachable", "cluster", 1, incidentRecentKeep, "서버 연결 끊김", "서버 연결 끊김", []string{"cordon-node"}},
 	"node-resource-low": {"node-resource-low", "cluster", 1, incidentRecentKeep, "서버 자원 부족", "서버 자원 부족", []string{"prune-images"}},
 	"tunnel-down":       {"tunnel-down", "cluster", 1, incidentRecentKeep, "서버 간 망 끊김", "서버 간 망 끊김", []string{"reconnect-tunnel"}},
-	// Raised by a failed post-sync webhook check, not by a mydcd event.
+	// Raised by a failed post-sync webhook check, not by a sfcd event.
 	"cd-post-check-failed": {"cd-post-check-failed", "app", 1, incidentRecentKeep, "배포 후 확인 실패", "배포 후 확인 실패", []string{"rollback-previous"}},
 }
 
@@ -133,8 +131,8 @@ func (s *Server) watchOnce(ctx context.Context) {
 	// cursor reset or a stop).
 	watched := maps.Clone(st.Since)
 	events, err := s.readIncidentEvents(ctx, ws, st)
-	var se *mydc.Error
-	if errors.As(err, &se) && (se.Code == mydc.CodeSessionExpired || se.Code == mydc.CodeClosed) {
+	var se *sfc.Error
+	if errors.As(err, &se) && (se.Code == sfc.CodeSessionExpired || se.Code == sfc.CodeClosed) {
 		// The kept session or its connection ended between rounds: log
 		// in again once. The
 		// cursors are unchanged, so nothing is missed.
@@ -144,9 +142,9 @@ func (s *Server) watchOnce(ctx context.Context) {
 		}
 	}
 	if err != nil {
-		var me *mydc.Error
-		if errors.As(err, &me) && me.Code == mydc.CodeCursorExpired {
-			// Start over from what mydcd still keeps; the rules only count
+		var me *sfc.Error
+		if errors.As(err, &me) && me.Code == sfc.CodeCursorExpired {
+			// Start over from what sfcd still keeps; the rules only count
 			// recent signals, so old ones do not open incidents again.
 			st.Cursors = nil
 			save("cursor-expired", string(me.Code))
@@ -209,6 +207,7 @@ func (s *Server) watchOnce(ctx context.Context) {
 	s.ingressDue(now)
 	s.acmeAutoPoll(ctx, ws)
 	s.acmeResponderSync(ctx, ws)
+	s.vpsDNSPoll(ctx, ws)
 	if incidentsOff {
 		save("stopped", "")
 		return
@@ -263,7 +262,7 @@ func (s *Server) readIncidentEvents(ctx context.Context, ws *webSession, st *sto
 		st.Cursors = map[string]string{}
 	}
 	var out []webEvent
-	err := ws.do(ctx, func(ctx context.Context, c mydc.Conn) error {
+	err := ws.do(ctx, func(ctx context.Context, c sfc.Conn) error {
 		var scopes []string
 		if ws.user.SystemAdmin {
 			scopes = []string{""}
@@ -279,7 +278,7 @@ func (s *Server) readIncidentEvents(ctx context.Context, ws *webSession, st *sto
 		for _, t := range scopes {
 			cur := st.Cursors[t]
 			for i := 0; i < incidentMaxPages; i++ {
-				p, err := c.Events(ctx, mydc.EventQuery{Tenant: t, After: cur, Limit: 100})
+				p, err := c.Events(ctx, sfc.EventQuery{Tenant: t, After: cur, Limit: 100})
 				if err != nil {
 					return err
 				}
@@ -366,7 +365,7 @@ func (s *Server) incidentSignal(ctx context.Context, ws *webSession, rule incide
 	var skipped []string
 	for _, id := range rule.Actions {
 		a := incidentActionByID(id)
-		if a == nil || cluster.Actions[id] == actionHuman || app != nil && !app.Actions[id] {
+		if a == nil || !aiAllows(a.floor()) || cluster.Actions[id] == actionHuman || app != nil && !app.Actions[id] {
 			continue
 		}
 		act, why := s.buildIncidentAction(ctx, ws, a, in, sig, app, recent)
@@ -428,86 +427,13 @@ func signalText(sig store.IncidentSignal) string {
 }
 
 // buildIncidentAction turns an action of the list into the screen API call
-// for this incident, or says why it does not fit.
+// for this incident, or says why it does not fit (the action's own Build).
 func (s *Server) buildIncidentAction(ctx context.Context, ws *webSession, a *incidentActionDef, in *store.Incident, sig store.IncidentSignal, app *store.AppIncidentPolicy, recent []store.IncidentSignal) (*store.IncidentAction, string) {
-	body := map[string]any{}
-	out := &store.IncidentAction{ID: a.ID, Label: a.Label, Method: http.MethodPost}
-	esc := url.PathEscape
-	switch a.ID {
-	case "restart-task":
-		parts := strings.Split(sig.Target, "/")
-		if len(parts) != 4 || parts[0] != in.Tenant || parts[1] != in.App {
-			return nil, "대상 컨테이너를 알 수 없음"
-		}
-		out.Path = "/api/v1/t/" + esc(in.Tenant) + "/apps/" + esc(in.App) + "/task/restart"
-		body["service"], body["instance"] = parts[2], parts[3]
-		out.Note = parts[2] + "/" + parts[3]
-	case "pause-cd":
-		var src mydc.AppSource
-		err := ws.do(ctx, func(ctx context.Context, c mydc.Conn) error {
-			var err error
-			src, err = c.AppSource(ctx, in.Tenant, in.App, 0)
-			return err
-		})
-		if err != nil || src.Kind != "cd" {
-			return nil, "지금 버전이 자동 배포로 올라온 것이 아님"
-		}
-		out.Path = "/api/v1/t/" + esc(in.Tenant) + "/apps/" + esc(in.App) + "/cd/pause"
-		out.Note = fmt.Sprintf("v%d", src.Version)
-	case "cordon-node":
-		node := sig.Node
-		if node == "" {
-			return nil, "대상 서버를 알 수 없음"
-		}
-		out.Path = "/api/v1/nodes/" + esc(node) + "/cordon"
-		body["reason"] = "장애 대응 " + in.ID
-		out.Note = node
-	case "prune-images":
-		node := sig.Node
-		if node == "" {
-			node, _, _ = strings.Cut(sig.Target, ":")
-		}
-		var plan imagePruneView
-		err := ws.do(ctx, func(ctx context.Context, c mydc.Conn) error {
-			var err error
-			plan, _, err = imagePruneSelection(ctx, c, node)
-			return err
-		})
-		if err != nil {
-			return nil, "지울 이미지 목록을 읽지 못함"
-		}
-		if len(plan.Images) == 0 {
-			return nil, "안 쓰는 이미지가 없음"
-		}
-		out.Path = "/api/v1/nodes/" + esc(node) + "/image-prune"
-		body["plan"] = plan.Plan
-		out.Note = fmt.Sprintf("%s: 안 쓰는 이미지 %d개, %d MB", node, len(plan.Images), plan.Bytes>>20)
-	case "reconnect-tunnel":
-		// one tenant-scoped event per TUN network and node pair,
-		// Target = PairID ("a/b", sorted), Node = the server that saw it
-		// down. That server dials; the other end is its peer.
-		from, to, ok := strings.Cut(sig.Target, "/")
-		if !ok || from == "" || to == "" || from == to || sig.Tenant == "" || sig.Network == "" {
-			return nil, "끊긴 링크의 작업 공간·망을 알 수 없음"
-		}
-		switch sig.Node {
-		case "", from:
-		case to:
-			from, to = to, from
-		default:
-			return nil, "끊김을 본 서버가 링크의 양 끝이 아님"
-		}
-		out.Path = "/api/v1/t/" + esc(sig.Tenant) + "/networks/" + esc(sig.Network) + "/tunnels/reconnect"
-		body["from"], body["to"] = from, to
-		out.Note = sig.Tenant + "/" + sig.Network + ": " + from + "–" + to
-	case "cd-rollback", "rollback-previous":
-		return s.buildRollback(ctx, ws, a, in, app, recent)
-	default:
+	if a.Build == nil {
 		// Moving a service needs a target server; people choose it.
 		return nil, "아직 자동으로 만들 수 없음"
 	}
-	out.Body, _ = json.Marshal(body)
-	return out, ""
+	return a.Build(s, ctx, incidentBuild{ws: ws, def: a, in: in, sig: sig, app: app, recent: recent})
 }
 
 // decideIncident picks the first candidate and decides by the rules: low
@@ -571,7 +497,7 @@ func (s *Server) decideIncident(ctx context.Context, ws *webSession, in *store.I
 
 // notifyIncident tells the people who can approve: the workspace's
 // managers for an app incident, the system administrators for a cluster
-// one (as mydcd lists them to the automation account).
+// one (as sfcd lists them to the automation account).
 func (s *Server) notifyIncident(ctx context.Context, ws *webSession, in *store.Incident) {
 	var users []string
 	add := func(u string) {
@@ -581,7 +507,7 @@ func (s *Server) notifyIncident(ctx context.Context, ws *webSession, in *store.I
 	}
 	cp, _ := s.clusterPolicy()
 	tenantToo := cp == nil || cp.Approvers.To != approversSystem
-	err := ws.do(ctx, func(ctx context.Context, c mydc.Conn) error {
+	err := ws.do(ctx, func(ctx context.Context, c sfc.Conn) error {
 		// system administrators always; the app's workspace managers too
 		// unless the policy asks system administrators only
 		after := ""
@@ -613,7 +539,7 @@ func (s *Server) notifyIncident(ctx context.Context, ws *webSession, in *store.I
 				return err
 			}
 			for _, m := range p.Items {
-				if m.Role == mydc.RoleManager && m.Enabled && m.AccountEnabled {
+				if m.Role == sfc.RoleManager && m.Enabled && m.AccountEnabled {
 					add(m.User)
 				}
 			}

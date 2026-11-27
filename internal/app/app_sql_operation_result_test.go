@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-// This is the sample application's result contract, not a MyDC acknowledgement
+// This is the sample application's result contract, not a Seafield Cluster acknowledgement
 // or a substitute for a successful original HTTP response. Only POST/PUT return
 // a committed original value through the sample's read-only operation endpoint.
 func originalSQLWriteResult(method, key, operation, value string, saved map[string]any) bool {

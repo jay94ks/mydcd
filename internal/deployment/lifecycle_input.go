@@ -9,9 +9,9 @@ import (
 	"math"
 	"slices"
 
-	"github.com/jay94ks/mydcd/internal/schema"
-	checker "github.com/jay94ks/mydcd/internal/workload/lifecycle"
-	contract "github.com/jay94ks/mydcd/lifecycle/v1"
+	"github.com/jay94ks/seafield/internal/schema"
+	checker "github.com/jay94ks/seafield/internal/workload/lifecycle"
+	contract "github.com/jay94ks/seafield/lifecycle/v1"
 	"gopkg.in/yaml.v3"
 )
 
@@ -138,11 +138,11 @@ func lifecycleTiming() checker.Timing {
 }
 
 func (c Compose) hasLifecycle() bool {
-	if c.MyDC.Lifecycle != nil {
+	if c.Sfc.Lifecycle != nil {
 		return true
 	}
 	for _, service := range c.Services {
-		if service.MyDC.Lifecycle != nil {
+		if service.Sfc.Lifecycle != nil {
 			return true
 		}
 	}
@@ -157,8 +157,8 @@ func (c Compose) LifecycleProgram() (checker.Program, bool, error) {
 		return checker.Program{}, false, nil
 	}
 	p := checker.Program{Services: map[string][]checker.Check{}}
-	present := c.MyDC.Lifecycle != nil
-	if d := c.MyDC.Lifecycle; d != nil {
+	present := c.Sfc.Lifecycle != nil
+	if d := c.Sfc.Lifecycle; d != nil {
 		p.Compile = d.Optimizer != nil && d.Optimizer.Compile
 		if d.Scripts != nil {
 			p.Scripts = make(map[string]checker.Script, len(d.Scripts))
@@ -185,15 +185,15 @@ func (c Compose) LifecycleProgram() (checker.Program, bool, error) {
 	}
 	for service, d := range c.Services {
 		p.Services[service] = nil
-		if d.MyDC.Lifecycle != nil {
+		if d.Sfc.Lifecycle != nil {
 			present = true
-			p.Services[service] = lifecycleChecks(d.MyDC.Lifecycle.Checks)
+			p.Services[service] = lifecycleChecks(d.Sfc.Lifecycle.Checks)
 		}
 	}
 	if present {
 		edges, err := checker.CheckProgram(p, lifecycleTiming(), math.MaxInt64)
 		if err != nil {
-			return checker.Program{}, true, inputError("INVALID_LIFECYCLE", "x-mydc.lifecycle")
+			return checker.Program{}, true, inputError("INVALID_LIFECYCLE", "x-sfc.lifecycle")
 		}
 		// Use the existing service DAG for both kinds of dependency, without
 		// mutating the original Compose condition or inventing a healthcheck.
@@ -225,20 +225,20 @@ func (c Compose) ResolveLifecycle(catalog checker.Catalog) (checker.ResolvedProg
 	if err != nil || !present {
 		return checker.ResolvedProgram{}, err
 	}
-	policy, ok := catalog.Policy(c.MyDC.Tenant, 0)
+	policy, ok := catalog.Policy(c.Sfc.Tenant, 0)
 	if !ok || !policy.Enabled {
-		return checker.ResolvedProgram{}, inputError("LIFECYCLE_POLICY_REQUIRED", "x-mydc.lifecycle")
+		return checker.ResolvedProgram{}, inputError("LIFECYCLE_POLICY_REQUIRED", "x-sfc.lifecycle")
 	}
-	resolved, err := checker.ResolveProgram(c.MyDC.Tenant, p, catalog.Sources(c.MyDC.Tenant), lifecycleTiming(), policy.Execution.TimeoutMS)
+	resolved, err := checker.ResolveProgram(c.Sfc.Tenant, p, catalog.Sources(c.Sfc.Tenant), lifecycleTiming(), policy.Execution.TimeoutMS)
 	if err != nil {
 		return checker.ResolvedProgram{}, err
 	}
 	for _, selected := range resolved.Scripts {
 		if selected.Compile && len(policy.Build.Nodes) == 0 {
-			return checker.ResolvedProgram{}, inputError("LIFECYCLE_BUILDER_REQUIRED", "x-mydc.lifecycle")
+			return checker.ResolvedProgram{}, inputError("LIFECYCLE_BUILDER_REQUIRED", "x-sfc.lifecycle")
 		}
 		if selected.Ref != nil {
-			record, ok := catalog.Script(c.MyDC.Tenant, selected.Ref.Name)
+			record, ok := catalog.Script(c.Sfc.Tenant, selected.Ref.Name)
 			allowed := false
 			if ok {
 				for _, version := range record.Versions {
@@ -248,7 +248,7 @@ func (c Compose) ResolveLifecycle(catalog checker.Catalog) (checker.ResolvedProg
 				}
 			}
 			if !allowed {
-				return checker.ResolvedProgram{}, inputError("LIFECYCLE_SOURCE_FORBIDDEN", "x-mydc.lifecycle")
+				return checker.ResolvedProgram{}, inputError("LIFECYCLE_SOURCE_FORBIDDEN", "x-sfc.lifecycle")
 			}
 		}
 	}
@@ -258,17 +258,17 @@ func (c Compose) ResolveLifecycle(catalog checker.Catalog) (checker.ResolvedProg
 // A null extension cannot silently become the absent/default declaration.
 func lifecycleSubset(root *yaml.Node) error {
 	check := func(n *yaml.Node) error {
-		x := nodeField(nodeField(n, "x-mydc"), "lifecycle")
+		x := nodeField(nodeField(n, "x-sfc"), "lifecycle")
 		if x == nil {
 			return nil
 		}
 		if x.Kind != yaml.MappingNode {
-			return inputError("LIFECYCLE_MAPPING_REQUIRED", "x-mydc.lifecycle")
+			return inputError("LIFECYCLE_MAPPING_REQUIRED", "x-sfc.lifecycle")
 		}
 		var walk func(*yaml.Node) error
 		walk = func(n *yaml.Node) error {
 			if n.Tag == "!!null" {
-				return inputError("LIFECYCLE_NULL_FORBIDDEN", "x-mydc.lifecycle")
+				return inputError("LIFECYCLE_NULL_FORBIDDEN", "x-sfc.lifecycle")
 			}
 			for _, child := range n.Content {
 				if err := walk(child); err != nil {
@@ -299,7 +299,7 @@ func lifecycleLiteralSources(tree *yaml.Node) map[*yaml.Node]bool {
 	if len(tree.Content) != 1 {
 		return result
 	}
-	scripts := nodeField(nodeField(nodeField(tree.Content[0], "x-mydc"), "lifecycle"), "scripts")
+	scripts := nodeField(nodeField(nodeField(tree.Content[0], "x-sfc"), "lifecycle"), "scripts")
 	if scripts != nil && scripts.Kind == yaml.MappingNode {
 		for i := 1; i < len(scripts.Content); i += 2 {
 			if source := nodeField(scripts.Content[i], "source"); source != nil && source.Kind == yaml.ScalarNode && source.Tag == "!!str" {

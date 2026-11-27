@@ -10,7 +10,7 @@ import (
 	"strings"
 
 	"github.com/google/nftables/expr"
-	"github.com/jay94ks/mydcd/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/reconcile"
 	"golang.org/x/sys/unix"
 )
 
@@ -22,6 +22,9 @@ func isolationPrefixes(known []TenantPrefix, tenant string, input []netip.Prefix
 	slices.SortFunc(out, func(a, b netip.Prefix) int { return strings.Compare(a.String(), b.String()) })
 	out = slices.Compact(out)
 	for _, prefix := range out {
+		if prefix.IsValid() && prefix == prefix.Masked() && SharedServerPrefix(prefix) {
+			continue // a server address, shared by every network on that server
+		}
 		if !prefix.IsValid() || prefix != prefix.Masked() || !packetAddress(prefix.Addr()) || !slices.ContainsFunc(known, func(p TenantPrefix) bool {
 			return p.Tenant == tenant && p.Prefix.Bits() <= prefix.Bits() && p.Prefix.Contains(prefix.Addr())
 		}) {

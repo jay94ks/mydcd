@@ -1,6 +1,6 @@
 # 내장 CD
 
-내장 CD는 필요한 GitOps 동작을 선별해 MyDC 자체 명세로 제공한다. Git source의 앱 선언을 읽고 후보를 게시하며 정책에 따라 같은 앱 배포 코어를 실행한다. UI는 후속 범위다.
+내장 CD는 필요한 GitOps 동작을 선별해 Seafield Cluster 자체 명세로 제공한다. Git source의 앱 선언을 읽고 후보를 게시하며 정책에 따라 같은 앱 배포 코어를 실행한다. UI는 후속 범위다.
 
 ```text
 Git source → 고정 commit/앱 artifact → 후보/계획 → 명시 승인·sync 정책

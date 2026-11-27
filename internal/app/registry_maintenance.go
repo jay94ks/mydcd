@@ -12,12 +12,12 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/registry"
-	"github.com/jay94ks/mydcd/internal/schema"
-	"github.com/jay94ks/mydcd/internal/storage"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/registry"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/storage"
 )
 
 type registryMaintenanceReceipt struct {
@@ -69,7 +69,7 @@ func (r *Runtime) registryMaintenanceWork(ctx context.Context, id string, images
 	}
 	work, err := schema.Decode[control.RegistryMaintenanceWork](reply.Data)
 	if err != nil || reply.Local || work.Schema != 1 || work.Cluster != r.controlPolicy.Cluster || work.Owner != r.Identity.Public || work.Change.OwnerKey() != r.Identity.Public || work.Operation != id || work.Revision == 0 || work.Index == 0 || work.Epoch == 0 || !work.Change.Valid(work.Cluster, work.Action) {
-		return work, mydcp.ErrAdmission
+		return work, sfcp.ErrAdmission
 	}
 	if _, err = r.Engine().ReadAtLeast(ctx, work.Index); err != nil {
 		return work, err
@@ -275,7 +275,7 @@ func (r *Runtime) runRegistryMaintenance(id string) {
 						return e
 					}
 					if fresh.State != "running" || fresh.Change.DigestValue() != change.DigestValue() {
-						return mydcp.ErrAdmission
+						return sfcp.ErrAdmission
 					}
 					if !fresh.Allowed {
 						return registry.ErrForbidden

@@ -6,18 +6,18 @@ import (
 	"context"
 	"encoding/json"
 
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/schema"
-	"github.com/jay94ks/mydcd/internal/workload"
-	"github.com/jay94ks/mydcd/internal/workload/volumes"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/workload"
+	"github.com/jay94ks/seafield/internal/workload/volumes"
 )
 
 func (r *Runtime) observeVolumeBackupSource(ctx context.Context, ready volumes.NativeReady) (control.VolumeBackupSource, error) {
 	var out control.VolumeBackupSource
 	if ready.Verify() != nil || ready.Owner.Key != r.Identity.Public || !r.volumeSourceMu.TryLock() {
-		return out, mydcp.ErrAdmission
+		return out, sfcp.ErrAdmission
 	}
 	defer r.volumeSourceMu.Unlock()
 	ctx, cancel := context.WithCancel(ctx)
@@ -30,7 +30,7 @@ func (r *Runtime) observeVolumeBackupSource(ctx context.Context, ready volumes.N
 	r.life.RLock()
 	if r.closed || r.activations == nil {
 		r.life.RUnlock()
-		return out, mydcp.ErrAdmission
+		return out, sfcp.ErrAdmission
 	}
 	source, err := r.activations.ColdSource(ctx, ready)
 	r.life.RUnlock()
@@ -39,7 +39,7 @@ func (r *Runtime) observeVolumeBackupSource(ctx context.Context, ready volumes.N
 	}
 	digest := backupCompatibility(source)
 	if !backupSourceMatches(source, control.VolumeBackupBinding{Scope: ready.Spec.Scope, Source: ready, Compatibility: digest}) {
-		return out, mydcp.ErrAdmission
+		return out, sfcp.ErrAdmission
 	}
 	spec, err := workload.DecodeContainer(source.Writer.Task.Spec)
 	if err != nil {
@@ -57,7 +57,7 @@ func (r *Runtime) volumeBackupSource(ctx context.Context, ready volumes.NativeRe
 	}
 	peer, ok := r.resourcePeer(ctx, ready.Owner.Node, ready.Owner.Key)
 	if !ok || !peer.Member || peer.ID != ready.Owner.Node {
-		return control.VolumeBackupSource{}, mydcp.ErrAdmission
+		return control.VolumeBackupSource{}, sfcp.ErrAdmission
 	}
 	body, _ := json.Marshal(ready)
 	reply, err := cluster.CallManagement(ctx, r.Mesh, r.commandIdentity(), ready.Spec.Scope.Cluster, peer, cluster.ManagementRequest{Method: "volume-backup-source-observe", Input: body})
@@ -66,7 +66,7 @@ func (r *Runtime) volumeBackupSource(ctx context.Context, ready volumes.NativeRe
 	}
 	value, err := schema.Decode[control.VolumeBackupSource](reply.Data)
 	if err != nil || !value.Matches(ready) {
-		return control.VolumeBackupSource{}, mydcp.ErrAdmission
+		return control.VolumeBackupSource{}, sfcp.ErrAdmission
 	}
 	return value, nil
 }

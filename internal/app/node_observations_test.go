@@ -9,11 +9,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/observability"
-	"github.com/jay94ks/mydcd/internal/userauth"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/observability"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/userauth"
 )
 
 // Real authenticated two-voter Raft/DB/QUIC, actual host statfs/CPU and current
@@ -22,7 +22,7 @@ func TestRQ3TwoNodeSignedObservationsSnapshotAndQuorumLoss(t *testing.T) {
 	testRealManagedJoin(t, false, "observations")
 }
 
-func verifyTwoNodeObservations(t *testing.T, ctx context.Context, a, b *Runtime, client userauth.Client, session access.Session, ap, bp mydcp.Peer, p control.Policy, submit func(string, string, uint64, any), wait func(string, func() bool)) {
+func verifyTwoNodeObservations(t *testing.T, ctx context.Context, a, b *Runtime, client userauth.Client, session access.Session, ap, bp sfcp.Peer, p control.Policy, submit func(string, string, uint64, any), wait func(string, func() bool)) {
 	t.Helper()
 	// No native adapters are enabled. These tenants exercise scope without
 	// creating Docker, routing, firewall or TUN resources.
@@ -41,7 +41,7 @@ func verifyTwoNodeObservations(t *testing.T, ctx context.Context, a, b *Runtime,
 		if tenant == "second" {
 			nodes = []string{"node-b"}
 		}
-		submit("observation-nodes-"+tenant, "set-nodes", tenantView.Revision, control.NodeAssignment{Tenant: tenant, Nodes: nodes})
+		submit("observation-nodes-"+tenant, "set-nodes", tenantView.Revision, control.NodeChangeTo(tenant, tenantView.AllowedNodes, nodes))
 	}
 	// Use the same key for two accounts only inside this fixture. The account
 	// identity and signed session scopes, not key equality, must isolate them.
@@ -60,7 +60,7 @@ func verifyTwoNodeObservations(t *testing.T, ctx context.Context, a, b *Runtime,
 	}
 	// Measure twice for an actual CPU delta, and send exact signed bytes through
 	// Session.Report. No test-only write bypass is used at the receiving node.
-	collect := func(r *Runtime, target mydcp.Peer) {
+	collect := func(r *Runtime, target sfcp.Peer) {
 		t.Helper()
 		view, e := r.Engine().Read(ctx, false)
 		if e != nil {
@@ -75,10 +75,10 @@ func verifyTwoNodeObservations(t *testing.T, ctx context.Context, a, b *Runtime,
 			t.Fatal(e)
 		}
 		for _, raw := range reports {
-			if e = r.storeNodeObservation(mydcp.Identity(r.Identity.Public), raw); e != nil {
+			if e = r.storeNodeObservation(sfcp.Identity(r.Identity.Public), raw); e != nil {
 				t.Fatal("local report", e)
 			}
-			if e = link.Report(ctx, raw); e != nil {
+			if e = link.Report(ctx, sfcp.KindNodeObservation, raw); e != nil {
 				t.Fatal("authenticated remote report", e)
 			}
 		}
@@ -94,18 +94,18 @@ func verifyTwoNodeObservations(t *testing.T, ctx context.Context, a, b *Runtime,
 	}
 	collect(a, bp)
 	collect(b, ap)
-	summary, e := client.NodeObservationPage(ctx, ap, session, "node-summary", "", "", "")
-	if e != nil || summary.NodeSummary == nil || len(summary.NodeSummary.Nodes) != 2 {
-		t.Fatal("admin two nodes", e, summary.Code)
+	summary, e := client.NodeSummary(ctx, ap, session, userauth.NodeObservationQuery{})
+	if e != nil || len(summary.Nodes) != 2 {
+		t.Fatal("admin two nodes", e, summary)
 	}
-	for _, node := range summary.NodeSummary.Nodes {
+	for _, node := range summary.Nodes {
 		if node.Admin == nil || node.Stale || node.ObserveLimitSeconds != observability.MaxAge/1000 || node.ObservationMaxAge != observability.MaxAge || node.State == "unreachable" {
 			t.Fatalf("real node observation unavailable: %+v", node)
 		}
 	}
-	scoped, e := client.NodeObservationPage(ctx, ap, reader, "node-summary", "first", "", "")
-	if e != nil || scoped.NodeSummary == nil || len(scoped.NodeSummary.Nodes) != 1 || scoped.NodeSummary.Nodes[0].Node != "node-a" || scoped.NodeSummary.Nodes[0].Admin != nil {
-		t.Fatal("tenant node visibility", e, scoped.Code)
+	scoped, e := client.NodeSummary(ctx, ap, reader, userauth.NodeObservationQuery{Tenant: "first"})
+	if e != nil || len(scoped.Nodes) != 1 || scoped.Nodes[0].Node != "node-a" || scoped.Nodes[0].Admin != nil {
+		t.Fatal("tenant node visibility", e, scoped)
 	}
 	raw, _ := json.Marshal(scoped)
 	for _, forbidden := range []string{"node-b", "second", ap.Endpoint, bp.Endpoint} {
@@ -113,21 +113,21 @@ func verifyTwoNodeObservations(t *testing.T, ctx context.Context, a, b *Runtime,
 			t.Fatal("hidden node/tenant/address in tenant response", forbidden)
 		}
 	}
-	if _, e = client.NodeObservationPage(ctx, ap, reader, "node-summary", "first", "node-b", ""); e == nil {
+	if _, e = client.NodeSummary(ctx, ap, reader, userauth.NodeObservationQuery{Tenant: "first", Node: "node-b"}); e == nil {
 		t.Fatal("explicit hidden node selector accepted")
 	}
-	disks, e := client.NodeObservationPage(ctx, ap, session, "node-disks", "", "node-a", "")
-	if e != nil || disks.NodeDisks == nil || len(disks.NodeDisks.Disks) == 0 {
+	disks, e := client.NodeDisks(ctx, ap, session, userauth.NodeObservationQuery{Node: "node-a"})
+	if e != nil || len(disks.Disks) == 0 {
 		t.Fatal("actual system statfs", e)
 	}
-	for _, disk := range disks.NodeDisks.Disks {
+	for _, disk := range disks.Disks {
 		if disk.Total == nil || *disk.Total == 0 || disk.Stale {
 			t.Fatal("unknown/fake disk", disk)
 		}
 	}
-	mesh, e := client.NodeObservationPage(ctx, ap, session, "mesh-links", "", "", "")
-	if e != nil || mesh.MeshLinks == nil || len(mesh.MeshLinks.Links) != 1 || mesh.MeshLinks.Links[0].ID != observability.PairID("node-a", "node-b") || len(mesh.MeshLinks.Links[0].Ends) != 2 {
-		t.Fatal("actual two-ended Mesh pair", e, mesh.MeshLinks)
+	mesh, e := client.MeshLinks(ctx, ap, session, userauth.NodeObservationQuery{})
+	if e != nil || len(mesh.Links) != 1 || mesh.Links[0].ID != observability.PairID("node-a", "node-b") || len(mesh.Links[0].Ends) != 2 {
+		t.Fatal("actual two-ended Mesh pair", e, mesh)
 	}
 	wait("actual leader replication match", func() bool {
 		reply, e := client.RaftStatus(ctx, ap, session)
@@ -162,5 +162,5 @@ func verifyTwoNodeObservations(t *testing.T, ctx context.Context, a, b *Runtime,
 		reply, e := client.RaftStatus(call, ap, session)
 		return e == nil && reply.RaftStatus != nil && reply.RaftStatus.Stale && reply.RaftStatus.LocalLastAppliedAuthorization && reply.RaftStatus.ObservedBy == "node-a" && reply.RaftStatus.Voters == 2
 	})
-	t.Log("two actual voters: signed OS observations over MYDCP, tenant filtering, statfs, both Mesh ends, acknowledged Raft prefix, actual snapshot, and quorum-loss local authenticated stale query")
+	t.Log("two actual voters: signed OS observations over SFCP, tenant filtering, statfs, both Mesh ends, acknowledged Raft prefix, actual snapshot, and quorum-loss local authenticated stale query")
 }

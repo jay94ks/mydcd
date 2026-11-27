@@ -16,15 +16,15 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/web/mydc"
-	"github.com/jay94ks/mydcd/internal/web/store"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/web/sfc"
+	"github.com/jay94ks/seafield/internal/web/store"
 )
 
-// Data store move (UI-64), as `mydc volume move-plan / move`. mydcd plans
+// Data store move (UI-64), as `sfcli volume move-plan / move`. sfcd plans
 // it (app-plan-stream with a move request) from the app document with the
 // volume's new server; the daemon uploads the planned artifact under the
-// move ID, sends begin-volume-move with mydcd's planned payload and
+// move ID, sends begin-volume-move with sfcd's planned payload and
 // Expected, and then gets the protected Group approvals of that original
 // (the deploy job machinery, step Parts+2). The nodes copy, commit and
 // switch; the source stays as a retained copy until delete-retained-volume.
@@ -32,7 +32,7 @@ import (
 type moveReq struct {
 	OpID            string `json:"opId,omitempty"`
 	App             string `json:"app,omitempty"`
-	Node            string `json:"node,omitempty"` // the new server; sets volumes.{name}.x-mydc.node
+	Node            string `json:"node,omitempty"` // the new server; sets volumes.{name}.x-sfc.node
 	YAML            string `json:"yaml,omitempty"` // whole app document instead of the running one + node
 	Digest          string `json:"digest,omitempty"`
 	ID              string `json:"id,omitempty"`
@@ -46,10 +46,10 @@ func (q *moveReq) digest(name string) string {
 	return hex.EncodeToString(h[:])
 }
 
-// setVolumeNode returns doc with volumes.{name}.x-mydc.node = node, keeping
+// setVolumeNode returns doc with volumes.{name}.x-sfc.node = node, keeping
 // the rest of the document (and its comments) as written.
 func setVolumeNode(doc []byte, name, node string) ([]byte, error) {
-	return setMappingPath(doc, []string{"volumes", name, "x-mydc"}, "node", node)
+	return setMappingPath(doc, []string{"volumes", name, "x-sfc"}, "node", node)
 }
 
 // setMappingPath sets key: value in the mapping at path of a YAML document
@@ -105,21 +105,21 @@ func encodeYAML(n *yaml.Node) ([]byte, error) {
 
 type movePlanned struct {
 	vol  volumeView
-	app  mydc.AppView
+	app  sfc.AppView
 	doc  []byte
-	plan mydc.AppPlan
+	plan sfc.AppPlan
 }
 
-// planMove reads the volume and its app, builds the document and asks mydcd
+// planMove reads the volume and its app, builds the document and asks sfcd
 // for the move plan.
-func planMove(ctx context.Context, c mydc.Conn, tenant, name, id string, q *moveReq) (movePlanned, error) {
+func planMove(ctx context.Context, c sfc.Conn, tenant, name, id string, q *moveReq) (movePlanned, error) {
 	var out movePlanned
 	v, err := findVolume(ctx, c, tenant, name, q.App)
 	if err != nil {
 		return out, err
 	}
 	if v.App == "" {
-		return out, &httpErr{http.StatusConflict, "no-app", "mydcd moves only data stores that belong to an app"}
+		return out, &httpErr{http.StatusConflict, "no-app", "sfcd moves only data stores that belong to an app"}
 	}
 	if v.Phase == "Moving" {
 		return out, &httpErr{http.StatusConflict, "moving", "this data store is already moving (" + v.MoveID + ")"}
@@ -128,7 +128,7 @@ func planMove(ctx context.Context, c mydc.Conn, tenant, name, id string, q *move
 	if err != nil {
 		return out, err
 	}
-	i := slices.IndexFunc(apps, func(a mydc.AppView) bool { return a.App == v.App })
+	i := slices.IndexFunc(apps, func(a sfc.AppView) bool { return a.App == v.App })
 	if i < 0 || apps[i].Retiring {
 		return out, &httpErr{http.StatusConflict, "app-not-running", "the data store's app is not running"}
 	}
@@ -175,7 +175,7 @@ func planMove(ctx context.Context, c mydc.Conn, tenant, name, id string, q *move
 	if seconds > 86400 {
 		return out, invalid("transferSeconds: 1 .. 86400")
 	}
-	out.plan, err = c.AppPlan(ctx, mydc.AppPlanRequest{Tenant: tenant, Document: out.doc, Project: v.App, Deployment: out.app.Deployment,
+	out.plan, err = c.AppPlan(ctx, sfc.AppPlanRequest{Tenant: tenant, Document: out.doc, Project: v.App, Deployment: out.app.Deployment,
 		Move: &control.AppMovePlanRequest{Volume: v.Name, ID: id, MaxBytes: maxBytes, MaxEntries: entries, TransferSeconds: seconds}})
 	if err != nil {
 		return out, err
@@ -189,8 +189,8 @@ func planMove(ctx context.Context, c mydc.Conn, tenant, name, id string, q *move
 	return out, nil
 }
 
-func allApps(ctx context.Context, c mydc.Conn, tenant string) ([]mydc.AppView, error) {
-	var out []mydc.AppView
+func allApps(ctx context.Context, c sfc.Conn, tenant string) ([]sfc.AppView, error) {
+	var out []sfc.AppView
 	after := ""
 	for {
 		p, err := c.Apps(ctx, tenant, after)
@@ -206,24 +206,24 @@ func allApps(ctx context.Context, c mydc.Conn, tenant string) ([]mydc.AppView, e
 }
 
 type movePlanView struct {
-	Volume          string                `json:"volume"`
-	App             string                `json:"app"`
-	ID              string                `json:"id"`
-	From            string                `json:"from"`
-	To              string                `json:"to"`
-	YAML            string                `json:"yaml"`
-	Digest          string                `json:"digest"` // of yaml; send it back with the move
-	CapacityBytes   uint64                `json:"capacityBytes"`
-	MaxBytes        uint64                `json:"maxBytes"`
-	MaxEntries      uint32                `json:"maxEntries"`
-	ExpiresAt       string                `json:"expiresAt"`
-	CD              bool                  `json:"cd"`
-	Services        []mydc.PlannedService `json:"services"`
-	TransferSeconds uint32                `json:"transferSeconds"` // as requested (mydcd's plan has only expiresAt)
+	Volume          string               `json:"volume"`
+	App             string               `json:"app"`
+	ID              string               `json:"id"`
+	From            string               `json:"from"`
+	To              string               `json:"to"`
+	YAML            string               `json:"yaml"`
+	Digest          string               `json:"digest"` // of yaml; send it back with the move
+	CapacityBytes   uint64               `json:"capacityBytes"`
+	MaxBytes        uint64               `json:"maxBytes"`
+	MaxEntries      uint32               `json:"maxEntries"`
+	ExpiresAt       string               `json:"expiresAt"`
+	CD              bool                 `json:"cd"`
+	Services        []sfc.PlannedService `json:"services"`
+	TransferSeconds uint32               `json:"transferSeconds"` // as requested (sfcd's plan has only expiresAt)
 }
 
 // POST /t/{t}/volumes/{name}/move-plan {app?, node | yaml, id?, maxBytes?,
-// maxEntries?, transferSeconds?} → the move mydcd would accept now.
+// maxEntries?, transferSeconds?} → the move sfcd would accept now.
 func (s *Server) handleVolumeMovePlan(w http.ResponseWriter, r *http.Request, ws *webSession) {
 	var req moveReq
 	if !readJSON(w, r, &req) {
@@ -237,7 +237,7 @@ func (s *Server) handleVolumeMovePlan(w http.ResponseWriter, r *http.Request, ws
 		writeError(w, http.StatusUnprocessableEntity, "invalid", "id: lowercase letters, digits and -, starting with a letter (at most 61)")
 		return
 	}
-	read(s, w, r, ws, func(ctx context.Context, c mydc.Conn) (movePlanView, error) {
+	read(s, w, r, ws, func(ctx context.Context, c sfc.Conn) (movePlanView, error) {
 		p, err := planMove(ctx, c, r.PathValue("t"), r.PathValue("name"), id, &req)
 		if err != nil {
 			return movePlanView{}, err
@@ -248,7 +248,7 @@ func (s *Server) handleVolumeMovePlan(w http.ResponseWriter, r *http.Request, ws
 			CapacityBytes: b.CapacityBytes, MaxBytes: b.MaxBytes, MaxEntries: b.MaxEntries, ExpiresAt: rfc3339(time.Unix(b.ExpiresAt, 0)), CD: b.App.CD != nil,
 			Services: p.plan.Services, TransferSeconds: req.TransferSeconds}
 		if v.Services == nil {
-			v.Services = []mydc.PlannedService{}
+			v.Services = []sfc.PlannedService{}
 		}
 		if v.TransferSeconds == 0 {
 			v.TransferSeconds = 900
@@ -296,7 +296,7 @@ func (s *Server) handleVolumeMove(w http.ResponseWriter, r *http.Request, ws *we
 	}
 	ctx, cancel := s.callCtx(r)
 	defer cancel()
-	err = ws.do(ctx, func(ctx context.Context, c mydc.Conn) error {
+	err = ws.do(ctx, func(ctx context.Context, c sfc.Conn) error {
 		if parent == nil {
 			p, err := planMove(ctx, c, tenant, name, id, &req)
 			if err != nil {
@@ -313,7 +313,7 @@ func (s *Server) handleVolumeMove(w http.ResponseWriter, r *http.Request, ws *we
 			parent = &store.Op{ID: req.OpID, User: ws.user.ID, Username: ws.user.Username, Action: "volume-move", Tenant: tenant, Target: p.vol.Name,
 				Digest: dg, State: store.OpRunning, SubmittedAt: now, UpdatedAt: now,
 				Deploy: &store.DeployJob{Tenant: tenant, App: p.vol.App, Deployment: p.app.Deployment, UploadID: id,
-					Document: art, Digest: hex.EncodeToString(sum[:]), Parts: (len(art) + mydc.AppPartBytes - 1) / mydc.AppPartBytes,
+					Document: art, Digest: hex.EncodeToString(sum[:]), Parts: (len(art) + sfc.AppPartBytes - 1) / sfc.AppPartBytes,
 					Move: &store.MoveJob{Volume: p.vol.Name, ID: id, From: p.vol.Node, To: b.Target.Node, Begin: begin, Expected: p.plan.Move.Expected, CD: b.App.CD != nil}}}
 			existing, err := s.opt.Store.CreateOp(parent)
 			if err != nil {
@@ -338,7 +338,7 @@ func (s *Server) handleVolumeMove(w http.ResponseWriter, r *http.Request, ws *we
 }
 
 // POST /t/{t}/volumes/{name}/move/cancel {opId, app?, id?} →
-// cancel-volume-move of the volume's current move (or id). mydcd refuses
+// cancel-volume-move of the volume's current move (or id). sfcd refuses
 // it once the owner is committed.
 func (s *Server) handleVolumeMoveCancel(w http.ResponseWriter, r *http.Request, ws *webSession) {
 	var req struct {
@@ -349,7 +349,7 @@ func (s *Server) handleVolumeMoveCancel(w http.ResponseWriter, r *http.Request, 
 	if !readJSON(w, r, &req) {
 		return
 	}
-	s.volumeStep(w, r, ws, req.OpID, req.App, req, func(ctx context.Context, c mydc.Conn, v volumeView) (string, any, uint64, error) {
+	s.volumeStep(w, r, ws, req.OpID, req.App, req, func(ctx context.Context, c sfc.Conn, v volumeView) (string, any, uint64, error) {
 		id := req.ID
 		if id == "" {
 			id = v.MoveID
@@ -357,7 +357,7 @@ func (s *Server) handleVolumeMoveCancel(w http.ResponseWriter, r *http.Request, 
 		if v.Phase != "Moving" || id == "" || id != v.MoveID {
 			return "", nil, 0, &httpErr{http.StatusConflict, "not-moving", "this data store has no such move in progress"}
 		}
-		return mydc.ActionCancelVolumeMove, control.VolumeMoveSelection{Scope: v.Scope, ID: id}, v.Revision, nil
+		return sfc.ActionCancelVolumeMove, control.VolumeMoveSelection{Scope: v.Scope, ID: id}, v.Revision, nil
 	})
 }
 
@@ -372,10 +372,10 @@ func (s *Server) handleRetainedDelete(w http.ResponseWriter, r *http.Request, ws
 		return
 	}
 	id := r.PathValue("id")
-	s.volumeStep(w, r, ws, req.OpID, req.App, req, func(ctx context.Context, c mydc.Conn, v volumeView) (string, any, uint64, error) {
+	s.volumeStep(w, r, ws, req.OpID, req.App, req, func(ctx context.Context, c sfc.Conn, v volumeView) (string, any, uint64, error) {
 		if i := slices.IndexFunc(v.Retained, func(x volumeRetained) bool { return x.MoveID == id }); i >= 0 && v.Retained[i].State != "retained" {
 			return "", nil, 0, &httpErr{http.StatusConflict, "not-retained", "this source copy is already being deleted or gone"}
 		}
-		return mydc.ActionDeleteRetained, control.VolumeMoveSelection{Scope: v.Scope, ID: id}, v.Revision, nil
+		return sfc.ActionDeleteRetained, control.VolumeMoveSelection{Scope: v.Scope, ID: id}, v.Revision, nil
 	})
 }

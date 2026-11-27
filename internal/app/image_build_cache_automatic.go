@@ -10,16 +10,16 @@ import (
 	"errors"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/imagebuild"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/imagebuild"
+	"github.com/jay94ks/seafield/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/sfcp"
 )
 
 func imageBuildCacheAutomaticWorkerID(cache [32]byte) [32]byte {
-	return sha256.Sum256(append([]byte("mydc-cache-automatic-worker-1\x00"), cache[:]...))
+	return sha256.Sum256(append([]byte("sfc-cache-automatic-worker-1\x00"), cache[:]...))
 }
 
 // Only proposes a new shared pass. The already existing finite maintenance
@@ -27,7 +27,7 @@ func imageBuildCacheAutomaticWorkerID(cache [32]byte) [32]byte {
 func (r *Runtime) submitImageBuildCacheAutomatic(ctx context.Context, candidate imagebuild.JobSpec) error {
 	view, err := r.currentView(ctx)
 	if err != nil || view.Local {
-		return mydcp.ErrAdmission
+		return sfcp.ErrAdmission
 	}
 	row, err := r.controlPolicy.ImageBuildCacheAutomaticPlan(view.State, r.Identity.Public, candidate.Tenant, candidate.Scope.Root.Node, imagebuild.CacheIdentity(candidate), time.Now().Unix())
 	if errors.Is(err, reconcile.ErrPending) || errors.Is(err, access.ErrDenied) || errors.Is(err, access.ErrConflict) {

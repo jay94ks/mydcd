@@ -5,10 +5,10 @@ package control
 import (
 	"encoding/json"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/secrets"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/secrets"
 )
 
 // This is public metadata for a read of an already approved exact binding.
@@ -31,9 +31,39 @@ type AppInputFetchPermit struct {
 	Realm        string
 	Leaf         secrets.Leaf
 	Provider     secrets.WriteProfile
+	// Builtin is the holding of a builtin leaf: the digest the serving
+	// voter must open from its local store.
+	Builtin *secrets.BuiltinHolding `json:",omitempty"`
+}
+
+// servesProvider is whether provider may answer for profile: a current voter
+// for the builtin profile, else the profile's own node key.
+func (p Policy) servesProvider(s state.State, provider [32]byte, profile secrets.WriteProfile) bool {
+	if profile.Builtin() {
+		members, err := p.Members(s)
+		return err == nil && members.VoterKey(provider)
+	}
+	return p.ownsResource(s, provider, profile.Key)
 }
 
 func (p Policy) AppInputFetchPermit(s state.State, provider [32]byte, q AppInputFetch) (AppInputFetchPermit, error) {
+	permit, err := p.appInputFetchPermit(s, provider, q)
+	if err != nil || !permit.Provider.Builtin() {
+		return permit, err
+	}
+	v, err := p.Vault(s)
+	if err != nil {
+		return AppInputFetchPermit{}, err
+	}
+	h, ok := v.Trees[permit.Realm].BuiltinHolding(secrets.ValueWrite, permit.Leaf.Reference.Object, permit.Leaf.Reference.Revision)
+	if !ok || permit.Leaf.Reference.Object != permit.Leaf.Secret {
+		return AppInputFetchPermit{}, access.ErrDenied
+	}
+	permit.Builtin = &h
+	return permit, nil
+}
+
+func (p Policy) appInputFetchPermit(s state.State, provider [32]byte, q AppInputFetch) (AppInputFetchPermit, error) {
 	if q.Schema != 1 || q.Consumer == ([32]byte{}) || q.ReadSet == ([32]byte{}) || q.MinimumIndex == 0 || s.Index() < q.MinimumIndex {
 		return AppInputFetchPermit{}, access.ErrDenied
 	}
@@ -50,7 +80,7 @@ func (p Policy) AppInputFetchPermit(s state.State, provider [32]byte, q AppInput
 			return AppInputFetchPermit{}, access.ErrDenied
 		}
 		for _, entry := range work.Inputs.Entries {
-			if entry.Realm == q.Realm && entry.Leaf.Secret == q.Secret && p.ownsResource(s, provider, entry.Provider.Key) {
+			if entry.Realm == q.Realm && entry.Leaf.Secret == q.Secret && p.servesProvider(s, provider, entry.Provider) {
 				return AppInputFetchPermit{Schema: 1, ReadSet: q.ReadSet, CommandIndex: s.Index(), Realm: entry.Realm, Leaf: entry.Leaf, Provider: entry.Provider}, nil
 			}
 		}
@@ -65,7 +95,7 @@ func (p Policy) AppInputFetchPermit(s state.State, provider [32]byte, q AppInput
 			return AppInputFetchPermit{}, access.ErrDenied
 		}
 		for _, entry := range work.Inputs.Entries {
-			if entry.Realm == q.Realm && entry.Leaf.Secret == q.Secret && p.ownsResource(s, provider, entry.Provider.Key) {
+			if entry.Realm == q.Realm && entry.Leaf.Secret == q.Secret && p.servesProvider(s, provider, entry.Provider) {
 				return AppInputFetchPermit{Schema: 1, ReadSet: q.ReadSet, CommandIndex: s.Index(), Realm: entry.Realm, Leaf: entry.Leaf, Provider: entry.Provider}, nil
 			}
 		}
@@ -107,7 +137,7 @@ func (p Policy) AppInputFetchPermit(s state.State, provider [32]byte, q AppInput
 				continue
 			}
 			for _, profile := range read.Profiles {
-				if profile.ID == leaf.Reference.Profile && p.ownsResource(s, provider, profile.Key) && profile.Enabled && profile.Values {
+				if profile.ID == leaf.Reference.Profile && p.servesProvider(s, provider, profile) && profile.Enabled && profile.Values {
 					return AppInputFetchPermit{Schema: 1, ReadSet: q.ReadSet, CommandIndex: s.Index(), Realm: read.Realm, Leaf: leaf, Provider: profile}, nil
 				}
 			}
@@ -128,7 +158,7 @@ func (p Policy) AppInputFetchPermit(s state.State, provider [32]byte, q AppInput
 				return AppInputFetchPermit{}, access.ErrDenied
 			}
 			for _, entry := range current.ExternalInputs.Entries {
-				if entry.Realm == q.Realm && entry.Leaf.Secret == q.Secret && p.ownsResource(s, provider, entry.Provider.Key) {
+				if entry.Realm == q.Realm && entry.Leaf.Secret == q.Secret && p.servesProvider(s, provider, entry.Provider) {
 					return AppInputFetchPermit{Schema: 1, ReadSet: q.ReadSet, CommandIndex: s.Index(), Realm: entry.Realm, Leaf: entry.Leaf, Provider: entry.Provider}, nil
 				}
 			}

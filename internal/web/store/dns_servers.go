@@ -8,8 +8,8 @@ import (
 	bolt "go.etcd.io/bbolt"
 )
 
-// The servers a domain's MyDC records point at (canvas ExtDomainDetail
-// "연결된 서버"): web-own data. The ingress state itself is mydcd's and
+// The servers a domain's Seafield Cluster records point at (canvas ExtDomainDetail
+// "연결된 서버"): web-own data. The ingress state itself is sfcd's and
 // read each time.
 
 var bucketDNSServers = []byte("dns-servers")

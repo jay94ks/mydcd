@@ -14,23 +14,23 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/tenancy"
-	"github.com/jay94ks/mydcd/internal/web/mydc"
-	"github.com/jay94ks/mydcd/internal/web/store"
-	"github.com/jay94ks/mydcd/internal/workload"
-	"github.com/jay94ks/mydcd/tests/clusterfixture"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/tenancy"
+	"github.com/jay94ks/seafield/internal/web/sfc"
+	"github.com/jay94ks/seafield/internal/web/store"
+	"github.com/jay94ks/seafield/internal/workload"
+	"github.com/jay94ks/seafield/tests/clusterfixture"
 
 	dockerspec "github.com/moby/docker-image-spec/specs-go/v1"
 )
 
-// newRealFixture serves the web server on the real mydcd adapter, pinned to
+// newRealFixture serves the web server on the real sfcd adapter, pinned to
 // node-0 of a real cluster of nodes (devel/refactor/16). Only host work is
 // fake. The bootstrap key is system administrator "admin" (u-admin).
 func newRealFixture(t *testing.T, ctx context.Context, nodes int, opts ...clusterfixture.Option) (*fixture, *clusterfixture.Cluster) {
 	t.Helper()
 	if testing.Short() {
-		t.Skip("starts real mydcd nodes")
+		t.Skip("starts real sfcd nodes")
 	}
 	c := clusterfixture.New(t, ctx, nodes, opts...)
 	return realFixtureOn(t, c), c
@@ -42,7 +42,7 @@ func newRealFixture(t *testing.T, ctx context.Context, nodes int, opts ...cluste
 func newIsolatedFixture(t *testing.T, ctx context.Context, nodes int) (*fixture, *clusterfixture.Cluster) {
 	t.Helper()
 	if testing.Short() {
-		t.Skip("starts real mydcd nodes")
+		t.Skip("starts real sfcd nodes")
 	}
 	if os.Geteuid() != 0 {
 		t.Skip("network namespaces need root")
@@ -57,7 +57,7 @@ func TestMain(m *testing.M) { clusterfixture.Main(m) }
 func realFixtureOn(t *testing.T, c *clusterfixture.Cluster) *fixture {
 	t.Helper()
 	n := c.Nodes[0]
-	client, err := mydc.NewReal(mydc.RealConfig{Socket: n.Socket, Cluster: c.ID, Node: n.ID, NodeKey: n.Key})
+	client, err := sfc.NewReal(sfc.RealConfig{Socket: n.Socket, Cluster: c.ID, Node: n.ID, NodeKey: n.Key})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -84,7 +84,7 @@ func realOpID() func() string {
 
 // Through the web server on a real two-node cluster: the administrator
 // logs in with the browser's key flow, sees both servers, and creates a
-// work space with a signed operation that mydcd applies.
+// work space with a signed operation that sfcd applies.
 func TestRealServerLoginNodesAndTenant(t *testing.T) {
 	if os.Geteuid() != 0 {
 		t.Skip("the fake engine makes kernel bridges (needs root)")
@@ -99,6 +99,15 @@ func TestRealServerLoginNodesAndTenant(t *testing.T) {
 	code, out := f.do("GET", "/api/v1/nodes", nil)
 	if code != 200 || len(out["items"].([]any)) != 2 {
 		t.Fatalf("nodes: %d %v", code, out)
+	}
+	// each server has its own fixed address
+	seen := map[any]bool{}
+	for _, row := range out["items"].([]any) {
+		a := row.(map[string]any)["systemAddress"]
+		if s, _ := a.(string); !strings.HasPrefix(s, "10.254.24") || seen[a] {
+			t.Fatalf("systemAddress: %v", out["items"])
+		}
+		seen[a] = true
 	}
 	code, out = f.do("POST", "/api/v1/ops", map[string]any{"opId": op(), "action": "create-tenant", "principal": "u-admin", "expected": 0, "payload": map[string]any{"ID": "shop"}})
 	if state := opState(t, code, out); state != "applied" {
@@ -128,7 +137,7 @@ func realShopOn(t *testing.T, c *clusterfixture.Cluster, lan ...string) {
 		t.Fatal(err)
 	}
 	tenant, _ := catalog.Tenant("shop")
-	c.Change(0, "shop-nodes", "set-nodes", tenant.Revision, control.NodeAssignment{Tenant: "shop", Nodes: []string{"node-0", "node-1"}})
+	c.Change(0, "shop-nodes", "set-nodes", tenant.Revision, control.NodeChangeTo("shop", tenant.AllowedNodes, []string{"node-0", "node-1"}))
 	for _, node := range []string{"node-0", "node-1"} {
 		for _, scope := range []string{"", "shop"} {
 			c.Change(0, "quota-"+node+"-"+scope, "set-node-quota", 0, tenancy.NodeLimit{Tenant: scope, Node: node, Capacity: workload.Resources{CPU: 2e9, Memory: 1 << 30}, Networks: 2, MaxConsumers: 8, PacketQueuePackets: 64, PacketQueueBytes: 1 << 20})
@@ -139,8 +148,8 @@ func realShopOn(t *testing.T, c *clusterfixture.Cluster, lan ...string) {
 		t.Fatal(err)
 	}
 	pools := map[string]tenancy.TUNNode{
-		"node-0": {Node: "node-0", Pools: []tenancy.Subnet{{ID: "pool", Prefix: netip.MustParsePrefix("10.199.1.0/24"), Gateway: netip.MustParseAddr("10.199.1.1"), MTU: 1280}}, Addresses: []netip.Prefix{netip.MustParsePrefix("10.199.2.0/32")}},
-		"node-1": {Node: "node-1", Pools: []tenancy.Subnet{{ID: "pool", Prefix: netip.MustParsePrefix("10.199.0.0/24"), Gateway: netip.MustParseAddr("10.199.0.1"), MTU: 1280}}, Addresses: []netip.Prefix{netip.MustParsePrefix("10.199.2.1/32")}},
+		"node-0": {Node: "node-0", Pools: []tenancy.Subnet{{ID: "pool", Prefix: netip.MustParsePrefix("10.199.1.0/24"), Gateway: netip.MustParseAddr("10.199.1.1"), MTU: 1280}}},
+		"node-1": {Node: "node-1", Pools: []tenancy.Subnet{{ID: "pool", Prefix: netip.MustParsePrefix("10.199.0.0/24"), Gateway: netip.MustParseAddr("10.199.0.1"), MTU: 1280}}},
 	}
 	if len(lan) == 0 {
 		return
@@ -152,8 +161,8 @@ func realShopOn(t *testing.T, c *clusterfixture.Cluster, lan ...string) {
 	c.Change(0, "shop-lan", "create-tun-network", resources.Networks.Revision(), tenancy.TUNDefinition{Tenant: "shop", Name: "lan", Members: members})
 }
 
-// The web plans and deploys an app on node-1 through mydcd: the plan is
-// mydcd's blueprint, node-1 pulls the image from the fake registry and runs
+// The web plans and deploys an app on node-1 through sfcd: the plan is
+// sfcd's blueprint, node-1 pulls the image from the fake registry and runs
 // the container on the TUN network's bridge, the deploy settles Succeeded and
 // the web reads the task's detail and logs (devel/refactor/16 step 4).
 func TestRealServerPlanAndDeploy(t *testing.T) {
@@ -169,7 +178,7 @@ func TestRealServerPlanAndDeploy(t *testing.T) {
 	var cfg dockerspec.DockerOCIImage
 	cfg.Config.User, cfg.Config.Cmd, cfg.Config.Env = "10001:10001", []string{"/web"}, []string{"PATH=/usr/bin"}
 	c.Nodes[1].Engine.Publish(cfg, image)
-	doc := "name: web\nservices:\n web:\n  image: docker.io/library/nginx@sha256:" + strings.Repeat("a", 64) + "\n  cpus: 0.1\n  mem_limit: 16m\n  networks: {app: {ipv4_address: 10.199.0.10}}\n  x-mydc: {node: node-1}\nnetworks:\n app: {external: true, name: lan}\n"
+	doc := "name: web\nservices:\n web:\n  image: docker.io/library/nginx@sha256:" + strings.Repeat("a", 64) + "\n  cpus: 0.1\n  mem_limit: 16m\n  networks: {app: {ipv4_address: 10.199.0.10}}\n  x-sfc: {node: node-1}\nnetworks:\n app: {external: true, name: lan}\n"
 	code, out := f.do("POST", "/api/v1/t/shop/apps/plan", map[string]any{"yaml": doc, "deployment": "prod"})
 	if code != 200 || out["app"] != "web" || !strings.Contains(fmt.Sprint(out["services"]), "node:node-1") {
 		t.Fatalf("plan: %d %v", code, out)
@@ -183,7 +192,7 @@ func TestRealServerPlanAndDeploy(t *testing.T) {
 		t.Fatalf("apps: %d %v", code, out)
 	}
 	// node-1 pulls the image from its "registry", creates and starts the
-	// container on the TUN network's bridge, and mydcd settles the deploy.
+	// container on the TUN network's bridge, and sfcd settles the deploy.
 	c.Wait("deploy succeeded", func() bool {
 		_, out = f.do("GET", "/api/v1/t/shop/apps", nil)
 		app := out["items"].([]any)[0].(map[string]any)
@@ -192,12 +201,12 @@ func TestRealServerPlanAndDeploy(t *testing.T) {
 	if pulls := c.Nodes[1].Engine.Pulls(); len(pulls) != 1 || pulls[0] != image {
 		t.Fatalf("pulls on node-1: %v", pulls)
 	}
-	ids := c.Nodes[1].Engine.Containers(map[string]string{"org.mydc.key": "workload/task/shop/web/web"})
+	ids := c.Nodes[1].Engine.Containers(map[string]string{"org.sfc.key": "workload/task/shop/web/web"})
 	if len(ids) != 1 || len(c.Nodes[0].Engine.Containers(nil)) != 0 {
 		t.Fatalf("containers: node-1 %v node-0 %v", ids, c.Nodes[0].Engine.Containers(nil))
 	}
 	// The task list names the instance; detail and logs read the running
-	// container on node-1 through mydcd.
+	// container on node-1 through sfcd.
 	code, out = f.do("GET", "/api/v1/t/shop/apps/web/tasks", nil)
 	tasks, _ := out["items"].([]any)
 	if code != 200 || len(tasks) != 1 {

@@ -9,11 +9,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/schema"
-	"github.com/jay94ks/mydcd/internal/secrets"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/secrets"
+	"github.com/jay94ks/seafield/internal/sfcp"
 )
 
 type externalReaderSlot struct {
@@ -29,7 +29,7 @@ func (r *Runtime) acquireExternalReader(work control.ExternalRegistryWork) (func
 	r.externalReaderMu.Lock()
 	defer r.externalReaderMu.Unlock()
 	if work.Reader.Owner != r.Identity.Public || work.Reader.Draining || work.Reader.Generation == 0 || work.Reader.Spec.Validate() != nil {
-		return nil, mydcp.ErrAdmission
+		return nil, sfcp.ErrAdmission
 	}
 	if r.externalReaders == nil {
 		r.externalReaders = map[string]*externalReaderSlot{}
@@ -41,7 +41,7 @@ func (r *Runtime) acquireExternalReader(work control.ExternalRegistryWork) (func
 		r.externalReaders[key] = slot
 	}
 	if slot.generation != work.Reader.Generation || slot.fenced {
-		return nil, mydcp.ErrAdmission
+		return nil, sfcp.ErrAdmission
 	}
 	slot.active++
 	var once sync.Once
@@ -57,15 +57,15 @@ func (r *Runtime) externalRegistryWork(ctx context.Context, selection control.Ex
 	}
 	work, err := schema.Decode[control.ExternalRegistryWork](reply.Data)
 	if err != nil || reply.Local || work.Index == 0 || work.Epoch == 0 || work.Reader.Spec.Tenant != selection.Tenant || work.Reader.Spec.ID != selection.ID || work.Reader.Generation != selection.Generation || work.Reader.Owner != r.Identity.Public {
-		return control.ExternalRegistryWork{}, mydcp.ErrAdmission
+		return control.ExternalRegistryWork{}, sfcp.ErrAdmission
 	}
 	view, err := r.Engine().ReadAtLeast(ctx, work.Index)
 	if err != nil || view.State.ModuleEpoch() != work.Epoch {
-		return control.ExternalRegistryWork{}, mydcp.ErrAdmission
+		return control.ExternalRegistryWork{}, sfcp.ErrAdmission
 	}
 	current, err := r.controlPolicy.ExternalRegistryWork(view.State, r.Identity.Public, q)
 	if err != nil || current.Inputs.ReadSet != work.Inputs.ReadSet {
-		return control.ExternalRegistryWork{}, mydcp.ErrAdmission
+		return control.ExternalRegistryWork{}, sfcp.ErrAdmission
 	}
 	return work, nil
 }

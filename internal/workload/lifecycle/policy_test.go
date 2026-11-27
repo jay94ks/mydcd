@@ -13,7 +13,7 @@ import (
 func sourcePolicy() TenantPolicy {
 	return TenantPolicy{Tenant: "tenant", Revision: 1, Enabled: true,
 		Execution: ExecutionPolicy{MaxConcurrent: 1, TimeoutMS: 5000, NanoCPU: 100_000_000, MemoryBytes: 32 << 20, MaxPIDs: 16, OutputBytes: 4096, ProbeBytes: 4096, Capabilities: []string{"file"}},
-		Resolver:  ResolverPolicy{AllowPackages: []string{"context", "example.invalid/safe", "example.invalid/safe/blocked", "github.com/jay94ks/mydcd/lifecycle/v1", "net/http", "net/url", "os", "unsafe"}, DenyPackages: []string{"example.invalid/safe/blocked/..."}, SourceCacheBytes: 1 << 20}}
+		Resolver:  ResolverPolicy{AllowPackages: []string{"context", "example.invalid/safe", "example.invalid/safe/blocked", "github.com/jay94ks/seafield/lifecycle/v1", "net/http", "net/url", "os", "unsafe"}, DenyPackages: []string{"example.invalid/safe/blocked/..."}, SourceCacheBytes: 1 << 20}}
 }
 
 func signedSource(seed byte, text string, modules []ModulePin) SourceFact {

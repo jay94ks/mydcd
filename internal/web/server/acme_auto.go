@@ -13,12 +13,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/certstore"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/web/acme"
-	"github.com/jay94ks/mydcd/internal/web/dns"
-	"github.com/jay94ks/mydcd/internal/web/mydc"
-	"github.com/jay94ks/mydcd/internal/web/store"
+	"github.com/jay94ks/seafield/internal/certstore"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/web/acme"
+	"github.com/jay94ks/seafield/internal/web/dns"
+	"github.com/jay94ks/seafield/internal/web/sfc"
+	"github.com/jay94ks/seafield/internal/web/store"
 )
 
 // Automatic issuance (UI-57 "자동 발급", web-own). Every minute the
@@ -27,10 +27,10 @@ import (
 // entry covers (exact SAN, or a "*." SAN one label up) is a watched host.
 // When its external domain has automatic issuance on, the web app makes an
 // ACME definition for it and starts an order as the automation account
-// (the order's put-certificate is signed by that account; mydcd decides if
+// (the order's put-certificate is signed by that account; sfcd decides if
 // it may). REQ-21's "certificate: auto" then picks the new store version
 // without a redeploy. Hosts that cannot be issued wait in a list kept in
-// memory (the mapping is mydcd's and read each round).
+// memory (the mapping is sfcd's and read each round).
 
 const acmeAutoEvery = time.Minute
 
@@ -40,7 +40,7 @@ var acmeAutoPerRound = 3
 
 type acmeAutoWaiting struct {
 	Host     string    `json:"host"`
-	Reason   string    `json:"reason"` // no-domain, not-assigned, auto-off, caa-blocked, rate-limit
+	Reason   string    `json:"reason"` // not-registered, no-responder, not-assigned, auto-off, caa-blocked, rate-limit
 	Tenant   string    `json:"tenant,omitempty"`
 	App      string    `json:"app,omitempty"`
 	Node     string    `json:"node"`
@@ -54,6 +54,9 @@ type acmeAutoState struct {
 	polled  time.Time
 	waiting map[string]*acmeAutoWaiting
 	tenants map[string][]string // domain → tenants with watched hosts under it
+	// cluster: the registered cluster domains as the last poll read them
+	// (the settings screen lists them; GET /acme/auto has no store read)
+	cluster []string
 }
 
 type acmeAutoDomainView struct {
@@ -71,13 +74,38 @@ func (s *Server) acmeAutoActive() bool {
 	if err != nil || a.Revision == 0 {
 		return false
 	}
-	ds, _ := s.opt.Store.ListDNSDomains()
-	for _, d := range ds {
-		if acmeAutoDomainOf(a, d.Domain).Enabled {
+	for _, d := range a.Domains {
+		if d.Enabled {
 			return true
 		}
 	}
-	return false
+	return a.Enabled && len(s.acmeAutoDomains()) > 0
+}
+
+// acmeAutoDomains: the domains automatic issuance can cover, the connected
+// external domains (DNS-01) and the registered cluster domains (HTTP-01
+// when no provider is attached). The cluster part is the last poll's read;
+// before any poll it is unknown, so the default counts as on.
+func (s *Server) acmeAutoDomains() []string {
+	ds, _ := s.opt.Store.ListDNSDomains()
+	var out []string
+	for _, d := range ds {
+		out = append(out, d.Domain)
+	}
+	s.acmeAuto.mu.Lock()
+	cluster := s.acmeAuto.cluster
+	polled := !s.acmeAuto.polled.IsZero()
+	s.acmeAuto.mu.Unlock()
+	for _, d := range cluster {
+		if !slices.Contains(out, d) {
+			out = append(out, d)
+		}
+	}
+	if !polled && len(out) == 0 {
+		return []string{""}
+	}
+	slices.Sort(out)
+	return out
 }
 
 func acmeAutoDomainOf(a *store.ACMEAuto, domain string) store.ACMEAutoDomain {
@@ -96,20 +124,26 @@ func (s *Server) acmeAutoView() (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
+	names := s.acmeAutoDomains()
 	st := &s.acmeAuto
 	st.mu.Lock()
 	defer st.mu.Unlock()
 	domains := []acmeAutoDomainView{}
-	for _, d := range ds {
-		x := acmeAutoDomainOf(a, d.Domain)
-		v := acmeAutoDomainView{Domain: d.Domain, Enabled: x.Enabled, Mode: x.Mode, KeyTypes: x.KeyTypes, Tenants: []string{}}
+	for _, name := range names {
+		if name == "" {
+			continue
+		}
+		x := acmeAutoDomainOf(a, name)
+		v := acmeAutoDomainView{Domain: name, Enabled: x.Enabled, Mode: x.Mode, KeyTypes: x.KeyTypes, Tenants: []string{}}
 		// the domain's tenant assignments, then tenants seen using it
-		for _, as := range d.Assignments {
-			if !slices.Contains(v.Tenants, as.Tenant) {
-				v.Tenants = append(v.Tenants, as.Tenant)
+		if i := slices.IndexFunc(ds, func(d *store.DNSDomain) bool { return d.Domain == name }); i >= 0 {
+			for _, as := range ds[i].Assignments {
+				if !slices.Contains(v.Tenants, as.Tenant) {
+					v.Tenants = append(v.Tenants, as.Tenant)
+				}
 			}
 		}
-		for _, t := range st.tenants[d.Domain] {
+		for _, t := range st.tenants[name] {
 			if !slices.Contains(v.Tenants, t) {
 				v.Tenants = append(v.Tenants, t)
 			}
@@ -197,18 +231,38 @@ func (s *Server) handlePutACMEAuto(w http.ResponseWriter, r *http.Request, ws *w
 		writeError(w, http.StatusInternalServerError, "internal", err.Error())
 		return
 	}
-	known := map[string]bool{}
+	connected := map[string]bool{}
 	for _, d := range ds {
-		known[d.Domain] = true
+		connected[d.Domain] = true
+	}
+	registered := map[string]bool{}
+	if len(req.Domains) > 0 {
+		ctx, cancel := s.callCtx(r)
+		names, err := s.orderDomains(ctx, ws)
+		cancel()
+		if err != nil {
+			s.writeBackendError(w, ws, err)
+			return
+		}
+		for _, n := range names {
+			registered[n] = true
+		}
+		s.acmeAuto.mu.Lock()
+		s.acmeAuto.cluster = names
+		s.acmeAuto.mu.Unlock()
 	}
 	domains := map[string]*store.ACMEAutoDomain{}
 	for _, d := range req.Domains {
-		if !known[d.Domain] || domains[d.Domain] != nil {
-			bad("domains: unknown or repeated external domain " + d.Domain)
+		if !connected[d.Domain] && !registered[d.Domain] || domains[d.Domain] != nil {
+			bad("domains: unknown or repeated domain " + d.Domain)
 			return
 		}
 		if d.Mode != "per-host" && d.Mode != "wildcard" {
 			bad("domains[].mode: per-host or wildcard")
+			return
+		}
+		if d.Mode == "wildcard" && !connected[d.Domain] {
+			bad("domains[].mode: a wildcard needs DNS-01, so " + d.Domain + " needs a DNS provider")
 			return
 		}
 		if len(d.KeyTypes) > 0 {
@@ -359,9 +413,13 @@ func (s *Server) acmeAutoPoll(ctx context.Context, ws *webSession) {
 	}
 	var iv *ingressView
 	var certs []certstore.PublicEntry
-	err = ws.do(ctx, func(ctx context.Context, c mydc.Conn) error {
+	var first control.CertificatePage
+	err = ws.do(ctx, func(ctx context.Context, c sfc.Conn) error {
 		var err error
 		if iv, err = ingressRead(ctx, c, control.IngressQuery{}); err != nil {
+			return err
+		}
+		if first, err = c.QueryCertificates(ctx, control.CertificateQuery{}); err != nil {
 			return err
 		}
 		certs, err = certAll(ctx, c)
@@ -375,10 +433,34 @@ func (s *Server) acmeAutoPoll(ctx context.Context, ws *webSession) {
 	if err != nil {
 		return
 	}
-	s.acmeAutoScan(a, acmeWatchedHosts(iv), certs, defs, now)
+	cl := acmeAutoCluster{responder: first.ACMEResponder != nil && first.ACMEResponder.Address != ""}
+	for _, d := range first.Domains {
+		cl.domains = append(cl.domains, d.Name)
+	}
+	st.mu.Lock()
+	st.cluster = cl.domains
+	st.mu.Unlock()
+	s.acmeAutoScan(a, acmeWatchedHosts(iv), certs, defs, cl, now)
 }
 
-func (s *Server) acmeAutoScan(a *store.ACMEAuto, hosts []watchedHost, certs []certstore.PublicEntry, defs []*store.ACMECert, now time.Time) {
+// acmeAutoCluster is what a poll read of the cluster settings: the
+// registered domains and whether the HTTP-01 responder address is set.
+type acmeAutoCluster struct {
+	domains   []string
+	responder bool
+}
+
+func (c acmeAutoCluster) cover(host string) string {
+	best := ""
+	for _, d := range c.domains {
+		if certstore.DomainCovers(d, host) && len(d) > len(best) {
+			best = d
+		}
+	}
+	return best
+}
+
+func (s *Server) acmeAutoScan(a *store.ACMEAuto, hosts []watchedHost, certs []certstore.PublicEntry, defs []*store.ACMECert, cl acmeAutoCluster, now time.Time) {
 	stored := func(h string) bool {
 		for _, c := range certs {
 			if c.Metadata.NotAfter <= now.Unix() {
@@ -424,9 +506,20 @@ func (s *Server) acmeAutoScan(a *store.ACMEAuto, hosts []watchedHost, certs []ce
 		if _, ign := a.Ignored[h.host]; ign || stored(h.host) {
 			continue
 		}
+		// a connected domain gives DNS-01; otherwise a registered one
+		// gives HTTP-01 through the web responder
 		dom, _, rel, derr := s.dnsFor(h.host)
-		if dom != nil && h.tenant != "" && !slices.Contains(tenants[dom.Domain], h.tenant) {
-			tenants[dom.Domain] = append(tenants[dom.Domain], h.tenant)
+		if derr != nil {
+			dom = nil
+		}
+		domain := ""
+		if dom != nil {
+			domain = dom.Domain
+		} else {
+			domain = cl.cover(h.host)
+		}
+		if domain != "" && h.tenant != "" && !slices.Contains(tenants[domain], h.tenant) {
+			tenants[domain] = append(tenants[domain], h.tenant)
 		}
 		if d := defFor(h.host); d != nil {
 			// A definition covers it: its order is running or waits for
@@ -439,19 +532,25 @@ func (s *Server) acmeAutoScan(a *store.ACMEAuto, hosts []watchedHost, certs []ce
 			}
 			continue
 		}
-		if derr != nil || dom == nil {
-			wait(h, "no-domain")
+		if domain == "" {
+			wait(h, "not-registered")
+			continue
+		}
+		if dom == nil && (!s.opt.ACMEHTTP01 || !cl.responder) {
+			wait(h, "no-responder")
 			continue
 		}
 		// The workspace that serves the host must hold the name in the
-		// domain's assignments (the same rule as its DNS records).
-		if h.tenant != "" && !slices.ContainsFunc(dom.Assignments, func(as store.DNSAssignment) bool {
+		// connected domain's assignments (the same rule as its DNS
+		// records). A domain without a provider has no assignments: the
+		// route itself is the claim sfcd accepted.
+		if dom != nil && h.tenant != "" && !slices.ContainsFunc(dom.Assignments, func(as store.DNSAssignment) bool {
 			return as.Tenant == h.tenant && dns.InRange(rel, as.Names)
 		}) {
 			wait(h, "not-assigned")
 			continue
 		}
-		ds := acmeAutoDomainOf(a, dom.Domain)
+		ds := acmeAutoDomainOf(a, domain)
 		if !ds.Enabled || a.Account == "" {
 			wait(h, "auto-off")
 			continue
@@ -461,7 +560,7 @@ func (s *Server) acmeAutoScan(a *store.ACMEAuto, hosts []watchedHost, certs []ce
 		}
 		made++
 		names := []string{h.host}
-		if ds.Mode == "wildcard" {
+		if ds.Mode == "wildcard" && dom != nil {
 			if i := strings.IndexByte(h.host, '.'); i > 0 && h.host[i+1:] == dom.Domain {
 				names = []string{"*." + dom.Domain}
 			}
@@ -494,9 +593,10 @@ func (s *Server) acmeAutoScan(a *store.ACMEAuto, hosts []watchedHost, certs []ce
 }
 
 var acmeAutoReasonText = map[string]string{
-	"no-domain":    "외부 도메인에 없는 이름이라 DNS 확인을 할 수 없습니다.",
-	"not-assigned": "이 호스트를 쓰는 작업 공간에 그 이름이 배정되지 않았습니다.",
-	"auto-off":     "이 도메인은 자동 발급이 꺼져 있습니다.",
-	"caa-blocked":  "CAA 레코드가 이 인증 기관을 막습니다.",
-	"rate-limit":   "인증 기관 요청 수 한도에 닿았습니다.",
+	"not-registered": "클러스터에 등록된 도메인 아래 이름이 아니라 받을 수 없습니다.",
+	"no-responder":   "DNS 공급자가 없는 도메인인데 HTTP 확인 응답기가 꺼져 있거나 클러스터에 등록되지 않았습니다.",
+	"not-assigned":   "이 호스트를 쓰는 작업 공간에 그 이름이 배정되지 않았습니다.",
+	"auto-off":       "이 도메인은 자동 발급이 꺼져 있습니다.",
+	"caa-blocked":    "CAA 레코드가 이 인증 기관을 막습니다.",
+	"rate-limit":     "인증 기관 요청 수 한도에 닿았습니다.",
 }

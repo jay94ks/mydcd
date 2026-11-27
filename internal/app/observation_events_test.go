@@ -5,7 +5,7 @@ package app
 import (
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/observability"
+	"github.com/jay94ks/seafield/internal/observability"
 )
 
 func TestObservationEventsPreserveFilesystemAndMeshIdentifiers(t *testing.T) {

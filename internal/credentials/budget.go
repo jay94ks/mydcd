@@ -25,6 +25,23 @@ type Budget struct {
 	active         chan struct{}
 }
 
+// userBurst is how many attempts an account may make at once on one node.
+const userBurst = 5
+
+// Left is how many attempts username has now on this node.
+func (b *Budget) Left(username string, now time.Time) int {
+	if b == nil {
+		return 0
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	entry, known := b.users[username]
+	if !known {
+		return userBurst
+	}
+	return max(0, int(entry.limit.TokensAt(now)))
+}
+
 func NewBudget() *Budget {
 	return &Budget{global: rate.NewLimiter(20, 20), users: map[string]attemptRate{}, sources: map[string]attemptRate{}, active: make(chan struct{}, 1)}
 }
@@ -53,7 +70,7 @@ func (b *Budget) Begin(ctx context.Context, username, source string, now time.Ti
 	}
 	var admitted [2]*rate.Limiter
 	for i, key := range []string{username, source} {
-		table, limit, burst := b.users, rate.Every(12*time.Second), 5
+		table, limit, burst := b.users, rate.Every(12*time.Second), userBurst
 		if i == 1 {
 			table, limit, burst = b.sources, rate.Every(2*time.Second), 10
 		}

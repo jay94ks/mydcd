@@ -11,13 +11,13 @@ import (
 	"errors"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/config"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/reconcile"
-	"github.com/jay94ks/mydcd/internal/schema"
-	"github.com/jay94ks/mydcd/internal/servicecall"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/config"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/servicecall"
+	"github.com/jay94ks/seafield/internal/sfcp"
 )
 
 func (r *Runtime) openServiceCalls(c config.Node) error {
@@ -59,7 +59,7 @@ func (r *Runtime) serviceCallPermit(ctx context.Context, read control.ServiceCal
 	}
 	index, err := schema.Decode[uint64](reply.Data)
 	if err != nil || index == 0 || reply.Local || reply.RaftIndex == 0 || reply.CommandIndex < index {
-		return mydcp.ErrAdmission
+		return sfcp.ErrAdmission
 	}
 	// The authenticated quorum permit can arrive before this native owner's
 	// FSM publication. Consume that command ordinal locally, then recheck the
@@ -75,7 +75,7 @@ func (r *Runtime) serviceCallPermit(ctx context.Context, read control.ServiceCal
 
 func (r *Runtime) callService(ctx context.Context, read control.ServiceCallRead) (out servicecall.Result, failure error) {
 	if read.Target.Container.Owner != r.Identity.Public || !read.Target.Valid() || !read.Request.Valid() {
-		return out, mydcp.ErrAdmission
+		return out, sfcp.ErrAdmission
 	}
 	parentCtx := ctx
 	ctx, cancel := context.WithTimeout(ctx, read.Request.Duration())
@@ -88,7 +88,7 @@ func (r *Runtime) callService(ctx context.Context, read control.ServiceCallRead)
 	r.life.RLock()
 	defer r.life.RUnlock()
 	if r.closed || r.workload == nil {
-		return out, mydcp.ErrAdmission
+		return out, sfcp.ErrAdmission
 	}
 	var nonce [32]byte
 	if _, err := rand.Read(nonce[:]); err != nil {
@@ -136,11 +136,11 @@ func (r *Runtime) probeCD(ctx context.Context, read control.CDProbeRead) (out de
 	current := func(ctx context.Context) error {
 		view, err := r.currentView(ctx)
 		if err != nil || view.Local {
-			return mydcp.ErrAdmission
+			return sfcp.ErrAdmission
 		}
 		members, err := r.controlPolicy.Members(view.State)
 		if err != nil || !members.WorkKey(r.Identity.Public) {
-			return mydcp.ErrAdmission
+			return sfcp.ErrAdmission
 		}
 		for _, entry := range members.Entries {
 			if entry.Peer.Key == hex.EncodeToString(r.Identity.Public[:]) {
@@ -149,7 +149,7 @@ func (r *Runtime) probeCD(ctx context.Context, read control.CDProbeRead) (out de
 			}
 		}
 		if out.Node == "" {
-			return mydcp.ErrAdmission
+			return sfcp.ErrAdmission
 		}
 		return r.controlPolicy.CDProbePermit(view.State, read, time.Now().Unix(), out.Node)
 	}
@@ -165,7 +165,7 @@ func (r *Runtime) probeCD(ctx context.Context, read control.CDProbeRead) (out de
 	r.life.RLock()
 	defer r.life.RUnlock()
 	if r.closed || r.gitFetcher == nil {
-		return out, mydcp.ErrAdmission
+		return out, sfcp.ErrAdmission
 	}
 	var access deployment.GitAccess
 	if read.Query.Credential != "" {

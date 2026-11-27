@@ -6,7 +6,7 @@
 
 member `image-build-base-tls-owner`는 원 `ImageBuildBaseRead`를 입력받아 외부 source의
 공개 CA만 반환한다. 일반 사용자/Vault 원문 조회가 아니며 설치된 원 Builder→source owner의
-MYDCP만 사용한다. 양쪽은 current quorum·running/unknown의 원 begin/reader/ReadSet을
+SFCP만 사용한다. 양쪽은 current quorum·running/unknown의 원 begin/reader/ReadSet을
 검사한다. CA가 선언돼 있으면 인증서 누락을 거부하고, 선언되지 않은 CA를 임의로 추가하지
 않는다. reader가 원 provider 값을 읽되 password·개인키·다른 Vault 값은 반환하지 않는다.
 

@@ -11,11 +11,11 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/containerops"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	checker "github.com/jay94ks/mydcd/internal/workload/lifecycle"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/containerops"
+	"github.com/jay94ks/seafield/internal/deployment"
+	checker "github.com/jay94ks/seafield/internal/workload/lifecycle"
 
 	"gopkg.in/yaml.v3"
 )
@@ -151,17 +151,11 @@ func TestStandaloneManagementCASRejectsStaleIntentFutureCoordinatesAndCurrentRev
 				}
 				applyRestartCore(t, f, cleanup, state.Applied)
 			case "credential":
-				catalog, _ := f.p.Catalog(f.s)
-				account, _ := catalog.User("admin")
-				expected := account.Revision
-				account.Revision = 0
 				// Preserve a usable account credential while revoking the exact
 				// key in the already signed original operation/session.
 				recovery := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{144}, ed25519.SeedSize))
-				account.Credentials = append(account.Credentials, access.Credential{ID: "recovery-key", Method: access.PrivateKey, PublicKey: [32]byte(recovery.Public().(ed25519.PublicKey)), Enabled: true})
+				f.replaceOwnKey("key", "recovery-key", [32]byte(recovery.Public().(ed25519.PublicKey)), nil)
 				clear(recovery)
-				account.Credentials[0].Enabled = false
-				f.apply("disable-original-credential", "put-user", expected, account, state.Applied)
 				want = state.Forbidden
 			}
 			before := f.s.Object(AppsKey)
@@ -437,15 +431,9 @@ func TestStandaloneControlCASRejectsForeignManagementNativeAndFutureOrdinals(t *
 				applyDownCAS(t, f, pin, state.Applied)
 			}
 			if mode == "credential" {
-				catalog, _ := f.p.Catalog(f.s)
-				account, _ := catalog.User("admin")
-				expected := account.Revision
-				account.Revision = 0
 				recovery := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{144}, ed25519.SeedSize))
-				account.Credentials = append(account.Credentials, access.Credential{ID: "recovery-key", Method: access.PrivateKey, PublicKey: [32]byte(recovery.Public().(ed25519.PublicKey)), Enabled: true})
+				f.replaceOwnKey("key", "recovery-key", [32]byte(recovery.Public().(ed25519.PublicKey)), nil)
 				clear(recovery)
-				account.Credentials[0].Enabled = false
-				f.apply("control-revoke-credential", "put-user", expected, account, state.Applied)
 				want = state.Forbidden
 			}
 			before := f.s.Object(AppsKey)
@@ -480,7 +468,7 @@ func TestStandaloneLegacyControlKeepsHistoricalPlanHashAndReceipt(t *testing.T) 
 		PreserveNative, PreserveWritableLayer, PreserveLogs bool
 	}{plan.Action, plan.StandaloneRevision, plan.Schema, plan.Tenant, plan.App, 0, [32]byte{}, plan.Registration, plan.Container, plan.OwnerBoot, plan.StopGraceSeconds, plan.PreserveNative, plan.PreserveWritableLayer, plan.PreserveLogs}
 	raw, _ := json.Marshal(old)
-	if plan.Target != sha256.Sum256(append([]byte("mydc-task-restart-target-1\x00"), raw...)) {
+	if plan.Target != sha256.Sum256(append([]byte("sfc-task-restart-target-1\x00"), raw...)) {
 		t.Fatal("nil management target changed the historical standalone hash")
 	}
 	q := TaskRestartChange{Standalone: "debug", Tenant: "tenant", Operation: "legacy-stop", Target: plan.Target}

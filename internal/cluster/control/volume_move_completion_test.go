@@ -8,8 +8,8 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/workload/volumes"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/workload/volumes"
 )
 
 func applyMoveOwnerReport(t *testing.T, f *backupCoreFixture, caller [32]byte, r VolumeMoveReport, want state.Code) {
@@ -101,7 +101,7 @@ func TestVolumeMoveOwnerCleanupAfterExpiryAndRevocationRetainsWriterAndSource(t 
 		t.Fatal(err)
 	}
 	tenant, _ := c.Tenant(j.Binding.Scope.Tenant)
-	f.apply("revoke-target-placement", "set-nodes", tenant.Revision, NodeAssignment{Tenant: tenant.ID, Nodes: []string{j.Binding.Source.Node}}, state.Applied)
+	f.apply("revoke-target-placement", "set-nodes", tenant.Revision, NodeChangeTo(tenant.ID, tenant.AllowedNodes, []string{j.Binding.Source.Node}), state.Applied)
 	for _, kind := range []string{"cleanup-source", "cleanup-target"} {
 		key, owner := f.node, j.Binding.Source
 		if kind == "cleanup-target" {

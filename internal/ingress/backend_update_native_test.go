@@ -15,7 +15,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/schema"
+	"github.com/jay94ks/seafield/internal/schema"
 )
 
 // Uses real HTTP streams/listeners, probes and the durable Manager. Only the

@@ -11,8 +11,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	checker "github.com/jay94ks/mydcd/internal/workload/lifecycle"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	checker "github.com/jay94ks/seafield/internal/workload/lifecycle"
 )
 
 // Isolated recovery projection: the original catalog job is retained while

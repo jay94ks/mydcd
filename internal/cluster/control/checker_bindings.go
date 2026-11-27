@@ -8,10 +8,10 @@ import (
 	"encoding/json"
 	"slices"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	checker "github.com/jay94ks/mydcd/internal/workload/lifecycle"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/deployment"
+	checker "github.com/jay94ks/seafield/internal/workload/lifecycle"
 )
 
 func CheckerBindingUse(b deployment.Binding) (checker.Use, bool) {
@@ -20,7 +20,7 @@ func CheckerBindingUse(b deployment.Binding) (checker.Use, bool) {
 		return checker.Use{}, false
 	}
 	parent := b.Digest()
-	id := sha256.Sum256(append([]byte("mydc-checker-binding-use-1\x00"), parent[:]...))
+	id := sha256.Sum256(append([]byte("sfc-checker-binding-use-1\x00"), parent[:]...))
 	selection := n.Lifecycle.Clone()
 	return checker.Use{Tenant: n.Use.Tenant, ID: hex.EncodeToString(id[:]), Kind: "app-binding", Principal: n.Use.User, Node: n.Use.Node, Owner: n.Use.NodeKey, Parent: parent, PolicyRevision: selection.PolicyRevision, Scripts: selection.Scripts, Sources: selection.Sources}, true
 }

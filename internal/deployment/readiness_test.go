@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/workload"
+	"github.com/jay94ks/seafield/internal/workload"
 )
 
 func TestComposeHTTPReadinessDeadlineContract(t *testing.T) {
@@ -24,7 +24,7 @@ func TestComposeHTTPReadinessDeadlineContract(t *testing.T) {
 		if err != nil {
 			t.Fatal(tc.value, err)
 		}
-		probe, err := c.Services["web"].MyDC.Readiness.httpProbe()
+		probe, err := c.Services["web"].Sfc.Readiness.httpProbe()
 		if err != nil || probe.TimeoutMS != tc.want {
 			t.Fatal(tc.value, probe, err)
 		}
@@ -52,7 +52,7 @@ func TestComposeHTTPReadinessDeadlineContract(t *testing.T) {
 	}
 	raw := strings.Replace(base, "ready: {http: /readyz, port: 8080}", "ready: healthcheck", 1)
 	raw = strings.Replace(raw, "    command: [php, app.php]\n", "    command: [php, app.php]\n    healthcheck: {test: [CMD, probe], interval: 5s, timeout: 3s, retries: 3}\n", 1)
-	if c, err := ParseCompose([]byte(raw)); err != nil || c.Services["web"].MyDC.Readiness.Kind != "exec" {
+	if c, err := ParseCompose([]byte(raw)); err != nil || c.Services["web"].Sfc.Readiness.Kind != "exec" {
 		t.Fatal("ready: healthcheck", err)
 	}
 }

@@ -19,17 +19,17 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/config"
-	"github.com/jay94ks/mydcd/internal/engine"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/reconcile"
-	"github.com/jay94ks/mydcd/internal/userauth"
-	"github.com/jay94ks/mydcd/internal/workload/volumes"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/config"
+	"github.com/jay94ks/seafield/internal/engine"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/userauth"
+	"github.com/jay94ks/seafield/internal/workload/volumes"
 	"github.com/moby/moby/client"
 )
 
@@ -123,16 +123,16 @@ func TestRealBoundaryVolumeCreateCLIUnknownRecoveryAndCancel(t *testing.T) {
 }
 
 func runRealVolumeOwnerBoundary(t *testing.T, withBackups, automatic, withRestore bool, scenario ...volumeOwnerScenario) {
-	if os.Geteuid() != 0 || os.Getenv("MYDC_DOCKER_TEST_OWNER") == "" {
+	if os.Geteuid() != 0 || os.Getenv("SFC_DOCKER_TEST_OWNER") == "" {
 		t.Skip("requires owned Docker prestate and root prebuilt binary")
 	}
-	binary := os.Getenv("MYDC_TEST_CLI")
+	binary := os.Getenv("SFC_TEST_CLI")
 	if !filepath.IsAbs(binary) {
 		t.Fatal("explicit user-prebuilt CLI required")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
-	root, rootErr := os.MkdirTemp("", "mydc-volume-owner-")
+	root, rootErr := os.MkdirTemp("", "sfc-volume-owner-")
 	if rootErr != nil {
 		t.Fatal(rootErr)
 	}
@@ -163,16 +163,19 @@ func runRealVolumeOwnerBoundary(t *testing.T, withBackups, automatic, withRestor
 		_ = p.Close()
 		modules := "network: {enabled: false}\n workload: {enabled: false}\n ingress: {enabled: false}"
 		if endpoint != "" {
-			modules = fmt.Sprintf("network: {enabled: true, docker_socket: %q}\n workload: {enabled: true}\n ingress: {enabled: false}", endpoint)
+			modules = fmt.Sprintf("network: {enabled: true}\n workload: {enabled: true}\n ingress: {enabled: false}")
 		}
 		raw := fmt.Sprintf("version: 1\nnode:\n id: %s\n listen: %q\n state_dir: %q\n identity_dir: %q\nmodules:\n %s\n", id, address, filepath.Join(root, id+"-state"), filepath.Join(root, id+"-key"), modules)
 		name := filepath.Join(root, id+".yaml")
 		if e = os.WriteFile(name, []byte(raw), 0600); e != nil {
 			t.Fatal(e)
 		}
-		cfg, e := config.LoadNode(name)
+		cfg, e := loadTestNode(name)
 		if e != nil {
 			t.Fatal(e)
+		}
+		if endpoint != "" {
+			cfg.EngineAPI = endpoint
 		}
 		return cfg
 	}
@@ -191,16 +194,16 @@ func runRealVolumeOwnerBoundary(t *testing.T, withBackups, automatic, withRestor
 	}
 	clusterID := initialized.Installation.Root.Cluster
 	policy := control.Policy{Cluster: clusterID, BootstrapKey: adminKey.Public, TrustRoot: a.Identity.Public, Genesis: initialized.Installation.Genesis}
-	peerA := mydcp.Peer{ID: cfgA.Node.ID, Endpoint: cfgA.Node.Listen, Policy: mydcp.Policy{Key: mydcp.Identity(a.Identity.Public), Respond: true}}
+	peerA := sfcp.Peer{ID: cfgA.Node.ID, Endpoint: cfgA.Node.Listen, Policy: sfcp.Policy{Key: sfcp.Identity(a.Identity.Public), Respond: true}}
 	var peersMu sync.RWMutex
-	peers := map[mydcp.Identity]mydcp.Peer{peerA.Key: peerA}
+	peers := map[sfcp.Identity]sfcp.Peer{peerA.Key: peerA}
 	user := func() userauth.Client {
 		t.Helper()
 		self, e := identity.Ephemeral()
 		if e != nil {
 			t.Fatal(e)
 		}
-		mesh, e := mydcp.NewTransport(self, clusterID, func(k mydcp.Identity) (mydcp.Peer, bool) {
+		mesh, e := sfcp.NewTransport(self, clusterID, func(k sfcp.Identity) (sfcp.Peer, bool) {
 			peersMu.RLock()
 			defer peersMu.RUnlock()
 			p, ok := peers[k]
@@ -210,7 +213,7 @@ func runRealVolumeOwnerBoundary(t *testing.T, withBackups, automatic, withRestor
 			t.Fatal(e)
 		}
 		t.Cleanup(func() { _ = mesh.Close(); clear(self.Private) })
-		return userauth.Client{Mesh: mesh, Self: self, Cluster: clusterID, Peers: []mydcp.Peer{peerA}}
+		return userauth.Client{Mesh: mesh, Self: self, Cluster: clusterID, Peers: []sfcp.Peer{peerA}}
 	}
 	admin := user()
 	enrolled, err := admin.Enroll(ctx, peerA, control.Enrollment{Schema: 1, RequestID: "enroll", User: access.User{ID: "admin", Username: "admin", Enabled: true, SystemAdmin: true, Credentials: []access.Credential{{ID: "key", Method: access.PrivateKey, PublicKey: adminKey.Public, Enabled: true}}}}, adminKey.Private)
@@ -285,7 +288,7 @@ func runRealVolumeOwnerBoundary(t *testing.T, withBackups, automatic, withRestor
 			_ = b.Close()
 		}
 	}()
-	peerB := mydcp.Peer{ID: "node-b", Endpoint: cfgB.Node.Listen, Policy: mydcp.Policy{Key: mydcp.Identity(b.Identity.Public), Respond: true}}
+	peerB := sfcp.Peer{ID: "node-b", Endpoint: cfgB.Node.Listen, Policy: sfcp.Policy{Key: sfcp.Identity(b.Identity.Public), Respond: true}}
 	peersMu.Lock()
 	peers[peerB.Key] = peerB
 	peersMu.Unlock()
@@ -294,7 +297,7 @@ func runRealVolumeOwnerBoundary(t *testing.T, withBackups, automatic, withRestor
 		t.Fatal(err)
 	}
 	tenant, _ := catalog.Tenant("tenant")
-	change("nodes", "set-nodes", tenant.Revision, control.NodeAssignment{Tenant: "tenant", Nodes: []string{"node-b"}})
+	change("nodes", "set-nodes", tenant.Revision, control.NodeChangeTo("tenant", tenant.AllowedNodes, []string{"node-b"}))
 	scope := volumes.Scope{Cluster: clusterID, Tenant: "tenant", App: "app", ID: "data", Generation: 1}
 	spec := volumes.NativeSpec{Schema: 1, Scope: scope, Node: "node-b", NodeKey: b.Identity.Public, Materialization: "initial", UID: 10001, GID: 10001, Mode: 0750, Retain: true}
 	cleanup, err := engine.Open(ctx, "unix:///var/run/docker.sock", engine.Owner(clusterID, b.Identity.Public))
@@ -302,7 +305,7 @@ func runRealVolumeOwnerBoundary(t *testing.T, withBackups, automatic, withRestor
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = cleanup.Close() })
-	filter := client.Filters{}.Add("label", "org.mydc.owner="+cleanup.Owner)
+	filter := client.Filters{}.Add("label", "org.sfc.owner="+cleanup.Owner)
 	before, err := cleanup.API.VolumeList(ctx, client.VolumeListOptions{Filters: filter})
 	if err != nil || len(before.Items) != 0 {
 		t.Fatal("owner prestate", err)
@@ -390,17 +393,17 @@ func runRealVolumeOwnerBoundary(t *testing.T, withBackups, automatic, withRestor
 		t.Fatal(err)
 	}
 	selector := control.VolumeSelector{App: "app", ID: "data"}
-	verify := func(reply userauth.Reply, e error) {
+	verify := func(reply userauth.VolumeUsageReply, e error) {
 		t.Helper()
-		if e != nil || reply.VolumeUsage == nil || !reply.VolumeUsage.Matches(ready) || reply.VolumeUsage.LogicalBytes != uint64(len(marker)) || reply.VolumeUsageIndex == 0 {
-			t.Fatal("remote native usage", reply.VolumeUsage, e)
+		if e != nil || !reply.Usage.Matches(ready) || reply.Usage.LogicalBytes != uint64(len(marker)) || reply.Index == 0 {
+			t.Fatal("remote native usage", reply.Usage, e)
 		}
 	}
 	reply, err := reader.VolumeUsage(ctx, peerA, readerSession, "tenant", selector)
 	verify(reply, err)
-	reply, err = admin.VolumeUsage(ctx, peerB, session, "tenant", selector)
+	reply, route, err := admin.VolumeUsageRoute(ctx, peerB, session, "tenant", selector)
 	verify(reply, err)
-	if reply.RelayedBy != b.Identity.Actor() {
+	if route.RelayedBy != b.Identity.Actor() {
 		t.Fatal("original user request did not relay via worker")
 	}
 	if _, err = reader.VolumeUsage(ctx, peerA, readerSession, "other", selector); err == nil {
@@ -411,7 +414,7 @@ func runRealVolumeOwnerBoundary(t *testing.T, withBackups, automatic, withRestor
 	metadataEntered, metadataRelease := gate.arm(ready.Owner.Native)
 	defer metadataRelease()
 	type usageAnswer struct {
-		reply userauth.Reply
+		reply userauth.VolumeUsageReply
 		err   error
 	}
 	metadataAnswer := make(chan usageAnswer, 1)
@@ -435,7 +438,7 @@ func runRealVolumeOwnerBoundary(t *testing.T, withBackups, automatic, withRestor
 		t.Fatal("usage returned mixed authority views", metadata.reply.RootRevision, finalCatalogRevision)
 	}
 	nativeBody, _ := json.Marshal(ready)
-	nativePeer, known := a.Mesh.Peer(mydcp.Identity(b.Identity.Public))
+	nativePeer, known := a.Mesh.Peer(sfcp.Identity(b.Identity.Public))
 	if !known {
 		t.Fatal("current member peer missing")
 	}
@@ -538,5 +541,5 @@ func runRealVolumeOwnerBoundary(t *testing.T, withBackups, automatic, withRestor
 	if gone, e := b.nativeVolumes.Gone(ctx, nativeKey, 2, 1); e != nil || !gone {
 		t.Fatal("original native removal", e)
 	}
-	t.Log("actual control/nonvoter native-owner MYDCP and private-key user/CLI list+usage; current scope and in-flight revoke; owner impersonation denied; no local/cached fallback; original signed materialization and same DB; observe-only private-free result; original nonforce removal/owner0/host rollback")
+	t.Log("actual control/nonvoter native-owner SFCP and private-key user/CLI list+usage; current scope and in-flight revoke; owner impersonation denied; no local/cached fallback; original signed materialization and same DB; observe-only private-free result; original nonforce removal/owner0/host rollback")
 }

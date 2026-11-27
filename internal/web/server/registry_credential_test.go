@@ -13,8 +13,8 @@ func TestRegistryCredential(t *testing.T) {
 	fakeLogin(t, f, "alice")
 	path := "/api/v1/t/shop/registries/builtin/credential"
 	code, out := f.do("POST", path, map[string]any{"repository": "shop/web", "access": "push,pull"})
-	if code != 200 || out["username"] != "alice" || out["authority"] != "registry.mydc.local" || out["expiresAt"] == "" ||
-		!strings.HasPrefix(out["token"].(string), "mydc-fake-registry-login.") || len(out["access"].([]any)) != 2 {
+	if code != 200 || out["username"] != "alice" || out["authority"] != "registry.sfc.local" || out["expiresAt"] == "" ||
+		!strings.HasPrefix(out["token"].(string), "sfc-fake-registry-login.") || len(out["access"].([]any)) != 2 {
 		t.Fatalf("credential: %d %v", code, out)
 	}
 	for _, bad := range []map[string]any{{"repository": "", "access": "pull"}, {"repository": "shop/web", "access": "delete"}, {"repository": "**", "access": "pull"}} {
@@ -23,11 +23,11 @@ func TestRegistryCredential(t *testing.T) {
 		}
 	}
 	// the token is in no stored op or journal
-	if _, ops := f.do("GET", "/api/v1/ops", nil); strings.Contains(fmt.Sprint(ops), "mydc-fake-registry-login") {
+	if _, ops := f.do("GET", "/api/v1/ops", nil); strings.Contains(fmt.Sprint(ops), "sfc-fake-registry-login") {
 		t.Fatalf("token in ops: %v", ops)
 	}
 	assertNowhere(t, f, out["token"].(string)) // not in any stored op (bbolt) either
-	// stopped registry: mydcd refuses
+	// stopped registry: sfcd refuses
 	if code, out := f.do("POST", "/api/v1/t/shop/registries/builtin/stop", map[string]any{"opId": "9e12c3d4-0000-4000-8000-000000000001"}); opState(t, code, out) != "applied" {
 		t.Fatalf("stop: %d %v", code, out)
 	}

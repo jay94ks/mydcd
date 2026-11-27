@@ -7,7 +7,7 @@ import (
 	"errors"
 	"sync"
 
-	"github.com/jay94ks/mydcd/internal/imagebuild"
+	"github.com/jay94ks/seafield/internal/imagebuild"
 )
 
 // This finite session joins Secret staging, filtered SDK output and the same

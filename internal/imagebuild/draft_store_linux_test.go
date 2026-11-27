@@ -11,7 +11,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/reconcile"
 	bolt "go.etcd.io/bbolt"
 )
 
@@ -113,7 +113,7 @@ func TestDraftStoreMissingJournalAndReplacedBlobFailClosed(t *testing.T) {
 	if _, err := store.Edit(ctx, edit, bytes.NewBufferString("FROM scratch\n")); err != nil {
 		t.Fatal(err)
 	}
-	file := filepath.Join(store.scope.Root.Path, ".mydc-imagebuild", string(store.key), string(draftBlobKey(edit.File.Digest)))
+	file := filepath.Join(store.scope.Root.Path, ".sfc-imagebuild", string(store.key), string(draftBlobKey(edit.File.Digest)))
 	if err := os.Rename(file, file+"-original"); err != nil {
 		t.Fatal(err)
 	}
@@ -179,7 +179,7 @@ func TestDraftStoreAdoptsOnlyCompletedOriginalFileAndChecksScope(t *testing.T) {
 func TestDraftStoreMissingNativeDirectoryIsNotUninitializedWhenJournalExists(t *testing.T) {
 	store, spool := draftStoreFixture(t)
 	scope := store.scope
-	name := filepath.Join(scope.Root.Path, ".mydc-imagebuild", string(store.key))
+	name := filepath.Join(scope.Root.Path, ".sfc-imagebuild", string(store.key))
 	if err := store.Close(); err != nil {
 		t.Fatal(err)
 	}

@@ -9,11 +9,11 @@ import (
 	"errors"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/cluster/lifecycle"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/mydcp"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/lifecycle"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/sfcp"
 )
 
 // nodeForceProbe performs a new authenticated request even if a transport
@@ -39,9 +39,9 @@ func (r *Runtime) nodeForceProbe(ctx context.Context, view cluster.View, plan co
 	if key == r.Identity.Public {
 		probe.Responding = true
 	} else {
-		peer, approved := r.Mesh.Peer(mydcp.Identity(key))
+		peer, approved := r.Mesh.Peer(sfcp.Identity(key))
 		if !approved || peer.ID != plan.Node {
-			return probe, mydcp.ErrAdmission
+			return probe, sfcp.ErrAdmission
 		}
 		probeCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
 		reply, callErr := cluster.CallManagement(probeCtx, r.Mesh, r.Identity, r.controlPolicy.Cluster, peer, cluster.ManagementRequest{Method: "status", Input: probe.Challenge[:]})
@@ -55,7 +55,7 @@ func (r *Runtime) nodeForceProbe(ctx context.Context, view cluster.View, plan co
 			probe.Responding = true
 		}
 		if probe.Responding && reply.Node != plan.Node {
-			return probe, mydcp.ErrAdmission
+			return probe, sfcp.ErrAdmission
 		}
 	}
 	probe.FinishedAt = time.Now().Unix()

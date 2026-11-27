@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	checker "github.com/jay94ks/mydcd/internal/workload/lifecycle"
+	checker "github.com/jay94ks/seafield/internal/workload/lifecycle"
 )
 
 // Product catalog and authority projection, SIMULATED signed native closure.

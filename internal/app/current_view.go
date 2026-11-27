@@ -5,7 +5,7 @@ package app
 import (
 	"context"
 
-	"github.com/jay94ks/mydcd/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster"
 )
 
 // currentView keeps native I/O on its exact installed owner while joining the

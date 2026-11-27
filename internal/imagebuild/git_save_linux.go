@@ -11,7 +11,7 @@ import (
 	"io"
 	"os"
 
-	"github.com/jay94ks/mydcd/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/reconcile"
 	bolt "go.etcd.io/bbolt"
 	"golang.org/x/sys/unix"
 )
@@ -28,7 +28,7 @@ func (h nativeGitSave) valid() bool {
 }
 
 func gitSaveKey(plan GitSavePlan) []byte {
-	h := digestJSON("mydc-imagebuild-git-local-id-1", struct{ Tenant, ID string }{plan.Tenant, plan.ID})
+	h := digestJSON("sfc-imagebuild-git-local-id-1", struct{ Tenant, ID string }{plan.Tenant, plan.ID})
 	return []byte("git-" + hex.EncodeToString(h[:]))
 }
 func gitSaveName(plan GitSavePlan) string {

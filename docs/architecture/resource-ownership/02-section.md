@@ -12,7 +12,7 @@ DNS Current의 로컬 파생 정책 cache는 node Runtime의 임시 최적화다
 
 앱 종료 operation은 원 사용자와 tenant/app에 귀속되며 수락 Origin의 digest를 Target으로 고정한다. 관측 갱신은 종료 대상을 변경하지 않지만 새 Origin이나 이미 수락된 다른 종료를 차용할 수 없다. 원 expected/root·서명·ID와 현재 cleanup 권한을 유지하고 기존 Inventory retirement가 실제 native 종료/빌린 자원 참조 반환을 정산한다. 이 종료 CAS는 앱 수락·이관이나 관리 자원의 CAS를 대체하지 않는다.
 
-예를 들어 `php-mysql-network`라는 MYDCP TUN 망은 클러스터의 tenant 관리 자원으로 먼저 정의한다. 관리 영역이 참여 노드와 각 CIDR/pool, TUN/Bridge 및 연결 경로를 담당한다. app.yaml은 다음처럼 이름을 참조한다.
+예를 들어 `php-mysql-network`라는 SFCP TUN 망은 클러스터의 tenant 관리 자원으로 먼저 정의한다. 관리 영역이 참여 노드와 각 CIDR/pool, TUN/Bridge 및 연결 경로를 담당한다. app.yaml은 다음처럼 이름을 참조한다.
 
 ```yaml
 networks:
@@ -37,7 +37,7 @@ compiler의 sealed manifest·로컬 scratch·산출물 report는 원 내구 buil
 
 build job과 source/policy pin은 같은 lifecycle checkpoint의 원 app use/compile=true Task에 귀속한다. live build가 있으면 앱 use도 반환하지 않는다. 원 builder의 서명된 journal/미생성 확정 또는 실제 종료·제거 증거로만 job을 closed로 바꾸며 정책 철회/timeout은 반환 근거가 아니다. 공유 catalog의 원 job ID/closure 이력과 node의 실제 journal/workspace/cache 소유권은 구분하고, closed 기록으로 새 compiler를 자동 생성하지 않는다.
 
-node compiler owner는 기존 observations DB와 mydcd의 전용 state root를 사용한다. input/output은 원 job, Go cache는 tenant/image/toolchain/target별 보존 자원이다. Create/Start의 내구 전송 표식·원 native ID와 output/cache 정산을 보존하고, 취소 시 원 native 정리를 새 Start 승인·현재 source 파일/SDK 검사와 분리한다. quorum 부재라도 원 컨테이너의 종료/제거는 가능하며 shared pin은 확정 전 반환하지 않는다. collector의 확인 없이 산출물 참조를 삭제하거나 다른 tenant의 cache를 채택하지 않는다.
+node compiler owner는 기존 observations DB와 sfcd의 전용 state root를 사용한다. input/output은 원 job, Go cache는 tenant/image/toolchain/target별 보존 자원이다. Create/Start의 내구 전송 표식·원 native ID와 output/cache 정산을 보존하고, 취소 시 원 native 정리를 새 Start 승인·현재 source 파일/SDK 검사와 분리한다. quorum 부재라도 원 컨테이너의 종료/제거는 가능하며 shared pin은 확정 전 반환하지 않는다. collector의 확인 없이 산출물 참조를 삭제하거나 다른 tenant의 cache를 채택하지 않는다.
 
 compiled build provenance는 원 builder, local cache 사실은 실제 저장 node, job collection/진단은 원 node job owner의 책임이다. 수신 node는 builder 서명을 보존하며 앱은 이름/source/recipe의 사용 참조만 갖는다. binary/서명/진단은 node observations DB에 저장하고 shared Raft에는 원 job/선택/closure만 둔다. cached fact·부분 성공/종료 receipt는 실행 grant나 앱 Ready가 아니다. cache pruning·원 build 이력 회수는 실제 소비 pin과 원 참조의 정산을 먼저 확인해야 한다.
 

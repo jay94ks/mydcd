@@ -9,12 +9,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/reconcile"
-	"github.com/jay94ks/mydcd/internal/storage"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/storage"
 )
 
-// NodeShellStream is the neutral owner boundary used by CLI/MYDCP adapters.
+// NodeShellStream is the neutral owner boundary used by CLI/SFCP adapters.
 // Opening credentials and terminal dimensions come only from the accepted
 // operation. This object has no container selector or replacement arguments.
 type NodeShellStream struct {

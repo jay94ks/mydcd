@@ -9,8 +9,8 @@ import (
 	"net/netip"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/network"
-	"github.com/jay94ks/mydcd/internal/tenancy"
+	"github.com/jay94ks/seafield/internal/network"
+	"github.com/jay94ks/seafield/internal/tenancy"
 )
 
 func networkChangeFixture(t *testing.T, sameCIDR bool) (networkFixture, tenancy.Network) {
@@ -157,11 +157,11 @@ func TestNetworkChangeArchiveRetainsCIDRClosureAndRejectsLegacyDHCPPayload(t *te
 
 func TestNetworkChangeGlobalDNSReferenceBlocksSourceEvenWithoutAddresses(t *testing.T) {
 	f, _ := networkChangeFixture(t, false)
-	m, e := NewDNSManager(f.a.cluster, pub(f.key), []string{"mydc.test."}, 8, 8)
+	m, e := NewDNSManager(f.a.cluster, pub(f.key), []string{"sfc.test."}, 8, 8)
 	if e != nil {
 		t.Fatal(e)
 	}
-	cfg := DNSConfig{Tenant: "first", ID: "dns", Network: "lan", Pool: "pool", Source: 100, Serial: 1, Enabled: true, Zone: "app.mydc.test.", ClientZone: "clients.app.mydc.test.", TTL: 30, NegativeTTL: 5, QuerySeconds: 2, MaxQueries: 2, MaxCacheEntries: 2, MaxResponseBytes: 4096}
+	cfg := DNSConfig{Tenant: "first", ID: "dns", Network: "lan", Pool: "pool", Source: 100, Serial: 1, Enabled: true, Zone: "app.sfc.test.", ClientZone: "clients.app.sfc.test.", TTL: 30, NegativeTTL: 5, QuerySeconds: 2, MaxQueries: 2, MaxCacheEntries: 2, MaxResponseBytes: 4096}
 	d := publishDNS(t, dnsFixture{f: f, m: m, cfg: cfg}, cfg, 190)
 	consumer := dnsConsumer(t, d)
 	f = changeDrain(t, d.f)

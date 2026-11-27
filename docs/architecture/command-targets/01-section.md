@@ -1,6 +1,6 @@
 ## 대상 결정과 원 작업 보존
 
-U0에서 전역 `--cluster NAME --tenant NAME`은 Linux user의 로컬 이름을 실제 cluster/tenant ID로 한 번 해석한다. 생략하면 기본 링크를 사용한다. 명시 설정/기본 링크가 깨졌으면 다른 대상으로 fallback하지 않는다. 등록 시 endpoint를 생략하면 `unix:///var/run/mydc.sock`이며, 이미 선택한 프로필의 endpoint는 보존한다. Unix 파일 접근 권한은 원격 계정·tenant 권한을 대신하지 않는다.
+U0에서 전역 `--cluster NAME --tenant NAME`은 Linux user의 로컬 이름을 실제 cluster/tenant ID로 한 번 해석한다. 생략하면 기본 링크를 사용한다. 명시 설정/기본 링크가 깨졌으면 다른 대상으로 fallback하지 않는다. 등록 시 endpoint를 생략하면 `unix:///run/sfcdp.sock`이며, 이미 선택한 프로필의 endpoint는 보존한다. Unix 파일 접근 권한은 원격 계정·tenant 권한을 대신하지 않는다.
 
 현재 기존 명령의 `--tenant`와 전역 tenant 선택을 함께 주면 실제 ID가 같아야 한다. app.yaml/cluster.yaml의 tenant도 같은 규칙을 따른다. 시스템 관리자도 tenant 자원 변경에는 대상을 명시/해석하며 모든 tenant에 암묵적으로 fan-out하지 않는다. 클러스터 범위 명령에 tenant 기본값이 있다고 해서 그 범위가 축소되거나 권한이 확대되지 않는다.
 

@@ -6,10 +6,10 @@ import (
 	"crypto/ed25519"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/secrets"
-	checker "github.com/jay94ks/mydcd/internal/workload/lifecycle"
-	"github.com/jay94ks/mydcd/internal/workload/volumes"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/secrets"
+	checker "github.com/jay94ks/seafield/internal/workload/lifecycle"
+	"github.com/jay94ks/seafield/internal/workload/volumes"
 )
 
 // Real reusable Binding/Catalog codecs and cross-reference validation. This
@@ -42,7 +42,7 @@ func TestCheckerBindingCrossReferenceRejectsMissingPinsAndChangedParent(t *testi
 	}
 	owner := [32]byte(f.node.Public().(ed25519.PublicKey))
 	n := deployment.Needs{Consumer: "task-web", Generation: 1, Use: secrets.Use{Tenant: "tenant", User: "manager", App: "demo", Deployment: "deploy", Service: "web", Node: "node-a", NodeKey: owner, RequesterKey: [32]byte(f.manager.Public().(ed25519.PublicKey))}, Lifecycle: &selection}
-	result, err := bindings.Reserve(0, f.users, map[string]secrets.Tree{}, approvals, map[string]volumes.State{}, []deployment.Needs{n}, 100)
+	result, err := bindings.Reserve(0, f.users, map[string]secrets.Tree{}, approvals, map[string]volumes.State{}, []deployment.Needs{n}, 100, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

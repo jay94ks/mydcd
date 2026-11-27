@@ -9,11 +9,11 @@ func TestEndpointContract(t *testing.T) {
 		input, uri, network, address string
 		path                         bool
 	}{
-		{"", DefaultEndpoint, "unix", "/var/run/mydc.sock", false},
-		{"/tmp/mydc.sock", "unix:///tmp/mydc.sock", "unix", "/tmp/mydc.sock", true},
-		{"mydcp://CONTROL.example:7443", "mydcp://control.example:7443", "mydcp", "control.example:7443", true},
-		{"mydcp://[2001:db8::1]:7443", "mydcp://[2001:db8::1]:7443", "mydcp", "[2001:db8::1]:7443", false},
-		{"mydcp://127.0.0.1:7443", "mydcp://127.0.0.1:7443", "mydcp", "127.0.0.1:7443", false},
+		{"", DefaultEndpoint, "unix", "/run/sfcdp.sock", false},
+		{"/tmp/sfcdp.sock", "unix:///tmp/sfcdp.sock", "unix", "/tmp/sfcdp.sock", true},
+		{"sfcp://CONTROL.example:7443", "sfcp://control.example:7443", "sfcp", "control.example:7443", true},
+		{"sfcp://[2001:db8::1]:7443", "sfcp://[2001:db8::1]:7443", "sfcp", "[2001:db8::1]:7443", false},
+		{"sfcp://127.0.0.1:7443", "sfcp://127.0.0.1:7443", "sfcp", "127.0.0.1:7443", false},
 	}
 	for _, tt := range good {
 		t.Run(tt.input, func(t *testing.T) {
@@ -23,7 +23,7 @@ func TestEndpointContract(t *testing.T) {
 			}
 		})
 	}
-	for _, s := range []string{"http://host:80", "mydcp://host", "mydcp://host:0", "mydcp://host:65536", "mydcp://host:07443", "mydcp://u:p@host:7443", "mydcp://host:7443/", "mydcp://host:7443?", "mydcp://host:7443#", "mydcp://host:7443?q=x", "mydcp://host:7443/#x", "mydcp://2001:db8::1:7443", "mydcp://[fe80::1%25eth0]:7443", "mydcp://0.0.0.0:7443", "mydcp://[ff02::1]:7443", "mydcp://bad_host:7443", "mydcp://-host:7443", "mydcp://host.:7443", "unix://host/tmp/sock", "unix:relative", "unix://relative", "unix:///", "unix:///tmp/../sock", "unix:///tmp//sock", "unix:///tmp/sock?", "unix:///tmp/sock#", "unix:///tmp/%73ock", "unix:///@abstract\x00", " /tmp/sock", "/tmp/sock", "unix:///tmp\\sock"} {
+	for _, s := range []string{"http://host:80", "sfcp://host", "sfcp://host:0", "sfcp://host:65536", "sfcp://host:07443", "sfcp://u:p@host:7443", "sfcp://host:7443/", "sfcp://host:7443?", "sfcp://host:7443#", "sfcp://host:7443?q=x", "sfcp://host:7443/#x", "sfcp://2001:db8::1:7443", "sfcp://[fe80::1%25eth0]:7443", "sfcp://0.0.0.0:7443", "sfcp://[ff02::1]:7443", "sfcp://bad_host:7443", "sfcp://-host:7443", "sfcp://host.:7443", "unix://host/tmp/sock", "unix:relative", "unix://relative", "unix:///", "unix:///tmp/../sock", "unix:///tmp//sock", "unix:///tmp/sock?", "unix:///tmp/sock#", "unix:///tmp/%73ock", "unix:///@abstract\x00", " /tmp/sock", "/tmp/sock", "unix:///tmp\\sock"} {
 		t.Run(s, func(t *testing.T) {
 			if _, err := ParseEndpoint(s, false); err == nil {
 				t.Fatal("accepted invalid endpoint")

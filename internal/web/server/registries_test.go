@@ -95,7 +95,7 @@ func TestRegistries(t *testing.T) {
 		t.Fatalf("reuse deleted ID: %d %v", code, out)
 	}
 
-	bobLogin(t, f) // a reader: mydcd refuses
+	bobLogin(t, f) // a reader: sfcd refuses
 	if code, out := f.do("POST", "/api/v1/t/shop/registries/builtin/stop", map[string]any{"opId": op()}); code != 403 && opState(t, code, out) != "failed" {
 		t.Fatalf("bob: %d %v", code, out)
 	}

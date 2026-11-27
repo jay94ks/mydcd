@@ -5,7 +5,7 @@ package userauth
 import (
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/imagebuild"
+	"github.com/jay94ks/seafield/internal/imagebuild"
 )
 
 func TestDraftRequestRejectsMixedSelectorsAndMutationWithoutProof(t *testing.T) {

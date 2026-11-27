@@ -12,20 +12,21 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"slices"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/reconcile"
-	"github.com/jay94ks/mydcd/internal/schema"
-	"github.com/jay94ks/mydcd/internal/storage"
-	"github.com/jay94ks/mydcd/internal/tenancy"
-	"github.com/jay94ks/mydcd/internal/workload"
-	checker "github.com/jay94ks/mydcd/internal/workload/lifecycle"
-	"github.com/jay94ks/mydcd/internal/workload/volumes"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/storage"
+	"github.com/jay94ks/seafield/internal/tenancy"
+	"github.com/jay94ks/seafield/internal/workload"
+	checker "github.com/jay94ks/seafield/internal/workload/lifecycle"
+	"github.com/jay94ks/seafield/internal/workload/volumes"
 )
 
 func (r *Runtime) appTaskAuthority(ctx context.Context, key string, op reconcile.Operation) error {
@@ -165,6 +166,18 @@ func (r *Runtime) appObservation(app control.AppView, stage deployment.StageReco
 	return o, nil
 }
 
+// appFailureObservation reports that this owner will never create the
+// stage's container (deployment.PreparationFailure).
+func (r *Runtime) appFailureObservation(app control.AppView, stage deployment.StageRecord, code string) (deployment.Observation, error) {
+	o, err := r.appObservation(app, stage, deployment.NeverObservedNative, false)
+	if err != nil {
+		return o, err
+	}
+	o.Applied, o.Failure = false, code
+	o.Signature = ed25519.Sign(r.Identity.Private, deployment.ObservationBytes(o))
+	return o, nil
+}
+
 func (r *Runtime) freshAppObservation(stage deployment.StageRecord, native string, healthy bool) bool {
 	return r.freshAppEvidence(stage, native, true, healthy)
 }
@@ -175,7 +188,7 @@ func (r *Runtime) freshAppEvidence(stage deployment.StageRecord, native string, 
 	if o == nil || o.Expired || o.Native != native || o.Applied != applied || o.Released || o.Healthy != healthy || o.At > now {
 		return false
 	}
-	// A renewal sent over MyDCP counts as fresh; Raft keeps only the fact.
+	// A renewal sent over SFCP counts as fresh; Raft keeps only the fact.
 	return r.renewalFresh(*o, now)
 }
 
@@ -617,6 +630,16 @@ func (r *Runtime) reconcileAppWorkloads(ctx context.Context, v cluster.View, app
 					return false, authErr
 				}
 				spec, err = e.ResolveTask(ctx, taskID, material, catalog, r.docker, true, auth)
+				if code := deployment.PreparationFailure(err); code != "" && stage.Observation == nil {
+					// Retrying cannot change a fixed goal on a digest-pinned
+					// image; end the deployment instead of reading its source again.
+					o, oerr := r.appFailureObservation(app, stage, code)
+					if oerr != nil {
+						return false, oerr
+					}
+					log.Printf("app task %s cannot start: %v", step.Key, err)
+					return true, r.appProgress(ctx, v, app, "observe", step.Key, &o)
+				}
 				if err != nil {
 					return false, err
 				}

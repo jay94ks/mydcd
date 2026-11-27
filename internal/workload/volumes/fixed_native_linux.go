@@ -14,11 +14,11 @@ import (
 	"sync"
 
 	cerrdefs "github.com/containerd/errdefs"
-	"github.com/jay94ks/mydcd/internal/engine"
-	"github.com/jay94ks/mydcd/internal/nodestorage"
-	"github.com/jay94ks/mydcd/internal/reconcile"
-	"github.com/jay94ks/mydcd/internal/schema"
-	"github.com/jay94ks/mydcd/internal/storage"
+	"github.com/jay94ks/seafield/internal/engine"
+	"github.com/jay94ks/seafield/internal/nodestorage"
+	"github.com/jay94ks/seafield/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/storage"
 	"github.com/moby/moby/api/types/mount"
 	"github.com/moby/moby/client"
 )
@@ -252,7 +252,7 @@ func (m *FixedManager) checkIdle(ctx context.Context, spec NativeSpec) error {
 			return err
 		}
 		for _, binding := range got.Container.Mounts {
-			if binding.Type == mount.TypeBind && filepath.Clean(binding.Source) == m.projector.sourcePath(spec) {
+			if binding.Type == mount.TypeVolume && binding.Name == FixedNativeName(spec.Scope) || binding.Type == mount.TypeBind && filepath.Clean(binding.Source) == m.projector.sourcePath(spec) {
 				return reconcile.ErrLease
 			}
 		}
@@ -647,4 +647,41 @@ func (m *FixedManager) InspectBindSource(ctx context.Context, l NativeLease) (st
 		return "", nil, err
 	}
 	return path, h, nil
+}
+
+// ServedSource opens the original directory of an applied fixed volume for a
+// remote consumer that this home serves over SFCP VolumeFS. It takes no local
+// pin: the remote consumer holds the Volume in Raft, and delete and move wait
+// for it there. The caller keeps the handle for as long as it serves.
+func (m *FixedManager) ServedSource(ctx context.Context, ready NativeReady) (*nodestorage.DirectoryHandle, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	key := NativeKey(ready.Spec)
+	if !fixedNativeKey(key) {
+		return nil, ErrNativeVolume
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	row, err := m.journal.Read(key)
+	if err != nil || row.State.Pending != nil || !row.State.Applied.Present {
+		return nil, errors.Join(ErrNativeVolume, err)
+	}
+	c, err := m.original(key, row)
+	if err != nil || c.Ready.Owner != ready.Owner || c.Ready.Spec.Scope != ready.Spec.Scope || c.Ready.Generation != ready.Generation {
+		return nil, errors.Join(ErrNativeVolume, err)
+	}
+	pin, ok, err := m.roots.RecordedPin(c.Ready.Fixed.Selection().Root.Root, key)
+	if err != nil || !ok || pin.Lease != c.RootLease {
+		return nil, errors.Join(ErrNativeVolume, err)
+	}
+	h, err := nodestorage.OpenDirectory(m.projector.sourcePath(c.Ready.Spec))
+	if err != nil {
+		return nil, err
+	}
+	if !h.Identity().SameData(c.Ready.Fixed.Directory) {
+		_ = h.Close()
+		return nil, ErrNativeVolume
+	}
+	return h, nil
 }

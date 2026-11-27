@@ -5,7 +5,7 @@ package app
 import (
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/containerops"
+	"github.com/jay94ks/seafield/internal/containerops"
 )
 
 func (r *Runtime) addContainerEventHistory(result *containerops.Result, q containerops.Query) error {
@@ -13,7 +13,7 @@ func (r *Runtime) addContainerEventHistory(result *containerops.Result, q contai
 		return nil
 	}
 	r.mu.RLock()
-	collectFailed := r.eventError != nil || r.dockerEventError != nil
+	collectFailed := r.eventError != nil
 	r.mu.RUnlock()
 	if r.events == nil {
 		result.Detail.HistoryIncomplete = true

@@ -1,9 +1,9 @@
 # app.yaml lifecycle 선언 예시(schema=1). 실제 이미지·관리 policy/source와 담당 node의 runner/builder 준비가 필요하다.
 # 관리 named script ready-file revision1·관리 망 php-mysql-network를 먼저 등록한다.
 # builder spawn 위치/이미지·resolver/cache 정책은 별도 tenant 관리 입력이다.
-# 이미지는 PHP·/healthz endpoint를 제공하고 앱이 /run/mydc/ready marker를 생성해야 한다.
+# 이미지는 PHP·/healthz endpoint를 제공하고 앱이 /run/sfc/ready marker를 생성해야 한다.
 name: php-lifecycle-demo
-x-mydc:
+x-sfc:
   lifecycle:
     optimizer:
       compile: true
@@ -16,7 +16,7 @@ x-mydc:
 
           import (
             "context"
-            lifecycle "github.com/jay94ks/mydcd/lifecycle/v1"
+            lifecycle "github.com/jay94ks/seafield/lifecycle/v1"
           )
 
           func Check(ctx context.Context, in lifecycle.Request, probe lifecycle.Probe) (lifecycle.Result, error) {
@@ -66,7 +66,7 @@ services:
     networks:
       app:
         ipv4_address: 10.240.10.40
-    x-mydc:
+    x-sfc:
       node: node-a
       lifecycle:
         checks:
@@ -76,7 +76,7 @@ services:
           - id: http-alive
             phase: liveness
             script: php-endpoint
-            # 명시 결과별 정책. 실제 컨테이너 제어는 MyDC/Docker SDK가 수행한다.
+            # 명시 결과별 정책. 실제 컨테이너 제어는 Seafield Cluster/Docker SDK가 수행한다.
             actions: {on_alive: keep, on_dead: restart}
             interval: 5s
             timeout: 3s
@@ -86,7 +86,7 @@ services:
             phase: startup
             script: ready-marker
             parameters:
-              path: /run/mydc/ready
+              path: /run/sfc/ready
             interval: 2s
             timeout: 1s
             retries: 15

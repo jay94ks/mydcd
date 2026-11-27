@@ -8,10 +8,10 @@ import (
 	"encoding/json"
 	"errors"
 
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/network/services"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/network/services"
+	"github.com/jay94ks/seafield/internal/sfcp"
 )
 
 // Cleanup uses local committed ORIGINAL references, not a new admission
@@ -30,7 +30,7 @@ func (r *Runtime) routeCleanupWork(ctx context.Context, reference [32]byte) (clu
 	}
 	projection, err = r.controlPolicy.ProjectResources(view.State)
 	if err != nil || projection.NetworkAuthority == nil {
-		return view, projection, work, errors.Join(err, mydcp.ErrAdmission)
+		return view, projection, work, errors.Join(err, sfcp.ErrAdmission)
 	}
 	return view, projection, work, nil
 }
@@ -68,7 +68,7 @@ func (r *Runtime) closeLocalRouteFlow(ctx context.Context, ref services.Referenc
 // when a candidate had identical bytes and saveRouteCore needed no new write.
 func (r *Runtime) storedClosingRouteClaim(ref services.ReferenceConsumer, flow services.RouteFlow) (services.RouteFlowReceipt, error) {
 	if r.Identity == nil || r.Identity.Public != ref.Local.Owner {
-		return services.RouteFlowReceipt{}, mydcp.ErrAdmission
+		return services.RouteFlowReceipt{}, sfcp.ErrAdmission
 	}
 	record, found, err := r.loadRouteOwner(ref)
 	if err != nil || !found || !record.NativeStarted || record.BridgeReturned || record.NeverDispatched {
@@ -89,7 +89,7 @@ func (r *Runtime) storedClosingRouteClaim(ref services.ReferenceConsumer, flow s
 
 func (r *Runtime) storedPeerRouteFlowClose(ref services.ReferenceConsumer, a services.Authority, claim services.RouteFlowReceipt, tuple services.RouteTuple) (services.RoutePeerFlowClose, error) {
 	if r.Identity == nil || r.Identity.Public != ref.Local.Owner {
-		return services.RoutePeerFlowClose{}, mydcp.ErrAdmission
+		return services.RoutePeerFlowClose{}, sfcp.ErrAdmission
 	}
 	record, found, err := r.loadRouteOwner(ref)
 	if err != nil || !found {
@@ -116,11 +116,11 @@ func (r *Runtime) closePeerRouteFlow(ctx context.Context, caller [32]byte, reque
 		return nil, err
 	}
 	if request.Close == nil || request.Tuple == nil {
-		return nil, mydcp.ErrAdmission
+		return nil, sfcp.ErrAdmission
 	}
 	members, err := r.controlPolicy.Members(view.State)
 	if err != nil || !members.MemberKey(caller) || !members.OwnsResource(caller, request.Close.Reference.Owner) {
-		return nil, mydcp.ErrAdmission
+		return nil, sfcp.ErrAdmission
 	}
 	record, found, err := r.loadRouteOwner(work.Reference)
 	if err != nil || !found {
@@ -217,7 +217,7 @@ func (r *Runtime) collectActiveRouteFlows(ctx context.Context, view cluster.View
 			peer, known := projection.NetworkAuthority.ReferenceConsumer(claim.Peer.Consumer)
 			if !known || peer.Generation != claim.Peer.Generation || peer.Lifetime != claim.Peer.Lifetime || peer.Local.Owner != claim.Peer.Owner {
 				r.routeMu.Unlock()
-				return mydcp.ErrAdmission
+				return sfcp.ErrAdmission
 			}
 			tasks = append(tasks, routeFlowCloseTask{ref.ID, peer, flow, claim})
 		}
@@ -248,7 +248,7 @@ func (r *Runtime) collectActiveRouteFlows(ctx context.Context, view cluster.View
 
 func (r *Runtime) finishActiveRouteFlow(ctx context.Context, task routeFlowCloseTask, reply routeFlowReply) error {
 	if reply.Closed == nil {
-		return mydcp.ErrAdmission
+		return sfcp.ErrAdmission
 	}
 	r.routeMu.Lock()
 	defer r.routeMu.Unlock()

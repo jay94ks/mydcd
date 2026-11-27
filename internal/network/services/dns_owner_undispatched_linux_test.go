@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/network"
-	"github.com/jay94ks/mydcd/internal/workload"
+	"github.com/jay94ks/seafield/internal/network"
+	"github.com/jay94ks/seafield/internal/workload"
 )
 
 // E4 final adapter bundle. Actual protected owner/Network/workload DBs, no
@@ -37,7 +37,7 @@ func TestDNSOwnerUndispatchedRetirementKeepsOriginalJournalAndLifetime(t *testin
 	}
 	defer w.Close()
 	policy := DNSOwnerPolicy{Catalog: d.f.c, Networks: d.f.n, Authority: d.f.a, Actor: "admin", Config: d.cfg, Bridge: "network/original-unstarted-bridge", BridgeGeneration: local.NetworkGeneration, MaxConnections: 4, RequestTimeout: time.Second}
-	options := DNSOwnerOptions{Cluster: d.f.a.cluster, Key: d.f.key, Network: n, Workload: w, Roots: []string{"mydc.test."}, MaxViews: 8, MaxQueries: 8, MaxConnections: 4, IdleTimeout: time.Second,
+	options := DNSOwnerOptions{Cluster: d.f.a.cluster, Key: d.f.key, Network: n, Workload: w, Roots: []string{"sfc.test."}, MaxViews: 8, MaxQueries: 8, MaxConnections: 4, IdleTimeout: time.Second,
 		Current: func(context.Context, string, string) (DNSOwnerPolicy, error) { return policy, nil },
 		Permit: func(context.Context, DNSOwnerPolicy) error {
 			t.Error("retirement requested a new native permit")

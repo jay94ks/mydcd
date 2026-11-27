@@ -18,15 +18,15 @@ import (
 	"time"
 
 	cerrdefs "github.com/containerd/errdefs"
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/engine"
-	"github.com/jay94ks/mydcd/internal/schema"
-	checker "github.com/jay94ks/mydcd/internal/workload/lifecycle"
-	contract "github.com/jay94ks/mydcd/lifecycle/v1"
-	"github.com/jay94ks/mydcd/tests/registryfixture"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/engine"
+	"github.com/jay94ks/seafield/internal/schema"
+	checker "github.com/jay94ks/seafield/internal/workload/lifecycle"
+	contract "github.com/jay94ks/seafield/lifecycle/v1"
+	"github.com/jay94ks/seafield/tests/registryfixture"
 	"github.com/moby/moby/client"
 	"gopkg.in/yaml.v3"
 )
@@ -38,7 +38,7 @@ func TestL1ManagedAppInterpretedCheckersCLIAndRestart(t *testing.T) {
 func TestL1ManagedAppCompiledAndInterpretedCheckersCLIAndRestart(t *testing.T) {
 	// Image preparation is explicit at L1's final validation, never hidden
 	// downloads/builds in a native test or ordinary daemon startup.
-	if os.Getenv("MYDC_LIFECYCLE_COMPILER_IMAGE") == "" && os.Getenv("MYDC_LIFECYCLE_COMPILER_CACHE") == "" {
+	if os.Getenv("SFC_LIFECYCLE_COMPILER_IMAGE") == "" && os.Getenv("SFC_LIFECYCLE_COMPILER_CACHE") == "" {
 		t.Skip("requires explicitly prepared pinned local compiler image")
 	}
 	runManagedAppOwner(t, true, true, true, true, managedAppCompiledChecker, true, false, false)
@@ -47,7 +47,7 @@ func TestL1ManagedAppCompiledAndInterpretedCheckersCLIAndRestart(t *testing.T) {
 const managedCheckerEndpointSource = `package checker
 import (
  "context"
- lifecycle "github.com/jay94ks/mydcd/lifecycle/v1"
+ lifecycle "github.com/jay94ks/seafield/lifecycle/v1"
 )
 func Check(ctx context.Context,in lifecycle.Request,probe lifecycle.Probe)(lifecycle.Result,error){
  r,err:=probe.Healthz(ctx,lifecycle.HTTPProbe{Service:"web",Port:8080,Path:"/readyz",Method:"GET",ExpectedStatus:[]int{200},MaxBytes:4096})
@@ -59,10 +59,10 @@ func Check(ctx context.Context,in lifecycle.Request,probe lifecycle.Probe)(lifec
 
 func prepareManagedCompilerImage(t *testing.T, ctx context.Context, builder *Runtime, public map[string]any, save func()) string {
 	t.Helper()
-	if ref := os.Getenv("MYDC_LIFECYCLE_COMPILER_IMAGE"); ref != "" {
+	if ref := os.Getenv("SFC_LIFECYCLE_COMPILER_IMAGE"); ref != "" {
 		return ref // explicitly pre-provisioned image remains outside fixture cleanup
 	}
-	cache := os.Getenv("MYDC_LIFECYCLE_COMPILER_CACHE")
+	cache := os.Getenv("SFC_LIFECYCLE_COMPILER_CACHE")
 	prepared := registryfixture.OpenCompilerCached(t, "127.0.0.1:0", cache)
 	ref := prepared.References["lifecycle-compiler"]
 	if _, err := builder.docker.Image(ctx, ref, false); !cerrdefs.IsNotFound(err) {
@@ -110,7 +110,7 @@ func prepareManagedCheckerApp(t *testing.T, ctx context.Context, r *Runtime, roo
 	if err != nil {
 		t.Fatal(err)
 	}
-	policy := checker.TenantPolicy{Tenant: "tenant", Enabled: true, Execution: checker.ExecutionPolicy{MaxConcurrent: 1, TimeoutMS: 5000, NanoCPU: 100000000, MemoryBytes: 64 << 20, MaxPIDs: 32, OutputBytes: 4096, ProbeBytes: 4096, Capabilities: []string{"connect", "dependency", "exec", "file", "healthz"}}, Resolver: checker.ResolverPolicy{AllowPackages: []string{"context", "github.com/jay94ks/mydcd/lifecycle/v1"}, SourceCacheBytes: 1 << 20}}
+	policy := checker.TenantPolicy{Tenant: "tenant", Enabled: true, Execution: checker.ExecutionPolicy{MaxConcurrent: 1, TimeoutMS: 5000, NanoCPU: 100000000, MemoryBytes: 64 << 20, MaxPIDs: 32, OutputBytes: 4096, ProbeBytes: 4096, Capabilities: []string{"connect", "dependency", "exec", "file", "healthz"}}, Resolver: checker.ResolverPolicy{AllowPackages: []string{"context", "github.com/jay94ks/seafield/lifecycle/v1"}, SourceCacheBytes: 1 << 20}}
 	if compiled {
 		image, err := access.PinImage(compilerImage)
 		if err != nil {
@@ -134,8 +134,7 @@ func prepareManagedCheckerApp(t *testing.T, ctx context.Context, r *Runtime, roo
 		if !slices.ContainsFunc(rules, func(rule access.TrustRule) bool {
 			return rule.Registry == image.Registry && rule.Repository == image.Repository
 		}) {
-			rules = append(rules, access.TrustRule{Registry: image.Registry, Repository: image.Repository})
-			change("checker-compiler-trust", "set-trust", tenant.Revision, control.TrustAssignment{Tenant: "tenant", Rules: rules})
+			change("checker-compiler-trust", "set-trust", tenant.Revision, control.TrustChange{Tenant: "tenant", Add: []access.TrustRule{{Registry: image.Registry, Repository: image.Repository}}})
 		}
 		policy.Build = checker.BuildPolicy{Nodes: []string{builder.installation.record.Root.Self.ID}, Image: image.Reference, Toolchain: runtime.Version(), Targets: []string{runtime.GOOS + "/" + runtime.GOARCH}, MaxJobs: 1, NanoCPU: 1000000000, MemoryBytes: 512 << 20, WorkspaceBytes: 512 << 20, ArtifactBytes: 64 << 20, TimeoutMS: 180000}
 		policy.CompiledCacheBytes = 128 << 20
@@ -145,7 +144,7 @@ func prepareManagedCheckerApp(t *testing.T, ctx context.Context, r *Runtime, roo
 	fileSource := fmt.Sprintf(`package checker
 import (
  "context"
- lifecycle "github.com/jay94ks/mydcd/lifecycle/v1"
+ lifecycle "github.com/jay94ks/seafield/lifecycle/v1"
 )
 func Check(ctx context.Context,in lifecycle.Request,probe lifecycle.Probe)(lifecycle.Result,error){
  r,err:=probe.File(ctx,lifecycle.FileProbe{Service:"web",Path:"/data/marker",Kind:"regular",ContentDigest:"%x",MaxBytes:4096})
@@ -158,13 +157,13 @@ func Check(ctx context.Context,in lifecycle.Request,probe lifecycle.Probe)(lifec
 		t.Fatal(err)
 	}
 	interpreted := false
-	input.MyDC.Lifecycle = &deployment.LifecycleDeclaration{Scripts: map[string]checker.Script{
+	input.Sfc.Lifecycle = &deployment.LifecycleDeclaration{Scripts: map[string]checker.Script{
 		"endpoint": {Source: managedCheckerEndpointSource, Compile: &compiled, Modules: []checker.ModulePin{}},
 		"marker":   {Ref: &checker.NamedReference{Name: "native-file", Revision: 1}, Compile: &interpreted},
 	}, Checks: []deployment.LifecycleCheck{{ID: "app-ready", Phase: contract.Readiness, Interval: "1s", Timeout: "3s", LifecycleTemplate: deployment.LifecycleTemplate{Builtin: "depends_on", Parameters: deployment.LifecycleParameters(`{"services":["web"],"condition":"service_healthy"}`)}}}}
 	retries := uint32(1)
 	service := input.Services["web"]
-	service.MyDC.Lifecycle = &deployment.ServiceLifecycle{Checks: []deployment.LifecycleCheck{
+	service.Sfc.Lifecycle = &deployment.ServiceLifecycle{Checks: []deployment.LifecycleCheck{
 		{ID: "marker", Phase: contract.Readiness, Interval: "1s", Timeout: "3s", LifecycleTemplate: deployment.LifecycleTemplate{Script: "marker"}},
 		{ID: "alive", Phase: contract.Liveness, Interval: "1s", Timeout: "3s", Retries: &retries, LifecycleTemplate: deployment.LifecycleTemplate{Script: "endpoint"}, Actions: &checker.ActionPolicy{OnDead: checker.RestartContainer}},
 		{ID: "shutdown", Phase: contract.Shutdown, Interval: "1s", Timeout: "3s", LifecycleTemplate: deployment.LifecycleTemplate{Script: "marker"}},
@@ -210,8 +209,8 @@ func prepareManagedCheckerCLI(t *testing.T, root string, document []byte, call f
 	}
 	sort.Strings(ordered)
 	for _, name := range ordered {
-		call(0, "lifecycle", "script", "put", name, "--tenant", input.MyDC.Tenant, "--file", filepath.Join(root, "checker-"+name+".go"), "--expected-revision", "0", "--request-id", "native-"+name)
-		call(0, "lifecycle", "script", "show", name, "--tenant", input.MyDC.Tenant, "--revision", fmt.Sprint(names[name]))
+		call(0, "lifecycle", "script", "put", name, "--tenant", input.Sfc.Tenant, "--file", filepath.Join(root, "checker-"+name+".go"), "--expected-revision", "0", "--request-id", "native-"+name)
+		call(0, "lifecycle", "script", "show", name, "--tenant", input.Sfc.Tenant, "--revision", fmt.Sprint(names[name]))
 	}
 }
 

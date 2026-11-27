@@ -9,7 +9,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/web/mydc"
+	"github.com/jay94ks/seafield/internal/web/sfc"
 )
 
 func TestWebhookIncidentDecideAndNotify(t *testing.T) {
@@ -17,7 +17,7 @@ func TestWebhookIncidentDecideAndNotify(t *testing.T) {
 	hs := newHookServer(t, f)
 	ctx := context.Background()
 	fakeLogin(t, f, "admin")
-	makeAutomation(t, f, "mydc-autofix", "a1b2c3d4-0000-4000-8000-0000000000a1", true, true)
+	makeAutomation(t, f, "sfc-autofix", "a1b2c3d4-0000-4000-8000-0000000000a1", true, true)
 	if code, out := f.do("PUT", "/api/v1/incidents/policy", map[string]any{"revision": 0, "level": "auto-low", "ratePerHour": 5,
 		"approvers": map[string]any{"label": "관리자", "deadlineMinutes": 30}, "quiet": []string{}, "newAppDefault": "suggest"}); code != 200 {
 		t.Fatalf("policy: %d %v", code, out)
@@ -51,7 +51,7 @@ func TestWebhookIncidentDecideAndNotify(t *testing.T) {
 	hs.mu.Lock()
 	hs.answer = `{"action":"scale-app","reason":"더 늘려요"}`
 	hs.mu.Unlock()
-	fake.AddEvent(mydc.FixtureEvent{Time: clock.Load(), Scope: "cluster", Node: "node-c", Kind: "node-unreachable", Target: "node-c"})
+	fake.AddEvent(sfc.FixtureEvent{Time: clock.Load(), Scope: "cluster", Node: "node-c", Kind: "node-unreachable", Target: "node-c"})
 	f.srv.watchOnce(ctx)
 	f.srv.hooks.wg.Wait()
 	row := findIncident(t, f, "node-unreachable")
@@ -63,7 +63,7 @@ func TestWebhookIncidentDecideAndNotify(t *testing.T) {
 	var events []string
 	hs.mu.Lock()
 	for _, r := range hs.got {
-		events = append(events, r.URL.Path+":"+r.Header.Get("X-MyDC-Event"))
+		events = append(events, r.URL.Path+":"+r.Header.Get("X-SFC-Event"))
 	}
 	hs.mu.Unlock()
 	if s := strings.Join(events, ","); !strings.Contains(s, "/judge:incident.decide") || !strings.Contains(s, "/ops:incident.opened") {
@@ -74,7 +74,7 @@ func TestWebhookIncidentDecideAndNotify(t *testing.T) {
 	hs.mu.Lock()
 	hs.answer = `{"action":"none","reason":"사람이 볼게요"}`
 	hs.mu.Unlock()
-	fake.AddEvent(mydc.FixtureEvent{Time: clock.Load(), Scope: "node", Node: "node-b", Kind: "node-resource-low", Target: "node-b:/srv/mydc-ssd"})
+	fake.AddEvent(sfc.FixtureEvent{Time: clock.Load(), Scope: "node", Node: "node-b", Kind: "node-resource-low", Target: "node-b:/srv/sfc-ssd"})
 	clock.Add(1)
 	f.srv.watchOnce(ctx)
 	f.srv.hooks.wg.Wait()
@@ -92,16 +92,16 @@ func TestWebhookCDChecks(t *testing.T) {
 	f, fake, _ := incidentFixture(t)
 	ctx := context.Background()
 	var mu sync.Mutex
-	calls := map[string][]mydc.ServiceCallRequest{}
+	calls := map[string][]sfc.ServiceCallRequest{}
 	answers := map[string]string{"/pre": `{"decision":"pass","reason":"검사 통과"}`, "/post": `{"result":"fail","reason":"오류율 9%"}`, "/chat": `ok`}
-	fake.SetServiceResponder("shop", "php-shop", "web", func(q mydc.ServiceCallRequest) mydc.ServiceResponse {
+	fake.SetServiceResponder("shop", "php-shop", "web", func(q sfc.ServiceCallRequest) sfc.ServiceResponse {
 		mu.Lock()
 		defer mu.Unlock()
 		calls[q.Path] = append(calls[q.Path], q)
-		return mydc.ServiceResponse{Status: 200, ContentType: "application/json", Body: []byte(answers[q.Path])}
+		return sfc.ServiceResponse{Status: 200, ContentType: "application/json", Body: []byte(answers[q.Path])}
 	})
 	fakeLogin(t, f, "admin")
-	makeAutomation(t, f, "mydc-autofix", "a1b2c3d4-0000-4000-8000-0000000000a2", true, true)
+	makeAutomation(t, f, "sfc-autofix", "a1b2c3d4-0000-4000-8000-0000000000a2", true, true)
 	// Incident response stays off: CD links alone keep the watcher reading.
 	fakeLogin(t, f, "alice")
 	for _, h := range []map[string]any{
@@ -124,7 +124,7 @@ func TestWebhookCDChecks(t *testing.T) {
 		}
 	}
 	_, ls := f.do("GET", "/api/v1/webhook-links?point=cd&app=php-shop", nil)
-	if !strings.Contains(fmt.Sprint(ls), "account:mydc-autofix scope:ApproveCD shop/php-shop state:ok") {
+	if !strings.Contains(fmt.Sprint(ls), "account:sfc-autofix scope:ApproveCD shop/php-shop state:ok") {
 		t.Fatalf("approver: %v", ls)
 	}
 
@@ -141,7 +141,7 @@ func TestWebhookCDChecks(t *testing.T) {
 	}
 	approved := false
 	for _, e := range fake.Journal() {
-		if e.User == "u-mydc-autofix" && e.Action == mydc.ActionApproveAppCD {
+		if e.User == "u-sfc-autofix" && e.Action == sfc.ActionApproveAppCD {
 			approved = true
 		}
 	}
@@ -163,7 +163,7 @@ func TestWebhookCDChecks(t *testing.T) {
 	}
 	paused := false
 	for _, e := range fake.Journal() {
-		if e.User == "u-mydc-autofix" && e.Action == mydc.ActionPauseAppCD {
+		if e.User == "u-sfc-autofix" && e.Action == sfc.ActionPauseAppCD {
 			paused = true
 		}
 	}
@@ -189,7 +189,7 @@ func TestWebhookCDChecks(t *testing.T) {
 	defer mu.Unlock()
 	var notes []string
 	for _, q := range calls["/chat"] {
-		notes = append(notes, q.Headers["X-MyDC-Event"])
+		notes = append(notes, q.Headers["X-SFC-Event"])
 	}
 	if s := strings.Join(notes, ","); !strings.Contains(s, "cd.approved") || !strings.Contains(s, "cd.paused") {
 		t.Fatalf("notices: %s", s)
@@ -203,15 +203,15 @@ func TestWebhookCDOldEvents(t *testing.T) {
 	ctx := context.Background()
 	var mu sync.Mutex
 	pre := 0
-	fake.SetServiceResponder("shop", "php-shop", "web", func(q mydc.ServiceCallRequest) mydc.ServiceResponse {
+	fake.SetServiceResponder("shop", "php-shop", "web", func(q sfc.ServiceCallRequest) sfc.ServiceResponse {
 		mu.Lock()
 		defer mu.Unlock()
 		pre++
-		return mydc.ServiceResponse{Status: 200, ContentType: "application/json", Body: []byte(`{"decision":"pass"}`)}
+		return sfc.ServiceResponse{Status: 200, ContentType: "application/json", Body: []byte(`{"decision":"pass"}`)}
 	})
 	calls := func() int { mu.Lock(); defer mu.Unlock(); return pre }
 	fakeLogin(t, f, "admin")
-	makeAutomation(t, f, "mydc-autofix", "a1b2c3d4-0000-4000-8000-0000000000a3", true, true)
+	makeAutomation(t, f, "sfc-autofix", "a1b2c3d4-0000-4000-8000-0000000000a3", true, true)
 	fakeLogin(t, f, "alice")
 	if code, out := f.do("POST", "/api/v1/webhooks", map[string]any{"name": "pre", "tenant": "shop", "kind": "internal",
 		"target": map[string]any{"app": "php-shop", "service": "web", "port": 8080, "path": "/pre"}, "role": "decide"}); code != 201 {
@@ -225,7 +225,7 @@ func TestWebhookCDOldEvents(t *testing.T) {
 	approvals := func() int {
 		n := 0
 		for _, e := range fake.Journal() {
-			if e.Action == mydc.ActionApproveAppCD {
+			if e.Action == sfc.ActionApproveAppCD {
 				n++
 			}
 		}
@@ -243,11 +243,11 @@ func TestWebhookCDOldEvents(t *testing.T) {
 	id := cd["cd"].(map[string]any)["candidateDigest"].(string)
 
 	// Older than the recent window, though about the waiting candidate.
-	fake.AddEvent(mydc.FixtureEvent{Time: clock.Load() - 3600, Scope: "app", Tenant: "shop", App: "php-shop", Kind: mydc.EventCDApprovalRequired,
-		CD: &mydc.CDEvent{CandidateID: id, Commit: "c0ffee1"}})
+	fake.AddEvent(sfc.FixtureEvent{Time: clock.Load() - 3600, Scope: "app", Tenant: "shop", App: "php-shop", Kind: sfc.EventCDApprovalRequired,
+		CD: &sfc.CDEvent{CandidateID: id, Commit: "c0ffee1"}})
 	// New, but about a candidate that is not the waiting one.
-	fake.AddEvent(mydc.FixtureEvent{Time: clock.Load(), Scope: "app", Tenant: "shop", App: "php-shop", Kind: mydc.EventCDApprovalRequired,
-		CD: &mydc.CDEvent{CandidateID: strings.Repeat("ab", 32), Commit: "dead000"}})
+	fake.AddEvent(sfc.FixtureEvent{Time: clock.Load(), Scope: "app", Tenant: "shop", App: "php-shop", Kind: sfc.EventCDApprovalRequired,
+		CD: &sfc.CDEvent{CandidateID: strings.Repeat("ab", 32), Commit: "dead000"}})
 	f.srv.watchOnce(ctx)
 	f.srv.hooks.wg.Wait()
 	if calls() != 0 || approvals() != 0 {
@@ -257,13 +257,13 @@ func TestWebhookCDOldEvents(t *testing.T) {
 	// The automation account is no approver: the webhook is not called.
 	approver := func(method string) {
 		t.Helper()
-		if code, out := f.do(method, "/api/v1/t/shop/apps/php-shop/cd/approvers", map[string]any{"opId": newOpID(), "userId": "u-mydc-autofix"}); opState(t, code, out) != "applied" {
+		if code, out := f.do(method, "/api/v1/t/shop/apps/php-shop/cd/approvers", map[string]any{"opId": newOpID(), "userId": "u-sfc-autofix"}); opState(t, code, out) != "applied" {
 			t.Fatalf("%s approver: %d %v", method, code, out)
 		}
 	}
 	approver("DELETE")
-	fake.AddEvent(mydc.FixtureEvent{Time: clock.Load(), Scope: "app", Tenant: "shop", App: "php-shop", Kind: mydc.EventCDApprovalRequired,
-		CD: &mydc.CDEvent{CandidateID: id, Commit: "c0ffee1"}})
+	fake.AddEvent(sfc.FixtureEvent{Time: clock.Load(), Scope: "app", Tenant: "shop", App: "php-shop", Kind: sfc.EventCDApprovalRequired,
+		CD: &sfc.CDEvent{CandidateID: id, Commit: "c0ffee1"}})
 	f.srv.watchOnce(ctx)
 	f.srv.hooks.wg.Wait()
 	_, cd = f.do("GET", "/api/v1/t/shop/apps/php-shop/cd", nil)
@@ -273,8 +273,8 @@ func TestWebhookCDOldEvents(t *testing.T) {
 	approver("POST")
 
 	// A new event about the waiting candidate is checked and approved.
-	fake.AddEvent(mydc.FixtureEvent{Time: clock.Load(), Scope: "app", Tenant: "shop", App: "php-shop", Kind: mydc.EventCDApprovalRequired,
-		CD: &mydc.CDEvent{CandidateID: id, Commit: "c0ffee1"}})
+	fake.AddEvent(sfc.FixtureEvent{Time: clock.Load(), Scope: "app", Tenant: "shop", App: "php-shop", Kind: sfc.EventCDApprovalRequired,
+		CD: &sfc.CDEvent{CandidateID: id, Commit: "c0ffee1"}})
 	f.srv.watchOnce(ctx)
 	f.srv.hooks.wg.Wait()
 	if calls() != 1 || approvals() != 1 {

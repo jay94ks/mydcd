@@ -55,7 +55,7 @@ func (s Selection) Equal(other Selection) bool {
 
 func (u Use) Digest() [32]byte {
 	raw, _ := json.Marshal(u)
-	return sha256.Sum256(append([]byte("mydc-checker-use-1\x00"), raw...))
+	return sha256.Sum256(append([]byte("sfc-checker-use-1\x00"), raw...))
 }
 
 func (u Use) Selection() Selection {

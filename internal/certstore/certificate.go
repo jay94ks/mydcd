@@ -114,7 +114,7 @@ type Certificate struct {
 func CertificateBytes(v Certificate) []byte {
 	v.Signature = nil
 	raw, _ := json.Marshal(v)
-	return append([]byte("mydc-certificate-2\x00"), raw...)
+	return append([]byte("sfc-certificate-2\x00"), raw...)
 }
 func (v Certificate) Digest() [32]byte { return sha256.Sum256(CertificateBytes(v)) }
 
@@ -261,7 +261,7 @@ func (v Certificate) Validate() error {
 
 // keyAAD binds the ciphertext to its cluster and certificate.
 func keyAAD(cluster [32]byte, id ID) []byte {
-	return append(append([]byte("mydc-certificate-key-1\x00"), cluster[:]...), id[:]...)
+	return append(append([]byte("sfc-certificate-key-1\x00"), cluster[:]...), id[:]...)
 }
 func keyAEAD(key []byte) (cipher.AEAD, error) {
 	block, err := aes.NewCipher(key)

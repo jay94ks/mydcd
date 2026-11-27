@@ -14,16 +14,16 @@ import (
 
 	"golang.org/x/net/websocket"
 
-	"github.com/jay94ks/mydcd/internal/web/mydc"
-	"github.com/jay94ks/mydcd/internal/web/store"
+	"github.com/jay94ks/seafield/internal/web/sfc"
+	"github.com/jay94ks/seafield/internal/web/store"
 )
 
-// Server SSH shell. mydcd checks the user's right
+// Server SSH shell. sfcd checks the user's right
 // (system administrator or NodeShell on the server) and the policy, then
-// opens a PTY as the server's dedicated MyDC account. The web relays the
+// opens a PTY as the server's dedicated Seafield Cluster account. The web relays the
 // PTY to the browser and never stores keys or screen content; its op
 // record holds only the signed open request (server, size). Settings,
-// grants and the forced close are ordinary signed actions; mydcd judges
+// grants and the forced close are ordinary signed actions; sfcd judges
 // every one of them.
 
 type nodeShellNodeView struct {
@@ -50,7 +50,7 @@ type nodeShellPolicyView struct {
 	Revision    uint64               `json:"revision"`
 }
 
-func nodeShellPolicyOf(p mydc.NodeShellPolicy) nodeShellPolicyView {
+func nodeShellPolicyOf(p sfc.NodeShellPolicy) nodeShellPolicyView {
 	v := nodeShellPolicyView{Enabled: p.Enabled, MaxSessions: p.MaxSessions, IdleSeconds: p.IdleSeconds, Account: p.Account, Revision: p.Revision,
 		Nodes: []nodeShellNodeView{}, Grants: []nodeShellGrantView{}}
 	for _, n := range p.Nodes {
@@ -85,7 +85,7 @@ type nodeShellSessionView struct {
 	End          *nodeShellEndView `json:"end,omitempty"`
 }
 
-// unixTime: mydcd's Unix seconds as RFC 3339, "" for 0 (not yet).
+// unixTime: sfcd's Unix seconds as RFC 3339, "" for 0 (not yet).
 func unixTime(sec int64) string {
 	if sec == 0 {
 		return ""
@@ -93,7 +93,7 @@ func unixTime(sec int64) string {
 	return rfc3339(time.Unix(sec, 0))
 }
 
-func nodeShellEndOf(e mydc.NodeShellEnd) *nodeShellEndView {
+func nodeShellEndOf(e sfc.NodeShellEnd) *nodeShellEndView {
 	v := &nodeShellEndView{Code: e.Code, Reason: e.Reason}
 	if by := e.ClosedBy; by != nil {
 		v.ClosedBy = map[string]string{"user": by.User, "username": by.Username}
@@ -101,7 +101,7 @@ func nodeShellEndOf(e mydc.NodeShellEnd) *nodeShellEndView {
 	return v
 }
 
-func nodeShellSessionOf(s mydc.NodeShellSession) nodeShellSessionView {
+func nodeShellSessionOf(s sfc.NodeShellSession) nodeShellSessionView {
 	v := nodeShellSessionView{SessionID: s.SessionID, User: s.User, Username: s.Username, Node: s.Node, Account: s.Account, Sudo: s.Sudo,
 		State: s.State, CreatedAt: unixTime(s.CreatedAt), OpenedAt: unixTime(s.OpenedAt), LastActivity: unixTime(s.LastActivity),
 		ClosedAt: unixTime(s.ClosedAt), BytesIn: s.BytesIn, BytesOut: s.BytesOut}
@@ -115,7 +115,7 @@ func nodeShellSessionOf(s mydc.NodeShellSession) nodeShellSessionView {
 // shell, sudo, enabled, ready, notReady?}], grants:[{user, nodes}], revision}.
 // A non-admin with NodeShell sees the granted servers and their own grant.
 func (s *Server) handleNodeShellPolicy(w http.ResponseWriter, r *http.Request, ws *webSession) {
-	read(s, w, r, ws, func(ctx context.Context, c mydc.Conn) (nodeShellPolicyView, error) {
+	read(s, w, r, ws, func(ctx context.Context, c sfc.Conn) (nodeShellPolicyView, error) {
 		p, err := c.NodeShellPolicy(ctx)
 		return nodeShellPolicyOf(p), err
 	})
@@ -135,12 +135,12 @@ func (s *Server) handleNodeShellPolicyPut(w http.ResponseWriter, r *http.Request
 	if !readJSON(w, r, &req) {
 		return
 	}
-	s.sharedCreate(w, r, ws, req.OpID, req, func(ctx context.Context, c mydc.Conn, _ mydc.Session) (string, any, uint64, string, error) {
+	s.sharedCreate(w, r, ws, req.OpID, req, func(ctx context.Context, c sfc.Conn, _ sfc.Session) (string, any, uint64, string, error) {
 		p, err := c.NodeShellPolicy(ctx)
 		if err != nil {
 			return "", nil, 0, "", err
 		}
-		q := mydc.SetNodeShellPolicy{Enabled: p.Enabled, MaxSessions: p.MaxSessions, IdleSeconds: p.IdleSeconds}
+		q := sfc.SetNodeShellPolicy{Enabled: p.Enabled, MaxSessions: p.MaxSessions, IdleSeconds: p.IdleSeconds}
 		if req.Enabled != nil {
 			q.Enabled = *req.Enabled
 		}
@@ -153,12 +153,12 @@ func (s *Server) handleNodeShellPolicyPut(w http.ResponseWriter, r *http.Request
 		if q.MaxSessions < 1 || q.MaxSessions > 16 || q.IdleSeconds < 60 || q.IdleSeconds > 86400 {
 			return "", nil, 0, "", invalid("maxSessions 1–16, idleSeconds 60–86400")
 		}
-		return mydc.ActionSetNodeShellPolicy, q, expectedOr(req.Expected, p.Revision), "node-shell", nil
+		return sfc.ActionSetNodeShellPolicy, q, expectedOr(req.Expected, p.Revision), "node-shell", nil
 	})
 }
 
 // PUT /node-shell/nodes/{node} {opId, shell(inherit/on/off), sudo,
-// expected?} → set-node-shell-node. mydcd applies sudo to the account.
+// expected?} → set-node-shell-node. sfcd applies sudo to the account.
 func (s *Server) handleNodeShellNodePut(w http.ResponseWriter, r *http.Request, ws *webSession) {
 	var req struct {
 		OpID     string `json:"opId"`
@@ -170,9 +170,9 @@ func (s *Server) handleNodeShellNodePut(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 	node := r.PathValue("node")
-	s.sharedCreate(w, r, ws, req.OpID, req, func(ctx context.Context, c mydc.Conn, _ mydc.Session) (string, any, uint64, string, error) {
+	s.sharedCreate(w, r, ws, req.OpID, req, func(ctx context.Context, c sfc.Conn, _ sfc.Session) (string, any, uint64, string, error) {
 		switch req.Shell {
-		case mydc.NodeShellInherit, mydc.NodeShellOn, mydc.NodeShellOff:
+		case sfc.NodeShellInherit, sfc.NodeShellOn, sfc.NodeShellOff:
 		default:
 			return "", nil, 0, "", invalid("shell: inherit, on or off")
 		}
@@ -180,7 +180,7 @@ func (s *Server) handleNodeShellNodePut(w http.ResponseWriter, r *http.Request, 
 		if err != nil {
 			return "", nil, 0, "", err
 		}
-		return mydc.ActionSetNodeShellNode, mydc.SetNodeShellNode{Node: node, Shell: req.Shell, Sudo: req.Sudo}, expectedOr(req.Expected, p.Revision), "node-shell/" + node, nil
+		return sfc.ActionSetNodeShellNode, sfc.SetNodeShellNode{Node: node, Shell: req.Shell, Sudo: req.Sudo}, expectedOr(req.Expected, p.Revision), "node-shell/" + node, nil
 	})
 }
 
@@ -196,32 +196,32 @@ func (s *Server) handleNodeShellGrantPut(w http.ResponseWriter, r *http.Request,
 		return
 	}
 	user := r.PathValue("user")
-	s.sharedCreate(w, r, ws, req.OpID, req, func(ctx context.Context, c mydc.Conn, _ mydc.Session) (string, any, uint64, string, error) {
+	s.sharedCreate(w, r, ws, req.OpID, req, func(ctx context.Context, c sfc.Conn, _ sfc.Session) (string, any, uint64, string, error) {
 		p, err := c.NodeShellPolicy(ctx)
 		if err != nil {
 			return "", nil, 0, "", err
 		}
 		nodes := append([]string{}, req.Nodes...)
-		return mydc.ActionSetNodeShellGrant, mydc.SetNodeShellGrant{User: user, Nodes: nodes}, expectedOr(req.Expected, p.Revision), "node-shell/grant/" + user, nil
+		return sfc.ActionSetNodeShellGrant, sfc.SetNodeShellGrant{User: user, Nodes: nodes}, expectedOr(req.Expected, p.Revision), "node-shell/grant/" + user, nil
 	})
 }
 
 // GET /node-shell/sessions?after=&active=&state=&node= → {items, next,
-// total}: mydcd's page of 8 by sessionId (system administrator: all;
+// total}: sfcd's page of 8 by sessionId (system administrator: all;
 // others: their own). active=1 is state=open (queued, opened, closing);
 // state=closed the kept closed ones; node narrows to one server. Total and
 // next follow the filter.
 func (s *Server) handleNodeShellSessions(w http.ResponseWriter, r *http.Request, ws *webSession) {
 	qs := r.URL.Query()
-	q := mydc.NodeShellSessionsQuery{After: qs.Get("after"), State: qs.Get("state"), Node: qs.Get("node")}
+	q := sfc.NodeShellSessionsQuery{After: qs.Get("after"), State: qs.Get("state"), Node: qs.Get("node")}
 	if qs.Get("active") == "1" {
-		q.State = mydc.NodeShellStateOpen
+		q.State = sfc.NodeShellStateOpen
 	}
-	if len(q.After) > 256 || q.State != "" && q.State != mydc.NodeShellStateOpen && q.State != mydc.NodeShellClosed || q.Node != "" && !safeParamRE.MatchString(q.Node) {
+	if len(q.After) > 256 || q.State != "" && q.State != sfc.NodeShellStateOpen && q.State != sfc.NodeShellClosed || q.Node != "" && !safeParamRE.MatchString(q.Node) {
 		writeError(w, http.StatusBadRequest, "bad-request", "after: a session id; state: open or closed; node: a name")
 		return
 	}
-	read(s, w, r, ws, func(ctx context.Context, c mydc.Conn) (map[string]any, error) {
+	read(s, w, r, ws, func(ctx context.Context, c sfc.Conn) (map[string]any, error) {
 		p, err := c.QueryNodeShellSessions(ctx, q)
 		if err != nil {
 			return nil, err
@@ -244,8 +244,8 @@ func (s *Server) handleNodeShellClose(w http.ResponseWriter, r *http.Request, ws
 		return
 	}
 	id := r.PathValue("id")
-	s.sharedCreate(w, r, ws, req.OpID, req, func(ctx context.Context, c mydc.Conn, _ mydc.Session) (string, any, uint64, string, error) {
-		return mydc.ActionCloseNodeShell, mydc.CloseNodeShell{SessionID: id}, 0, "node-shell/session/" + id, nil
+	s.sharedCreate(w, r, ws, req.OpID, req, func(ctx context.Context, c sfc.Conn, _ sfc.Session) (string, any, uint64, string, error) {
+		return sfc.ActionCloseNodeShell, sfc.CloseNodeShell{SessionID: id}, 0, "node-shell/session/" + id, nil
 	})
 }
 
@@ -259,12 +259,12 @@ type shellMsg struct {
 
 // nodeShellStream adapts a NodeShell to the session's held streams (a
 // logout or session end closes it).
-type nodeShellStream struct{ mydc.NodeShell }
+type nodeShellStream struct{ sfc.NodeShell }
 
 // GET /nodes/{node}/shell?opId=&cols=&rows= (WebSocket): open-node-shell.
 // The signed request is stored first (op "open-node-shell", no content),
 // then opened. One opId opens one shell: a used opId is 409 shell-used.
-// Refusals before the socket opens are HTTP errors with mydcd's code
+// Refusals before the socket opens are HTTP errors with sfcd's code
 // (403 forbidden, 409 node-shell-disabled / node-shell-not-ready / limit,
 // 503 node-unreachable).
 //
@@ -299,35 +299,35 @@ func (s *Server) handleNodeShellOpen(w http.ResponseWriter, r *http.Request, ws 
 		s.refuseShell(w, r, ws, &httpErr{http.StatusInternalServerError, "internal", err.Error()})
 		return
 	}
-	payload := mydc.OpenNodeShell{Node: node, Cols: cols, Rows: rows}
-	digestReq := opRequest{Action: mydc.ActionOpenNodeShell, Payload: mustJSON(map[string]any{"node": node})}
+	payload := sfc.OpenNodeShell{Node: node, Cols: cols, Rows: rows}
+	digestReq := opRequest{Action: sfc.ActionOpenNodeShell, Payload: mustJSON(map[string]any{"node": node})}
 	dg := digestReq.digest()
 
 	ctx, cancel := s.callCtx(r)
-	var sh mydc.NodeShell
-	err := ws.do(ctx, func(ctx context.Context, c mydc.Conn) error {
+	var sh sfc.NodeShell
+	err := ws.do(ctx, func(ctx context.Context, c sfc.Conn) error {
 		who, err := c.Whoami(ctx)
 		if err != nil {
 			return err
 		}
 		raw, _ := json.Marshal(payload)
-		ch := mydc.Change{Schema: 1, Action: mydc.ActionOpenNodeShell, Principal: ws.user.ID, Expected: 0, Payload: raw}
-		op, err := c.PrepareRequest(ctx, "shell-"+opID, ch, who.RootFor(mydc.ActionOpenNodeShell))
+		ch := sfc.Change{Schema: 1, Action: sfc.ActionOpenNodeShell, Principal: ws.user.ID, Expected: 0, Payload: raw}
+		op, err := c.PrepareRequest(ctx, "shell-"+opID, ch, who.RootFor(sfc.ActionOpenNodeShell))
 		if err != nil {
 			return err
 		}
 		now := s.now()
-		o := &store.Op{ID: opID, User: ws.user.ID, Username: ws.user.Username, RequestID: "shell-" + opID, Action: mydc.ActionOpenNodeShell,
+		o := &store.Op{ID: opID, User: ws.user.ID, Username: ws.user.Username, RequestID: "shell-" + opID, Action: sfc.ActionOpenNodeShell,
 			Target: "node/" + node, Digest: dg, Signed: op, State: store.OpRunning, SubmittedAt: now, UpdatedAt: now}
 		if existing, err := s.opt.Store.CreateOp(o); err != nil {
 			return err
 		} else if existing != nil {
 			return &httpErr{http.StatusConflict, "shell-used", "this opId already opened a shell; use a new opId"}
 		}
-		// mydcd accepts the open first (a queued session counted in the
+		// sfcd accepts the open first (a queued session counted in the
 		// limits), then the same original opens the PTY.
 		res, serr := c.Submit(ctx, op)
-		if serr != nil || res.Code != mydc.ResultApplied {
+		if serr != nil || res.Code != sfc.ResultApplied {
 			settleSubmit(o, res, serr, s.now())
 			code := ""
 			if serr == nil {
@@ -340,7 +340,7 @@ func (s *Server) handleNodeShellOpen(w http.ResponseWriter, r *http.Request, ws 
 			if serr != nil {
 				return serr
 			}
-			return &httpErr{statusOf(code), code, "mydcd refused the shell: " + code}
+			return &httpErr{statusOf(code), code, "sfcd refused the shell: " + code}
 		}
 		sh, err = c.OpenNodeShell(ctx, op)
 		if err != nil {
@@ -374,15 +374,15 @@ func (s *Server) handleNodeShellOpen(w http.ResponseWriter, r *http.Request, ws 
 }
 
 // shellRefusal: the web error code of a refused open-node-shell submit
-// (the mydcd rejection reason, forbidden, conflict for a stale CAS).
-func shellRefusal(res mydc.Result) string {
-	if c := mydc.ResultErrorCode(res.Code); c != "" {
+// (the sfcd rejection reason, forbidden, conflict for a stale CAS).
+func shellRefusal(res sfc.Result) string {
+	if c := sfc.ResultErrorCode(res.Code); c != "" {
 		return c
 	}
 	switch res.Code {
-	case mydc.ResultForbidden:
-		return string(mydc.CodeForbidden)
-	case mydc.ResultConditionFailed:
+	case sfc.ResultForbidden:
+		return string(sfc.CodeForbidden)
+	case sfc.ResultConditionFailed:
 		return "conflict"
 	}
 	if res.Reason != "" && safeParamRE.MatchString(res.Reason) {
@@ -411,7 +411,7 @@ func (s *Server) refuseShell(w http.ResponseWriter, r *http.Request, ws *webSess
 	wsrv.ServeHTTP(w, r)
 }
 
-func (s *Server) pumpShell(ctx context.Context, conn *websocket.Conn, sh mydc.NodeShell, opID string, ws *webSession) {
+func (s *Server) pumpShell(ctx context.Context, conn *websocket.Conn, sh sfc.NodeShell, opID string, ws *webSession) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	_ = websocket.JSON.Send(conn, map[string]any{"type": "session", "session": nodeShellSessionOf(sh.Session())})
@@ -467,7 +467,7 @@ func (s *Server) pumpShell(ctx context.Context, conn *websocket.Conn, sh mydc.No
 }
 
 // finishShellOp settles the open-node-shell op: applied with the exit code
-// and reason, or failed with mydcd's code.
+// and reason, or failed with sfcd's code.
 func (s *Server) finishShellOp(ws *webSession, opID, reason string, code int, err error) {
 	o, gerr := s.opt.Store.GetOp(ws.user.ID, opID)
 	if gerr != nil || o.State != store.OpRunning {

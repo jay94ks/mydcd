@@ -9,9 +9,9 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/network"
-	"github.com/jay94ks/mydcd/internal/tenancy"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/network"
+	"github.com/jay94ks/seafield/internal/tenancy"
 	"github.com/miekg/dns"
 )
 
@@ -39,7 +39,9 @@ type DNSConfig struct {
 	Members                                       []string
 	Names                                         []DNSName
 	Leases                                        []DNSLeaseName
-	Upstreams                                     []netip.AddrPort
+	// Records are hand records (DNSRecord), sorted, at no name in Names.
+	Records   []DNSRecord `json:",omitempty"`
+	Upstreams []netip.AddrPort
 }
 type dnsRecord struct {
 	Name                           string
@@ -63,6 +65,7 @@ func ownDNSConfig(c DNSConfig) DNSConfig {
 	c.Members = slices.Clone(c.Members)
 	c.Names = slices.Clone(c.Names)
 	c.Leases = slices.Clone(c.Leases)
+	c.Records = slices.Clone(c.Records)
 	c.Upstreams = slices.Clone(c.Upstreams)
 	return c
 }
@@ -74,7 +77,7 @@ func ownProjection(p dnsProjection) dnsProjection {
 }
 func projectionHash(p dnsProjection) [32]byte {
 	raw, _ := json.Marshal(p)
-	return sha256.Sum256(append([]byte("mydc-dns-view-1\x00"), raw...))
+	return sha256.Sum256(append([]byte("sfc-dns-view-1\x00"), raw...))
 }
 func dnsKey(tenant, id string) string { return tenant + "/" + id }
 func reverseZone(prefix netip.Prefix) (string, error) {
@@ -115,7 +118,7 @@ func memberPool(p dnsProjection, pool string) (Source, bool) {
 	return Source{}, false
 }
 func validDNSConfig(input DNSConfig) bool {
-	if len(input.Leases) != 0 || !id(input.Tenant) || !id(input.ID) || !id(input.Network) || !id(input.Pool) || input.Source == 0 || input.TTL < 1 || input.TTL > 3600 || input.NegativeTTL < 1 || input.NegativeTTL > input.TTL || input.QuerySeconds < 1 || input.QuerySeconds > 61 || input.MaxQueries < 1 || input.MaxQueries > 4096 || input.MaxCacheEntries < 0 || input.MaxCacheEntries > 4096 || input.MaxResponseBytes < 512 || input.MaxResponseBytes > 65535 || len(input.Names)+len(input.Leases) > maxRecords || len(input.Members) > 16 || len(input.Upstreams) > 4 {
+	if len(input.Leases) != 0 || !id(input.Tenant) || !id(input.ID) || !id(input.Network) || !id(input.Pool) || input.Source == 0 || input.TTL < 1 || input.TTL > 3600 || input.NegativeTTL < 1 || input.NegativeTTL > input.TTL || input.QuerySeconds < 1 || input.QuerySeconds > 61 || input.MaxQueries < 1 || input.MaxQueries > 4096 || input.MaxCacheEntries < 0 || input.MaxCacheEntries > 4096 || input.MaxResponseBytes < 512 || input.MaxResponseBytes > 65535 || len(input.Names)+len(input.Leases) > maxRecords || len(input.Members) > 16 || len(input.Upstreams) > 4 || len(input.Records) > MaxDNSRecords {
 		return false
 	}
 	for _, v := range input.Names {
@@ -237,6 +240,13 @@ func buildDNSView(c access.Catalog, n tenancy.Networks, a Authority, actor strin
 		}
 		seen[key] = true
 		p.Records = append(p.Records, dnsRecord{Name: name, Address: alloc.Address, Allocation: alloc})
+	}
+	recordNames := make([]string, 0, len(p.Records))
+	for _, r := range p.Records {
+		recordNames = append(recordNames, r.Name)
+	}
+	if !validConfigRecords(p.Config, recordNames) {
+		return dnsProjection{}, ErrProtocol
 	}
 	if input.Reverse {
 		p.ReverseZone, err = reverseZone(local.Prefix)

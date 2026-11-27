@@ -10,11 +10,11 @@ import (
 	"slices"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/imagecache"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/schema"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/imagecache"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/sfcp"
 )
 
 func (r *Runtime) imageCachePermit(ctx context.Context, read control.ImageCacheRead) (control.ImageCachePermit, error) {
@@ -28,7 +28,7 @@ func (r *Runtime) imageCachePermit(ctx context.Context, read control.ImageCacheR
 	}
 	permit, err := schema.Decode[control.ImageCachePermit](reply.Data)
 	if err != nil || reply.Local || reply.RaftIndex == 0 || permit.Owner != r.Identity.Public || permit.Node != r.Engine().ObservedNodeID() || permit.Index < read.Index || permit.Epoch == 0 || len(permit.References) != len(read.Images) {
-		return permit, mydcp.ErrAdmission
+		return permit, sfcp.ErrAdmission
 	}
 	if _, err = r.Engine().ReadAtLeast(ctx, permit.Index); err != nil {
 		return permit, err
@@ -40,10 +40,10 @@ func (r *Runtime) nativeImageCachePlan(ctx context.Context, read control.ImageCa
 	defer r.imageUseMu.Unlock()
 	var out imagecache.Plan
 	if len(r.Identity.Certificate.Certificate) == 0 {
-		return out, mydcp.ErrAdmission
+		return out, sfcp.ErrAdmission
 	}
 	if read.Owner != r.Identity.Public || read.Query.Node != r.Engine().ObservedNodeID() || len(read.Images) != 0 || !read.Query.Valid(true) {
-		return out, mydcp.ErrAdmission
+		return out, sfcp.ErrAdmission
 	}
 	if _, err := r.imageCachePermit(ctx, read); err != nil {
 		return out, err
@@ -51,7 +51,7 @@ func (r *Runtime) nativeImageCachePlan(ctx context.Context, read control.ImageCa
 	r.life.RLock()
 	defer r.life.RUnlock()
 	if r.closed || r.docker == nil {
-		return out, mydcp.ErrAdmission
+		return out, sfcp.ErrAdmission
 	}
 	rows, next, err := r.docker.CacheCandidates(ctx, read.Query.Images, read.Query.After)
 	if err != nil {
@@ -85,9 +85,9 @@ func (r *Runtime) imageCachePlan(ctx context.Context, read control.ImageCacheRea
 	if read.Owner == r.Identity.Public {
 		return r.nativeImageCachePlan(ctx, read)
 	}
-	peer, ok := r.Mesh.Peer(mydcp.Identity(read.Owner))
+	peer, ok := r.Mesh.Peer(sfcp.Identity(read.Owner))
 	if !ok || !peer.Member || peer.ID != read.Query.Node {
-		return imagecache.Plan{}, mydcp.ErrAdmission
+		return imagecache.Plan{}, sfcp.ErrAdmission
 	}
 	raw, err := json.Marshal(read)
 	if err != nil {

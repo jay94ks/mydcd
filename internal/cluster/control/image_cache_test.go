@@ -3,13 +3,14 @@
 package control
 
 import (
+	"bytes"
 	"crypto/ed25519"
 	"encoding/json"
 	"strings"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/imagecache"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/imagecache"
 )
 
 func signedCachePlanCore(t *testing.T, f *backupCoreFixture, alias string) imagecache.Plan {
@@ -110,15 +111,8 @@ func TestCacheProtectsAcceptedTaskBeforeContainerExistsAndCurrentCredentialRevoc
 	g := newBackupCore(t)
 	unused := signedCachePlanCore(t, g, "docker.io/library/unused:latest")
 	managedDNSChange(t, g, "cache-revoke-original", "prune-node-images", 0, imagecache.Change{Operation: "cache-revoked", Plan: unused}, state.Applied)
-	users, err := g.p.Catalog(g.s)
-	if err != nil {
-		t.Fatal(err)
-	}
-	u, _ := users.User("admin")
-	u.Credentials[0].Operations = []string{"cordon-node"}
-	revision := u.Revision
-	u.Revision = 0
-	g.apply("cache-revoke-key", "put-user", revision, u, state.Applied)
+	restricted := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{164}, ed25519.SeedSize))
+	g.replaceOwnKey("key", "restricted", [32]byte(restricted.Public().(ed25519.PublicKey)), []string{"cordon-node"})
 	work, err := g.p.ImageCacheWork(g.s, unused.Owner, ImageCacheWorkRequest{Operation: "cache-revoked"})
 	if err != nil || work.Allowed {
 		t.Fatal("revoked credential authorized deletion", err)

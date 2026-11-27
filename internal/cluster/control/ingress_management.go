@@ -10,10 +10,11 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/desired"
-	"github.com/jay94ks/mydcd/internal/ingress"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/desired"
+	"github.com/jay94ks/seafield/internal/ingress"
 )
 
 const IngressManagementKey = "control/ingress-management"
@@ -49,6 +50,7 @@ type IngressManagement struct {
 	Revision            uint64
 	Blocks              []IngressBlockRecord
 	HostPolicies        []IngressHostPolicyRecord `json:",omitempty"`
+	ClusterAppRoutes    []ClusterAppRouteRecord   `json:",omitempty"`
 }
 
 func (p Policy) IngressManagement(s state.State) (IngressManagement, error) {
@@ -57,7 +59,7 @@ func (p Policy) IngressManagement(s state.State) (IngressManagement, error) {
 	if err != nil || raw == nil {
 		return out, err
 	}
-	if canonical(raw, &out) != nil || out.Schema != 1 || out.Cluster != p.Cluster || out.Revision != revision || len(out.Blocks) > 4096 || !validateIngressOperations(out) {
+	if canonical(raw, &out) != nil || out.Schema != 1 || out.Cluster != p.Cluster || out.Revision != revision || len(out.Blocks) > 4096 || !validateIngressOperations(out) || !validClusterAppRouteRecords(out) {
 		return out, ErrCatalog
 	}
 	seen := map[string]bool{}
@@ -146,6 +148,9 @@ func (p Policy) ingressBlockAuthorized(s state.State, c access.Catalog, op UserO
 	}
 	if c.OperationAllowed(op.Session, op.Change.Action) != nil {
 		return access.ErrDenied
+	}
+	if clusterAppRouteAction(op.Change.Action) {
+		return p.authorizeClusterAppRoute(c, op)
 	}
 	if op.Change.Action == "set-ingress-host-policy" {
 		var q IngressHostPolicyChange
@@ -313,12 +318,17 @@ func (p Policy) reduceIngressManagement(s state.State, cmd state.Command) (map[s
 	before := book
 	before.Blocks = slices.Clone(book.Blocks)
 	before.HostPolicies = slices.Clone(book.HostPolicies)
+	before.ClusterAppRoutes = slices.Clone(book.ClusterAppRoutes)
 	if extendedIngressAction(op.Change.Action) {
 		history, code := p.reduceIngressOperation(s, &book, op)
 		if code != state.Applied {
 			return nil, code
 		}
 		book.History = append(slices.Clone(book.History), history)
+	} else if clusterAppRouteAction(op.Change.Action) {
+		if code := p.reduceClusterAppRoute(s, &book, op); code != state.Applied {
+			return nil, code
+		}
 	} else if op.Change.Action == "set-ingress-host-policy" {
 		var q IngressHostPolicyChange
 		if canonical(op.Change.Payload, &q) != nil {
@@ -399,7 +409,12 @@ func (p Policy) reduceIngressManagement(s state.State, cmd state.Command) (map[s
 	}
 	if !extendedIngressAction(op.Change.Action) {
 		h := IngressHistoryRecord{Order: book.Revision + 1, Origin: op, Detail: slices.Clone(op.Change.Payload)}
-		if op.Change.Action == "set-ingress-host-policy" {
+		if clusterAppRouteAction(op.Change.Action) {
+			h.App = deployment.ClusterAppPrefix + clusterAppRouteApp(op)
+			if old, found := before.ClusterAppRoute(clusterAppRouteApp(op)); found {
+				h.Previous, _ = json.Marshal(old.Ingress)
+			}
+		} else if op.Change.Action == "set-ingress-host-policy" {
 			var q IngressHostPolicyChange
 			_ = json.Unmarshal(op.Change.Payload, &q)
 			h.Tenant = q.Tenant
@@ -453,7 +468,7 @@ type IngressQuery struct {
 }
 
 func (q IngressQuery) Valid() bool {
-	return (q.Part == "" || q.Part == "mappings" || q.Part == "metrics" || q.Part == "errors" || q.Part == "blocks" || q.Part == "policies" || q.Part == "gateways" || q.Part == "history") && validIngressGatewayCheck(q) && q.Offset <= 4096 && len(q.After) <= 512 && (q.Node == "" || validID(q.Node)) && (q.Tenant == "" || validID(q.Tenant)) && (q.App == "" || validID(q.App)) && len(q.Key) <= 512
+	return (q.Part == "" || q.Part == "mappings" || q.Part == "metrics" || q.Part == "errors" || q.Part == "blocks" || q.Part == "policies" || q.Part == "gateways" || q.Part == "history" || q.Part == "cluster-app-routes") && validIngressGatewayCheck(q) && q.Offset <= 4096 && len(q.After) <= 512 && (q.Node == "" || validID(q.Node)) && (q.Tenant == "" || validID(q.Tenant)) && (q.App == "" || validID(q.App)) && len(q.Key) <= 512
 }
 
 type IngressBlockView struct {
@@ -514,6 +529,7 @@ type IngressPage struct {
 	System                     bool                    `json:"-"`
 	SummaryRefs                []IngressSummaryRef     `json:"-"`
 	HostPolicies               []IngressHostPolicyView `json:",omitempty"`
+	ClusterAppRoutes           []ClusterAppRouteView   `json:",omitempty"`
 	Schema                     uint8
 	Index, Epoch, RootRevision uint64
 	BlockRevision              uint64 // committed policy book target; compare with owner Runtime.BlockRevision
@@ -602,6 +618,13 @@ func (p Policy) IngressPage(s state.State, session access.Session, at int64, q I
 		}
 		out.History, out.Next, err = book.historyPage(q, ingressHistoryBasis(c.Revision(), session, q), visible)
 		return out, err
+	}
+	if q.Part == "cluster-app-routes" {
+		if !system || q.Node != "" || q.Tenant != "" || q.App != "" {
+			return out, access.ErrDenied
+		}
+		out.ClusterAppRoutes = book.clusterAppRouteViews()
+		return out, nil
 	}
 	if q.Part == "gateways" {
 		if !system || q.Node == "" || q.Tenant != "" || q.App != "" {
@@ -830,3 +853,6 @@ func ingressBlockTargetMissing(b ingress.Block, projection ResourceProjection) b
 	}
 	return true
 }
+
+// ingressManagementBook is the IngressManagementKey book (books.go).
+var ingressManagementBook = Book{Key: IngressManagementKey, Reduce: Policy.reduceIngressManagement}

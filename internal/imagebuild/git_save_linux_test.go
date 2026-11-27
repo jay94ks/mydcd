@@ -14,7 +14,7 @@ import (
 
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing/object"
-	"github.com/jay94ks/mydcd/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/reconcile"
 )
 
 func gitSaveFixture(t *testing.T) (*Spool, *git.Repository, GitSavePlan) {
@@ -49,7 +49,7 @@ func TestGitSaveKeepsCheckedCommitDespiteRefMovementAndUsesOneOriginalArchive(t 
 	if _, err = work.Add("source"); err != nil {
 		t.Fatal(err)
 	}
-	if hash, err := work.Commit("moved ref", &git.CommitOptions{Author: &object.Signature{Name: "fixture", Email: "fixture@mydc.test", When: time.Unix(2, 0)}}); err != nil || hash.String() == plan.Commit {
+	if hash, err := work.Commit("moved ref", &git.CommitOptions{Author: &object.Signature{Name: "fixture", Email: "fixture@sfc.test", When: time.Unix(2, 0)}}); err != nil || hash.String() == plan.Commit {
 		t.Fatal("fixture ref did not move", err)
 	}
 	scope, err := spool.PrepareGit(ctx, plan, func(w io.Writer) (Tree, error) {
@@ -152,7 +152,7 @@ func TestGitSaveRetainsPartialOriginalWithoutRegeneratingOrTruncating(t *testing
 	if _, err := spool.PrepareGit(ctx, plan, func(io.Writer) (Tree, error) { t.Fatal("partial original regenerated"); return Tree{}, nil }); !errors.Is(err, reconcile.ErrPending) {
 		t.Fatal("partial source not preserved", err)
 	}
-	name := filepath.Join(plan.Root.Path, ".mydc-imagebuild", gitSaveName(plan))
+	name := filepath.Join(plan.Root.Path, ".sfc-imagebuild", gitSaveName(plan))
 	if raw, err := os.ReadFile(name); err != nil || string(raw) != "partial original" {
 		t.Fatal("partial source truncated/replaced", err)
 	}
@@ -169,9 +169,9 @@ func TestGitSaveRefusesForeignDestinationOrReplacedOriginalInode(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			name := filepath.Join(plan.Root.Path, ".mydc-imagebuild", gitSaveName(plan))
+			name := filepath.Join(plan.Root.Path, ".sfc-imagebuild", gitSaveName(plan))
 			if target {
-				name = filepath.Join(plan.Root.Path, ".mydc-imagebuild", scopeName(scope)+".zip")
+				name = filepath.Join(plan.Root.Path, ".sfc-imagebuild", scopeName(scope)+".zip")
 			} else {
 				if err := os.Rename(name, name+"-original"); err != nil {
 					t.Fatal(err)

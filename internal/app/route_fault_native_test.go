@@ -11,11 +11,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/network"
-	"github.com/jay94ks/mydcd/internal/network/services"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/network"
+	"github.com/jay94ks/seafield/internal/network/services"
+	"github.com/jay94ks/seafield/internal/sfcp"
 )
 
 // Construct an IPv4 UDP reply for an actual, durably admitted Book tuple.
@@ -124,7 +124,7 @@ func testManagedRouteFaults(t *testing.T, ctx context.Context, a *Runtime, root,
 		t.Fatal("new exact peer pin missing", err)
 	}
 	// A delayed legitimate OLD admission claim cannot attach to a new flow
-	// with the same tuple. The original authenticated MYDCP endpoint decides.
+	// with the same tuple. The original authenticated SFCP endpoint decides.
 	if _, err := a.callRouteFlow(ctx, peer, routeFlowRequest{Schema: 1, Reference: peer.ID, Tuple: &tuple, Receipt: &claim, Native: &localNative.Native}); err == nil {
 		t.Fatal("late original flow claim entered a new same-tuple lifetime")
 	}
@@ -135,7 +135,7 @@ func testManagedRouteFaults(t *testing.T, ctx context.Context, a *Runtime, root,
 	// Use the actual installed PacketPlane, authenticated original peer session,
 	// current path/Book/native and product gate. Replaying a retained decoded
 	// frame is deterministic; no transport absence is used to infer rejection.
-	getPlane := func() (*tunnelInstance, *network.PacketPlane, *mydcp.Session) {
+	getPlane := func() (*tunnelInstance, *network.PacketPlane, *sfcp.Session) {
 		t.Helper()
 		a.tunnel.mu.Lock()
 		instance := a.tunnel.routes[ref.ID]
@@ -158,7 +158,7 @@ func testManagedRouteFaults(t *testing.T, ctx context.Context, a *Runtime, root,
 		t.Fatal(err)
 	}
 	networkID := network.NetworkID(ref.Local.Cluster, work.Tunnel.Network)
-	frame := mydcp.Frame{Purpose: mydcp.Packet, Kind: 2, Fields: []mydcp.Field{{Tag: 1, Required: true, Value: peer.Local.Owner[:]}, {Tag: 2, Required: true, Value: networkID[:]}, {Tag: 3, Required: true, Value: oldBinding.Token[:]}, {Tag: 4, Required: true, Value: packet}}}
+	frame := sfcp.Frame{Purpose: sfcp.Packet, Kind: 2, Fields: []sfcp.Field{{Tag: 1, Required: true, Value: peer.Local.Owner[:]}, {Tag: 2, Required: true, Value: networkID[:]}, {Tag: 3, Required: true, Value: oldBinding.Token[:]}, {Tag: 4, Required: true, Value: packet}}}
 	if err := plane.Receive(session, frame); err == nil {
 		t.Fatal("old bilateral token entered actual receive queue after tuple reuse")
 	}

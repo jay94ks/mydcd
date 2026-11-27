@@ -106,7 +106,7 @@ func TestSpoolChunkSizeRecoveryPreservesLegacyOffsetAndPendingSlot(t *testing.T)
 			if err != nil {
 				t.Fatal(err)
 			}
-			path := filepath.Join(root.Name(), ".mydc-imagebuild", scopeName(scope)+".zip")
+			path := filepath.Join(root.Name(), ".sfc-imagebuild", scopeName(scope)+".zip")
 			before, err := os.Stat(path)
 			if err != nil {
 				t.Fatal(err)
@@ -120,7 +120,7 @@ func TestSpoolChunkSizeRecoveryPreservesLegacyOffsetAndPendingSlot(t *testing.T)
 			if _, err := spool.RecoverPart(ctx, changed, index, part.Digest, key); err == nil {
 				t.Fatal("original slot reinterpreted under another chunk size")
 			}
-			if _, err := os.Stat(filepath.Join(root.Name(), ".mydc-imagebuild", scopeName(changed)+".zip")); !errors.Is(err, os.ErrNotExist) {
+			if _, err := os.Stat(filepath.Join(root.Name(), ".sfc-imagebuild", scopeName(changed)+".zip")); !errors.Is(err, os.ErrNotExist) {
 				t.Fatal("recovery created a replacement scope", err)
 			}
 			if err := db.Update(func(tx *bolt.Tx) error {

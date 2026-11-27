@@ -8,7 +8,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/secrets"
+	"github.com/jay94ks/seafield/internal/secrets"
 )
 
 func TestRotatedInputProviderRetainsOriginalProfileAndRequiresExactNodeLineage(t *testing.T) {

@@ -8,30 +8,41 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/lifecycle"
-	"github.com/jay94ks/mydcd/internal/cluster/membership"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/network/services"
-	"github.com/jay94ks/mydcd/internal/tenancy"
-	"github.com/jay94ks/mydcd/internal/workload"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/lifecycle"
+	"github.com/jay94ks/seafield/internal/cluster/membership"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/network/services"
+	"github.com/jay94ks/seafield/internal/tenancy"
+	"github.com/jay94ks/seafield/internal/workload"
 )
 
 type ResourceEntry struct {
-	DNS         *DNSPolicyView `json:",omitempty"`
-	Key         string
-	Limit       *tenancy.NodeLimit   `json:",omitempty"`
-	Network     *tenancy.Network     `json:",omitempty"`
-	Route       *tenancy.Route       `json:",omitempty"`
-	Change      *NetworkChangeStatus `json:",omitempty"`
-	Reservation *tenancy.Reservation `json:",omitempty"`
+	DNS     *DNSPolicyView `json:",omitempty"`
+	Key     string
+	Limit   *tenancy.NodeLimit `json:",omitempty"`
+	Network *tenancy.Network   `json:",omitempty"`
+	// Route is a cross-tenant route. On a tenant's page the other side's
+	// prefix is left out (the zero prefix): a tenant sees the peer network
+	// only by name (RouteNames).
+	Route      *tenancy.Route `json:",omitempty"`
+	RouteNames *RouteNames    `json:",omitempty"`
+	// Bridge is a virtual bridge (key "bridge/<A tenant>/<ID>"). Both sides'
+	// tenants see it; it names the peer network, never its addresses.
+	Bridge      *tenancy.VirtualBridge `json:",omitempty"`
+	Change      *NetworkChangeStatus   `json:",omitempty"`
+	Reservation *tenancy.Reservation   `json:",omitempty"`
 	// System is the system network setting (key "system"). A tenant's page
 	// carries only its range; the every-tenant page (tenant "") also its
 	// users. Its members are Network rows of tenant "".
 	System *tenancy.SystemPolicy `json:",omitempty"`
 }
+
+// RouteNames are the logical names of a route's two member networks (the
+// member ID for a plain network; empty once the member is gone).
+type RouteNames struct{ Source, Destination string }
 
 // Public current-candidate metadata. The full retained proof/previous-target
 // history stays in the existing checkpoint, not in each paginated reply.
@@ -66,7 +77,13 @@ func (r Resources) Page(c access.Catalog, actor, tenant, after string, authoriti
 		v := limit
 		entries = append(entries, ResourceEntry{Key: "limit/" + limit.Tenant + "/" + limit.Node, Limit: &v})
 	}
-	for _, network := range r.Networks.VisibleNetworks(c, actor) {
+	visible := r.Networks.VisibleNetworks(c, actor)
+	if tenant == "" {
+		// The system network has no tenant, so no tenant grant shows it;
+		// the every-tenant page (system administrators) lists its members.
+		visible = append(visible, r.Networks.SystemMembers()...)
+	}
+	for _, network := range visible {
 		if !allowed(network.Tenant) {
 			continue
 		}
@@ -82,7 +99,21 @@ func (r Resources) Page(c access.Catalog, actor, tenant, after string, authoriti
 			continue
 		}
 		v := route
-		entries = append(entries, ResourceEntry{Key: "route/" + v.Source.Tenant + "/" + v.ID, Route: &v})
+		if tenant != "" && v.Source.Tenant != tenant {
+			v.Source.Prefix = netip.Prefix{}
+		}
+		if tenant != "" && v.Destination.Tenant != tenant {
+			v.Destination.Prefix = netip.Prefix{}
+		}
+		names := RouteNames{Source: r.Networks.LogicalName(v.Source.Tenant, v.Source.Network), Destination: r.Networks.LogicalName(v.Destination.Tenant, v.Destination.Network)}
+		entries = append(entries, ResourceEntry{Key: "route/" + v.Source.Tenant + "/" + v.ID, Route: &v, RouteNames: &names})
+	}
+	for _, bridge := range r.Networks.VisibleBridges(c, actor) {
+		if tenant != "" && bridge.A.Tenant != tenant && bridge.B.Tenant != tenant {
+			continue
+		}
+		v := bridge
+		entries = append(entries, ResourceEntry{Key: "bridge/" + v.A.Tenant + "/" + v.ID, Bridge: &v})
 	}
 	for _, reservation := range r.Quotas.Reservations() {
 		if !allowed(reservation.Tenant) {
@@ -91,10 +122,9 @@ func (r Resources) Page(c access.Catalog, actor, tenant, after string, authoriti
 		v := reservation
 		entries = append(entries, ResourceEntry{Key: "reservation/" + v.Key, Reservation: &v})
 	}
-	// Every page names the system range, which no tenant network may
-	// overlap; only the every-tenant page names the servers using it.
+	// Every page has the system row (the fixed range no tenant network may
+	// overlap); only the every-tenant page names the servers using it.
 	v := r.Networks.SystemPolicy()
-	v.Range = v.RangeOrDefault()
 	if tenant != "" {
 		v.Users = nil
 	}

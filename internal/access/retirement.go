@@ -62,7 +62,7 @@ type TenantReport struct {
 func TenantReportBytes(p TenantReport) []byte {
 	p.Signature = nil
 	b, _ := json.Marshal(p)
-	return append([]byte("mydc-tenant-retirement-1\x00"), b...)
+	return append([]byte("sfc-tenant-retirement-1\x00"), b...)
 }
 func ownRetirement(r TenantRetirement) TenantRetirement {
 	r.Targets = slices.Clone(r.Targets)
@@ -87,7 +87,7 @@ func ownerSetHash(owners []RetirementOwner) [32]byte {
 		public[i] = RetirementOwner{Node: o.Node, Key: o.Key}
 	}
 	b, _ := json.Marshal(public)
-	return sha256.Sum256(append([]byte("mydc-tenant-owners-1\x00"), b...))
+	return sha256.Sum256(append([]byte("sfc-tenant-owners-1\x00"), b...))
 }
 func canonicalInventory(tenant string, targets []RetirementTarget) ([]RetirementTarget, []RetirementOwner, [32]byte, error) {
 	if len(targets) > 16384 {
@@ -128,7 +128,7 @@ func canonicalInventory(tenant string, targets []RetirementTarget) ([]Retirement
 	// This digest identifies a single immutable inventory, not a replication log
 	// or a hash-chain synchronization layer.
 	b, _ := json.Marshal(targets)
-	h := sha256.Sum256(append([]byte("mydc-tenant-inventory-1\x00"), b...))
+	h := sha256.Sum256(append([]byte("sfc-tenant-inventory-1\x00"), b...))
 	return targets, list, h, nil
 }
 func reportComplete(p *TenantReport) bool {

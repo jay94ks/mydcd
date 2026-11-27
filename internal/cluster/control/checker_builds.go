@@ -10,10 +10,10 @@ import (
 	"math"
 	"slices"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	checker "github.com/jay94ks/mydcd/internal/workload/lifecycle"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/deployment"
+	checker "github.com/jay94ks/seafield/internal/workload/lifecycle"
 )
 
 // CheckerBuildReport uses installed-member Management and the existing finite
@@ -32,7 +32,7 @@ type CheckerBuildReport struct {
 func CheckerBuildReportBytes(r CheckerBuildReport) []byte {
 	r.Signature = nil
 	raw, _ := json.Marshal(r)
-	return append([]byte("mydc-checker-build-report-1\x00"), raw...)
+	return append([]byte("sfc-checker-build-report-1\x00"), raw...)
 }
 func (r CheckerBuildReport) Command() (state.Command, error) {
 	raw, err := json.Marshal(r)

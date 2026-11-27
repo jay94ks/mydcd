@@ -7,38 +7,48 @@ import (
 	"errors"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/observability"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/observability"
+	"github.com/jay94ks/seafield/internal/sfcp"
 )
 
-func (c Client) TasksPage(ctx context.Context, peer mydcp.Peer, session access.Session, q control.TaskSelection, after string) (Reply, error) {
-	if !q.Valid() {
-		return Reply{}, access.ErrInvalid
-	}
-	return c.query(ctx, peer, session, Request{Method: "tasks", Node: q.Node, Tenant: q.Tenant, App: q.App, After: after})
+// TaskQuery selects one page of tasks.
+type TaskQuery struct {
+	control.TaskSelection
+	After string `json:",omitempty"`
 }
 
-func (s Service) taskQueryReply(ctx context.Context, view cluster.View, session access.Session, request Request) Reply {
+func (q TaskQuery) Valid() bool { return q.TaskSelection.Valid() && len(q.After) <= 512 }
+
+func (c Client) TasksPage(ctx context.Context, peer sfcp.Peer, session access.Session, q control.TaskSelection, after string) (control.TasksPage, error) {
+	query := TaskQuery{TaskSelection: q, After: after}
+	if !query.Valid() {
+		return control.TasksPage{}, access.ErrInvalid
+	}
+	return call(ctx, c, peer, session, TasksMethod, query)
+}
+
+// TasksMethod pages accepted tasks and their signed observations; the policy
+// reader authorizes Read on each tenant and server it shows.
+var TasksMethod = define(Method[TaskQuery, control.TasksPage]{Name: "tasks"}, true, func(ctx context.Context, s Service, view cluster.View, session access.Session, q TaskQuery) (control.TasksPage, string) {
 	var reports []observability.Report
 	if s.NodeObservations != nil {
 		var err error
 		reports, err = s.NodeObservations(ctx, view)
 		if err != nil {
-			return Reply{Schema: 1, Code: "unavailable"}
+			return control.TasksPage{}, "unavailable"
 		}
 	}
-	page, err := s.Policy.TaskPage(view.State, session, time.Now().Unix(), control.TaskSelection{Node: request.Node, Tenant: request.Tenant, App: request.App}, request.After, reports)
-	if err != nil {
-		code := "unavailable"
-		if errors.Is(err, access.ErrConflict) {
-			code = "conflict"
-		} else if errors.Is(err, access.ErrDenied) || errors.Is(err, access.ErrInvalid) {
-			code = "denied"
-		}
-		return Reply{Schema: 1, Code: code}
+	page, err := s.Policy.TaskPage(view.State, session, time.Now().Unix(), q.TaskSelection, q.After, reports)
+	switch {
+	case err == nil:
+		return page, "ok"
+	case errors.Is(err, access.ErrConflict):
+		return control.TasksPage{}, "conflict"
+	case errors.Is(err, access.ErrDenied) || errors.Is(err, access.ErrInvalid):
+		return control.TasksPage{}, "denied"
 	}
-	return Reply{Schema: 1, Code: "ok", Tasks: page.Tasks, TasksNext: page.Next, TasksRootRevision: page.RootRevision}
-}
+	return control.TasksPage{}, "unavailable"
+})

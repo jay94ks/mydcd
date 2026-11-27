@@ -5,7 +5,7 @@ package app
 import (
 	"bytes"
 	"encoding/json"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/cluster/state"
 	"path/filepath"
 	"testing"
 )

@@ -7,12 +7,12 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/deployment"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/deployment"
 )
 
 // expireAll commits expire-observation for every live stage observation,
-// as the leader does once owners stop renewing them over MyDCP
+// as the leader does once owners stop renewing them over SFCP
 // (devel/refactor/14-raft-liveness.md). reporter must be a member key.
 func expireAll(t *testing.T, p Policy, s state.State, reporter ed25519.PrivateKey, at uint64) state.State {
 	t.Helper()
@@ -54,7 +54,7 @@ func expireAll(t *testing.T, p Policy, s state.State, reporter ed25519.PrivateKe
 	}
 }
 
-// The leader admits a MyDCP renewal of an unchanged signed fact without any
+// The leader admits a SFCP renewal of an unchanged signed fact without any
 // Raft write, and refuses changed facts and expired observations.
 func TestObservationRenewalStaysOutOfRaft(t *testing.T) {
 	f, o, _ := logClearPlanFixture(t, "local")
@@ -86,5 +86,42 @@ func TestObservationRenewalStaysOutOfRaft(t *testing.T) {
 	}
 	if apps, _ := f.p.Apps(stale); apps.entries[appKey("tenant", "source-app")].Inventory.Revision() == i.Revision() {
 		t.Fatal("expiry did not record one inventory change")
+	}
+}
+
+// Health follows the leader's recorded expiry, not the reader's clock: an
+// owner that keeps renewing stays live however old its fact is, and once the
+// leader expires the unrenewed observations a historical success is Unknown.
+func TestObservedHealthIsUnknownOnlyAfterRecordedExpiry(t *testing.T) {
+	f, o, _ := logClearPlanFixture(t, "local")
+	health := func(s state.State, now uint64) string {
+		t.Helper()
+		apps, err := f.p.Apps(s)
+		if err != nil {
+			t.Fatal(err)
+		}
+		catalog, err := f.p.Catalog(s)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rows, _, err := apps.ObservedPage(catalog, "admin", "tenant", "", now)
+		for _, row := range rows {
+			if row.App == "source-app" {
+				return row.Health
+			}
+		}
+		t.Fatal("source-app missing from observed page", rows, err)
+		return ""
+	}
+	live := health(f.s, o.At)
+	if live == "Unknown" {
+		t.Fatal("fixture has no live owner evidence")
+	}
+	if late := health(f.s, o.At+AppObservationLinkedMaxAge+1); late != live {
+		t.Fatal("reader's clock alone changed health", live, late)
+	}
+	expired := expireAll(t, f.p, f.s, f.node, o.At+AppObservationMaxAge+1)
+	if got := health(expired, o.At+AppObservationMaxAge+1); got != "Unknown" {
+		t.Fatal("expired owner evidence kept its health", got)
 	}
 }

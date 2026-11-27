@@ -100,12 +100,15 @@ type receipt struct {
 
 type State struct {
 	index          uint64
-	objects        map[string]Object
-	requests       map[requestKey]receipt
+	objects        tree[Object]
+	requests       tree[receipt]
 	principals     map[string]principal
 	window         *moduleWindow
-	reportReceipts map[requestKey]reportReceipt
+	reportReceipts tree[reportReceipt]
 	reportFloors   map[reportRoot]uint64
+	// touched is the write set of the apply that produced this State. It is
+	// never shared with a parent or a later candidate.
+	touched *touched
 }
 
 // New establishes the one genesis administrator. Later policy is committed input.
@@ -117,34 +120,29 @@ func New(admin string) (State, error) {
 }
 
 func (s State) Index() uint64            { return s.index }
-func (s State) Object(key string) Object { return s.objects[key] }
+func (s State) Object(key string) Object { o, _ := s.objects.get(key); return o }
 
 // Objects returns an owned view; callers cannot mutate the immutable FSM maps.
 func (s State) Objects(prefix string) map[string]Object {
 	v := map[string]Object{}
-	for key, o := range s.objects {
-		if strings.HasPrefix(key, prefix) {
-			v[key] = o
-		}
-	}
+	s.objects.walk(prefix, func(key string, o Object) bool {
+		v[key] = o
+		return true
+	})
 	return v
 }
 
 // RangeObjects visits the matching keys and Object values in this immutable
-// snapshot without copying its map. Like Objects, it includes tombstones and
-// has unspecified order. Values are copies; subsequent State candidates do not
-// change this snapshot or an iterator already obtained from it.
+// snapshot in key order without copying it. Like Objects, it includes
+// tombstones. Later State candidates do not change this snapshot or an
+// iterator already obtained from it.
 func (s State) RangeObjects(prefix string) iter.Seq2[string, Object] {
 	return func(yield func(string, Object) bool) {
-		for key, object := range s.objects {
-			if strings.HasPrefix(key, prefix) && !yield(key, object) {
-				return
-			}
-		}
+		s.objects.walk(prefix, yield)
 	}
 }
 
-func (s State) ReceiptCount() int { return len(s.requests) }
+func (s State) ReceiptCount() int { return s.requests.len() }
 
 // LookupResult never re-executes an absent/expired request. A false result is
 // not evidence that the operation did not commit in an earlier ledger epoch.
@@ -156,7 +154,7 @@ func (s State) LookupResult(c Command) (Result, bool) {
 		return Result{}, false
 	}
 	p, known := s.principals[c.Actor]
-	r, found := s.requests[requestKey{c.Actor, c.RequestID}]
+	r, found := s.request(requestKey{c.Actor, c.RequestID})
 	if !known || p.Epoch != c.Epoch || !found || r.digest != Digest(c) {
 		return Result{}, false
 	}
@@ -187,25 +185,17 @@ func commandDigest(c Command) [32]byte {
 	return sha256.Sum256(b)
 }
 
+// clone starts a candidate. The trees are shared and path-copied on write;
+// only the small principal and report-floor maps are copied.
 func clone(s State) State {
-	n := State{index: s.index, objects: make(map[string]Object, len(s.objects)), requests: make(map[requestKey]receipt, len(s.requests)), principals: make(map[string]principal, len(s.principals))}
-	n.reportReceipts = make(map[requestKey]reportReceipt, len(s.reportReceipts))
+	n := State{index: s.index, objects: s.objects, requests: s.requests, reportReceipts: s.reportReceipts, principals: make(map[string]principal, len(s.principals)), touched: newTouched()}
 	n.reportFloors = make(map[reportRoot]uint64, len(s.reportFloors))
-	for key, value := range s.reportReceipts {
-		n.reportReceipts[key] = value
-	}
 	for key, value := range s.reportFloors {
 		n.reportFloors[key] = value
 	}
 	if s.window != nil {
 		window := *s.window
 		n.window = &window
-	}
-	for k, v := range s.objects {
-		n.objects[k] = v
-	}
-	for k, v := range s.requests {
-		n.requests[k] = v
 	}
 	for k, v := range s.principals {
 		n.principals[k] = v
@@ -214,7 +204,7 @@ func clone(s State) State {
 }
 
 // Apply returns a candidate; the caller publishes it only after atomic persistence.
-// Actor is an authenticated full-key identity supplied by the MYDCP adapter, never
+// Actor is an authenticated full-key identity supplied by the SFCP adapter, never
 // a trusted field copied from an unauthenticated payload. Replicas recheck policy.
 func Apply(s State, index uint64, c Command) (State, Result, error) {
 	return ApplyChecked(s, index, c, nil)
@@ -292,7 +282,7 @@ func ApplyTransactional(s State, index uint64, c Command, validate Validator, re
 	}
 	key := requestKey{c.Actor, c.RequestID}
 	digest := commandDigest(c)
-	if old, ok := s.requests[key]; ok {
+	if old, ok := s.request(key); ok {
 		if old.digest != digest {
 			return n, Result{Code: RequestConflict, Index: index}, nil
 		}
@@ -307,12 +297,7 @@ func ApplyTransactional(s State, index uint64, c Command, validate Validator, re
 	if c.Kind == ModuleReport && !s.reportRootAvailable(c.Actor, c.Key) {
 		return n, Result{Code: LedgerFull, Index: index}, nil
 	}
-	count := 0
-	for k := range s.requests {
-		if k.actor == c.Actor {
-			count++
-		}
-	}
+	count := s.requestCount(c.Actor)
 	// Rotation is the explicit escape from a full ledger. Old epochs can never
 	// execute again, including after snapshot/restart. No wall-clock eviction.
 	if count >= LedgerLimit && c.Kind != ModuleReport && !(c.Kind == RotateLedger && c.Target == c.Actor) {
@@ -326,10 +311,10 @@ func ApplyTransactional(s State, index uint64, c Command, validate Validator, re
 	} else if validMutation && required != 0 {
 		if p.Rights&required == 0 && p.Rights&Admin == 0 && !(p.Rights == 0 && (strings.HasPrefix(c.Actor, "user/") || strings.HasPrefix(c.Actor, "node/")) && delegate != nil && delegate(s, c)) {
 			result.Code = Forbidden
-			n.requests[key] = receipt{digest, result}
+			n.putRequest(key, receipt{digest, result})
 			return n, result, nil
 		}
-		old := s.objects[c.Key]
+		old := s.Object(c.Key)
 		result.Revision, result.Generation = old.Revision, old.Generation
 		result.Code = ConditionFailed
 		if c.Expected == old.Revision && (!c.Delete || old.Present) {
@@ -337,14 +322,10 @@ func ApplyTransactional(s State, index uint64, c Command, validate Validator, re
 			if !c.Delete && !old.Present {
 				object.Generation = index
 			}
-			n.objects[c.Key] = object
+			n.putObject(c.Key, object)
 			result = Result{Code: Applied, Index: index, Revision: index, Generation: object.Generation}
 			if validate != nil && validate(s, n, c) != nil {
-				if original, exists := s.objects[c.Key]; exists {
-					n.objects[c.Key] = original
-				} else {
-					delete(n.objects, c.Key)
-				}
+				n.restoreObject(s, c.Key)
 				result = Result{Code: Invalid, Index: index, Revision: old.Revision, Generation: old.Generation}
 			}
 		}
@@ -356,10 +337,13 @@ func ApplyTransactional(s State, index uint64, c Command, validate Validator, re
 			if c.Expected == target.Revision && (c.Kind != RotateLedger || (exists && target.Epoch < ^uint64(0))) {
 				if c.Kind == RotateLedger {
 					target.Epoch++
-					for k := range n.requests {
-						if k.actor == c.Target {
-							delete(n.requests, k)
-						}
+					var rotated []requestKey
+					n.actorRequests(c.Target, func(k requestKey, _ receipt) bool {
+						rotated = append(rotated, k)
+						return true
+					})
+					for _, k := range rotated {
+						n.dropRequest(k)
 					}
 				} else {
 					// Never revoke the last administrator.
@@ -370,7 +354,7 @@ func ApplyTransactional(s State, index uint64, c Command, validate Validator, re
 						}
 					}
 					if target.Rights&Admin != 0 && c.Rights&Admin == 0 && admins == 1 {
-						n.requests[key] = receipt{digest, result}
+						n.putRequest(key, receipt{digest, result})
 						return n, result, nil
 					}
 					target.Rights = c.Rights
@@ -394,9 +378,9 @@ func ApplyTransactional(s State, index uint64, c Command, validate Validator, re
 		}
 	}
 	if !(c.Kind == RotateLedger && c.Target == c.Actor && result.Code == Applied) {
-		n.requests[key] = receipt{digest: digest, result: result}
+		n.putRequest(key, receipt{digest: digest, result: result})
 		if c.Kind == ModuleReport {
-			n.reportReceipts[key] = reportReceipt{Key: c.Key, Expected: c.Expected}
+			n.putReport(key, reportReceipt{Key: c.Key, Expected: c.Expected})
 		}
 	}
 	return n, result, nil

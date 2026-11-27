@@ -47,16 +47,18 @@ type snapshot struct {
 func rows(s State) snapshot {
 	d := snapshot{Schema: 1, Index: s.index, Window: s.window}
 	d.Reports, d.ReportFloors = reportRows(s)
-	for k, v := range s.objects {
+	s.objects.walk("", func(k string, v Object) bool {
 		d.Objects = append(d.Objects, objectRow{k, v.Revision, v.Generation, []byte(v.Value), v.Present})
-	}
+		return true
+	})
 	for k, v := range s.principals {
 		d.Principals = append(d.Principals, principalRow{k, v})
 	}
-	for k, v := range s.requests {
-		d.Receipts = append(d.Receipts, receiptRow{k.actor, k.id, v.digest, v.result})
-	}
-	sort.Slice(d.Objects, func(i, j int) bool { return d.Objects[i].Key < d.Objects[j].Key })
+	s.requests.walk("", func(k string, v receipt) bool {
+		key, _ := parseRequestKey(k)
+		d.Receipts = append(d.Receipts, receiptRow{key.actor, key.id, v.digest, v.result})
+		return true
+	})
 	sort.Slice(d.Principals, func(i, j int) bool { return d.Principals[i].Actor < d.Principals[j].Actor })
 	sort.Slice(d.Receipts, func(i, j int) bool {
 		a, b := d.Receipts[i], d.Receipts[j]
@@ -164,6 +166,21 @@ func DecodeFrom(source io.Reader) (State, error) {
 	if readDocument(decoder, &d) != nil || decoder.Decode(new(any)) != io.EOF || d.Schema != 1 {
 		return State{}, ErrSnapshot
 	}
+	s, err := fromRows(d)
+	if err != nil {
+		return State{}, err
+	}
+	// Reject duplicate JSON fields, alternate order/number spellings and omitted
+	// fields by requiring our one canonical representation.
+	canonical := sha256.New()
+	if err := EncodeTo(canonical, s); err != nil || !bytes.Equal(input.Sum(nil), canonical.Sum(nil)) {
+		return State{}, ErrSnapshot
+	}
+	return s, nil
+}
+
+// fromRows checks every row of a snapshot or stored state and builds it.
+func fromRows(d snapshot) (State, error) {
 	s := clone(State{})
 	s.index = d.Index
 	if d.Window != nil {
@@ -197,10 +214,10 @@ func DecodeFrom(source io.Reader) (State, error) {
 		if r.Key == "" || len(r.Key) > 512 || len(o.Value) > 64*1024 || o.Revision == 0 || o.Revision > d.Index || o.Generation == 0 || o.Generation > o.Revision || !o.Present && o.Value != "" {
 			return State{}, ErrSnapshot
 		}
-		if _, ok := s.objects[r.Key]; ok {
+		if _, ok := s.objects.get(r.Key); ok {
 			return State{}, ErrSnapshot
 		}
-		s.objects[r.Key] = o
+		s.putObject(r.Key, o)
 	}
 	counts := map[string]int{}
 	for _, r := range d.Receipts {
@@ -209,24 +226,19 @@ func DecodeFrom(source io.Reader) (State, error) {
 		if !known || r.ID == "" || len(r.ID) > 256 || r.Result.Index == 0 || r.Result.Index > d.Index || !r.Result.ValidReason() || r.Result.Revision > d.Index || r.Result.Generation > d.Index {
 			return State{}, ErrSnapshot
 		}
-		if _, ok := s.requests[k]; ok {
+		if _, ok := s.request(k); ok {
 			return State{}, ErrSnapshot
 		}
 		counts[r.Actor]++
 		if counts[r.Actor] > LedgerLimit {
 			return State{}, ErrSnapshot
 		}
-		s.requests[k] = receipt{r.Digest, r.Result}
+		s.putRequest(k, receipt{r.Digest, r.Result})
 	}
 	if err := restoreReportRows(&s, d.Reports, d.ReportFloors); err != nil {
 		return State{}, err
 	}
-	// Reject duplicate JSON fields, alternate order/number spellings and omitted
-	// fields by requiring our one canonical representation.
-	canonical := sha256.New()
-	if err := EncodeTo(canonical, s); err != nil || !bytes.Equal(input.Sum(nil), canonical.Sum(nil)) {
-		return State{}, ErrSnapshot
-	}
+	s.touched = nil
 	return s, nil
 }
 

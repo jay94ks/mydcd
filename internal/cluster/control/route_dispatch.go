@@ -7,8 +7,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/network/services"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/network/services"
 )
 
 // RouteDispatchReport publishes only the original owner's durable dispatch
@@ -27,7 +27,7 @@ type RouteDispatchReport struct {
 func RouteDispatchReportBytes(r RouteDispatchReport) []byte {
 	r.Signature = nil
 	raw, _ := json.Marshal(r)
-	return append([]byte("mydc-route-dispatch-report-1\x00"), raw...)
+	return append([]byte("sfc-route-dispatch-report-1\x00"), raw...)
 }
 
 func (r RouteDispatchReport) Command() (state.Command, error) {

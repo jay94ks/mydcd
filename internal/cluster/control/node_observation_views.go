@@ -5,15 +5,16 @@ package control
 import (
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"slices"
 	"strings"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/lifecycle"
-	"github.com/jay94ks/mydcd/internal/cluster/membership"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/observability"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/lifecycle"
+	"github.com/jay94ks/seafield/internal/cluster/membership"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/observability"
 )
 
 type NodeUsageView struct {
@@ -45,6 +46,23 @@ type NodeSummaryView struct {
 	ObservedAt, ObservationMaxAge uint64
 	Usage                         *NodeUsageView `json:",omitempty"`
 	Admin                         *NodeAdminView `json:",omitempty"`
+	// Build says whether image builds can run on this server. Reason is
+	// one of observability.BuildReasons, or UNKNOWN without a fresh report.
+	Build NodeBuildView
+}
+
+type NodeBuildView struct {
+	Enabled bool
+	Reason  string `json:",omitempty"`
+}
+
+// nodeBuild reads a server's build capability from its Host report. Only
+// a fresh report that says so enables builds.
+func nodeBuild(host observability.Report, known bool, now uint64) NodeBuildView {
+	if !known || host.Host == nil || host.Host.Build == nil || !observability.Fresh(host.At, now) {
+		return NodeBuildView{Reason: "UNKNOWN"}
+	}
+	return NodeBuildView{Enabled: host.Host.Build.Enabled, Reason: host.Host.Build.Reason}
 }
 
 type NodeSummaryPage struct {
@@ -69,13 +87,51 @@ type NodeDiskView struct {
 	ObservedAt, ObservationMaxAge              uint64
 	Stale                                      bool
 	MeasurementOnly                            bool
+	// BlockDevice/BlockClass: the disk this filesystem is on, from the
+	// server's device inventory (system administrator, one server only).
+	BlockDevice string `json:",omitempty"`
+	BlockClass  string `json:",omitempty"`
 }
 
 type NodeDisksPage struct {
 	Disks        []NodeDiskView
 	Next         string
 	RootRevision uint64
+	// Devices is the server's block device inventory. Only a system
+	// administrator asking about one server gets it, on the first page.
+	Devices *NodeDevicesView `json:",omitempty"`
 }
+
+// NodeDevicesView is a measurement joined at read time with the node
+// storage book: which storage roots, Docker data root and system mount sit
+// on each part. It never authorizes a format or a mount.
+type NodeDevicesView struct {
+	Node      string
+	Disks     []NodeBlockDiskView
+	Truncated bool
+	// Recorded: mounts sfcd made and mounts again at start; Reason says
+	// why one is not mounted now (disk-not-found shows 디스크를 찾지 못함).
+	Recorded                      []observability.RecordedMount
+	ObservedAt, ObservationMaxAge uint64
+	Stale                         bool
+}
+
+type NodeBlockDiskView struct {
+	observability.BlockDisk
+	Parts []NodeBlockPartView
+	// Purposes is the union of its parts' purposes.
+	Purposes []string
+}
+
+type NodeBlockPartView struct {
+	observability.BlockPart
+	// Purposes: system, container-runtime, storage-root, swap.
+	Purposes     []string
+	StorageRoots []string
+}
+
+// NodeDevicesBudget bounds the inventory in a node-disks page.
+const NodeDevicesBudget = 40 << 10
 
 type nodeObservationAccess struct {
 	policy  Policy
@@ -166,7 +222,7 @@ func observationBasis(s state.State, session access.Session, method, tenant, nod
 		Scopes                             []access.Scope
 		Rows                               any
 	}{s.Object(MembersKey).Revision, s.Object(CatalogKey).Revision, s.Object(ResourcesKey).Revision, s.Object(NodeStorageKey).Revision, session.User, method, tenant, node, session.Scopes, rows})
-	return sha256.Sum256(append([]byte("mydc-node-observation-page-1\x00"), raw...))
+	return sha256.Sum256(append([]byte("sfc-node-observation-page-1\x00"), raw...))
 }
 
 func observationPage(after string, basis [32]byte, length int) (int, int, error) {
@@ -272,6 +328,7 @@ func (p Policy) NodeSummary(s state.State, session access.Session, at int64, ten
 			}
 		}
 		host, known := selected[id]["host"]
+		row.Build = nodeBuild(host, known, now)
 		if known && host.Host != nil {
 			row.ObservedAt, row.Stale = host.At, !observability.Fresh(host.At, now)
 			row.Ready = !row.Stale && host.Host.ModuleReady && work
@@ -316,6 +373,10 @@ func (p Policy) NodeSummary(s state.State, session access.Session, at int64, ten
 				if copy.MemoryTotal != nil {
 					n := *copy.MemoryTotal
 					copy.MemoryTotal = &n
+				}
+				if copy.Build != nil {
+					b := *copy.Build
+					copy.Build = &b
 				}
 				admin.Host = &copy
 				admin.Version = copy.Version
@@ -417,7 +478,7 @@ func (p Policy) nodeDisks(s state.State, a nodeObservationAccess, node string, r
 		return nil, err
 	}
 	for _, root := range roots.Roots() {
-		if root.Definition.Node != node || root.Closed != nil || !a.admin && !slices.Contains(root.Definition.Tenants, a.tenant) {
+		if root.Definition.Node != node || root.Closed != nil || !a.admin && !root.Definition.Allows(a.tenant) {
 			continue
 		}
 		sources["root/"+root.Definition.ID] = source{purpose: "storage-root", root: root.Definition.ID, path: root.Definition.Path, generation: root.Generation, revision: root.Revision}
@@ -512,12 +573,24 @@ func (p Policy) NodeDisks(s state.State, session access.Session, at int64, tenan
 	if err != nil {
 		return NodeDisksPage{}, err
 	}
+	var devices *NodeDevicesView
+	budget := 120 << 10
+	if a.admin && node != "" && start == 0 {
+		devices, err = a.policy.nodeDevices(s, node, selected[node], uint64(at)*1000+999)
+		if err != nil {
+			return NodeDisksPage{}, err
+		}
+		if devices != nil {
+			linkBlockDevices(rows, devices)
+			budget -= NodeDevicesBudget
+		}
+	}
 	// Mount paths may approach the path budget. Keep the common User frame
 	// bounded even for eight maximum-length, escaped path rows.
 	used := 0
 	for i := start; i < end; i++ {
 		raw, _ := json.Marshal(rows[i])
-		if used+len(raw) > 120<<10 {
+		if used+len(raw) > budget {
 			end = i
 			break
 		}
@@ -526,7 +599,7 @@ func (p Policy) NodeDisks(s state.State, session access.Session, at int64, tenan
 	if start == end && start < len(rows) {
 		return NodeDisksPage{}, access.ErrInvalid
 	}
-	page := NodeDisksPage{Disks: rows[start:end], RootRevision: s.Object(NodeStorageKey).Revision}
+	page := NodeDisksPage{Disks: rows[start:end], RootRevision: s.Object(NodeStorageKey).Revision, Devices: devices}
 	if end < len(rows) {
 		page.Next = nextTaskCursor(basis, uint32(end))
 	}
@@ -541,7 +614,10 @@ type MeshLinkEnd struct {
 }
 
 type MeshLinkView struct {
-	ID, NodeA, NodeB, State       string
+	ID, NodeA, NodeB, State string
+	// Dialer is NodeA or NodeB: the node that opened the session now
+	// carrying the pair, by the most recent end that reports one.
+	Dialer                        string `json:",omitempty"`
 	ObservedAt, ObservationMaxAge uint64
 	Stale                         bool
 	Ends                          []MeshLinkEnd `json:",omitempty"`
@@ -601,7 +677,11 @@ func (p Policy) MeshLinks(s state.State, session access.Session, at int64, tenan
 			if len(ends) > 0 {
 				row.State = "up"
 				row.Stale = len(ends) != 2
+				var dialerAt uint64
 				for _, end := range ends {
+					if d := end.Observation.Dialer; (d == row.NodeA || d == row.NodeB) && end.ObservedAt >= dialerAt {
+						row.Dialer, dialerAt = d, end.ObservedAt
+					}
 					row.ObservedAt = max(row.ObservedAt, end.ObservedAt)
 					row.Stale = row.Stale || end.Stale
 					if end.Observation.State == "down" {
@@ -630,4 +710,28 @@ func (p Policy) MeshLinks(s state.State, session access.Session, at int64, tenan
 		page.Next = nextTaskCursor(basis, uint32(end))
 	}
 	return page, nil
+}
+
+// ErrBuildDisabled is a build placed on a server whose fresh Host report
+// says it does not build (NodeBuildView).
+var ErrBuildDisabled = errors.New("BUILD_DISABLED")
+
+// CheckBuildNode refuses a build on node only when that member's own fresh
+// report says it cannot build. A missing or stale report does not refuse:
+// the server itself still decides, and observations may lag.
+func (p Policy) CheckBuildNode(s state.State, node string, reports []observability.Report, at int64) error {
+	p, err := p.Current(s)
+	if err != nil {
+		return err
+	}
+	members, err := p.Members(s)
+	if err != nil {
+		return err
+	}
+	a := nodeObservationAccess{policy: p, members: members, nodes: map[string]bool{node: true}}
+	host, known := allowedNodeReports(a, reports)[node]["host"]
+	if b := nodeBuild(host, known, uint64(at)*1000+999); !b.Enabled && b.Reason != "UNKNOWN" {
+		return ErrBuildDisabled
+	}
+	return nil
 }

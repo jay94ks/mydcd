@@ -13,14 +13,14 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/lifecycle"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/imagesource"
-	"github.com/jay94ks/mydcd/internal/tenancy"
-	"github.com/jay94ks/mydcd/internal/workload"
-	checker "github.com/jay94ks/mydcd/internal/workload/lifecycle"
-	"github.com/jay94ks/mydcd/internal/workload/volumes"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/lifecycle"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/imagesource"
+	"github.com/jay94ks/seafield/internal/tenancy"
+	"github.com/jay94ks/seafield/internal/workload"
+	checker "github.com/jay94ks/seafield/internal/workload/lifecycle"
+	"github.com/jay94ks/seafield/internal/workload/volumes"
 )
 
 type Condition string
@@ -78,6 +78,7 @@ type PlanningContext struct {
 	Networks                                        tenancy.Networks        // complete shared catalog, including other tenants
 	Volumes                                         map[string]volumes.State
 	FixedVolumes                                    map[string]volumes.NativeReady // current permitted signed registrations; never caller-supplied app paths
+	Shares                                          map[string]VolumeShare         // volume key -> committed volume-shares record
 	Checkers                                        checker.Catalog
 	CheckerPrograms                                 map[AppScope]checker.FrozenProgram // exact accepted app programs, not current authority
 	CheckerProviders                                map[[32]byte]bool                  // exact source owners served by current installed members in this committed view; never authentication
@@ -225,32 +226,32 @@ func compile(c Compose, policy access.Catalog, ctx PlanningContext, move *Volume
 	if !identifier(c.Name) {
 		return Blueprint{}, inputError("PROJECT_NAME_REQUIRED", "name")
 	}
-	if c.MyDC.Tenant == "" {
-		c.MyDC.Tenant = ctx.Tenant
-	} else if ctx.Tenant != "" && ctx.Tenant != c.MyDC.Tenant {
-		return Blueprint{}, inputError("TENANT_CONFLICT", "x-mydc.tenant")
+	if c.Sfc.Tenant == "" {
+		c.Sfc.Tenant = ctx.Tenant
+	} else if ctx.Tenant != "" && ctx.Tenant != c.Sfc.Tenant {
+		return Blueprint{}, inputError("TENANT_CONFLICT", "x-sfc.tenant")
 	}
-	if c.MyDC.Deployment == "" {
+	if c.Sfc.Deployment == "" {
 		// The deployment of an app is named after it unless the caller
 		// keeps an existing one (ctx.Deployment).
-		c.MyDC.Deployment = ctx.Deployment
-		if c.MyDC.Deployment == "" {
-			c.MyDC.Deployment = c.Name
+		c.Sfc.Deployment = ctx.Deployment
+		if c.Sfc.Deployment == "" {
+			c.Sfc.Deployment = c.Name
 		}
-	} else if ctx.Deployment != "" && ctx.Deployment != c.MyDC.Deployment {
-		return Blueprint{}, inputError("DEPLOYMENT_CONFLICT", "x-mydc.deployment_id")
+	} else if ctx.Deployment != "" && ctx.Deployment != c.Sfc.Deployment {
+		return Blueprint{}, inputError("DEPLOYMENT_CONFLICT", "x-sfc.deployment_id")
 	}
-	if ctx.Cluster == ([32]byte{}) || !identifier(c.MyDC.Tenant) || !identifier(c.MyDC.Deployment) || policy.Authorize(ctx.Actor, c.MyDC.Tenant, access.Deploy, "") != nil {
-		return Blueprint{}, inputError("APP_SCOPE_REQUIRED", "x-mydc")
+	if ctx.Cluster == ([32]byte{}) || !identifier(c.Sfc.Tenant) || !identifier(c.Sfc.Deployment) || policy.Authorize(ctx.Actor, c.Sfc.Tenant, access.Deploy, "") != nil {
+		return Blueprint{}, inputError("APP_SCOPE_REQUIRED", "x-sfc")
 	}
 	if _, e := ctx.Networks.Encode(); e != nil {
 		return Blueprint{}, inputError("COMPLETE_NETWORK_VIEW_REQUIRED", "context")
 	}
-	b := Blueprint{blueprintRecord{InputKind: inputKind, Schema: 1, Cluster: ctx.Cluster, Actor: ctx.Actor, Tenant: c.MyDC.Tenant, App: c.Name, Deployment: c.MyDC.Deployment, CatalogRevision: policy.Revision(), NetworkRevision: ctx.Networks.Revision(), Nodes: map[string]PlanningNode{}}}
+	b := Blueprint{blueprintRecord{InputKind: inputKind, Schema: 1, Cluster: ctx.Cluster, Actor: ctx.Actor, Tenant: c.Sfc.Tenant, App: c.Name, Deployment: c.Sfc.Deployment, CatalogRevision: policy.Revision(), NetworkRevision: ctx.Networks.Revision(), Nodes: map[string]PlanningNode{}}}
 	if err := b.freezeRegistrySources(c, ctx.ExternalRegistries); err != nil {
 		return Blueprint{}, err
 	}
-	if inputKind == "app" && c.MyDC.Delivery != nil && c.MyDC.Delivery.Enabled {
+	if inputKind == "app" && c.Sfc.Delivery != nil && c.Sfc.Delivery.Enabled {
 		if ctx.DefaultNode != "" && !identifier(ctx.DefaultNode) {
 			return Blueprint{}, inputError("INVALID_DEFAULT_NODE", "context")
 		}
@@ -325,10 +326,10 @@ func compile(c Compose, policy access.Catalog, ctx PlanningContext, move *Volume
 	if e := require("core"); e != nil {
 		return Blueprint{}, e
 	}
-	for id, h := range c.MyDC.Nodes {
+	for id, h := range c.Sfc.Nodes {
 		n, ok := ctx.Nodes[id]
 		if !ok || n.Underlay != h.Underlay || n.Voter != h.Voter {
-			return Blueprint{}, inputError("NODE_HINT_CONFLICT", "x-mydc.nodes."+id)
+			return Blueprint{}, inputError("NODE_HINT_CONFLICT", "x-sfc.nodes."+id)
 		}
 	}
 
@@ -344,7 +345,7 @@ func compile(c Compose, policy access.Catalog, ctx PlanningContext, move *Volume
 		if e := require("network-reference"); e != nil {
 			return Blueprint{}, e
 		}
-		if definition.MyDC.DNS != nil || definition.MyDC.RuntimeChanges != nil || len(definition.MyDC.TunnelAddresses) > 0 {
+		if definition.Sfc.DNS != nil || definition.Sfc.RuntimeChanges != nil || len(definition.Sfc.TunnelAddresses) > 0 {
 			return Blueprint{}, inputError("EXTERNAL_NETWORK_NOT_MUTABLE", alias)
 		}
 		name := definition.Name
@@ -359,12 +360,12 @@ func compile(c Compose, policy access.Catalog, ctx PlanningContext, move *Volume
 				}
 			}
 		}
-		for _, registry := range c.MyDC.Registries {
+		for _, registry := range c.Sfc.Registries {
 			if registry.Enabled && registry.Network == alias {
 				owners[registry.Node] = true
 			}
 		}
-		if ingress := c.MyDC.Ingress; ingress != nil {
+		if ingress := c.Sfc.Ingress; ingress != nil {
 			for _, route := range IngressRoutes(*ingress) {
 				backend, exists := c.Services[route.Service]
 				if !exists {
@@ -412,16 +413,16 @@ func compile(c Compose, policy access.Catalog, ctx PlanningContext, move *Volume
 		if net.External {
 			continue
 		}
-		if len(net.MyDC.Pools) == 0 {
+		if len(net.Sfc.Pools) == 0 {
 			return Blueprint{}, inputError("NETWORK_BINDING_REQUIRED", "networks."+id)
 		}
-		for _, owner := range mapKeys(net.MyDC.Pools) {
-			pool := net.MyDC.Pools[owner]
+		for _, owner := range mapKeys(net.Sfc.Pools) {
+			pool := net.Sfc.Pools[owner]
 			n, e := node(owner, access.ManageNetwork)
 			if e != nil {
 				return Blueprint{}, e
 			}
-			mtu := net.MyDC.MTU
+			mtu := net.Sfc.MTU
 			if mtu == 0 {
 				mtu = 1280
 			}
@@ -448,16 +449,16 @@ func compile(c Compose, policy access.Catalog, ctx PlanningContext, move *Volume
 			if e = add(Step{Key: bridge, Kind: "bridge", Node: owner, Owner: resourceOwner, Goal: goal(bridgeDeclaration{id, mtu, bridgePool}), Completion: Applied}); e != nil {
 				return Blueprint{}, e
 			}
-			if len(net.MyDC.Pools) > 1 {
+			if len(net.Sfc.Pools) > 1 {
 				var deps []Dependency
-				for _, other := range mapKeys(net.MyDC.Pools) {
+				for _, other := range mapKeys(net.Sfc.Pools) {
 					deps = append(deps, Dependency{key("bridge", id+"/"+other), Applied})
 				}
-				if e = add(Step{Key: key("tunnel", id+"/"+owner), Kind: "tunnel", Node: owner, Owner: resourceOwner, Goal: goal(net.MyDC.TunnelAddresses), Dependencies: deps, Completion: Applied}); e != nil {
+				if e = add(Step{Key: key("tunnel", id+"/"+owner), Kind: "tunnel", Node: owner, Owner: resourceOwner, Goal: goal(net.Sfc.TunnelAddresses), Dependencies: deps, Completion: Applied}); e != nil {
 					return Blueprint{}, e
 				}
 			}
-			if net.MyDC.DNS != nil && net.MyDC.DNS.Enabled {
+			if net.Sfc.DNS != nil && net.Sfc.DNS.Enabled {
 				feature := "network-dns"
 				if ctx.Features["network-services"] {
 					feature = "network-services"
@@ -465,39 +466,42 @@ func compile(c Compose, policy access.Catalog, ctx PlanningContext, move *Volume
 				if e = require(feature); e != nil {
 					return Blueprint{}, e
 				}
-				if e = add(Step{Key: key("dns", id+"/"+owner), Kind: "dns", Node: owner, Owner: resourceOwner, Goal: goal(net.MyDC.DNS), Dependencies: []Dependency{{bridge, Applied}}, Completion: Applied}); e != nil {
+				if e = add(Step{Key: key("dns", id+"/"+owner), Kind: "dns", Node: owner, Owner: resourceOwner, Goal: goal(net.Sfc.DNS), Dependencies: []Dependency{{bridge, Applied}}, Completion: Applied}); e != nil {
 					return Blueprint{}, e
 				}
 			}
 		}
 	}
-	if c.MyDC.Vault != nil {
+	if c.Sfc.Vault != nil {
 		if e := require("inputs"); e != nil {
 			return Blueprint{}, e
 		}
 		if policy.Authorize(ctx.Actor, b.d.Tenant, access.ManageSecrets, "") != nil {
 			return Blueprint{}, access.ErrDenied
 		}
-		if e := add(Step{Key: key("namespace", "root"), Kind: "namespace", Goal: goal(c.MyDC.Vault), Completion: Committed, Retain: true}); e != nil {
+		if e := add(Step{Key: key("namespace", "root"), Kind: "namespace", Goal: goal(c.Sfc.Vault), Completion: Committed, Retain: true}); e != nil {
 			return Blueprint{}, e
 		}
 	}
 	volumeOwners := map[string]string{}
 	for id, service := range c.Services {
-		if len(service.MyDC.Nodes) == 0 {
-			service.MyDC.Node = placements[id][0].Node
+		if len(service.Sfc.Nodes) == 0 {
+			service.Sfc.Node = placements[id][0].Node
 			c.Services[id] = service
 		}
 		for _, instance := range placements[id] {
 			for _, mount := range service.Volumes {
-				if len(placements[id]) > 1 {
-					_, fixed, err := resolveFixedVolume(mount.Source, b.d.Tenant, c.Volumes[mount.Source], ctx)
-					if err != nil {
-						return Blueprint{}, err
-					}
-					if fixed {
-						return Blueprint{}, inputError("REPLICA_FIXED_VOLUME_FORBIDDEN", mount.Source)
-					}
+				ref, fixed, err := resolveFixedVolume(mount.Source, b.d.Tenant, c.Volumes[mount.Source], ctx)
+				if err != nil {
+					return Blueprint{}, err
+				}
+				if fixed && ref.Share != "" {
+					// A shared Volume stays on its owner; tasks on other
+					// servers reach it over VolumeFS.
+					continue
+				}
+				if len(placements[id]) > 1 && fixed {
+					return Blueprint{}, inputError("REPLICA_FIXED_VOLUME_FORBIDDEN", mount.Source)
 				}
 				if old := volumeOwners[mount.Source]; old != "" && old != instance.Node {
 					return Blueprint{}, inputError("VOLUME_MOVE_REQUIRED", mount.Source)
@@ -506,7 +510,7 @@ func compile(c Compose, policy access.Catalog, ctx PlanningContext, move *Volume
 			}
 		}
 	}
-	for _, r := range c.MyDC.Registries {
+	for _, r := range c.Sfc.Registries {
 		if r.Enabled {
 			if old := volumeOwners[r.Volume]; old != "" && old != r.Node {
 				return Blueprint{}, inputError("VOLUME_MOVE_REQUIRED", r.Volume)
@@ -523,7 +527,7 @@ func compile(c Compose, policy access.Catalog, ctx PlanningContext, move *Volume
 		if resolveErr != nil {
 			return Blueprint{}, resolveErr
 		}
-		owner := v.MyDC.Node
+		owner := v.Sfc.Node
 		if owner == "" {
 			owner = volumeOwners[id]
 		}
@@ -543,13 +547,13 @@ func compile(c Compose, policy access.Catalog, ctx PlanningContext, move *Volume
 		if e != nil {
 			return Blueprint{}, e
 		}
-		if v.MyDC.Quota == "hard" {
+		if v.Sfc.Quota == "hard" {
 			if e = require("hard-quota"); e != nil {
 				return Blueprint{}, e
 			}
 		}
 		volumeOwners[id] = owner
-		v.MyDC.Node = owner
+		v.Sfc.Node = owner
 		c.Volumes[id] = v
 		if fixed {
 			if e := require("fixed-volumes"); e != nil {
@@ -597,12 +601,12 @@ func compile(c Compose, policy access.Catalog, ctx PlanningContext, move *Volume
 			if materializeErr != nil {
 				return Blueprint{}, materializeErr
 			}
-			n, e := node(s.MyDC.Node, access.Deploy)
+			n, e := node(s.Sfc.Node, access.Deploy)
 			if e != nil {
 				return Blueprint{}, e
 			}
-			if _, e = policy.CheckImage(ctx.Actor, b.d.Tenant, s.MyDC.Node, s.Image); e != nil {
-				return Blueprint{}, imageCheckError(policy, ctx.Actor, b.d.Tenant, s.MyDC.Node, e, "services."+logical+".image")
+			if _, e = policy.CheckImage(ctx.Actor, b.d.Tenant, s.Sfc.Node, s.Image); e != nil {
+				return Blueprint{}, imageCheckError(policy, ctx.Actor, b.d.Tenant, s.Sfc.Node, e, "services."+logical+".image")
 			}
 			cpu, _ := nanoCPU(s.CPUs)
 			memory, _ := byteSize(s.Memory)
@@ -653,9 +657,9 @@ func compile(c Compose, policy access.Catalog, ctx PlanningContext, move *Volume
 						return Blueprint{}, e
 					}
 				}
-				pool, ok := net.MyDC.Pools[s.MyDC.Node]
+				pool, ok := net.Sfc.Pools[s.Sfc.Node]
 				if net.External {
-					referenceKey := key("network-ref", netID+"/"+s.MyDC.Node)
+					referenceKey := key("network-ref", netID+"/"+s.Sfc.Node)
 					ref, exists := borrowed[referenceKey]
 					if !exists {
 						return Blueprint{}, inputError("EXTERNAL_NETWORK_BINDING_REQUIRED", netID)
@@ -680,15 +684,15 @@ func compile(c Compose, policy access.Catalog, ctx PlanningContext, move *Volume
 						return Blueprint{}, inputError("ADDRESS_OUTSIDE_POOL", id)
 					}
 				}
-				deps = append(deps, Dependency{key("bridge", netID+"/"+s.MyDC.Node), Applied})
-				if len(net.MyDC.Pools) > 1 {
-					deps = append(deps, Dependency{key("tunnel", netID+"/"+s.MyDC.Node), Applied})
+				deps = append(deps, Dependency{key("bridge", netID+"/"+s.Sfc.Node), Applied})
+				if len(net.Sfc.Pools) > 1 {
+					deps = append(deps, Dependency{key("tunnel", netID+"/"+s.Sfc.Node), Applied})
 				}
-				if net.MyDC.DNS != nil && net.MyDC.DNS.Enabled {
+				if net.Sfc.DNS != nil && net.Sfc.DNS.Enabled {
 					// Publish the task's exact address/generation before DNS native
 					// readiness, which itself consumes those committed addresses.
 					// Native Create/Start remains gated by the same DNS observation.
-					dns := key("dns", netID+"/"+s.MyDC.Node)
+					dns := key("dns", netID+"/"+s.Sfc.Node)
 					deps = append(deps, Dependency{dns, Committed})
 					activation = append(activation, Dependency{dns, Applied})
 				}
@@ -699,15 +703,15 @@ func compile(c Compose, policy access.Catalog, ctx PlanningContext, move *Volume
 						continue
 					}
 					canonical := mustAddr(ip).String()
-					wanted := Step{Key: key("task", id), Kind: "task", Node: s.MyDC.Node, Owner: n.Key, Goal: goal(taskConfig)}
+					wanted := Step{Key: key("task", id), Kind: "task", Node: s.Sfc.Node, Owner: n.Key, Goal: goal(taskConfig)}
 					if !plannedAddressAllowed(b, ctx, wanted, mustAddr(ip)) {
 						return Blueprint{}, inputError("ADDRESS_CONFLICT", id)
 					}
 					if held, ok := ctx.Addresses[canonical]; ok && (held.Generation == 0 || held.Revision < held.Generation || !ctx.Current[held.Key].Present || held.Key != key("task", id) || held.Generation != ctx.Current[held.Key].Generation || held.Revision != ctx.Current[held.Key].Revision) {
 						return Blueprint{}, inputError("ADDRESS_CONFLICT", id)
 					}
-					addressKey := s.MyDC.Node + "/" + canonical
-					if addresses[addressKey] || canonical == c.Networks[netID].MyDC.Pools[s.MyDC.Node].Gateway {
+					addressKey := s.Sfc.Node + "/" + canonical
+					if addresses[addressKey] || canonical == c.Networks[netID].Sfc.Pools[s.Sfc.Node].Gateway {
 						return Blueprint{}, inputError("ADDRESS_CONFLICT", id)
 					}
 					addresses[addressKey] = true
@@ -725,19 +729,20 @@ func compile(c Compose, policy access.Catalog, ctx PlanningContext, move *Volume
 				} else {
 					writers[volumeKey]++
 				}
-				if writers[volumeKey] > 1 || writers[volumeKey] > 0 && readers[volumeKey] > 0 {
+				share := b.d.FixedVolumes[mount.Source].Share
+				if share == "" && (writers[volumeKey] > 1 || writers[volumeKey] > 0 && readers[volumeKey] > 0) || share == volumes.ShareSingleWriter && writers[volumeKey] > 1 {
 					return Blueprint{}, inputError("VOLUME_WRITER_CONFLICT", mount.Source)
 				}
 				if _, fixed := b.d.FixedVolumes[mount.Source]; !fixed {
 					deps = append(deps, Dependency{key("volume", mount.Source), Applied})
 				}
 			}
-			if len(s.Secrets) > 0 || len(s.MyDC.Sources) > 0 || len(s.MyDC.SecretEnv) > 0 || len(b.d.RegistrySources[logical]) > 0 {
+			if len(s.Secrets) > 0 || len(s.Sfc.Sources) > 0 || len(s.Sfc.SecretEnv) > 0 || len(b.d.RegistrySources[logical]) > 0 {
 				if e = require("inputs"); e != nil {
 					return Blueprint{}, e
 				}
 				inputDeps := []Dependency{{Key: key("task", id), Condition: Committed}}
-				if c.MyDC.Vault != nil {
+				if c.Sfc.Vault != nil {
 					inputDeps = append(inputDeps, Dependency{key("namespace", "root"), Committed})
 				}
 				for _, mount := range s.Volumes {
@@ -745,12 +750,12 @@ func compile(c Compose, policy access.Catalog, ctx PlanningContext, move *Volume
 						inputDeps = append(inputDeps, Dependency{key("volume", mount.Source), Applied})
 					}
 				}
-				if e = add(Step{Key: key("inputs", id), Kind: "inputs", Identity: []string{key("task", id)}, Node: s.MyDC.Node, Owner: n.Key, Goal: goal(struct {
+				if e = add(Step{Key: key("inputs", id), Kind: "inputs", Identity: []string{key("task", id)}, Node: s.Sfc.Node, Owner: n.Key, Goal: goal(struct {
 					Sources         []Selector
 					Mounts          SecretMounts
 					Environment     []SecretEnvironment `json:",omitempty"`
 					RegistrySources []Source            `json:",omitempty"`
-				}{Sources: s.MyDC.Sources, Mounts: s.Secrets, Environment: s.MyDC.SecretEnv, RegistrySources: b.d.RegistrySources[logical]}), Dependencies: inputDeps, Completion: Applied}); e != nil {
+				}{Sources: s.Sfc.Sources, Mounts: s.Secrets, Environment: s.Sfc.SecretEnv, RegistrySources: b.d.RegistrySources[logical]}), Dependencies: inputDeps, Completion: Applied}); e != nil {
 					return Blueprint{}, e
 				}
 				activation = append(activation, Dependency{Key: key("inputs", id), Condition: Applied})
@@ -775,12 +780,12 @@ func compile(c Compose, policy access.Catalog, ctx PlanningContext, move *Volume
 				}
 			}
 			deps = expandReplicaDependencies(deps, placements, b.d.Tenant, b.d.App)
-			if e = add(Step{Key: key("task", id), Kind: "task", Node: s.MyDC.Node, Owner: n.Key, Goal: goal(taskConfig), Dependencies: deps, Activation: activation, Completion: completion}); e != nil {
+			if e = add(Step{Key: key("task", id), Kind: "task", Node: s.Sfc.Node, Owner: n.Key, Goal: goal(taskConfig), Dependencies: deps, Activation: activation, Completion: completion}); e != nil {
 				return Blueprint{}, e
 			}
 		}
 	}
-	if i := c.MyDC.Ingress; i != nil {
+	if i := c.Sfc.Ingress; i != nil {
 		n, e := node(i.Node, access.Deploy)
 		if e != nil {
 			return Blueprint{}, e
@@ -830,7 +835,7 @@ func compile(c Compose, policy access.Catalog, ctx PlanningContext, move *Volume
 						}
 						continue
 					}
-					if c.Networks[alias].MyDC.Pools[i.Node].CIDR == "" {
+					if c.Networks[alias].Sfc.Pools[i.Node].CIDR == "" {
 						return Blueprint{}, inputError("INGRESS_REMOTE_NETWORK_REQUIRED", alias)
 					}
 					for _, owner := range []string{i.Node, instance.Node} {
@@ -863,8 +868,8 @@ func compile(c Compose, policy access.Catalog, ctx PlanningContext, move *Volume
 			return Blueprint{}, e
 		}
 	}
-	for _, id := range mapKeys(c.MyDC.Registries) {
-		r := c.MyDC.Registries[id]
+	for _, id := range mapKeys(c.Sfc.Registries) {
+		r := c.Sfc.Registries[id]
 		if !r.Enabled {
 			continue
 		}
@@ -876,7 +881,7 @@ func compile(c Compose, policy access.Catalog, ctx PlanningContext, move *Volume
 			return Blueprint{}, e
 		}
 		if _, e = policy.CheckImage(ctx.Actor, b.d.Tenant, r.Node, r.Image); e != nil {
-			return Blueprint{}, imageCheckError(policy, ctx.Actor, b.d.Tenant, r.Node, e, "x-mydc.registries."+id+".image")
+			return Blueprint{}, imageCheckError(policy, ctx.Actor, b.d.Tenant, r.Node, e, "x-sfc.registries."+id+".image")
 		}
 		if volumeOwners[r.Volume] != r.Node {
 			return Blueprint{}, inputError("REGISTRY_VOLUME_REQUIRED", id)
@@ -905,22 +910,22 @@ func compile(c Compose, policy access.Catalog, ctx PlanningContext, move *Volume
 			return Blueprint{}, e
 		}
 	}
-	if c.MyDC.Delivery != nil && c.MyDC.Delivery.Enabled {
+	if c.Sfc.Delivery != nil && c.Sfc.Delivery.Enabled {
 		if e := require("git-cd"); e != nil {
 			return Blueprint{}, e
 		}
 		if policy.Authorize(ctx.Actor, b.d.Tenant, access.ManageCD, "") != nil {
 			return Blueprint{}, access.ErrDenied
 		}
-		if e := add(Step{Key: key("delivery", "source"), Kind: "delivery", Goal: goal(c.MyDC.Delivery), Completion: Committed}); e != nil {
+		if e := add(Step{Key: key("delivery", "source"), Kind: "delivery", Goal: goal(c.Sfc.Delivery), Completion: Committed}); e != nil {
 			return Blueprint{}, e
 		}
 	}
-	if c.MyDC.Routing != nil && len(c.MyDC.Routing.Routes) > 0 {
+	if c.Sfc.Routing != nil && len(c.Sfc.Routing.Routes) > 0 {
 		if e := require("routes"); e != nil {
 			return Blueprint{}, e
 		}
-		for _, r := range c.MyDC.Routing.Routes {
+		for _, r := range c.Sfc.Routing.Routes {
 			if e := add(Step{Key: key("route", r.ID), Kind: "route", Goal: goal(r), Completion: Applied}); e != nil {
 				return Blueprint{}, e
 			}
@@ -935,7 +940,7 @@ func compile(c Compose, policy access.Catalog, ctx PlanningContext, move *Volume
 	}
 	b.d.Input = c
 	for _, service := range mapKeys(c.Services) {
-		if len(c.Services[service].MyDC.SecretEnv) != 0 {
+		if len(c.Services[service].Sfc.SecretEnv) != 0 {
 			b.d.SecretEnvRequiresNewGeneration = append(b.d.SecretEnvRequiresNewGeneration, service)
 		}
 	}

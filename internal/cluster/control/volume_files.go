@@ -10,10 +10,10 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/schema"
-	"github.com/jay94ks/mydcd/internal/workload/volumes"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/workload/volumes"
 )
 
 type VolumeFileChange struct {
@@ -55,7 +55,7 @@ type VolumeFileJob struct {
 }
 
 func VolumeFileID(op UserOperation) string {
-	d := sha256.Sum256(append([]byte("mydc-volume-file-job-1\x00"), OperationBytes(op)...))
+	d := sha256.Sum256(append([]byte("sfc-volume-file-job-1\x00"), OperationBytes(op)...))
 	return "file-" + hex.EncodeToString(d[:24])
 }
 func ownVolumeFile(j VolumeFileJob) VolumeFileJob {
@@ -204,7 +204,7 @@ type VolumeFileReport struct {
 func VolumeFileReportBytes(r VolumeFileReport) []byte {
 	r.Signature = nil
 	raw, _ := json.Marshal(r)
-	return append([]byte("mydc-volume-file-report-1\x00"), raw...)
+	return append([]byte("sfc-volume-file-report-1\x00"), raw...)
 }
 func volumeFileReportValue(raw []byte) bool {
 	var h struct{ Operation string }

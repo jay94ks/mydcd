@@ -6,7 +6,7 @@ import (
 	"bytes"
 	"encoding/json"
 
-	checker "github.com/jay94ks/mydcd/internal/workload/lifecycle"
+	checker "github.com/jay94ks/seafield/internal/workload/lifecycle"
 )
 
 func freezeCheckerPlan(c Compose, ctx PlanningContext) (checker.FrozenProgram, error) {
@@ -14,18 +14,18 @@ func freezeCheckerPlan(c Compose, ctx PlanningContext) (checker.FrozenProgram, e
 	if err != nil || !present || ctx.Checkers.Cluster() != ctx.Cluster {
 		return checker.FrozenProgram{}, ErrInputs
 	}
-	frozen, err := checker.FreezeProgram(c.MyDC.Tenant, p, ctx.Checkers, ctx.CheckerSources, lifecycleTiming())
+	frozen, err := checker.FreezeProgram(c.Sfc.Tenant, p, ctx.Checkers, ctx.CheckerSources, lifecycleTiming())
 	if err != nil {
 		return checker.FrozenProgram{}, err
 	}
 	for _, fact := range frozen.Sources {
 		if !ctx.CheckerProviders[fact.Owner] {
-			return checker.FrozenProgram{}, inputError("LIFECYCLE_PROVIDER_REQUIRED", "x-mydc.lifecycle")
+			return checker.FrozenProgram{}, inputError("LIFECYCLE_PROVIDER_REQUIRED", "x-sfc.lifecycle")
 		}
 	}
 	// Keep an accepted identity when only the policy sequence changed. The
 	// current freeze above still checks active sources, policy and membership.
-	scope := AppScope{ctx.Cluster, ctx.Actor, c.MyDC.Tenant, c.Name, c.MyDC.Deployment}
+	scope := AppScope{ctx.Cluster, ctx.Actor, c.Sfc.Tenant, c.Name, c.Sfc.Deployment}
 	if accepted, ok := ctx.CheckerPrograms[scope]; ok && accepted.ValidateCatalog(ctx.Checkers) == nil && accepted.Validate(p, ctx.Cluster, lifecycleTiming()) == nil {
 		comparable := frozen.Clone()
 		comparable.Policy.Revision = accepted.Policy.Revision
@@ -113,11 +113,11 @@ func sameCheckerSelection(a, b *checker.Selection) bool {
 }
 
 func (s ComposeService) hasReadiness() bool {
-	if s.Healthcheck != nil && !s.Healthcheck.disabled() || s.MyDC.Readiness != nil {
+	if s.Healthcheck != nil && !s.Healthcheck.disabled() || s.Sfc.Readiness != nil {
 		return true
 	}
-	if s.MyDC.Lifecycle != nil {
-		for _, check := range s.MyDC.Lifecycle.Checks {
+	if s.Sfc.Lifecycle != nil {
+		for _, check := range s.Sfc.Lifecycle.Checks {
 			if check.Phase == "startup" || check.Phase == "readiness" {
 				return true
 			}

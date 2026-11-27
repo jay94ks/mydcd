@@ -7,9 +7,9 @@ import (
 	"encoding/json"
 	"slices"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/reconcile"
-	"github.com/jay94ks/mydcd/internal/tenancy"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/tenancy"
 )
 
 type SettingsAction string
@@ -46,7 +46,7 @@ type SettingsProof struct {
 func SettingsProofBytes(p SettingsProof) []byte {
 	p.Signature = nil
 	raw, _ := json.Marshal(p)
-	return append([]byte("mydc-settings-native-1\x00"), raw...)
+	return append([]byte("sfc-settings-native-1\x00"), raw...)
 }
 func ownSettingsProof(p SettingsProof) SettingsProof {
 	p.Signature = slices.Clone(p.Signature)
@@ -304,7 +304,7 @@ type SettingsUseClose struct {
 func SettingsUseCloseBytes(p SettingsUseClose) []byte {
 	p.Signature = nil
 	raw, _ := json.Marshal(p)
-	return append([]byte("mydc-settings-user-close-1\x00"), raw...)
+	return append([]byte("sfc-settings-user-close-1\x00"), raw...)
 }
 func (m Settings) UseFacts(h SettingsUse) (SettingsUseClose, error) {
 	slot, ok := m.slots[h.slot]

@@ -2,7 +2,7 @@
 
 | 명령 | 인증/대상 | 의미 |
 |---|---|---|
-| server-version | 선택 cluster/peer TLS pin; 로그인 불필요 | 응답한 mydcd의 공개 판·protocol/build metadata |
+| server-version | 선택 cluster/peer TLS pin; 로그인 불필요 | 응답한 sfcd의 공개 판·protocol/build metadata |
 | manage network-users/image-trust, volume users | 현재 사용자·선택 tenant Read | 원 Task/Binding·소비자·신뢰 규칙의 공개 projection |
 | manage network-closure | 현재 사용자·선택 tenant ManageNetwork cleanup | 정확 owner 관측/서명 closure만 조회; fence/retire는 별도 변경 |
 | volume backup limits | tenant Read, --all은 system-admin | 동일 한도/CAS와 archive/staging 예약량 |

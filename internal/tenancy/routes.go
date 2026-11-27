@@ -8,7 +8,7 @@ import (
 	"net/netip"
 	"slices"
 
-	"github.com/jay94ks/mydcd/internal/access"
+	"github.com/jay94ks/seafield/internal/access"
 )
 
 type Binding struct {
@@ -345,7 +345,7 @@ type RouteClosure struct {
 func RouteClosureBytes(p RouteClosure) []byte {
 	p.Signature = nil
 	b, _ := json.Marshal(p)
-	return append([]byte("mydc-route-closure-1\x00"), b...)
+	return append([]byte("sfc-route-closure-1\x00"), b...)
 }
 func (n Networks) verifyRouteClosure(r Route, p RouteClosure) bool {
 	return VerifyRouteClosure(n.cluster, r, p)

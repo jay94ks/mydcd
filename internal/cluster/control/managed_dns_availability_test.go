@@ -8,9 +8,9 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/network/services"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/network/services"
 )
 
 // Signed native observations are explicit fake inputs here. Membership,
@@ -20,7 +20,7 @@ func TestManagedDNSReplicaServingAvailabilityPreservesNameAndAddressOwnership(t 
 	const app = "replica-app"
 	managedDNSTaskCoreBegin(t, f, app, "10.80.1.2", "replicas", func(c *deployment.Compose, _ *deployment.PlanningContext) {
 		service := c.Services["web"]
-		service.MyDC.Node, service.MyDC.Nodes, service.MyDC.PerNode = "", []string{"node-a"}, 2
+		service.Sfc.Node, service.Sfc.Nodes, service.Sfc.PerNode = "", []string{"node-a"}, 2
 		attachment := service.Networks["lan"]
 		attachment.IPv4 = ""
 		service.Networks["lan"] = attachment

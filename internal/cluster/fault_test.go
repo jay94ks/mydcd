@@ -5,9 +5,9 @@ package cluster
 import (
 	"context"
 	"errors"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/mydcp"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/sfcp"
 	"path/filepath"
 	"sync"
 	"sync/atomic"
@@ -25,14 +25,14 @@ func TestRealBoundaryCommittedWriteFailureAndSameDBReplay(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	peer := mydcp.Peer{ID: "node", Policy: mydcp.Policy{Key: mydcp.Identity(self.Public), Member: true, Snapshot: true, Respond: true}}
+	peer := sfcp.Peer{ID: "node", Policy: sfcp.Policy{Key: sfcp.Identity(self.Public), Member: true, Snapshot: true, Respond: true}}
 	var peerMu sync.RWMutex
-	lookup := func(key mydcp.Identity) (mydcp.Peer, bool) {
+	lookup := func(key sfcp.Identity) (sfcp.Peer, bool) {
 		peerMu.RLock()
 		defer peerMu.RUnlock()
 		return peer, key == peer.Key
 	}
-	mesh, err := mydcp.NewTransport(self, [32]byte{1}, lookup)
+	mesh, err := sfcp.NewTransport(self, [32]byte{1}, lookup)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -42,7 +42,7 @@ func TestRealBoundaryCommittedWriteFailureAndSameDBReplay(t *testing.T) {
 	peerMu.Lock()
 	peer.Endpoint = mesh.Addr().String()
 	peerMu.Unlock()
-	resolve := func(id raft.ServerID, address raft.ServerAddress) (mydcp.Peer, bool) {
+	resolve := func(id raft.ServerID, address raft.ServerAddress) (sfcp.Peer, bool) {
 		return peer, string(id) == peer.ID && string(address) == peer.Endpoint
 	}
 	o := Options{ID: peer.ID, Root: t.TempDir(), Admin: self.Actor(), Cluster: [32]byte{1}, Mesh: mesh, Resolve: resolve, Bootstrap: true, Servers: []raft.Server{{ID: raft.ServerID(peer.ID), Address: raft.ServerAddress(peer.Endpoint), Suffrage: raft.Voter}}}
@@ -100,7 +100,7 @@ func TestRealBoundaryCommittedWriteFailureAndSameDBReplay(t *testing.T) {
 	}
 	_ = engine.Close()
 	_ = mesh.Close()
-	mesh, err = mydcp.NewTransport(self, [32]byte{1}, lookup)
+	mesh, err = sfcp.NewTransport(self, [32]byte{1}, lookup)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -137,10 +137,10 @@ func TestRealBoundaryManagementDisconnectDoesNotRetry(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	clientPeer := mydcp.Peer{ID: "caller", Policy: mydcp.Policy{Key: mydcp.Identity(clientID.Public), Manage: true}}
-	serverPeer := mydcp.Peer{ID: "server", Policy: mydcp.Policy{Key: mydcp.Identity(serverID.Public), Respond: true}}
+	clientPeer := sfcp.Peer{ID: "caller", Policy: sfcp.Policy{Key: sfcp.Identity(clientID.Public), Manage: true}}
+	serverPeer := sfcp.Peer{ID: "server", Policy: sfcp.Policy{Key: sfcp.Identity(serverID.Public), Respond: true}}
 	var peerMu sync.RWMutex
-	lookup := func(key mydcp.Identity) (mydcp.Peer, bool) {
+	lookup := func(key sfcp.Identity) (sfcp.Peer, bool) {
 		peerMu.RLock()
 		defer peerMu.RUnlock()
 		if key == clientPeer.Key {
@@ -148,10 +148,10 @@ func TestRealBoundaryManagementDisconnectDoesNotRetry(t *testing.T) {
 		}
 		return serverPeer, key == serverPeer.Key
 	}
-	server, _ := mydcp.NewTransport(serverID, [32]byte{1}, lookup)
+	server, _ := sfcp.NewTransport(serverID, [32]byte{1}, lookup)
 	defer server.Close()
 	var received atomic.Int32
-	if err = server.On(mydcp.Management, func(_ context.Context, _ *mydcp.Session, stream *quic.Stream, _ mydcp.Frame) error {
+	if err = server.On(sfcp.Management, func(_ context.Context, _ *sfcp.Session, stream *quic.Stream, _ sfcp.Frame) error {
 		received.Add(1)
 		stream.CancelWrite(90)
 		return nil
@@ -164,19 +164,19 @@ func TestRealBoundaryManagementDisconnectDoesNotRetry(t *testing.T) {
 	peerMu.Lock()
 	serverPeer.Endpoint = server.Addr().String()
 	peerMu.Unlock()
-	client, _ := mydcp.NewTransport(clientID, [32]byte{1}, lookup)
+	client, _ := sfcp.NewTransport(clientID, [32]byte{1}, lookup)
 	defer client.Close()
 	command, _ := state.EncodeCommand(state.Command{Actor: clientID.Actor(), Epoch: 1, RequestID: "one", Key: "network/x", Value: "x"})
 	r := ManagementRequest{Method: "submit", Command: command, Latest: true}
 	_, err = CallManagement(ctx, client, clientID, [32]byte{1}, serverPeer, r)
 	var outcome *ManagementError
-	if !errors.As(err, &outcome) || outcome.Phase != mydcp.Unknown || received.Load() != 1 {
+	if !errors.As(err, &outcome) || outcome.Phase != sfcp.Unknown || received.Load() != 1 {
 		t.Fatal("sent operation was retried or classified not-sent", err, received.Load())
 	}
 	before, cancelBefore := context.WithCancel(ctx)
 	cancelBefore()
 	_, err = CallManagement(before, client, clientID, [32]byte{1}, serverPeer, r)
-	if !errors.As(err, &outcome) || outcome.Phase != mydcp.NotSent || received.Load() != 1 {
+	if !errors.As(err, &outcome) || outcome.Phase != sfcp.NotSent || received.Load() != 1 {
 		t.Fatal("cancelled prepared request was sent", err, received.Load())
 	}
 }

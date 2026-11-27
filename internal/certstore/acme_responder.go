@@ -7,7 +7,7 @@ import (
 	"net/netip"
 )
 
-// ACMEResponder is the cluster's HTTP-01 responder address (mydc-web's
+// ACMEResponder is the cluster's HTTP-01 responder address (sfc-web's
 // acme-listen, inside the TUN network). Ingress forwards
 // /.well-known/acme-challenge/ of registered-domain hosts on its clear
 // listeners there; without one that path answers 404.
@@ -42,7 +42,7 @@ func (r *ACMEResponder) valid() bool {
 
 // SetACMEResponder sets (or, with an empty address, clears) the responder
 // under the catalog revision CAS. Setting the same address again is a
-// conflict so a repeated start of mydc-web does not bump the revision.
+// conflict so a repeated start of sfc-web does not bump the revision.
 func (c Catalog) SetACMEResponder(address, user string, expected uint64, at int64) (Catalog, error) {
 	if c.Validate() != nil || expected != c.Revision || c.Revision == math.MaxUint64 || at <= 0 || user == "" || len(user) > 128 {
 		return c, ErrConflict

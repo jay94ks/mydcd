@@ -11,7 +11,7 @@ import (
 	"slices"
 	"strconv"
 
-	"github.com/jay94ks/mydcd/internal/network"
+	"github.com/jay94ks/seafield/internal/network"
 )
 
 // RouteDispatch permanently records that this original local journal may have
@@ -27,7 +27,7 @@ type RouteDispatch struct {
 func RouteDispatchBytes(dispatch RouteDispatch) []byte {
 	dispatch.Signature = nil
 	raw, _ := json.Marshal(dispatch)
-	return append([]byte("mydc-route-dispatch-1\x00"), raw...)
+	return append([]byte("sfc-route-dispatch-1\x00"), raw...)
 }
 
 func ownRouteDispatch(dispatch RouteDispatch) RouteDispatch {
@@ -45,7 +45,7 @@ func RouteJournalDigest(ref ReferenceConsumer, nonce [32]byte) [32]byte {
 		Spec      [32]byte
 		Nonce     [32]byte
 	}{ref.Local.Cluster, referenceNeed(ref), ref.Native, ref.DesiredHash, nonce})
-	return sha256.Sum256(append([]byte("mydc-route-journal-1\x00"), raw...))
+	return sha256.Sum256(append([]byte("sfc-route-journal-1\x00"), raw...))
 }
 
 func RouteTunnelDefinition(ref ReferenceConsumer) (network.TunnelSpec, error) {

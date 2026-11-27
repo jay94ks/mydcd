@@ -8,11 +8,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/schema"
-	"github.com/jay94ks/mydcd/internal/tenancy"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/tenancy"
 )
 
 func TestManagedIngressProjectionReservesPortsBudgetsAndOriginalLifetime(t *testing.T) {
@@ -60,7 +60,7 @@ func TestManagedIngressProjectionReservesPortsBudgetsAndOriginalLifetime(t *test
 		taskKey := deployment.ResourceKey("task", "tenant", app, "web")
 		g = base
 		g.Kind = "task"
-		g.Config = []byte(`{"CPUs":"0.1","Memory":"16m","Networks":{"lan":{"IPv4":"10.90.0.2"}},"MyDC":{"Node":"node-a"}}`)
+		g.Config = []byte(`{"CPUs":"0.1","Memory":"16m","Networks":{"lan":{"IPv4":"10.90.0.2"}},"Sfc":{"Node":"node-a"}}`)
 		g.Dependencies = []deployment.ObjectRef{ref(bridgeKey)}
 		s = put(s, taskKey, g)
 		var d deployment.IngressDeclaration

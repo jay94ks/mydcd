@@ -31,7 +31,7 @@ func nodeShellSSHFixture(t *testing.T) (*Adapter, <-chan string, <-chan [2]uint3
 		t.Fatal(err)
 	}
 	a.lookup = func(string) (*user.User, error) {
-		return &user.User{Username: Account, Name: "MyDC node shell", HomeDir: record.Home, Uid: record.UID, Gid: record.GID}, nil
+		return &user.User{Username: Account, Name: "Seafield Cluster node shell", HomeDir: record.Home, Uid: record.UID, Gid: record.GID}, nil
 	}
 	clientKey, err := a.signer(true)
 	if err != nil {
@@ -150,7 +150,7 @@ func TestNodeShellSSHUsesExactHostPinPTYAttributionAndOriginalExit(t *testing.T)
 		t.Fatal(err)
 	}
 	defer session.Close()
-	if got := <-commands; got != "export MYDC_USER='alice'\"'\"'; printf injected; '\"'\"''; exec /bin/sh -l" {
+	if got := <-commands; got != "export SFC_USER='alice'\"'\"'; printf injected; '\"'\"''; exec /bin/sh -l" {
 		t.Fatal("attribution was not literal quoted data", got)
 	}
 	if got := <-sizes; got != [2]uint32{80, 24} {

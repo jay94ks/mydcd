@@ -2,7 +2,7 @@
 
 | 빌드 job의 registry I/O | 인증·대상 | 제한 |
 |---|---|---|
-| member `image-build-registry-permit` → OCI BuildSubject (`mydc-build`) | 원 installed builder node·수락된 job Snapshot/현재 권한·내장 registry Run/Generation | pull은 trust/회수 fence, push는 running/unknown job의 정확한 출력 repository. Session/Task와 배타적이며 bearer는 registry owner가 발급. 취소/종결 뒤 새 I/O 거부. [포맷](../reference/image-build-jobs/04-owner.md) |
+| member `image-build-registry-permit` → OCI BuildSubject (`sfc-build`) | 원 installed builder node·수락된 job Snapshot/현재 권한·내장 registry Run/Generation | pull은 trust/회수 fence, push는 running/unknown job의 정확한 출력 repository. Session/Task와 배타적이며 bearer는 registry owner가 발급. 취소/종결 뒤 새 I/O 거부. [포맷](../reference/image-build-jobs/04-owner.md) |
 
 | 이미지 빌드 job | 인증·대상 | 원 결과/수명 |
 |---|---|---|
@@ -63,20 +63,24 @@
 |---|---|---|
 | `manage node-summary [--node NODE] [--after CURSOR] [--system]` | 선택 tenant의 허용 node 또는 명시 system 전체 | tenant Read / system-admin ManageCluster. 다른 tenant 사용량·호스트 metadata를 tenant 응답에 넣지 않음 |
 | `manage node-disks` / `node disks [NODE]` + 같은 필터 | 승인된 system/Docker data-root/등록 root | 전체 system-admin 또는 tenant ManageVolumes. 허용 root부터 고른 뒤 같은 파일시스템 중복 제거. 디스크 변경 없음 |
+| `node firewall show/log NODE` / User `node-firewall` show·log | 대상 서버의 `SFC-INPUT`·저장된 규칙·변경 기록, 운영자 INPUT(읽기만) | system-admin ManageCluster. 대상 sfcd가 리더 quorum 읽기로 세션 재확인 |
+| `node firewall allow/deny/update/remove/policy NODE` / User `node-firewall` change | node.yaml `firewall.managed`가 켜진 대상 서버 하나의 `SFC-INPUT` | system-admin ManageCluster. revision+delta, Raft 없이 대상이 바로 적용·저장, 서명 이벤트 기록. 꺼진 서버는 not-managed |
+| `firewall show` / User `cluster-firewall` | 커밋된 Raft 책 `control/firewall`(클러스터 정책·공통 규칙) | system-admin ManageCluster |
+| `firewall allow/deny/update/remove/policy` / 관리 변경 `set-cluster-firewall` | Raft 책 `control/firewall`. managed 서버마다 reconcile에서 자기 체인에 반영 | system-admin ManageCluster. Expected=revision + delta, 이벤트 `cluster-firewall-changed` |
 | `manage node-tenant-usage --node NODE [--after CURSOR]` | 선택 node의 tenant별 관측/예약/한도 | system-admin ManageCluster. node-summary의 TenantsNext 사용 |
 | `manage mesh-links` / `mesh links` + 같은 필터 | 전체 node 쌍 또는 tenant 허용 node 쌍 | system 관리자 상세 / tenant Read 상태 요약. 링크 재설정 없음 |
 | `manage raft-status` / `raft-status [--after CURSOR]` | 연결한 node의 로컬 합의 진단 | system-admin ManageCluster·현재 Session을 로컬 마지막 적용 catalog로 확인. 단절 시 stale, 관리 변경의 quorum 정책을 우회하지 않음 |
 
 각 명령은 [노드 관측 API](../reference/node-observations.md)의 같은 User method로 전달한다. 결과가 실행/용량 확보 권한을 뜻하지 않는다.
 
-`manage tasks [--app NAME] [--node NODE] [--after CURSOR] [--all-tenants]`는 현재 사용자 Session으로 수락된 Task·서명 관측을 읽는다. 기본 적용대상은 선택 tenant이며 `--all-tenants`도 현재 Read·membership·허용 node 범위만 반환한다. 관리 변경·provider 입력·native 제어를 수행하지 않는다. MYDCP method는 `tasks`이고 [행·cursor 계약](../reference/task-observability.md)을 따른다.
+`manage tasks [--app NAME] [--node NODE] [--after CURSOR] [--all-tenants]`는 현재 사용자 Session으로 수락된 Task·서명 관측을 읽는다. 기본 적용대상은 선택 tenant이며 `--all-tenants`도 현재 Read·membership·허용 node 범위만 반환한다. 관리 변경·provider 입력·native 제어를 수행하지 않는다. SFCP method는 `tasks`이고 [행·cursor 계약](../reference/task-observability.md)을 따른다.
 
 | 원문 조회 명령 | 적용대상·입력 | 권한·효과 |
 |---|---|---|
 | `manage app-source --app NAME [--deployment ID] [--revision VERSION] [--section source\|local-services\|overlays] [--raw]` | 선택 tenant의 수락된 앱·고정 보존 버전. 기본 최신 수락 버전 | 현재 Session tenant Read. 원문/별도 local-services YAML/CD overlay를 읽으며 배포·provider fetch·원 operation 변경 없음 |
 | `manage app-revisions --app NAME [--deployment ID] [--after CURSOR]` | 같은 앱의 보존 버전 목록 | 같은 Read, root/사용자/scope/선택자 고정 페이지. 이력 회수는 기존 rotate-app-history 별도 명령 |
 
-MYDCP method는 각각 `app-source`·`app-revisions`다. [형식·원문 분할·이력 회수](../reference/app-source.md)를 따른다.
+SFCP method는 각각 `app-source`·`app-revisions`다. [형식·원문 분할·이력 회수](../reference/app-source.md)를 따른다.
 
 명령의 적용대상·입력·효과를 정의하는 기준표다. 자원의 생성/삭제 주체는 [자원표](resource-ownership.md), 파일의 책임은 [app.yaml·cluster.yaml](app-and-cluster-spec.md), 프로필 선택은 CLI 선행 계약을 함께 따른다. 실행 가능한 문법은 [현재 CLI](../configuration/cli.md)와 구현된 도움말이 기준이다. 이 표는 현재 명령과 내부 API의 책임 경계를 기술한다. 실제 후속 도구는 별도로 표시하며, 실행/완료 내역은 HISTORY, 남은 작업은 MILESTONES에서 관리한다.
 

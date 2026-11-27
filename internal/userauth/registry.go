@@ -8,14 +8,14 @@ import (
 	"slices"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/registry"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/registry"
+	"github.com/jay94ks/seafield/internal/sfcp"
 )
 
 // This is a protected request for a derived, short-lived credential, not a
-// registry definition change, Raft command or raw MYDCP session bearer.
+// registry definition change, Raft command or raw SFCP session bearer.
 type RegistryCredentialRequest struct {
 	ID, Repository string
 	Actions        []string
@@ -75,15 +75,15 @@ func (s Service) registryCredential(ctx context.Context, view cluster.View, sess
 	return Reply{Schema: 1, Code: "ok", RegistryCredential: credential.Bytes(), RegistryAuthority: entry.Spec.Authority, RegistryCredentialExpires: grant.ExpiresAt}
 }
 
-func (c Client) RegistryCredential(ctx context.Context, target mydcp.Peer, session access.Session, tenant string, q RegistryCredentialRequest) (Reply, error) {
+func (c Client) RegistryCredential(ctx context.Context, target sfcp.Peer, session access.Session, tenant string, q RegistryCredentialRequest) (Reply, error) {
 	if c.Verify(session) != nil {
-		return Reply{}, mydcp.ErrAdmission
+		return Reply{}, sfcp.ErrAdmission
 	}
 	body, err := requestBody(Request{Method: "registry-credential", Tenant: tenant, Registry: &q})
 	if err != nil {
 		return Reply{}, err
 	}
-	reply, _, err := c.exchange(ctx, target, func(conn *mydcp.Session) (Envelope, error) {
+	reply, _, err := c.exchange(ctx, target, func(conn *sfcp.Session) (Envelope, error) {
 		return Envelope{Body: body, Session: &session, Signature: ed25519.Sign(c.Self.Private, access.RequestBytes(session, conn.PeerChallenge(), body))}, nil
 	}, true)
 	return reply, err

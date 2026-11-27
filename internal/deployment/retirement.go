@@ -11,10 +11,10 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/reconcile"
-	"github.com/jay94ks/mydcd/internal/schema"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/schema"
 )
 
 type retirementTarget struct {
@@ -167,7 +167,7 @@ func (a Inventory) ingressDrainReady(task Claim) bool {
 	return true
 }
 func retirementNonce(cluster [32]byte, id, key string, generation uint64) [16]byte {
-	data := append([]byte("mydc-app-drain-1\x00"), cluster[:]...)
+	data := append([]byte("sfc-app-drain-1\x00"), cluster[:]...)
 	data = append(data, []byte(id+"\x00"+key)...)
 	data = binary.LittleEndian.AppendUint64(data, generation)
 	digest := sha256.Sum256(data)
@@ -573,7 +573,7 @@ type RetainReceipt struct {
 
 func RetainReceiptBytes(o RetainReceipt) []byte {
 	o.Signature = nil
-	return append([]byte("mydc-app-retained-1\x00"), goal(o)...)
+	return append([]byte("sfc-app-retained-1\x00"), goal(o)...)
 }
 
 type RemovalProof struct {

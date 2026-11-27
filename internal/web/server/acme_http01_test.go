@@ -9,7 +9,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/web/provlog"
+	"github.com/jay94ks/seafield/internal/web/provlog"
 )
 
 func TestACMEIssueThroughHTTP01(t *testing.T) {
@@ -41,7 +41,26 @@ func TestACMEIssueThroughHTTP01(t *testing.T) {
 	if code != 201 {
 		t.Fatalf("add cert: %d %v", code, out)
 	}
+	_, out = f.do("GET", "/api/v1/acme/certs/app", nil)
+	if m, rs := out["methods"].(map[string]any), out["methodReasons"].(map[string]any); m["shop.example.com"] != "dns-01" || m["app.other.org"] != nil || rs["app.other.org"] != "not-registered" {
+		t.Fatalf("methods: %v %v", m, rs)
+	}
+	// app.other.org is not under a registered cluster domain: the order
+	// stops before the CA is asked
 	if code, out := f.do("POST", "/api/v1/acme/certs/app/issue", map[string]any{"opId": opA}); code != 202 {
+		t.Fatalf("issue: %d %v", code, out)
+	}
+	out = waitCert(t, f, "app")
+	if o := lastOrder(out); o["state"] != "failed" || o["errorCode"] != "not-registered" || ca.Issued() != 0 {
+		t.Fatalf("unregistered HTTP-01 name: %v", o)
+	}
+	if code, out := f.do("POST", "/api/v1/dns/domains", map[string]any{"domain": "other.org"}); code != 201 {
+		t.Fatalf("register: %d %v", code, out)
+	}
+	if _, out := f.do("GET", "/api/v1/acme/certs/app", nil); out["methods"].(map[string]any)["app.other.org"] != "http-01" {
+		t.Fatalf("methods after register: %v", out["methods"])
+	}
+	if code, out := f.do("POST", "/api/v1/acme/certs/app/issue", map[string]any{"opId": opB}); code != 202 {
 		t.Fatalf("issue: %d %v", code, out)
 	}
 	out = waitCert(t, f, "app")

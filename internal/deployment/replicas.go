@@ -9,28 +9,28 @@ import (
 	"slices"
 	"strconv"
 
-	"github.com/jay94ks/mydcd/internal/network"
-	"github.com/jay94ks/mydcd/internal/tenancy"
+	"github.com/jay94ks/seafield/internal/network"
+	"github.com/jay94ks/seafield/internal/tenancy"
 )
 
 func validateServicePlacement(service ComposeService) error {
-	if len(service.MyDC.Nodes) == 0 {
-		if service.MyDC.PerNode != 0 {
-			return inputError("REPLICA_NODES_REQUIRED", "x-mydc.per_node")
+	if len(service.Sfc.Nodes) == 0 {
+		if service.Sfc.PerNode != 0 {
+			return inputError("REPLICA_NODES_REQUIRED", "x-sfc.per_node")
 		}
 		return nil
 	}
-	if service.MyDC.Node != "" || len(service.MyDC.Nodes) > 128 || service.MyDC.PerNode > 128 {
-		return inputError("INVALID_REPLICA_PLACEMENT", "x-mydc")
+	if service.Sfc.Node != "" || len(service.Sfc.Nodes) > 128 || service.Sfc.PerNode > 128 {
+		return inputError("INVALID_REPLICA_PLACEMENT", "x-sfc")
 	}
 	seen := map[string]bool{}
-	for _, node := range service.MyDC.Nodes {
+	for _, node := range service.Sfc.Nodes {
 		if !identifier(node) || seen[node] {
 			return inputError("INVALID_REPLICA_NODE", node)
 		}
 		seen[node] = true
 	}
-	count := uint64(len(service.MyDC.Nodes)) * uint64(max(1, service.MyDC.PerNode))
+	count := uint64(len(service.Sfc.Nodes)) * uint64(max(1, service.Sfc.PerNode))
 	if count > 128 {
 		return inputError("REPLICA_LIMIT", "services")
 	}
@@ -56,8 +56,8 @@ func servicePlacements(name string, service ComposeService, defaultNode string) 
 	if err := validateServicePlacement(service); err != nil {
 		return nil, err
 	}
-	if len(service.MyDC.Nodes) == 0 {
-		node := service.MyDC.Node
+	if len(service.Sfc.Nodes) == 0 {
+		node := service.Sfc.Node
 		if node == "" {
 			node = defaultNode
 		}
@@ -67,8 +67,8 @@ func servicePlacements(name string, service ComposeService, defaultNode string) 
 		return []TaskInstance{{Service: name, Node: node}}, nil
 	}
 	out := []TaskInstance{}
-	for _, node := range service.MyDC.Nodes {
-		for ordinal := uint32(1); ordinal <= max(1, service.MyDC.PerNode); ordinal++ {
+	for _, node := range service.Sfc.Nodes {
+		for ordinal := uint32(1); ordinal <= max(1, service.Sfc.PerNode); ordinal++ {
 			out = append(out, TaskInstance{Service: name, Node: node, Ordinal: ordinal})
 		}
 	}
@@ -98,11 +98,11 @@ func materializeTaskInstance(source ComposeService, instance TaskInstance) (Comp
 	if err != nil || json.Unmarshal(raw, &service) != nil || instance.ResourceID() == "" {
 		return service, ErrInputs
 	}
-	service.MyDC.Node = instance.Node
-	service.MyDC.Nodes, service.MyDC.PerNode = nil, 0
+	service.Sfc.Node = instance.Node
+	service.Sfc.Nodes, service.Sfc.PerNode = nil, 0
 	if instance.Ordinal != 0 {
 		copy := instance
-		service.MyDC.Instance = &copy
+		service.Sfc.Instance = &copy
 	}
 	return service, nil
 }
@@ -163,8 +163,8 @@ func replicaAddresses(b Blueprint, ctx PlanningContext, instance TaskInstance, s
 				return service, inputError("EXTERNAL_NETWORK_BINDING_REQUIRED", alias)
 			}
 			pools = reference.Pools
-		} else if pool, ok := definition.MyDC.Pools[instance.Node]; ok {
-			pools = []tenancy.Subnet{{ID: "pool", Prefix: mustPrefix(pool.CIDR), Gateway: mustAddr(pool.Gateway), MTU: max(1280, definition.MyDC.MTU)}}
+		} else if pool, ok := definition.Sfc.Pools[instance.Node]; ok {
+			pools = []tenancy.Subnet{{ID: "pool", Prefix: mustPrefix(pool.CIDR), Gateway: mustAddr(pool.Gateway), MTU: max(1280, definition.Sfc.MTU)}}
 		}
 		if len(pools) == 0 {
 			return service, inputError("NETWORK_BINDING_REQUIRED", alias)

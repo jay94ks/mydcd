@@ -105,7 +105,7 @@ func TestReadOnlySpoolNeverInitializesMissingOriginalNamespace(t *testing.T) {
 	if _, err := OpenExistingSpool(int(fresh.Fd()), ref, db); err == nil {
 		t.Fatal("absent evidence became new read namespace")
 	}
-	if _, err := os.Stat(filepath.Join(path, ".mydc-imagebuild")); !errors.Is(err, os.ErrNotExist) {
+	if _, err := os.Stat(filepath.Join(path, ".sfc-imagebuild")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatal("read-only query created directory", err)
 	}
 }

@@ -13,9 +13,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/storage"
-	"github.com/jay94ks/mydcd/internal/workload"
-	contract "github.com/jay94ks/mydcd/lifecycle/v1"
+	"github.com/jay94ks/seafield/internal/storage"
+	"github.com/jay94ks/seafield/internal/workload"
+	contract "github.com/jay94ks/seafield/lifecycle/v1"
 )
 
 // Reuses the owned frozen-image fixture and its rollback, not another Docker

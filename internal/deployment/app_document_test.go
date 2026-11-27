@@ -8,7 +8,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/access"
+	"github.com/jay94ks/seafield/internal/access"
 )
 
 func TestOriginalAppDocumentIsExactBoundedOwnedAndMatchesFrozenPlan(t *testing.T) {
@@ -44,7 +44,7 @@ func TestOriginalAppDocumentIsExactBoundedOwnedAndMatchesFrozenPlan(t *testing.T
 		func(d *blueprintRecord) {
 			d.Document.DefaultNode = "other-node"
 			for name, service := range d.Input.Services {
-				service.MyDC.Node = ""
+				service.Sfc.Node = ""
 				d.Input.Services[name] = service
 			}
 		},
@@ -106,7 +106,7 @@ func TestUntrustedImageNamesItsReason(t *testing.T) {
 // Without Deploy on the node the same denial must not claim a trust cause.
 func TestImageDenialWithoutDeployStaysUnnamed(t *testing.T) {
 	f, _, ctx, _ := externalFixture(t)
-	err := imageCheckError(f.c, "no-such-user", "tenant", "node-a", access.ErrDenied, "x-mydc.registries.r.image")
+	err := imageCheckError(f.c, "no-such-user", "tenant", "node-a", access.ErrDenied, "x-sfc.registries.r.image")
 	if !errors.Is(err, access.ErrDenied) {
 		t.Fatal("denial without Deploy was relabelled", err)
 	}

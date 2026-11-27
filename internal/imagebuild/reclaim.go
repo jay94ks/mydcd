@@ -18,7 +18,7 @@ type ReclaimReceipt struct {
 func ReclaimReceiptBytes(r ReclaimReceipt) []byte {
 	r.Signature = nil
 	raw, _ := json.Marshal(r)
-	return append([]byte("mydc-imagebuild-reclaimed-1\x00"), raw...)
+	return append([]byte("sfc-imagebuild-reclaimed-1\x00"), raw...)
 }
 func (r ReclaimReceipt) Valid(scope UploadScope, version [32]byte) bool {
 	return scope.Validate() == nil && r.Schema == 1 && r.Scope == scope.Hash() && r.Version == version && r.Native != ([32]byte{}) && r.At > 0 && r.At <= math.MaxInt64 && len(r.Signature) == ed25519.SignatureSize && ed25519.Verify(scope.Root.Key[:], ReclaimReceiptBytes(r), r.Signature)

@@ -10,7 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/jay94ks/mydcd/internal/mydcp"
+	"github.com/jay94ks/seafield/internal/sfcp"
 	"io"
 	"log"
 	"os"
@@ -28,11 +28,11 @@ type rpcEnvelope struct {
 	Body   json.RawMessage
 	Error  string
 }
-type PeerResolver func(raft.ServerID, raft.ServerAddress) (mydcp.Peer, bool)
+type PeerResolver func(raft.ServerID, raft.ServerAddress) (sfcp.Peer, bool)
 type raftTransport struct {
 	replication                        map[string]ReplicationObservation
 	acks                               map[raft.ServerID]appendAck
-	mesh                               *mydcp.Transport
+	mesh                               *sfcp.Transport
 	address                            raft.ServerAddress
 	resolve                            PeerResolver
 	consumer                           chan raft.RPC
@@ -46,11 +46,11 @@ type raftTransport struct {
 	closed                             bool
 }
 
-func newRaftTransport(mesh *mydcp.Transport, address raft.ServerAddress, resolve PeerResolver, staging string) (*raftTransport, error) {
+func newRaftTransport(mesh *sfcp.Transport, address raft.ServerAddress, resolve PeerResolver, staging string) (*raftTransport, error) {
 	if err := os.MkdirAll(staging, 0700); err != nil {
 		return nil, err
 	}
-	files, err := filepath.Glob(filepath.Join(staging, ".mydc-snapshot-*"))
+	files, err := filepath.Glob(filepath.Join(staging, ".sfc-snapshot-*"))
 	if err != nil {
 		return nil, err
 	}
@@ -61,11 +61,11 @@ func newRaftTransport(mesh *mydcp.Transport, address raft.ServerAddress, resolve
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	t := &raftTransport{mesh: mesh, address: address, resolve: resolve, consumer: make(chan raft.RPC, 32), ctx: ctx, cancel: cancel, staging: staging, incomingSnapshot: make(chan struct{}, 1), outgoingSnapshot: make(chan struct{}, 1)}
-	if err := mesh.On(mydcp.Raft, t.incoming); err != nil {
+	if err := mesh.On(sfcp.Raft, t.incoming); err != nil {
 		cancel()
 		return nil, err
 	}
-	if err := mesh.On(mydcp.Snapshot, t.snapshot); err != nil {
+	if err := mesh.On(sfcp.Snapshot, t.snapshot); err != nil {
 		cancel()
 		return nil, err
 	}
@@ -159,8 +159,8 @@ func parseRPC(b []byte) (rpcEnvelope, error) {
 	}
 	return e, err
 }
-func rpcFrame(request uint64, b []byte) mydcp.Frame {
-	return mydcp.Frame{Purpose: mydcp.Raft, Kind: 1, Request: request, Fields: []mydcp.Field{{Tag: 1, Required: true, Value: b}}}
+func rpcFrame(kind uint8, request uint64, b []byte) sfcp.Frame {
+	return sfcp.Frame{Purpose: sfcp.Raft, Kind: kind, Request: request, Fields: []sfcp.Field{{Tag: 1, Required: true, Value: b}}}
 }
 func (t *raftTransport) call(id raft.ServerID, addr raft.ServerAddress, kind uint8, args, response any) error {
 	// Preserve the first cause of a slow heartbeat: membership lookup and
@@ -189,7 +189,7 @@ func (t *raftTransport) call(id raft.ServerID, addr raft.ServerAddress, kind uin
 		stages[0] = time.Since(started)
 	}
 	if !ok || !(peer.Member || peer.Replicate) {
-		return mydcp.ErrAdmission
+		return sfcp.ErrAdmission
 	}
 	s, err := t.mesh.Dial(ctx, peer)
 	if !started.IsZero() {
@@ -214,21 +214,21 @@ func (t *raftTransport) call(id raft.ServerID, addr raft.ServerAddress, kind uin
 		return err
 	}
 	request = t.mesh.NextRequest()
-	if err = mydcp.WriteFrame(stream, rpcFrame(request, b)); err != nil {
+	if err = sfcp.WriteFrame(stream, rpcFrame(sfcp.KindRequest, request, b)); err != nil {
 		return err
 	}
 	if !started.IsZero() {
 		stages[3] = time.Since(started)
 	}
-	f, err := mydcp.ReadFrame(stream, mydcp.MaxBody)
+	f, err := sfcp.ReadFrame(stream, sfcp.MaxBody)
 	if !started.IsZero() {
 		stages[4] = time.Since(started)
 	}
 	if err != nil {
 		return err
 	}
-	if f.Request != request || f.Purpose != mydcp.Raft || s.Admit(f, mydcp.Raft, false) != nil {
-		return mydcp.ErrAdmission
+	if f.Request != request || f.Purpose != sfcp.Raft || f.Kind != sfcp.KindResponse || s.Admit(f, sfcp.Raft, false) != nil {
+		return sfcp.ErrAdmission
 	}
 	e, err := parseRPC(f.Fields[0].Value)
 	if err != nil {
@@ -242,7 +242,7 @@ func (t *raftTransport) call(id raft.ServerID, addr raft.ServerAddress, kind uin
 	}
 	h, ok := response.(interface{ GetRPCHeader() raft.RPCHeader })
 	if !ok || !rpcResponseHeader(kind, h.GetRPCHeader(), peer.ID) {
-		return mydcp.ErrAdmission
+		return sfcp.ErrAdmission
 	}
 	return nil
 }
@@ -256,7 +256,7 @@ func rpcResponseHeader(kind uint8, header raft.RPCHeader, peer string) bool {
 	}
 	// HashiCorp Raft v1.8.0 timeoutNow intentionally responds with an empty
 	// TimeoutNowResponse. Its ACK is already bound above to the authenticated
-	// MYDCP peer/session, purpose and exact request. No other empty/foreign
+	// SFCP peer/session, purpose and exact request. No other empty/foreign
 	// header is a valid Raft response.
 	return kind == 4 && peer != "" && header.ProtocolVersion == 0 && len(header.ID) == 0 && len(header.Addr) == 0
 }
@@ -306,19 +306,22 @@ func (t *raftTransport) deliver(ctx context.Context, command any, reader io.Read
 // A TLS session authenticates a key; its first peer display name can predate
 // publication of the durable managed directory. Bind each RPC to the current
 // resolver's exact ID/address/key, without reviving bootstrap seed authority.
-func (t *raftTransport) requestPeer(header raft.RPCHeader, key mydcp.Identity) bool {
+// The resolver accepts only an address the directory names for that ID (its
+// endpoint, or the new one of an endpoint change being installed), so the
+// address is checked there: the returned peer carries the recorded endpoint.
+func (t *raftTransport) requestPeer(header raft.RPCHeader, key sfcp.Identity) bool {
 	peer, ok := t.resolve(raft.ServerID(header.ID), raft.ServerAddress(header.Addr))
-	return ok && peer.Key == key && peer.ID == string(header.ID) && peer.Endpoint == string(header.Addr) && (peer.Member || peer.Replicate)
+	return ok && peer.Key == key && peer.ID == string(header.ID) && (peer.Member || peer.Replicate)
 }
 
-func (t *raftTransport) incoming(ctx context.Context, s *mydcp.Session, stream *quic.Stream, f mydcp.Frame) error {
+func (t *raftTransport) incoming(ctx context.Context, s *sfcp.Session, stream *quic.Stream, f sfcp.Frame) error {
 	received := time.Now()
 	if err := t.begin(); err != nil {
 		return err
 	}
 	defer t.active.Done()
-	if f.Kind != 1 {
-		return mydcp.ErrFrame
+	if f.Kind != sfcp.KindRequest {
+		return sfcp.ErrFrame
 	}
 	e, err := parseRPC(f.Fields[0].Value)
 	if err != nil {
@@ -335,7 +338,7 @@ func (t *raftTransport) incoming(ctx context.Context, s *mydcp.Session, stream *
 	case 4:
 		command = new(raft.TimeoutNowRequest)
 	default:
-		return mydcp.ErrFrame
+		return sfcp.ErrFrame
 	}
 	if err = json.Unmarshal(e.Body, command); err != nil {
 		return err
@@ -370,7 +373,7 @@ func (t *raftTransport) incoming(ctx context.Context, s *mydcp.Session, stream *
 		authorityCPU = processCPUUsed(cpuStart)
 	}
 	if !approved {
-		return mydcp.ErrAdmission
+		return sfcp.ErrAdmission
 	}
 	phase = "deliver"
 	before = time.Now()
@@ -393,7 +396,7 @@ func (t *raftTransport) incoming(ctx context.Context, s *mydcp.Session, stream *
 	if err != nil {
 		return err
 	}
-	err = mydcp.WriteFrame(stream, rpcFrame(f.Request, b))
+	err = sfcp.WriteFrame(stream, rpcFrame(sfcp.KindResponse, f.Request, b))
 	if err == nil {
 		phase = "complete"
 	}
@@ -407,7 +410,7 @@ func (t *raftTransport) InstallSnapshot(id raft.ServerID, addr raft.ServerAddres
 	}
 	defer t.active.Done()
 	if args.Size <= 0 {
-		return mydcp.ErrBudget
+		return sfcp.ErrBudget
 	}
 	ctx, cancel := context.WithTimeout(t.ctx, 30*time.Second)
 	defer cancel()
@@ -425,7 +428,7 @@ func (t *raftTransport) InstallSnapshot(id raft.ServerID, addr raft.ServerAddres
 
 	peer, ok := t.resolve(id, addr)
 	if !ok || !(peer.Member || peer.Replicate) {
-		return mydcp.ErrAdmission
+		return sfcp.ErrAdmission
 	}
 	s, err := t.mesh.Dial(ctx, peer)
 	if err != nil {
@@ -444,8 +447,8 @@ func (t *raftTransport) InstallSnapshot(id raft.ServerID, addr raft.ServerAddres
 	if err != nil {
 		return err
 	}
-	f := mydcp.Frame{Purpose: mydcp.Snapshot, Kind: 1, Request: request, Fields: []mydcp.Field{{Tag: 1, Required: true, Value: metadata}, {Tag: 2, Required: true, Value: digest[:]}}}
-	if err = mydcp.WriteFrame(stream, f); err != nil {
+	f := sfcp.Frame{Purpose: sfcp.Snapshot, Kind: sfcp.KindRequest, Request: request, Fields: []sfcp.Field{{Tag: 1, Required: true, Value: metadata}, {Tag: 2, Required: true, Value: digest[:]}}}
+	if err = sfcp.WriteFrame(stream, f); err != nil {
 		return err
 	}
 	buffer := make([]byte, 128<<10)
@@ -458,38 +461,39 @@ func (t *raftTransport) InstallSnapshot(id raft.ServerID, addr raft.ServerAddres
 		if err != nil {
 			return err
 		}
-		f.Kind = 2
-		f.Fields = []mydcp.Field{{Tag: 1, Required: true, Value: binary.LittleEndian.AppendUint64(nil, uint64(offset))}, {Tag: 2, Required: true, Value: buffer[:n]}}
-		if err = mydcp.WriteFrame(stream, f); err != nil {
+		f.Kind = sfcp.KindChunk
+		// Every chunk has the common shape: offset, data, transfer digest.
+		f.Fields = []sfcp.Field{{Tag: 1, Required: true, Value: binary.LittleEndian.AppendUint64(nil, uint64(offset))}, {Tag: 2, Required: true, Value: buffer[:n]}, {Tag: 3, Required: true, Value: digest[:]}}
+		if err = sfcp.WriteFrame(stream, f); err != nil {
 			return err
 		}
 		offset += int64(n)
 	}
 
-	ack, err := mydcp.ReadFrame(stream, 128)
+	ack, err := sfcp.ReadFrame(stream, 128)
 	if err != nil {
 		return err
 	}
-	if ack.Purpose != mydcp.Snapshot || ack.Kind != 3 || ack.Request != request || s.Admit(ack, mydcp.Snapshot, false) != nil || binary.LittleEndian.Uint64(ack.Fields[0].Value) != args.LastLogIndex || !bytes.Equal(ack.Fields[2].Value, digest[:]) {
-		return mydcp.ErrAdmission
+	if ack.Purpose != sfcp.Snapshot || ack.Kind != sfcp.KindDone || ack.Request != request || s.Admit(ack, sfcp.Snapshot, false) != nil || binary.LittleEndian.Uint64(ack.Fields[0].Value) != args.LastLogIndex || !bytes.Equal(ack.Fields[2].Value, digest[:]) {
+		return sfcp.ErrAdmission
 	}
 	*response = raft.InstallSnapshotResponse{RPCHeader: raft.RPCHeader{ProtocolVersion: raft.ProtocolVersionMax, ID: []byte(peer.ID), Addr: []byte(addr)}, Term: binary.LittleEndian.Uint64(ack.Fields[1].Value), Success: true}
 	return nil
 }
-func (t *raftTransport) snapshot(ctx context.Context, s *mydcp.Session, stream *quic.Stream, f mydcp.Frame) error {
+func (t *raftTransport) snapshot(ctx context.Context, s *sfcp.Session, stream *quic.Stream, f sfcp.Frame) error {
 	if err := t.begin(); err != nil {
 		return err
 	}
 	defer t.active.Done()
-	if f.Kind != 1 {
-		return mydcp.ErrFrame
+	if f.Kind != sfcp.KindRequest {
+		return sfcp.ErrFrame
 	}
 	var request raft.InstallSnapshotRequest
 	if err := json.Unmarshal(f.Fields[0].Value, &request); err != nil {
 		return err
 	}
 	if !t.requestPeer(request.RPCHeader, s.Peer().Key) || request.Size <= 0 {
-		return mydcp.ErrAdmission
+		return sfcp.ErrAdmission
 	}
 	digest := append([]byte(nil), f.Fields[1].Value...)
 	select {
@@ -500,19 +504,19 @@ func (t *raftTransport) snapshot(ctx context.Context, s *mydcp.Session, stream *
 		return t.ctx.Err()
 	}
 	defer func() { <-t.incomingSnapshot }()
-	file, err := os.CreateTemp(t.staging, ".mydc-snapshot-*")
+	file, err := os.CreateTemp(t.staging, ".sfc-snapshot-*")
 	if err != nil {
 		return err
 	}
 	defer func() { _ = file.Close(); _ = os.Remove(file.Name()) }()
 	hash := sha256.New()
 	for offset := int64(0); offset < request.Size; {
-		chunk, err := mydcp.ReadFrame(stream, 128*1024+32)
+		chunk, err := sfcp.ReadFrame(stream, 128<<10+64)
 		if err != nil {
 			return err
 		}
-		if chunk.Purpose != mydcp.Snapshot || chunk.Kind != 2 || chunk.Request != f.Request || s.Admit(chunk, mydcp.Snapshot, false) != nil || binary.LittleEndian.Uint64(chunk.Fields[0].Value) != uint64(offset) || len(chunk.Fields[1].Value) == 0 || int64(len(chunk.Fields[1].Value)) > request.Size-offset {
-			return mydcp.ErrFrame
+		if chunk.Purpose != sfcp.Snapshot || chunk.Kind != sfcp.KindChunk || chunk.Request != f.Request || s.Admit(chunk, sfcp.Snapshot, false) != nil || binary.LittleEndian.Uint64(chunk.Fields[0].Value) != uint64(offset) || len(chunk.Fields[1].Value) == 0 || int64(len(chunk.Fields[1].Value)) > request.Size-offset || !bytes.Equal(chunk.Fields[2].Value, digest) {
+			return sfcp.ErrFrame
 		}
 		b := chunk.Fields[1].Value
 		n, err := file.Write(b)
@@ -526,7 +530,7 @@ func (t *raftTransport) snapshot(ctx context.Context, s *mydcp.Session, stream *
 		offset += int64(n)
 	}
 	if !bytes.Equal(hash.Sum(nil), digest) {
-		return mydcp.ErrFrame
+		return sfcp.ErrFrame
 	}
 	if _, err = file.Seek(0, io.SeekStart); err != nil {
 		return err
@@ -543,14 +547,14 @@ func (t *raftTransport) snapshot(ctx context.Context, s *mydcp.Session, stream *
 	if !ok || !response.Success {
 		return errors.New("snapshot installation rejected")
 	}
-	return mydcp.WriteFrame(stream, mydcp.Frame{Purpose: mydcp.Snapshot, Kind: 3, Request: f.Request, Fields: []mydcp.Field{{Tag: 1, Required: true, Value: binary.LittleEndian.AppendUint64(nil, request.LastLogIndex)}, {Tag: 2, Required: true, Value: binary.LittleEndian.AppendUint64(nil, response.Term)}, {Tag: 3, Required: true, Value: digest}}})
+	return sfcp.WriteFrame(stream, sfcp.Frame{Purpose: sfcp.Snapshot, Kind: sfcp.KindDone, Request: f.Request, Fields: []sfcp.Field{{Tag: 1, Required: true, Value: binary.LittleEndian.AppendUint64(nil, request.LastLogIndex)}, {Tag: 2, Required: true, Value: binary.LittleEndian.AppendUint64(nil, response.Term)}, {Tag: 3, Required: true, Value: digest}}})
 }
 
 // Stage immutable bytes on owned disk before sending a digest or handing them
 // to native InstallSnapshot. No whole-artifact buffer or fixed DB-size cap.
 func (t *raftTransport) spool(source io.Reader, size int64) (*os.File, [32]byte, error) {
 	var digest [32]byte
-	file, err := os.CreateTemp(t.staging, ".mydc-snapshot-*")
+	file, err := os.CreateTemp(t.staging, ".sfc-snapshot-*")
 	if err != nil {
 		return nil, digest, err
 	}

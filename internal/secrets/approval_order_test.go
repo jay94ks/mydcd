@@ -7,6 +7,8 @@ import (
 	"crypto/ed25519"
 	"fmt"
 	"testing"
+
+	"github.com/jay94ks/seafield/internal/access"
 )
 
 func commitOrderApproval(t *testing.T, f fixture, target Target, at int64, id string) fixture {
@@ -120,7 +122,7 @@ func TestCommittedUseTimeRequiresCurrentCommittedExactApprovalFacts(t *testing.T
 				user.Enabled = false
 				revision := user.Revision
 				user.Revision = 0
-				catalog, err = catalog.PutUser("admin", revision, user)
+				catalog, err = catalog.PutUser("admin", revision, access.User{ID: user.ID, Username: user.Username})
 			}
 			if err != nil {
 				t.Fatal(err)

@@ -18,9 +18,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/engine"
-	"github.com/jay94ks/mydcd/internal/reconcile"
-	"github.com/jay94ks/mydcd/internal/storage"
+	"github.com/jay94ks/seafield/internal/engine"
+	"github.com/jay94ks/seafield/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/storage"
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/client"
 )
@@ -136,7 +136,7 @@ func TestCheckerCompilerOriginalNoCreateClosureAndBorrowedDBRecovery(t *testing.
 		t.Fatal(err)
 	}
 	defer db.Close()
-	api, err := client.New(client.WithHost("unix:///nonexistent-mydc-compiler.sock"), client.WithAPIVersion("1.53"))
+	api, err := client.New(client.WithHost("unix:///nonexistent-sfc-compiler.sock"), client.WithAPIVersion("1.53"))
 	if err != nil {
 		t.Fatal(err)
 	}

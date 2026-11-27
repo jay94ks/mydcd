@@ -10,10 +10,10 @@ import (
 	"math"
 	"slices"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/lifecycle"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/deployment"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/lifecycle"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/deployment"
 )
 
 var ErrAppSourceUnavailable = errors.New("original application document was not retained")
@@ -276,7 +276,7 @@ func appSourceBasis(s state.State, session access.Session, tenant string, q AppS
 		Scopes                 []access.Scope
 		Query                  AppSourceSelection
 	}{s.Object(AppsKey).Revision, s.Object(CatalogKey).Revision, s.Object(MembersKey).Revision, session.User, tenant, session.Scopes, q})
-	return sha256.Sum256(append([]byte("mydc-app-revisions-1\x00"), raw...))
+	return sha256.Sum256(append([]byte("sfc-app-revisions-1\x00"), raw...))
 }
 
 func publicAppRevision(v appVersion) AppRevisionView {

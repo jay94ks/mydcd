@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/registryclient"
+	"github.com/jay94ks/seafield/internal/registryclient"
 	"github.com/moby/buildkit/session/auth"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"

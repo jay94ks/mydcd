@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/engine"
-	"github.com/jay94ks/mydcd/internal/reconcile"
-	"github.com/jay94ks/mydcd/internal/workload/volumes"
+	"github.com/jay94ks/seafield/internal/engine"
+	"github.com/jay94ks/seafield/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/workload/volumes"
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/api/types/mount"
 )
@@ -86,26 +86,36 @@ func TestFixedVolumePublicReferenceAndExactResolvedBind(t *testing.T) {
 	if _, err := volumeReferences(s, "workload/task/other/actual-app/database", reconcile.Operation{ID: 1, Target: resource}); err == nil {
 		t.Fatal("cross-tenant Task accepted")
 	}
-	m := mount.Mount{Type: mount.TypeBind, Source: "/private-state/mounts/original/data", Target: v.Target, ReadOnly: false, BindOptions: &mount.BindOptions{Propagation: mount.PropagationRPrivate, CreateMountpoint: false, NonRecursive: true}}
-	got := container.InspectResponse{HostConfig: &container.HostConfig{Mounts: []mount.Mount{m}}, Mounts: []container.MountPoint{{Type: mount.TypeBind, Source: m.Source, Destination: m.Target, RW: true, Propagation: mount.PropagationRPrivate}}}
-	if !matchResolvedTaskMounts(got, nil, []VolumeMount{v}, []mount.Mount{m}) {
-		t.Fatal("exact adapter-resolved bind rejected")
+	// A fixed volume is an engine "sfc" volume named by its native name;
+	// the engine asks sfcd for the held directory on Mount.
+	m := mount.Mount{Type: mount.TypeVolume, Source: v.Consumer.Owner.Native, Target: v.Target, ReadOnly: false, VolumeOptions: &mount.VolumeOptions{NoCopy: true, DriverConfig: &mount.Driver{Name: volumes.EngineVolumeDriver}}}
+	got := container.InspectResponse{HostConfig: &container.HostConfig{Mounts: []mount.Mount{m}}, Mounts: []container.MountPoint{{Type: mount.TypeVolume, Name: m.Source, Driver: volumes.EngineVolumeDriver, Source: "/run/sfe/volumes/m1", Destination: m.Target, RW: true}}}
+	if !matchResolvedTaskMounts(got, nil, 1, []mount.Mount{m}) {
+		t.Fatal("exact adapter-resolved engine volume rejected")
 	}
 	if matchTaskMounts(got, nil, []VolumeMount{v}) {
 		t.Fatal("fixed mount accepted without original source resolution")
 	}
-	for _, change := range []func(*container.InspectResponse){func(g *container.InspectResponse) { g.Mounts[0].Source = "/foreign" }, func(g *container.InspectResponse) { g.Mounts[0].RW = false }, func(g *container.InspectResponse) { g.HostConfig.Mounts[0].BindOptions.CreateMountpoint = true }, func(g *container.InspectResponse) { g.Mounts[0].Propagation = mount.PropagationRShared }} {
+	for name, change := range map[string]func(*container.InspectResponse){
+		"foreign name": func(g *container.InspectResponse) { g.Mounts[0].Name = "sfc-fixed-other" },
+		"read-only":    func(g *container.InspectResponse) { g.Mounts[0].RW = false },
+		"local driver": func(g *container.InspectResponse) { g.Mounts[0].Driver = "local" },
+		"no driver":    func(g *container.InspectResponse) { g.HostConfig.Mounts[0].VolumeOptions.DriverConfig = nil },
+		"host bind": func(g *container.InspectResponse) {
+			g.Mounts[0] = container.MountPoint{Type: mount.TypeBind, Source: "/private-state/mounts/original/data", Destination: m.Target, RW: true, Propagation: mount.PropagationRPrivate}
+		},
+	} {
 		bad := got
 		host := *got.HostConfig
-		opts := *m.BindOptions
+		opts := *m.VolumeOptions
 		copyMount := m
-		copyMount.BindOptions = &opts
+		copyMount.VolumeOptions = &opts
 		host.Mounts = []mount.Mount{copyMount}
 		bad.HostConfig = &host
 		bad.Mounts = append([]container.MountPoint(nil), got.Mounts...)
 		change(&bad)
-		if matchResolvedTaskMounts(bad, nil, []VolumeMount{v}, []mount.Mount{m}) {
-			t.Fatal("foreign/implicit creation bind accepted")
+		if matchResolvedTaskMounts(bad, nil, 1, []mount.Mount{m}) {
+			t.Fatal("foreign fixed mount accepted:", name)
 		}
 	}
 }

@@ -9,11 +9,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/network"
-	"github.com/jay94ks/mydcd/internal/tenancy"
-	"github.com/jay94ks/mydcd/internal/workload"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/network"
+	"github.com/jay94ks/seafield/internal/tenancy"
+	"github.com/jay94ks/seafield/internal/workload"
 )
 
 // These cases exercise the real deterministic module transaction, not native
@@ -26,7 +26,7 @@ func TestP0ManagedNetworkTypedTransactionSourceScopeAndNativePermit(t *testing.T
 	for _, tenant := range []string{"", "tenant"} {
 		f.apply("network-quota-"+tenant, "set-node-quota", 0, tenancy.NodeLimit{Tenant: tenant, Node: "node-a", Owner: owner, Capacity: workload.Resources{CPU: 8, Memory: 80}, Networks: 4, MaxConsumers: 4, PacketQueuePackets: 4, PacketQueueBytes: 8192}, state.Applied)
 	}
-	d := tenancy.TUNDefinition{Tenant: "tenant", Name: "services", Members: []tenancy.TUNNode{{Node: "node-a", Pools: []tenancy.Subnet{{ID: "pool", Prefix: netip.MustParsePrefix("10.71.1.0/24"), Gateway: netip.MustParseAddr("10.71.1.1"), MTU: 1280}}, Addresses: []netip.Prefix{netip.MustParsePrefix("10.72.0.1/32")}}}}
+	d := tenancy.TUNDefinition{Tenant: "tenant", Name: "services", Members: []tenancy.TUNNode{{Node: "node-a", Pools: []tenancy.Subnet{{ID: "pool", Prefix: netip.MustParsePrefix("10.71.1.0/24"), Gateway: netip.MustParseAddr("10.71.1.1"), MTU: 1280}}}}}
 	raw, _ := json.Marshal(d)
 	op := UserOperation{Schema: 1, Session: f.session, At: 2, Epoch: f.s.ModuleEpoch(), RequestID: "named-network", RootRevision: f.s.Object(ResourcesKey).Revision, Change: Change{Schema: 1, Principal: "admin", Action: "create-tun-network", Expected: 0, Payload: raw}}
 	op.Signature = ed25519.Sign(f.admin, OperationBytes(op))

@@ -9,8 +9,8 @@ import (
 	"slices"
 	"strconv"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/reconcile"
 )
 
 // WriteProfile grants only a designated node's public key the authority to
@@ -92,7 +92,12 @@ type WriteObservation struct {
 	Outcome                            reconcile.Outcome
 	ProviderRevision                   uint64
 	VerifierRef                        string
-	Signature                          []byte
+	// Builtin writes only: the voter that signs this observation, the
+	// SHA-256 of the sealed value, and the voters that hold it (sorted).
+	Reporter  [32]byte        `json:",omitempty"`
+	Digest    [32]byte        `json:",omitempty"`
+	Holders   []HolderReceipt `json:",omitempty"`
+	Signature []byte
 }
 
 func ownRequest(r WriteRequest) WriteRequest { r.Keys = slices.Clone(r.Keys); return r }
@@ -106,6 +111,7 @@ func ownWrite(w WriteRecord) WriteRecord {
 		p := *w.Observation
 		p.Request = ownRequest(p.Request)
 		p.Signature = slices.Clone(p.Signature)
+		p.Holders = slices.Clone(p.Holders)
 		w.Observation = &p
 	}
 	return w
@@ -113,10 +119,21 @@ func ownWrite(w WriteRecord) WriteRecord {
 func WriteObservationBytes(p WriteObservation) []byte {
 	p.Signature = nil
 	b, _ := json.Marshal(p)
-	return append([]byte("mydc-secret-write-observation-1\x00"), b...)
+	return append([]byte("sfc-secret-write-observation-1\x00"), b...)
 }
+
+// validProfile is an installed profile; the builtin one is never stored.
 func validProfile(p WriteProfile) bool {
-	return identifier(p.ID) && identifier(p.Node) && p.Key != ([32]byte{}) && p.Revision > 0 && (p.Values || p.Verifiers) && (p.Mode == "" || p.Mode == "vault" || p.Mode == "local-file" && p.Values && !p.Verifiers)
+	return p.ID != BuiltinProfile && identifier(p.ID) && identifier(p.Node) && p.Key != ([32]byte{}) && p.Revision > 0 && (p.Values || p.Verifiers) && (p.Mode == "" || p.Mode == "vault" || p.Mode == "local-file" && p.Values && !p.Verifiers)
+}
+func usableProfile(p WriteProfile) bool { return p.Builtin() || validProfile(p) }
+
+func (t Tree) profile(id string) (WriteProfile, bool) {
+	if id == BuiltinProfile {
+		return BuiltinWriteProfile(), true
+	}
+	p, ok := t.profiles[id]
+	return p, ok
 }
 func (t Tree) WriteEpoch() uint64                  { return t.writeEpoch }
 func (t Tree) Write(id string) (WriteRecord, bool) { w, ok := t.writes[id]; return ownWrite(w), ok }
@@ -146,6 +163,8 @@ func (t Tree) PlanWrite(c access.Catalog, actor, id, object, profile string, kin
 				return r, ErrPolicy
 			}
 			r.Profile, r.ExpectedProviderRevision = binding.Reference.Profile, binding.Reference.Revision
+		} else if r.Profile == "" {
+			r.Profile = t.DefaultProfile(VerifierWrite)
 		}
 		r.ProviderObject, r.Protected = verifierObject(t.tenant, object, o.Generation), true
 	default:
@@ -165,7 +184,7 @@ func (t Tree) SetWriteProfile(c access.Catalog, actor string, expected uint64, p
 		return t, ErrPolicy
 	}
 	p.Revision = t.revision + 1
-	if !validProfile(p) {
+	if p.ID == BuiltinProfile || p.Mode == BuiltinProfile || !validProfile(p) {
 		return t, ErrPolicy
 	}
 	if _, ok := t.profiles[p.ID]; !ok && len(t.profiles) >= 256 {
@@ -244,7 +263,7 @@ func (t Tree) PrepareWrite(c access.Catalog, actor string, expected uint64, r Wr
 	if !ok || o.PendingWrite != "" {
 		return t, ErrPolicy
 	}
-	p, ok := t.profiles[r.Profile]
+	p, ok := t.profile(r.Profile)
 	if !ok || !p.Enabled || p.Mode == "local-file" || !cleanText(r.ProviderObject) {
 		return t, ErrPolicy
 	}
@@ -296,7 +315,7 @@ func (t Tree) DispatchWrite(c access.Catalog, actor, id string, epoch, expected 
 	if !ok || writeTerminal(w) {
 		return t, ErrPolicy
 	}
-	p, ok := t.profiles[w.Request.Profile]
+	p, ok := t.profile(w.Request.Profile)
 	if !ok || !p.Enabled || p != w.Writer {
 		return t, access.ErrDenied
 	}
@@ -321,7 +340,17 @@ func (t Tree) DispatchWrite(c access.Catalog, actor, id string, epoch, expected 
 	return n, nil
 }
 func (t Tree) validObservation(w WriteRecord, p WriteObservation) bool {
+	if w.Writer.Builtin() {
+		if !validBuiltinObservation(w, p) {
+			return false
+		}
+	} else if p.Reporter != ([32]byte{}) || p.Digest != ([32]byte{}) || len(p.Holders) != 0 {
+		return false
+	}
 	key := w.Writer.Key
+	if w.Writer.Builtin() {
+		key = p.Reporter
+	}
 	if p.Observer != (WriteProfile{}) {
 		if !validProfile(p.Observer) || p.Observer.Mode == "local-file" || !p.Observer.Enabled || p.Observer.ID != w.Request.Profile || p.Observer.Revision > t.revision || p.Outcome == reconcile.EffectNotApplied || w.Request.Kind == ValueWrite && !p.Observer.Values || w.Request.Kind == VerifierWrite && !p.Observer.Verifiers {
 			return false
@@ -345,7 +374,7 @@ func (t Tree) validObservation(w WriteRecord, p WriteObservation) bool {
 func (t Tree) ObserveWrite(p WriteObservation) (Tree, error) {
 	w, ok := t.writes[p.Request.ID]
 	if p.Observer != (WriteProfile{}) {
-		current, exists := t.profiles[p.Observer.ID]
+		current, exists := t.profile(p.Observer.ID)
 		if !exists || current != p.Observer {
 			return t, ErrPolicy
 		}
@@ -400,7 +429,7 @@ func (t Tree) PublishStored(c access.Catalog, actor, id string, epoch, expectedO
 	if w.Journal.Pending != nil || !w.Journal.Applied.Present || w.Observation == nil || w.Observation.Outcome != reconcile.EffectApplied {
 		return t, ErrPolicy
 	}
-	p, ok := t.profiles[w.Request.Profile]
+	p, ok := t.profile(w.Request.Profile)
 	if !ok || !p.Enabled || w.Request.Kind == ValueWrite && !p.Values || w.Request.Kind == VerifierWrite && !p.Verifiers {
 		return t, access.ErrDenied
 	}
@@ -429,6 +458,16 @@ func (t Tree) PublishStored(c access.Catalog, actor, id string, epoch, expectedO
 		o := result.objects[w.Request.Object]
 		o.VerifierBinding = &VerifierBinding{Reference: Reference{Profile: w.Request.Profile, Object: w.Request.ProviderObject, Revision: w.Observation.ProviderRevision, Keys: []string{"verifier"}}, Receipt: writeReceipt(w)}
 		result.objects[o.ID] = o
+	}
+	if w.Writer.Builtin() {
+		h := BuiltinHolding{Kind: w.Request.Kind, Object: w.Request.ProviderObject, Revision: w.Observation.ProviderRevision, Digest: w.Observation.Digest}
+		for _, r := range w.Observation.Holders {
+			h.Holders = append(h.Holders, r.Voter)
+		}
+		if _, exists := result.builtin[h.key()]; exists || len(result.builtin) >= maxBuiltinHoldings || !h.valid() {
+			return t, ErrPolicy
+		}
+		result.builtin[h.key()] = h
 	}
 	w = ownWrite(w)
 	w.PublishedRevision = result.revision
@@ -521,7 +560,7 @@ func (t Tree) RotateWrites(c access.Catalog, actor string, expected, epoch uint6
 func (t Tree) validWrite(w WriteRecord) bool {
 	r := w.Request
 	o, ok := t.objects[r.Object]
-	if !ok || !identifier(r.ID) || r.Epoch != t.writeEpoch || !identifier(w.Actor) || w.Generation != o.Generation || w.ExpectedObjectRevision == 0 || w.ExpectedObjectRevision > t.revision || !validProfile(w.Writer) || w.Writer.Mode == "local-file" || w.Writer.ID != r.Profile || w.Writer.Revision > t.revision || !cleanText(r.ProviderObject) || r.Kind != ValueWrite && r.Kind != VerifierWrite || reconcile.Validate(w.Journal) != nil || w.Journal.LastID != 1 || w.Journal.Desired.Spec != writeSpec(t.cluster, t.tenant, w) || w.Journal.Desired.Generation != w.Generation || !w.Journal.Desired.Present || w.Journal.Applied.Present && w.Journal.Applied != w.Journal.Desired.Resource || w.PublishedRevision > t.revision || w.Abandoned && w.PublishedRevision != 0 {
+	if !ok || !identifier(r.ID) || r.Epoch != t.writeEpoch || !identifier(w.Actor) || w.Generation != o.Generation || w.ExpectedObjectRevision == 0 || w.ExpectedObjectRevision > t.revision || !usableProfile(w.Writer) || w.Writer.Mode == "local-file" || w.Writer.ID != r.Profile || w.Writer.Revision > t.revision || !cleanText(r.ProviderObject) || r.Kind != ValueWrite && r.Kind != VerifierWrite || reconcile.Validate(w.Journal) != nil || w.Journal.LastID != 1 || w.Journal.Desired.Spec != writeSpec(t.cluster, t.tenant, w) || w.Journal.Desired.Generation != w.Generation || !w.Journal.Desired.Present || w.Journal.Applied.Present && w.Journal.Applied != w.Journal.Desired.Resource || w.PublishedRevision > t.revision || w.Abandoned && w.PublishedRevision != 0 {
 		return false
 	}
 	if r.Kind == ValueWrite {

@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/reconcile"
-	"github.com/jay94ks/mydcd/internal/workload"
+	"github.com/jay94ks/seafield/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/workload"
 )
 
 func TestUntaggedCacheReferencesKeepDesiredAppliedAndUnknownOriginalConfigIDs(t *testing.T) {

@@ -5,15 +5,16 @@ package control
 import (
 	"encoding/json"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/credentials"
-	"github.com/jay94ks/mydcd/internal/imagebuild"
-	"github.com/jay94ks/mydcd/internal/imagecache"
-	"github.com/jay94ks/mydcd/internal/nodestorage"
-	"github.com/jay94ks/mydcd/internal/schema"
-	"github.com/jay94ks/mydcd/internal/tenancy"
-	checker "github.com/jay94ks/mydcd/internal/workload/lifecycle"
-	"github.com/jay94ks/mydcd/internal/workload/volumes"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/credentials"
+	"github.com/jay94ks/seafield/internal/firewall"
+	"github.com/jay94ks/seafield/internal/imagebuild"
+	"github.com/jay94ks/seafield/internal/imagecache"
+	"github.com/jay94ks/seafield/internal/nodestorage"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/tenancy"
+	checker "github.com/jay94ks/seafield/internal/workload/lifecycle"
+	"github.com/jay94ks/seafield/internal/workload/volumes"
 )
 
 // ChangeDocument is a local metadata file, not a signed operation or an app.
@@ -168,10 +169,16 @@ func InputChange(raw []byte, principal string) (Change, error) {
 		payload, err = normalizedPayload[AppHistorySelection](d.Payload)
 	case "prune-node-images":
 		payload, err = normalizedPayload[imagecache.Change](d.Payload)
+	case "set-cluster-firewall":
+		payload, err = normalizedPayload[firewall.Delta](d.Payload)
 	case "reconnect-tunnel":
 		payload, err = normalizedPayload[TunnelChange](d.Payload)
 	case "raft-compact":
 		payload, err = normalizedPayload[CompactChange](d.Payload)
+	case "cluster-backup":
+		payload, err = normalizedPayload[ClusterBackupChange](d.Payload)
+	case "set-volume-remote":
+		payload, err = normalizedPayload[VolumeRemoteChange](d.Payload)
 	case "cd-approve", "cd-reject":
 		payload, err = normalizedPayload[AppCDDecisionChange](d.Payload)
 	case "grant-cd-approver", "revoke-cd-approver":
@@ -184,6 +191,8 @@ func InputChange(raw []byte, principal string) (Change, error) {
 		payload, err = normalizedPayload[AppDown](d.Payload)
 	case "resume-app-retirement":
 		payload, err = normalizedPayload[AppRetirementReplay](d.Payload)
+	case "resume-app-step":
+		payload, err = normalizedPayload[AppStepReplay](d.Payload)
 	case "set-volume-capacity":
 		payload, err = normalizedPayload[VolumeCapacity](d.Payload)
 	case "begin-volume-move":
@@ -237,22 +246,24 @@ func InputChange(raw []byte, principal string) (Change, error) {
 	case "begin-tenant-retirement", "finish-tenant-retirement":
 		payload, err = normalizedPayload[TenantRetirementSelection](d.Payload)
 	case "set-nodes":
-		payload, err = normalizedPayload[NodeAssignment](d.Payload)
+		payload, err = normalizedPayload[NodeChange](d.Payload)
 	case "set-membership":
 		payload, err = normalizedPayload[access.Membership](d.Payload)
 	case "set-trust":
-		payload, err = normalizedPayload[TrustAssignment](d.Payload)
+		payload, err = normalizedPayload[TrustChange](d.Payload)
 	case "revoke-session":
 		payload, err = normalizedPayload[SessionRevocation](d.Payload)
 	case "rotate-node-identity":
 		payload, err = normalizedPayload[NodeIdentityChange](d.Payload)
+	case "set-node-endpoint":
+		payload, err = normalizedPayload[NodeEndpointChange](d.Payload)
 	case "drain-node":
 		payload, err = normalizedPayload[NodeDrainChange](d.Payload)
 	case "invite-node":
 		payload, err = normalizedPayload[NodeInvitation](d.Payload)
 	case "cordon-node":
 		payload, err = normalizedPayload[NodeCordonChange](d.Payload)
-	case "uncordon-node", "promote-node", "demote-node":
+	case "uncordon-node", "promote-node", "demote-node", "cancel-node-invite", "abort-node-join":
 		payload, err = normalizedPayload[NodeSelection](d.Payload)
 	case "force-remove-node":
 		payload, err = normalizedPayload[NodeForceChange](d.Payload)
@@ -274,14 +285,16 @@ func InputChange(raw []byte, principal string) (Change, error) {
 		payload, err = normalizedPayload[NetworkJoin](d.Payload)
 	case "set-network-toggle":
 		payload, err = normalizedPayload[NetworkToggleSet](d.Payload)
-	case "set-system-network-range":
-		payload, err = normalizedPayload[SystemNetworkRange](d.Payload)
 	case "plan-network-change":
 		payload, err = normalizedPayload[NetworkChangePlan](d.Payload)
 	case "propose-route":
 		payload, err = normalizedPayload[RouteProposal](d.Payload)
 	case "approve-route", "withdraw-route":
 		payload, err = normalizedPayload[RouteSelection](d.Payload)
+	case "create-virtual-bridge":
+		payload, err = normalizedPayload[BridgeProposal](d.Payload)
+	case "approve-virtual-bridge", "close-virtual-bridge":
+		payload, err = normalizedPayload[BridgeSelection](d.Payload)
 	case "cancel-network-change":
 		payload, err = normalizedPayload[NetworkChangeCancel](d.Payload)
 	case "fence-network-change":
@@ -298,6 +311,10 @@ func InputChange(raw []byte, principal string) (Change, error) {
 		payload, err = normalizedPayload[tenancy.NetworkClosure](d.Payload)
 	case "rotate-ledger":
 		payload, err = normalizedPayload[LedgerWindow](d.Payload)
+	case "put-cluster-app-route":
+		payload, err = normalizedPayload[ClusterAppRouteChange](d.Payload)
+	case "remove-cluster-app-route":
+		payload, err = normalizedPayload[ClusterAppRouteSelection](d.Payload)
 	default:
 		return Change{}, schema.ErrInput
 	}

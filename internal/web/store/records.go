@@ -10,7 +10,7 @@ import (
 )
 
 // SessionRow is the persisted listing of a web login. Only the hash of the
-// cookie session ID is stored; the MYDCP session itself lives in memory.
+// cookie session ID is stored; the SFCP session itself lives in memory.
 type SessionRow struct {
 	Hash       string    `json:"hash"`
 	User       string    `json:"user"`
@@ -64,7 +64,7 @@ func (s *Store) ListSessions(user string) ([]*SessionRow, error) {
 }
 
 // ExpireOpenSessions ends every open row. Called on start: a restart drops all
-// MYDCP sessions, so remaining rows are expired.
+// SFCP sessions, so remaining rows are expired.
 func (s *Store) ExpireOpenSessions(at time.Time) error {
 	return s.db.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket(bucketSessions)

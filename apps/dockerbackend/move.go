@@ -13,7 +13,7 @@ import (
 // A single explicit write gets a fixed durable result. A lost reply must be
 // read back; PUT never overwrites an earlier result under the same filename.
 func registerMoveFixture() {
-	if os.Getenv("MYDC_MOVE_FIXTURE") != "1" {
+	if os.Getenv("SFC_MOVE_FIXTURE") != "1" {
 		return
 	}
 	http.HandleFunc("/move-state", func(w http.ResponseWriter, r *http.Request) {

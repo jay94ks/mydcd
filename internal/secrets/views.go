@@ -38,7 +38,7 @@ func (t Tree) Writes() []WriteRecord {
 	})
 	return out
 }
-func (t Tree) WriteProfile(id string) (WriteProfile, bool) { p, ok := t.profiles[id]; return p, ok }
+func (t Tree) WriteProfile(id string) (WriteProfile, bool) { return t.profile(id) }
 func (t Tree) Quiescent() bool {
 	for _, o := range t.objects {
 		if o.PendingWrite != "" || o.PasswordChange != "" {

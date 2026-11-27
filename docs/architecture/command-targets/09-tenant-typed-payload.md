@@ -4,12 +4,13 @@
 
 | Action | Payload | 현재 필요 권한·CAS |
 |---|---|---|
-| `put-user` | `access.User{ID,Username,Revision:0,Enabled,SystemAdmin,AutomationOnly?,Operations?,Credentials}` | system-admin/ManageCluster, 대상 User.Revision. 다른 계정의 키·상태 변경; 변경 시 해당 계정 전체 session 회수 |
-| `set-account-scope` | `access.AccountScope{User,Operations?,KeyOnly?}` | system-admin, 대상 계정 revision. 계정 action 상한(credential 상한과 교집합)과 KeyOnly(=AutomationOnly)만 바꿈; 변경 시 해당 계정 전체 session 회수. 시스템 관리자에게는 범위를 둘 수 없음 |
+| `put-user` | 새 계정(Expected 0): `access.User{ID,Username,Revision:0,Enabled,SystemAdmin,AutomationOnly?,Operations?,Credentials}`. 있는 계정: `{ID,Username,Enabled,SystemAdmin}`만 | system-admin/ManageCluster, 대상 User.Revision. 있는 계정은 그 세 칸만 바꿈(로그인 수단·상한 칸이 있으면 Invalid); 변경 시 해당 계정 전체 session 회수 |
+| `set-account-scope` | `access.AccountScope{User,Add?,Remove?,Unlimited?,KeyOnly?}` | system-admin, 대상 계정 revision. 계정 action 상한(credential 상한과 교집합)을 변경분으로, KeyOnly(=AutomationOnly)를 값으로 바꿈. 있는 이름 Add·없는 이름 Remove는 ConditionFailed; 변경 시 해당 계정 전체 session 회수. 시스템 관리자에게는 범위를 둘 수 없음 |
+| `add-credential` (관리자) | `access.CredentialAddition{User,Credential,Label?,Operations?,VolumeFiles?}` (Challenge·Proof 없음) | system-admin/ManageCluster, 대상 계정 revision. 어느 계정에나 키 하나를 더함. 상한은 이때 정해짐 |
 | `create-tenant` | `{ID}` | system-admin/ManageCluster, 신규0. tenant 생성은 로컬 CLI profile 등록과 다름 |
 | `set-membership` | `{Tenant,User,Role:manager 또는 viewer,Revision:0,Enabled}` | 대상 tenant ManageMembers, 해당 membership.Revision. 종료 중에는 기존 원 membership의 비활성화만 허용 |
-| `set-nodes` | `{Tenant,Nodes:[node ID...]}` | system-admin/ManageCluster, 대상 tenant.Revision. managed root는 실제 사용 가능한 노드만 허용 |
-| `set-trust` | `{Tenant,Rules:[{Registry,Repository}...]}` | 대상 tenant ManageTrust, 대상 tenant.Revision |
+| `set-nodes` | `{Tenant,Add?:[node ID...],Remove?:[node ID...]}`: 바뀐 서버만. 둘 다 비면 Invalid, 이미 있는 서버 Add·없는 서버 Remove는 ConditionFailed | system-admin/ManageCluster, 대상 tenant.Revision. managed root는 Add에 실제 사용 가능한 노드만 허용(클러스터를 떠난 서버도 Remove는 된다) |
+| `set-trust` | `{Tenant,Add?:[{Registry,Repository}...],Remove?:[...]}`: 바뀐 규칙만. 둘 다 비면 Invalid, 이미 있는 규칙 Add·없는 규칙 Remove는 ConditionFailed | 대상 tenant ManageTrust, 대상 tenant.Revision |
 | `begin-tenant-retirement` | `{Tenant,Operation}` | system-admin/ManageCluster, 대상 tenant.Revision. 원 inventory 수집과 신규 수락 중단 |
 | `finish-tenant-retirement` | `{Tenant,Operation}` | system-admin/ManageCluster, 대상 tenant.Revision. 동일 원 Operation과 owner 전체의 양성 종료/잔여0 필요 |
 | `revoke-session` | `{User,Session}` | system-admin/ManageCluster, 대상 User.Revision(계정 revision CAS). 자기 logout은 기존 SelfLogout의 제한된 별도 예외이며 타 사용자 회수 권한을 주지 않음 |
@@ -20,13 +21,13 @@
 |---|---|---|
 | `manage self-credentials` / `my-credentials` | 현재 Session.User의 공개 계정·credential·revision | 현재 session만, 임의 TargetUser/Tenant/Node/After 금지. verifier 참조 없음 |
 | `manage apply`의 `add-credential` | `{User,Credential:{ID,Method:private-key,PublicKey},Label?,Challenge,Proof}` | 자기 User만 + Tenant=* credentials scope, 원 User revision Expected와 catalog root CAS·서명 operation·새 key 소유 증명. 계정의 다른 필드 변경 불가 |
-| `manage apply`의 `disable-credential` | `{User,Credential:ID}` | 자기 private-key만 + 같은 credentials scope/CAS. 마지막 인증수단/독립 admin key 보호, 계정 전체 session 회수. 새 로그인으로 원 result 조회 |
+| `manage apply`의 `disable-credential` | `{User,Credential:ID}` | 자기 private-key만 + 같은 credentials scope/CAS, 또는 system-admin이면 어느 계정의 어느 수단이든. 마지막 인증수단/독립 admin key 보호, 계정 전체 session 회수. 새 로그인으로 원 result 조회 |
 
-node CLI 제한이 켜져 있으면 본인 변경에도 기존 독립 승인·관리자 조건을 그대로 추가한다. 관리자용 put-user/credential 편의 명령의 권한은 유지한다. [정확한 proof와 승인 bytes](../../reference/client-authentication.md)를 따른다.
+node CLI 제한이 켜져 있으면 본인 변경에도 기존 독립 승인·관리자 조건을 그대로 추가한다. 관리자용 계정·credential 편의 명령의 권한은 유지한다. [정확한 proof와 승인 bytes](../../reference/client-authentication.md)를 따른다.
 
 전역 --reason/--incident-id/--approved-by는 user-auth 관리 명령의 첫 UserOperation에만 고정되는 표시 metadata다. result/resume의 원 사유·서명·ID를 교체하지 않고, claimed approved-by는 독립 승인으로 취급하지 않는다. Credential.Operations는 현재 역할/Session scope에 더하는 typed action ceiling이며 권한을 부여하지 않는다.
 
-`app check/diff/deploy`의 Secret 전달 선언은 [파일/환경 변수 공급](../../reference/secret-delivery.md)을 따른다. `x-mydc.secret_env`는 앱 소유 참조이고 Vault 값을 생성/변경하는 명령이 아니다. 계획/diff의 `SecretEnvRequiresNewGeneration`은 해당 서비스 이름 목록이며 새 Task 세대의 필요성을 표시한다. 현재 권한·Group 승인·원 Binding·정산 정책은 유지한다.
+`app check/diff/deploy`의 Secret 전달 선언은 [파일/환경 변수 공급](../../reference/secret-delivery.md)을 따른다. `x-sfc.secret_env`는 앱 소유 참조이고 Vault 값을 생성/변경하는 명령이 아니다. 계획/diff의 `SecretEnvRequiresNewGeneration`은 해당 서비스 이름 목록이며 새 Task 세대의 필요성을 표시한다. 현재 권한·Group 승인·원 Binding·정산 정책은 유지한다.
 
 `app logs --cursor`는 같은 사용자·tenant/app/service/instance·원 Task/native와 로그 옵션의 가림 완료 구간만 이어 읽는다. 현재 Read/owner permit을 매번 요구하며 follow/다른 종류의 조회와 혼합하지 않는다. cursor가 배포·로그 삭제·권한 확대를 실행하지 않는다.
 
@@ -71,6 +72,7 @@ owner `task-restart-permit`은 다음 미전송 SDK 호출의 현재 허가를 �
 | `raft compact --preview` / `raft-compact-plan` | 시스템 관리자, credential의 raft-compact 허용, 현재 quorum | voter 기본/설치 노드 명시 선택·roster 지문, 최대64개 계획 페이지 |
 | `raft compact --operation ID --request-id ID` / 서명 action `raft-compact` | 같은 권한과 현재 maintenance root/epoch | 원 journal·대상 키/CAS, 겹친 pending 거부, keep/minimal·순차/parallel, 현재 leader-last |
 | `raft compact-status OP [--after CURSOR]` / `raft-compact-status` | 현재 시스템 관리자 quorum read | 원 job Summary·이유·노드별 결과4개/root 고정 페이지, 수락과 SDK 완료 구분 |
+| `cluster backup create` / 서명 action `cluster-backup` + purpose20 | 시스템 관리자, credential의 cluster-backup 허용, 현재 quorum | 기록 뒤 15분 안의 같은 사용자. voter가 직접, non-voter는 리더로 relay. 마스터 키는 기록한 1회용 X25519 키로만 봉인([클러스터 백업](../../reference/cluster-backup.md)) |
 | `raft-status`의 LastManualCompact | 기존 시스템 관리자 로컬 진단 | 마지막 공유 job/노드별 요약, stale/마지막 적용 권한 표시 유지 |
 | 노드 Management `compact-work` / `compact-report` | 설치된 원 owner, queued skip은 현재 leader | 원 grant 확인·원 SDK 효과/진행 보고. 사용자 관리 권한 발급 경로 아님 |
 
@@ -127,11 +129,11 @@ owner `task-restart-permit`은 다음 미전송 SDK 호출의 현재 허가를 �
 
 각 메시지·필터·종류·retention/원 신원은 [관측 이벤트](../../reference/events.md)를 따른다.
 
-CD field의 원 Git 값/현재 값·ValuesPart와 history/diff의 메시지 및 제약은 [CD 조회 명세](../../reference/cd-inspection.md)를 따른다. UI의 독자 DTO나 mock 응답을 MYDCP 원 메시지로 취급하지 않는다.
+CD field의 원 Git 값/현재 값·ValuesPart와 history/diff의 메시지 및 제약은 [CD 조회 명세](../../reference/cd-inspection.md)를 따른다. UI의 독자 DTO나 mock 응답을 SFCP 원 메시지로 취급하지 않는다.
 
 `app diff`의 AppDiff와 `cd diff`의 AppCDDiff는 앱 범위 `Replacement` 영향 계획을 함께 반환할 수 있다. 같은 원 Inventory claim의 노드별 종료 closure를 읽으며 현재 권한과 exact 원 Key/Generation/Revision에 고정한다. 이 결과는 새로운 operation·종료 증명·다음 파동 실행 권한이 아니다. 기존 source 입력이나 관리 범위는 바꾸지 않는다.
 
-내부 MYDCP app-progress의 `advance-wave`는 활성 WorkKey의 원 app/operation/Inventory 보고다. 현재 원 사용자 권한과 원 파동의 실제 종료·새 세대 health를 재확인하며 사용자 승인·새 배포·Unknown 자동 재제출 권한을 추가하지 않는다. CLI/Unix 사용자는 기존 앱 배포/CD 명령과 원 결과 조회를 사용하며 AppView.Replacement로 노드별 진행을 본다.
+내부 SFCP app-progress의 `advance-wave`는 활성 WorkKey의 원 app/operation/Inventory 보고다. 현재 원 사용자 권한과 원 파동의 실제 종료·새 세대 health를 재확인하며 사용자 승인·새 배포·Unknown 자동 재제출 권한을 추가하지 않는다. CLI/Unix 사용자는 기존 앱 배포/CD 명령과 원 결과 조회를 사용하며 AppView.Replacement로 노드별 진행을 본다.
 
 기존 plain 앱의 `app deploy`/`begin-app` 갱신은 `AppView.BeginTarget`을 원 `AppBegin.Target`에 서명·보존하여 관측 revision과 배포 의도 변경을 구분한다. 현재 권한·같은 Blueprint/원 claim/종료 CAS는 유지하고 과거 Target 없는 intent는 엄격 CAS로 재생한다. 신규 생성은 expected=0과 해당 cluster/tenant/app/deployment의 부재 지문을 고정하고 서버가 entry 부재를 확인한다. 기존 앱 갱신·CD sync·Volume move와 혼합하거나 거부 뒤 새 ID로 자동 재제출하지 않는다. 상세는 [Unix API](../../reference/unix-sockets/22-credential.md#rq5-begin-app-대상-cas)를 따른다.
 

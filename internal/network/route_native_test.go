@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/reconcile"
 	"github.com/vishvananda/netlink"
 )
 
@@ -27,7 +27,7 @@ func TestRealBoundaryRouteTunnelNativePolicyJournal(t *testing.T) {
 }
 
 func testRouteTunnelNativePolicy(t *testing.T, ipv6 bool) {
-	host, owner := os.Getenv("MYDC_KERNEL_HOST_NETNS"), os.Getenv("MYDC_KERNEL_TEST_OWNER")
+	host, owner := os.Getenv("SFC_KERNEL_HOST_NETNS"), os.Getenv("SFC_KERNEL_TEST_OWNER")
 	if host == "" {
 		t.Skip("owned isolated network namespace and prior rollback plan required")
 	}
@@ -71,7 +71,7 @@ func testRouteTunnelNativePolicy(t *testing.T, ipv6 bool) {
 	secondRaw, _ := json.Marshal(second)
 	secondKey := key + "-second"
 	secondResource := reconcile.Resource{Present: true, Generation: 1, Spec: string(secondRaw)}
-	bridgeAlias := "mydc-route-test-" + familyLabel(ipv6)
+	bridgeAlias := "sfc-route-test-" + familyLabel(ipv6)
 	var createdBridge bool
 	manager, err := OpenTunnelManager(path, owner)
 	if err != nil {
@@ -277,7 +277,7 @@ func testRouteTunnelNativePolicy(t *testing.T, ipv6 bool) {
 	if absent, err := manager.driver.RouteAbsent(ctx, key, resource); err != nil || !absent {
 		t.Fatal("readonly route absence after original native retirement", absent, err)
 	}
-	foreign := &netlink.Dummy{LinkAttrs: netlink.LinkAttrs{Name: native.name, Alias: "mydc-native-absence-foreign-marker"}}
+	foreign := &netlink.Dummy{LinkAttrs: netlink.LinkAttrs{Name: native.name, Alias: "sfc-native-absence-foreign-marker"}}
 	foreignCreated := false
 	removeForeign := func() {
 		if !foreignCreated {

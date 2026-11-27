@@ -11,10 +11,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/storage"
-	checker "github.com/jay94ks/mydcd/internal/workload/lifecycle"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/storage"
+	checker "github.com/jay94ks/seafield/internal/workload/lifecycle"
 )
 
 func (b *sourceTestBackend) StageModule(ctx context.Context, s access.Session, d checker.SourceDescriptor, a checker.ModuleArchive) (checker.ModuleFact, error) {
@@ -74,7 +74,7 @@ func TestCheckerModuleActualUnixChunksLostFactAndCurrentRevocation(t *testing.T)
 		t.Fatal("lost fact manufactured success")
 	} else {
 		var outcome *Error
-		if !errors.As(err, &outcome) || outcome.Phase == mydcp.Completed {
+		if !errors.As(err, &outcome) || outcome.Phase == sfcp.Completed {
 			t.Fatal("module uncertainty lost", err)
 		}
 	}

@@ -11,12 +11,12 @@ import (
 	"slices"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/identity"
-	checker "github.com/jay94ks/mydcd/internal/workload/lifecycle"
-	contract "github.com/jay94ks/mydcd/lifecycle/v1"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/identity"
+	checker "github.com/jay94ks/seafield/internal/workload/lifecycle"
+	contract "github.com/jay94ks/seafield/lifecycle/v1"
 )
 
 // Metadata only. Probe request/response bytes travel on the authenticated
@@ -211,5 +211,5 @@ func (p CheckerProbePermit) Matches(q CheckerProbeRequest, call checker.ProbeCal
 func (q CheckerProbeRequest) HeaderDigest() [32]byte {
 	q.At = 0
 	raw, _ := json.Marshal(q)
-	return sha256.Sum256(append([]byte("mydc-checker-remote-call-1\x00"), raw...))
+	return sha256.Sum256(append([]byte("sfc-checker-remote-call-1\x00"), raw...))
 }

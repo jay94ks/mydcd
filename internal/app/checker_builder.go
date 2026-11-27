@@ -11,12 +11,12 @@ import (
 	"sort"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/reconcile"
-	"github.com/jay94ks/mydcd/internal/storage"
-	checker "github.com/jay94ks/mydcd/internal/workload/lifecycle"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/storage"
+	checker "github.com/jay94ks/seafield/internal/workload/lifecycle"
 )
 
 // The local read can deny/cancel work. Only compilerQuery/CompilerOwner's
@@ -232,7 +232,7 @@ func (r *Runtime) compilerCandidates(v cluster.View) ([]checker.BuildIntent, err
 	return pending, nil
 }
 
-// A mydcd-owned event consumer, not an idle compiler process/container. Only
+// A sfcd-owned event consumer, not an idle compiler process/container. Only
 // one finite native Step runs at a time; current state can interrupt it without
 // blocking the common module loop behind source transfer or Docker Wait.
 func (r *Runtime) compilerLoop() {

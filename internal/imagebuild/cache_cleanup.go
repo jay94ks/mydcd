@@ -95,7 +95,7 @@ func (s CacheCleanupSelection) valid() bool {
 	return true
 }
 func (s CacheCleanupSelection) Digest() [32]byte {
-	return digestJSON("mydc-imagebuild-cache-cleanup-selection-1", s)
+	return digestJSON("sfc-imagebuild-cache-cleanup-selection-1", s)
 }
 func (s CacheCleanupSelection) PruneOptions() ([]bkclient.PruneOption, error) {
 	if !s.valid() || len(s.IDs) == 0 {

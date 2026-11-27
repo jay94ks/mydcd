@@ -13,15 +13,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/containerops"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/observability"
-	"github.com/jay94ks/mydcd/internal/storage"
-	"github.com/jay94ks/mydcd/internal/workload"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/containerops"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/observability"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/storage"
+	"github.com/jay94ks/seafield/internal/workload"
 )
 
 // Reuses the actual N3 authenticated Raft/membership/installation fixture with
@@ -131,7 +131,7 @@ func verifyRetainedTaskMeasurementIdentity(t *testing.T, ctx context.Context, ta
 		if _, err = observability.Decode(oldRaw); err != nil {
 			t.Fatal("old report must be structurally/signature valid before denial", err)
 		}
-		if err = current.storeNodeObservation(mydcp.Identity(original), oldRaw); !errors.Is(err, mydcp.ErrAdmission) {
+		if err = current.storeNodeObservation(sfcp.Identity(original), oldRaw); !errors.Is(err, sfcp.ErrAdmission) {
 			t.Fatal("old externally signed report authenticated as current", err)
 		}
 		after, err := current.reports.Get(observationKey)

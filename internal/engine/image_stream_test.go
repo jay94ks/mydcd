@@ -79,7 +79,7 @@ func TestImageStreamKeepsProgressAndOriginalCancellation(t *testing.T) {
 				}
 				loaded.Store(true)
 			})
-			root, err := os.MkdirTemp("", "mydc-image-stream-")
+			root, err := os.MkdirTemp("", "sfc-image-stream-")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -106,13 +106,17 @@ func TestImageStreamKeepsProgressAndOriginalCancellation(t *testing.T) {
 				defer stop()
 			}
 			started := time.Now()
-			got, err := c.Image(request, ref, true)
+			err = c.pullImage(request, ref)
+			var got client.ImageInspectResult
+			if err == nil {
+				got, err = c.Image(request, ref, false)
+			}
 			elapsed := time.Since(started)
 			if mode == "progress" {
 				if err != nil || got.ID != id || elapsed <= idle {
 					t.Fatal("live body was cut by metadata deadline", got.ID, err, elapsed)
 				}
-				if _, err = c.Image(ctx, ref, true); err != nil {
+				if _, err = c.Image(ctx, ref, false); err != nil {
 					t.Fatal("same digest cache", err)
 				}
 				if _, err = c.API.Info(ctx, client.InfoOptions{}); err == nil {

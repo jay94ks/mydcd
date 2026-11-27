@@ -11,7 +11,7 @@ import (
 
 func TestP0FreshWalletJournalAbsenceRetainsUnsafePathErrors(t *testing.T) {
 	home := t.TempDir()
-	if err := os.Mkdir(filepath.Join(home, ".mydc"), 0700); err != nil {
+	if err := os.Mkdir(filepath.Join(home, ".sfc"), 0700); err != nil {
 		t.Fatal(err)
 	}
 	client := Client{Cluster: [32]byte{71}}
@@ -23,7 +23,7 @@ func TestP0FreshWalletJournalAbsenceRetainsUnsafePathErrors(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = root.Close()
-	sessions := filepath.Join(home, ".mydc", "sessions")
+	sessions := filepath.Join(home, ".sfc", "sessions")
 	if err = os.Chmod(sessions, 0777); err != nil {
 		t.Fatal(err)
 	}

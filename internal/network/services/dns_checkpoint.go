@@ -9,8 +9,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/jay94ks/mydcd/internal/network"
-	"github.com/jay94ks/mydcd/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/network"
+	"github.com/jay94ks/seafield/internal/reconcile"
 	"github.com/miekg/dns"
 )
 
@@ -138,9 +138,12 @@ func validProjection(p dnsProjection, cluster, owner [32]byte) bool {
 		if r.Lease != ([32]byte{}) || r.ExpiresAt != 0 || r.LeaseGeneration != 0 || r.LeaseRevision != 0 || r.LeaseService != "" || r.LeaseClient != "" {
 			return false
 		}
-
 	}
-	return len(expected) == 0
+	names := make([]string, 0, len(p.Records))
+	for _, r := range p.Records {
+		names = append(names, r.Name)
+	}
+	return len(expected) == 0 && validConfigRecords(c, names)
 }
 
 func (m DNSManager) snapshot() (dnsSnapshot, error) {

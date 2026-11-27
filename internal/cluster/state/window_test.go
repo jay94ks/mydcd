@@ -19,10 +19,10 @@ func windowFixture(t *testing.T) (State, Command, Reducer, ModuleAuthorizer) {
 		s.principals[fmt.Sprint("user/", i)] = principal{Epoch: 1, Revision: 1}
 	}
 	for i := 0; i < LedgerLimit; i++ {
-		s.requests[requestKey{"user/0", fmt.Sprint(i)}] = receipt{result: Result{Code: Applied, Index: 1}}
+		s.putRequest(requestKey{"user/0", fmt.Sprint(i)}, receipt{result: Result{Code: Applied, Index: 1}})
 	}
-	s.requests[requestKey{"legacy-admin", "original"}] = receipt{result: Result{Code: Applied, Index: 2}}
-	s.objects["workload/held"] = Object{Revision: 3, Generation: 3, Value: "original-native-owner/pin", Present: true}
+	s.putRequest(requestKey{"legacy-admin", "original"}, receipt{result: Result{Code: Applied, Index: 2}})
+	s.putObject("workload/held", Object{Revision: 3, Generation: 3, Value: "original-native-owner/pin", Present: true})
 	c := Command{Kind: ModuleWindow, Actor: "user/new-admin-session", Epoch: 1, RequestID: "rotate", Key: "control/storage", Value: "signed-maintenance"}
 	reduce := func(_ State, input Command) (map[string][]byte, Code) {
 		return map[string][]byte{input.Key: []byte("window")}, Applied

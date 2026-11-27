@@ -8,10 +8,10 @@ import (
 	"fmt"
 	"slices"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/imagebuild"
-	"github.com/jay94ks/mydcd/internal/registryclient"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/imagebuild"
+	"github.com/jay94ks/seafield/internal/registryclient"
 )
 
 type ImageBuildContentRead struct {
@@ -63,7 +63,7 @@ func (r ImageBuildContentRead) Snapshot() [32]byte {
 		Epoch                  uint64
 		Path                   string `json:",omitempty"`
 	}{r.Scope.Cluster, r.Query.Version, r.Seal.Tree, r.Tenant, r.Query.Part, r.Epoch, r.Query.Path})
-	return sha256.Sum256(append([]byte("mydc-imagebuild-content-cursor-1\x00"), raw...))
+	return sha256.Sum256(append([]byte("sfc-imagebuild-content-cursor-1\x00"), raw...))
 }
 func (r ImageBuildContentRead) Offset() (uint64, error) {
 	root, key, err := registryclient.CatalogueCursor(r.After)

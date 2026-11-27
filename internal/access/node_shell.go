@@ -8,7 +8,7 @@ import (
 )
 
 const NodeShell Action = "node-shell"
-const NodeShellAccount = "mydc-shell"
+const NodeShellAccount = "sfc-shell"
 
 type NodeShellNode struct {
 	Node, Shell string

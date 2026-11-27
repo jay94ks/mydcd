@@ -11,9 +11,9 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/web/mydc"
-	"github.com/jay94ks/mydcd/internal/web/store"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/web/sfc"
+	"github.com/jay94ks/seafield/internal/web/store"
 )
 
 // GET /api/v1/dashboard?tenant=: server cards scoped to the caller's
@@ -21,12 +21,12 @@ import (
 func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request, ws *webSession) {
 	tenant := r.URL.Query().Get("tenant")
 	type dashboard struct {
-		Nodes    []summaryView  `json:"nodes"`
-		Apps     []mydc.AppView `json:"apps"`
-		AppsNext string         `json:"appsNext,omitempty"`
-		AsOf     string         `json:"asOf"`
+		Nodes    []summaryView `json:"nodes"`
+		Apps     []sfc.AppView `json:"apps"`
+		AppsNext string        `json:"appsNext,omitempty"`
+		AsOf     string        `json:"asOf"`
 	}
-	read(s, w, r, ws, func(ctx context.Context, c mydc.Conn) (dashboard, error) {
+	read(s, w, r, ws, func(ctx context.Context, c sfc.Conn) (dashboard, error) {
 		var d dashboard
 		var err error
 		if d.Nodes, err = nodeSummaries(ctx, c, tenant); err != nil {
@@ -57,14 +57,14 @@ type memberDrain struct {
 	State     string `json:"state"`
 }
 
-// withNodeDrains asks mydcd for each server's in-progress (else newest)
+// withNodeDrains asks sfcd for each server's in-progress (else newest)
 // drain: node-drain-status without Operation, one call a server on
 // the page. Missing = no drain; any other answer leaves the row without one.
-func withNodeDrains(ctx context.Context, c mydc.Conn, ms []memberView) []memberRow {
+func withNodeDrains(ctx context.Context, c sfc.Conn, ms []memberView) []memberRow {
 	out := make([]memberRow, 0, len(ms))
 	for _, m := range ms {
 		row := memberRow{memberView: m}
-		if m.Phase != mydc.NodePhaseRemoved {
+		if m.Phase != sfc.NodePhaseRemoved {
 			if st, err := c.NodeDrainStatus(ctx, control.NodeDrainQuery{Node: m.ID}); err == nil && st.Operation != "" {
 				row.Drain = &memberDrain{Operation: st.Operation, State: st.State}
 			}
@@ -87,7 +87,7 @@ func (s *Server) handleMembers(w http.ResponseWriter, r *http.Request, ws *webSe
 		LedgerEpoch    uint64 `json:"ledgerEpoch"`
 		LedgerRevision uint64 `json:"ledgerRevision"`
 	}
-	read(s, w, r, ws, func(ctx context.Context, c mydc.Conn) (membersView, error) {
+	read(s, w, r, ws, func(ctx context.Context, c sfc.Conn) (membersView, error) {
 		p, err := c.Members(ctx, r.URL.Query().Get("after"))
 		if err != nil {
 			return membersView{}, err
@@ -138,13 +138,13 @@ func (s *Server) handleObserve(w http.ResponseWriter, r *http.Request, ws *webSe
 		writeError(w, http.StatusBadRequest, "bad-request", "since and until: Unix seconds, until not before since")
 		return
 	}
-	sel := mydc.ContainerSelection{App: r.PathValue("app"), Service: req.Service, Instance: req.Instance}
+	sel := sfc.ContainerSelection{App: r.PathValue("app"), Service: req.Service, Instance: req.Instance}
 	if name := r.PathValue("name"); name != "" {
-		sel = mydc.ContainerSelection{Standalone: name}
+		sel = sfc.ContainerSelection{Standalone: name}
 	}
-	q := mydc.ContainerQuery{Selection: sel,
+	q := sfc.ContainerQuery{Selection: sel,
 		Kind: req.Kind, Tail: req.Tail, Stdout: req.Stdout == nil || *req.Stdout, Stderr: req.Stderr == nil || *req.Stderr, Since: req.Since, Until: req.Until}
-	read(s, w, r, ws, func(ctx context.Context, c mydc.Conn) (mydc.ContainerResult, error) {
+	read(s, w, r, ws, func(ctx context.Context, c sfc.Conn) (sfc.ContainerResult, error) {
 		return c.ContainerObserve(ctx, r.PathValue("t"), q)
 	})
 }
@@ -158,7 +158,7 @@ type planReq struct {
 }
 
 // POST /api/v1/t/{t}/apps/plan: app.yaml check and change preview through
-// the same plan core as `mydc compose plan`. Nothing is changed.
+// the same plan core as `sfcli compose plan`. Nothing is changed.
 func (s *Server) handlePlan(w http.ResponseWriter, r *http.Request, ws *webSession) {
 	var req planReq
 	if !readJSON(w, r, &req) {
@@ -168,8 +168,8 @@ func (s *Server) handlePlan(w http.ResponseWriter, r *http.Request, ws *webSessi
 		writeError(w, http.StatusBadRequest, "bad-request", "yaml is required and at most 4 MiB")
 		return
 	}
-	read(s, w, r, ws, func(ctx context.Context, c mydc.Conn) (mydc.AppPlan, error) {
-		return c.AppPlan(ctx, mydc.AppPlanRequest{Tenant: r.PathValue("t"), Document: []byte(req.YAML), Project: req.Project, Deployment: req.Deployment, Node: req.Node, Diff: req.Diff})
+	read(s, w, r, ws, func(ctx context.Context, c sfc.Conn) (sfc.AppPlan, error) {
+		return c.AppPlan(ctx, sfc.AppPlanRequest{Tenant: r.PathValue("t"), Document: []byte(req.YAML), Project: req.Project, Deployment: req.Deployment, Node: req.Node, Diff: req.Diff})
 	})
 }
 
@@ -184,7 +184,7 @@ type appSourceView struct {
 	AcceptedAt string `json:"acceptedAt,omitempty"`
 }
 
-func viewSource(src mydc.AppSource) appSourceView {
+func viewSource(src sfc.AppSource) appSourceView {
 	v := appSourceView{Tenant: src.Tenant, App: src.App, Version: src.Version, YAML: string(src.Document), Digest: hex.EncodeToString(src.Digest[:]), Submitter: src.Submitter, Operation: src.Operation}
 	if src.AcceptedAt > 0 {
 		v.AcceptedAt = rfc3339(time.Unix(src.AcceptedAt, 0))
@@ -207,7 +207,7 @@ func (s *Server) handleDown(w http.ResponseWriter, r *http.Request, ws *webSessi
 		return
 	}
 	tenant, app := r.PathValue("t"), r.PathValue("app")
-	req.Action = mydc.ActionDownApp
+	req.Action = sfc.ActionDownApp
 	req.Tenant, req.Target = tenant, app
 	// The archived app and the app taken down must be the same one.
 	var down control.AppDown
@@ -231,8 +231,8 @@ func (s *Server) handleDown(w http.ResponseWriter, r *http.Request, ws *webSessi
 		return
 	}
 	ctx, cancel := s.callCtx(r)
-	var src mydc.AppSource
-	err := ws.do(ctx, func(ctx context.Context, c mydc.Conn) error {
+	var src sfc.AppSource
+	err := ws.do(ctx, func(ctx context.Context, c sfc.Conn) error {
 		var err error
 		src, err = c.AppSource(ctx, tenant, app, 0)
 		return err
@@ -260,12 +260,12 @@ func (s *Server) handleDown(w http.ResponseWriter, r *http.Request, ws *webSessi
 }
 
 // tenantRole returns the caller's role in tenant ("" when no access), asking
-// mydcd each time: web rows never grant access on their own.
-func (s *Server) tenantRole(r *http.Request, ws *webSession, tenant string) (mydc.Role, error) {
+// sfcd each time: web rows never grant access on their own.
+func (s *Server) tenantRole(r *http.Request, ws *webSession, tenant string) (sfc.Role, error) {
 	ctx, cancel := s.callCtx(r)
 	defer cancel()
-	var tenants []mydc.TenantView
-	err := ws.do(ctx, func(ctx context.Context, c mydc.Conn) error {
+	var tenants []sfc.TenantView
+	err := ws.do(ctx, func(ctx context.Context, c sfc.Conn) error {
 		var err error
 		tenants, err = c.Tenants(ctx)
 		return err
@@ -287,7 +287,7 @@ func (s *Server) requireRole(w http.ResponseWriter, r *http.Request, ws *webSess
 		s.writeBackendError(w, ws, err)
 		return false
 	}
-	if role == "" || (manager && role != mydc.RoleManager) {
+	if role == "" || (manager && role != sfc.RoleManager) {
 		// Same answer for "no such workspace" and "no permission".
 		writeError(w, http.StatusForbidden, "denied", "no access to this workspace")
 		return false

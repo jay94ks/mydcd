@@ -7,8 +7,8 @@ import (
 	"slices"
 	"sync"
 
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/network/services"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/network/services"
 )
 
 const maxDNSPolicyCacheEntries = 16
@@ -129,6 +129,7 @@ func ownDNSPolicy(p services.DNSOwnerPolicy) services.DNSOwnerPolicy {
 	p.Config.Members = slices.Clone(p.Config.Members)
 	p.Config.Names = slices.Clone(p.Config.Names)
 	p.Config.Leases = slices.Clone(p.Config.Leases)
+	p.Config.Records = slices.Clone(p.Config.Records)
 	p.Config.Upstreams = slices.Clone(p.Config.Upstreams)
 	p.ProtectedZones = slices.Clone(p.ProtectedZones)
 	return p

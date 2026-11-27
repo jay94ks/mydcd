@@ -13,13 +13,13 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/userauth"
-	"github.com/jay94ks/mydcd/internal/web/mydc"
-	"github.com/jay94ks/mydcd/internal/web/store"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/userauth"
+	"github.com/jay94ks/seafield/internal/web/sfc"
+	"github.com/jay94ks/seafield/internal/web/store"
 )
 
-// REQ-28 file jobs in mydcd's real shape (docs/reference/volume-files.md):
+// REQ-28 file jobs in sfcd's real shape (docs/reference/volume-files.md):
 // volume-file-plan gives the change; the web signs it as the session user
 // with Expected = plan.Revision, stores the original, submits it (the job
 // is reserved), then streams the body once over purpose18 by VolumeFile.
@@ -70,7 +70,7 @@ func newVolumeFileOp(ws *webSession, opID, tenant string, q control.VolumeFileQu
 // runVolumeFile plans, signs, stores and submits j, then streams it. A
 // stored op (j.o.Signed set, from an earlier try of the same opId) is not
 // signed again: only its stream is resumed.
-func (s *Server) runVolumeFile(ctx context.Context, c mydc.Conn, ws *webSession, j vfJob) (vfResult, error) {
+func (s *Server) runVolumeFile(ctx context.Context, c sfc.Conn, ws *webSession, j vfJob) (vfResult, error) {
 	o := j.o
 	if len(o.Signed) == 0 {
 		plan, err := c.VolumeFilePlan(ctx, j.tenant, j.q)
@@ -85,7 +85,7 @@ func (s *Server) runVolumeFile(ctx context.Context, c mydc.Conn, ws *webSession,
 		if err != nil {
 			return vfResult{op: o}, err
 		}
-		ch := mydc.Change{Schema: 1, Action: j.q.Method, Principal: ws.user.ID, Expected: plan.Revision, Payload: raw}
+		ch := sfc.Change{Schema: 1, Action: j.q.Method, Principal: ws.user.ID, Expected: plan.Revision, Payload: raw}
 		if _, err := s.sendStored(ctx, c, o, ch, who.RootFor(j.q.Method)); err != nil {
 			return vfResult{op: o}, err
 		}
@@ -93,14 +93,14 @@ func (s *Server) runVolumeFile(ctx context.Context, c mydc.Conn, ws *webSession,
 	if o.State != store.OpApplied {
 		return vfResult{op: o}, &httpErr{opStatus(o), "op-" + o.State, fmt.Sprintf("%s was not reserved (%s %s)", j.q.Method, o.State, o.ErrorCode)}
 	}
-	r, data, err := s.streamVolumeFile(ctx, c, j.tenant, j.q.Method, mydc.SignedOp(o.Signed), j.body)
+	r, data, err := s.streamVolumeFile(ctx, c, j.tenant, j.q.Method, sfc.SignedOp(o.Signed), j.body)
 	return vfResult{reply: r, data: data, op: o}, err
 }
 
 // streamVolumeFile streams a reserved job once, and after a lost reply
 // settles it from the job's status (see above).
-func (s *Server) streamVolumeFile(ctx context.Context, c mydc.Conn, tenant, method string, op mydc.SignedOp, body []byte) (userauth.VolumeFileReply, []byte, error) {
-	id, err := mydc.VolumeFileID(op)
+func (s *Server) streamVolumeFile(ctx context.Context, c sfc.Conn, tenant, method string, op sfc.SignedOp, body []byte) (userauth.VolumeFileReply, []byte, error) {
+	id, err := sfc.VolumeFileID(op)
 	if err != nil {
 		return userauth.VolumeFileReply{}, nil, err
 	}
@@ -109,14 +109,14 @@ func (s *Server) streamVolumeFile(ctx context.Context, c mydc.Conn, tenant, meth
 		var buf bytes.Buffer
 		var to io.Writer
 		switch method {
-		case mydc.ActionPutVolumeFile:
+		case sfc.ActionPutVolumeFile:
 			src = bytes.NewReader(body)
-		case mydc.ActionGetVolumeFile:
+		case sfc.ActionGetVolumeFile:
 			to = &buf
 		}
 		r, err := c.VolumeFile(ctx, op, src, to)
 		if err == nil {
-			if method != mydc.ActionGetVolumeFile || r.Code != "ok" {
+			if method != sfc.ActionGetVolumeFile || r.Code != "ok" {
 				return r, nil, nil
 			}
 			if r.Result == nil || r.Result.Size != int64(buf.Len()) || r.Result.Digest != sha256.Sum256(buf.Bytes()) {
@@ -126,7 +126,7 @@ func (s *Server) streamVolumeFile(ctx context.Context, c mydc.Conn, tenant, meth
 			return r, buf.Bytes(), nil
 		}
 		clear(buf.Bytes())
-		if !isMydcCode(err, mydc.CodeUnknown) {
+		if !isSfcCode(err, sfc.CodeUnknown) {
 			return r, nil, err
 		}
 		v, serr := c.VolumeFileStatus(ctx, tenant, id)
@@ -137,7 +137,7 @@ func (s *Server) streamVolumeFile(ctx context.Context, c mydc.Conn, tenant, meth
 		case "Reserved":
 			continue
 		case "Completed":
-			if method == mydc.ActionGetVolumeFile {
+			if method == sfc.ActionGetVolumeFile {
 				return r, nil, errVolumeFileGetLost
 			}
 			if r, err := c.VolumeFile(ctx, op, nil, nil); err == nil {
@@ -153,8 +153,8 @@ func (s *Server) streamVolumeFile(ctx context.Context, c mydc.Conn, tenant, meth
 
 // volumeFileGet reads one file (at most max bytes), starting over with a
 // new op once when a completed get lost its bytes.
-func (s *Server) volumeFileGet(ctx context.Context, c mydc.Conn, ws *webSession, tenant, volume, path string, max int64, reason *store.OpReason) (vfResult, error) {
-	q := control.VolumeFileQuery{Volume: volume, Path: path, Method: mydc.ActionGetVolumeFile, MaxBytes: max}
+func (s *Server) volumeFileGet(ctx context.Context, c sfc.Conn, ws *webSession, tenant, volume, path string, max int64, reason *store.OpReason) (vfResult, error) {
+	q := control.VolumeFileQuery{Volume: volume, Path: path, Method: sfc.ActionGetVolumeFile, MaxBytes: max}
 	var res vfResult
 	var err error
 	for range 2 {
@@ -167,11 +167,11 @@ func (s *Server) volumeFileGet(ctx context.Context, c mydc.Conn, ws *webSession,
 }
 
 // volumeFileList reads every entry under prefix (one op per 64-entry page).
-func (s *Server) volumeFileList(ctx context.Context, c mydc.Conn, ws *webSession, tenant, volume, prefix string, reason *store.OpReason, pages int) ([]vfEntry, string, error) {
+func (s *Server) volumeFileList(ctx context.Context, c sfc.Conn, ws *webSession, tenant, volume, prefix string, reason *store.OpReason, pages int) ([]vfEntry, string, error) {
 	var out []vfEntry
 	after := ""
 	for range pages {
-		q := control.VolumeFileQuery{Volume: volume, Path: prefix, Method: mydc.ActionListVolumeFiles, After: after}
+		q := control.VolumeFileQuery{Volume: volume, Path: prefix, Method: sfc.ActionListVolumeFiles, After: after}
 		res, err := s.runVolumeFile(ctx, c, ws, vfJob{tenant: tenant, q: q, o: newVolumeFileOp(ws, "", tenant, q, reason)})
 		if err != nil {
 			return nil, "", err

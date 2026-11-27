@@ -8,10 +8,10 @@ import (
 	"encoding/json"
 	"math"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/imagebuild"
-	"github.com/jay94ks/mydcd/internal/secrets"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/imagebuild"
+	"github.com/jay94ks/seafield/internal/secrets"
 )
 
 type ImageBuildJobWorkQuery struct {
@@ -163,7 +163,7 @@ type ImageBuildJobReport struct {
 func ImageBuildJobReportBytes(r ImageBuildJobReport) []byte {
 	r.Signature = nil
 	raw, _ := json.Marshal(r)
-	return append([]byte("mydc-imagebuild-job-report-1\x00"), raw...)
+	return append([]byte("sfc-imagebuild-job-report-1\x00"), raw...)
 }
 func (r ImageBuildJobReport) Valid(spec imagebuild.JobSpec) bool {
 	if r.Schema != 1 || r.Kind != "job" || r.Cluster != spec.Cluster || r.Owner != spec.Scope.Root.Key || r.Tenant != spec.Tenant || r.Job != spec.ID || r.At < spec.CreatedAt || r.At > math.MaxInt64 || r.Expected == 0 || r.Epoch == 0 || !ed25519.Verify(r.Owner[:], ImageBuildJobReportBytes(r), r.Signature) {

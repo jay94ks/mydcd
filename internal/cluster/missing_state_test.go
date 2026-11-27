@@ -9,9 +9,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/storage"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/storage"
 )
 
 func TestRealMissingRaftStateNeverReinitializesDurableFSM(t *testing.T) {
@@ -25,11 +25,11 @@ func TestRealMissingRaftStateNeverReinitializesDurableFSM(t *testing.T) {
 	if err = os.Remove(filepath.Join(f.options.Root, "control", "raft.db")); err != nil {
 		t.Fatal(err)
 	}
-	f.server, err = mydcp.NewTransport(f.node, f.policy.Cluster, f.lookup)
+	f.server, err = sfcp.NewTransport(f.node, f.policy.Cluster, f.lookup)
 	if err != nil {
 		t.Fatal(err)
 	}
-	peer, _ := f.lookup(mydcp.Identity(f.node.Public))
+	peer, _ := f.lookup(sfcp.Identity(f.node.Public))
 	if err = f.server.Listen(peer.Endpoint); err != nil {
 		t.Fatal(err)
 	}

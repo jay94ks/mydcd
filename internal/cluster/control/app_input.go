@@ -3,8 +3,8 @@
 package control
 
 import (
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/deployment"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/deployment"
 )
 
 // CheckAppSubmission is an edge admission rule for a NEW user operation, not

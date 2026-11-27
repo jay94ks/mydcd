@@ -8,9 +8,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/jay94ks/mydcd/internal/engine"
-	"github.com/jay94ks/mydcd/internal/network"
-	"github.com/jay94ks/mydcd/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/engine"
+	"github.com/jay94ks/seafield/internal/network"
+	"github.com/jay94ks/seafield/internal/reconcile"
 	"io"
 	"net/http"
 	"net/netip"
@@ -35,7 +35,7 @@ func TestRQ3DockerTaskFactsUseOriginalNativeAcrossStopAndStart(t *testing.T) {
 }
 
 func testRealDockerManagedLifetime(t *testing.T, factsOnly bool) {
-	owner := os.Getenv("MYDC_DOCKER_TEST_OWNER")
+	owner := os.Getenv("SFC_DOCKER_TEST_OWNER")
 	if owner == "" {
 		t.Skip("requires explicit owner and docs/testing/system-rollback.md prestate")
 	}
@@ -47,11 +47,11 @@ func testRealDockerManagedLifetime(t *testing.T, factsOnly bool) {
 	}
 	defer c.Close()
 	root := t.TempDir()
-	imageRef := "mydc-boundary/" + owner + ":local"
+	imageRef := "sfc-boundary/" + owner + ":local"
 	if _, err = c.API.ImageInspect(ctx, imageRef); !cerrdefs.IsNotFound(err) {
 		t.Fatal("test image must be initially absent", err)
 	}
-	fixture := os.Getenv("MYDC_DOCKER_TEST_BACKEND")
+	fixture := os.Getenv("SFC_DOCKER_TEST_BACKEND")
 	if fixture == "" {
 		fixture = filepath.Join(root, "backend")
 		build := exec.CommandContext(ctx, "go", "build", "-p", "2", "-o", fixture, "../../apps/dockerbackend")
@@ -98,7 +98,7 @@ func testRealDockerManagedLifetime(t *testing.T, factsOnly bool) {
 			t.Error("image cleanup inspect", e)
 			return
 		}
-		if im.Config == nil || im.Config.Labels["org.mydc.test.owner"] != owner {
+		if im.Config == nil || im.Config.Labels["org.sfc.test.owner"] != owner {
 			t.Error("image cleanup ownership mismatch")
 			return
 		}
@@ -109,7 +109,7 @@ func testRealDockerManagedLifetime(t *testing.T, factsOnly bool) {
 			t.Error("image retained", e)
 		}
 	}()
-	stream, err := c.API.ImageImport(ctx, client.ImageImportSource{Source: archive, SourceName: "-"}, imageRef, client.ImageImportOptions{Changes: []string{`CMD ["/backend"]`, "LABEL org.mydc.test.owner=" + owner}})
+	stream, err := c.API.ImageImport(ctx, client.ImageImportSource{Source: archive, SourceName: "-"}, imageRef, client.ImageImportOptions{Changes: []string{`CMD ["/backend"]`, "LABEL org.sfc.test.owner=" + owner}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -140,7 +140,7 @@ func testRealDockerManagedLifetime(t *testing.T, factsOnly bool) {
 	}
 	defer func() { _ = n.Close() }()
 	key := "network/pool-a"
-	prefix := netip.MustParsePrefix(os.Getenv("MYDC_DOCKER_TEST_CIDR"))
+	prefix := netip.MustParsePrefix(os.Getenv("SFC_DOCKER_TEST_CIDR"))
 	spec := network.BridgeSpec{Schema: 1, Network: "boundary", Owner: owner, MTU: 1280, Internal: true, Pools: []network.Pool{{ID: "a", Network: "boundary", Owner: owner, Prefix: prefix, Gateway: prefix.Addr().Next(), MTU: 1280}}}
 	if err = n.Desired(key, 1, 1, &spec, 8); err != nil {
 		t.Fatal(err)
@@ -286,7 +286,7 @@ func testRealDockerManagedLifetime(t *testing.T, factsOnly bool) {
 		if e == nil {
 			b, _ := io.ReadAll(resp.Body)
 			resp.Body.Close()
-			if string(b) != "mydc-boundary /ping" {
+			if string(b) != "sfc-boundary /ping" {
 				t.Fatalf("backend response=%q", b)
 			}
 			break
@@ -408,7 +408,7 @@ func TestDockerTaskEndpointEvidenceComesFromMatchedInspectionIDs(t *testing.T) {
 			case "foreign-network":
 				f.native.NetworkSettings.Networks["fixture-bridge"].NetworkID = "foreign-network"
 			case "foreign-owner":
-				f.native.Config.Labels["org.mydc.owner"] = "foreign"
+				f.native.Config.Labels["org.sfc.owner"] = "foreign"
 			case "missing-container":
 				f.gone = true
 			}

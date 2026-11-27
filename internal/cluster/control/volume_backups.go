@@ -10,11 +10,11 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/lifecycle"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/schema"
-	"github.com/jay94ks/mydcd/internal/workload/volumes"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/lifecycle"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/workload/volumes"
 )
 
 const maxVolumeBackups = 256
@@ -93,7 +93,7 @@ type VolumeBackupReport struct {
 func VolumeBackupReportBytes(r VolumeBackupReport) []byte {
 	r.Signature = nil
 	raw, _ := json.Marshal(r)
-	return append([]byte("mydc-volume-backup-report-1\x00"), raw...)
+	return append([]byte("sfc-volume-backup-report-1\x00"), raw...)
 }
 func backupKey(s volumes.Scope, id string) string { return volumeKey(s) + "/" + id }
 func backupLimitKey(tenant, node string) string   { return tenant + "/" + node }

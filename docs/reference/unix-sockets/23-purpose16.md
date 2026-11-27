@@ -1,6 +1,6 @@
 ## 이미지 내용 전송 — purpose16
 
-수락 빌드의 source-owner 본문 읽기 kind5는 member QUIC 내부 실행용이며 Unix에서 거부한다. 로컬 사용자 `image pull-content`는 아래 kind1 경로를 유지한다. [kind5 형식·고정 root/child 검증](../image-content.md#수락된-빌드의-from-본문)을 참고한다.
+수락 빌드의 source-owner 본문 읽기 kind16은 member QUIC 내부 실행용이며 Unix에서 거부한다. 로컬 사용자 `image pull-content`는 아래 kind1 경로를 유지한다. [kind16 형식·고정 root/child 검증](../image-content.md#수락된-빌드의-from-본문)을 참고한다.
 
 manifest·config/history·layer blob은 [ImageContent 명세](../image-content.md)의 동일 handler를 Unix TLS와 QUIC에서 사용한다. 일반 User Reply나 Raft value에 큰 본문을 넣지 않는다. 요청 Envelope의 원 사용자 Session/연결 proof·tenant/신뢰·고정 run/source 승인을 검사하며, 해당 owner가 다른 노드이면 설치 member 간 QUIC kind3이 그 원 proof를 보존하여 전달한다. Unix에서 kind3을 받거나 node 키만으로 사용자 권한을 만들지 않는다.
 
@@ -24,7 +24,7 @@ running/unknown 예약은 실제 종료 보고 수락 전까지 유지한다. �
 
 `image-build-cache-prune-work`의 Blocked는 NOT_READY/TIMEOUT도 포함하며 원 정리
 요청의 At와 Source 정책 Seconds로 기한을 판단한다. [native 실행 경계](../image-build-jobs/14-section.md#수동-정리의-유한-native-실행)의
-private SDK 소켓은 컨테이너 내부 작업용이며 관리 Unix/MYDCP 끝점을 추가하지 않는다.
+private SDK 소켓은 컨테이너 내부 작업용이며 관리 Unix/SFCP 끝점을 추가하지 않는다.
 주기 자동 정리는 [idle 정책 정리](../image-build-jobs/16-idle-cache.md)의
 member `image-build-cache-automatic-report`로 수락하고 같은 work/report를 소비한다.
 Unix 사용자 끝점은 이 member 메시지를 받지 않는다. 공개 cache-prunes 행에는 optional

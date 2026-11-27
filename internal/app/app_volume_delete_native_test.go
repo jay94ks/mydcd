@@ -9,9 +9,9 @@ import (
 	"testing"
 
 	cerrdefs "github.com/containerd/errdefs"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/state"
 	"github.com/moby/moby/client"
 )
 
@@ -29,7 +29,7 @@ func verifyManagedAppVolumeDelete(t *testing.T, ctx context.Context, r *Runtime,
 	if !ok {
 		t.Fatal("retained original app volume missing")
 	}
-	cmd := nativeCLICmd(ctx, os.Getenv("MYDC_TEST_CLI"), filepath.Join(root, "cli-home"), filepath.Join(root, "cli.yaml"), "--tenant", "tenant", "volume", "delete", "app/data", "--id", "delete-retained-app", "--no-wait")
+	cmd := nativeCLICmd(ctx, os.Getenv("SFC_TEST_CLI"), filepath.Join(root, "cli-home"), filepath.Join(root, "cli.yaml"), "--tenant", "tenant", "volume", "delete", "app/data", "--id", "delete-retained-app", "--no-wait")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatal("retained app volume CLI delete", err, string(out))
 	}

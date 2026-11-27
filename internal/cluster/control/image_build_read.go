@@ -10,10 +10,10 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/imagebuild"
-	"github.com/jay94ks/mydcd/internal/registryclient"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/imagebuild"
+	"github.com/jay94ks/seafield/internal/registryclient"
 )
 
 type ImageBuildQuery struct {
@@ -101,12 +101,12 @@ type ImageBuildPage struct {
 
 func imageBuildCursor(cluster [32]byte, s state.State, tenant string, q ImageBuildQuery) [32]byte {
 	if q.Part == "cache-prunes" {
-		return sha256.Sum256([]byte(fmt.Sprintf("mydc-build-cache-prune-page-1\x00%x\x00%s\x00%s\x00%s\x00%d\x00%d", cluster, tenant, q.ID, q.Node, s.Object(ImageBuildKey).Revision, s.ModuleEpoch())))
+		return sha256.Sum256([]byte(fmt.Sprintf("sfc-build-cache-prune-page-1\x00%x\x00%s\x00%s\x00%s\x00%d\x00%d", cluster, tenant, q.ID, q.Node, s.Object(ImageBuildKey).Revision, s.ModuleEpoch())))
 	}
 	if q.Job != "" {
-		return sha256.Sum256([]byte(fmt.Sprintf("mydc-imagebuild-job-page-1\x00%x\x00%s\x00%s\x00%s\x00%d\x00%d", cluster, tenant, q.ID, q.Job, s.Object(ImageBuildKey).Revision, s.ModuleEpoch())))
+		return sha256.Sum256([]byte(fmt.Sprintf("sfc-imagebuild-job-page-1\x00%x\x00%s\x00%s\x00%s\x00%d\x00%d", cluster, tenant, q.ID, q.Job, s.Object(ImageBuildKey).Revision, s.ModuleEpoch())))
 	}
-	return sha256.Sum256([]byte(fmt.Sprintf("mydc-imagebuild-page-1\x00%x\x00%s\x00%s\x00%s\x00%s\x00%d\x00%d", cluster, tenant, q.Part, q.ID, q.Upload, s.Object(ImageBuildKey).Revision, s.ModuleEpoch())))
+	return sha256.Sum256([]byte(fmt.Sprintf("sfc-imagebuild-page-1\x00%x\x00%s\x00%s\x00%s\x00%s\x00%d\x00%d", cluster, tenant, q.Part, q.ID, q.Upload, s.Object(ImageBuildKey).Revision, s.ModuleEpoch())))
 }
 func buildPageNext(snapshot [32]byte, key string) string {
 	raw := append([]byte{1}, snapshot[:]...)

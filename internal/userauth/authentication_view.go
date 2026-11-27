@@ -5,7 +5,7 @@ package userauth
 import (
 	"context"
 
-	"github.com/jay94ks/mydcd/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster"
 )
 
 // Keep credentials on their pinned issuer while consuming the same quorum

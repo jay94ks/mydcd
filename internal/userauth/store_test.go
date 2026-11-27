@@ -13,9 +13,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/mydcp"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/sfcp"
 )
 
 func TestPrivateSessionStoreAtomicPermissionsProfileAndSymlink(t *testing.T) {
@@ -29,7 +29,7 @@ func TestPrivateSessionStoreAtomicPermissionsProfileAndSymlink(t *testing.T) {
 	}
 	defer clear(issuer.Private)
 	defer clear(self.Private)
-	c := Client{Self: self, Cluster: [32]byte{83}, Peers: []mydcp.Peer{{ID: "node", Endpoint: "127.0.0.1:7443", Policy: mydcp.Policy{Key: mydcp.Identity(issuer.Public), Respond: true}}}}
+	c := Client{Self: self, Cluster: [32]byte{83}, Peers: []sfcp.Peer{{ID: "node", Endpoint: "127.0.0.1:7443", Policy: sfcp.Policy{Key: sfcp.Identity(issuer.Public), Respond: true}}}}
 	now := time.Now().Unix()
 	s := access.Session{Schema: 1, ID: "session", Cluster: c.Cluster, User: "alice", Credential: "key", AccountRevision: 1, Key: self.Public, Issuer: issuer.Public, IssuerEpoch: 1, IssuedAt: now, ExpiresAt: now + 3600, Scopes: []access.Scope{{Tenant: "*", Actions: []access.Action{access.Read}}}}
 	s.Signature = ed25519.Sign(issuer.Private, access.SessionBytes(s))
@@ -57,13 +57,13 @@ func TestPrivateSessionStoreAtomicPermissionsProfileAndSymlink(t *testing.T) {
 	}
 	defer clear(updated.Self.Private)
 	profile := c.Profile()
-	path := filepath.Join(home, ".mydc", "sessions", hex.EncodeToString(c.Cluster[:]), "profiles", hex.EncodeToString(profile[:]), "session.json")
+	path := filepath.Join(home, ".sfc", "sessions", hex.EncodeToString(c.Cluster[:]), "profiles", hex.EncodeToString(profile[:]), "session.json")
 	info, err := os.Stat(path)
 	if err != nil || info.Mode().Perm() != 0600 {
 		t.Fatal("private session permissions", err)
 	}
 	wrong := c
-	wrong.Peers = append([]mydcp.Peer(nil), c.Peers...)
+	wrong.Peers = append([]sfcp.Peer(nil), c.Peers...)
 	wrong.Peers[0].Endpoint = "127.0.0.1:7444"
 	if moved, err := Load(home, wrong); err != nil {
 		t.Fatal("a moved endpoint lost the cluster's session", err)

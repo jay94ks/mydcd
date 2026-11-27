@@ -6,7 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 
-	"github.com/jay94ks/mydcd/internal/deployment"
+	"github.com/jay94ks/seafield/internal/deployment"
 )
 
 // The signed mode is optional. Legacy accepted operations retain strict root
@@ -28,7 +28,7 @@ func AppCreateTarget(cluster [32]byte, tenant, app, deploymentID string) [32]byt
 		Cluster                 [32]byte
 		Tenant, App, Deployment string
 	}{cluster, tenant, app, deploymentID})
-	return sha256.Sum256(append([]byte("mydc-app-create-target-1\x00"), raw...))
+	return sha256.Sum256(append([]byte("sfc-app-create-target-1\x00"), raw...))
 }
 
 // A health refresh or unrelated upload is not an edit to the accepted app.
@@ -67,5 +67,5 @@ func (entry appEntry) beginTarget() [32]byte {
 	if err != nil {
 		return [32]byte{}
 	}
-	return sha256.Sum256(append([]byte("mydc-app-begin-target-1\x00"), raw...))
+	return sha256.Sum256(append([]byte("sfc-app-begin-target-1\x00"), raw...))
 }

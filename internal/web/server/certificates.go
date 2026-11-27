@@ -17,22 +17,22 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/certstore"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/userauth"
-	"github.com/jay94ks/mydcd/internal/web/mydc"
-	"github.com/jay94ks/mydcd/internal/web/store"
+	"github.com/jay94ks/seafield/internal/certstore"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/userauth"
+	"github.com/jay94ks/seafield/internal/web/sfc"
+	"github.com/jay94ks/seafield/internal/web/store"
 )
 
 // The certificate store screens (docs/reference/certificate-store.md,
-// devel/design/certificate-store.md). Every read and change goes to mydcd
-// as the logged-in user's session; mydcd decides who may see or change the
+// devel/design/certificate-store.md). Every read and change goes to sfcd
+// as the logged-in user's session; sfcd decides who may see or change the
 // store (system administrators). The web app keeps no copy of the store.
 // It only adds which certificate its own ACME definitions received last
 // (definition) and which servers serve a link (servedBy, from the ingress
 // mappings' Runtime.Certificates).
 //
-// A private key sent to POST /certificates goes once to mydcd's protected
+// A private key sent to POST /certificates goes once to sfcd's protected
 // input (WriteCertificate), which seals it and returns a public receipt.
 // The key is never stored, logged or echoed back; the stored op holds only
 // the signed put-certificate original with that receipt.
@@ -73,12 +73,12 @@ func rfc(unix int64) string {
 const certMaxTries = 3
 
 func isConflict(err error) bool {
-	var me *mydc.Error
-	return errors.As(err, &me) && me.Code == mydc.CodeConflict
+	var me *sfc.Error
+	return errors.As(err, &me) && me.Code == sfc.CodeConflict
 }
 
 // certAll reads every store certificate (restarted if the store moved).
-func certAll(ctx context.Context, c mydc.Conn) ([]certstore.PublicEntry, error) {
+func certAll(ctx context.Context, c sfc.Conn) ([]certstore.PublicEntry, error) {
 	for try := 0; ; try++ {
 		var out []certstore.PublicEntry
 		q := control.CertificateQuery{}
@@ -145,7 +145,7 @@ func serialText(s string) string {
 }
 
 // usernames maps user IDs to names for the "by" columns; unknown IDs stay.
-func usernames(ctx context.Context, c mydc.Conn) map[string]string {
+func usernames(ctx context.Context, c sfc.Conn) map[string]string {
 	out := map[string]string{}
 	after := ""
 	for range ingressMaxPages {
@@ -208,7 +208,7 @@ func (s *Server) handleCertificates(w http.ResponseWriter, r *http.Request, ws *
 	defer cancel()
 	var certs []certstore.PublicEntry
 	var names map[string]string
-	err := ws.do(ctx, func(ctx context.Context, c mydc.Conn) error {
+	err := ws.do(ctx, func(ctx context.Context, c sfc.Conn) error {
 		var err error
 		if certs, err = certAll(ctx, c); err != nil {
 			return err
@@ -233,7 +233,7 @@ func (s *Server) handleCertificates(w http.ResponseWriter, r *http.Request, ws *
 }
 
 // certOne reads one certificate and its public chain by ID prefix.
-func certOne(ctx context.Context, c mydc.Conn, prefix string) (*certstore.PublicEntry, []byte, error) {
+func certOne(ctx context.Context, c sfc.Conn, prefix string) (*certstore.PublicEntry, []byte, error) {
 	all, err := certAll(ctx, c)
 	if err != nil {
 		return nil, nil, err
@@ -260,7 +260,7 @@ func (s *Server) handleCertificate(w http.ResponseWriter, r *http.Request, ws *w
 	var chain []byte
 	var iv *ingressView
 	var names map[string]string
-	err := ws.do(ctx, func(ctx context.Context, c mydc.Conn) error {
+	err := ws.do(ctx, func(ctx context.Context, c sfc.Conn) error {
 		var err error
 		if e, chain, err = certOne(ctx, c, r.PathValue("id")); err != nil {
 			return err
@@ -313,7 +313,7 @@ func (s *Server) handleCertificateChain(w http.ResponseWriter, r *http.Request, 
 	defer cancel()
 	var e *certstore.PublicEntry
 	var chain []byte
-	err := ws.do(ctx, func(ctx context.Context, c mydc.Conn) error {
+	err := ws.do(ctx, func(ctx context.Context, c sfc.Conn) error {
 		var err error
 		e, chain, err = certOne(ctx, c, r.PathValue("id"))
 		return err
@@ -329,9 +329,9 @@ func (s *Server) handleCertificateChain(w http.ResponseWriter, r *http.Request, 
 
 // certChange signs and sends a delete or disable of one certificate as the
 // logged-in user, stored as an op the daemon starts itself.
-func (s *Server) certChange(ctx context.Context, c mydc.Conn, ws *webSession, action string, id certstore.ID) (*store.Op, error) {
+func (s *Server) certChange(ctx context.Context, c sfc.Conn, ws *webSession, action string, id certstore.ID) (*store.Op, error) {
 	p, _ := json.Marshal(control.CertificateSelection{ID: id})
-	ch := mydc.Change{Schema: 1, Action: action, Principal: ws.user.ID, Payload: p}
+	ch := sfc.Change{Schema: 1, Action: action, Principal: ws.user.ID, Payload: p}
 	who, err := c.Whoami(ctx)
 	if err != nil {
 		return nil, err
@@ -352,9 +352,9 @@ func certOpErr(o *store.Op) error {
 	case store.OpFailed:
 		return &httpErr{http.StatusConflict, "stale", "the certificate store changed; reload it"}
 	case store.OpRejected:
-		return &httpErr{http.StatusForbidden, "denied", "mydcd refused the change: " + o.ErrorCode}
+		return &httpErr{http.StatusForbidden, "denied", "sfcd refused the change: " + o.ErrorCode}
 	}
-	return &httpErr{http.StatusServiceUnavailable, "unknown", "mydcd did not answer; operation " + o.ID + " keeps the signed original, read its result"}
+	return &httpErr{http.StatusServiceUnavailable, "unknown", "sfcd did not answer; operation " + o.ID + " keeps the signed original, read its result"}
 }
 
 func certLinksView(links []certstore.Link) []storeCertLink {
@@ -371,7 +371,7 @@ func (s *Server) handleCertificateDelete(w http.ResponseWriter, r *http.Request,
 	ctx, cancel := s.callCtx(r)
 	defer cancel()
 	var linked []certstore.Link
-	err := ws.do(ctx, func(ctx context.Context, c mydc.Conn) error {
+	err := ws.do(ctx, func(ctx context.Context, c sfc.Conn) error {
 		all, err := certAll(ctx, c)
 		if err != nil {
 			return err
@@ -384,7 +384,7 @@ func (s *Server) handleCertificateDelete(w http.ResponseWriter, r *http.Request,
 			linked = e.Links
 			return nil
 		}
-		o, err := s.certChange(ctx, c, ws, mydc.ActionDeleteCertificate, e.Metadata.ID)
+		o, err := s.certChange(ctx, c, ws, sfc.ActionDeleteCertificate, e.Metadata.ID)
 		if err != nil {
 			return err
 		}
@@ -406,7 +406,7 @@ func (s *Server) handleCertificateDisable(w http.ResponseWriter, r *http.Request
 	ctx, cancel := s.callCtx(r)
 	defer cancel()
 	n := 0
-	err := ws.do(ctx, func(ctx context.Context, c mydc.Conn) error {
+	err := ws.do(ctx, func(ctx context.Context, c sfc.Conn) error {
 		all, err := certAll(ctx, c)
 		if err != nil {
 			return err
@@ -423,7 +423,7 @@ func (s *Server) handleCertificateDisable(w http.ResponseWriter, r *http.Request
 			hosts[l.Host] = true
 		}
 		n = len(hosts)
-		o, err := s.certChange(ctx, c, ws, mydc.ActionDisableCertificate, e.Metadata.ID)
+		o, err := s.certChange(ctx, c, ws, sfc.ActionDisableCertificate, e.Metadata.ID)
 		if err != nil {
 			return err
 		}
@@ -438,7 +438,7 @@ func (s *Server) handleCertificateDisable(w http.ResponseWriter, r *http.Request
 
 func invalidCode(code, msg string) error { return &httpErr{http.StatusUnprocessableEntity, code, msg} }
 
-// readStoreChain inspects a chain the way mydcd will: leaf first, the ID,
+// readStoreChain inspects a chain the way sfcd will: leaf first, the ID,
 // hosts and algorithm. It refuses only what is not a chain.
 func readStoreChain(chain string, now time.Time) (certstore.Inspection, []byte, error) {
 	ders := pemChain(chain)
@@ -473,7 +473,7 @@ func (s *Server) handleCertificateCheck(w http.ResponseWriter, r *http.Request, 
 	ctx, cancel := s.callCtx(r)
 	defer cancel()
 	var catalog certstore.Catalog
-	err = ws.do(ctx, func(ctx context.Context, c mydc.Conn) error {
+	err = ws.do(ctx, func(ctx context.Context, c sfc.Conn) error {
 		p, err := c.QueryCertificates(ctx, control.CertificateQuery{})
 		if err != nil {
 			return err
@@ -589,7 +589,7 @@ func (s *Server) handleCertificatePut(w http.ResponseWriter, r *http.Request, ws
 	defer cancel()
 	created := false
 	var links []certstore.Link
-	err = ws.do(ctx, func(ctx context.Context, c mydc.Conn) error {
+	err = ws.do(ctx, func(ctx context.Context, c sfc.Conn) error {
 		var err error
 		created, links, err = s.storeCertificate(ctx, c, ws.user.ID, ws.user.Username, newOpID(), chain, keyPEM, reason)
 		return err
@@ -598,7 +598,7 @@ func (s *Server) handleCertificatePut(w http.ResponseWriter, r *http.Request, ws
 		s.writeBackendError(w, ws, err)
 		return
 	}
-	s.log.Info("create", "user", ws.user.Username, "action", mydc.ActionPutCertificate, "target", in.Metadata.ID.String(), "created", created)
+	s.log.Info("create", "user", ws.user.Username, "action", sfc.ActionPutCertificate, "target", in.Metadata.ID.String(), "created", created)
 	status := http.StatusOK
 	if created {
 		status = http.StatusCreated
@@ -610,7 +610,7 @@ func (s *Server) handleCertificatePut(w http.ResponseWriter, r *http.Request, ws
 // stored, then returns the certificate's links. opID names the stored op
 // (and the protected input's request): one per put, so a lost reply is
 // asked again with the same input and never makes a second certificate.
-func (s *Server) storeCertificate(ctx context.Context, c mydc.Conn, user, username, opID string, chain, keyPEM []byte, reason *store.OpReason) (bool, []certstore.Link, error) {
+func (s *Server) storeCertificate(ctx context.Context, c sfc.Conn, user, username, opID string, chain, keyPEM []byte, reason *store.OpReason) (bool, []certstore.Link, error) {
 	in, err := certstore.Inspect(chain, s.now().Unix())
 	if err != nil {
 		return false, nil, invalidCode("invalid-chain", "chain: the certificates could not be read")
@@ -638,7 +638,7 @@ func (s *Server) storeCertificate(ctx context.Context, c mydc.Conn, user, userna
 		return false, nil, err
 	}
 	sum := sha256.Sum256(op)
-	o := &store.Op{ID: opID, User: user, Username: username, Action: mydc.ActionPutCertificate, Target: in.Metadata.ID.String(), Digest: hex.EncodeToString(sum[:]), Reason: reason}
+	o := &store.Op{ID: opID, User: user, Username: username, Action: sfc.ActionPutCertificate, Target: in.Metadata.ID.String(), Digest: hex.EncodeToString(sum[:]), Reason: reason}
 	if _, err := s.sendPrepared(ctx, c, o, op); err != nil {
 		return false, nil, err
 	}
@@ -660,19 +660,19 @@ func pemBytes(b []byte) []byte {
 }
 
 // certRequestID is the protected input's request: one per web op, so a
-// lost reply is asked again with the same input (mydcd gives the same
+// lost reply is asked again with the same input (sfcd gives the same
 // receipt) and never makes a second certificate.
 func certRequestID(opID string) string { return "web-cert-" + opID }
 
-// certPrepare hands the chain and key to mydcd's protected input, which
+// certPrepare hands the chain and key to sfcd's protected input, which
 // checks them, seals the key and returns the public receipt; only the
 // receipt goes into the signed put-certificate original. Nothing durable is
 // sent: store the original before Submit. A lost reply is settled by
 // resending that same original, which carries no key.
-func certPrepare(ctx context.Context, c mydc.Conn, user string, chainPEM, keyPEM []byte, request string, reason *store.OpReason) (certstore.Certificate, mydc.SignedOp, error) {
+func certPrepare(ctx context.Context, c sfc.Conn, user string, chainPEM, keyPEM []byte, request string, reason *store.OpReason) (certstore.Certificate, sfc.SignedOp, error) {
 	in := userauth.CertificateInput{Request: request, Chain: chainPEM, Key: keyPEM}
 	receipt, err := c.WriteCertificate(ctx, in)
-	if err != nil && !isMydcCode(err, mydc.CodeInvalid, mydc.CodeConflict, mydc.CodeDenied) {
+	if err != nil && !isSfcCode(err, sfc.CodeInvalid, sfc.CodeConflict, sfc.CodeDenied) {
 		// Asking again with the same request and input gives the same
 		// receipt if the first one was made.
 		receipt, err = c.WriteCertificate(ctx, in)
@@ -688,32 +688,32 @@ func certPrepare(ctx context.Context, c mydc.Conn, user string, chainPEM, keyPEM
 	if err != nil {
 		return receipt, nil, err
 	}
-	ch := mydc.Change{Schema: 1, Action: mydc.ActionPutCertificate, Principal: user, Payload: raw}
-	root := who.RootFor(mydc.ActionPutCertificate)
-	var op mydc.SignedOp
+	ch := sfc.Change{Schema: 1, Action: sfc.ActionPutCertificate, Principal: user, Payload: raw}
+	root := who.RootFor(sfc.ActionPutCertificate)
+	var op sfc.SignedOp
 	if reason != nil {
-		op, err = c.PrepareRequestReason(ctx, receipt.Request, ch, root, mydc.OperationReason{Reason: reason.Reason, Incident: reason.Incident})
+		op, err = c.PrepareRequestReason(ctx, receipt.Request, ch, root, sfc.OperationReason{Reason: reason.Reason, Incident: reason.Incident})
 	} else {
 		op, err = c.PrepareRequest(ctx, receipt.Request, ch, root)
 	}
 	return receipt, op, err
 }
 
-func isMydcCode(err error, codes ...mydc.Code) bool {
-	var me *mydc.Error
+func isSfcCode(err error, codes ...sfc.Code) bool {
+	var me *sfc.Error
 	return errors.As(err, &me) && slices.Contains(codes, me.Code)
 }
 
 // certInputErr maps the protected input's refusals.
 func certInputErr(err error) error {
-	var me *mydc.Error
+	var me *sfc.Error
 	if !errors.As(err, &me) {
 		return err
 	}
 	switch me.Code {
-	case mydc.CodeInvalid:
-		return invalidCode("invalid-certificate", "mydcd refused the chain or key (key pair, names or validity)")
-	case mydc.CodeConflict:
+	case sfc.CodeInvalid:
+		return invalidCode("invalid-certificate", "sfcd refused the chain or key (key pair, names or validity)")
+	case sfc.CodeConflict:
 		return &httpErr{http.StatusConflict, "stale", "the certificate is already in the store; reload it"}
 	}
 	return err

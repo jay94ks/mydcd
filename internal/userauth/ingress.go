@@ -5,79 +5,54 @@ package userauth
 import (
 	"context"
 	"errors"
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"reflect"
 	"time"
+
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/sfcp"
 )
 
-func (r Request) validIngressFields() bool {
-	if (r.Ingress != nil) != (r.Method == "ingresses") {
-		return false
-	}
-	if r.Ingress == nil {
-		return true
-	}
-	want := Request{Schema: r.Schema, Method: r.Method, Nonce: r.Nonce, Ingress: r.Ingress, Tenant: r.Tenant}
-	return r.Ingress.Valid() && r.Tenant == r.Ingress.Tenant && reflect.DeepEqual(r, want)
-}
-func (s Service) ingressQuery(ctx context.Context, view cluster.View, session access.Session, q control.IngressQuery) Reply {
+// IngressesMethod reads ingress mappings, blocks, node summaries and a
+// server's gateways. The observer asks each owner server; the reply is kept
+// only when the leader's current page still selects the same rows.
+var IngressesMethod = define(Method[control.IngressQuery, control.IngressPage]{Name: "ingresses"}, true, func(ctx context.Context, s Service, view cluster.View, session access.Session, q control.IngressQuery) (control.IngressPage, string) {
 	if s.IngressObserver == nil {
-		return Reply{Schema: 1, Code: "unavailable"}
+		return control.IngressPage{}, "unavailable"
 	}
 	page, err := s.IngressObserver(ctx, control.IngressRead{Session: session, Query: q, At: time.Now().Unix(), Index: view.State.Index()})
 	if err != nil {
-		code := "unavailable"
-		if errors.Is(err, access.ErrDenied) || errors.Is(err, mydcp.ErrAdmission) {
-			code = "denied"
+		if errors.Is(err, access.ErrDenied) || errors.Is(err, sfcp.ErrAdmission) {
+			return control.IngressPage{}, "denied"
 		}
-		return Reply{Schema: 1, Code: code}
+		return control.IngressPage{}, "unavailable"
 	}
 	latest, err := s.Engine.Read(ctx, true)
 	if err != nil || latest.Local {
-		return Reply{Schema: 1, Code: "unavailable"}
+		return control.IngressPage{}, "unavailable"
 	}
 	current, err := s.Policy.IngressPage(latest.State, session, time.Now().Unix(), q)
 	if err != nil || !page.SameSelection(current) {
-		return Reply{Schema: 1, Code: "denied"}
+		return control.IngressPage{}, "denied"
 	}
-	return Reply{Schema: 1, Code: "ok", Ingress: &page}
-}
-func (c Client) Ingresses(ctx context.Context, peer mydcp.Peer, session access.Session, q control.IngressQuery) (control.IngressPage, error) {
+	return page, "ok"
+})
+
+func (c Client) Ingresses(ctx context.Context, peer sfcp.Peer, session access.Session, q control.IngressQuery) (control.IngressPage, error) {
 	if !q.Valid() {
-		return control.IngressPage{}, mydcp.ErrAdmission
+		return control.IngressPage{}, sfcp.ErrAdmission
 	}
-	reply, err := c.query(ctx, peer, session, Request{Method: "ingresses", Tenant: q.Tenant, Ingress: &q})
+	page, err := call(ctx, c, peer, session, IngressesMethod, q)
 	if err != nil {
 		return control.IngressPage{}, err
 	}
-	if reply.Ingress == nil || reply.Ingress.Schema != 1 || reply.Ingress.Index == 0 || len(reply.Ingress.Mappings) > 1 {
-		return control.IngressPage{}, mydcp.ErrFrame
+	if page.Schema != 1 || page.Index == 0 || len(page.Mappings) > 1 {
+		return control.IngressPage{}, sfcp.ErrFrame
 	}
-	for _, row := range reply.Ingress.Mappings {
+	for _, row := range page.Mappings {
 		if row.Key == "" || row.Generation == 0 || q.Node != "" && row.Node != q.Node || q.Tenant != "" && row.Tenant != q.Tenant || q.App != "" && row.App != q.App || q.Key != "" && row.Key != q.Key {
-			return control.IngressPage{}, mydcp.ErrFrame
+			return control.IngressPage{}, sfcp.ErrFrame
 		}
 	}
-	return *reply.Ingress, nil
-}
-
-func (r Request) validCertificateFields() bool {
-	method := r.Method == "certificates"
-	if (r.Certificate != nil) != method {
-		return false
-	}
-	if !method {
-		return true
-	}
-	want := Request{Schema: r.Schema, Method: r.Method, Nonce: r.Nonce, Certificate: r.Certificate}
-	if !reflect.DeepEqual(r, want) {
-		return false
-	}
-	if len(r.Certificate.After) > 512 {
-		return false
-	}
-	return r.Certificate.Valid()
+	return page, nil
 }

@@ -15,7 +15,7 @@ import (
 
 	xacme "golang.org/x/crypto/acme"
 
-	"github.com/jay94ks/mydcd/internal/web/provlog"
+	"github.com/jay94ks/seafield/internal/web/provlog"
 )
 
 // Directory is a real ACME directory (RFC 8555) reached with
@@ -57,7 +57,7 @@ func (d *Directory) client(key crypto.Signer, account string) *xacme.Client {
 			_ = json.Unmarshal(body, &p)
 			return strings.TrimPrefix(p.Type, "urn:ietf:params:acme:error:")
 		}})
-	c := &xacme.Client{Key: key, DirectoryURL: d.info.Directory, UserAgent: "mydc-web",
+	c := &xacme.Client{Key: key, DirectoryURL: d.info.Directory, UserAgent: "sfc-web",
 		HTTPClient: &http.Client{Transport: tr, Timeout: 60 * time.Second}}
 	if account != "" {
 		c.KID = xacme.KeyID(account)
@@ -259,8 +259,8 @@ func (d *Directory) Finalize(ctx context.Context, key crypto.Signer, account str
 }
 
 // Revoke implements CA (signed by the account key).
-func (d *Directory) Revoke(ctx context.Context, key crypto.Signer, account string, certDER []byte) error {
+func (d *Directory) Revoke(ctx context.Context, key crypto.Signer, account string, certDER []byte, reason RevokeReason) error {
 	ctx, cancel := context.WithTimeout(provlog.WithOp(ctx, "Revoke"), callTimeout)
 	defer cancel()
-	return classify("revoke", d.client(key, account).RevokeCert(ctx, nil, certDER, xacme.CRLReasonUnspecified))
+	return classify("revoke", d.client(key, account).RevokeCert(ctx, nil, certDER, xacme.CRLReasonCode(RevokeReasons[reason])))
 }

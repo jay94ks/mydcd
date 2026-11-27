@@ -11,15 +11,15 @@ import (
 	"io"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/schema"
-	"github.com/jay94ks/mydcd/internal/storage"
-	"github.com/jay94ks/mydcd/internal/userauth"
-	"github.com/jay94ks/mydcd/internal/workload/volumes"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/storage"
+	"github.com/jay94ks/seafield/internal/userauth"
+	"github.com/jay94ks/seafield/internal/workload/volumes"
 )
 
 type volumeFileOwner struct {
@@ -47,11 +47,11 @@ func (r *Runtime) volumeFileWorkAt(ctx context.Context, session access.Session, 
 	body, _ := json.Marshal(volumeFileWorkRequest{session, id, time.Now().Unix()})
 	reply, err := r.appCall(ctx, "volume-file-work", body)
 	if err != nil || reply.Local || reply.RaftIndex == 0 || reply.CommandIndex == 0 {
-		return control.VolumeFileJob{}, mydcp.ErrAdmission
+		return control.VolumeFileJob{}, sfcp.ErrAdmission
 	}
 	job, err := schema.Decode[control.VolumeFileJob](reply.Data)
 	if err != nil || job.ID != id {
-		return control.VolumeFileJob{}, mydcp.ErrAdmission
+		return control.VolumeFileJob{}, sfcp.ErrAdmission
 	}
 	// A quorum permit may precede the native owner's local publication. Wait
 	// for its durable command ordinal, then recheck the original job and the
@@ -61,11 +61,11 @@ func (r *Runtime) volumeFileWorkAt(ctx context.Context, session access.Session, 
 		return control.VolumeFileJob{}, err
 	}
 	if epoch != 0 && view.State.ModuleEpoch() != epoch {
-		return control.VolumeFileJob{}, mydcp.ErrAdmission
+		return control.VolumeFileJob{}, sfcp.ErrAdmission
 	}
 	current, err := r.controlPolicy.VolumeFileWork(view.State, r.commandIdentity().Public, session, id, time.Now().Unix())
 	if err != nil || volumes.NativeBindingDigest(current.Native) != volumes.NativeBindingDigest(job.Native) || current.Consumer != job.Consumer || current.Request != job.Request || current.Method != job.Method {
-		return control.VolumeFileJob{}, mydcp.ErrAdmission
+		return control.VolumeFileJob{}, sfcp.ErrAdmission
 	}
 	return current, nil
 }
@@ -84,18 +84,18 @@ func (r *Runtime) runVolumeFile(ctx context.Context, session access.Session, job
 	if job.Native.Owner.Key != r.Identity.Public {
 		owner, ok := r.nativeOwner(job.Native.Owner.Key)
 		if !ok || !r.acceptsResourceOwner(ctx, job.Native.Owner.Node, job.Native.Owner.Key) {
-			return userauth.VolumeFileReply{}, mydcp.ErrAdmission
+			return userauth.VolumeFileReply{}, sfcp.ErrAdmission
 		}
 		return owner.runVolumeFile(ctx, session, job, channel)
 	}
 	if !r.volumeSourceMu.TryLock() {
-		return userauth.VolumeFileReply{}, mydcp.ErrBudget
+		return userauth.VolumeFileReply{}, sfcp.ErrBudget
 	}
 	defer r.volumeSourceMu.Unlock()
 	r.inputLife.RLock()
 	defer r.inputLife.RUnlock()
 	if r.ctx.Err() != nil || r.nativeVolumes == nil || job.Native.Owner.Key != r.Identity.Public {
-		return userauth.VolumeFileReply{}, mydcp.ErrAdmission
+		return userauth.VolumeFileReply{}, sfcp.ErrAdmission
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -103,20 +103,20 @@ func (r *Runtime) runVolumeFile(ctx context.Context, session access.Session, job
 	defer stop()
 	current, err := r.volumeFileWorkAt(ctx, session, job.ID, channel.Epoch)
 	if err != nil || current.ID != job.ID || volumes.NativeBindingDigest(current.Native) != volumes.NativeBindingDigest(job.Native) || current.Consumer != job.Consumer {
-		return userauth.VolumeFileReply{}, mydcp.ErrAdmission
+		return userauth.VolumeFileReply{}, sfcp.ErrAdmission
 	}
 	row := volumeFileOwner{Schema: 1, ID: job.ID, Scope: job.Request.Scope, Native: volumes.NativeBindingDigest(job.Native), Consumer: job.Consumer, Phase: "intent"}
 	raw, err := r.reports.GetBounded("volume/file/"+job.ID, 128<<10)
 	if err == nil {
 		old, e := schema.Decode[volumeFileOwner](raw)
 		if e != nil || old.Schema != 1 || old.ID != row.ID || old.Scope != row.Scope || old.Native != row.Native || old.Consumer != row.Consumer {
-			return userauth.VolumeFileReply{}, mydcp.ErrAdmission
+			return userauth.VolumeFileReply{}, sfcp.ErrAdmission
 		}
 		row = old
 	} else if !errors.Is(err, storage.ErrMissing) {
 		return userauth.VolumeFileReply{}, err
 	} else if channel.Recover {
-		return row.Reply, mydcp.ErrAdmission
+		return row.Reply, sfcp.ErrAdmission
 	} else if err = r.saveVolumeFile(row); err != nil {
 		return userauth.VolumeFileReply{}, err
 	}
@@ -153,7 +153,7 @@ func (r *Runtime) runVolumeFile(ctx context.Context, session access.Session, job
 		}
 	}
 	if channel.Recover && row.Phase != "applying" && row.Phase != "completed" {
-		return row.Reply, mydcp.ErrAdmission
+		return row.Reply, sfcp.ErrAdmission
 	}
 	if row.Phase != "completed" {
 		root, e := r.nativeVolumes.OpenConsumerData(ctx, job.Native, job.Consumer, *row.Pin)
@@ -165,7 +165,7 @@ func (r *Runtime) runVolumeFile(ctx context.Context, session access.Session, job
 			// Only the original staged inode/rename intent can prove this effect.
 			if job.Method != "volume-file-put" || row.Publication == nil || row.Publication.Operation != job.ID || row.Publication.Path != job.Request.Path || row.Publication.Size != job.Request.Size || row.Publication.Digest != job.Request.Digest {
 				root.Close()
-				return row.Reply, mydcp.ErrAdmission
+				return row.Reply, sfcp.ErrAdmission
 			}
 			result, err := volumes.RecoverPutFile(ctx, root, *row.Publication)
 			if err != nil {
@@ -208,7 +208,7 @@ func (r *Runtime) runVolumeFile(ctx context.Context, session access.Session, job
 						n, readErr := file.Read(buffer)
 						if n > 0 {
 							if channel.Write == nil {
-								e = mydcp.ErrAdmission
+								e = sfcp.ErrAdmission
 								break
 							}
 							if e = channel.Write(buffer[:n]); e != nil {
@@ -232,11 +232,11 @@ func (r *Runtime) runVolumeFile(ctx context.Context, session access.Session, job
 					if e == nil && size == info.Size {
 						reply.Result = &volumes.FileResult{Path: info.Path, Size: size, Digest: digest}
 					} else if e == nil {
-						e = mydcp.ErrAdmission
+						e = sfcp.ErrAdmission
 					}
 				}
 			default:
-				e = mydcp.ErrAdmission
+				e = sfcp.ErrAdmission
 			}
 		}
 		if e != nil {
@@ -269,7 +269,7 @@ func (r *Runtime) runVolumeFile(ctx context.Context, session access.Session, job
 func (r *Runtime) finishVolumeFile(ctx context.Context, job control.VolumeFileJob, row volumeFileOwner) (userauth.VolumeFileReply, error) {
 	// No open descriptor or live stream callback remains before native Return.
 	if row.Pin == nil {
-		return row.Reply, mydcp.ErrAdmission
+		return row.Reply, sfcp.ErrAdmission
 	}
 	local, err := r.nativeVolumes.View(row.Pin.Key)
 	if err != nil {
@@ -277,7 +277,7 @@ func (r *Runtime) finishVolumeFile(ctx context.Context, job control.VolumeFileJo
 	}
 	if pin, exists := local.Consumers[row.Pin.Consumer]; exists {
 		if pin != row.Pin.Pin {
-			return row.Reply, mydcp.ErrAdmission
+			return row.Reply, sfcp.ErrAdmission
 		}
 		if err = r.nativeVolumes.Return(*row.Pin); err != nil {
 			return row.Reply, err
@@ -299,7 +299,7 @@ func (r *Runtime) reportVolumeFile(ctx context.Context, job control.VolumeFileJo
 	// a follower's local view supplies the report envelope and may be retried.
 	view, err := r.Engine().Read(ctx, false)
 	if err != nil {
-		return mydcp.ErrAdmission
+		return sfcp.ErrAdmission
 	}
 	if book, e := r.controlPolicy.Volumes(view.State); e == nil {
 		if original, ok := book.VolumeFile(job.ID); ok && original.Phase == "Completed" {
@@ -316,7 +316,7 @@ func (r *Runtime) reportVolumeFile(ctx context.Context, job control.VolumeFileJo
 		return err
 	}
 	if out.Committed == nil || out.Committed.Result.Code != state.Applied {
-		return mydcp.ErrAdmission
+		return sfcp.ErrAdmission
 	}
 	return nil
 }
@@ -339,14 +339,14 @@ func (r *Runtime) advanceVolumeFiles(ctx context.Context, v cluster.View) error 
 	for _, raw := range rows {
 		row, err := schema.Decode[volumeFileOwner](raw)
 		if err != nil || row.Schema != 1 {
-			return mydcp.ErrAdmission
+			return sfcp.ErrAdmission
 		}
 		if row.Phase != "completed" && row.Phase != "returned" {
 			continue
 		}
 		job, ok := book.VolumeFile(row.ID)
 		if !ok || job.Native.Owner.Key != r.Identity.Public || volumes.NativeBindingDigest(job.Native) != row.Native || job.Consumer != row.Consumer {
-			return mydcp.ErrAdmission
+			return sfcp.ErrAdmission
 		}
 		if job.Phase == "Completed" {
 			continue

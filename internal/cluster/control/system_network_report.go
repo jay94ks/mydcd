@@ -10,32 +10,37 @@ import (
 	"net/netip"
 	"strings"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/network"
-	"github.com/jay94ks/mydcd/internal/network/services"
-	"github.com/jay94ks/mydcd/internal/tenancy"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/network"
+	"github.com/jay94ks/seafield/internal/network/services"
+	"github.com/jay94ks/seafield/internal/tenancy"
 )
 
 // SystemNetworkReport is a server's own step on the system network
-// (mydc-system), signed with its node key. No user sends one: the network
-// follows the servers that run node apps.
+// (sfc-system), signed with its node key. No user sends one: the network
+// follows the servers that run cluster apps.
 //
-//   - use: the server starts (On) or stops running node apps. The first user
+//   - use: the server starts (On) or stops running cluster apps. The first user
 //     creates the network with itself as the only member.
 //   - join: a work server that is not a member joins while any server uses
 //     the network (and creates it when it has no members).
 //   - drain, leave: while no server uses it, each member drains itself; a
 //     drained member leaves on its own closure. The last leave deletes the
 //     network.
+//   - run: the server starts running cluster app App. Only one server runs
+//     each cluster app: refused while another server that uses the network
+//     runs it (Jay 2026-11-26). Stopping cluster apps (use off) ends its
+//     runs. Its address is fixed (tenancy Networks.ClusterAppAddress).
 //
-// Expected is the networks revision (use, join) or the member's revision
-// (drain, leave). RootRevision is the resources root it was read at.
+// Expected is the networks revision (use, join, run) or the member's
+// revision (drain, leave). RootRevision is the resources root it was read at.
 type SystemNetworkReport struct {
 	Schema            uint8
 	Cluster, Reporter [32]byte
 	Node, Action      string
-	On                bool `json:",omitempty"`
+	On                bool   `json:",omitempty"`
+	App               string `json:",omitempty"`
 	Expected, Epoch   uint64
 	RootRevision      uint64
 	Closure           *tenancy.NetworkClosure `json:",omitempty"`
@@ -45,7 +50,7 @@ type SystemNetworkReport struct {
 func SystemNetworkReportBytes(r SystemNetworkReport) []byte {
 	r.Signature = nil
 	raw, _ := json.Marshal(r)
-	return append([]byte("mydc-system-network-report-1\x00"), raw...)
+	return append([]byte("sfc-system-network-report-1\x00"), raw...)
 }
 
 func (r SystemNetworkReport) Command() (state.Command, error) {
@@ -81,8 +86,11 @@ func (p Policy) systemNetworkReport(s state.State, cmd state.Command) (SystemNet
 	if err != nil || want != cmd {
 		return r, ErrCatalog
 	}
+	if (r.Action == "run") != (r.App != "") {
+		return r, ErrCatalog
+	}
 	switch r.Action {
-	case "use", "join", "drain":
+	case "use", "join", "drain", "run":
 		if r.Closure != nil {
 			return r, ErrCatalog
 		}
@@ -99,7 +107,7 @@ func (p Policy) systemNetworkReport(s state.State, cmd state.Command) (SystemNet
 	// Joining and starting to use need a current work server; stopping and
 	// leaving only the server's own identity.
 	owner := p.nodeOwner
-	if r.Action == "join" || r.Action == "use" && r.On {
+	if r.Action == "join" || r.Action == "use" && r.On || r.Action == "run" {
 		owner = p.workNodeOwner
 	}
 	key, err := owner(s, r.Node)
@@ -141,6 +149,18 @@ func (p Policy) reduceSystemNetworkReport(s state.State, cmd state.Command) (map
 		res.Networks, err = res.Networks.SetSystemUse(r.Node, r.On)
 		if err == nil && r.On && len(members) == 0 {
 			res.Networks, native, err = p.createSystemNetwork(s, res, r)
+		} else if err == nil && !r.On {
+			// its cluster apps' addresses stop routing to it
+			native, err = systemTunnelWrites(s, res.Networks)
+		}
+	case "run":
+		res.Networks, err = res.Networks.ClaimClusterApp(r.Expected, r.Node, r.App, p.SystemNetworkUsers(s, res.Networks))
+		if errors.Is(err, access.ErrConflict) {
+			return nil, state.ConditionFailed
+		}
+		if err == nil {
+			// the other members' TUNs route the app's address to it
+			native, err = systemTunnelWrites(s, res.Networks)
 		}
 	case "join":
 		if _, found := member(); found || len(p.SystemNetworkUsers(s, res.Networks)) == 0 || r.Expected != res.Networks.Revision() {
@@ -194,6 +214,31 @@ func (p Policy) reduceSystemNetworkReport(s state.State, cmd state.Command) (map
 	return writes, code
 }
 
+// systemTunnelWrites rewrites the members' TUN sources whose route set
+// changed, in place: a cluster app's address follows the server that runs
+// it (tenancy Networks.ClusterAppHosts). Nothing changes without members.
+func systemTunnelWrites(s state.State, next tenancy.Networks) (map[string][]byte, error) {
+	if len(next.SystemMembers()) == 0 {
+		return nil, nil
+	}
+	rows, err := next.TUNSources("", tenancy.SystemNetwork)
+	if err != nil {
+		return nil, err
+	}
+	writes := map[string][]byte{}
+	for _, row := range rows {
+		o := s.Object(row.TunnelKey)
+		if row.Tunnel == nil || !o.Present {
+			return nil, ErrCatalog
+		}
+		raw, _ := json.Marshal(row.Tunnel)
+		if string(raw) != o.Value {
+			writes[row.TunnelKey] = raw
+		}
+	}
+	return writes, nil
+}
+
 // createSystemNetwork creates the system network with the reporter as its
 // only member, at the first free addresses of the range.
 func (p Policy) createSystemNetwork(s state.State, res Resources, r SystemNetworkReport) (tenancy.Networks, map[string][]byte, error) {
@@ -223,13 +268,6 @@ func (p Policy) SystemNetworkUsers(s state.State, n tenancy.Networks) []string {
 	return out
 }
 
-// SystemNetworkRange is set-system-network-range: the system network's
-// address range, changed only while it has no members (cluster
-// administrators). Expected is the networks revision.
-type SystemNetworkRange struct {
-	Range netip.Prefix
-}
-
 // systemRangeRefusal: a refused workspace network create, join, plan or
 // reconfigure whose addresses overlap the system range gets its own result
 // reason (system-range-overlap) instead of a bare condition failure.
@@ -240,7 +278,6 @@ func systemRangeRefusal(n tenancy.Networks, change Change) bool {
 			for _, p := range v.Pools {
 				prefixes = append(prefixes, p.Prefix)
 			}
-			prefixes = append(prefixes, v.Addresses...)
 		}
 	}
 	switch change.Action {
@@ -270,9 +307,39 @@ func systemRangeRefusal(n tenancy.Networks, change Change) bool {
 		for _, p := range v.Target.Pools {
 			prefixes = append(prefixes, p.Prefix)
 		}
-		prefixes = append(prefixes, v.Target.TunnelAddresses...)
 	default:
 		return false
 	}
-	return n.OverlapsSystemRange(prefixes)
+	return tenancy.OverlapsSystemRange(prefixes)
+}
+
+// SystemNetworkBlock is why node cannot add itself to the system network
+// now (use that creates it, or join), as a fixed reason, or "" when nothing
+// known blocks it. The reducer refuses such a report as a condition failure,
+// which reads the same as a race, so sfcd asks this first and shows the
+// reason instead of sending a report that cannot apply.
+func (p Policy) SystemNetworkBlock(s state.State, node string, owner [32]byte) string {
+	if key, err := p.workNodeOwner(s, node); err != nil || key != owner {
+		return "not-work-server"
+	}
+	res, err := p.Resources(s)
+	if err != nil {
+		return ""
+	}
+	if _, ok := res.Networks.NodeAddress(node); !ok {
+		return "no-server-address"
+	}
+	limit, ok := res.Quotas.Limit("", node)
+	switch {
+	case !ok:
+		return "no-server-quota"
+	case limit.Owner != owner:
+		return "server-quota-owner"
+	case res.Networks.ReservedCount("", node) >= limit.Networks:
+		return "server-network-limit"
+	}
+	if _, err := res.Networks.NextSystemMember(node, owner); err != nil {
+		return "no-free-system-pool"
+	}
+	return ""
 }

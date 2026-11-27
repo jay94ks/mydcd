@@ -3,8 +3,8 @@
 package ingress
 
 import (
-	"github.com/jay94ks/mydcd/internal/network"
-	"github.com/jay94ks/mydcd/internal/schema"
+	"github.com/jay94ks/seafield/internal/network"
+	"github.com/jay94ks/seafield/internal/schema"
 	"net/netip"
 	"strconv"
 )

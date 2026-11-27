@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/engine"
-	"github.com/jay94ks/mydcd/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/engine"
+	"github.com/jay94ks/seafield/internal/reconcile"
 	"github.com/moby/moby/client"
 )
 
@@ -33,7 +33,7 @@ func TestNodeCensusReadsOnlyOwnedDockerInventoryAndRetainsErrors(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			api, err := client.New(client.WithHost("http://fixture.invalid"), client.WithAPIVersion("1.52"), client.WithHTTPClient(&http.Client{Transport: nodeCensusTransport(func(request *http.Request) (*http.Response, error) {
-				if request.Method != http.MethodGet || !strings.Contains(request.URL.Query().Get("filters"), "org.mydc.owner=original-owner") {
+				if request.Method != http.MethodGet || !strings.Contains(request.URL.Query().Get("filters"), "org.sfc.owner=original-owner") {
 					t.Fatal("unowned or mutating inventory request", request.Method, request.URL)
 				}
 				status, body := 200, ""

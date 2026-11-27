@@ -1,10 +1,10 @@
-# Create this node's identity with mydc identity create DIR, then obtain a
+# Create this node's identity with sfcli identity create DIR, then obtain a
 # system-admin-approved invitation for this exact ID/key/listener.
-# mydcd --config configs/node.join.example.yaml join \
+# sfcd --config configs/node.join.example.yaml join \
 #   --cluster CLUSTER_ID --source-public-key CONTROL_PUBLIC_KEY \
 #   --invitation work/join/invitation.json
 # Keep the ORIGINAL invitation/DB/identity after interruption. Then operate via
-# mydcd --config configs/node.join.example.yaml run
+# sfcd --config configs/node.join.example.yaml run
 version: 1
 node:
   id: joining

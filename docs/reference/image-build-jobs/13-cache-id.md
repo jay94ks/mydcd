@@ -1,6 +1,6 @@
 ## cache ID별 보존 항목 조회
 
-`mydc build cache show CACHE --node NODE`는 목록에서 얻은
+`sfcli build cache show CACHE --node NODE`는 목록에서 얻은
 cache identity의 항목을 읽는다. `CACHE_HEX`는 32바이트 Cache의 소문자64자리 hex다.
 기존 Job selector와 같은 사용자 메서드를 쓰며 selector를 혼합하지 않는다.
 

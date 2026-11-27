@@ -5,8 +5,8 @@ package server
 import (
 	"context"
 
-	"github.com/jay94ks/mydcd/internal/cluster/membership"
-	"github.com/jay94ks/mydcd/internal/web/mydc"
+	"github.com/jay94ks/seafield/internal/cluster/membership"
+	"github.com/jay94ks/seafield/internal/web/sfc"
 )
 
 // memberView: one /nodes row, the screen's merge of a `members` entry
@@ -19,20 +19,23 @@ import (
 // entry's while joining), joinRevision the entry's (promote-node), and
 // scheduling.revision the cordon's (cordon / uncordon).
 type memberView struct {
-	ID           string
-	Key          string
-	Endpoint     string
-	JoinID       string
-	Revision     uint64
-	JoinRevision uint64
-	Phase        string
-	Voter        bool
-	AdmitsWork   bool
-	Cordoned     bool
-	CordonedBy   string                 `json:",omitempty"`
-	CordonedAt   string                 `json:",omitempty"`
-	CordonReason string                 `json:",omitempty"` // the cordon-node original's note
-	Scheduling   *membership.CordonView `json:",omitempty"`
+	ID       string
+	Key      string
+	Endpoint string
+	// SystemAddress: the server's fixed address (10.254.240.0/20), set by
+	// sfcd when it joined the cluster; its tunnel address in every network.
+	SystemAddress string `json:",omitempty"`
+	JoinID        string
+	Revision      uint64
+	JoinRevision  uint64
+	Phase         string
+	Voter         bool
+	AdmitsWork    bool
+	Cordoned      bool
+	CordonedBy    string                 `json:",omitempty"`
+	CordonedAt    string                 `json:",omitempty"`
+	CordonReason  string                 `json:",omitempty"` // the cordon-node original's note
+	Scheduling    *membership.CordonView `json:",omitempty"`
 	// PendingOperation: the lifecycle row's unfinished node operation.
 	PendingOperation string `json:",omitempty"`
 	// Identity: the latest identity rotation (operation, phase: Preparing
@@ -55,7 +58,10 @@ type memberIdentity struct {
 
 func newMemberView(e membership.Entry, v *membership.NodeView) memberView {
 	m := memberView{ID: e.Peer.ID, Key: e.Peer.Key, Endpoint: e.Peer.Endpoint, JoinID: e.JoinID, Revision: e.Revision, JoinRevision: e.Revision,
-		Phase: mydc.NodePhasePending, Voter: e.Peer.Voter, Join: string(e.Phase)}
+		Phase: sfc.NodePhasePending, Voter: e.Peer.Voter, Join: string(e.Phase)}
+	if e.Address.IsValid() {
+		m.SystemAddress = e.Address.String()
+	}
 	if v != nil {
 		sch := v.Scheduling
 		m.Revision, m.Phase, m.Voter, m.AdmitsWork, m.Scheduling = v.Node.Revision, string(v.Node.Phase), v.Node.Member.Voter, v.AdmitsWork, &sch
@@ -72,7 +78,7 @@ func newMemberView(e membership.Entry, v *membership.NodeView) memberView {
 }
 
 // memberViews: the page's entries in order, each with its lifecycle row.
-func memberViews(p mydc.MembersPage) []memberView {
+func memberViews(p sfc.MembersPage) []memberView {
 	nodes := make(map[string]*membership.NodeView, len(p.Nodes))
 	for i := range p.Nodes {
 		nodes[p.Nodes[i].Node.Member.ID] = &p.Nodes[i]
@@ -88,9 +94,9 @@ func memberViews(p mydc.MembersPage) []memberView {
 const membersMaxPages = 256
 
 // eachMember walks every members page until fn says stop. It reads at most
-// membersMaxPages pages and stops early if mydcd hands back a cursor that
+// membersMaxPages pages and stops early if sfcd hands back a cursor that
 // does not move forward (a backend fault, not an endless loop).
-func eachMember(ctx context.Context, c mydc.Conn, fn func(memberView, mydc.MembersPage) bool) error {
+func eachMember(ctx context.Context, c sfc.Conn, fn func(memberView, sfc.MembersPage) bool) error {
 	after := ""
 	for range membersMaxPages {
 		p, err := c.Members(ctx, after)
@@ -112,10 +118,10 @@ func eachMember(ctx context.Context, c mydc.Conn, fn func(memberView, mydc.Membe
 
 // findMemberEpoch: the server's row (nil when there is none) and the node
 // operation epoch of the members page it came from (remove-node's Epoch).
-func findMemberEpoch(ctx context.Context, c mydc.Conn, id string) (*memberView, uint64, error) {
+func findMemberEpoch(ctx context.Context, c sfc.Conn, id string) (*memberView, uint64, error) {
 	var found *memberView
 	var epoch uint64
-	err := eachMember(ctx, c, func(m memberView, p mydc.MembersPage) bool {
+	err := eachMember(ctx, c, func(m memberView, p sfc.MembersPage) bool {
 		if m.ID == id {
 			found, epoch = &m, p.NodeOperationEpoch
 			return false
@@ -125,7 +131,7 @@ func findMemberEpoch(ctx context.Context, c mydc.Conn, id string) (*memberView, 
 	return found, epoch, err
 }
 
-func findMember(ctx context.Context, c mydc.Conn, id string) (*memberView, error) {
+func findMember(ctx context.Context, c sfc.Conn, id string) (*memberView, error) {
 	m, _, err := findMemberEpoch(ctx, c, id)
 	return m, err
 }

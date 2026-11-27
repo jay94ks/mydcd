@@ -14,10 +14,10 @@ import (
 	"os"
 	"syscall"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/identity"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/identity"
 )
 
 type Stored struct {
@@ -47,7 +47,7 @@ type privateRecord struct {
 // It is the cluster alone: trusting another node or changing endpoints
 // keeps the same saved logins and operations.
 func (c Client) Profile() [32]byte {
-	return sha256.Sum256(append([]byte("mydc-user-profile-2\x00"), c.Cluster[:]...))
+	return sha256.Sum256(append([]byte("sfc-user-profile-2\x00"), c.Cluster[:]...))
 }
 
 // JournalProfile is the namespace of retained operation journals.
@@ -111,7 +111,7 @@ func clusterRoot(home string, cluster [32]byte, create bool) (*os.Root, error) {
 	if err != nil {
 		return nil, ErrPrivateState
 	}
-	for _, part := range []string{".mydc", "sessions", hex.EncodeToString(cluster[:])} {
+	for _, part := range []string{".sfc", "sessions", hex.EncodeToString(cluster[:])} {
 		next, err := descend(r, part, create)
 		_ = r.Close()
 		if err != nil {

@@ -8,7 +8,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/registry"
+	"github.com/jay94ks/seafield/internal/registry"
 )
 
 // Exact production post-authorization adapter and actual retained Store. Grant

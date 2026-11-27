@@ -14,18 +14,17 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/config"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/engine"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/network"
-	"github.com/jay94ks/mydcd/internal/network/services"
-	"github.com/jay94ks/mydcd/internal/tenancy"
-	"github.com/jay94ks/mydcd/tests/registryfixture"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/engine"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/network"
+	"github.com/jay94ks/seafield/internal/network/services"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/tenancy"
+	"github.com/jay94ks/seafield/tests/registryfixture"
 	"github.com/miekg/dns"
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/client"
@@ -49,21 +48,21 @@ func testCurrentIdentityDNSClosure(t *testing.T, ctx context.Context, a *Runtime
 		}
 		return r
 	}
-	backend := os.Getenv("MYDC_DOCKER_TEST_BACKEND")
+	backend := os.Getenv("SFC_DOCKER_TEST_BACKEND")
 	if !filepath.IsAbs(backend) {
 		t.Fatal("prebuilt original DNS client backend required")
 	}
-	registry := registryfixture.OpenPreparedAt(t, backend, container.Config{Cmd: []string{"/backend"}, Env: []string{"MYDC_DNS_FIXTURE=1"}, User: "10001:10001", Labels: map[string]string{"org.mydc.test.owner": os.Getenv("MYDC_KERNEL_TEST_OWNER")}}, "192.0.2.1:0")
+	registry := registryfixture.OpenPreparedAt(t, backend, container.Config{Cmd: []string{"/backend"}, Env: []string{"SFC_DNS_FIXTURE=1"}, User: "10001:10001", Labels: map[string]string{"org.sfc.test.owner": os.Getenv("SFC_KERNEL_TEST_OWNER")}}, "192.0.2.1:0")
 	catalog, err := p.Catalog(read().State)
 	if err != nil {
 		t.Fatal(err)
 	}
 	tenant, _ := catalog.Tenant("tenant")
-	change("dns-identity/trust", "set-trust", tenant.Revision, control.TrustAssignment{Tenant: "tenant", Rules: append(tenant.ImageSources, access.TrustRule{Registry: registry.Registry, Repository: "fixture"})})
+	change("dns-identity/trust", "set-trust", tenant.Revision, control.TrustChange{Tenant: "tenant", Add: []access.TrustRule{access.TrustRule{Registry: registry.Registry, Repository: "fixture"}}})
 	public := sqlPublicFixture{Images: map[string]string{registry.Reference: registry.ConfigDigest}}
 	var originalOwner [32]byte
 	for n, path := range configs {
-		cfg, err := config.LoadNode(path)
+		cfg, err := loadTestNode(path)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -93,9 +92,9 @@ func testCurrentIdentityDNSClosure(t *testing.T, ctx context.Context, a *Runtime
 	if err := os.WriteFile(filepath.Join(root, "dns-fixture.json"), raw, 0644); err != nil {
 		t.Fatal(err)
 	}
-	definition := tenancy.TUNDefinition{Tenant: "tenant", Name: name, GatewayMode: network.ManagedGatewayMode, Members: []tenancy.TUNNode{{Node: "node-b", Pools: []tenancy.Subnet{{ID: "v4", Prefix: netip.MustParsePrefix("198.19.86.16/28"), Gateway: netip.MustParseAddr(gateway), MTU: 1280}}, Addresses: []netip.Prefix{netip.MustParsePrefix("198.19.87.2/32")}}}}
+	definition := tenancy.TUNDefinition{Tenant: "tenant", Name: name, GatewayMode: network.ManagedGatewayMode, Members: []tenancy.TUNNode{{Node: "node-b", Pools: []tenancy.Subnet{{ID: "v4", Prefix: netip.MustParsePrefix("198.19.86.16/28"), Gateway: netip.MustParseAddr(gateway), MTU: 1280}}}}}
 	change("dns-identity/network", "create-tun-network", resources().Networks.Revision(), definition)
-	policy := services.ManagedDNSDefinition{Schema: 1, Tenant: "tenant", Network: name, Policy: services.ManagedDNSPolicy{Enabled: true, Zone: name + ".mydc.test.", TTL: 30, NegativeTTL: 5, Transports: []string{"udp", "tcp"}, Upstreams: []netip.AddrPort{}, MaxQueries: 8, MaxCacheEntries: 8, MaxResponseBytes: 4096, MaxConnections: 4, RequestTimeoutMS: 1000}}
+	policy := services.ManagedDNSDefinition{Schema: 1, Tenant: "tenant", Network: name, Policy: services.ManagedDNSPolicy{Enabled: true, Zone: name + ".sfc.test.", TTL: 30, NegativeTTL: 5, Transports: []string{"udp", "tcp"}, Upstreams: []netip.AddrPort{}, MaxQueries: 8, MaxCacheEntries: 8, MaxResponseBytes: 4096, MaxConnections: 4, RequestTimeoutMS: 1000}}
 	policyKey := services.ManagedDNSKey("tenant", name)
 	change("dns-identity/enable", "configure-network-dns", 0, policy)
 	profile, home := filepath.Join(root, "dns-identity-client.yaml"), filepath.Join(root, "dns-identity-home")
@@ -107,7 +106,7 @@ func testCurrentIdentityDNSClosure(t *testing.T, ctx context.Context, a *Runtime
 	}
 	cli := func(args ...string) {
 		t.Helper()
-		out, diagnostic, err := runManagedCLICommand(ctx, filepath.Join(products, "mydc"), home, profile, args, nil)
+		out, diagnostic, err := runManagedCLICommand(ctx, filepath.Join(products, "sfc"), home, profile, args, nil)
 		if err != nil {
 			t.Fatal("focused DNS CLI", args, err, string(out), string(diagnostic))
 		}
@@ -115,7 +114,7 @@ func testCurrentIdentityDNSClosure(t *testing.T, ctx context.Context, a *Runtime
 	cli("wallet", "init")
 	cli("login", "--username", "admin", "--method", "private-key", "--key-file", filepath.Join(root, "admin/key.pem"))
 	path := filepath.Join(root, "dns-original-client-app.yaml")
-	document := fmt.Sprintf("name: %s\nservices:\n client:\n  image: %s\n  command: [/backend]\n  environment: {MYDC_DNS_FIXTURE: '1'}\n  user: '10001:10001'\n  cpus: 0.1\n  mem_limit: 16m\n  healthcheck: {test: [CMD, /backend, --tcp-probe, '127.0.0.1:8080'], interval: 1s, timeout: 2s, retries: 3}\n  networks: {lan: {ipv4_address: '%s'}}\n  x-mydc: {node: node-b}\nnetworks:\n lan: {external: true, name: %s}\n", appName, registry.Reference, address, name)
+	document := fmt.Sprintf("name: %s\nservices:\n client:\n  image: %s\n  command: [/backend]\n  environment: {SFC_DNS_FIXTURE: '1'}\n  user: '10001:10001'\n  cpus: 0.1\n  mem_limit: 16m\n  healthcheck: {test: [CMD, /backend, --tcp-probe, '127.0.0.1:8080'], interval: 1s, timeout: 2s, retries: 3}\n  networks: {lan: {ipv4_address: '%s'}}\n  x-sfc: {node: node-b}\nnetworks:\n lan: {external: true, name: %s}\n", appName, registry.Reference, address, name)
 	if err := os.WriteFile(path, []byte(document), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -123,11 +122,11 @@ func testCurrentIdentityDNSClosure(t *testing.T, ctx context.Context, a *Runtime
 	observe := func(node, key string) (ModuleObservation, error) {
 		var value ModuleObservation
 		if node != "node-b" {
-			return value, mydcp.ErrAdmission
+			return value, sfcp.ErrAdmission
 		}
 		peer, ok := a.resourcePeerForKey(ctx, originalOwner)
 		if !ok || peer.ID != node {
-			return value, mydcp.ErrAdmission
+			return value, sfcp.ErrAdmission
 		}
 		reply, err := cluster.CallManagement(ctx, a.Mesh, a.commandIdentity(), p.Cluster, peer, cluster.ManagementRequest{Method: "observe", Key: key, Latest: false})
 		if err == nil {

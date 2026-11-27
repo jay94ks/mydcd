@@ -4,12 +4,12 @@ RQ4 서버·CLI 연결은 마지막 실행 검증 전이다. UI는 이 API를 �
 
 ```sh
 # 기본: 설치된 voter 전체, 한 대씩, 현재 leader는 마지막
-mydc cluster compact --dry-run
-mydc cluster compact --minimal --retain 1000
+sfcli cluster compact --dry-run
+sfcli cluster compact --minimal --retain 1000
 # 대상을 명시하거나 follower 병렬 실행을 선택할 수 있다.
-mydc cluster compact --nodes node-a,node-b --parallel --dry-run
+sfcli cluster compact --nodes node-a,node-b --parallel --dry-run
 # 끊긴 작업은 새로 계획하지 않고 같은 작업 ID로 이어 본다.
-mydc op show ID
+sfcli op show ID
 ```
 
 현재 시스템 관리자(`ManageCluster`)만 계획·실행·결과를 조회한다. 실행 credential의 동작 제한에는 `raft-compact`가 필요하다. tenant 관리자는 실행할 수 없다. 노드 키는 수락된 사용자 요청에 대한 현재 허가를 확인하고 자기 SDK 효과와 진행을 보고한다. 노드 보고가 새 사용자 승인을 만들지 않는다.
@@ -34,20 +34,20 @@ mydc op show ID
 
 ## User 메시지와 포맷
 
-Unix TLS와 네트워크 MYDCP의 기존 User purpose/frame/envelope·Session 인증을 사용한다. JSON 필드 이름은 아래와 같이 대문자로 시작하며 버전은1이다. `[32]byte`는 JSON 숫자 배열, `Signature` 바이트는 기존 base64 규칙을 따른다.
+Unix TLS와 네트워크 SFCP의 기존 User purpose/frame/envelope·Session 인증을 사용한다. JSON 필드 이름은 아래와 같이 대문자로 시작하며 버전은1이다. `[32]byte`는 JSON 숫자 배열, `Signature` 바이트는 기존 base64 규칙을 따른다.
 
 | Method | Request의 추가 필드 | Reply의 추가 필드 |
 |---|---|---|
-| raft-compact-plan | `Compact:{Selection:{Mode,Retain,Parallel,Nodes?},Operation:"",After:""}` | CompactPlan 페이지 |
-| raft-compact-status | `Compact:{Operation,After:""}`; Selection 없음 | CompactStatus 페이지 |
-| whoami | 기존 요청 | CompactRootRevision, ModuleEpoch |
+| raft-compact-plan | typed `Params:{Selection:{Mode,Retain,Parallel,Nodes?},After?}` | `Data`: CompactPlan 페이지 |
+| raft-compact-status | typed `Params:{Operation,After?}` | `Data`: CompactStatus 페이지 |
+| whoami | Params `{}` | `Data.Roots["control/raft-maintenance"]`, `Data.ModuleEpoch` |
 | operation/result | 기존 UserOperation/원 request ID | 기존 Result/Found; SDK 완료와 구분 |
 | raft-status | 기존 요청 | RaftStatus.LastManualCompact와 Nodes[].LastManualCompact |
 
-위 요청에는 별도 Tenant/Node/바깥 After를 넣지 않는다. 모든 페이지 cursor는 `Compact.After`에 넣는다. 기존 Request의 Schema·Method·Nonce와 인증 envelope 필드는 그대로 필요하다.
+두 compact method는 [typed method](unix-sockets/10-user.md#typed-method)라 Request에 Schema·Method·Nonce·`Params`만 둔다. 모든 페이지 cursor는 `Params.After`에 넣는다.
 
 ```json
-{"Schema":1,"Method":"raft-compact-plan","Compact":{"Selection":{"Mode":"minimal","Retain":1000,"Parallel":false},"Operation":"","After":""}}
+{"Schema":1,"Method":"raft-compact-plan","Params":{"Selection":{"Mode":"minimal","Retain":1000,"Parallel":false}}}
 ```
 
 이는 추가 필드를 설명하는 본문 예시이며 실제 전송은 기존 client가 Nonce와 서명 envelope를 붙인다.
@@ -58,7 +58,7 @@ Unix TLS와 네트워크 MYDCP의 기존 User purpose/frame/envelope·Session �
 | Selection, Target | 원 선택과 그 선택/노드 ID/키를 묶은32바이트 지문 |
 | Total, Nodes, Next | 전체 대상 수, 최대64개 clean queued 행, 다음 opaque cursor |
 
-client의 `CompactPlan`은 최대16페이지를 같은 Target/Total로 수집하고 전체 계획을 검증한다. roster가 달라진 cursor는 `conflict / COMPACT_VIEW_CHANGED`다. 미리보기가 실제 수락을 보장하지 않으며 수락 시 현재 권한·구성·겹친 작업·저장 예산을 다시 검사한다.
+client의 `CompactPlan`은 최대16페이지를 같은 Target/Total로 수집하고 전체 계획을 검증한다. roster가 달라진 cursor는 `Code:"conflict"`, `InputCode:"COMPACT_VIEW_CHANGED"`다. 미리보기가 실제 수락을 보장하지 않으며 수락 시 현재 권한·구성·겹친 작업·저장 예산을 다시 검사한다.
 
 실행은 기존 서명 UserOperation을 사용한다.
 
@@ -67,7 +67,7 @@ client의 `CompactPlan`은 최대16페이지를 같은 Target/Total로 수집하
 | Change.Action | raft-compact |
 | Change.Expected | 0: 새 원 operation ID만 허용 |
 | Change.Payload | `{Operation,Selection:{Nodes?,Mode,Retain,Parallel},Target}` |
-| RootRevision, Epoch | whoami의 CompactRootRevision을 원 operation.RootRevision에 넣고 현재 module epoch를 사용 |
+| RootRevision, Epoch | whoami의 `Data.Roots["control/raft-maintenance"]`를 원 operation.RootRevision에 넣고 현재 module epoch를 사용 |
 | Reason | 선택한 공개 Text·IncidentID·ApprovedBy metadata. 승인 권한을 만들지 않음 |
 
 CLI는 전송 전에 원 intent를 journal에 저장한다. 같은 request ID를 다시 실행하면 원 서명·계획·결과를 사용한다. 원 기록이 없거나 대상/선택이 다르면 명시 재개를 거부한다. 결과 불명으로 새 operation ID를 자동 발급하지 않는다.
@@ -99,7 +99,7 @@ Before/After metrics는 `LogKnown,LogFileKnown,LogUsedKnown,SnapshotKnown`과 `F
 
 ## Owner 실행·복구와 저장 경계
 
-노드 간 Management method `compact-work`는 `{Operation}`을 받아 원 owner·대상/키·상태/revision·현재 leader·공유 root/epoch/index·원 grant 허용 여부·실행 순서를 반환하는 quorum read다. `compact-report`는 owner/leader의 서명 보고 `{Schema,Cluster,Reporter,Operation,Node,Action,Leader,Expected,RootRevision,Epoch,At,Result?,Code?,Signature}`를 받는다. 서명 domain은 `mydc-raft-compact-report-1` 뒤 NUL과 Signature를 null로 둔 JSON이다. begin/finish/cancel은 owner, queued skip은 현재 leader만 보고한다. Unix 사용자 연결은 이 노드 권한을 얻지 않는다.
+노드 간 Management method `compact-work`는 `{Operation}`을 받아 원 owner·대상/키·상태/revision·현재 leader·공유 root/epoch/index·원 grant 허용 여부·실행 순서를 반환하는 quorum read다. `compact-report`는 owner/leader의 서명 보고 `{Schema,Cluster,Reporter,Operation,Node,Action,Leader,Expected,RootRevision,Epoch,At,Result?,Code?,Signature}`를 받는다. 서명 domain은 `sfc-raft-compact-report-1` 뒤 NUL과 Signature를 null로 둔 JSON이다. begin/finish/cancel은 owner, queued skip은 현재 leader만 보고한다. Unix 사용자 연결은 이 노드 권한을 얻지 않는다.
 
 공유 job은 `control/raft-maintenance`에, SDK 호출 직전 Dispatch와 실제 terminal 결과는 owner private DB의 `maintenance/compact/`에 저장한다. 원 job은 미정산 node activity·원장 교체/종료의 outstanding 참조에 포함한다. 앱/tenant가 이 시스템 유지보수 자원을 소유하거나 앱 종료로 삭제하지 않는다.
 
@@ -109,4 +109,4 @@ private 전송 기록의 동기 저장이 실패하면 SDK 호출과 설정 변�
 
 job은 최대128개, 기본 roster는 최대1024개, 개별 결과는8KiB, checkpoint는4MiB다. 수락 전에 pending 대상당9KiB의 결과 공간을 예약하므로 큰 배치는 더 일찍 거부될 수 있다. 거부된 배치는 대상별 작은 명시 계획으로 나눌 수 있으나 수락된 원 작업을 분할/초기화하지 않는다. 완료 이력 자동 무한 보관이나 물리 파일 vacuum을 제공한다고 표시하지 않는다.
 
-Bolt 로그를 삭제해도 할당된 파일은 바로 작아지지 않으며 free page가 후속 쓰기에 재사용된다. 이 기능은 파일을 복사·교체·vacuum하지 않는다. 물리 축소는 별도 offline 유지보수 절차가 필요한 작업이며 `mydcd` 재시작만으로 축소된다고 안내하지 않는다.
+Bolt 로그를 삭제해도 할당된 파일은 바로 작아지지 않으며 free page가 후속 쓰기에 재사용된다. 이 기능은 파일을 복사·교체·vacuum하지 않는다. 물리 축소는 별도 offline 유지보수 절차가 필요한 작업이며 `sfcd` 재시작만으로 축소된다고 안내하지 않는다.

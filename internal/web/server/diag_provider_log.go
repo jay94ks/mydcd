@@ -9,12 +9,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/web/provlog"
+	"github.com/jay94ks/seafield/internal/web/provlog"
 )
 
 // Provider diagnostic log (docs/reference/web-api/…-provider-log.md). Off by
 // default. A system administrator turns it on from 웹 앱 설정; that makes a
-// bearer token, shown once, for the debugging tool (`mydc-web provider-log`).
+// bearer token, shown once, for the debugging tool (`sfc-web provider-log`).
 // Collection and the token end after an idle hour (provlog.IdleLimit).
 
 func (s *Server) providerLog() *provlog.Log { return s.opt.ProviderLog }
@@ -163,7 +163,7 @@ func (s *Server) handleProviderLogDownload(w http.ResponseWriter, r *http.Reques
 	h := w.Header()
 	h.Set("Content-Type", "application/x-ndjson")
 	h.Set("Cache-Control", "no-store")
-	h.Set("Content-Disposition", fmt.Sprintf(`attachment; filename="mydc-provider-log-%s.jsonl"`, s.now().UTC().Format("20060102-150405")))
+	h.Set("Content-Disposition", fmt.Sprintf(`attachment; filename="sfc-provider-log-%s.jsonl"`, s.now().UTC().Format("20060102-150405")))
 	if err := s.providerLog().Export(w, f); err != nil {
 		s.log.Error("provider log export", "err", err)
 	}

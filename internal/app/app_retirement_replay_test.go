@@ -4,14 +4,14 @@ package app
 
 import (
 	"context"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/reconcile"
 	"testing"
 )
 
-// Actual user authentication, MYDCP, SDK Raft and durable FSM; no Docker/kernel
+// Actual user authentication, SFCP, SDK Raft and durable FSM; no Docker/kernel
 // adapters. The retained metadata command is the same boundary as E8's source
 // Delete. Failure injection omits its first transmission after durable send.
 func verifyRealRetirementReplay(t *testing.T, ctx context.Context, r *Runtime, read func() state.State, userOp func(string, string, uint64, any, ...state.Code) state.Result, late bool) {

@@ -16,7 +16,7 @@
 
 ```sh
 # 큰 파일은 조각으로 보낸다. 끊기면 같은 --id로 다시 실행해 남은 조각만 보낸다.
-mydc build draft put editable data/payload.bin ./payload.bin --id put-payload
+sfcli build draft put editable data/payload.bin ./payload.bin --id put-payload
 ```
 
 

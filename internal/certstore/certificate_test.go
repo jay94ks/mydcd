@@ -23,7 +23,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/storage"
+	"github.com/jay94ks/seafield/internal/storage"
 )
 
 func materialWith(t *testing.T, key crypto.Signer, cn string, hosts []string, before, after int64) Material {

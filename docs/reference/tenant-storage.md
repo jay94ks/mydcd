@@ -3,9 +3,9 @@
 `tenant-storage`는 특정 tenant에서 사용할 수 있는 node 저장 root의 읽기 전용 조회다. 현재 사용자에게 그 tenant의 `ManageVolumes` 또는 `ManageRegistry` 권한이 있어야 한다. viewer·Read 전용 credential은 거부하며, 시스템 관리자도 현재 session의 해당 권한 범위를 충족해야 한다. 기존 시스템 관리자 `node-storage`·`node-storage-space`의 권한과 전체 root/실제 용량 조회는 바꾸지 않는다.
 
 ```sh
-mydc --tenant shop manage tenant-storage --node node-b
-mydc --tenant shop manage tenant-storage --node node-b --after CURSOR
-mydc --tenant shop node storage list
+sfcli --tenant shop manage tenant-storage --node node-b
+sfcli --tenant shop manage tenant-storage --node node-b --after CURSOR
+sfcli --tenant shop node storage list
 ```
 
 첫 명령은 한 페이지를 출력한다. `TenantStorageNext`가 있으면 같은 tenant/node 선택에서 `--after`로 이어 읽는다. 저장 정책·사용자/tenant 권한·멤버십·epoch가 바뀌면 과거 cursor는 `conflict`로 거부되므로 처음부터 다시 읽는다. 기본 프로필의 tenant 선택 규칙은 다른 tenant 관리 명령과 같다. 이 명령은 root 등록·OS 디렉터리 생성·용량 예약·빌더 기동을 하지 않는다.

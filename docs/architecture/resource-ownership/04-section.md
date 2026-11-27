@@ -1,6 +1,6 @@
 ## 사용자 컨테이너 운영 조회의 소유권
 
-노드 CPU/메모리·승인된 경로의 파일시스템·tenant 실제 사용량·QUIC 링크·SDK 합의 관측은 담당 mydcd의 observations.db/SDK에 속한다. 현재 멤버 신원·서명·node/source를 검사한 read projection이며 공유 quota·배치·실행 허가를 대체하지 않는다. tenant의 허용 node/root를 먼저 골라 시스템/다른 tenant 정보를 숨기고 같은 파일시스템은 한 번만 합산한다. 합의 순서·term/vote/log/snapshot은 기존 Raft SDK가 소유하며 진단 observer가 합의를 구현하지 않는다. [노드 관측 API](../../reference/node-observations.md)를 따른다.
+노드 CPU/메모리·승인된 경로의 파일시스템·tenant 실제 사용량·QUIC 링크·SDK 합의 관측은 담당 sfcd의 observations.db/SDK에 속한다. 현재 멤버 신원·서명·node/source를 검사한 read projection이며 공유 quota·배치·실행 허가를 대체하지 않는다. tenant의 허용 node/root를 먼저 골라 시스템/다른 tenant 정보를 숨기고 같은 파일시스템은 한 번만 합산한다. 합의 순서·term/vote/log/snapshot은 기존 Raft SDK가 소유하며 진단 observer가 합의를 구현하지 않는다. [노드 관측 API](../../reference/node-observations.md)를 따른다.
 
 수락된 앱의 원 app.yaml·버전·별도 로컬 서비스 YAML·CD field overlay는 Apps가 Inventory 수락과 같은 FSM 변경으로 보존하는 앱 소유 metadata다. 앱은 이름으로 빌린 관리 망·Volume·Secret 자체를 소유하지 않는다. 원문 query는 현재 tenant Read로만 읽고 Secret provider 값을 채워 넣지 않는다. 이력 회수는 기존 전부 종료·정산·원장 만료 조건을 재사용하며 버전 counter와 빌린 자원은 보존한다. [원문·버전 API](../../reference/app-source.md)를 따른다.
 

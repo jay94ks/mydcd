@@ -6,25 +6,27 @@ import (
 	"bytes"
 	"context"
 	"crypto/ed25519"
+	"crypto/x509"
 	"encoding/hex"
 	"encoding/json"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/cluster/membership"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/config"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/wallet"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/membership"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/config"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/sfcp"
 )
 
 // Reuses the actual SDK Raft/bbolt and authenticated transport fixture. Member
@@ -33,11 +35,12 @@ import (
 // The new drain is genuinely accepted through the ordinary User management
 // API, with an empty Task plan; no original ID is supplied to its discoverer.
 func TestRQ15NodeQueriesActualRaftUnixQUICAndCLI(t *testing.T) {
-	binary := os.Getenv("MYDC_TEST_CLI")
+	binary := os.Getenv("SFC_TEST_CLI")
 	if !filepath.IsAbs(binary) {
-		t.Skip("requires explicitly prebuilt final mydc")
+		t.Skip("requires explicitly prebuilt final sfc")
 	}
 	f := newVolumeFileWireFixture(t)
+	f.publicUserAuth.Store(true)
 	f.session.Scopes = fullUserScopes()
 	f.session.Signature = ed25519.Sign(f.nodes[0].Private, access.SessionBytes(f.session))
 	root := t.TempDir()
@@ -218,7 +221,7 @@ func TestRQ15NodeQueriesActualRaftUnixQUICAndCLI(t *testing.T) {
 
 	type target struct {
 		client  Client
-		peer    mydcp.Peer
+		peer    sfcp.Peer
 		session access.Session
 		call    func(...string) ([]byte, int)
 	}
@@ -231,10 +234,10 @@ func TestRQ15NodeQueriesActualRaftUnixQUICAndCLI(t *testing.T) {
 				peer.Endpoint = "unix://" + socket
 			}
 			client := f.client
-			client.Peers = []mydcp.Peer{peer}
+			client.Peers = []sfcp.Peer{peer}
 			// A profile's transport pins the selected endpoint too. Replacing
 			// Client.Peers cannot turn the fixture's QUIC pin into a Unix pin.
-			mesh, err := mydcp.NewTransport(f.user, f.policy.Cluster, func(key mydcp.Identity) (mydcp.Peer, bool) {
+			mesh, err := sfcp.NewTransport(f.user, f.policy.Cluster, func(key sfcp.Identity) (sfcp.Peer, bool) {
 				return peer, key == peer.Key
 			})
 			if err != nil {
@@ -282,9 +285,9 @@ func TestRQ15NodeQueriesActualRaftUnixQUICAndCLI(t *testing.T) {
 	if !found {
 		t.Fatal("separate observer missing")
 	}
-	expected := observer.Revision
-	observer.Revision, observer.SystemAdmin = 0, false
-	f.change("put-user", expected, observer)
+	// An existing account's put-user changes only Username, Enabled and
+	// SystemAdmin; its credentials stay as they are.
+	f.change("put-user", observer.Revision, access.User{ID: observer.ID, Username: observer.Username, Enabled: observer.Enabled})
 	for _, target := range targets {
 		if _, err := target.client.NodeShellSessions(f.ctx, target.peer, target.session, "", control.NodeShellSessionsQuery{State: "open"}); err == nil {
 			t.Fatal("cached revoked account revision still queried shell rows")
@@ -292,10 +295,8 @@ func TestRQ15NodeQueriesActualRaftUnixQUICAndCLI(t *testing.T) {
 		if _, err := target.client.NodeDrainStatus(f.ctx, target.peer, target.session, control.NodeDrainQuery{Node: f.peers[0].ID}); err == nil {
 			t.Fatal("cached administrator still discovered another user's drain")
 		}
-		for _, args := range [][]string{{"node", "shell-sessions", "--state", "open"}, {"node", "drain-status", f.peers[0].ID}} {
-			if _, code := target.call(args...); code != 3 {
-				t.Fatal("actual CLI did not refuse the revoked current role", code)
-			}
+		if _, code := target.call("node", "shell", "sessions", "--state", "open"); code != 1 {
+			t.Fatal("actual CLI did not refuse the revoked current role", code)
 		}
 		ordinary, err := target.client.Login(f.ctx, target.peer, "query.observer", observerKey.Private)
 		if err != nil {
@@ -314,7 +315,7 @@ func TestRQ15NodeQueriesActualRaftUnixQUICAndCLI(t *testing.T) {
 	}
 }
 
-func verifyRQ15NodeQueries(t *testing.T, ctx context.Context, client Client, peer mydcp.Peer, session access.Session, call func(...string) ([]byte, int), operation string) {
+func verifyRQ15NodeQueries(t *testing.T, ctx context.Context, client Client, peer sfcp.Peer, session access.Session, call func(...string) ([]byte, int), operation string) {
 	t.Helper()
 	for _, test := range []struct {
 		filter control.NodeShellSessionsQuery
@@ -358,20 +359,30 @@ func verifyRQ15NodeQueries(t *testing.T, ctx context.Context, client Client, pee
 				t.Fatal("open filter hid an accepted nonclosed lifetime", states)
 			}
 		}
-		args := []string{"node", "shell-sessions"}
+		// The CLI lists every page itself and has no cursor option, so
+		// compare its whole list with all of the SDK's pages once per filter.
+		if test.after != "" {
+			continue
+		}
+		all := append([]control.NodeShellSession{}, page.Sessions...)
+		for next := page.Next; next != ""; {
+			more, err := client.NodeShellSessions(ctx, peer, session, next, test.filter)
+			if err != nil || more.NodeShellSessions == nil {
+				t.Fatal("actual User shell query next page", err)
+			}
+			all, next = append(all, more.NodeShellSessions.Sessions...), more.NodeShellSessions.Next
+		}
+		args := []string{"node", "shell", "sessions"}
 		if test.filter.State != "" {
 			args = append(args, "--state", test.filter.State)
 		}
 		if test.filter.Node != "" {
 			args = append(args, "--node", test.filter.Node)
 		}
-		if test.after != "" {
-			args = append(args, "--after", test.after)
-		}
 		body, code := call(args...)
-		var actual control.NodeShellSessionsPage
-		if code != 0 || json.Unmarshal(body, &actual) != nil || !reflect.DeepEqual(actual.Sessions, page.Sessions) || actual.Total != page.Total || actual.Next != page.Next || actual.RootRevision != page.RootRevision {
-			t.Fatal("actual CLI changed filtered sessions/count/cursor", code)
+		var actual []control.NodeShellSession
+		if code != 0 || json.Unmarshal(body, &actual) != nil || len(actual) != test.total || !reflect.DeepEqual(actual, all) {
+			t.Fatal("actual CLI changed filtered sessions", test.filter, code, len(actual))
 		}
 		rq15PublicNodeQuery(t, body)
 	}
@@ -380,16 +391,6 @@ func verifyRQ15NodeQueries(t *testing.T, ctx context.Context, client Client, pee
 		if err != nil || status.Node != peer.ID || status.Operation != operation || status.State != "Succeeded" || status.Total != 0 || status.Moved != 0 || status.Blocked != 0 {
 			t.Fatal("another administrator did not discover the exact original drain", err)
 		}
-		args := []string{"node", "drain-status", peer.ID}
-		if selection.Operation != "" {
-			args = append(args, "--operation", selection.Operation)
-		}
-		body, code := call(args...)
-		var actual control.NodeDrainStatus
-		if code != 0 || json.Unmarshal(body, &actual) != nil || !reflect.DeepEqual(actual, status) {
-			t.Fatal("actual CLI changed the discovered original drain", code)
-		}
-		rq15PublicNodeQuery(t, body)
 	}
 	for _, q := range []control.NodeDrainQuery{{Node: "node-b"}, {Node: peer.ID, Operation: "missing-original"}} {
 		if _, err := client.NodeDrainStatus(ctx, peer, session, q); err == nil {
@@ -413,9 +414,11 @@ func rq15PublicNodeQuery(t *testing.T, raw []byte) {
 	}
 }
 
-// A private wallet/profile and each protected FD belong only to this fixture.
-// The prebuilt CLI is consumed, never compiled/downloaded by a test child.
-func rq15NodeQueryCLI(t *testing.T, ctx context.Context, binary, root string, client Client, peer mydcp.Peer, key *identity.Identity) func(...string) ([]byte, int) {
+// A private wallet, key file and context belong only to this fixture. The
+// prebuilt CLI is consumed, never compiled/downloaded by a test child. It
+// imports the observer's key, adds a context pinned to the peer's key and
+// logs in exactly as an operator would.
+func rq15NodeQueryCLI(t *testing.T, ctx context.Context, binary, root string, client Client, peer sfcp.Peer, key *identity.Identity) func(...string) ([]byte, int) {
 	t.Helper()
 	home := filepath.Join(root, "home")
 	if err := os.MkdirAll(home, 0700); err != nil {
@@ -423,48 +426,26 @@ func rq15NodeQueryCLI(t *testing.T, ctx context.Context, binary, root string, cl
 	}
 	password := []byte("rq15-private-query-wallet")
 	t.Cleanup(func() { clear(password) })
-	disk, err := wallet.OpenDisk(home, true)
+	passwordFile := filepath.Join(root, "wallet-password")
+	if err := os.WriteFile(passwordFile, append(append([]byte{}, password...), '\n'), 0600); err != nil {
+		t.Fatal(err)
+	}
+	der, err := x509.MarshalPKCS8PrivateKey(key.Private)
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = disk.Init(password)
-	closeErr := disk.Close()
-	if err != nil || closeErr != nil {
-		t.Fatal("owned query wallet", err, closeErr)
-	}
-	store, err := OpenCredentials(home, password)
-	if err != nil {
+	keyFile := filepath.Join(root, "observer.pem")
+	if err := os.WriteFile(keyFile, pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der}), 0600); err != nil {
 		t.Fatal(err)
 	}
-	_, err = store.LoginPrivate(ctx, client, peer, "query.observer", key.Private)
-	closeErr = store.Close()
-	if err != nil || closeErr != nil {
-		t.Fatal("actual separate administrator wallet login", err, closeErr)
-	}
-	profile := filepath.Join(root, "client.yaml")
-	configuration := fmt.Sprintf("version: 1\nauth: user\ncluster: '%x'\npeers:\n - {id: %s, key: '%x', endpoint: '%s', voter: true}\n", client.Cluster, peer.ID, peer.Key, peer.Endpoint)
-	if err := os.WriteFile(profile, []byte(configuration), 0600); err != nil {
-		t.Fatal(err)
-	}
-	return func(args ...string) ([]byte, int) {
+	clear(der)
+	run := func(args ...string) ([]byte, int) {
 		t.Helper()
-		r, w, err := os.Pipe()
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer r.Close()
-		if _, err := w.Write(password); err != nil {
-			_ = w.Close()
-			t.Fatal("owned wallet password FD")
-		}
-		_ = w.Close()
-		flags := []string{"--config", profile, "--user", "query.observer", "--wallet-password-fd", "3", "--no-input"}
-		command := exec.CommandContext(ctx, binary, append(flags, args...)...)
-		command.Env = append(os.Environ(), "HOME="+home)
-		command.ExtraFiles = []*os.File{r}
+		command := exec.CommandContext(ctx, binary, append([]string{"-o", "json", "-y"}, args...)...)
+		command.Env = append(os.Environ(), "HOME="+home, "SFC_WALLET_PASSWORD_FILE="+passwordFile, "SFC_NONINTERACTIVE=1")
 		var output, diagnostic bytes.Buffer
 		command.Stdout, command.Stderr = &output, &diagnostic
-		err = command.Run()
+		err := command.Run()
 		if bytes.Contains(output.Bytes(), password) || bytes.Contains(diagnostic.Bytes(), password) {
 			t.Fatal("wallet password escaped actual CLI")
 		}
@@ -473,9 +454,24 @@ func rq15NodeQueryCLI(t *testing.T, ctx context.Context, binary, root string, cl
 		}
 		var exit *exec.ExitError
 		if errors.As(err, &exit) {
+			t.Log("actual CLI", args, exit.ExitCode(), diagnostic.String())
 			return output.Bytes(), exit.ExitCode()
 		}
 		t.Fatal("actual query CLI child did not run", err)
 		return nil, -1
 	}
+	endpoint := peer.Endpoint
+	if !strings.HasPrefix(endpoint, "unix://") {
+		endpoint = "sfcp://" + endpoint
+	}
+	for _, args := range [][]string{
+		{"key", "import", "observer", keyFile},
+		{"--user", "query.observer", "context", "add", "rq15", endpoint, "--key", fmt.Sprintf("%x", peer.Key), "--wallet-key", "observer"},
+		{"login"},
+	} {
+		if _, code := run(args...); code != 0 {
+			t.Fatal("actual separate administrator CLI setup", args, code)
+		}
+	}
+	return run
 }

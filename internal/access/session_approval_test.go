@@ -119,7 +119,7 @@ func TestSessionApprovalRechecksRegistrationAndPreservesAcceptedTimeBoundary(t *
 	u.Credentials[0].Enabled = false // password remains a valid login method
 	expected := u.Revision
 	u.Revision = 0
-	n, err := c.PutUser("admin", expected, u)
+	n, err := c.replaceUser(expected, u)
 	if err != nil || n.VerifySessionApproval(s) == nil || n.AuthorizeAccepted(s, s.Cluster, 110, "tenant", Deploy, "") == nil {
 		t.Fatal("credential/account revocation was cached", err)
 	}

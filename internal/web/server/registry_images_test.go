@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/web/store"
+	"github.com/jay94ks/seafield/internal/web/store"
 )
 
 func TestRegistryImages(t *testing.T) {
@@ -37,7 +37,7 @@ func TestRegistryImages(t *testing.T) {
 	}
 	fakeLogin(t, f, "alice")
 	out := get("/api/v1/t/shop/registries/builtin/images")
-	if fmt.Sprint(out["repositories"]) != "[shop/php-shop shop/worker]" || out["authority"] != "registry.mydc.local" || out["untaggedComplete"] != true || out["code"] != nil {
+	if fmt.Sprint(out["repositories"]) != "[shop/php-shop shop/worker]" || out["authority"] != "registry.sfc.local" || out["untaggedComplete"] != true || out["code"] != nil {
 		t.Fatalf("repositories: %v", out)
 	}
 	shop := refs("shop/php-shop")
@@ -52,7 +52,7 @@ func TestRegistryImages(t *testing.T) {
 	}
 
 	// The page comes from the web's memory for 10 minutes; refresh=1 and
-	// an expired row read mydcd again; another user never gets it.
+	// an expired row read sfcd again; another user never gets it.
 	k := imageCacheKey{"u-alice", "shop", "managed", "builtin", "", ""}
 	e, ok := f.srv.images.get(k, f.srv.now())
 	if !ok {
@@ -82,11 +82,11 @@ func TestRegistryImages(t *testing.T) {
 	fakeLogin(t, f, "alice")
 	// An archived app (web bbolt) names 1.4.1: usage lists it and prune
 	// protects its digest.
-	src := []byte("name: old-shop\nservices:\n  web:\n    image: registry.mydc.local/shop/php-shop:1.4.1\n  env:\n    image: ${IMAGE}\n")
+	src := []byte("name: old-shop\nservices:\n  web:\n    image: registry.sfc.local/shop/php-shop:1.4.1\n  env:\n    image: ${IMAGE}\n")
 	if _, err := f.store.PutArchived(&store.ArchivedApp{Tenant: "shop", App: "old-shop", Source: src, DownBy: "alice", DownAt: time.Now()}); err != nil {
 		t.Fatal(err)
 	}
-	code, out := f.do("POST", "/api/v1/t/shop/image-usage", map[string]any{"refs": []string{"registry.mydc.local/shop/php-shop:1.4.1", "registry.mydc.local/shop/php-shop:stable", "docker.io/nowhere/x:1"}})
+	code, out := f.do("POST", "/api/v1/t/shop/image-usage", map[string]any{"refs": []string{"registry.sfc.local/shop/php-shop:1.4.1", "registry.sfc.local/shop/php-shop:stable", "docker.io/nowhere/x:1"}})
 	if code != 200 {
 		t.Fatalf("usage: %d %v", code, out)
 	}

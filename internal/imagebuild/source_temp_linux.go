@@ -18,7 +18,7 @@ import (
 func sourceTemporaryFile(dir *os.File) (*os.File, error) {
 	fd, err := unix.Openat(int(dir.Fd()), ".", unix.O_TMPFILE|unix.O_RDWR|unix.O_CLOEXEC, 0600)
 	if err == nil {
-		return os.NewFile(uintptr(fd), "mydc-source-body"), nil
+		return os.NewFile(uintptr(fd), "sfc-source-body"), nil
 	}
 	if !errors.Is(err, unix.EOPNOTSUPP) && !errors.Is(err, unix.EINVAL) && !errors.Is(err, unix.EISDIR) {
 		return nil, ErrStorage
@@ -27,12 +27,12 @@ func sourceTemporaryFile(dir *os.File) (*os.File, error) {
 	if _, err := rand.Read(random[:]); err != nil {
 		return nil, ErrStorage
 	}
-	name := ".mydc-source-" + hex.EncodeToString(random[:])
+	name := ".sfc-source-" + hex.EncodeToString(random[:])
 	fd, err = unix.Openat(int(dir.Fd()), name, unix.O_CREAT|unix.O_EXCL|unix.O_NOFOLLOW|unix.O_RDWR|unix.O_CLOEXEC, 0600)
 	if err != nil {
 		return nil, ErrStorage
 	}
-	file := os.NewFile(uintptr(fd), "mydc-source-body")
+	file := os.NewFile(uintptr(fd), "sfc-source-body")
 	var held, actual unix.Stat_t
 	if unix.Fstat(fd, &held) != nil || unix.Fstatat(int(dir.Fd()), name, &actual, unix.AT_SYMLINK_NOFOLLOW) != nil || held.Dev != actual.Dev || held.Ino != actual.Ino || actual.Mode&unix.S_IFMT != unix.S_IFREG || actual.Nlink != 1 {
 		_ = file.Close()

@@ -11,9 +11,9 @@
 | 망·주소·DNS·교차 tenant 경로 | 전역 CIDR 유일성과 소유/승인 경계를 따름 |
 | 앱·CD | 자기 tenant의 이름 있는 앱과 실행 정책 |
 | Secret Vault·Volume | 자기 tenant의 비밀/저장 자원 및 앱 참조 |
-| private registry·신뢰 출처 | mydcd 내장 registry와 허용 이미지 출처 |
+| private registry·신뢰 출처 | sfcd 내장 registry와 허용 이미지 출처 |
 
-새 tenant의 기본 신뢰 출처는 Docker Hub다. private registry는 `go-containerregistry` 기반으로 mydcd가 서비스하고 저장·인증·tenant 경계를 관리한다.
+새 tenant의 기본 신뢰 출처는 Docker Hub다. private registry는 `go-containerregistry` 기반으로 sfcd가 서비스하고 저장·인증·tenant 경계를 관리한다.
 
 전체 tenant 삭제는 관리 상태의 삭제 의도와 실제 owner의 종료 보고를 연결한다. 보존 데이터의 명시 정산 정책을 따르며 다른 tenant의 앱·데이터를 종료하지 않는다.
 

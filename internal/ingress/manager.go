@@ -8,7 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/jay94ks/mydcd/internal/storage"
+	"github.com/jay94ks/seafield/internal/storage"
 	"net/netip"
 	"sort"
 	"strings"
@@ -82,6 +82,7 @@ type Manager struct {
 	eventMu                 sync.Mutex
 	eventSink               func(Event)
 	acme                    atomic.Pointer[acmeForward]
+	enroll                  atomic.Pointer[nodeEnroll]
 }
 
 func Open(ctx context.Context, path string, deps Dependencies) (*Manager, error) {
@@ -497,4 +498,44 @@ func (m *Manager) Close() error {
 		g.stop()
 	}
 	return errors.Join(err, m.db.Close())
+}
+
+// Endpoint is one transport port the ingress on this node listens on.
+type Endpoint struct {
+	Proto string // tcp or udp
+	Port  uint16
+}
+
+// ListenEndpoints is every port this node's ingress listens on or is about
+// to: the shared gateways and each instance's own listeners, UDP too for
+// HTTP/3. The node firewall keeps them open.
+func (m *Manager) ListenEndpoints() []Endpoint {
+	out := []Endpoint{}
+	add := func(l Listener) {
+		a, err := netip.ParseAddrPort(l.Address)
+		if l.Shared != "" || err != nil || a.Port() == 0 {
+			return
+		}
+		out = append(out, Endpoint{Proto: "tcp", Port: a.Port()})
+		if l.HTTP3 {
+			out = append(out, Endpoint{Proto: "udp", Port: a.Port()})
+		}
+	}
+	m.gatewayMu.Lock()
+	for _, g := range m.gateways {
+		add(g.definition)
+	}
+	m.gatewayMu.Unlock()
+	m.mu.Lock()
+	for _, i := range m.instances {
+		i.mu.Lock()
+		if !i.record.Gone {
+			for _, l := range i.record.Spec.Listeners {
+				add(l)
+			}
+		}
+		i.mu.Unlock()
+	}
+	m.mu.Unlock()
+	return out
 }

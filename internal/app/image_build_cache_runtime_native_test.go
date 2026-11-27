@@ -18,10 +18,10 @@ import (
 	"time"
 
 	cerrdefs "github.com/containerd/errdefs"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/imagebuild"
-	"github.com/jay94ks/mydcd/internal/nodestorage"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/imagebuild"
+	"github.com/jay94ks/seafield/internal/nodestorage"
 	"github.com/moby/moby/client"
 )
 
@@ -149,7 +149,7 @@ func (f *managedRegistryNative) verifyImageBuildCacheRuntimeNative(t *testing.T,
 		if err != nil || !held || pin.Lease != cachePin.Lease || pin.Root != cachePin.Root {
 			t.Fatal("cleanup changed original RootManager dependency", err)
 		}
-		current, err := os.Lstat(filepath.Join(base.Root.Path, ".mydc-imagebuild", "build-cache", hex.EncodeToString(cache[:])))
+		current, err := os.Lstat(filepath.Join(base.Root.Path, ".sfc-imagebuild", "build-cache", hex.EncodeToString(cache[:])))
 		if err != nil || !os.SameFile(cacheDir, current) || !current.IsDir() {
 			t.Fatal("cleanup removed/recreated original cache inode", err)
 		}
@@ -288,7 +288,7 @@ func (f *managedRegistryNative) verifyImageBuildCacheRuntimeNative(t *testing.T,
 		if err != nil || !exists || cachePin.Lease != cacheHold.Lease {
 			t.Fatal("original cache RootManager pin missing", err)
 		}
-		cacheDir, err = os.Lstat(filepath.Join(base.Root.Path, ".mydc-imagebuild", "build-cache", hex.EncodeToString(cache[:])))
+		cacheDir, err = os.Lstat(filepath.Join(base.Root.Path, ".sfc-imagebuild", "build-cache", hex.EncodeToString(cache[:])))
 		if err != nil || !cacheDir.IsDir() {
 			t.Fatal("original retained native cache missing", err)
 		}

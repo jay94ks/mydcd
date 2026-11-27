@@ -14,23 +14,23 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/web/dns"
-	"github.com/jay94ks/mydcd/internal/web/mydc"
-	"github.com/jay94ks/mydcd/internal/web/store"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/web/dns"
+	"github.com/jay94ks/seafield/internal/web/sfc"
+	"github.com/jay94ks/seafield/internal/web/store"
 )
 
 // A domain's linked servers (canvas ExtDomainDetail "연결된 서버", web-own
-// data): the servers whose public addresses the domain's MyDC A/AAAA
+// data): the servers whose public addresses the domain's Seafield Cluster A/AAAA
 // records point at. The servers, their external gateway and phase are read
-// from mydcd each time; the links (address source, manual addresses,
+// from sfcd each time; the links (address source, manual addresses,
 // autoRemove, last reach check) are the web's. Saving a link does not touch
 // the zone: it answers with the record changes it implies (changes, staged
 // = their count), which go through the usual plan/apply.
 
 const dnsReachTimeout = 5 * time.Second
 
-// dnsNode is a server with an external gateway, as mydcd shows it.
+// dnsNode is a server with an external gateway, as sfcd shows it.
 type dnsNode struct {
 	listen    []int
 	addresses []string
@@ -41,7 +41,7 @@ type dnsNode struct {
 // view of the gateways).
 func (s *Server) dnsNodes(ctx context.Context, ws *webSession) (map[string]dnsNode, error) {
 	out := map[string]dnsNode{}
-	err := ws.do(ctx, func(ctx context.Context, c mydc.Conn) error {
+	err := ws.do(ctx, func(ctx context.Context, c sfc.Conn) error {
 		iv, err := ingressRead(ctx, c, control.IngressQuery{})
 		if err != nil {
 			return err
@@ -56,8 +56,8 @@ func (s *Server) dnsNodes(ctx context.Context, ws *webSession) (map[string]dnsNo
 				}
 			}
 		}
-		return eachMember(ctx, c, func(m memberView, _ mydc.MembersPage) bool {
-			if n, ok := out[m.ID]; ok && m.Phase == mydc.NodePhaseIsolated {
+		return eachMember(ctx, c, func(m memberView, _ sfc.MembersPage) bool {
+			if n, ok := out[m.ID]; ok && m.Phase == sfc.NodePhaseIsolated {
 				n.isolated = true
 				out[m.ID] = n
 			}
@@ -102,7 +102,7 @@ func linkAddresses(row *store.DNSServerLink, n dnsNode) []string {
 }
 
 // dnsServerItems: every server with an external gateway, then linked ones
-// mydcd no longer shows (admin), or only the linked ones (others, nodes
+// sfcd no longer shows (admin), or only the linked ones (others, nodes
 // nil: node addresses and phases unknown).
 func dnsServerItems(l *store.DNSServerLinks, nodes map[string]dnsNode, admin bool) []map[string]any {
 	names := []string{}
@@ -143,7 +143,7 @@ func dnsServerItems(l *store.DNSServerLinks, nodes map[string]dnsNode, admin boo
 				v["state"] = "removed"
 			}
 			if !known {
-				v["missing"] = true // mydcd no longer shows its external gateway
+				v["missing"] = true // sfcd no longer shows its external gateway
 			}
 			if row.Reach != nil {
 				v["reach"] = reachView(row.Reach)
@@ -158,7 +158,7 @@ func dnsServerItems(l *store.DNSServerLinks, nodes map[string]dnsNode, admin boo
 }
 
 // dnsServerChanges: the record changes the links imply. Each name that
-// has a MyDC A or AAAA record gets the addresses of the linked servers in
+// has a Seafield Cluster A or AAAA record gets the addresses of the linked servers in
 // the DNS (A for IPv4, AAAA for IPv6); a type left without addresses is
 // deleted.
 func dnsServerChanges(d *store.DNSDomain, z dns.Zone, managed map[string]*store.DNSManaged, items []map[string]any) dnsChangeReq {
@@ -200,7 +200,7 @@ func dnsServerChanges(d *store.DNSDomain, z dns.Zone, managed map[string]*store.
 				want = v6
 			}
 			cur := z.Find(dns.Key{Name: name, Type: typ})
-			// Only MyDC's own sets: a record someone else made stays.
+			// Only Seafield Cluster's own sets: a record someone else made stays.
 			if cur != nil && managed[dns.Key{Name: name, Type: typ}.String()] == nil {
 				continue
 			}
@@ -237,7 +237,7 @@ func dnsServerChanges(d *store.DNSDomain, z dns.Zone, managed map[string]*store.
 func (s *Server) dnsServersView(w http.ResponseWriter, r *http.Request, ws *webSession, a *dnsAccess, d *store.DNSDomain, p *store.DNSProvider, l *store.DNSServerLinks) (map[string]any, bool) {
 	if !a.admin {
 		// The gateways and server phases are the system administrator's
-		// in mydcd: others see the links as saved (partial).
+		// in sfcd: others see the links as saved (partial).
 		out := map[string]any{"items": dnsServerItems(l, nil, false), "revision": l.Revision, "partial": true}
 		return out, true
 	}

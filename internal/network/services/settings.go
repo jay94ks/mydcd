@@ -8,10 +8,10 @@ import (
 	"encoding/json"
 	"slices"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/network"
-	"github.com/jay94ks/mydcd/internal/reconcile"
-	"github.com/jay94ks/mydcd/internal/tenancy"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/network"
+	"github.com/jay94ks/seafield/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/tenancy"
 )
 
 type settingsScope struct {
@@ -568,7 +568,7 @@ func (m Settings) AcquireDNS(c access.Catalog, n tenancy.Networks, a Authority, 
 }
 func settingsDNSRequest(q DNSQuery) [32]byte {
 	id := q.ID()
-	return sha256.Sum256(append([]byte("mydc/settings/dns-query/1/"), id[:]...))
+	return sha256.Sum256(append([]byte("sfc/settings/dns-query/1/"), id[:]...))
 }
 func (m Settings) ReleaseDNS(d DNSManager, h SettingsDNSUse, now Clock, p SettingsUseClose) (Settings, DNSManager, error) {
 	if h.Runtime.request != settingsDNSRequest(h.Query) {

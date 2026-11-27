@@ -6,7 +6,7 @@ package ingress
 
 import (
 	"errors"
-	"github.com/jay94ks/mydcd/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/reconcile"
 	"sort"
 	"strings"
 )

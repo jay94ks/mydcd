@@ -10,8 +10,8 @@ import (
 	"os"
 	"syscall"
 
-	"github.com/jay94ks/mydcd/internal/config"
-	"github.com/jay94ks/mydcd/internal/deployment"
+	"github.com/jay94ks/seafield/internal/config"
+	"github.com/jay94ks/seafield/internal/deployment"
 )
 
 func (r *Runtime) openGit(c config.Node) error {

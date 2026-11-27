@@ -31,7 +31,7 @@ func GoneBytes(cluster [32]byte, key string, generation uint64, valueWithoutProo
 // GoneDigestBytes preserves the original signature bytes while allowing a
 // reader to verify a terminal fact without receiving the private native spec.
 func GoneDigestBytes(cluster [32]byte, key string, generation uint64, digest [32]byte) []byte {
-	b := append([]byte("mydc-local-retirement-1"), cluster[:]...)
+	b := append([]byte("sfc-local-retirement-1"), cluster[:]...)
 	b = binary.LittleEndian.AppendUint64(b, uint64(len(key)))
 	b = append(b, key...)
 	b = binary.LittleEndian.AppendUint64(b, generation)

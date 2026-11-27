@@ -15,9 +15,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/desired"
-	"github.com/jay94ks/mydcd/internal/engine"
+	"github.com/jay94ks/seafield/internal/desired"
+	"github.com/jay94ks/seafield/internal/engine"
 )
 
 func TestComposeImageAdapterUsesCurrentTenantPolicyAndTypedOverrides(t *testing.T) {
@@ -26,7 +25,7 @@ func TestComposeImageAdapterUsesCurrentTenantPolicyAndTypedOverrides(t *testing.
 	ref := "docker.io/library/php@sha256:" + strings.Repeat("e", 64)
 	// Linux sockaddr_un bounds the complete pathname, including Go's test name.
 	// Keep this owned fixture root short instead of changing product endpoints.
-	root, err := os.MkdirTemp("/tmp", "mydc-process-")
+	root, err := os.MkdirTemp("/tmp", "sfc-process-")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -116,7 +115,7 @@ func TestComposeImageAdapterUsesCurrentTenantPolicyAndTypedOverrides(t *testing.
 		t.Fatal("cross-tenant image lookup admitted")
 	}
 	tenant, _ := f.c.Tenant("tenant")
-	revoked, err := f.c.SetTrust("alice", "tenant", tenant.Revision, []access.TrustRule{})
+	revoked, err := f.c.ChangeTrust("alice", "tenant", tenant.Revision, nil, tenant.ImageSources)
 	if err != nil {
 		t.Fatal(err)
 	}

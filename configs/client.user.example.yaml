@@ -4,7 +4,7 @@
 # Password/token need a separately installed system credential backend.
 # manage apply/result/resume/prune preserve original signed metadata requests.
 # Member relay and explicit logout --resume-original are supported.
-# Managed init/join is provided by mydcd; compose deployment remains pending.
+# Managed init/join is provided by sfcd; compose deployment remains pending.
 version: 1
 auth: user
 cluster: "0101010101010101010101010101010101010101010101010101010101010101"

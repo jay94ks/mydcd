@@ -6,13 +6,12 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"slices"
 	"strings"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/lifecycle"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/nodestorage"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/lifecycle"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/nodestorage"
 )
 
 // TenantStorageRoot reveals only the selected tenant's root reference, never
@@ -38,7 +37,7 @@ func tenantStorageSnapshot(s state.State, cluster [32]byte, tenant, node string)
 		Tenant, Node                   string
 		Catalog, Members, Roots, Epoch uint64
 	}{cluster, tenant, node, s.Object(CatalogKey).Revision, s.Object(MembersKey).Revision, s.Object(NodeStorageKey).Revision, s.ModuleEpoch()})
-	digest := sha256.Sum256(append([]byte("mydc-tenant-storage-page-1\x00"), raw...))
+	digest := sha256.Sum256(append([]byte("sfc-tenant-storage-page-1\x00"), raw...))
 	return hex.EncodeToString(digest[:])
 }
 func (p Policy) TenantStoragePage(s state.State, session access.Session, at int64, tenant, node, after string) (TenantStoragePage, error) {
@@ -80,7 +79,7 @@ func (p Policy) TenantStoragePage(s state.State, session access.Session, at int6
 	for _, root := range roots.Roots() {
 		definition := root.Definition
 		key := definition.Node + "/" + definition.ID
-		if key <= last || node != "" && definition.Node != node || !slices.Contains(definition.Tenants, tenant) || !tenantStorageAllowed(users, p, session, at, tenant, definition.Node) {
+		if key <= last || node != "" && definition.Node != node || !definition.Allows(tenant) || !tenantStorageAllowed(users, p, session, at, tenant, definition.Node) {
 			continue
 		}
 		owner, err := p.nodeOwner(s, definition.Node)

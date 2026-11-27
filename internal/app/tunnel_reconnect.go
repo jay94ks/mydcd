@@ -14,11 +14,11 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/schema"
-	"github.com/jay94ks/mydcd/internal/storage"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/storage"
 )
 
 type tunnelReceipt struct {
@@ -38,7 +38,7 @@ func tunnelReceiptKey(operation string) string {
 func (r *Runtime) saveTunnelReceipt(receipt tunnelReceipt) error {
 	raw, err := json.Marshal(receipt)
 	if err != nil || len(raw) > 8<<10 {
-		return mydcp.ErrAdmission
+		return sfcp.ErrAdmission
 	}
 	return r.reports.Write(map[string][]byte{tunnelReceiptKey(receipt.Operation): raw})
 }
@@ -53,7 +53,7 @@ func (r *Runtime) loadTunnelReceipt(work control.TunnelWork) (tunnelReceipt, err
 	}
 	stored, err := schema.Decode[tunnelReceipt](raw)
 	if err != nil || stored.Schema != 1 || stored.Cluster != receipt.Cluster || stored.Owner != receipt.Owner || stored.Target != receipt.Target || stored.Operation != receipt.Operation || stored.Result != nil && (!stored.Sent || !stored.Result.Valid(work.Plan)) {
-		return receipt, mydcp.ErrAdmission
+		return receipt, sfcp.ErrAdmission
 	}
 	return stored, nil
 }
@@ -65,7 +65,7 @@ func (r *Runtime) tunnelWork(ctx context.Context, operation string) (control.Tun
 	}
 	work, err := schema.Decode[control.TunnelWork](reply.Data)
 	if err != nil || work.Schema != 1 || work.Cluster != r.controlPolicy.Cluster || work.Owner != r.Identity.Public || work.Operation != operation || !work.Plan.Valid() || work.Plan.Owner != work.Owner || work.Plan.Cluster != work.Cluster || work.Index == 0 || reply.Local || reply.RaftIndex == 0 || reply.CommandIndex < work.Index {
-		return work, mydcp.ErrAdmission
+		return work, sfcp.ErrAdmission
 	}
 	return work, nil
 }
@@ -90,8 +90,6 @@ func tunnelError(err error) string {
 	return s
 }
 func (r *Runtime) runTunnelReconnect(operation string) {
-	defer r.wg.Done()
-	defer func() { r.mu.Lock(); r.tunnelBusy = false; r.mu.Unlock() }()
 	ctx := r.ctx
 	work, err := r.tunnelWork(ctx, operation)
 	if err != nil {
@@ -120,7 +118,7 @@ func (r *Runtime) runTunnelReconnect(operation string) {
 		log.Printf("tunnel reconnect receipt unavailable: operation=%s cause=%v", operation, err)
 		return
 	}
-	peer, known := r.Mesh.Peer(mydcp.Identity(work.Plan.PeerKey))
+	peer, known := r.Mesh.Peer(sfcp.Identity(work.Plan.PeerKey))
 	if receipt.Result == nil && receipt.Sent && known {
 		if link, ok := r.Mesh.LinkObservation(work.Plan.Node, peer); ok && link.State != "down" && link.LastHandshakeAt >= work.Plan.Observation.Link.LastHandshakeAt {
 			receipt.Result = &control.TunnelResult{State: "already-connected", PairID: work.Plan.PairID, HandshakeAt: link.LastHandshakeAt, KeptExisting: true}
@@ -192,13 +190,7 @@ func (r *Runtime) advanceTunnelReconnects(ctx context.Context) {
 		if row.Plan.Owner != r.Identity.Public || row.State != "queued" && row.State != "running" {
 			continue
 		}
-		r.mu.Lock()
-		if !r.tunnelBusy && ctx.Err() == nil {
-			r.tunnelBusy = true
-			r.wg.Add(1)
-			go r.runTunnelReconnect(row.Operation)
-		}
-		r.mu.Unlock()
+		r.startJob(&r.tunnelJob, row.Operation, r.runTunnelReconnect)
 		return
 	}
 }

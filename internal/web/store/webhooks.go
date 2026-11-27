@@ -12,7 +12,7 @@ import (
 	bolt "go.etcd.io/bbolt"
 )
 
-// Webhooks (W2.3b): where mydc-web sends incident, CD and ingress events
+// Webhooks (W2.3b): where sfc-web sends incident, CD and ingress events
 // and asks for decisions. Secrets and header tokens are sealed, never here.
 
 var (
@@ -32,7 +32,7 @@ type Webhook struct {
 	URL            string         `json:"url,omitempty"`
 	Target         *WebhookTarget `json:"target,omitempty"`
 	Role           string         `json:"role"`   // notify, decide
-	Format         string         `json:"format"` // mydc, slack, teams, pagerduty
+	Format         string         `json:"format"` // sfc, slack, teams, pagerduty
 	Sign           string         `json:"sign"`   // hmac, token, none
 	TokenLast4     string         `json:"tokenLast4,omitempty"`
 	RotatingUntil  time.Time      `json:"rotatingUntil,omitzero"`
@@ -129,7 +129,8 @@ func (s *Store) GetWebhook(name string) (*Webhook, error) {
 }
 
 // CreateWebhook stores a new webhook; ErrConflict when the name is taken.
-func (s *Store) CreateWebhook(w *Webhook) error {
+func (s *Store) CreateWebhook(w *Webhook) (err error) {
+	defer func() { s.changed(err, Change{Kind: "webhook", Tenant: w.Tenant, ID: w.Name}) }()
 	return s.db.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket(bucketWebhooks)
 		if b.Get([]byte(w.Name)) != nil {
@@ -157,6 +158,7 @@ func (s *Store) UpdateWebhook(name string, expected uint64, fn func(w *Webhook) 
 		w.Revision++
 		return putJSON(b, []byte(name), &w)
 	})
+	s.changed(err, Change{Kind: "webhook", Tenant: w.Tenant, ID: name})
 	if err != nil {
 		return nil, err
 	}
@@ -180,12 +182,15 @@ func (s *Store) ListWebhooks() ([]*Webhook, error) {
 }
 
 // DeleteWebhook removes a webhook, its links and deliveries.
-func (s *Store) DeleteWebhook(name string) error {
+func (s *Store) DeleteWebhook(name string) (err error) {
+	var tenant string
+	defer func() { s.changed(err, Change{Kind: "webhook", Tenant: tenant, ID: name, Deleted: true}) }()
 	return s.db.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket(bucketWebhooks)
 		if b.Get([]byte(name)) == nil {
 			return ErrNotFound
 		}
+		tenant = webhookTenant(tx, name)
 		if err := b.Delete([]byte(name)); err != nil {
 			return err
 		}
@@ -208,8 +213,11 @@ func (s *Store) DeleteWebhook(name string) error {
 }
 
 // PutWebhookLink stores a link; expected is its revision (0 = new).
-func (s *Store) PutWebhookLink(l *WebhookLink, expected uint64) error {
+func (s *Store) PutWebhookLink(l *WebhookLink, expected uint64) (err error) {
+	var tenant string
+	defer func() { s.changed(err, Change{Kind: "webhook-link", Tenant: tenant, ID: l.ID}) }()
 	return s.db.Update(func(tx *bolt.Tx) error {
+		tenant = webhookTenant(tx, l.Webhook)
 		b := tx.Bucket(bucketWebhookLinks)
 		var cur WebhookLink
 		rev := uint64(0)
@@ -254,14 +262,31 @@ func (s *Store) ListWebhookLinks() ([]*WebhookLink, error) {
 }
 
 // DeleteWebhookLink removes a link.
-func (s *Store) DeleteWebhookLink(id string) error {
+func (s *Store) DeleteWebhookLink(id string) (err error) {
+	var tenant string
+	defer func() { s.changed(err, Change{Kind: "webhook-link", Tenant: tenant, ID: id, Deleted: true}) }()
 	return s.db.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket(bucketWebhookLinks)
-		if b.Get([]byte(id)) == nil {
+		raw := b.Get([]byte(id))
+		if raw == nil {
 			return ErrNotFound
+		}
+		var l WebhookLink
+		if json.Unmarshal(raw, &l) == nil {
+			tenant = webhookTenant(tx, l.Webhook)
 		}
 		return b.Delete([]byte(id))
 	})
+}
+
+// webhookTenant is the tenant of webhook name ("" for a cluster webhook or
+// one that is gone): who hears of its links and deliveries.
+func webhookTenant(tx *bolt.Tx, name string) string {
+	var w Webhook
+	if getJSON(tx.Bucket(bucketWebhooks), []byte(name), &w) != nil {
+		return ""
+	}
+	return w.Tenant
 }
 
 func deliveryKey(d *WebhookDelivery) []byte {
@@ -270,8 +295,11 @@ func deliveryKey(d *WebhookDelivery) []byte {
 
 // PutWebhookDelivery stores (or updates) a delivery and keeps the newest
 // WebhookDeliveriesKeep of its webhook.
-func (s *Store) PutWebhookDelivery(d *WebhookDelivery) error {
+func (s *Store) PutWebhookDelivery(d *WebhookDelivery) (err error) {
+	var tenant string
+	defer func() { s.changed(err, Change{Kind: "webhook-delivery", Tenant: tenant, ID: d.Webhook}) }()
 	return s.db.Update(func(tx *bolt.Tx) error {
+		tenant = webhookTenant(tx, d.Webhook)
 		b := tx.Bucket(bucketWebhookDeliveries)
 		if d.Seq == 0 {
 			n, err := b.NextSequence()

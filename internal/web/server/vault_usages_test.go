@@ -32,7 +32,7 @@ func TestVaultUsages(t *testing.T) {
 	if code, out := f.do("GET", "/api/v1/vault/usages", nil); code != 400 {
 		t.Fatalf("cluster without id: %d %v", code, out)
 	}
-	bobLogin(t, f) // a reader: mydcd refuses
+	bobLogin(t, f) // a reader: sfcd refuses
 	if code, out := f.do("GET", "/api/v1/t/shop/vault/usages?id=mysql", nil); code != 403 {
 		t.Fatalf("bob: %d %v", code, out)
 	}

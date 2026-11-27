@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+<style>.o{stroke:#0C3051}@media (prefers-color-scheme:dark){.o{stroke:#E6EDF4}}</style>
+<path class="o" d="M4.22 15.2V9.20L16 2.40L27.78 9.20V13.3M27.78 19.6V22.80L16 29.60L4.22 22.80V21.4" fill="none" stroke-width="3.4" stroke-linejoin="round"/>
+<path d="M2.5 20C6.5 15.8 10 15.5 14.5 18.5S23 22 29.5 15" fill="none" stroke="#10909A" stroke-width="3.4" stroke-linecap="round"/>
+<path d="M9.5 13.2C12 9.8 16.5 9.3 18.8 12.6" fill="none" stroke="#47BEC5" stroke-width="2.6" stroke-linecap="round"/>
+</svg>

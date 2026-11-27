@@ -67,7 +67,8 @@ type AIToolLine struct {
 }
 
 // PutAIConversation stores a conversation.
-func (s *Store) PutAIConversation(c *AIConversation) error {
+func (s *Store) PutAIConversation(c *AIConversation) (err error) {
+	defer func() { s.changed(err, Change{Kind: "ai-conversation", User: c.User, ID: c.ID}) }()
 	return s.db.Update(func(tx *bolt.Tx) error {
 		return putJSON(tx.Bucket(bucketAIConversations), key(c.User, c.ID), c)
 	})
@@ -98,6 +99,7 @@ func (s *Store) UpdateAIConversation(user, id string, fn func(c *AIConversation)
 		}
 		return putJSON(b, key(user, id), &out)
 	})
+	s.changed(err, Change{Kind: "ai-conversation", User: user, ID: id})
 	if err != nil {
 		return nil, err
 	}
@@ -125,9 +127,9 @@ func (s *Store) ListAIConversations(user string) ([]*AIConversation, error) {
 
 // DeleteAIConversations deletes the user's conversation id ("" = all of
 // them) and their proposals. It returns how many conversations went.
-func (s *Store) DeleteAIConversations(user, id string) (int, error) {
-	n := 0
-	err := s.db.Update(func(tx *bolt.Tx) error {
+func (s *Store) DeleteAIConversations(user, id string) (n int, err error) {
+	defer func() { s.changed(err, Change{Kind: "ai-conversation", User: user, ID: id, Deleted: id != ""}) }()
+	err = s.db.Update(func(tx *bolt.Tx) error {
 		convs, props := tx.Bucket(bucketAIConversations), tx.Bucket(bucketAIProposals)
 		var dropC, dropP [][]byte
 		c := convs.Cursor()

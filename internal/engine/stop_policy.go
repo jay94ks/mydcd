@@ -12,7 +12,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/schema"
+	"github.com/jay94ks/seafield/internal/schema"
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/client"
 	"golang.org/x/sys/unix"

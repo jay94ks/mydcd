@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-const notBuilt = `<!doctype html><meta charset="utf-8"><title>MyDC</title><p>The web UI is not built into this binary. Build apps/mydc-web/web and copy dist to apps/mydc-web/ui/dist, or run with -static-dir.</p>`
+const notBuilt = `<!doctype html><meta charset="utf-8"><title>Seafield Cluster</title><p>The web UI is not built into this binary. Build apps/sfc-web/web and copy dist to apps/sfc-web/ui/dist, or run with -static-dir.</p>`
 
 // static serves the UI build with SPA fallback: unknown paths get
 // index.html so client-side routes survive reload. Hashed assets are cached

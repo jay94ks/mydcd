@@ -9,14 +9,14 @@
 
 | 내부 요청 | 적용 대상/권한 | 결과와 경계 |
 |---|---|---|
-| MYDCP `app-progress` | 현재 member의 원 tenant/app·operation·Step/journal에 대한 내부 진행 보고 | observe가 아닌 진행 보고는 정확한 app inventory Expected와 양수/현재 이하 Apps basis를 사용. 원 member/권한/epoch·원 명령 및 atomic 관련 자원 검증 유지. observe는 관측 target을 사용. legacy는 strict root/원 bytes 유지. 사용자 관리 CAS·native Unknown 재제출 권한으로 확대하지 않음 |
-| MYDCP `app-delivery-permit` | current member의 latest quorum 조회. 원 tenant/app 등록·현재 CD 권한·source policy/ticket | reader·module epoch·Apps root/Delivery CAS·원 upload progress. Git 자격/실제 source part나 native 실행 권한을 반환하지 않음 |
-| MYDCP `app-delivery-sync-work` | current member의 latest quorum 조회. 현재 source/권한·정확한 candidate·원 실행과 실제 health | 같은 reducer의 replan/auto-sync/continue 전이를 미리 계산. Apps root/CD revision/module epoch·정확한 선택만 반환하며 native 실행 권한이 아님. manual/paused·불명/실패·미종료/권한 부족은 새 자동 작업을 만들지 않음 |
-| MYDCP `app-delivery-progress` | signed current member ModuleReport. fetch/input/part/received는 원 ticket/현재 등록 권한, source-error는 원 ticket의 읽기 정산. replan/auto-sync/continue는 같은 현재 work preview와 CAS 대조 | 기존 Apps/Upload의 후보 게시 또는 같은 Delivery/Inventory의 선택·양성 종료 후 계속만 수행. native 효과는 기존 앱 실행기/원 retirement 경로가 담당하고 관리 자원을 CD로 변경하지 않음. source 오류로 현재 앱을 삭제하지 않음 |
+| SFCP `app-progress` | 현재 member의 원 tenant/app·operation·Step/journal에 대한 내부 진행 보고 | observe가 아닌 진행 보고는 정확한 app inventory Expected와 양수/현재 이하 Apps basis를 사용. 원 member/권한/epoch·원 명령 및 atomic 관련 자원 검증 유지. observe는 관측 target을 사용. legacy는 strict root/원 bytes 유지. 사용자 관리 CAS·native Unknown 재제출 권한으로 확대하지 않음 |
+| SFCP `app-delivery-permit` | current member의 latest quorum 조회. 원 tenant/app 등록·현재 CD 권한·source policy/ticket | reader·module epoch·Apps root/Delivery CAS·원 upload progress. Git 자격/실제 source part나 native 실행 권한을 반환하지 않음 |
+| SFCP `app-delivery-sync-work` | current member의 latest quorum 조회. 현재 source/권한·정확한 candidate·원 실행과 실제 health | 같은 reducer의 replan/auto-sync/continue 전이를 미리 계산. Apps root/CD revision/module epoch·정확한 선택만 반환하며 native 실행 권한이 아님. manual/paused·불명/실패·미종료/권한 부족은 새 자동 작업을 만들지 않음 |
+| SFCP `app-delivery-progress` | signed current member ModuleReport. fetch/input/part/received는 원 ticket/현재 등록 권한, source-error는 원 ticket의 읽기 정산. replan/auto-sync/continue는 같은 현재 work preview와 CAS 대조 | 기존 Apps/Upload의 후보 게시 또는 같은 Delivery/Inventory의 선택·양성 종료 후 계속만 수행. native 효과는 기존 앱 실행기/원 retirement 경로가 담당하고 관리 자원을 CD로 변경하지 않음. source 오류로 현재 앱을 삭제하지 않음 |
 
 이 요청들은 daemon 내부 source/선택·실행 진행 어댑터 경계다. source 등록은 app.yaml의 명시 CD 정책을 포함한 기존 app deploy이며 planning의 `git-cd`로 선언/연결 입력 지원을 게시한다. 실제 fetch·적용/health·전체 검증과는 구분하며 완료 여부는 Milestones/HISTORY를 따른다. 명령 문법이나 source 후보를 native 성공으로 해석하지 않는다.
 
-사용자 MYDCP 조회 `app-cd-field`는 tenant/app/정확한 field, `app-cd-registration`은 tenant/app/명시 candidate 또는 operation selector에 결합한다. 후자는 원 등록자와 같은 현재 사용자에게 공개 signed 등록과 실제 approval realm만 반환한다. 기존 vault-approval-plan/permit·보호 SecretInput·signed VaultApprovalReport의 optional Selection이 같은 원 선택을 전달하며, 임의 caller의 recipe나 unsigned 원 requester를 받지 않는다. 새 합의/RPC/승인 실행기는 만들지 않는다.
+사용자 SFCP 조회 `app-cd-field`는 tenant/app/정확한 field, `app-cd-registration`은 tenant/app/명시 candidate 또는 operation selector에 결합한다. 후자는 원 등록자와 같은 현재 사용자에게 공개 signed 등록과 실제 approval realm만 반환한다. 기존 vault-approval-plan/permit·보호 SecretInput·signed VaultApprovalReport의 optional Selection이 같은 원 선택을 전달하며, 임의 caller의 recipe나 unsigned 원 requester를 받지 않는다. 새 합의/RPC/승인 실행기는 만들지 않는다.
 
 
 ### CD 앱의 Volume 이관과 이력 회수

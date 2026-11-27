@@ -9,8 +9,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"net/http"
-	"net/url"
 	"reflect"
 	"sort"
 	"strings"
@@ -18,8 +16,8 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/jay94ks/mydcd/internal/web/mydc"
-	"github.com/jay94ks/mydcd/internal/web/store"
+	"github.com/jay94ks/seafield/internal/web/sfc"
+	"github.com/jay94ks/seafield/internal/web/store"
 )
 
 // Rolling an app back for an incident (W2.3): "roll back right after CD"
@@ -30,12 +28,12 @@ import (
 
 // appVersionPair is the running version and the one before it.
 type appVersionPair struct {
-	cur, prev mydc.AppSource
+	cur, prev sfc.AppSource
 }
 
 // appVersions reads the running source and the newest earlier version that
 // did not fail.
-func appVersions(ctx context.Context, c mydc.Conn, tenant, app string) (*appVersionPair, error) {
+func appVersions(ctx context.Context, c sfc.Conn, tenant, app string) (*appVersionPair, error) {
 	cur, err := c.AppSource(ctx, tenant, app, 0)
 	if err != nil {
 		return nil, err
@@ -161,16 +159,16 @@ func versionAuto(cur, prev []byte) string {
 // rollbackAction builds the deploy of the previous version, with the CD
 // pause when cdAuto.
 func rollbackAction(def *incidentActionDef, in *store.Incident, pair *appVersionPair, cdAuto bool) *store.IncidentAction {
-	esc := url.PathEscape
 	sum := sha256.Sum256(pair.prev.Document)
 	body, _ := json.Marshal(map[string]any{"yaml": string(pair.prev.Document), "digest": hex.EncodeToString(sum[:])})
-	out := &store.IncidentAction{ID: def.ID, Label: def.Label, Method: http.MethodPost, Path: "/api/v1/t/" + esc(in.Tenant) + "/apps/deploy", Body: body,
+	method, path := routePath(routeAppsDeploy, "t", in.Tenant)
+	out := &store.IncidentAction{ID: def.ID, Label: def.Label, Method: method, Path: path, Body: body,
 		Note: fmt.Sprintf("v%d → v%d", pair.cur.Version, pair.prev.Version)}
 	if cdAuto {
 		out.Note += ", 자동 배포 멈춤"
 		pause, _ := json.Marshal(map[string]any{})
-		out.Also = &store.IncidentAction{ID: "pause-cd", Label: "자동 배포 일시 정지", Method: http.MethodPost,
-			Path: "/api/v1/t/" + esc(in.Tenant) + "/apps/" + esc(in.App) + "/cd/pause", Body: pause}
+		method, path := routePath(routeAppCDPause, "t", in.Tenant, "app", in.App)
+		out.Also = &store.IncidentAction{ID: "pause-cd", Label: "자동 배포 일시 정지", Method: method, Path: path, Body: pause}
 	}
 	return out
 }
@@ -178,7 +176,7 @@ func rollbackAction(def *incidentActionDef, in *store.Incident, pair *appVersion
 // buildRollback is the cd-rollback / rollback-previous candidate.
 func (s *Server) buildRollback(ctx context.Context, ws *webSession, def *incidentActionDef, in *store.Incident, app *store.AppIncidentPolicy, recent []store.IncidentSignal) (*store.IncidentAction, string) {
 	var pair *appVersionPair
-	err := ws.do(ctx, func(ctx context.Context, c mydc.Conn) error {
+	err := ws.do(ctx, func(ctx context.Context, c sfc.Conn) error {
 		var err error
 		pair, err = appVersions(ctx, c, in.Tenant, in.App)
 		return err

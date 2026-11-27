@@ -7,14 +7,14 @@ import (
 	"maps"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/cluster/lifecycle"
+	"github.com/jay94ks/seafield/internal/cluster/lifecycle"
 )
 
 func TestReplacementIdentityKeepsOriginalIngressOwnerForNewAppPlan(t *testing.T) {
 	f, input, ctx := managedNetworkFixture(t)
 	declaration := &IngressDeclaration{Node: "node-b", Host: "app.test", Listeners: []ListenerDeclaration{{Address: "192.0.2.12:8080"}}, Runtime: IngressRuntime{MaxRequests: 2, MaxConnections: 8, MaxHeaderBytes: 4096, MaxBodyBytes: 1 << 20, BufferBytes: 128 << 10, RequestTimeoutMS: 30000, DialTimeoutMS: 1000, ResponseHeaderTimeoutMS: 2000, HealthIntervalMS: 100}}
 	declaration.Backend.Service, declaration.Backend.Port, declaration.Backend.HealthPath = "web", 8080, "/readyz"
-	input.MyDC.Ingress = declaration
+	input.Sfc.Ingress = declaration
 	original, err := CompileApp(input, f.c, ctx)
 	if err != nil {
 		t.Fatal(err)

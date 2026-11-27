@@ -7,9 +7,9 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/tenancy"
-	"github.com/jay94ks/mydcd/internal/workload/volumes"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/tenancy"
+	"github.com/jay94ks/seafield/internal/workload/volumes"
 )
 
 func createCore(t *testing.T) (*backupCoreFixture, VolumeCreate) {
@@ -114,7 +114,7 @@ func TestVolumeCreateCurrentRevocationDeniesReadyButAllowsOriginalCleanup(t *tes
 	job, _ := f.view().Creation(q.Scope)
 	c, _ := f.p.Catalog(f.s)
 	tenant, _ := c.Tenant("tenant")
-	f.apply("revoke-placement", "set-nodes", tenant.Revision, NodeAssignment{Tenant: "tenant"}, state.Applied)
+	f.apply("revoke-placement", "set-nodes", tenant.Revision, NodeChangeTo("tenant", tenant.AllowedNodes, nil), state.Applied)
 	owner := job.Spec.NodeKey
 	if _, err := f.p.VolumeCreatePermit(f.s, owner, q.Scope); err == nil {
 		t.Fatal("revoked placement got native creation permit")

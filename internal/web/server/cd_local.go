@@ -15,21 +15,21 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/web/mydc"
-	"github.com/jay94ks/mydcd/internal/web/store"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/web/sfc"
+	"github.com/jay94ks/seafield/internal/web/store"
 )
 
 // CD apps beyond Git: the services the web adds apart from Git (REQ-15
 // mock), approve/reject of a candidate with a reason, and the per-app
-// approver grant. mydcd merges the documents, checks name conflicts and
+// approver grant. sfcd merges the documents, checks name conflicts and
 // judges permissions.
 
 // GET /t/{t}/apps/{app}/cd/local → {tenant, app, revision, document,
 // services, gitServices, conflicts?}: the web-added part (an app.yaml
 // fragment with only services:) and the Git services it may not change.
 func (s *Server) handleCDLocal(w http.ResponseWriter, r *http.Request, ws *webSession) {
-	read(s, w, r, ws, func(ctx context.Context, c mydc.Conn) (mydc.AppCDLocal, error) {
+	read(s, w, r, ws, func(ctx context.Context, c sfc.Conn) (sfc.AppCDLocal, error) {
 		l, err := c.AppDeliveryLocal(ctx, r.PathValue("t"), r.PathValue("app"))
 		if l.Services == nil {
 			l.Services = []string{}
@@ -42,7 +42,7 @@ func (s *Server) handleCDLocal(w http.ResponseWriter, r *http.Request, ws *webSe
 }
 
 // PUT /t/{t}/apps/{app}/cd/local {opId, document, expected?}: the
-// web-added services, as `mydc cd put-local` / `clear-local` send them.
+// web-added services, as `sfcli cd put-local` / `clear-local` send them.
 // A document goes up as an app upload (begin-app-upload → put-app-part × n)
 // and put-app-local-services names it, one job under opId (sending the same
 // opId again continues it); document "" sends clear-app-local-services.
@@ -60,8 +60,8 @@ func (s *Server) handlePutCDLocal(w http.ResponseWriter, r *http.Request, ws *we
 		return
 	}
 	tenant, app := r.PathValue("t"), r.PathValue("app")
-	change := func(cur mydc.AppCDLocal) mydc.AppLocalChange {
-		q := mydc.AppLocalChange{Tenant: tenant, App: app, Registration: cur.Registration, Revision: cur.LocalRevision}
+	change := func(cur sfc.AppCDLocal) sfc.AppLocalChange {
+		q := sfc.AppLocalChange{Tenant: tenant, App: app, Registration: cur.Registration, Revision: cur.LocalRevision}
 		if req.Expected == 0 {
 			t := cur.Target
 			q.Target = &t
@@ -69,7 +69,7 @@ func (s *Server) handlePutCDLocal(w http.ResponseWriter, r *http.Request, ws *we
 		return q
 	}
 	if req.Document == "" {
-		s.sharedCreate(w, r, ws, req.OpID, req, func(ctx context.Context, c mydc.Conn, _ mydc.Session) (string, any, uint64, string, error) {
+		s.sharedCreate(w, r, ws, req.OpID, req, func(ctx context.Context, c sfc.Conn, _ sfc.Session) (string, any, uint64, string, error) {
 			cur, err := c.AppDeliveryLocal(ctx, tenant, app)
 			if err != nil {
 				return "", nil, 0, "", err
@@ -77,7 +77,7 @@ func (s *Server) handlePutCDLocal(w http.ResponseWriter, r *http.Request, ws *we
 			if len(cur.Services) == 0 {
 				return "", nil, 0, "", &httpErr{http.StatusConflict, "unchanged", "there are no web-added services"}
 			}
-			return mydc.ActionClearAppLocalServices, change(cur), expectedOr(req.Expected, cur.Revision), "app/" + app, nil
+			return sfc.ActionClearAppLocalServices, change(cur), expectedOr(req.Expected, cur.Revision), "app/" + app, nil
 		})
 		return
 	}
@@ -90,7 +90,7 @@ func (s *Server) handlePutCDLocal(w http.ResponseWriter, r *http.Request, ws *we
 		writeError(w, http.StatusUnprocessableEntity, "invalid", "document: at most 1 MiB")
 		return
 	}
-	// The names are signed metadata; mydcd checks them against the exact
+	// The names are signed metadata; sfcd checks them against the exact
 	// uploaded document and judges the document itself.
 	var frag struct {
 		Services map[string]yaml.Node `yaml:"services"`
@@ -124,7 +124,7 @@ func (s *Server) handlePutCDLocal(w http.ResponseWriter, r *http.Request, ws *we
 	}
 	ctx, cancel := s.callCtx(r)
 	defer cancel()
-	err = ws.do(ctx, func(ctx context.Context, c mydc.Conn) error {
+	err = ws.do(ctx, func(ctx context.Context, c sfc.Conn) error {
 		if parent == nil {
 			row, _, err := cdRow(ctx, c, tenant, app)
 			if err != nil {
@@ -144,10 +144,10 @@ func (s *Server) handlePutCDLocal(w http.ResponseWriter, r *http.Request, ws *we
 				return err
 			}
 			now := s.now()
-			parent = &store.Op{ID: req.OpID, User: ws.user.ID, Username: ws.user.Username, Action: mydc.ActionPutAppLocalServices, Tenant: tenant, Target: "app/" + app,
+			parent = &store.Op{ID: req.OpID, User: ws.user.ID, Username: ws.user.Username, Action: sfc.ActionPutAppLocalServices, Tenant: tenant, Target: "app/" + app,
 				Digest: dg, State: store.OpRunning, SubmittedAt: now, UpdatedAt: now,
 				Deploy: &store.DeployJob{Tenant: tenant, App: app, Deployment: row.Deployment, UploadID: q.Upload, Document: doc, Digest: hex.EncodeToString(sum[:]),
-					Parts: (len(doc) + mydc.AppPartBytes - 1) / mydc.AppPartBytes, Local: &store.LocalJob{Change: raw, Expected: expectedOr(req.Expected, cur.Revision)}}}
+					Parts: (len(doc) + sfc.AppPartBytes - 1) / sfc.AppPartBytes, Local: &store.LocalJob{Change: raw, Expected: expectedOr(req.Expected, cur.Revision)}}}
 			existing, err := s.opt.Store.CreateOp(parent)
 			if err != nil {
 				return err
@@ -173,11 +173,11 @@ func (s *Server) handlePutCDLocal(w http.ResponseWriter, r *http.Request, ws *we
 // POST /t/{t}/apps/{app}/cd/candidate/approve {opId, candidate, reason?,
 // expected?} → cd-approve; POST …/cd/candidate/reject {opId, candidate,
 // reason?, expected?} → cd-reject. candidate is cd.candidateDigest as shown
-// (409 candidate-changed when the row moved on). mydcd runs an approved
+// (409 candidate-changed when the row moved on). sfcd runs an approved
 // candidate itself; a rejected commit stays out until a new commit or
-// replan. The reason (≤ 512) is signed into the op, as X-MyDC-Reason would
+// replan. The reason (≤ 512) is signed into the op, as X-SFC-Reason would
 // be (one or the other). A given expected must be the CD revision exactly
-// (Strict); without it mydcd takes any revision not newer than the row's.
+// (Strict); without it sfcd takes any revision not newer than the row's.
 func (s *Server) handleCDDecision(action string) func(http.ResponseWriter, *http.Request, *webSession) {
 	return func(w http.ResponseWriter, r *http.Request, ws *webSession) {
 		var req struct {
@@ -190,14 +190,14 @@ func (s *Server) handleCDDecision(action string) func(http.ResponseWriter, *http
 			return
 		}
 		if req.Reason != "" {
-			if r.Header.Get("X-MyDC-Reason") != "" {
-				writeError(w, http.StatusBadRequest, "bad-request", "reason: in the body or X-MyDC-Reason, not both")
+			if r.Header.Get("X-SFC-Reason") != "" {
+				writeError(w, http.StatusBadRequest, "bad-request", "reason: in the body or X-SFC-Reason, not both")
 				return
 			}
-			r.Header.Set("X-MyDC-Reason", url.PathEscape(req.Reason))
+			r.Header.Set("X-SFC-Reason", url.PathEscape(req.Reason))
 		}
 		tenant, app := r.PathValue("t"), r.PathValue("app")
-		s.sharedCreate(w, r, ws, req.OpID, actionBody{action, req}, func(ctx context.Context, c mydc.Conn, _ mydc.Session) (string, any, uint64, string, error) {
+		s.sharedCreate(w, r, ws, req.OpID, actionBody{action, req}, func(ctx context.Context, c sfc.Conn, _ sfc.Session) (string, any, uint64, string, error) {
 			if len(req.Candidate) != 64 {
 				return "", nil, 0, "", invalid("candidate: cd.candidateDigest as shown")
 			}
@@ -211,7 +211,7 @@ func (s *Server) handleCDDecision(action string) func(http.ResponseWriter, *http
 			if req.Candidate != hex.EncodeToString(cd.CandidateDigest[:]) {
 				return "", nil, 0, "", &httpErr{http.StatusConflict, "candidate-changed", "the source candidate changed; read the app again"}
 			}
-			return action, mydc.CDDecision{Strict: req.Expected != 0, Tenant: tenant, App: app, Candidate: cd.CandidateDigest, Target: cd.Target},
+			return action, sfc.CDDecision{Strict: req.Expected != 0, Tenant: tenant, App: app, Candidate: cd.CandidateDigest, Target: cd.Target},
 				expectedOr(req.Expected, cd.Revision), "app/" + app, nil
 		})
 	}
@@ -219,7 +219,7 @@ func (s *Server) handleCDDecision(action string) func(http.ResponseWriter, *http
 
 // cdApproverNames maps the CD record's approver IDs to usernames (tenant
 // members; an ID that is not a member stays as it is).
-func cdApproverNames(ctx context.Context, c mydc.Conn, ws *webSession, tenant string, cd *mydc.AppCD) []string {
+func cdApproverNames(ctx context.Context, c sfc.Conn, ws *webSession, tenant string, cd *sfc.AppCD) []string {
 	names := ownerNames(ctx, c, ws, tenant)
 	out := []string{}
 	for _, id := range cd.Approvers {
@@ -237,7 +237,7 @@ func cdApproverNames(ctx context.Context, c mydc.Conn, ws *webSession, tenant st
 // CD record.
 func (s *Server) handleCDApprovers(w http.ResponseWriter, r *http.Request, ws *webSession) {
 	tenant, app := r.PathValue("t"), r.PathValue("app")
-	read(s, w, r, ws, func(ctx context.Context, c mydc.Conn) (map[string]any, error) {
+	read(s, w, r, ws, func(ctx context.Context, c sfc.Conn) (map[string]any, error) {
 		_, cd, err := cdRow(ctx, c, tenant, app)
 		if err != nil {
 			return nil, err
@@ -249,7 +249,7 @@ func (s *Server) handleCDApprovers(w http.ResponseWriter, r *http.Request, ws *w
 // POST /t/{t}/apps/{app}/cd/approvers {opId, user | userId, expected?} →
 // grant-cd-approver; DELETE …/cd/approvers {opId, user | userId, expected?}
 // → revoke-cd-approver. user is a tenant member's username (for revoke also
-// an approver ID shown as is); userId is the user ID mydcd takes (the
+// an approver ID shown as is); userId is the user ID sfcd takes (the
 // automation account, which need not be a member). Expected defaults to the
 // CD revision.
 func (s *Server) handleCDApprover(action string) func(http.ResponseWriter, *http.Request, *webSession) {
@@ -264,7 +264,7 @@ func (s *Server) handleCDApprover(action string) func(http.ResponseWriter, *http
 			return
 		}
 		tenant, app := r.PathValue("t"), r.PathValue("app")
-		s.sharedCreate(w, r, ws, req.OpID, actionBody{action, req}, func(ctx context.Context, c mydc.Conn, _ mydc.Session) (string, any, uint64, string, error) {
+		s.sharedCreate(w, r, ws, req.OpID, actionBody{action, req}, func(ctx context.Context, c sfc.Conn, _ sfc.Session) (string, any, uint64, string, error) {
 			if (req.User == "") == (req.UserID == "") || len(req.User) > 128 || len(req.UserID) > 128 {
 				return "", nil, 0, "", invalid("user: a username, or userId: a user ID (one of them)")
 			}
@@ -281,13 +281,13 @@ func (s *Server) handleCDApprover(action string) func(http.ResponseWriter, *http
 					id = uid
 				}
 			}
-			if id == "" && action == mydc.ActionDropCDApprover && slices.Contains(cd.Approvers, req.User) {
+			if id == "" && action == sfc.ActionDropCDApprover && slices.Contains(cd.Approvers, req.User) {
 				id = req.User
 			}
 			if id == "" {
 				return "", nil, 0, "", &httpErr{http.StatusNotFound, "not-found", "no such member of the work space"}
 			}
-			return action, mydc.CDApproverGrant{Tenant: tenant, App: app, User: id}, expectedOr(req.Expected, cd.Revision), "app/" + app, nil
+			return action, sfc.CDApproverGrant{Tenant: tenant, App: app, User: id}, expectedOr(req.Expected, cd.Revision), "app/" + app, nil
 		})
 	}
 }

@@ -23,7 +23,7 @@
 
 상태(State): `{enabled, enabledAt?, enabledBy?, lastActivity?, expiresAt?, disabledReason?, disabledAt?, entries, last}`. `disabledReason`은 `user`(끔), `idle`(1시간 무활동), `limit`(켠 지 24시간), `restart`(웹 앱 시작). `expiresAt`은 둘 중 먼저 오는 꺼질 시각이다. `entries`는 메모리에 있는 항목 수, `last`는 가장 새 seq다.
 
-항목(Entry): `{seq, at, provider, conn?, op?, level, msg?, kind?, error?, attrs?, http?}`. `provider`는 `dns:<벤더>`, `acme:<인증 기관 ID>`, 켜고 끈 기록은 `mydc-web`. `level`은 `info`·`warn`(4xx)·`error`(5xx, 429, 연결 실패). `kind`는 공급자 오류 분류(`auth-failed`, `rate-limited` 등). `http`는 `{method, url, status?, durationMs, request?, response?, reqBytes?, respBytes?, headers?}`.
+항목(Entry): `{seq, at, provider, conn?, op?, level, msg?, kind?, error?, attrs?, http?}`. `provider`는 `dns:<벤더>`, `acme:<인증 기관 ID>`, 켜고 끈 기록은 `sfc-web`. `level`은 `info`·`warn`(4xx)·`error`(5xx, 429, 연결 실패). `kind`는 공급자 오류 분류(`auth-failed`, `rate-limited` 등). `http`는 `{method, url, status?, durationMs, request?, response?, reqBytes?, respBytes?, headers?}`.
 
 ### 폴링
 
@@ -37,17 +37,17 @@
 
 ## 디버깅 도구
 
-`mydc-web provider-log`가 위 끝점을 읽는다. 웹 컨테이너 안에서도 돌릴 수 있다.
+`sfc-web provider-log`가 위 끝점을 읽는다. 웹 컨테이너 안에서도 돌릴 수 있다.
 
 ```sh
-export MYDC_WEB_DIAG_TOKEN=mpl_...          # 켤 때 보인 토큰
-mydc-web provider-log -url https://web.example -tail 200 -format text
-mydc-web provider-log -url https://web.example -format summary -provider dns:
-mydc-web provider-log -url https://web.example -follow -out provider-log.jsonl
-docker exec mydc-web mydc-web provider-log -tail 500 > provider-log.jsonl
+export SFC_WEB_DIAG_TOKEN=mpl_...          # 켤 때 보인 토큰
+sfc-web provider-log -url https://web.example -tail 200 -format text
+sfc-web provider-log -url https://web.example -format summary -provider dns:
+sfc-web provider-log -url https://web.example -follow -out provider-log.jsonl
+docker exec sfc-web sfc-web provider-log -tail 500 > provider-log.jsonl
 ```
 
 - `-format jsonl`(기본, 항목 그대로), `text`(한 줄씩, 실패한 응답 본문 포함), `summary`(공급자·작업별 호출 수, 상태 코드, 평균 시간, 최근 경고·오류 20개).
 - `-follow`는 SSE로 새 항목을 계속 받고, 끊기면 마지막 seq부터 다시 붙는다. 기록이 꺼지면 끝난다.
 - 거르기: `-provider`, `-op`, `-level`, `-since 2h`, `-q`. 시작 위치: `-after <seq>` 또는 `-tail <n>`.
-- 토큰: `-token-file` 또는 `MYDC_WEB_DIAG_TOKEN`(`-token`도 되지만 셸 기록에 남는다). 자체 서명 인증서면 `-insecure`.
+- 토큰: `-token-file` 또는 `SFC_WEB_DIAG_TOKEN`(`-token`도 되지만 셸 기록에 남는다). 자체 서명 인증서면 `-insecure`.

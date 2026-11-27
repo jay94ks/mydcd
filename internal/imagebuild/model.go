@@ -16,8 +16,8 @@ import (
 	"unicode/utf8"
 
 	"github.com/containerd/platforms"
-	"github.com/jay94ks/mydcd/internal/cluster/lifecycle"
-	"github.com/jay94ks/mydcd/internal/nodestorage"
+	"github.com/jay94ks/seafield/internal/cluster/lifecycle"
+	"github.com/jay94ks/seafield/internal/nodestorage"
 )
 
 const (

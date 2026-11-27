@@ -200,7 +200,7 @@ func (e *Engine) networkCreate(w http.ResponseWriter, r *http.Request, _ []strin
 			}
 		}
 	}
-	if e.host && n.Driver == "bridge" {
+	if e.host && (n.Driver == "bridge" || n.Driver == sfcDriver) {
 		if err := e.createBridgeLink(n); err != nil {
 			writeError(w, http.StatusInternalServerError, "bridge link: "+err.Error())
 			return
@@ -210,6 +210,11 @@ func (e *Engine) networkCreate(w http.ResponseWriter, r *http.Request, _ []strin
 	e.emit("network", "create", n.ID, map[string]string{"name": n.Name, "type": n.Driver})
 	writeJSON(w, http.StatusCreated, map[string]any{"Id": n.ID, "Warning": ""})
 }
+
+// sfcDriver is Seafield's built-in network driver (network.EngineDriver):
+// a bridge whose device sfcd names. In host mode the fake makes it as it
+// makes "bridge" networks.
+const sfcDriver = "sfc"
 
 func (e *Engine) networkInspect(w http.ResponseWriter, _ *http.Request, a []string) {
 	e.mu.Lock()

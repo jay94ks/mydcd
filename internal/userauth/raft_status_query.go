@@ -13,12 +13,12 @@ import (
 	"time"
 
 	"github.com/hashicorp/raft"
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/observability"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/observability"
+	"github.com/jay94ks/seafield/internal/sfcp"
 )
 
 type RaftNodeStatus struct {
@@ -53,7 +53,7 @@ type RaftStatus struct {
 	WritesSince uint64               `json:",omitempty"`
 }
 
-func (c Client) RaftStatus(ctx context.Context, peer mydcp.Peer, session access.Session) (Reply, error) {
+func (c Client) RaftStatus(ctx context.Context, peer sfcp.Peer, session access.Session) (Reply, error) {
 	return c.query(ctx, peer, session, Request{Method: "raft-status"})
 }
 
@@ -230,7 +230,7 @@ func (s Service) raftStatusReply(ctx context.Context, view cluster.View, session
 		User                                  string
 		Scopes                                []access.Scope
 	}{status.Term, status.ConfigurationIndex, view.State.Object(control.CatalogKey).Revision, view.State.Object(control.MembersKey).Revision, session.User, session.Scopes})
-	basis := sha256.Sum256(append([]byte("mydc-raft-status-page-1\x00"), basisRaw...))
+	basis := sha256.Sum256(append([]byte("sfc-raft-status-page-1\x00"), basisRaw...))
 	offset := uint32(0)
 	if after != "" {
 		raw, err := base64.RawURLEncoding.DecodeString(after)
@@ -263,6 +263,6 @@ func (s Service) raftStatusReply(ctx context.Context, view cluster.View, session
 	return Reply{Schema: 1, Code: "ok", RaftStatus: &status}
 }
 
-func (c Client) RaftStatusPage(ctx context.Context, peer mydcp.Peer, session access.Session, after string) (Reply, error) {
+func (c Client) RaftStatusPage(ctx context.Context, peer sfcp.Peer, session access.Session, after string) (Reply, error) {
 	return c.query(ctx, peer, session, Request{Method: "raft-status", After: after})
 }

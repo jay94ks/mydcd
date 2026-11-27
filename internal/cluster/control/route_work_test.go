@@ -6,9 +6,9 @@ import (
 	"bytes"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/network/services"
-	"github.com/jay94ks/mydcd/internal/tenancy"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/network/services"
+	"github.com/jay94ks/seafield/internal/tenancy"
 )
 
 func approveRouteControl(t *testing.T, f *backupCoreFixture, proposal RouteProposal) (state.Command, state.Result) {
@@ -186,7 +186,7 @@ func TestRoutePreparationRevocationRetainsOriginalConsumerBudgetAndCleanup(t *te
 	}
 	catalog, _ := f.p.Catalog(f.s)
 	tenant, _ := catalog.Tenant(proposal.Source.Tenant)
-	f.apply("route-withdraw-node-grant", "set-nodes", tenant.Revision, NodeAssignment{Tenant: proposal.Source.Tenant, Nodes: []string{"node-b"}}, state.Applied)
+	f.apply("route-withdraw-node-grant", "set-nodes", tenant.Revision, NodeChangeTo(proposal.Source.Tenant, tenant.AllowedNodes, []string{"node-b"}), state.Applied)
 	if f.p.RouteTransportAllowed(f.s, local, remote) || f.p.RouteTransportAllowed(f.s, remote, local) {
 		t.Fatal("node grant revocation retained route transport admission")
 	}
@@ -229,7 +229,7 @@ func TestRouteWorkProjectionKeepsOldSnapshotSeparateFromCurrentRevocation(t *tes
 	}
 	catalog, _ := f.p.Catalog(f.s)
 	tenant, _ := catalog.Tenant(proposal.Source.Tenant)
-	f.apply("readback-revoke-owner", "set-nodes", tenant.Revision, NodeAssignment{Tenant: proposal.Source.Tenant, Nodes: []string{"node-b"}}, state.Applied)
+	f.apply("readback-revoke-owner", "set-nodes", tenant.Revision, NodeChangeTo(proposal.Source.Tenant, tenant.AllowedNodes, []string{"node-b"}), state.Applied)
 	after, current, err := f.p.ProjectRouteWork(f.s, ref.Local.Owner, request)
 	if err != nil || current.PrepareAllowed || current.ResourcesRevision != f.s.Object(ResourcesKey).Revision || current.AppsRevision != f.s.Object(AppsKey).Revision || current.Reference.ID != work.Reference.ID || current.Reference.Closed != nil || *current.Reference.Native != *work.Reference.Native {
 		t.Fatal("current readback reused old permission or erased its original cleanup pin", err)

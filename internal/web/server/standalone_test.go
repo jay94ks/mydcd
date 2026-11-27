@@ -25,7 +25,7 @@ grace: 10m
 mode: shell
 image: busybox:1.36
 networks: [shop-net]
-x-mydc: {node: node-b}
+x-sfc: {node: node-b}
 `
 
 func standaloneNames(out map[string]any) map[string]map[string]any {
@@ -65,7 +65,7 @@ func TestStandaloneLifecycle(t *testing.T) {
 	}
 	rev := item["revision"]
 
-	// a temp one's time left is extended (mydcd's StandaloneExtendChange)
+	// a temp one's time left is extended (sfcd's StandaloneExtendChange)
 	exp := item["expiresAt"].(float64)
 	code, out = f.do("POST", "/api/v1/t/shop/standalone/try-shell/extend", map[string]any{"opId": "b1b2c3d4-0000-4000-8000-000000000011", "ttlSeconds": 7200})
 	if code != 200 || opState(t, code, out) != "applied" {
@@ -103,7 +103,7 @@ func TestStandaloneLifecycle(t *testing.T) {
 lifetime: temp
 mode: shell
 image: busybox:1.36
-x-mydc: {node: node-b}
+x-sfc: {node: node-b}
 `
 	code, out = f.do("POST", "/api/v1/t/shop/standalone/up", map[string]any{"opId": opSa3, "yaml": second})
 	if code != 409 || out["error"].(map[string]any)["code"] != "limit-user-temp" {
@@ -253,7 +253,7 @@ func TestStandaloneUpGroupApproval(t *testing.T) {
 	f, fake := newFakeFixture(t)
 	fakeLogin(t, f, "alice")
 	fake.SetGroupPassword("shop", "shop-db", "open-sesame")
-	def := "name: sec-shell\nlifetime: fixed\nmode: shell\nimage: busybox:1.36\nnetworks: [shop-net]\nx-mydc:\n  node: node-b\n  secrets_from: [group/shop-db]\n"
+	def := "name: sec-shell\nlifetime: fixed\nmode: shell\nimage: busybox:1.36\nnetworks: [shop-net]\nx-sfc:\n  node: node-b\n  secrets_from: [group/shop-db]\n"
 	op := "b1b2c3d4-0000-4000-8000-000000000031"
 	code, out := f.do("POST", "/api/v1/t/shop/standalone/up", map[string]any{"opId": op, "yaml": def})
 	o, _ := out["op"].(map[string]any)
@@ -272,7 +272,7 @@ func TestStandaloneHostPortConflict(t *testing.T) {
 	f, _ := newFakeFixture(t)
 	fakeLogin(t, f, "alice")
 	def := func(name string) string {
-		return "name: " + name + "\nlifetime: fixed\nimage: busybox:1.36\nnetworks: [shop-net]\nports: [\"18080:80\"]\nx-mydc: {node: node-b}\n"
+		return "name: " + name + "\nlifetime: fixed\nimage: busybox:1.36\nnetworks: [shop-net]\nports: [\"18080:80\"]\nx-sfc: {node: node-b}\n"
 	}
 	if code, out := f.do("POST", "/api/v1/t/shop/standalone/up", map[string]any{"opId": "b1b2c3d4-0000-4000-8000-000000000041", "yaml": def("port-a")}); code != 200 || opState(t, code, out) != "applied" {
 		t.Fatalf("first: %d %v", code, out)

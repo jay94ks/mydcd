@@ -173,7 +173,7 @@ func TestReportCollectionPreservesNonReportOriginalResults(t *testing.T) {
 	if r, ok := s.LookupResult(legacy); !ok || r != saved {
 		t.Fatal("protected original result evicted")
 	}
-	if _, ok := s.reportReceipts[requestKey{legacy.Actor, legacy.RequestID}]; ok {
+	if _, ok := s.reportReceipts.get(requestKey{legacy.Actor, legacy.RequestID}.String()); ok {
 		t.Fatal("legacy result silently classified")
 	}
 }

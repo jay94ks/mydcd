@@ -6,7 +6,7 @@ updates:
       interval: weekly
     open-pull-requests-limit: 5
   - package-ecosystem: npm
-    directory: /apps/mydc-web/web
+    directory: /apps/sfc-web/web
     schedule:
       interval: weekly
     open-pull-requests-limit: 5

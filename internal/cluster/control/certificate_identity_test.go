@@ -7,7 +7,7 @@ import (
 	"crypto/ed25519"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/cluster/state"
 )
 
 // Real certificate/identity reducers and snapshot bytes, with modeled native

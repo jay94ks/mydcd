@@ -6,15 +6,16 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/certstore"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/cluster/membership"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/storage"
-	"github.com/jay94ks/mydcd/internal/userauth"
+	"github.com/jay94ks/seafield/internal/certstore"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/membership"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/storage"
+	"github.com/jay94ks/seafield/internal/userauth"
 )
 
 // The master key starts on the init voter, reaches a promoted voter, and
@@ -68,5 +69,29 @@ func TestCertificateMasterFollowsVotersAndSealsOnNonVoter(t *testing.T) {
 	defer clear(key)
 	if _, err = certstore.Open(v, key); err != nil {
 		t.Fatal("voter-derived key does not open the non-voter's receipt", err)
+	}
+}
+
+// Typed methods (R09) go through the same session, relay and leader path:
+// both voters answer.
+func TestTypedCertificateAndVPSQueriesOnEveryVoter(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+	admin, err := identity.Ephemeral()
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := newManagedVoters(t, ctx, t.TempDir(), admin, 2)
+	for i := range m.Nodes {
+		if _, err := m.client.QueryCertificates(ctx, m.Peer(i), m.session, control.CertificateQuery{}); err != nil {
+			t.Fatal("typed certificates query", i, err)
+		}
+		if _, err = m.client.QueryVPS(ctx, m.Peer(i), m.session, control.VPSQuery{}); err != nil {
+			t.Fatal("typed vps query", i, err)
+		}
+		// A malformed selector is refused before it is sent.
+		if _, err = m.client.QueryCertificates(ctx, m.Peer(i), m.session, control.CertificateQuery{After: strings.Repeat("x", 600)}); err == nil {
+			t.Fatal("oversized cursor accepted", i)
+		}
 	}
 }

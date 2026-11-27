@@ -27,7 +27,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/schema"
+	"github.com/jay94ks/seafield/internal/schema"
 	"github.com/quic-go/quic-go/http3"
 	"golang.org/x/net/http2"
 )

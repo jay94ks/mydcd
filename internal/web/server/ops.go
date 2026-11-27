@@ -13,8 +13,9 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/web/mydc"
-	"github.com/jay94ks/mydcd/internal/web/store"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/web/sfc"
+	"github.com/jay94ks/seafield/internal/web/store"
 )
 
 var uuidRE = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
@@ -30,6 +31,10 @@ type opRequest struct {
 	RootRevision uint64          `json:"rootRevision"`
 	Tenant       string          `json:"tenant,omitempty"` // display/filter only
 	Target       string          `json:"target,omitempty"` // display only
+	// Batch groups the ops of one change set sent together (a lowercase
+	// UUID v4 the browser picks); display/filter only, each op is still
+	// its own signed request
+	Batch string `json:"batch,omitempty"`
 }
 
 func (o *opRequest) digest() string {
@@ -58,6 +63,7 @@ type opView struct {
 	SubmittedAt string `json:"submittedAt"`
 	UpdatedAt   string `json:"updatedAt"`
 	Parent      string `json:"parent,omitempty"`
+	Batch       string `json:"batch,omitempty"`
 	// deploy jobs: next step and total steps (begin + parts + begin-app)
 	Step  int `json:"step,omitempty"`
 	Steps int `json:"steps,omitempty"`
@@ -67,6 +73,10 @@ type opView struct {
 	Move *moveView `json:"move,omitempty"`
 	// REQ-9 display-only reason sent with the op
 	Reason *store.OpReason `json:"reason,omitempty"`
+	// UI-A4: whether "revert this change" is offered (here / link / no)
+	// and the op this one reverts
+	Revert   string `json:"revert"`
+	RevertOf string `json:"revertOf,omitempty"`
 }
 
 type moveView struct {
@@ -87,7 +97,8 @@ type approvalView struct {
 func viewOp(o *store.Op) opView {
 	v := opView{ID: o.ID, RequestID: o.RequestID, Action: o.Action, Tenant: o.Tenant, Target: o.Target, State: o.State, ErrorCode: o.ErrorCode,
 		SubmittedAt: o.SubmittedAt.UTC().Format(time.RFC3339), UpdatedAt: o.UpdatedAt.UTC().Format(time.RFC3339)}
-	v.Parent, v.Reason = o.Parent, o.Reason
+	v.Parent, v.Batch, v.Reason = o.Parent, o.Batch, o.Reason
+	v.Revert, v.RevertOf = revertKind(o), o.RevertOf
 	if o.Deploy != nil {
 		v.Step, v.Steps = o.Deploy.Step, o.Deploy.Parts+2
 		for _, a := range o.Deploy.Approvals {
@@ -141,6 +152,11 @@ func (s *Server) writeOpOutcome(w http.ResponseWriter, ws *webSession, o *store.
 			writeError(w, he.status, he.code, he.msg)
 			return
 		}
+		var ee *existsErr
+		if errors.As(err, &ee) {
+			writeExists(w, "a "+ee.what+" with this name is there now", ee.current)
+			return
+		}
 		var ce *compileErr
 		if errors.As(err, &ce) {
 			writeJSON(w, http.StatusUnprocessableEntity, map[string]apiError{"error": {Code: "compile-error", Message: "the source does not compile", Diagnostics: ce.items}})
@@ -173,6 +189,23 @@ func (s *Server) submitOp(r *http.Request, ws *webSession, req *opRequest) (*sto
 	if req.Action == "" {
 		return nil, 0, &httpErr{http.StatusBadRequest, "bad-request", "action is required"}
 	}
+	if req.Batch != "" && !uuidRE.MatchString(req.Batch) {
+		return nil, 0, &httpErr{http.StatusBadRequest, "bad-request", "batch must be a lowercase UUID v4"}
+	}
+	if req.Principal == "" {
+		// as `sfcli manage apply` signs it: the change is the user's own
+		req.Principal = ws.user.ID
+	}
+	if _, known := control.InputActionType(req.Action); known {
+		// sfcd takes a payload only in its own canonical form; read it as
+		// `sfcli manage apply` reads a change file
+		doc, _ := json.Marshal(control.ChangeDocument{Schema: 1, Action: req.Action, Expected: req.Expected, Payload: req.Payload})
+		ch, err := control.InputChange(doc, req.Principal)
+		if err != nil {
+			return nil, 0, &httpErr{http.StatusBadRequest, "bad-payload", "the payload does not match this action's fields"}
+		}
+		req.Payload = ch.Payload
+	}
 	reason, err := opReasonOf(r)
 	if err != nil {
 		return nil, 0, &httpErr{http.StatusBadRequest, "bad-request", err.Error()}
@@ -181,6 +214,11 @@ func (s *Server) submitOp(r *http.Request, ws *webSession, req *opRequest) (*sto
 	if reason != nil {
 		// keeps the digest of ops without a reason as it was
 		raw, _ := json.Marshal([]any{dg, reason})
+		h := sha256.Sum256(raw)
+		dg = hex.EncodeToString(h[:])
+	}
+	if req.Batch != "" {
+		raw, _ := json.Marshal([]string{dg, req.Batch})
 		h := sha256.Sum256(raw)
 		dg = hex.EncodeToString(h[:])
 	}
@@ -197,7 +235,7 @@ func (s *Server) submitOp(r *http.Request, ws *webSession, req *opRequest) (*sto
 	defer cancel()
 	var o *store.Op
 	status := http.StatusOK
-	err = ws.do(ctx, func(ctx context.Context, c mydc.Conn) error {
+	err = ws.do(ctx, func(ctx context.Context, c sfc.Conn) error {
 		root := req.RootRevision
 		if root == 0 {
 			// The browser does not track the root revision; use the current
@@ -209,8 +247,8 @@ func (s *Server) submitOp(r *http.Request, ws *webSession, req *opRequest) (*sto
 			}
 			root = who.RootFor(req.Action)
 		}
-		o = &store.Op{ID: req.OpID, User: ws.user.ID, Username: ws.user.Username, Action: req.Action, Tenant: req.Tenant, Target: req.Target, Digest: dg, Reason: reason}
-		ch := mydc.Change{Schema: 1, Action: req.Action, Principal: req.Principal, Expected: req.Expected, Payload: req.Payload}
+		o = &store.Op{ID: req.OpID, User: ws.user.ID, Username: ws.user.Username, Action: req.Action, Tenant: req.Tenant, Target: req.Target, Batch: req.Batch, Digest: dg, Reason: reason}
+		ch := sfc.Change{Schema: 1, Action: req.Action, Principal: req.Principal, Expected: req.Expected, Payload: req.Payload}
 		existing, err := s.sendStored(ctx, c, o, ch, root)
 		if err != nil {
 			return err
@@ -234,11 +272,12 @@ func (s *Server) submitOp(r *http.Request, ws *webSession, req *opRequest) (*sto
 // sendStored signs change, stores o with the signed original, and only then
 // submits it. When a row with o's ID already exists it is returned and
 // nothing is sent. Errors before the store mean nothing was sent.
-func (s *Server) sendStored(ctx context.Context, c mydc.Conn, o *store.Op, ch mydc.Change, root uint64) (*store.Op, error) {
-	var op mydc.SignedOp
+func (s *Server) sendStored(ctx context.Context, c sfc.Conn, o *store.Op, ch sfc.Change, root uint64) (*store.Op, error) {
+	s.recordChange(ctx, c, o, ch)
+	var op sfc.SignedOp
 	var err error
 	if o.Reason != nil {
-		op, err = c.PrepareReason(ctx, ch, root, mydc.OperationReason{Reason: o.Reason.Reason, Incident: o.Reason.Incident})
+		op, err = c.PrepareReason(ctx, ch, root, sfc.OperationReason{Reason: o.Reason.Reason, Incident: o.Reason.Incident})
 	} else {
 		op, err = c.Prepare(ctx, ch, root)
 	}
@@ -250,18 +289,18 @@ func (s *Server) sendStored(ctx context.Context, c mydc.Conn, o *store.Op, ch my
 
 // prepareHold signs ch and asks hold whether to keep it unsent; a held
 // original is stored as o (hold set its state), otherwise it is sent.
-func (s *Server) prepareHold(ctx context.Context, c mydc.Conn, o *store.Op, ch mydc.Change, root uint64, hold holdFunc) (*store.Op, error) {
-	var op mydc.SignedOp
+func (s *Server) prepareHold(ctx context.Context, c sfc.Conn, o *store.Op, ch sfc.Change, root uint64, hold holdFunc) (*store.Op, error) {
+	var op sfc.SignedOp
 	var err error
 	if o.Reason != nil {
-		op, err = c.PrepareReason(ctx, ch, root, mydc.OperationReason{Reason: o.Reason.Reason, Incident: o.Reason.Incident})
+		op, err = c.PrepareReason(ctx, ch, root, sfc.OperationReason{Reason: o.Reason.Reason, Incident: o.Reason.Incident})
 	} else {
 		op, err = c.Prepare(ctx, ch, root)
 	}
 	if err != nil {
 		return nil, err
 	}
-	reqID, err := mydc.OperationID(op)
+	reqID, err := sfc.OperationID(op)
 	if err != nil {
 		return nil, err
 	}
@@ -279,8 +318,8 @@ func (s *Server) prepareHold(ctx context.Context, c mydc.Conn, o *store.Op, ch m
 }
 
 // sendPrepared stores an already signed original as o, then sends it.
-func (s *Server) sendPrepared(ctx context.Context, c mydc.Conn, o *store.Op, op mydc.SignedOp) (*store.Op, error) {
-	reqID, err := mydc.OperationID(op)
+func (s *Server) sendPrepared(ctx context.Context, c sfc.Conn, o *store.Op, op sfc.SignedOp) (*store.Op, error) {
+	reqID, err := sfc.OperationID(op)
 	if err != nil {
 		return nil, err
 	}
@@ -295,24 +334,25 @@ func (s *Server) sendPrepared(ctx context.Context, c mydc.Conn, o *store.Op, op 
 	if err := s.saveOp(o); err != nil {
 		s.log.Error("update op after submit", "op", o.ID, "err", err)
 	}
+	s.trashFromOp(o)
 	return nil, nil
 }
 
 // settleSubmit applies the outcome of the first submit to an op.
-func settleSubmit(o *store.Op, res mydc.Result, err error, now time.Time) {
+func settleSubmit(o *store.Op, res sfc.Result, err error, now time.Time) {
 	o.UpdatedAt = now
 	if err == nil {
 		setResult(o, res)
 		return
 	}
-	var me *mydc.Error
+	var me *sfc.Error
 	if !errors.As(err, &me) {
 		o.State, o.ErrorCode = store.OpUnknown, "disconnected"
 		return
 	}
 	switch me.Code {
-	case mydc.CodeDenied, mydc.CodeInvalid, mydc.CodeUnsupported, mydc.CodeExpired, mydc.CodeLedgerFull, mydc.CodeNotSessionIssuer, mydc.CodeTransport, mydc.CodeNotLoggedIn, mydc.CodeSessionExpired:
-		// mydcd answered and refused before execution, or the exchange
+	case sfc.CodeDenied, sfc.CodeInvalid, sfc.CodeUnsupported, sfc.CodeExpired, sfc.CodeLedgerFull, sfc.CodeNotSessionIssuer, sfc.CodeTransport, sfc.CodeNotLoggedIn, sfc.CodeSessionExpired:
+		// sfcd answered and refused before execution, or the exchange
 		// failed locally before anything was sent.
 		o.State, o.ErrorCode = store.OpRejected, string(me.Code)
 	default:
@@ -322,11 +362,11 @@ func settleSubmit(o *store.Op, res mydc.Result, err error, now time.Time) {
 	}
 }
 
-func setResult(o *store.Op, res mydc.Result) {
+func setResult(o *store.Op, res sfc.Result) {
 	o.Result = &store.OpResult{Found: true, Code: int(res.Code), Index: res.Index, Revision: res.Revision, Generation: res.Generation}
 	// a count limit gets its own code; others have none
-	o.ErrorCode = mydc.LimitCode(res.Code)
-	if res.Code == mydc.ResultApplied {
+	o.ErrorCode = sfc.LimitCode(res.Code)
+	if res.Code == sfc.ResultApplied {
 		o.State = store.OpApplied
 	} else {
 		o.State = store.OpFailed
@@ -354,9 +394,10 @@ func (s *Server) handleListOps(w http.ResponseWriter, r *http.Request, ws *webSe
 		return
 	}
 	children := r.URL.Query().Get("children") == "1"
+	batch := r.URL.Query().Get("batch")
 	views := make([]opView, 0, len(ops))
 	for _, o := range ops {
-		if o.Parent != "" && !children {
+		if o.Parent != "" && !children || batch != "" && o.Batch != batch {
 			continue
 		}
 		views = append(views, viewOp(o))
@@ -383,7 +424,7 @@ func (s *Server) handleGetOp(w http.ResponseWriter, r *http.Request, ws *webSess
 	}
 }
 
-// handleOpResult asks mydcd for the original result of the stored op.
+// handleOpResult asks sfcd for the original result of the stored op.
 // "Not found" is not proof that it did not run, so the op stays unknown.
 func (s *Server) handleOpResult(w http.ResponseWriter, r *http.Request, ws *webSession) {
 	s.settleStored(w, r, ws, false)
@@ -426,10 +467,10 @@ func (s *Server) settleStored(w http.ResponseWriter, r *http.Request, ws *webSes
 	}
 	ctx, cancel := s.callCtx(r)
 	defer cancel()
-	op := mydc.SignedOp(o.Signed)
-	var res mydc.Result
+	op := sfc.SignedOp(o.Signed)
+	var res sfc.Result
 	var found bool
-	err := ws.do(ctx, func(ctx context.Context, c mydc.Conn) error {
+	err := ws.do(ctx, func(ctx context.Context, c sfc.Conn) error {
 		var err error
 		if resume {
 			res, found, err = c.Resume(ctx, op)
@@ -445,7 +486,9 @@ func (s *Server) settleStored(w http.ResponseWriter, r *http.Request, ws *webSes
 		return
 	}
 	o.UpdatedAt = s.now()
+	settledNow := false
 	if found {
+		settledNow = o.State != store.OpApplied && res.Code == sfc.ResultApplied
 		setResult(o, res)
 	} else {
 		o.Result = &store.OpResult{Found: false}
@@ -457,7 +500,10 @@ func (s *Server) settleStored(w http.ResponseWriter, r *http.Request, ws *webSes
 		writeError(w, http.StatusInternalServerError, "internal", err.Error())
 		return
 	}
-	if o.Action == mydc.ActionDownApp && o.State == store.OpFailed {
+	if settledNow {
+		s.trashFromOp(o)
+	}
+	if o.Action == sfc.ActionDownApp && o.State == store.OpFailed {
 		// The down did not apply: drop the archive row saved for it.
 		if err := s.opt.Store.DeleteArchivedByOp(o.Tenant, o.ID); err != nil {
 			s.log.Error("drop archive of failed down", "op", o.ID, "err", err)

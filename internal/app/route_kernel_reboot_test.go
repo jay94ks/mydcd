@@ -20,15 +20,15 @@ import (
 	"time"
 
 	cerrdefs "github.com/containerd/errdefs"
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/engine"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/network"
-	"github.com/jay94ks/mydcd/internal/network/services"
-	"github.com/jay94ks/mydcd/internal/reconcile"
-	"github.com/jay94ks/mydcd/internal/schema"
-	"github.com/jay94ks/mydcd/internal/storage"
-	"github.com/jay94ks/mydcd/internal/tenancy"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/engine"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/network"
+	"github.com/jay94ks/seafield/internal/network/services"
+	"github.com/jay94ks/seafield/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/storage"
+	"github.com/jay94ks/seafield/internal/tenancy"
 	"github.com/moby/moby/client"
 	"github.com/vishvananda/netlink"
 )
@@ -72,14 +72,14 @@ type kernelRouteAdmission struct {
 // verify consumes the original disk, actual boot difference and product
 // retirement. Policy/current grant is model input, not a Raft/CLI/peer claim.
 func TestRealBoundaryRouteKernelReboot(t *testing.T) {
-	phase, root := os.Getenv("MYDC_E3_KERNEL_PHASE"), os.Getenv("MYDC_E3_KERNEL_ROOT")
+	phase, root := os.Getenv("SFC_E3_KERNEL_PHASE"), os.Getenv("SFC_E3_KERNEL_ROOT")
 	if phase == "" {
 		t.Skip("explicit owned guest prepare/reset/verify with persistent disk required")
 	}
 	if phase != "prepare" && phase != "verify" && phase != "rollback" {
 		t.Fatal("unknown kernel fixture phase")
 	}
-	authorityPath := os.Getenv("MYDC_E3_KERNEL_AUTHORITY")
+	authorityPath := os.Getenv("SFC_E3_KERNEL_AUTHORITY")
 	checkKernelRoutePrivate(t, authorityPath, false)
 	authorityRaw, err := os.ReadFile(authorityPath)
 	var guest kernelRouteGuest
@@ -117,7 +117,7 @@ func TestRealBoundaryRouteKernelReboot(t *testing.T) {
 	var upstream *net.UDPConn
 	if phase == "prepare" {
 		key = ed25519.NewKeyFromSeed(bytes.Repeat([]byte{161}, 32)) // Explicit fixture policy key.
-		cluster := sha256.Sum256([]byte("mydc-e3-kernel-route-1/" + guest.GuestID))
+		cluster := sha256.Sum256([]byte("sfc-e3-kernel-route-1/" + guest.GuestID))
 		owner := engine.Owner(cluster, [32]byte(key.Public().(ed25519.PublicKey)))
 		source := tenancy.SourceIdentity{Kind: "bridge", Tenant: "first", Network: "lan", Node: "node-a"}
 		prefix := netip.MustParsePrefix("10.61.0.0/24")
@@ -324,7 +324,7 @@ func TestRealBoundaryRouteKernelReboot(t *testing.T) {
 		return
 	}
 	if phase == "prepare" {
-		rows, err := c.API.NetworkList(ctx, client.NetworkListOptions{Filters: client.Filters{}.Add("label", "org.mydc.owner="+input.Owner)})
+		rows, err := c.API.NetworkList(ctx, client.NetworkListOptions{Filters: client.Filters{}.Add("label", "org.sfc.owner="+input.Owner)})
 		if err != nil || len(rows.Items) != 0 {
 			t.Fatal("kernel fixture owner must initially have no Engine networks", err)
 		}
@@ -474,7 +474,7 @@ func TestRealBoundaryRouteKernelReboot(t *testing.T) {
 	if exists, err := network.IsolationExists(input.Owner); err != nil || exists {
 		t.Fatal("current-boot protection not Gone after all original consumers", err)
 	}
-	rows, err := c.API.NetworkList(ctx, client.NetworkListOptions{Filters: client.Filters{}.Add("label", "org.mydc.owner="+input.Owner)})
+	rows, err := c.API.NetworkList(ctx, client.NetworkListOptions{Filters: client.Filters{}.Add("label", "org.sfc.owner="+input.Owner)})
 	if err != nil || len(rows.Items) != 0 {
 		t.Fatal("kernel fixture retains original Engine networks", err)
 	}

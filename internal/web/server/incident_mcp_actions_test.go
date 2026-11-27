@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/web/mydc"
+	"github.com/jay94ks/seafield/internal/web/sfc"
 )
 
 // A propose-auto MCP tool runs on its own under its limits; past them it
@@ -19,7 +19,7 @@ func TestIncidentMCPCandidates(t *testing.T) {
 	m := newMCPFake(t, f)
 	ctx := context.Background()
 	fakeLogin(t, f, "admin")
-	makeAutomation(t, f, "mydc-autofix", "a1b2c3d4-0000-4000-8000-0000000000e8", true, true)
+	makeAutomation(t, f, "sfc-autofix", "a1b2c3d4-0000-4000-8000-0000000000e8", true, true)
 	if code, out := f.do("PUT", "/api/v1/incidents/policy", map[string]any{"revision": 0, "level": "auto-low", "ratePerHour": 5,
 		"approvers": map[string]any{"label": "관리자", "deadlineMinutes": 30}, "quiet": []string{}, "newAppDefault": "suggest",
 		"actions": map[string]any{"cordon-node": "human"}}); code != 200 {
@@ -43,7 +43,7 @@ func TestIncidentMCPCandidates(t *testing.T) {
 		return append([]string(nil), m.calls...)
 	}
 
-	fake.AddEvent(mydc.FixtureEvent{Time: clock.Load(), Scope: "cluster", Node: "node-c", Kind: "node-unreachable", Target: "node-c"})
+	fake.AddEvent(sfc.FixtureEvent{Time: clock.Load(), Scope: "cluster", Node: "node-c", Kind: "node-unreachable", Target: "node-c"})
 	f.srv.watchOnce(ctx)
 	row := findIncident(t, f, "node-unreachable")
 	if row == nil || decisionOf(row) != "auto" || row["mitigation"] != "묵음" {
@@ -60,7 +60,7 @@ func TestIncidentMCPCandidates(t *testing.T) {
 
 	// The day's one run is used: the next incident asks a person.
 	clock.Add(1)
-	fake.AddEvent(mydc.FixtureEvent{Time: clock.Load(), Scope: "cluster", Node: "node-b", Kind: "node-unreachable", Target: "node-b"})
+	fake.AddEvent(sfc.FixtureEvent{Time: clock.Load(), Scope: "cluster", Node: "node-b", Kind: "node-unreachable", Target: "node-b"})
 	f.srv.watchOnce(ctx)
 	var next map[string]any
 	_, list := f.do("GET", "/api/v1/incidents?limit=200", nil)

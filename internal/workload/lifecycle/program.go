@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/schema"
-	contract "github.com/jay94ks/mydcd/lifecycle/v1"
+	"github.com/jay94ks/seafield/internal/schema"
+	contract "github.com/jay94ks/seafield/lifecycle/v1"
 )
 
 // Template selects one implementation. It deliberately cannot refer to another

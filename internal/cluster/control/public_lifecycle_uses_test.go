@@ -12,11 +12,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	checker "github.com/jay94ks/mydcd/internal/workload/lifecycle"
-	contract "github.com/jay94ks/mydcd/lifecycle/v1"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/deployment"
+	checker "github.com/jay94ks/seafield/internal/workload/lifecycle"
+	contract "github.com/jay94ks/seafield/lifecycle/v1"
 )
 
 // This extends the existing accepted-app/FSM fixture. Source staging and the
@@ -36,9 +36,9 @@ func TestPublicLifecycleUsesJoinOriginalBuildParentAndReturnOnlyClosedJob(t *tes
 	compiled := true
 	ref := checker.NamedReference{Name: "ready", Revision: 1}
 	task := managedDNSTaskCoreBegin(t, f, "checker-app", "10.80.1.41", "checker-app", func(input *deployment.Compose, _ *deployment.PlanningContext) {
-		input.MyDC.Lifecycle = &deployment.LifecycleDeclaration{Scripts: map[string]checker.Script{"ready": {Ref: &ref, Compile: &compiled}}}
+		input.Sfc.Lifecycle = &deployment.LifecycleDeclaration{Scripts: map[string]checker.Script{"ready": {Ref: &ref, Compile: &compiled}}}
 		service := input.Services["web"]
-		service.MyDC.Lifecycle = &deployment.ServiceLifecycle{Checks: []deployment.LifecycleCheck{{ID: "ready", Phase: contract.Readiness, Interval: "1s", Timeout: "3s", LifecycleTemplate: deployment.LifecycleTemplate{Script: "ready"}}}}
+		service.Sfc.Lifecycle = &deployment.ServiceLifecycle{Checks: []deployment.LifecycleCheck{{ID: "ready", Phase: contract.Readiness, Interval: "1s", Timeout: "3s", LifecycleTemplate: deployment.LifecycleTemplate{Script: "ready"}}}}
 		input.Services["web"] = service
 	})
 	apps, err := f.p.Apps(f.s)

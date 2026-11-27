@@ -12,17 +12,17 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/wallet"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/wallet"
 )
 
 // Uses the original native Vault/managed cluster. No process here compiles or
 // installs the CLI; every file, credential FD and child belongs to this test.
-func verifyInitialCredentialCLI(t *testing.T, ctx context.Context, root string, c Client, peer mydcp.Peer, adminSession access.Session, admin *identity.Identity) {
+func verifyInitialCredentialCLI(t *testing.T, ctx context.Context, root string, c Client, peer sfcp.Peer, adminSession access.Session, admin *identity.Identity) {
 	t.Helper()
 	home := filepath.Join(root, "initial-cli-home")
 	if err := os.Mkdir(home, 0700); err != nil {
@@ -73,7 +73,7 @@ func verifyInitialCredentialCLI(t *testing.T, ctx context.Context, root string, 
 		defer password.Close()
 		extra := append(append([]*os.File(nil), privateFiles...), password)
 		flags := []string{"--config", profile, "--user", username, "--wallet-password-fd", fmt.Sprint(3 + len(privateFiles)), "--no-input"}
-		command := exec.CommandContext(ctx, os.Getenv("MYDC_TEST_CLI"), append(flags, args...)...)
+		command := exec.CommandContext(ctx, os.Getenv("SFC_TEST_CLI"), append(flags, args...)...)
 		command.Env = append(os.Environ(), "HOME="+home)
 		command.ExtraFiles = extra
 		command.Stdin = bytes.NewReader(stdin)
@@ -83,7 +83,7 @@ func verifyInitialCredentialCLI(t *testing.T, ctx context.Context, root string, 
 		if err != nil {
 			// Diagnose only fixed public error categories, never raw provider,
 			// credential, stdout or stderr bytes from a protected-input call.
-			for _, category := range []string{ErrPrivateState.Error(), wallet.ErrWallet.Error(), wallet.ErrPending.Error(), wallet.ErrMissing.Error(), identity.ErrCredential.Error(), mydcp.ErrAdmission.Error(), mydcp.ErrFrame.Error(), mydcp.ErrBudget.Error(), mydcp.ErrTruncated.Error(), "user request: denied", "user request: unavailable", "user request: invalid", "context deadline exceeded", "connection refused"} {
+			for _, category := range []string{ErrPrivateState.Error(), wallet.ErrWallet.Error(), wallet.ErrPending.Error(), wallet.ErrMissing.Error(), identity.ErrCredential.Error(), sfcp.ErrAdmission.Error(), sfcp.ErrFrame.Error(), sfcp.ErrBudget.Error(), sfcp.ErrTruncated.Error(), "user request: denied", "user request: unavailable", "user request: invalid", "context deadline exceeded", "connection refused"} {
 				if bytes.Contains(diagnostic.Bytes(), []byte(category)) {
 					t.Log("CLI failure category:", category)
 				}

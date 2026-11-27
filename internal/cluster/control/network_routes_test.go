@@ -7,11 +7,11 @@ import (
 	"net/netip"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/network/services"
-	"github.com/jay94ks/mydcd/internal/tenancy"
-	"github.com/jay94ks/mydcd/internal/workload"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/network/services"
+	"github.com/jay94ks/seafield/internal/tenancy"
+	"github.com/jay94ks/seafield/internal/workload"
 )
 
 // Reuses real product reducers and explicit installation model facts. Policy
@@ -55,10 +55,10 @@ func routeControlOwnersFixture(t *testing.T) (*backupCoreFixture, RouteProposal,
 	f.apply("route-other-tenant", "create-tenant", 0, TenantID{ID: "other"}, state.Applied)
 	catalog, _ := f.p.Catalog(f.s)
 	other, _ := catalog.Tenant("other")
-	f.apply("route-other-nodes", "set-nodes", other.Revision, NodeAssignment{Tenant: "other", Nodes: []string{"node-b"}}, state.Applied)
+	f.apply("route-other-nodes", "set-nodes", other.Revision, NodeChangeTo("other", other.AllowedNodes, []string{"node-b"}), state.Applied)
 	f.apply("route-other-quota", "set-node-quota", 0, tenancy.NodeLimit{Tenant: "other", Node: "node-b", Capacity: workload.Resources{CPU: 8, Memory: 80}, Networks: 4, MaxConsumers: 8, PacketQueuePackets: 4, PacketQueueBytes: 8192}, state.Applied)
 	r, _ := f.p.Resources(f.s)
-	definition := tenancy.TUNDefinition{Tenant: "other", Name: "dest", Members: []tenancy.TUNNode{{Node: "node-b", Pools: []tenancy.Subnet{{ID: "pool", Prefix: netip.MustParsePrefix("10.90.1.0/24"), Gateway: netip.MustParseAddr("10.90.1.1"), MTU: 1280}}, Addresses: []netip.Prefix{netip.MustParsePrefix("10.90.3.1/32")}}}}
+	definition := tenancy.TUNDefinition{Tenant: "other", Name: "dest", Members: []tenancy.TUNNode{{Node: "node-b", Pools: []tenancy.Subnet{{ID: "pool", Prefix: netip.MustParsePrefix("10.90.1.0/24"), Gateway: netip.MustParseAddr("10.90.1.1"), MTU: 1280}}}}}
 	managedDNSChange(t, f, "route-other-network", "create-tun-network", r.Networks.Revision(), definition, state.Applied)
 	return f, RouteProposal{ID: "database", Source: RouteEndpoint{Tenant: "tenant", Network: "services", Node: "node-a", Pool: "pool"}, Destination: RouteEndpoint{Tenant: "other", Network: "dest", Node: "node-b", Pool: "pool"}, Protocol: 6, Ports: []tenancy.Ports{{First: 3306, Last: 3306}}}, map[[32]byte]ed25519.PrivateKey{[32]byte(f.node.Public().(ed25519.PublicKey)): f.node, [32]byte(second.Public().(ed25519.PublicKey)): second}
 }
@@ -98,6 +98,15 @@ func TestRouteManagementUsesExplicitBilateralApprovalAndRetainsRevokingPolicy(t 
 				if entry.Route != nil && entry.Route.ID == route.ID {
 					found = true
 					entry.Route.Ports[0].Last++ // owned page, not the shared policy
+					// a tenant sees the peer network by name, never its prefix
+					own, peer := entry.Route.Source, entry.Route.Destination
+					if tenant == "other" {
+						own, peer = peer, own
+					}
+					names := resources.Networks.LogicalName(route.Source.Tenant, route.Source.Network) + ">" + resources.Networks.LogicalName(route.Destination.Tenant, route.Destination.Network)
+					if !own.Prefix.IsValid() || peer.Prefix.IsValid() || entry.RouteNames == nil || entry.RouteNames.Source+">"+entry.RouteNames.Destination != names || entry.RouteNames.Source == "" || entry.RouteNames.Destination == "" {
+						t.Fatal("route row prefixes or names", tenant, entry.Route, entry.RouteNames)
+					}
 				}
 			}
 			if next == "" {

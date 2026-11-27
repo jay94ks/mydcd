@@ -11,8 +11,8 @@ Frozen은 `{Schema:1,Plan,Scope:UploadScope,Fact:SealReceipt,Signature:base64}`�
 관리 action `publish-build-draft`의 payload는 `{Tenant,Context,Frozen}`이고 Expected는 freeze plan의 원 draft Revision이다. 원 creator의 기존 signed User operation·현재 권한·현재 context/policy/root·기한·저장 예산을 확인한다. 같은 FSM 변경으로 다음 context version 번호, closed artifact record, immutable version을 확정한다. 원 archive ID를 재사용하지 않으며 bytes/가짜 part 영수증·slot을 Raft에 넣지 않는다. 소비된 archive와 같은 버전 조회·build version 참조·reader pin·명시 삭제 후 owner GC/RootManager 반환 경계를 사용한다. 기존 build-uploads 조회는 원 archive metadata도 포함하며 생성한 context의 Kind로 구분한다.
 
 ```sh
-mydc build draft freeze editable --id save-editable-one
-mydc build context versions editable
+sfcli build draft freeze editable --id save-editable-one
+sfcli build context versions editable
 ```
 
 

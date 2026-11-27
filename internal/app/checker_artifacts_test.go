@@ -11,8 +11,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	checker "github.com/jay94ks/mydcd/internal/workload/lifecycle"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	checker "github.com/jay94ks/seafield/internal/workload/lifecycle"
 )
 
 // SIMULATED signed source/build/cache facts. Real metadata validation only;

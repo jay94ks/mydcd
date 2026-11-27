@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/reconcile"
-	"github.com/jay94ks/mydcd/tests/enginefixture"
+	"github.com/jay94ks/seafield/internal/reconcile"
+	"github.com/jay94ks/seafield/tests/enginefixture"
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/api/types/mount"
 	"github.com/moby/moby/client"
@@ -28,11 +28,11 @@ func TestRealBoundaryVolumeMoveFencedArchive(t *testing.T) {
 }
 
 func testRealVolumeWriterExit(t *testing.T, move bool) {
-	if os.Getenv("MYDC_DOCKER_TEST_BACKEND") == "" {
+	if os.Getenv("SFC_DOCKER_TEST_BACKEND") == "" {
 		t.Skip("requires user-prebuilt backend and owned Docker rollback prestate")
 	}
 	ctx, docker, spec := realNativeVolume(t)
-	fixture := enginefixture.OpenPrepared(t, ctx, docker.Owner, os.Getenv("MYDC_DOCKER_TEST_OWNER"), []string{`USER 10001:10001`}, os.Getenv("MYDC_DOCKER_TEST_BACKEND"))
+	fixture := enginefixture.OpenPrepared(t, ctx, docker.Owner, os.Getenv("SFC_DOCKER_TEST_OWNER"), []string{`USER 10001:10001`}, os.Getenv("SFC_DOCKER_TEST_BACKEND"))
 	m, err := OpenNative(filepath.Join(t.TempDir(), "native.db"), docker)
 	if err != nil {
 		t.Fatal(err)
@@ -248,7 +248,7 @@ func testRealVolumeWriterExit(t *testing.T, move bool) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		t.Log("actual clean writer/Remove -> synced original owner fence -> same activation DB/boot change -> exact readonly move pin -> real ExportCold artifact bytes/file sync/native reader return; revoked post-copy authorization yields no receipt and preserves shared pin. Authority/owner transition is product-core fixture, not Raft/MYDCP/SQL or published move completion")
+		t.Log("actual clean writer/Remove -> synced original owner fence -> same activation DB/boot change -> exact readonly move pin -> real ExportCold artifact bytes/file sync/native reader return; revoked post-copy authorization yields no receipt and preserves shared pin. Authority/owner transition is product-core fixture, not Raft/SFCP/SQL or published move completion")
 	}
 	if err = m.DeleteDesired(key, 2, 1); err != nil {
 		t.Fatal(err)

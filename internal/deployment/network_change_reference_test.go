@@ -8,7 +8,7 @@ import (
 	"maps"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/tenancy"
+	"github.com/jay94ks/seafield/internal/tenancy"
 )
 
 // Product references and PlanChange, with a purely in-memory catalog/source

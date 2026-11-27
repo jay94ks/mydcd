@@ -13,9 +13,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/containerops"
-	"github.com/jay94ks/mydcd/internal/engine"
-	"github.com/jay94ks/mydcd/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/containerops"
+	"github.com/jay94ks/seafield/internal/engine"
+	"github.com/jay94ks/seafield/internal/reconcile"
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/api/types/mount"
 	"github.com/moby/moby/client"
@@ -61,7 +61,7 @@ func (m *Manager) ObserveContainerDetail(ctx context.Context, target containerop
 		return out, engine.ErrOwnership
 	}
 	lease, bridgeErr := bridge.InspectConsumer(ctx, spec.Bridge, containerConsumer(id), spec.BridgeGeneration)
-	mounts, mountErr := m.driver.taskMounts(spec.Volumes)
+	mounts, mountErr := m.driver.specMounts(spec)
 	detail, err := containerDetail(spec, id, actual, inputs.Files, mounts, lease.NetworkID, expectedEnv, declaration, filter)
 	if err != nil {
 		return out, err
@@ -74,7 +74,7 @@ func (m *Manager) ObserveContainerDetail(ctx context.Context, target containerop
 			detail.Drift = append(detail.Drift, "network")
 		}
 	}
-	if mountErr != nil || !matchResolvedTaskMounts(actual, inputs.Files, spec.Volumes, mounts) || !matchTmpfs(actual, spec.Tmpfs) {
+	if mountErr != nil || !matchResolvedTaskMounts(actual, inputs.Files, len(spec.Volumes)+len(spec.RemoteVolumes), mounts) || !matchTmpfs(actual, spec.Tmpfs) {
 		detail.Drift = append(detail.Drift, "mounts")
 	}
 	limit := q.HistoryLimit

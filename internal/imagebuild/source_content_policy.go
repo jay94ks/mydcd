@@ -13,7 +13,7 @@ import (
 
 func sourceContentStoreID(pin string) string {
 	sum := sha256.Sum256([]byte(pin))
-	return "mydc-from-" + hex.EncodeToString(sum[:])
+	return "sfc-from-" + hex.EncodeToString(sum[:])
 }
 
 // Convert in both metadata resolution and LLB evaluation. The native

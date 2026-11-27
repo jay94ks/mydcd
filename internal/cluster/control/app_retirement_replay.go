@@ -2,7 +2,7 @@
 
 package control
 
-import "github.com/jay94ks/mydcd/internal/cluster/state"
+import "github.com/jay94ks/seafield/internal/cluster/state"
 
 // AppRetirementReplay names one original internal Raft mutation. It neither
 // replaces the app/Down/move nor authorizes a different native effect.

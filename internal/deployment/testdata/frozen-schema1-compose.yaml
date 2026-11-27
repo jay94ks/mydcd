@@ -14,7 +14,7 @@
 # 계정/tenant·node 가입/투표·trust·Secret 값·backup/restore/이관 실행은 별도 명시 관리 작업이다.
 # 입력 경계: docs/architecture/commands-and-declarations.md. 이 파일에는 목표 구성/정책만 둔다.
 name: php-mysql-demo
-x-mydc:
+x-sfc:
   nodes: # 기존 등록 값의 일치 조건만 검사한다. 노드 생성/주소 변경/투표권 부여가 아니다.
     node-a:
       underlay: 192.0.2.11
@@ -50,7 +50,7 @@ x-mydc:
       kind: git
       repository: https://example.invalid/team/php-mysql.git
       ref: main
-      path: mydc-compose.yaml
+      path: sfc-compose.yaml
       credential_profile: git-readonly
     poll_interval_seconds: 60
     sync:
@@ -166,7 +166,7 @@ x-mydc:
       - target
 services:
   web:
-    image: docker.io/mydc-example/php-demo@sha256:<WEB_IMAGE_DIGEST>
+    image: docker.io/sfc-example/php-demo@sha256:<WEB_IMAGE_DIGEST>
     command:
     - apache2-foreground
     user: 10001:10001
@@ -178,7 +178,7 @@ services:
     cpus: 0.5
     mem_limit: 256m
     environment:
-      DB_HOST: db.php-mysql.mydc.test
+      DB_HOST: db.php-mysql.sfc.test
       DB_PORT: '3306'
       DB_DATABASE: demo
       DB_USER: demo
@@ -199,16 +199,16 @@ services:
     networks:
       app:
         ipv4_address: 10.240.10.10
-    x-mydc:
+    x-sfc:
       node: node-a
       ready: {http: /readyz, port: 8080}
       secrets_from: [tenant-defaults, group/common, web-runtime-overrides]
     dns:
     - 10.240.10.1
     dns_search:
-    - php-mysql.mydc.test
+    - php-mysql.sfc.test
   db:
-    image: docker.io/mydc-example/mysql-demo@sha256:<DB_IMAGE_DIGEST>
+    image: docker.io/sfc-example/mysql-demo@sha256:<DB_IMAGE_DIGEST>
     command:
     - mysqld
     - --bind-address=0.0.0.0
@@ -247,7 +247,7 @@ services:
     healthcheck:
       test:
       - CMD
-      - /usr/local/bin/mydc-db-ready
+      - /usr/local/bin/sfc-db-ready
       interval: 5s
       timeout: 3s
       retries: 12
@@ -255,16 +255,16 @@ services:
     networks:
       app:
         ipv4_address: 10.240.20.10
-    x-mydc:
+    x-sfc:
       node: node-b
       secrets_from: [tenant-defaults, group/common, group/db-admin]
     dns:
     - 10.240.20.1
     dns_search:
-    - php-mysql.mydc.test
+    - php-mysql.sfc.test
 networks:
   app:
-    x-mydc:
+    x-sfc:
       mtu: 1280
       pools:
         node-a:
@@ -285,7 +285,7 @@ networks:
         node-a: 10.240.30.1/32
         node-b: 10.240.30.2/32
       runtime_changes:
-        authority: authenticated-mydcp-raft-cas
+        authority: authenticated-sfcp-raft-cas
         daemon_restart: false
         strategy: staged
         existing_lease_deadlines: preserve
@@ -298,7 +298,7 @@ networks:
         - phase
         - pending_reason
       dns:
-        zone: php-mysql.mydc.test.
+        zone: php-mysql.sfc.test.
         ttl_seconds: 30
         negative_ttl_seconds: 5
         transports:
@@ -320,12 +320,12 @@ networks:
         enabled: true
 volumes:
   registry-data:
-    x-mydc:
+    x-sfc:
       node: node-a
       size: 2147483648
       # registry image의 실제 UID/쓰기 경로/준비 probe는 D5.09에서 고정한다.
   mysql-data:
-    x-mydc:
+    x-sfc:
       node: node-b
       uid: 10001
       gid: 10001
@@ -333,8 +333,8 @@ volumes:
       size: 2147483648
 secrets:
   db-password:
-    x-mydc:
+    x-sfc:
       key: DB_PASSWORD
   db-root-password:
-    x-mydc:
+    x-sfc:
       key: MYSQL_ROOT_PASSWORD

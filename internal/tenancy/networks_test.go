@@ -10,7 +10,7 @@ import (
 	"net/netip"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/access"
+	"github.com/jay94ks/seafield/internal/access"
 )
 
 type fixture struct {
@@ -66,8 +66,13 @@ func newFixture(t *testing.T) fixture {
 	if err != nil {
 		t.Fatal(err)
 	}
+	n = n.WithServers(testServers)
 	return fixture{c, n, a, b}
 }
+
+// testServers are the fixture servers' fixed addresses (membership's).
+var testServers = map[string]netip.Addr{"node-a": netip.MustParseAddr("10.254.240.1"), "node-b": netip.MustParseAddr("10.254.240.2"), "node-c": netip.MustParseAddr("10.254.240.3")}
+
 func definition(tenant, id, node, cidr string, k ed25519.PrivateKey) Network {
 	p := netip.MustParsePrefix(cidr)
 	return Network{Tenant: tenant, ID: id, Node: node, Owner: public(k), Pools: []Subnet{{ID: "pool", Prefix: p, Gateway: p.Addr().Next(), MTU: 1500}}}

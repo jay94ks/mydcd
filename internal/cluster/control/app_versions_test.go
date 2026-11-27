@@ -9,9 +9,9 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/deployment"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/deployment"
 )
 
 // Only native outcomes are model inputs. Planning, exact upload, signed user
@@ -44,7 +44,7 @@ func acceptSourceVersion(t *testing.T, f *backupCoreFixture, id string, raw []by
 
 func TestAppSourceVersionsKeepExactBytesOldRevisionsAndCurrentReadScope(t *testing.T) {
 	f := managedDNSTaskCoreFixture(t)
-	raw := []byte("# " + string(bytes.Repeat([]byte{'a'}, 26000)) + "\nname: source-view\nservices:\n  web:\n    image: docker.io/library/php@sha256:" + string(bytes.Repeat([]byte{'a'}, 64)) + "\n    cpus: '0.1'\n    mem_limit: 16m\n    networks: {lan: {ipv4_address: 10.80.1.9}}\n    x-mydc: {node: node-a}\nnetworks:\n  lan: {external: true, name: services}\n")
+	raw := []byte("# " + string(bytes.Repeat([]byte{'a'}, 26000)) + "\nname: source-view\nservices:\n  web:\n    image: docker.io/library/php@sha256:" + string(bytes.Repeat([]byte{'a'}, 64)) + "\n    cpus: '0.1'\n    mem_limit: 16m\n    networks: {lan: {ipv4_address: 10.80.1.9}}\n    x-sfc: {node: node-a}\nnetworks:\n  lan: {external: true, name: services}\n")
 	acceptSourceVersion(t, f, "run-source-view", raw)
 	q := AppSourceSelection{App: "source-view", Deployment: "deploy"}
 	first, err := f.p.AppSource(f.s, f.session, 10, "tenant", q)

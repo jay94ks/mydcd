@@ -6,8 +6,8 @@ import (
 	"bytes"
 	"crypto/ed25519"
 	"encoding/json"
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/tenancy"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/tenancy"
 	"net/netip"
 	"testing"
 )
@@ -51,6 +51,7 @@ func fixture(t *testing.T) networkFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
+	n = n.WithServers(map[string]netip.Addr{"node-a": addr("10.254.240.1"), "node-b": addr("10.254.240.2"), "node-c": addr("10.254.240.3")})
 	n, err = n.Create(c, "admin", n.Revision(), tenancy.Network{Tenant: "first", ID: "lan", Node: "node-a", Owner: pub(key), Pools: []tenancy.Subnet{{ID: "pool", Prefix: netip.MustParsePrefix("10.42.0.0/24"), Gateway: addr("10.42.0.1"), MTU: 1500}}})
 	if err != nil {
 		t.Fatal(err)

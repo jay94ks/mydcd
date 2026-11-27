@@ -13,14 +13,14 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/web/mydc"
-	"github.com/jay94ks/mydcd/internal/web/store"
+	"github.com/jay94ks/seafield/internal/web/sfc"
+	"github.com/jay94ks/seafield/internal/web/store"
 )
 
-const cookieName = "mydc_web_session"
+const cookieName = "sfc_web_session"
 
-// webSession is one browser login. It owns one mydc.Conn (session key,
-// transport, userauth client). The Conn redials after mydcd closes an idle
+// webSession is one browser login. It owns one sfc.Conn (session key,
+// transport, userauth client). The Conn redials after sfcd closes an idle
 // connection and serializes exchanges per connection itself, so calls of
 // one login run concurrently (R03).
 type webSession struct {
@@ -30,7 +30,7 @@ type webSession struct {
 	expiresAt time.Time
 	issuedAt  time.Time
 
-	conn mydc.Conn
+	conn sfc.Conn
 	seen atomic.Int64 // unix nanos of the last browser request (idle limit)
 
 	// Open container streams (logs, top/stats, exec). They do not use conn
@@ -95,15 +95,19 @@ type pendingLogin struct {
 	id       string
 	method   string // password, token, key
 	username string
-	ticket   mydc.Ticket
-	proof    mydc.KeyProof // key login only: unsigned proof the browser signs
-	// approve: a key login that mydcd accepted, waiting for the browser's
+	ticket   sfc.Ticket
+	proof    sfc.KeyProof // key login only: unsigned proof the browser signs
+	// approve: a key login that sfcd accepted, waiting for the browser's
 	// signature of approval (R02). session is the issued, unapproved session.
 	approve  bool
-	session  mydc.Session
-	approval mydc.SessionApproval
-	conn     mydc.Conn
+	session  sfc.Session
+	approval sfc.SessionApproval
+	conn     sfc.Conn
 	deadline time.Time
+	// invite: an opened invitation's token session (invites.go): the
+	// account and the revision its new key's proof binds.
+	user            string
+	accountRevision uint64
 }
 
 // sessions tracks pending logins and live sessions in memory. Only hashes and
@@ -135,7 +139,7 @@ func randomID(n int) string {
 }
 
 func hashID(id string) string {
-	h := sha256.Sum256([]byte("mydc-web-session-1\x00" + id))
+	h := sha256.Sum256([]byte("sfc-web-session-1\x00" + id))
 	return hex.EncodeToString(h[:])
 }
 
@@ -148,6 +152,15 @@ func (s *sessions) addPending(p *pendingLogin) {
 		}
 	}
 	p.deadline = deadline
+	s.mu.Lock()
+	s.pending[p.id] = p
+	s.mu.Unlock()
+}
+
+// addPendingFor is addPending with its own lifetime (an opened invitation).
+func (s *sessions) addPendingFor(p *pendingLogin, ttl time.Duration) {
+	p.id = randomID(24)
+	p.deadline = s.now().Add(ttl)
 	s.mu.Lock()
 	s.pending[p.id] = p
 	s.mu.Unlock()
@@ -332,7 +345,7 @@ func (s *sessions) closeAll() {
 }
 
 // do runs fn with the session's connection.
-func (ws *webSession) do(ctx context.Context, fn func(context.Context, mydc.Conn) error) error {
+func (ws *webSession) do(ctx context.Context, fn func(context.Context, sfc.Conn) error) error {
 	return fn(ctx, ws.conn)
 }
 

@@ -25,14 +25,14 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/jay94ks/mydcd/internal/servicecall"
-	"github.com/jay94ks/mydcd/internal/web/mydc"
-	"github.com/jay94ks/mydcd/internal/web/store"
+	"github.com/jay94ks/seafield/internal/servicecall"
+	"github.com/jay94ks/seafield/internal/web/sfc"
+	"github.com/jay94ks/seafield/internal/web/store"
 )
 
-// Webhooks (W2.3b, UI-BB). External webhooks are sent by mydc-web to a
+// Webhooks (W2.3b, UI-BB). External webhooks are sent by sfc-web to a
 // public https address; internal ones go to an app service inside a
-// workspace network through mydcd's service-call. Secrets and
+// workspace network through sfcd's service-call. Secrets and
 // header tokens are sealed; the store keeps only their last 4 characters.
 
 const (
@@ -60,6 +60,9 @@ type webhookState struct {
 	mcpAuto sync.Mutex
 	// reachPort overrides :443 of the DNS server reach check (tests).
 	reachPort string
+	// vpsReach overrides the outside reach check before a stopped VPS
+	// server's addresses go back into DNS (tests).
+	vpsReach func(ctx context.Context, addrs []string) bool
 }
 
 // Sealed entry names. The prefixes never extend each other, so one
@@ -139,7 +142,7 @@ func (a incidentAccess) webhook(tenant string, manage bool) bool {
 		return false
 	}
 	role := a.roles[tenant]
-	return role != "" && (!manage || role == mydc.RoleManager)
+	return role != "" && (!manage || role == sfc.RoleManager)
 }
 
 func newSecret() string {
@@ -179,10 +182,10 @@ func (s *Server) checkWebhook(w *store.Webhook) string {
 		return "tenant: not a workspace name"
 	case w.Role != "notify" && w.Role != "decide":
 		return "role: notify or decide"
-	case w.Format != "mydc" && w.Format != "slack" && w.Format != "teams" && w.Format != "pagerduty":
-		return "format: mydc, slack, teams or pagerduty"
-	case w.Role == "decide" && w.Format != "mydc":
-		return "format: decide webhooks answer in the mydc format"
+	case w.Format != "sfc" && w.Format != "slack" && w.Format != "teams" && w.Format != "pagerduty":
+		return "format: sfc, slack, teams or pagerduty"
+	case w.Role == "decide" && w.Format != "sfc":
+		return "format: decide webhooks answer in the sfcli format"
 	case w.Sign != "hmac" && w.Sign != "token" && w.Sign != "none":
 		return "sign: hmac, token or none"
 	}
@@ -379,7 +382,7 @@ func (s *Server) handleCreateWebhook(w http.ResponseWriter, r *http.Request, ws 
 		h.URL = *req.URL
 	}
 	if h.Format == "" {
-		h.Format = "mydc"
+		h.Format = "sfc"
 	}
 	if h.Sign == "" {
 		h.Sign = "hmac"
@@ -558,6 +561,14 @@ func (s *Server) handleDeleteWebhook(w http.ResponseWriter, r *http.Request, ws 
 		writeError(w, http.StatusUnprocessableEntity, "confirm-name", "type the webhook's name to delete it")
 		return
 	}
+	var links []*store.WebhookLink
+	if all, err := s.opt.Store.ListWebhookLinks(); err == nil {
+		for _, l := range all {
+			if l.Webhook == h.Name {
+				links = append(links, l)
+			}
+		}
+	}
 	if err := s.opt.Store.DeleteWebhook(h.Name); err != nil {
 		writeError(w, http.StatusInternalServerError, "internal", err.Error())
 		return
@@ -566,7 +577,7 @@ func (s *Server) handleDeleteWebhook(w http.ResponseWriter, r *http.Request, ws 
 		_ = s.opt.Seal.Delete(k)
 	}
 	s.audit(ws, h.Tenant, "webhooks", "delete", h.Name, nil, nil)
-	w.WriteHeader(http.StatusNoContent)
+	writeDeleted(w, s.putTrash(ws.user.ID, ws.user.Username, store.TrashWebhook, h.Tenant, h.Name, "", "", store.TrashWebhookData{Webhook: *h, Links: links}))
 }
 
 // POST /webhooks/{name}/rotate → {secret}: both signatures go for 24 hours.
@@ -604,7 +615,7 @@ func (s *Server) handleRotateWebhook(w http.ResponseWriter, r *http.Request, ws 
 type webhookSend struct {
 	Point, Event string
 	Link         string         // the link it is sent for ("" for tests)
-	Payload      map[string]any // the mydc body; other formats are built from it
+	Payload      map[string]any // the sfcli body; other formats are built from it
 	Summary      string         // one line for slack/teams/pagerduty
 	Decide       bool
 	Timeout      time.Duration // decide only (0: 10 s)
@@ -624,7 +635,7 @@ func webhookBody(h *store.Webhook, m webhookSend, id string, at time.Time) ([]by
 	var v any = p
 	text := m.Summary
 	if text == "" {
-		text = "MyDC " + m.Event
+		text = "Seafield Cluster " + m.Event
 	}
 	switch h.Format {
 	case "slack":
@@ -637,7 +648,7 @@ func webhookBody(h *store.Webhook, m webhookSend, id string, at time.Time) ([]by
 			action = "resolve"
 		}
 		key, _ := p["dedupKey"].(string)
-		v = map[string]any{"event_action": action, "dedup_key": key, "payload": map[string]any{"summary": text, "source": "mydc", "severity": "error", "custom_details": p}}
+		v = map[string]any{"event_action": action, "dedup_key": key, "payload": map[string]any{"summary": text, "source": "sfc", "severity": "error", "custom_details": p}}
 	}
 	raw, err := json.Marshal(v)
 	if err == nil && len(raw) > webhookBodyMax {
@@ -656,7 +667,7 @@ func webhookSign(secret []byte, ts int64, body []byte) string {
 // webhookHeaders: content type, event, delivery id, then the signature
 // (both secrets while rotating) or the header token.
 func (s *Server) webhookHeaders(h *store.Webhook, event, id string, body []byte) (map[string]string, error) {
-	hd := map[string]string{"Content-Type": "application/json", "X-MyDC-Event": event, "X-MyDC-Delivery": id}
+	hd := map[string]string{"Content-Type": "application/json", "X-SFC-Event": event, "X-SFC-Delivery": id}
 	switch h.Sign {
 	case "hmac":
 		sec, err := s.opt.Seal.Get(webhookSecretKey(h.Name))
@@ -670,13 +681,13 @@ func (s *Server) webhookHeaders(h *store.Webhook, event, id string, body []byte)
 				sig += ",v1=" + webhookSign(old, ts, body)
 			}
 		}
-		hd["X-MyDC-Signature"] = sig
+		hd["X-SFC-Signature"] = sig
 	case "token":
 		tok, err := s.opt.Seal.Get(webhookTokenKey(h.Name))
 		if err != nil {
 			return nil, errors.New("token-unavailable")
 		}
-		hd["X-MyDC-Token"] = string(tok)
+		hd["X-SFC-Token"] = string(tok)
 	}
 	return hd, nil
 }
@@ -691,10 +702,10 @@ func (s *Server) webhookAttempt(ctx context.Context, h *store.Webhook, m webhook
 				return 0, nil, automationErrorCode(err)
 			}
 		}
-		// One service-call; mydcd never resends it, and a timeout, refusal
+		// One service-call; sfcd never resends it, and a timeout, refusal
 		// or lost reply may still have reached the app (retryable).
 		var res servicecall.Result
-		err := ws.do(ctx, func(ctx context.Context, c mydc.Conn) error {
+		err := ws.do(ctx, func(ctx context.Context, c sfc.Conn) error {
 			var err error
 			res, err = c.CallService(ctx, h.Tenant, servicecall.Request{App: h.Target.App, Service: h.Target.Service, Port: h.Target.Port,
 				Path: h.Target.Path, Method: http.MethodPost, Headers: hd, Body: body, TimeoutMS: int(timeout / time.Millisecond),
@@ -702,7 +713,7 @@ func (s *Server) webhookAttempt(ctx context.Context, h *store.Webhook, m webhook
 			return err
 		})
 		if err != nil {
-			var me *mydc.Error
+			var me *sfc.Error
 			if errors.As(err, &me) {
 				return 0, nil, string(me.Code)
 			}
@@ -726,7 +737,7 @@ func (s *Server) webhookAttempt(ctx context.Context, h *store.Webhook, m webhook
 	for k, v := range hd {
 		req.Header.Set(k, v)
 	}
-	req.Header.Set("User-Agent", "mydc-web")
+	req.Header.Set("User-Agent", "sfc-web")
 	resp, err := s.webhookClient(timeout).Do(req)
 	if err != nil {
 		switch {
@@ -748,9 +759,9 @@ func (s *Server) webhookAttempt(ctx context.Context, h *store.Webhook, m webhook
 }
 
 // retryable: whether another try may follow. An answered 429/5xx is
-// retried (same X-MyDC-Delivery, the receiver can tell). For an internal
+// retried (same X-SFC-Delivery, the receiver can tell). For an internal
 // webhook only failures that never reached the app are retried (no ready
-// task, rate-limited): service-call's timeout, refusal or a lost mydcd
+// task, rate-limited): service-call's timeout, refusal or a lost sfcd
 // reply may already have run the request, so it is not sent again.
 func retryable(internal bool, status int, code string) bool {
 	if code == "" {
@@ -875,7 +886,7 @@ func (s *Server) handleTestWebhook(w http.ResponseWriter, r *http.Request, ws *w
 	if !ok {
 		return
 	}
-	m := webhookSend{Point: "test", Event: "test", Summary: "MyDC 웹훅 시험: " + h.Name, ws: ws,
+	m := webhookSend{Point: "test", Event: "test", Summary: "Seafield Cluster 웹훅 시험: " + h.Name, ws: ws,
 		Payload: map[string]any{"webhook": h.Name, "test": true, "role": h.Role}}
 	if h.Role == "decide" {
 		m.Payload["allowed"] = []string{"none"}

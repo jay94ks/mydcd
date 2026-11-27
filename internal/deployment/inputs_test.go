@@ -10,9 +10,9 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/secrets"
-	"github.com/jay94ks/mydcd/internal/workload/volumes"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/secrets"
+	"github.com/jay94ks/seafield/internal/workload/volumes"
 )
 
 func private(n byte) ed25519.PrivateKey    { return ed25519.NewKeyFromSeed(bytes.Repeat([]byte{n}, 32)) }
@@ -119,7 +119,7 @@ func makeFixtureCluster(t *testing.T, cluster [32]byte) *fixture {
 	if e != nil {
 		t.Fatal(e)
 	}
-	volume, e := volumes.New(c, "alice", volumes.Scope{Cluster: f.cluster, Tenant: "tenant", App: "php-mysql", ID: "mysql-data", Generation: 8}, volumes.Owner{Node: "node-b", Key: public(f.nb), Native: "mydc-mysql-original"}, 2)
+	volume, e := volumes.New(c, "alice", volumes.Scope{Cluster: f.cluster, Tenant: "tenant", App: "php-mysql", ID: "mysql-data", Generation: 8}, volumes.Owner{Node: "node-b", Key: public(f.nb), Native: "sfc-mysql-original"}, 2)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -170,7 +170,7 @@ func (f *fixture) approveAll(needs ...Needs) []secrets.Target {
 }
 func (f *fixture) reserve(needs ...Needs) Reservation {
 	f.t.Helper()
-	r, e := f.bindings.Reserve(f.bindings.Revision(), f.c, f.trees, f.a, f.v, needs, 100)
+	r, e := f.bindings.Reserve(f.bindings.Revision(), f.c, f.trees, f.a, f.v, needs, 100, nil)
 	if e != nil {
 		f.t.Fatal(e)
 	}
@@ -258,7 +258,7 @@ func TestAppInputsPromptOnceAndReserveWholePHPMySQLBatch(t *testing.T) {
 		t.Fatal("partial prompt resume", e)
 	}
 	before, _ := f.a.Encode()
-	_, e = f.bindings.Reserve(f.bindings.Revision(), f.c, f.trees, f.a, f.v, []Needs{web, db}, 100)
+	_, e = f.bindings.Reserve(f.bindings.Revision(), f.c, f.trees, f.a, f.v, []Needs{web, db}, 100, nil)
 	deny(t, e)
 	after, _ := f.a.Encode()
 	if !bytes.Equal(before, after) || len(f.v[db.Volumes[0].Key].Consumers()) != 0 {
@@ -373,7 +373,7 @@ func TestAppInputsRejectForeignClusterEvenForUnprotectedSources(t *testing.T) {
 	n.Sources = []Source{{"tenant", "defaults"}}
 	n.Files = n.Files[1:]
 	f.trees["tenant"] = other
-	_, e = f.bindings.Reserve(f.bindings.Revision(), f.c, f.trees, f.a, f.v, []Needs{n}, 100)
+	_, e = f.bindings.Reserve(f.bindings.Revision(), f.c, f.trees, f.a, f.v, []Needs{n}, 100, nil)
 	deny(t, e)
 	n.Sources[0].Realm = "other"
 	_, e = Required(f.cluster, f.c, f.trees, []Needs{n})
@@ -395,12 +395,12 @@ func TestAppInputsFailurePublishesNeitherSecretPinsNorSecondWriter(t *testing.T)
 		n := ownNeeds(db)
 		v := copyVolumes(f.v)
 		change(&n, v)
-		_, e := f.bindings.Reserve(f.bindings.Revision(), f.c, f.trees, f.a, v, []Needs{n}, 100)
+		_, e := f.bindings.Reserve(f.bindings.Revision(), f.c, f.trees, f.a, v, []Needs{n}, 100, nil)
 		deny(t, e)
 	}
 	copy := ownNeeds(db)
 	copy.Consumer = "competing-task"
-	_, e := f.bindings.Reserve(f.bindings.Revision(), f.c, f.trees, f.a, f.v, []Needs{db, copy}, 100)
+	_, e := f.bindings.Reserve(f.bindings.Revision(), f.c, f.trees, f.a, f.v, []Needs{db, copy}, 100, nil)
 	deny(t, e)
 	after, _ := f.a.Encode()
 	if !bytes.Equal(before, after) || len(original.Consumers()) != 0 {
@@ -417,7 +417,7 @@ func TestAppInputsFailurePublishesNeitherSecretPinsNorSecondWriter(t *testing.T)
 	}
 	f.v[db.Volumes[0].Key] = volume
 	deny(t, b.Check(f.bindings, f.c, f.trees, f.a, f.v, 100))
-	_, e = f.bindings.Reserve(f.bindings.Revision(), f.c, f.trees, f.a, f.v, []Needs{db}, 100)
+	_, e = f.bindings.Reserve(f.bindings.Revision(), f.c, f.trees, f.a, f.v, []Needs{db}, 100, nil)
 	deny(t, e)
 	// Existing original pin remains for cleanup; a move/Drain cannot restart it.
 	if owner.Node != "node-b" || len(volume.Consumers()) != 1 || volume.Consumers()[0] != b.Pins()[0].Consumer {
@@ -507,7 +507,7 @@ func TestAppInputsPolicyRevokeBlocksReadButOriginalClosureReleasesWholeBinding(t
 	expectedUserRevision := u.Revision
 	u.Enabled = false
 	u.Revision = 0
-	f.c, e = f.c.PutUser("admin", expectedUserRevision, u)
+	f.c, e = f.c.PutUser("admin", expectedUserRevision, access.User{ID: u.ID, Username: u.Username})
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -539,13 +539,13 @@ func TestAppInputsImmutableRecipeFloorAndBindingInventoryCAS(t *testing.T) {
 	for _, change := range []func(*Needs){func(n *Needs) { n.Files[0].Target = "/run/secrets/changed" }, func(n *Needs) { n.Files[0].UID++ }, func(n *Needs) { n.Files[0].Mode = 0440 }, func(n *Needs) { n.Use.Service = "other" }} {
 		x := ownNeeds(n)
 		change(&x)
-		_, e := f.bindings.Reserve(f.bindings.Revision(), f.c, f.trees, f.a, f.v, []Needs{x}, 100)
+		_, e := f.bindings.Reserve(f.bindings.Revision(), f.c, f.trees, f.a, f.v, []Needs{x}, 100, nil)
 		deny(t, e)
 	}
 	forged := Binding{ownBinding(bound.d)}
 	forged.d.Needs.Files[0].Target = "/run/secrets/forged"
 	deny(t, forged.Check(f.bindings, f.c, f.trees, f.a, f.v, 100))
-	_, e := f.bindings.Reserve(0, f.c, f.trees, f.a, f.v, []Needs{n}, 100)
+	_, e := f.bindings.Reserve(0, f.c, f.trees, f.a, f.v, []Needs{n}, 100, nil)
 	deny(t, e)
 	before, _ := f.bindings.Encode()
 	candidate, e := f.bindings.Release(f.bindings.Revision(), bound, f.a, f.v, f.closure(bound))
@@ -561,7 +561,7 @@ func TestAppInputsImmutableRecipeFloorAndBindingInventoryCAS(t *testing.T) {
 	f.a = candidate.Approvals
 	f.v = candidate.Volumes
 	deny(t, bound.Check(f.bindings, f.c, f.trees, f.a, f.v, 100))
-	_, e = f.bindings.Reserve(f.bindings.Revision(), f.c, f.trees, f.a, f.v, []Needs{n}, 100)
+	_, e = f.bindings.Reserve(f.bindings.Revision(), f.c, f.trees, f.a, f.v, []Needs{n}, 100, nil)
 	deny(t, e)
 	raw, e := f.bindings.Encode()
 	if e != nil {

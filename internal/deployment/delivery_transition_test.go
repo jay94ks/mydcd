@@ -10,9 +10,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/reconcile"
-	"github.com/jay94ks/mydcd/internal/schema"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/schema"
 	"gopkg.in/yaml.v3"
 )
 
@@ -23,8 +23,8 @@ func newTransitionFixture(t *testing.T, prune, empty bool) *deliveryFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	c.MyDC.Delivery.Sync.Prune = prune
-	c.MyDC.Delivery.Sync.AllowEmpty = empty
+	c.Sfc.Delivery.Sync.Prune = prune
+	c.Sfc.Delivery.Sync.AllowEmpty = empty
 	f.body, err = yaml.Marshal(c)
 	if err != nil {
 		t.Fatal(err)
@@ -344,17 +344,17 @@ func TestDeliveryTransitionEmptySourceRequiresPolicyAndRetainsData(t *testing.T)
 			t.Fatal("prune empty left unclosed task")
 		}
 	}
-	c.MyDC.Delivery.Sync.AllowEmpty = false
+	c.Sfc.Delivery.Sync.AllowEmpty = false
 	bad, _ := yaml.Marshal(c)
 	if _, err := ParseCompose(bad); err == nil {
 		t.Fatal("empty services without allow_empty")
 	}
-	if _, err := ParseCompose([]byte("name: app\nx-mydc: {schema: 1, delivery: {sync: {allow_empty: true}}}\n")); err == nil {
+	if _, err := ParseCompose([]byte("name: app\nx-sfc: {schema: 1, delivery: {sync: {allow_empty: true}}}\n")); err == nil {
 		t.Fatal("absent services treated as explicit empty map")
 	}
 	// Non-Git empty input may legitimately have zero resource goals.
-	c.MyDC.Delivery.Enabled = false
-	c.MyDC.Delivery.Sync.AllowEmpty = true
+	c.Sfc.Delivery.Enabled = false
+	c.Sfc.Delivery.Sync.AllowEmpty = true
 	local, _ := yaml.Marshal(c)
 	parsed, err := ParseCompose(local)
 	if err != nil {
@@ -379,7 +379,7 @@ func TestDeliveryTransitionEmptySourceRequiresPolicyAndRetainsData(t *testing.T)
 		t.Fatal(err)
 	}
 	nonempty, _ := ParseCompose(f.body)
-	nonempty.MyDC.Delivery.Enabled = false
+	nonempty.Sfc.Delivery.Enabled = false
 	erased := zero
 	erased.d.Input = nonempty
 	// Encode or Decode must refuse it (Encode validates since the input

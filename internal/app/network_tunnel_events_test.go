@@ -3,9 +3,10 @@
 package app
 
 import (
-	"github.com/jay94ks/mydcd/internal/observability"
-	"github.com/jay94ks/mydcd/internal/tenancy"
+	"github.com/jay94ks/seafield/internal/observability"
+	"github.com/jay94ks/seafield/internal/tenancy"
 	"net/netip"
+	"slices"
 	"testing"
 )
 
@@ -16,6 +17,7 @@ func TestTunnelEventsProjectOnlyCurrentTenantLogicalMemberships(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	networks = networks.WithServers(map[string]netip.Addr{"node-a": netip.MustParseAddr("10.254.240.1"), "node-b": netip.MustParseAddr("10.254.240.2")})
 	var rows []tenancy.Network
 	for group, tenant := range []string{"payments", "orders", "unpaired"} {
 		nodes := []string{"node-a", "node-b"}
@@ -25,12 +27,21 @@ func TestTunnelEventsProjectOnlyCurrentTenantLogicalMemberships(t *testing.T) {
 		for i, node := range nodes {
 			identity := tenancy.SourceIdentity{Kind: "bridge", Tenant: tenant, Network: "services", Node: node}
 			offset := group*2 + i
-			address := netip.AddrFrom4([4]byte{10, 77, byte(offset), 1})
+			address := netip.AddrFrom4([4]byte{10, 254, 240, byte(i + 1)})
 			prefix := netip.PrefixFrom(netip.AddrFrom4([4]byte{10, 76, byte(offset), 0}), 24)
 			rows = append(rows, tenancy.Network{Tenant: tenant, ID: identity.MemberID(), Logical: "services", Node: node, Owner: [32]byte{byte(i + 1)}, Generation: 1, Revision: 1, Pools: []tenancy.Subnet{{ID: "pool", Prefix: prefix, Gateway: prefix.Addr().Next(), MTU: 1280}}, TunnelAddresses: []netip.Prefix{netip.PrefixFrom(address, 32)}})
 		}
 	}
-	networks, err = networks.WithCommittedNetworks(rows)
+	// Every server is also a member of the system network, which has no
+	// tenant: its outages must not become (invalid) tenant events.
+	var system []tenancy.Network
+	for i, node := range []string{"node-a", "node-b"} {
+		identity := tenancy.SourceIdentity{Kind: "tun", Network: tenancy.SystemNetwork, Node: node}
+		address := netip.AddrFrom4([4]byte{10, 254, 240, byte(i + 1)})
+		prefix := netip.PrefixFrom(netip.AddrFrom4([4]byte{10, 77, byte(i), 0}), 24)
+		system = append(system, tenancy.Network{ID: identity.MemberID(), Logical: tenancy.SystemNetwork, System: true, Node: node, Owner: [32]byte{byte(i + 1)}, Generation: 1, Revision: 1, Pools: []tenancy.Subnet{{ID: "pool", Prefix: prefix, Gateway: prefix.Addr().Next(), MTU: 1280}}, TunnelAddresses: []netip.Prefix{netip.PrefixFrom(address, 32)}})
+	}
+	networks, err = networks.WithCommittedNetworks(append(slices.Clone(rows), system...))
 	if err != nil {
 		t.Fatal("valid current membership projection", err)
 	}

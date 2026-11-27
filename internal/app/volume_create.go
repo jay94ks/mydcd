@@ -10,13 +10,13 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/reconcile"
-	"github.com/jay94ks/mydcd/internal/schema"
-	"github.com/jay94ks/mydcd/internal/storage"
-	"github.com/jay94ks/mydcd/internal/workload/volumes"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/storage"
+	"github.com/jay94ks/seafield/internal/workload/volumes"
 )
 
 func (r *Runtime) volumeCreatePermit(ctx context.Context, work control.VolumeCreateWork) (control.VolumeCreateWork, error) {
@@ -27,10 +27,10 @@ func (r *Runtime) volumeCreatePermit(ctx context.Context, work control.VolumeCre
 	}
 	permit, err := schema.Decode[control.VolumeCreateWork](reply.Data)
 	if err != nil || reply.Local || reply.RaftIndex == 0 || permit.Spec != work.Spec || permit.Phase != work.Phase || permit.Prepared != work.Prepared || permit.Revision != work.Revision || permit.Capacity < 1 || permit.Capacity > work.Capacity {
-		return work, mydcp.ErrAdmission
+		return work, sfcp.ErrAdmission
 	}
 	if (permit.Fixed == nil) != (work.Fixed == nil) || permit.Fixed != nil && (permit.Fixed.Validate() != nil || permit.Fixed.Digest() != work.Fixed.Digest()) {
-		return work, mydcp.ErrAdmission
+		return work, sfcp.ErrAdmission
 	}
 	return permit, nil
 }

@@ -5,8 +5,8 @@ package control
 import (
 	"slices"
 
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/workload/volumes"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/workload/volumes"
 )
 
 // admitAppVolumeConsumers is a read-only preflight against the same current

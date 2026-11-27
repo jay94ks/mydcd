@@ -4,7 +4,8 @@ package access
 
 // InstallInitialCredential is the deterministic publication boundary. Provider
 // authentication and write evidence belong to the control/adapter boundary.
-// It never replaces an existing method, even if that method was disabled.
+// It never replaces an existing method: a new password or token needs every
+// earlier one of its kind turned off (a new invitation after a used one).
 func (c Catalog) InstallInitialCredential(actor, user string, expected uint64, credential Credential) (Catalog, error) {
 	if !c.SystemAllowed(actor) {
 		return c, ErrDenied
@@ -17,7 +18,7 @@ func (c Catalog) InstallInitialCredential(actor, user string, expected uint64, c
 		return c, ErrInvalid
 	}
 	for _, old := range u.Credentials {
-		if old.Method == credential.Method || old.ID == credential.ID {
+		if old.Enabled && old.Method == credential.Method || old.ID == credential.ID {
 			return c, ErrConflict
 		}
 	}

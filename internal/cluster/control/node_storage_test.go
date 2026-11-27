@@ -10,17 +10,17 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/config"
-	"github.com/jay94ks/mydcd/internal/nodestorage"
-	"github.com/jay94ks/mydcd/internal/workload/volumes"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/config"
+	"github.com/jay94ks/seafield/internal/nodestorage"
+	"github.com/jay94ks/seafield/internal/workload/volumes"
 )
 
 // This fixture tests the actual shared reducer, signatures and checkpoint
 // invariants. Directory observations are simulated, not native filesystem proof.
 type nodeStorageFixture struct {
-	t                    *testing.T
+	t                    testing.TB
 	p                    Policy
 	s                    state.State
 	users                access.Catalog
@@ -29,7 +29,7 @@ type nodeStorageFixture struct {
 	next                 int
 }
 
-func newNodeStorageFixture(t *testing.T) *nodeStorageFixture {
+func newNodeStorageFixture(t testing.TB) *nodeStorageFixture {
 	t.Helper()
 	key := func(n byte) ed25519.PrivateKey { return ed25519.NewKeyFromSeed(bytes.Repeat([]byte{n}, 32)) }
 	f := &nodeStorageFixture{t: t, node: key(101), admin: key(102), manager: key(103), sessions: map[string]access.Session{}}
@@ -156,7 +156,7 @@ func (f *nodeStorageFixture) observe() {
 
 func TestNodeStorageSharedAuthorityFactsDrainAndSnapshotFloor(t *testing.T) {
 	f := newNodeStorageFixture(t)
-	d := nodestorage.Definition{Node: "node-a", ID: "hdd", Path: "/mnt/hdd", MaxVolumes: 2, Tenants: []string{"tenant"}}
+	d := nodestorage.Definition{Node: "node-a", ID: "hdd", Path: "/mnt/hdd", Tenants: []string{"tenant"}}
 	f.apply("manager", "add-node-storage", 0, d, state.Forbidden)
 	wrong := d
 	wrong.Key = [32]byte{9}
@@ -219,14 +219,14 @@ func TestNodeStorageSharedAuthorityFactsDrainAndSnapshotFloor(t *testing.T) {
 }
 
 func TestNodeStorageTypedInputRejectsCounterfeitCountsAndUnknownPolicy(t *testing.T) {
-	good := []byte(`{"schema":1,"action":"add-node-storage","payload":{"Node":"node-a","ID":"hdd","Path":"/mnt/hdd","Tenants":[],"MaxVolumes":2}}`)
+	good := []byte(`{"schema":1,"action":"add-node-storage","payload":{"Node":"node-a","ID":"hdd","Path":"/mnt/hdd","Tenants":[]}}`)
 	change, err := InputChange(good, "admin")
 	if err != nil || CommandKey(change.Action) != NodeStorageKey {
 		t.Fatal("typed node-storage input", err)
 	}
 	for _, raw := range []string{
 		`{"schema":1,"action":"remove-node-storage","payload":{"Node":"node-a","ID":"hdd","Registered":0}}`,
-		`{"schema":1,"action":"set-node-storage-policy","payload":{"Node":"node-a","ID":"hdd","MaxVolumes":2,"AllowAll":true}}`,
+		`{"schema":1,"action":"set-node-storage-policy","payload":{"Node":"node-a","ID":"hdd","CapacityBytes":2,"AllowAll":true}}`,
 		`{"schema":1,"action":"node-storage-ready","payload":{}}`,
 	} {
 		if _, err := InputChange([]byte(raw), "admin"); err == nil {
@@ -237,7 +237,7 @@ func TestNodeStorageTypedInputRejectsCounterfeitCountsAndUnknownPolicy(t *testin
 
 func TestNodeStorageFixedDirectoryCapacityAndCurrentStartPolicy(t *testing.T) {
 	f := newNodeStorageFixture(t)
-	f.apply("admin", "add-node-storage", 0, nodestorage.Definition{Node: "node-a", ID: "hdd", Path: "/mnt/hdd", MaxVolumes: 2, Tenants: []string{"tenant"}}, state.Applied)
+	f.apply("admin", "add-node-storage", 0, nodestorage.Definition{Node: "node-a", ID: "hdd", Path: "/mnt/hdd", Tenants: []string{"tenant"}}, state.Applied)
 	f.observe()
 	r := f.root()
 	v, err := f.p.Volumes(f.s)
@@ -262,14 +262,15 @@ func TestNodeStorageFixedDirectoryCapacityAndCurrentStartPolicy(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		v.entries[scope.Key()] = registeredVolume{Native: ready, State: core}
+		v.entries[scope.Key()] = registeredVolume{Native: ready, State: core, CapacityBytes: 1 << 30}
 	}
 	writes, code := f.p.volumeCheckpoint(f.s, v)
 	if code != state.Applied {
 		t.Fatal(code)
 	}
 	f.checkpoint(VolumesKey, writes)
-	f.apply("admin", "set-node-storage-policy", r.Revision, NodeStoragePolicy{Node: "node-a", ID: "hdd", Tenants: []string{"tenant"}, MaxVolumes: 1}, state.ConditionFailed)
+	limit := uint64(1 << 30) // below the 2 GiB its two volumes reserve
+	f.apply("admin", "set-node-storage-policy", r.Revision, NodeStoragePolicy{Node: "node-a", ID: "hdd", CapacityBytes: &limit}, state.ConditionFailed)
 	scope := volumes.Scope{Cluster: f.p.Cluster, Tenant: "tenant", ID: "data-1", Generation: 1}
 	f.apply("manager", "acquire-volume", 1, VolumeAcquire{scope, "writer", 1, true}, state.Applied)
 	v, err = f.p.Volumes(f.s)
@@ -295,4 +296,83 @@ func TestNodeStorageFixedDirectoryCapacityAndCurrentStartPolicy(t *testing.T) {
 	if err != nil || len(after.Consumers()) != 1 {
 		t.Fatal("Drain/rejected closure erased writer", err)
 	}
+}
+
+func (f *nodeStorageFixture) defaultRoot() (nodestorage.Root, bool) {
+	f.t.Helper()
+	c, err := f.p.NodeStorage(f.s)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	return c.Root("node-a", nodestorage.DefaultRootID)
+}
+
+func TestNodeStorageDefaultRootRegisteredOnceByItsNode(t *testing.T) {
+	f := newNodeStorageFixture(t)
+	work, err := f.p.NodeStoragePermit(f.s, f.p.TrustRoot, NodeStorageSelection{"node-a", nodestorage.DefaultRootID})
+	if err != nil || !work.Unregistered {
+		t.Fatal("first default permit", work, err)
+	}
+	if _, err := f.p.NodeStoragePermit(f.s, [32]byte(f.manager.Public().(ed25519.PublicKey)), NodeStorageSelection{"node-a", nodestorage.DefaultRootID}); err == nil {
+		t.Fatal("non-owner obtained a default root permit")
+	}
+	d := nodestorage.DefaultDefinition("node-a", f.p.TrustRoot, "/var/lib/sfc-storage")
+	f.report(NodeStorageReport{Action: "default", Default: &d}, f.manager, state.Forbidden)
+	limited := d
+	limited.CapacityBytes = 1 << 30
+	f.report(NodeStorageReport{Action: "default", Default: &limited}, f.node, state.ConditionFailed)
+	other := d
+	other.ID = "other"
+	f.report(NodeStorageReport{Action: "default", Default: &other}, f.node, state.Forbidden)
+	f.report(NodeStorageReport{Action: "default", Default: &d}, f.node, state.Applied)
+	r, ok := f.defaultRoot()
+	if !ok || !r.Definition.AllTenants || r.Definition.CapacityBytes != 0 || r.Attestation != nil {
+		t.Fatal("default root", r, ok)
+	}
+	f.report(NodeStorageReport{Action: "default", Default: &d}, f.node, state.ConditionFailed)
+
+	// The operator may limit it and take it away; the node does not bring it back.
+	limit := uint64(10 << 30)
+	f.apply("admin", "set-node-storage-policy", r.Revision, NodeStoragePolicy{Node: "node-a", ID: nodestorage.DefaultRootID, CapacityBytes: &limit}, state.Applied)
+	r, _ = f.defaultRoot()
+	if r.Definition.CapacityBytes != limit || !r.Definition.AllTenants {
+		t.Fatal("capacity change", r.Definition)
+	}
+	selection := NodeStorageSelection{"node-a", nodestorage.DefaultRootID}
+	f.apply("admin", "drain-node-storage", r.Revision, selection, state.Applied)
+	r, _ = f.defaultRoot()
+	closed := nodestorage.RootClosed{Schema: 1, Root: r.Reference(f.p.Cluster), NoUsers: true, NoPending: true}
+	closed.Signature = ed25519.Sign(f.node, nodestorage.RootClosedBytes(closed))
+	f.report(NodeStorageReport{Action: "closed", Expected: r.Revision, Closed: &closed}, f.node, state.Applied)
+	r, _ = f.defaultRoot()
+	f.apply("admin", "remove-node-storage", r.Revision, selection, state.Applied)
+	if _, ok := f.defaultRoot(); ok {
+		t.Fatal("default root not removed")
+	}
+	work, err = f.p.NodeStoragePermit(f.s, f.p.TrustRoot, selection)
+	if err != nil || work.Unregistered {
+		t.Fatal("removed default root offered again", work, err)
+	}
+	f.report(NodeStorageReport{Action: "default", Default: &d}, f.node, state.ConditionFailed)
+}
+
+func TestNodeStorageRootCapacityBoundsFixedVolumes(t *testing.T) {
+	f, q := fixedRegistrationFixture(t)
+	r := f.root()
+	limit := uint64(2 << 20)
+	f.apply("admin", "set-node-storage-policy", r.Revision, NodeStoragePolicy{Node: "node-a", ID: "hdd", CapacityBytes: &limit}, state.Applied)
+	// A limited root takes only sized volumes, and only within its limit.
+	f.apply("manager", "register-fixed-volume", 0, q, state.ConditionFailed)
+	for _, tenant := range []string{"", "tenant"} {
+		f.apply("admin", "set-volume-backup-limit", 0, VolumeBackupLimit{Tenant: tenant, Node: "node-a", Bytes: 64 << 20, Count: 8, StagingBytes: 64 << 20, StagingCount: 2, Original: &OriginalVolumeLimit{Bytes: 64 << 20, Count: 8}}, state.Applied)
+	}
+	q.CapacityBytes = 3 << 20
+	f.apply("manager", "register-fixed-volume", 0, q, state.ConditionFailed)
+	q.CapacityBytes = 2 << 20
+	f.apply("manager", "register-fixed-volume", 0, q, state.Applied)
+	r = f.root()
+	lower := uint64(1 << 20)
+	f.apply("admin", "set-node-storage-policy", r.Revision, NodeStoragePolicy{Node: "node-a", ID: "hdd", CapacityBytes: &lower}, state.ConditionFailed)
+	unlimited := uint64(0)
+	f.apply("admin", "set-node-storage-policy", r.Revision, NodeStoragePolicy{Node: "node-a", ID: "hdd", CapacityBytes: &unlimited}, state.Applied)
 }

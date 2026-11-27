@@ -10,12 +10,13 @@ import (
 	"log"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/schema"
-	"github.com/jay94ks/mydcd/internal/secrets"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/secrets"
+	"github.com/jay94ks/seafield/internal/sfcp"
 )
 
 func (r *Runtime) volumeMoveInputPermit(ctx context.Context, selection control.VolumeMoveSelection) (control.VolumeMovePermit, error) {
@@ -26,7 +27,7 @@ func (r *Runtime) volumeMoveInputPermit(ctx context.Context, selection control.V
 	}
 	permit, err := schema.Decode[control.VolumeMovePermit](reply.Data)
 	if err != nil || reply.Local || reply.RaftIndex == 0 || permit.Job.Verify() != nil || permit.Job.Selection() != selection || permit.Inputs == nil || permit.Inputs.ReadSet == ([32]byte{}) || permit.Inputs.CommandIndex == 0 {
-		return control.VolumeMovePermit{}, mydcp.ErrAdmission
+		return control.VolumeMovePermit{}, sfcp.ErrAdmission
 	}
 	return permit, nil
 }
@@ -41,8 +42,8 @@ func (r *Runtime) observeVolumeMoveInputs(ctx context.Context, caller [32]byte, 
 		}
 	}()
 	now := time.Now().Unix()
-	if request.At < 0 || request.At > now || now-request.At > 30 || request.ReadSet == ([32]byte{}) || request.MinimumIndex == 0 {
-		return out, mydcp.ErrAdmission
+	if request.At < 0 || !access.Recent(request.At, now, 30) || request.ReadSet == ([32]byte{}) || request.MinimumIndex == 0 {
+		return out, sfcp.ErrAdmission
 	}
 	r.inputLife.RLock()
 	defer r.inputLife.RUnlock()
@@ -53,7 +54,7 @@ func (r *Runtime) observeVolumeMoveInputs(ctx context.Context, caller [32]byte, 
 	stage = "quorum-permit"
 	permit, err := r.volumeMoveInputPermit(ctx, request.Selection)
 	if err != nil || caller != permit.Job.Binding.Target.Key || permit.Inputs == nil || permit.Inputs.ReadSet != request.ReadSet || permit.Inputs.CommandIndex < request.MinimumIndex {
-		return out, mydcp.ErrAdmission
+		return out, sfcp.ErrAdmission
 	}
 	stage = "replica"
 	view, err := r.Engine().Read(ctx, false)
@@ -113,7 +114,7 @@ func (r *Runtime) observeVolumeMoveInputs(ctx context.Context, caller [32]byte, 
 	stage = "recheck-permit"
 	latest, err := r.volumeMoveInputPermit(ctx, request.Selection)
 	if err != nil || latest.Inputs == nil || latest.Inputs.ReadSet != request.ReadSet || latest.Job.Digest() != permit.Job.Digest() {
-		return out, mydcp.ErrAdmission
+		return out, sfcp.ErrAdmission
 	}
 	stage = "recheck-replica"
 	view, err = r.Engine().Read(ctx, false)
@@ -128,12 +129,12 @@ func (r *Runtime) observeVolumeMoveInputs(ctx context.Context, caller [32]byte, 
 	stage = "final-permit"
 	fresh, err := r.volumeMoveInputPermit(ctx, request.Selection)
 	if err != nil || fresh.Inputs == nil || fresh.Inputs.ReadSet != request.ReadSet || fresh.Job.Digest() != latest.Job.Digest() {
-		return out, mydcp.ErrAdmission
+		return out, sfcp.ErrAdmission
 	}
 	now = time.Now().Unix()
 	stage = "proof-freshness"
 	if observedAt > now || now-observedAt > 30 {
-		return out, mydcp.ErrAdmission
+		return out, sfcp.ErrAdmission
 	}
 	out = control.VolumeMoveInputProof{Schema: 1, Selection: request.Selection, Binding: latest.Job.Digest(), ReadSet: request.ReadSet, Consumer: r.Identity.Public, At: observedAt}
 	out.Signature = ed25519.Sign(r.Identity.Private, control.VolumeMoveInputProofBytes(out))
@@ -146,7 +147,7 @@ func (r *Runtime) prepareVolumeMoveInputs(ctx context.Context, job control.Volum
 		return [32]byte{}, 0, fmt.Errorf("input authorization: %w", err)
 	}
 	if permit.Job.Digest() != job.Digest() {
-		return [32]byte{}, 0, fmt.Errorf("original input job differs: %w", mydcp.ErrAdmission)
+		return [32]byte{}, 0, fmt.Errorf("original input job differs: %w", sfcp.ErrAdmission)
 	}
 	view, err := r.Engine().Read(ctx, false)
 	if err != nil {
@@ -159,14 +160,14 @@ func (r *Runtime) prepareVolumeMoveInputs(ctx context.Context, job control.Volum
 	owners := map[[32]byte]string{}
 	for _, row := range inputs.Resources {
 		if old, ok := owners[row.Owner]; ok && old != row.Node {
-			return [32]byte{}, 0, mydcp.ErrAdmission
+			return [32]byte{}, 0, sfcp.ErrAdmission
 		}
 		owners[row.Owner] = row.Node
 	}
 	for _, read := range inputs.Reads {
 		use := read.Plan.Use
 		if old, ok := owners[use.NodeKey]; ok && old != use.Node {
-			return [32]byte{}, 0, mydcp.ErrAdmission
+			return [32]byte{}, 0, sfcp.ErrAdmission
 		}
 		owners[use.NodeKey] = use.Node
 	}
@@ -177,9 +178,9 @@ func (r *Runtime) prepareVolumeMoveInputs(ctx context.Context, job control.Volum
 		if owner == r.Identity.Public {
 			proof, err = r.observeVolumeMoveInputs(ctx, r.Identity.Public, request)
 		} else {
-			peer, ok := r.Mesh.Peer(mydcp.Identity(owner))
+			peer, ok := r.Mesh.Peer(sfcp.Identity(owner))
 			if !ok || !peer.Member || peer.ID != node {
-				return [32]byte{}, 0, mydcp.ErrAdmission
+				return [32]byte{}, 0, sfcp.ErrAdmission
 			}
 			raw, _ := json.Marshal(request)
 			reply, callErr := cluster.CallManagement(ctx, r.Mesh, r.Identity, r.controlPolicy.Cluster, peer, cluster.ManagementRequest{Method: "volume-move-inputs-observe", Input: raw})
@@ -201,7 +202,7 @@ func (r *Runtime) prepareVolumeMoveInputs(ctx context.Context, job control.Volum
 		return [32]byte{}, 0, fmt.Errorf("final input authorization: %w", err)
 	}
 	if latest.Inputs == nil || latest.Job.Digest() != job.Digest() || latest.Inputs.ReadSet != permit.Inputs.ReadSet {
-		return [32]byte{}, 0, fmt.Errorf("authorized input read set changed: %w", mydcp.ErrAdmission)
+		return [32]byte{}, 0, fmt.Errorf("authorized input read set changed: %w", sfcp.ErrAdmission)
 	}
 	observedAt := time.Now().Unix()
 	for _, proof := range proofs {

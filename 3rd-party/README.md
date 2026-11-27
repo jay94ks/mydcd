@@ -16,7 +16,7 @@ follower에게 필요 없는 빈 AppendEntries를 보내지 않는다. heartbeat
 `HeartbeatInterval`로 따로 정할 수 있고(0이면 upstream과 같은 HeartbeatTimeout/10),
 그때 알려진 leader가 없는 follower는 ElectionTimeout만 기다린다. transport가
 `PeerConnectionLost`로 연결 상실을 알리면 follower는 곧 선거를 시작하고 leader는
-lease를 바로 다시 확인한다. `PeerConnected`로 연결이 다시 생기면 leader는 그 follower에게 바로 heartbeat를 보낸다(재시작한 follower가 HeartbeatInterval을 기다리지 않고 leader를 안다). term·투표·lease 규칙과 로그 일치 규칙은 바꾸지 않는다.
+lease를 바로 다시 확인한다. `PeerConnected`로 연결이 다시 생기면 leader는 그 follower에게 바로 heartbeat를 보낸다(재시작한 follower가 HeartbeatInterval을 기다리지 않고 leader를 안다). 요청 종류별로 보낸 쪽 역할도 본다: 받는 서버가 다른 leader를 따르는(또는 자신이 leader인) 동안 non-voter로 아는 서버의 AppendEntries·InstallSnapshot은 (요청이 그 서버를 voter로 만드는 구성을 싣지 않는 한) term·leader를 바꾸기 전에 로그 불일치처럼 거절하고, non-voter의 RequestVote는 term을 올리기 전에 거절하며, TimeoutNow는 지금 따르는 leader의 것만 받는다(NK3, [보안](../docs/mechanisms/security.md#raft-요청을-보낼-수-있는-역할)). 이 밖의 term·투표·lease 규칙과 로그 일치 규칙은 바꾸지 않는다.
 root go.mod의 명시 replace를 사용한다.
 
 `go-containerregistry`는 upstream `v0.22.1`, commit

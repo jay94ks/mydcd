@@ -6,7 +6,7 @@ import (
 	"math"
 	"slices"
 
-	contract "github.com/jay94ks/mydcd/lifecycle/v1"
+	contract "github.com/jay94ks/seafield/lifecycle/v1"
 )
 
 // AppCheckResult gates the application, not any service's Healthy/activation.

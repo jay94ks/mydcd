@@ -27,7 +27,7 @@ func ValidVolumeFilePath(name string, prefix bool) bool {
 		return false
 	}
 	for _, part := range strings.Split(name, "/") {
-		if part == ".." || strings.HasPrefix(part, ".mydc-file-") {
+		if part == ".." || strings.HasPrefix(part, ".sfc-file-") {
 			return false
 		}
 	}

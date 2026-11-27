@@ -10,17 +10,17 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/imagebuild"
-	"github.com/jay94ks/mydcd/internal/nodestorage"
-	"github.com/jay94ks/mydcd/internal/web/mydc"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/imagebuild"
+	"github.com/jay94ks/seafield/internal/nodestorage"
+	"github.com/jay94ks/seafield/internal/web/sfc"
 )
 
-// Image builds on mydcd's real contract (REQ-19·47, docs/reference/
+// Image builds on sfcd's real contract (REQ-19·47, docs/reference/
 // image-build-jobs.md, image-build-contexts.md). Every read is the user's
 // image-builds / build-context-content / image-build-logs /
 // image-build-cache on their own session, every change the signed real
-// action; mydcd judges permissions, policy bounds and record CAS. The web
+// action; sfcd judges permissions, policy bounds and record CAS. The web
 // only reshapes rows (version numbers for 32-byte ids, flattened policy).
 //
 // Still on the old REQ-19 mock until the fake has them (build-draft with
@@ -44,7 +44,7 @@ const buildLogPage = 24 << 10
 const maxBuildFileRead = 32 << 20
 
 // buildPart reads every page of one image-builds Part (bounded).
-func buildPart(ctx context.Context, c mydc.Conn, tenant string, q control.ImageBuildQuery) (control.ImageBuildPage, error) {
+func buildPart(ctx context.Context, c sfc.Conn, tenant string, q control.ImageBuildQuery) (control.ImageBuildPage, error) {
 	var out control.ImageBuildPage
 	after := ""
 	for i := 0; i < incidentMaxPages; i++ {
@@ -71,7 +71,7 @@ func buildPart(ctx context.Context, c mydc.Conn, tenant string, q control.ImageB
 	return out, nil
 }
 
-func currentPolicy(ctx context.Context, c mydc.Conn, tenant string) (*control.ImageBuildPolicyView, error) {
+func currentPolicy(ctx context.Context, c sfc.Conn, tenant string) (*control.ImageBuildPolicyView, error) {
 	p, err := buildPart(ctx, c, tenant, control.ImageBuildQuery{Part: "policy"})
 	if err != nil {
 		return nil, err
@@ -84,7 +84,7 @@ func currentPolicy(ctx context.Context, c mydc.Conn, tenant string) (*control.Im
 	return nil, nil
 }
 
-func realContext(ctx context.Context, c mydc.Conn, tenant, id string) (*control.ImageBuildContextView, error) {
+func realContext(ctx context.Context, c sfc.Conn, tenant, id string) (*control.ImageBuildContextView, error) {
 	p, err := buildPart(ctx, c, tenant, control.ImageBuildQuery{Part: "contexts", ID: id})
 	if err != nil {
 		return nil, err
@@ -97,7 +97,7 @@ func realContext(ctx context.Context, c mydc.Conn, tenant, id string) (*control.
 	return nil, nil
 }
 
-func liveVersions(ctx context.Context, c mydc.Conn, tenant, id string) ([]control.ImageBuildVersionView, error) {
+func liveVersions(ctx context.Context, c sfc.Conn, tenant, id string) ([]control.ImageBuildVersionView, error) {
 	p, err := buildPart(ctx, c, tenant, control.ImageBuildQuery{Part: "versions", ID: id})
 	if err != nil {
 		return nil, err
@@ -113,7 +113,7 @@ func liveVersions(ctx context.Context, c mydc.Conn, tenant, id string) ([]contro
 }
 
 // versionByNumber: the kept version n of a context (404 when none).
-func versionByNumber(ctx context.Context, c mydc.Conn, tenant, id string, n uint64) (control.ImageBuildVersionView, error) {
+func versionByNumber(ctx context.Context, c sfc.Conn, tenant, id string, n uint64) (control.ImageBuildVersionView, error) {
 	vs, err := liveVersions(ctx, c, tenant, id)
 	if err != nil {
 		return control.ImageBuildVersionView{}, err
@@ -169,7 +169,7 @@ func limitsView() buildLimits {
 
 // GET /t/{t}/build-policy
 func (s *Server) handleBuildPolicy(w http.ResponseWriter, r *http.Request, ws *webSession) {
-	read(s, w, r, ws, func(ctx context.Context, c mydc.Conn) (buildPolicyView, error) {
+	read(s, w, r, ws, func(ctx context.Context, c sfc.Conn) (buildPolicyView, error) {
 		out := buildPolicyView{Nodes: []buildNodeView{}, Platforms: []string{}, Limits: limitsView()}
 		p, err := currentPolicy(ctx, c, r.PathValue("t"))
 		if err != nil || p == nil || p.Deleted {
@@ -192,9 +192,9 @@ func (s *Server) handleBuildPolicy(w http.ResponseWriter, r *http.Request, ws *w
 
 // rootReference finds the storage root id on node for the policy: the
 // policy's current one when it is the same root, else the tenant-storage
-// row's full reference, which mydcd fills for roots the tenant
+// row's full reference, which sfcd fills for roots the tenant
 // may build on.
-func rootReference(ctx context.Context, c mydc.Conn, tenant string, cur *control.ImageBuildPolicyView, node, id string) (nodestorage.Reference, error) {
+func rootReference(ctx context.Context, c sfc.Conn, tenant string, cur *control.ImageBuildPolicyView, node, id string) (nodestorage.Reference, error) {
 	if cur != nil {
 		for _, n := range cur.Spec.Nodes {
 			if n.Node == node && (id == "" || n.Root.ID == id) {
@@ -257,7 +257,7 @@ func (s *Server) handleSetImageBuildPolicy(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	tenant := r.PathValue("t")
-	s.sharedCreate(w, r, ws, req.OpID, req, func(ctx context.Context, c mydc.Conn, sess mydc.Session) (string, any, uint64, string, error) {
+	s.sharedCreate(w, r, ws, req.OpID, req, func(ctx context.Context, c sfc.Conn, sess sfc.Session) (string, any, uint64, string, error) {
 		in := req.Policy
 		cur, err := currentPolicy(ctx, c, tenant)
 		if err != nil {
@@ -287,13 +287,13 @@ func (s *Server) handleSetImageBuildPolicy(w http.ResponseWriter, r *http.Reques
 		if cur != nil {
 			rev = cur.Revision
 		}
-		return mydc.ActionSetImageBuildPolicy, control.ImageBuildPolicyPut{Spec: sp}, expectedOr(req.Expected, rev), "build-policy", nil
+		return sfc.ActionSetImageBuildPolicy, control.ImageBuildPolicyPut{Spec: sp}, expectedOr(req.Expected, rev), "build-policy", nil
 	})
 }
 
 // builderDigest: the builder image pinned by digest. "" keeps the current
 // one; name:tag is resolved with image-resolve on the user's session.
-func (s *Server) builderDigest(ctx context.Context, c mydc.Conn, tenant, image string, cur *control.ImageBuildPolicyView) (string, error) {
+func (s *Server) builderDigest(ctx context.Context, c sfc.Conn, tenant, image string, cur *control.ImageBuildPolicyView) (string, error) {
 	switch {
 	case image == "" && cur != nil:
 		return cur.Spec.BuilderImage, nil
@@ -355,7 +355,7 @@ type gitCheckView struct {
 	Entries uint32 `json:"entries"`
 }
 
-func contextRow(ctx context.Context, c mydc.Conn, tenant string, x control.ImageBuildContextView) (buildContextRow, error) {
+func contextRow(ctx context.Context, c sfc.Conn, tenant string, x control.ImageBuildContextView) (buildContextRow, error) {
 	sp := x.Spec
 	row := buildContextRow{ID: sp.ID, Kind: sp.Kind, Revision: x.Revision, Node: sp.Root.Node, Root: sp.Root.ID, Dockerfile: sp.Dockerfile,
 		Args: sp.Arguments, Secrets: sp.Secrets, Repository: sp.Repository, Tags: sp.Tags, Platforms: sp.Platforms, Git: sp.Git, Versions: []buildVersionRow{}}
@@ -400,7 +400,7 @@ func contextRow(ctx context.Context, c mydc.Conn, tenant string, x control.Image
 
 // GET /t/{t}/build-contexts?after=
 func (s *Server) handleImageBuildContexts(w http.ResponseWriter, r *http.Request, ws *webSession) {
-	read(s, w, r, ws, func(ctx context.Context, c mydc.Conn) (listPage, error) {
+	read(s, w, r, ws, func(ctx context.Context, c sfc.Conn) (listPage, error) {
 		tenant := r.PathValue("t")
 		p, err := c.ImageBuilds(ctx, tenant, control.ImageBuildQuery{Part: "contexts"}, r.URL.Query().Get("after"))
 		if err != nil {
@@ -455,7 +455,7 @@ func (s *Server) handlePutImageBuildContext(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	tenant, id := r.PathValue("t"), r.PathValue("id")
-	s.sharedCreate(w, r, ws, req.OpID, req, func(ctx context.Context, c mydc.Conn, _ mydc.Session) (string, any, uint64, string, error) {
+	s.sharedCreate(w, r, ws, req.OpID, req, func(ctx context.Context, c sfc.Conn, _ sfc.Session) (string, any, uint64, string, error) {
 		in := req.Context
 		pol, err := currentPolicy(ctx, c, tenant)
 		if err != nil {
@@ -497,7 +497,7 @@ func (s *Server) handlePutImageBuildContext(w http.ResponseWriter, r *http.Reque
 }
 
 // POST /t/{t}/build-contexts/{id}/delete {opId, expected?} →
-// delete-build-context. mydcd keeps a context while versions remain, so
+// delete-build-context. sfcd keeps a context while versions remain, so
 // those go first: 409 versions-left with their numbers.
 func (s *Server) handleDeleteImageBuildContext(w http.ResponseWriter, r *http.Request, ws *webSession) {
 	var req struct {
@@ -508,7 +508,7 @@ func (s *Server) handleDeleteImageBuildContext(w http.ResponseWriter, r *http.Re
 		return
 	}
 	tenant, id := r.PathValue("t"), r.PathValue("id")
-	s.sharedCreate(w, r, ws, req.OpID, req, func(ctx context.Context, c mydc.Conn, _ mydc.Session) (string, any, uint64, string, error) {
+	s.sharedCreate(w, r, ws, req.OpID, req, func(ctx context.Context, c sfc.Conn, _ sfc.Session) (string, any, uint64, string, error) {
 		cur, err := realContext(ctx, c, tenant, id)
 		if err != nil {
 			return "", nil, 0, "", err
@@ -542,7 +542,7 @@ func (s *Server) handleDeleteImageBuildVersion(w http.ResponseWriter, r *http.Re
 	}
 	tenant, id := r.PathValue("t"), r.PathValue("id")
 	n, verr := strconv.ParseUint(r.PathValue("version"), 10, 64)
-	s.sharedCreate(w, r, ws, req.OpID, actionBody{"delete-build-version", req}, func(ctx context.Context, c mydc.Conn, _ mydc.Session) (string, any, uint64, string, error) {
+	s.sharedCreate(w, r, ws, req.OpID, actionBody{"delete-build-version", req}, func(ctx context.Context, c sfc.Conn, _ sfc.Session) (string, any, uint64, string, error) {
 		if verr != nil || n == 0 {
 			return "", nil, 0, "", invalid("version: a kept version number")
 		}
@@ -570,7 +570,7 @@ func (s *Server) handleImageBuildTree(w http.ResponseWriter, r *http.Request, ws
 		Entries    []imagebuild.Entry `json:"entries"`
 		Dockerfile string             `json:"dockerfile"`
 	}
-	read(s, w, r, ws, func(ctx context.Context, c mydc.Conn) (treeView, error) {
+	read(s, w, r, ws, func(ctx context.Context, c sfc.Conn) (treeView, error) {
 		tenant, id := r.PathValue("t"), r.PathValue("id")
 		v, err := versionByNumber(ctx, c, tenant, id, n)
 		if err != nil {
@@ -609,7 +609,7 @@ func (s *Server) handleImageBuildFile(w http.ResponseWriter, r *http.Request, ws
 	defer cancel()
 	var data []byte
 	var exec bool
-	err := ws.do(ctx, func(ctx context.Context, c mydc.Conn) error {
+	err := ws.do(ctx, func(ctx context.Context, c sfc.Conn) error {
 		if n == 0 {
 			var err error
 			data, exec, err = draftFile(ctx, c, r.PathValue("t"), r.PathValue("id"), path)
@@ -628,7 +628,7 @@ func (s *Server) handleImageBuildFile(w http.ResponseWriter, r *http.Request, ws
 			}
 			f := p.Page.File
 			if f == nil {
-				return &httpErr{http.StatusBadGateway, "bad-page", "mydcd sent no file page"}
+				return &httpErr{http.StatusBadGateway, "bad-page", "sfcd sent no file page"}
 			}
 			if f.Total > maxBuildFileRead {
 				return &httpErr{http.StatusRequestEntityTooLarge, "too-large", "the file is larger than the web passes through; use the CLI"}
@@ -650,7 +650,7 @@ func (s *Server) handleImageBuildFile(w http.ResponseWriter, r *http.Request, ws
 	h.Set("Content-Security-Policy", "sandbox")
 	h.Set("Cache-Control", "no-store")
 	if exec {
-		h.Set("X-MyDC-Executable", "1")
+		h.Set("X-SFC-Executable", "1")
 	}
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(data)
@@ -658,7 +658,7 @@ func (s *Server) handleImageBuildFile(w http.ResponseWriter, r *http.Request, ws
 
 // POST /t/{t}/build-contexts/{id}/verify → check-build-context (Git).
 func (s *Server) handleCheckImageBuildContext(w http.ResponseWriter, r *http.Request, ws *webSession) {
-	read(s, w, r, ws, func(ctx context.Context, c mydc.Conn) (control.ImageBuildSourceResult, error) {
+	read(s, w, r, ws, func(ctx context.Context, c sfc.Conn) (control.ImageBuildSourceResult, error) {
 		return c.CheckBuildContext(ctx, r.PathValue("t"), control.ImageBuildSourceQuery{ID: r.PathValue("id")})
 	})
 }
@@ -699,7 +699,7 @@ func jobRow(j control.ImageBuildJobView, vs []control.ImageBuildVersionView) bui
 	return row
 }
 
-func findJob(ctx context.Context, c mydc.Conn, tenant, id string) (*control.ImageBuildJobView, error) {
+func findJob(ctx context.Context, c sfc.Conn, tenant, id string) (*control.ImageBuildJobView, error) {
 	p, err := c.ImageBuilds(ctx, tenant, control.ImageBuildQuery{Part: "jobs", Job: id}, "")
 	if err != nil {
 		return nil, err
@@ -729,7 +729,7 @@ func (s *Server) handleBeginImageBuild(w http.ResponseWriter, r *http.Request, w
 		req.Build = "build-" + req.OpID
 	}
 	tenant, id := r.PathValue("t"), r.PathValue("id")
-	s.sharedCreateHold(w, r, ws, req.OpID, req, func(ctx context.Context, c mydc.Conn, _ mydc.Session) (string, any, uint64, string, error) {
+	s.sharedCreateHold(w, r, ws, req.OpID, req, func(ctx context.Context, c sfc.Conn, _ sfc.Session) (string, any, uint64, string, error) {
 		if !validName(req.Build) {
 			return "", nil, 0, "", invalid("build: lowercase letters, digits and -, at most 63")
 		}
@@ -751,13 +751,13 @@ func (s *Server) handleBeginImageBuild(w http.ResponseWriter, r *http.Request, w
 		if err != nil {
 			return "", nil, 0, "", err
 		}
-		return mydc.ActionBeginImageBuild, plan.Change, 0, "build/" + req.Build, nil
+		return sfc.ActionBeginImageBuild, plan.Change, 0, "build/" + req.Build, nil
 	}, holdBuild(tenant, id, req.Build))
 }
 
 // GET /t/{t}/builds?context=&after= → job rows (version numbers filled).
 func (s *Server) handleImageBuildJobs(w http.ResponseWriter, r *http.Request, ws *webSession) {
-	read(s, w, r, ws, func(ctx context.Context, c mydc.Conn) (listPage, error) {
+	read(s, w, r, ws, func(ctx context.Context, c sfc.Conn) (listPage, error) {
 		tenant, cx := r.PathValue("t"), r.URL.Query().Get("context")
 		p, err := c.ImageBuilds(ctx, tenant, control.ImageBuildQuery{Part: "jobs", ID: cx}, r.URL.Query().Get("after"))
 		if err != nil {
@@ -799,7 +799,7 @@ func (s *Server) handleImageBuildLog(w http.ResponseWriter, r *http.Request, ws 
 		Phase     string `json:"phase"`
 		Done      bool   `json:"done"`
 	}
-	read(s, w, r, ws, func(ctx context.Context, c mydc.Conn) (logView, error) {
+	read(s, w, r, ws, func(ctx context.Context, c sfc.Conn) (logView, error) {
 		q, after := imagebuild.LogQuery{Job: r.PathValue("id"), MaxBytes: buildLogPage}, r.URL.Query().Get("after")
 		if t := r.URL.Query().Get("tail"); t != "" && t != "0" {
 			if after != "" {
@@ -828,7 +828,7 @@ func (s *Server) jobOp(action string) func(http.ResponseWriter, *http.Request, *
 			return
 		}
 		tenant, id := r.PathValue("t"), r.PathValue("id")
-		s.sharedCreate(w, r, ws, req.OpID, actionBody{action, req}, func(ctx context.Context, c mydc.Conn, _ mydc.Session) (string, any, uint64, string, error) {
+		s.sharedCreate(w, r, ws, req.OpID, actionBody{action, req}, func(ctx context.Context, c sfc.Conn, _ sfc.Session) (string, any, uint64, string, error) {
 			j, err := findJob(ctx, c, tenant, id)
 			if err != nil {
 				return "", nil, 0, "", err
@@ -951,7 +951,7 @@ func (s *Server) handleImageBuildCache(w http.ResponseWriter, r *http.Request, w
 		Caches     []cacheScopeRow    `json:"caches"`
 		Cleaning   []cacheCleaningRow `json:"cleaning"`
 	}
-	read(s, w, r, ws, func(ctx context.Context, c mydc.Conn) (cacheView, error) {
+	read(s, w, r, ws, func(ctx context.Context, c sfc.Conn) (cacheView, error) {
 		tenant := r.PathValue("t")
 		out := cacheView{Nodes: []cacheNodeRow{}, Caches: []cacheScopeRow{}, Cleaning: []cacheCleaningRow{}}
 		if pol, err := currentPolicy(ctx, c, tenant); err == nil && pol != nil && !pol.Deleted {
@@ -1043,7 +1043,7 @@ func (s *Server) handleImageBuildCacheEntries(w http.ResponseWriter, r *http.Req
 		Entries         []entryRow        `json:"entries"`
 		Cleanup         *cacheCleanupView `json:"cleanup,omitempty"`
 	}
-	read(s, w, r, ws, func(ctx context.Context, c mydc.Conn) (entriesView, error) {
+	read(s, w, r, ws, func(ctx context.Context, c sfc.Conn) (entriesView, error) {
 		p, err := c.ImageBuildCacheUsage(ctx, r.PathValue("t"), imagebuild.CacheQuery{Cache: &cache, Node: node}, r.URL.Query().Get("after"))
 		if err != nil {
 			return entriesView{}, err
@@ -1083,7 +1083,7 @@ func (s *Server) handlePruneImageBuildCache(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	tenant := r.PathValue("t")
-	s.sharedCreate(w, r, ws, req.OpID, actionBody{"prune-build-cache", req}, func(ctx context.Context, c mydc.Conn, _ mydc.Session) (string, any, uint64, string, error) {
+	s.sharedCreate(w, r, ws, req.OpID, actionBody{"prune-build-cache", req}, func(ctx context.Context, c sfc.Conn, _ sfc.Session) (string, any, uint64, string, error) {
 		cache, ok := parseHex32(req.Cache)
 		f := imagebuild.CachePruneFilter{Mode: req.Filter.Mode, IDs: slices.Sorted(slices.Values(req.Filter.IDs)), UnusedDays: req.Filter.UnusedDays}
 		if len(f.IDs) == 0 {

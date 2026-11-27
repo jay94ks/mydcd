@@ -11,20 +11,20 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/certstore"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/schema"
-	"github.com/jay94ks/mydcd/internal/storage"
-	"github.com/jay94ks/mydcd/internal/userauth"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/certstore"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/storage"
+	"github.com/jay94ks/seafield/internal/userauth"
 
 	bolt "go.etcd.io/bbolt"
 )
 
 // This extends the existing native fixture and its owned ingress rollback.
 // No additional daemon/node or native certificate proof is manufactured.
-func prepareIdentityCertificate(t *testing.T, ctx context.Context, r *Runtime, user userauth.Client, peer mydcp.Peer, session access.Session, change func(string, string, uint64, any)) {
+func prepareIdentityCertificate(t *testing.T, ctx context.Context, r *Runtime, user userauth.Client, peer sfcp.Peer, session access.Session, change func(string, string, uint64, any)) {
 	t.Helper()
 	registerTestDomain(t, ctx, user, peer, session, change, "app.test")
 	material, _ := rq7Certificate(t, "app.test")
@@ -44,7 +44,7 @@ func prepareIdentityCertificate(t *testing.T, ctx context.Context, r *Runtime, u
 
 // prepareIngressCertificate stores the certificate the managed ingress
 // fixture serves for app.test; TLS listeners choose it by host.
-func prepareIngressCertificate(t *testing.T, ctx context.Context, user userauth.Client, peer mydcp.Peer, session access.Session, change func(string, string, uint64, any)) {
+func prepareIngressCertificate(t *testing.T, ctx context.Context, user userauth.Client, peer sfcp.Peer, session access.Session, change func(string, string, uint64, any)) {
 	t.Helper()
 	registerTestDomain(t, ctx, user, peer, session, change, "app.test")
 	material, _ := rq7Certificate(t, "app.test")
@@ -58,7 +58,7 @@ func prepareIngressCertificate(t *testing.T, ctx context.Context, user userauth.
 
 // registerTestDomain adds a cluster domain once, so stored certificates
 // under it get links.
-func registerTestDomain(t *testing.T, ctx context.Context, user userauth.Client, peer mydcp.Peer, session access.Session, change func(string, string, uint64, any), name string) {
+func registerTestDomain(t *testing.T, ctx context.Context, user userauth.Client, peer sfcp.Peer, session access.Session, change func(string, string, uint64, any), name string) {
 	t.Helper()
 	page, err := user.QueryCertificates(ctx, peer, session, control.CertificateQuery{})
 	if err != nil {
@@ -85,7 +85,7 @@ func storedByRequest(t *testing.T, catalog certstore.Catalog, request string) ce
 }
 
 // storeFileCertificate puts a fixture's PEM files into the store.
-func storeFileCertificate(t *testing.T, ctx context.Context, user userauth.Client, peer mydcp.Peer, session access.Session, change func(string, string, uint64, any), chainFile, keyFile string) {
+func storeFileCertificate(t *testing.T, ctx context.Context, user userauth.Client, peer sfcp.Peer, session access.Session, change func(string, string, uint64, any), chainFile, keyFile string) {
 	t.Helper()
 	chain, err := os.ReadFile(chainFile)
 	if err != nil {
@@ -127,7 +127,7 @@ func certificateNativeRecords(t *testing.T, r *Runtime) map[string][]byte {
 	return records
 }
 
-func captureIdentityCertificate(t *testing.T, ctx context.Context, runtime **Runtime, user *userauth.Client, peer *mydcp.Peer, session *access.Session, policy control.Policy) func() {
+func captureIdentityCertificate(t *testing.T, ctx context.Context, runtime **Runtime, user *userauth.Client, peer *sfcp.Peer, session *access.Session, policy control.Policy) func() {
 	t.Helper()
 	original := *runtime
 	view, err := original.currentView(ctx)
@@ -188,7 +188,7 @@ func captureIdentityCertificate(t *testing.T, ctx context.Context, runtime **Run
 		if !ok || [32]byte(target.Key) != current.Identity.Public {
 			t.Fatal("original sealer did not resolve to current peer")
 		}
-		client, err := mydcp.NewTransport(current.Identity, policy.Cluster, func(key mydcp.Identity) (mydcp.Peer, bool) { return current.Mesh.Peer(key) })
+		client, err := sfcp.NewTransport(current.Identity, policy.Cluster, func(key sfcp.Identity) (sfcp.Peer, bool) { return current.Mesh.Peer(key) })
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -223,7 +223,7 @@ func captureIdentityCertificate(t *testing.T, ctx context.Context, runtime **Run
 				t.Fatal("changed original certificate/source accepted")
 			}
 		}
-		oldClient, err := mydcp.NewTransport(retained.Identity, policy.Cluster, func(key mydcp.Identity) (mydcp.Peer, bool) { return current.Mesh.Peer(key) })
+		oldClient, err := sfcp.NewTransport(retained.Identity, policy.Cluster, func(key sfcp.Identity) (sfcp.Peer, bool) { return current.Mesh.Peer(key) })
 		if err != nil {
 			t.Fatal(err)
 		}

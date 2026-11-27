@@ -18,6 +18,11 @@
 | [관측 이벤트](events.md) | Task/노드/CD의 내구 알림·종류/메시지·현재 권한·cursor/보존·수집 누락 |
 | [app.yaml 원문·버전](app-source.md) | 원문 바이트·수락 버전·CD overlay·분할 조회와 이력 회수 |
 | [단독 컨테이너](standalone.md) | tenant 소유 단일 서비스·temp/fixed 수명·원 attach/exec·pin·정산 |
+| [클러스터 백업](cluster-backup.md) | `cluster-backup` 작업 기록·purpose20 스트림·백업 파일 형식 |
+| [정족수 복구](quorum-recovery.md) | `sfcd recover`: voter 과반을 영구히 잃었을 때 남은 voter로 다시 세우기 |
+| [가입한 서버의 주소 바꾸기](server-endpoint-move.md) | `sfcli node set-endpoint`·`sfcd set-listen`: IP나 포트가 바뀐 서버를 빼지 않고 옮기기 |
+| [전체 복구](cluster-restore.md) | `sfcd restore`: voter를 모두 잃었을 때 새 서버에서 클러스터 백업으로 다시 세우기 |
+| [변경 감시](change-watch.md) | purpose22 스트림: 세션이 읽을 수 있는 기록 중 바뀐 것의 참조(Raft index 기준, 이어 받기·resync) |
 | [Volume 파일 작업](volume-files.md) | 상대 경로 위임·purpose18 유한 전송·원 publication/권한·소유 참조 |
 
 | [Lifecycle 원본](lifecycle-sources.md) | 사용자 source/module 업로드·resolver/타입 진단·원 token 복구·정확한 버전 원문 읽기 |
@@ -37,13 +42,15 @@
 | [Task 재시작](task-actions.md) | 원 Task/native·사용자 승인·Stop/Start 내구 기록·원 결과 |
 | [컨테이너 실제 설정](container-detail.md) | inspect·목표와 실제 drift·보호된 환경 참조·최근 서비스 검사 결과 |
 | [Secret 파일·환경 변수 공급](secret-delivery.md) | 기존 승인/Binding·경로/이름·native 전달·새 세대·로그 가림 |
-| [mydc-web HTTP API](web-api.md) | 웹 UI 데몬의 `/api/v1`: 로그인 세션·작업(원 operation 저장 후 전송)·화면 조회·보관된 앱 |
-| [MYDCP](../protocol/mydcp.md) | 공통 바이너리 frame/TLV, 목적별 메시지와 인증 |
+| [sfc-web HTTP API](web-api.md) | 웹 UI 데몬의 `/api/v1`: 로그인 세션·작업(원 operation 저장 후 전송)·화면 조회·보관된 앱 |
+| [SFCP](../protocol/sfcp.md) | 공통 바이너리 frame/TLV, 목적별 메시지와 인증 |
 | [명령어 적용대상표](../architecture/command-targets.md) | 명령·옵션·인증 주체·local/cluster/tenant/app 범위 |
 | [CLI·설정](../configuration/cli.md) | 실행 파일의 옵션·설정 탐색·명령 문법·종료 코드 |
 | [app.yaml과 tenant 설정](../architecture/app-and-cluster-spec.md) | 앱 묶음과 관리 자원의 명시 부분 변경 |
 | [클러스터/앱 자원표](../architecture/resource-ownership.md) | 정의·변경·삭제 주체와 앱 참조·수명 |
+| [서버 방화벽](node-firewall.md) | node.yaml `firewall`, `SFC-INPUT` 체인·잠금 규칙, `node-firewall` method·revision+delta·변경 기록, 클러스터 방화벽(`control/firewall`, 필수 규칙, `inherit`) |
+| [VPS 서버 자동 가입](vps-enroll.md) | `.well-known/sfc/node` 경로, 사용자 스크립트 예시 |
 
-관리 API는 MYDCP 메시지로 처리한다. CLI의 하위 명령 이름과 wire의 `Purpose`/`Kind`는 서로 다른 분류다. 예를 들어 node 관리 명령도 사용자 관리 요청으로 전달하며, Unix 소켓에서 node 간 Raft 스트림을 열 수 있다는 뜻은 아니다.
+관리 API는 SFCP 메시지로 처리한다. CLI의 하위 명령 이름과 wire의 `Purpose`/`Kind`는 서로 다른 분류다. 예를 들어 node 관리 명령도 사용자 관리 요청으로 전달하며, Unix 소켓에서 node 간 Raft 스트림을 열 수 있다는 뜻은 아니다.
 
 - [관리 자원·사용처 조회](resource-queries.md): 실제 blocker/원 참조·한도/CAS·망 closure/DNS·위임·현재 권한과 페이지.

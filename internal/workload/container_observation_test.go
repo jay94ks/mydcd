@@ -9,7 +9,7 @@ import (
 	"io"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/containerops"
+	"github.com/jay94ks/seafield/internal/containerops"
 )
 
 type observationTestBody struct {

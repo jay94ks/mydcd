@@ -107,7 +107,7 @@ func TestDNSReplyTransportBudgetDoesNotTruncateCacheOrEchoOPT(t *testing.T) {
 }
 
 func TestDNSTCPFrameLengthIsCheckedBeforeBodyAndHandlesFragments(t *testing.T) {
-	raw := dnsWire("web.app.mydc.test.", dns.TypeA)
+	raw := dnsWire("web.app.sfc.test.", dns.TypeA)
 	frame := make([]byte, 2+len(raw))
 	binary.BigEndian.PutUint16(frame, uint16(len(raw)))
 	copy(frame[2:], raw)

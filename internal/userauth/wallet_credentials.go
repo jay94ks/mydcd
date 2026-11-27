@@ -12,14 +12,15 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cliprofile"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/wallet"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cliprofile"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/wallet"
 )
 
 // CredentialStore owns an unlocked, encrypted wallet transaction lifetime.
@@ -76,7 +77,7 @@ type loginCredential struct {
 }
 
 func loginRecordName(cluster, profile [32]byte, username string) string {
-	b := append([]byte("mydc-wallet-login-1\x00"), cluster[:]...)
+	b := append([]byte("sfc-wallet-login-1\x00"), cluster[:]...)
 	b = append(b, profile[:]...)
 	b = append(b, username...)
 	digest := sha256.Sum256(b)
@@ -206,24 +207,37 @@ func (s *CredentialStore) Load(c Client, username string) (Stored, error) {
 // LoginPrivate/PasswordOrToken store only a successful protocol login's account,
 // issued session and proof key. Input passwords/tokens are not needed afterwards
 // and are not used to silently repeat authentication on expiry or disconnect.
-func (s *CredentialStore) LoginPrivate(ctx context.Context, c Client, peer mydcp.Peer, username string, key ed25519.PrivateKey) (access.Session, error) {
+func (s *CredentialStore) LoginPrivate(ctx context.Context, c Client, peer sfcp.Peer, username string, key ed25519.PrivateKey) (access.Session, error) {
 	if s == nil || !s.ready || !cliprofile.ValidUsername(username) {
 		return access.Session{}, ErrPrivateState
 	}
 	if _, err := s.migrateLegacy(c); err != nil {
 		return access.Session{}, err
 	}
+	// A login relayed through peer may come from an issuer that peer
+	// vouched for; the record is checked against the pins plus that one.
+	var vouched []sfcp.Peer
+	if trust := c.TrustIssuer; trust != nil {
+		c.TrustIssuer = func(p sfcp.Peer) error {
+			if err := trust(p); err != nil {
+				return err
+			}
+			vouched = append(vouched, p)
+			return nil
+		}
+	}
 	session, err := c.Login(ctx, peer, username, key)
 	if err != nil {
 		return access.Session{}, err
 	}
+	c.Peers = append(slices.Clone(c.Peers), vouched...)
 	if err := s.activate(c, username, session); err != nil {
 		return access.Session{}, err
 	}
 	return session, nil
 }
 
-func (s *CredentialStore) PasswordOrToken(ctx context.Context, c Client, peer mydcp.Peer, username string, method access.Method, credential string, secret []byte) (access.Session, error) {
+func (s *CredentialStore) PasswordOrToken(ctx context.Context, c Client, peer sfcp.Peer, username string, method access.Method, credential string, secret []byte) (access.Session, error) {
 	return s.passwordOrToken(ctx, c, peer, username, method, credential, secret, nil)
 }
 
@@ -231,14 +245,14 @@ func (s *CredentialStore) PasswordOrToken(ctx context.Context, c Client, peer my
 // its scope ceiling, adding a delegation by an explicitly selected user key.
 // The approval key is not retained in the login record or used as a fallback
 // authentication method. The cluster checks its current account registration.
-func (s *CredentialStore) PasswordOrTokenApproved(ctx context.Context, c Client, peer mydcp.Peer, username string, method access.Method, credential string, secret []byte, key ed25519.PrivateKey) (access.Session, error) {
+func (s *CredentialStore) PasswordOrTokenApproved(ctx context.Context, c Client, peer sfcp.Peer, username string, method access.Method, credential string, secret []byte, key ed25519.PrivateKey) (access.Session, error) {
 	if len(key) != ed25519.PrivateKeySize {
 		return access.Session{}, ErrPrivateState
 	}
 	return s.passwordOrToken(ctx, c, peer, username, method, credential, secret, key)
 }
 
-func (s *CredentialStore) passwordOrToken(ctx context.Context, c Client, peer mydcp.Peer, username string, method access.Method, credential string, secret []byte, key ed25519.PrivateKey) (access.Session, error) {
+func (s *CredentialStore) passwordOrToken(ctx context.Context, c Client, peer sfcp.Peer, username string, method access.Method, credential string, secret []byte, key ed25519.PrivateKey) (access.Session, error) {
 	if s == nil || !s.ready || !cliprofile.ValidUsername(username) {
 		return access.Session{}, ErrPrivateState
 	}

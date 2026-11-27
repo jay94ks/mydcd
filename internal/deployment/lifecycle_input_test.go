@@ -11,13 +11,13 @@ import (
 	"strings"
 	"testing"
 
-	checker "github.com/jay94ks/mydcd/internal/workload/lifecycle"
+	checker "github.com/jay94ks/seafield/internal/workload/lifecycle"
 	"gopkg.in/yaml.v3"
 )
 
 // A bounded parser fixture, not a compiler/runner or container success proof.
 func lifecycleInputDocument() string {
-	raw := strings.Replace(appInputDocument(), "x-mydc: {}", `x-mydc:
+	raw := strings.Replace(appInputDocument(), "x-sfc: {}", `x-sfc:
   lifecycle:
     optimizer: {compile: true}
     scripts:
@@ -32,7 +32,7 @@ func lifecycleInputDocument() string {
       image: {builtin: docker_health}
     checks:
       - {id: all-ready, phase: readiness, builtin: depends_on, parameters: {services: [web], condition: service_healthy}}`, 1)
-	return strings.Replace(raw, "x-mydc: {node: node-a}", `x-mydc:
+	return strings.Replace(raw, "x-sfc: {node: node-a}", `x-sfc:
       node: node-a
       lifecycle:
         checks:
@@ -181,7 +181,7 @@ func TestAppLifecycleDependenciesShareOriginalDAGAndDoNotMutateInput(t *testing.
 	c.Services["web"] = web
 	db := c.Services["web"]
 	db.DependsOn = nil
-	db.MyDC.Lifecycle = &ServiceLifecycle{Checks: []LifecycleCheck{{ID: "wait-web", Phase: "startup", LifecycleTemplate: LifecycleTemplate{Builtin: "depends_on", Parameters: LifecycleParameters(`{"services":["web"],"condition":"service_started"}`)}}}}
+	db.Sfc.Lifecycle = &ServiceLifecycle{Checks: []LifecycleCheck{{ID: "wait-web", Phase: "startup", LifecycleTemplate: LifecycleTemplate{Builtin: "depends_on", Parameters: LifecycleParameters(`{"services":["web"],"condition":"service_started"}`)}}}}
 	c.Services["db"] = db
 	before, _ := json.Marshal(c)
 	if _, _, err := c.LifecycleProgram(); err == nil || !strings.Contains(err.Error(), "DEPENDENCY_CYCLE") {
@@ -208,9 +208,9 @@ func TestAppLifecycleCannotDeployBeforePinsAndRunnerAreConnected(t *testing.T) {
 	if bytes.Contains(old, []byte(`"Lifecycle"`)) || bytes.Contains(old, []byte(`"LifecycleSources"`)) {
 		t.Fatal("absent lifecycle changed schema1 artifact")
 	}
-	c.MyDC.Lifecycle = &LifecycleDeclaration{Templates: map[string]LifecycleTemplate{"image": {Builtin: "docker_health"}}}
+	c.Sfc.Lifecycle = &LifecycleDeclaration{Templates: map[string]LifecycleTemplate{"image": {Builtin: "docker_health"}}}
 	svc := c.Services["web"]
-	svc.MyDC.Lifecycle = &ServiceLifecycle{Checks: []LifecycleCheck{{ID: "image", Use: "image", Phase: "readiness"}}}
+	svc.Sfc.Lifecycle = &ServiceLifecycle{Checks: []LifecycleCheck{{ID: "image", Use: "image", Phase: "readiness"}}}
 	c.Services["web"] = svc
 	if _, err := CompileApp(c, f.c, ctx); err == nil || !strings.Contains(err.Error(), "FEATURE_UNAVAILABLE: lifecycle") {
 		t.Fatal("parsed declaration was accepted as an executable Task", err)
@@ -228,14 +228,14 @@ func TestAppLifecyclePlanningUsesCurrentPolicyAndExactNamedMetadata(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	c.MyDC.Tenant = "tenant" // the server sets the tenant from the request scope
-	c.MyDC.Lifecycle.Optimizer.Compile = false
-	script := c.MyDC.Lifecycle.Scripts["registered"]
+	c.Sfc.Tenant = "tenant" // the server sets the tenant from the request scope
+	c.Sfc.Lifecycle.Optimizer.Compile = false
+	script := c.Sfc.Lifecycle.Scripts["registered"]
 	script.Ref.Revision = 1
-	c.MyDC.Lifecycle.Scripts["registered"] = script
+	c.Sfc.Lifecycle.Scripts["registered"] = script
 	policy := checker.TenantPolicy{Tenant: "tenant", Enabled: true,
 		Execution: checker.ExecutionPolicy{MaxConcurrent: 1, TimeoutMS: 5000, NanoCPU: 100000000, MemoryBytes: 32 << 20, MaxPIDs: 16, OutputBytes: 4096, ProbeBytes: 4096, Capabilities: []string{"file"}},
-		Resolver:  checker.ResolverPolicy{AllowPackages: []string{"context", "github.com/jay94ks/mydcd/lifecycle/v1"}, SourceCacheBytes: 1 << 20}}
+		Resolver:  checker.ResolverPolicy{AllowPackages: []string{"context", "github.com/jay94ks/seafield/lifecycle/v1"}, SourceCacheBytes: 1 << 20}}
 	book, err := checker.NewCatalog(f.cluster)
 	if err != nil {
 		t.Fatal(err)
@@ -255,11 +255,11 @@ func TestAppLifecyclePlanningUsesCurrentPolicyAndExactNamedMetadata(t *testing.T
 	if err != nil || r.Scripts["registered"].Ref.Revision != 1 || r.Scripts["registered"].Compile || r.Services["web"][0].Timing.IntervalMS != 10000 {
 		t.Fatal("current metadata resolution", err)
 	}
-	c.MyDC.Lifecycle.Optimizer.Compile = true
+	c.Sfc.Lifecycle.Optimizer.Compile = true
 	if _, err := c.ResolveLifecycle(book); err == nil || !strings.Contains(err.Error(), "LIFECYCLE_BUILDER_REQUIRED") {
 		t.Fatal("compile=true invented a builder", err)
 	}
-	c.MyDC.Lifecycle.Optimizer.Compile = false
+	c.Sfc.Lifecycle.Optimizer.Compile = false
 	short := policy
 	short.Execution.TimeoutMS = 500
 	shortBook, err := book.SetPolicy(f.c, "alice", 1, short)

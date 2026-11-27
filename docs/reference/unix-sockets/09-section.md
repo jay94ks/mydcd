@@ -18,17 +18,17 @@
 
 | 필드 | 타입 | 규칙 |
 |---|---|---|
-| `Body` | bytes | User면 canonical Request, SecretInput이면 SecretRequest, ContainerSession이면 ContainerSessionRequest, ImageContent이면 ImageContentRequest, NodeShell이면 NodeShellRequest JSON의 바이트 |
+| `Body` | json.RawMessage(서명한 바이트 그대로) | User면 canonical Request, SecretInput이면 SecretRequest, ContainerSession이면 ContainerSessionRequest, ImageContent이면 ImageContentRequest, NodeShell이면 NodeShellRequest JSON의 바이트 |
 | `Session` | Session, 선택 | 로그인 후 요청의 현재 사용자 세션 |
 | `Signature` | bytes, 선택 | 요청 서명. 인증 전 challenge 요청에는 없음 |
 | `Relay` | 객체, 선택 | Unix client는 **생략**한다. node 간 relay 수신은 이 끝점에서 허용하지 않음 |
 
-포장 순서는 `B = Marshal(Request 또는 SecretRequest)` → `E = Marshal(Envelope{Body:B,...})` → TLV1=`E`, TLV2=`SHA256(E)`다. Body가 JSON 객체로 중첩되는 것이 아니라 base64 문자열로 들어간다는 점에 주의한다. 응답 TLV2도 **원 E의 digest**이며 Reply의 digest가 아니다.
+포장 순서는 `B = Marshal(Request 또는 SecretRequest)` → `E = Marshal(Envelope{Body:B,...})` → TLV1=`E`, TLV2=`SHA256(E)`다. Body는 base64 문자열이 아니라 B가 JSON 값 그대로 들어간다(B는 compact JSON이어야 하며, 받는 쪽은 그 바이트를 그대로 꺼내 서명을 확인한다). 응답 TLV2도 **원 E의 digest**이며 Reply의 digest가 아니다.
 
 세션 요청 Signature는 `Session.Key`에 해당하는 Ed25519 개인키로 다음 바이트를 서명한다. `challenge`는 현재 서버가 낸 연결 challenge다.
 
 ```text
-"mydc-user-request-1\x00" || Session.Cluster[32] ||
+"sfc-user-request-1\x00" || Session.Cluster[32] ||
 u64LE(len(Session.ID의 UTF-8 바이트)) || Session.ID || challenge[32] ||
 u64LE(len(B)) || B
 ```

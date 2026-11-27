@@ -6,9 +6,9 @@ import (
 	"context"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/mydcp"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/sfcp"
 )
 
 // Private to ONE source packet admission. Only a successful source-local
@@ -46,7 +46,7 @@ func (r *Runtime) readRouteAdmissionAuthority(ctx context.Context, admission rou
 		return view, projection, work, err
 	}
 	if !admission.allows(ctx, r.Identity.Public, view.State.Index(), work, time.Now()) {
-		return view, projection, work, mydcp.ErrAdmission
+		return view, projection, work, sfcp.ErrAdmission
 	}
 	return view, projection, work, nil
 }

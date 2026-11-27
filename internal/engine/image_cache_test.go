@@ -12,7 +12,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/imagecache"
+	"github.com/jay94ks/seafield/internal/imagecache"
 	"github.com/moby/moby/client"
 )
 

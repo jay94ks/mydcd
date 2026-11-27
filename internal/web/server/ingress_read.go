@@ -7,16 +7,16 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/ingress"
-	"github.com/jay94ks/mydcd/internal/web/mydc"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/ingress"
+	"github.com/jay94ks/seafield/internal/web/sfc"
 )
 
-// Reading mydcd's `ingresses` (REQ-22, docs/reference/ingress-management.md)
+// Reading sfcd's `ingresses` (REQ-22, docs/reference/ingress-management.md)
 // in full. A mappings page holds one mapping; its listeners, routes,
 // backends, blocks and Runtime certificates/listeners/backends/blocks come
 // 4 at a time by Offset, and so do the node's shared listener bindings.
-// mydcd decides which rows the person sees; the web only joins the pages.
+// sfcd decides which rows the person sees; the web only joins the pages.
 
 const (
 	ingressMaxPages = 64  // mappings read per screen
@@ -42,7 +42,7 @@ func (v *ingressView) node(name string) *control.IngressNodeSummary {
 
 // ingressRead reads every mapping matching q (Node/Tenant/App/Key; Part and
 // paging are set here) with its inner pages joined.
-func ingressRead(ctx context.Context, c mydc.Conn, q control.IngressQuery) (*ingressView, error) {
+func ingressRead(ctx context.Context, c sfc.Conn, q control.IngressQuery) (*ingressView, error) {
 	q.Part, q.Offset, q.After = "", 0, ""
 	out := &ingressView{nodeAt: map[string]int{}}
 	for range ingressMaxPages {
@@ -76,7 +76,7 @@ func ingressRead(ctx context.Context, c mydc.Conn, q control.IngressQuery) (*ing
 
 // ingressMappingRest reads the offset pages after the first one of m and
 // joins them into m. With gateways, the node's binding pages are joined too.
-func ingressMappingRest(ctx context.Context, c mydc.Conn, q control.IngressQuery, m control.IngressMapping, gateways bool, v *ingressView) (control.IngressMapping, error) {
+func ingressMappingRest(ctx context.Context, c sfc.Conn, q control.IngressQuery, m control.IngressMapping, gateways bool, v *ingressView) (control.IngressMapping, error) {
 	more := func(p *control.IngressNodeSummary) bool {
 		if !gateways || p == nil {
 			return false
@@ -174,7 +174,7 @@ func joinGateways(n *control.IngressNodeSummary, x control.IngressNodeSummary) {
 
 // ingressMetrics reads Part metrics (recent 60 s) or errors of one mapping
 // with its dimension pages joined.
-func ingressMetrics(ctx context.Context, c mydc.Conn, key, tenant, part string) (*ingress.Metrics, error) {
+func ingressMetrics(ctx context.Context, c sfc.Conn, key, tenant, part string) (*ingress.Metrics, error) {
 	q := control.IngressQuery{Key: key, Tenant: tenant, Part: part}
 	var out *ingress.Metrics
 	for range ingressMaxInner {
@@ -211,7 +211,7 @@ func ingressMetrics(ctx context.Context, c mydc.Conn, key, tenant, part string) 
 }
 
 // ingressPaged reads Part blocks or policies (numeric Offset in Next).
-func ingressPaged(ctx context.Context, c mydc.Conn, q control.IngressQuery) (control.IngressPage, error) {
+func ingressPaged(ctx context.Context, c sfc.Conn, q control.IngressQuery) (control.IngressPage, error) {
 	var out control.IngressPage
 	q.Offset, q.After = 0, ""
 	for i := range ingressMaxInner {

@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/cluster/state"
 )
 
 // Simulated committed claims are inputs to the real compiler and retirement
@@ -24,7 +24,7 @@ func replacementCoreFixture(t *testing.T) (Inventory, Blueprint, *fixture, Plann
 	f, input, ctx := replicaFixture(t)
 	i := &IngressDeclaration{Node: "node-a", Host: "app.test", Listeners: []ListenerDeclaration{{Address: "192.0.2.11:8080"}}, Runtime: IngressRuntime{MaxRequests: 2, MaxConnections: 8, MaxHeaderBytes: 4096, MaxBodyBytes: 1 << 20, BufferBytes: 128 << 10, RequestTimeoutMS: 30000, DialTimeoutMS: 1000, ResponseHeaderTimeoutMS: 2000, HealthIntervalMS: 100}}
 	i.Backend.Service, i.Backend.Port, i.Backend.HealthPath = "web", 8080, "/readyz"
-	input.MyDC.Ingress = i
+	input.Sfc.Ingress = i
 	original, err := CompileApp(input, f.c, ctx)
 	if err != nil {
 		t.Fatal(err)

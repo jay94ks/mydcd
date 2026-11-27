@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// Package acme is mydc-web's certificate automation layer (devel/design/
+// Package acme is sfc-web's certificate automation layer (devel/design/
 // web-acme-plan.md). The ACME client, DNS-01 records and renewal schedule
-// all run inside mydc-web; mydcd only stores the result in its certificate
+// all run inside sfc-web; sfcd only stores the result in its certificate
 // store (REQUEST.md REQ-21). Only DNS-01 is used.
 package acme
 
@@ -129,7 +129,22 @@ type CA interface {
 	Validate(ctx context.Context, key crypto.Signer, account string, o Order) error
 	// Finalize sends the CSR and returns the issued chain (DER, leaf first).
 	Finalize(ctx context.Context, key crypto.Signer, account string, o Order, csr []byte) ([][]byte, error)
-	Revoke(ctx context.Context, key crypto.Signer, account string, certDER []byte) error
+	// Revoke revokes certDER, signed by the account key, with an RFC 5280
+	// reason (one of RevokeReasons).
+	Revoke(ctx context.Context, key crypto.Signer, account string, certDER []byte, reason RevokeReason) error
+}
+
+// RevokeReason is a revocation reason of the web API, by its RFC 5280 name.
+type RevokeReason string
+
+// RevokeReasons maps each accepted reason to its RFC 5280 CRLReason code.
+// A CA may refuse keyCompromise when the request is signed by the account
+// key instead of the certificate key (Let's Encrypt does).
+var RevokeReasons = map[RevokeReason]int{
+	"unspecified":          0,
+	"keyCompromise":        1,
+	"superseded":           4,
+	"cessationOfOperation": 5,
 }
 
 func pick(method Method, name string) string {

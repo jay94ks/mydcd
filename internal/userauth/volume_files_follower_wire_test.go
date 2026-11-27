@@ -18,19 +18,19 @@ import (
 	"time"
 
 	"github.com/hashicorp/raft"
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/config"
-	"github.com/jay94ks/mydcd/internal/engine"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/reconcile"
-	"github.com/jay94ks/mydcd/internal/workload/volumes"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/config"
+	"github.com/jay94ks/seafield/internal/engine"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/workload/volumes"
 )
 
-// Real loopback TLS/MYDCP, SDK Raft and bbolt command publication. Transport
+// Real loopback TLS/SFCP, SDK Raft and bbolt command publication. Transport
 // membership and signed native Volume facts are declared fixture inputs; the
 // runner records I/O calls and claims no Docker/file publication or native Gone.
 type volumeFileWireFixture struct {
@@ -39,15 +39,18 @@ type volumeFileWireFixture struct {
 	policy  control.Policy
 	user    *identity.Identity
 	nodes   [3]*identity.Identity
-	peers   [3]mydcp.Peer
+	peers   [3]sfcp.Peer
 	engines [3]*cluster.Engine
-	meshes  [3]*mydcp.Transport
+	meshes  [3]*sfcp.Transport
 	client  Client
 	session access.Session
 	service Service
 	blocked atomic.Bool
-	serial  int
-	job     control.VolumeFileJob
+	// publicUserAuth admits any other TLS key for user authentication only,
+	// as the real runtime does, so an actual CLI with its own key can log in.
+	publicUserAuth atomic.Bool
+	serial         int
+	job            control.VolumeFileJob
 }
 
 func newVolumeFileWireFixture(t *testing.T) *volumeFileWireFixture {
@@ -67,24 +70,27 @@ func newVolumeFileWireFixture(t *testing.T) *volumeFileWireFixture {
 	f.user = key()
 	for i := range f.nodes {
 		f.nodes[i] = key()
-		f.peers[i] = mydcp.Peer{ID: fmt.Sprintf("node-%c", 'a'+i), Policy: mydcp.Policy{Key: mydcp.Identity(f.nodes[i].Public), Member: true, Manage: true, Read: true, Respond: true, Snapshot: true}}
+		f.peers[i] = sfcp.Peer{ID: fmt.Sprintf("node-%c", 'a'+i), Policy: sfcp.Policy{Key: sfcp.Identity(f.nodes[i].Public), Member: true, Manage: true, Read: true, Respond: true, Snapshot: true}}
 	}
 	clusterID := [32]byte{218}
-	lookup := func(k mydcp.Identity) (mydcp.Peer, bool) {
-		if k == mydcp.Identity(f.user.Public) {
-			return mydcp.Peer{ID: "user", Policy: mydcp.Policy{Key: k, UserAuth: true}}, true
+	lookup := func(k sfcp.Identity) (sfcp.Peer, bool) {
+		if k == sfcp.Identity(f.user.Public) {
+			return sfcp.Peer{ID: "user", Policy: sfcp.Policy{Key: k, UserAuth: true}}, true
 		}
 		for _, peer := range f.peers {
 			if k == peer.Key {
 				return peer, true
 			}
 		}
-		return mydcp.Peer{}, false
+		if f.publicUserAuth.Load() {
+			return sfcp.Peer{ID: "public", Policy: sfcp.Policy{Key: k, UserAuth: true}}, true
+		}
+		return sfcp.Peer{}, false
 	}
 	for i := range f.nodes {
-		mesh, err := mydcp.NewTransportWithPurposeLookup(f.nodes[i], clusterID, func(k mydcp.Identity, purpose mydcp.Purpose) (mydcp.Peer, bool) {
-			if f.blocked.Load() && (i == 0 || k == f.peers[0].Key) && (purpose == mydcp.Raft || purpose == mydcp.Snapshot) {
-				return mydcp.Peer{}, false
+		mesh, err := sfcp.NewTransportWithPurposeLookup(f.nodes[i], clusterID, func(k sfcp.Identity, purpose sfcp.Purpose) (sfcp.Peer, bool) {
+			if f.blocked.Load() && (i == 0 || k == f.peers[0].Key) && (purpose == sfcp.Raft || purpose == sfcp.Snapshot) {
+				return sfcp.Peer{}, false
 			}
 			return lookup(k)
 		})
@@ -93,6 +99,10 @@ func newVolumeFileWireFixture(t *testing.T) *volumeFileWireFixture {
 		}
 		f.meshes[i] = mesh
 		t.Cleanup(func() { _ = mesh.Close() })
+		// As the real runtime does, so a CLI can add a context for this node.
+		if err = mesh.EnableDiscovery(f.peers[i].ID); err != nil {
+			t.Fatal(err)
+		}
 		if err = mesh.Listen("127.0.0.1:0"); err != nil {
 			t.Fatal(err)
 		}
@@ -106,13 +116,13 @@ func newVolumeFileWireFixture(t *testing.T) *volumeFileWireFixture {
 	root := t.TempDir()
 	for i := range f.nodes {
 		e, err := cluster.Open(cluster.Options{ID: f.peers[i].ID, Root: filepath.Join(root, f.peers[i].ID), Admin: f.user.Actor(), Cluster: clusterID, Mesh: f.meshes[i], Bootstrap: i == 0, Servers: servers,
-			Resolve: func(id raft.ServerID, _ raft.ServerAddress) (mydcp.Peer, bool) {
+			Resolve: func(id raft.ServerID, _ raft.ServerAddress) (sfcp.Peer, bool) {
 				for _, peer := range f.peers {
 					if peer.ID == string(id) {
 						return peer, true
 					}
 				}
-				return mydcp.Peer{}, false
+				return sfcp.Peer{}, false
 			}, ModuleID: f.policy.ID(), Validate: f.policy.ValidateManaged, Reduce: f.policy.Reduce, AdmitModule: f.policy.AdmitModule, AdmitMutation: f.policy.AdmitAppMutation, AdmitModulePatch: f.policy.AdmitAppPatch})
 		if err != nil {
 			t.Fatal(err)
@@ -146,7 +156,7 @@ func newVolumeFileWireFixture(t *testing.T) *volumeFileWireFixture {
 		t.Fatal(err)
 	}
 	tenant, _ := catalog.Tenant("tenant")
-	f.change("set-nodes", tenant.Revision, control.NodeAssignment{Tenant: "tenant", Nodes: []string{f.peers[0].ID}})
+	f.change("set-nodes", tenant.Revision, control.NodeChangeTo("tenant", tenant.AllowedNodes, []string{f.peers[0].ID}))
 	scope := volumes.Scope{Cluster: clusterID, Tenant: "tenant", App: "app", ID: "data", Generation: 1}
 	spec := volumes.NativeSpec{Schema: 1, Scope: scope, Node: f.peers[0].ID, NodeKey: f.nodes[0].Public, Materialization: "initial", UID: 10001, GID: 10001, Mode: 0750, Retain: true}
 	raw, _ := json.Marshal(spec)
@@ -165,12 +175,12 @@ func newVolumeFileWireFixture(t *testing.T) *volumeFileWireFixture {
 	}
 	f.job = book.VolumeFiles()[0]
 	f.service = Service{Engine: f.engines[0], Mesh: f.meshes[0], Self: f.nodes[0], Policy: f.policy}
-	mesh, err := mydcp.NewTransport(f.user, clusterID, lookup)
+	mesh, err := sfcp.NewTransport(f.user, clusterID, lookup)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = mesh.Close() })
-	f.client = Client{Mesh: mesh, Self: f.user, Cluster: clusterID, Peers: []mydcp.Peer{f.peers[0]}}
+	f.client = Client{Mesh: mesh, Self: f.user, Cluster: clusterID, Peers: []sfcp.Peer{f.peers[0]}}
 	f.wait(func() bool {
 		view, err := f.engines[0].Read(ctx, false)
 		return err == nil && view.State.Index() >= f.read().State.Index()
@@ -241,10 +251,7 @@ func (f *volumeFileWireFixture) revoke() {
 		f.t.Fatal(err)
 	}
 	u, _ := c.User("admin")
-	u.Credentials[0].Label = "revoked-old-session-revision"
-	expected := u.Revision
-	u.Revision = 0
-	f.change("put-user", expected, u)
+	f.change("put-user", u.Revision, access.User{ID: u.ID, Username: "revoked-old-session-revision", Enabled: u.Enabled, SystemAdmin: u.SystemAdmin})
 }
 
 func TestVolumeFileActualFollowerOwnerQuorumAndCurrentUserGates(t *testing.T) {
@@ -256,7 +263,7 @@ func TestVolumeFileActualFollowerOwnerQuorumAndCurrentUserGates(t *testing.T) {
 			f.service.VolumeFiles = func(ctx context.Context, session access.Session, job control.VolumeFileJob, boundary VolumeFileIO) (VolumeFileReply, error) {
 				calls.Add(1)
 				if job.ID != f.job.ID || job.Consumer != f.job.Consumer || !sameSession(session, f.session) || job.Native.Owner.Key != f.nodes[0].Public || f.engines[0].IsLeader() || boundary.Epoch == 0 {
-					return VolumeFileReply{}, mydcp.ErrAdmission
+					return VolumeFileReply{}, sfcp.ErrAdmission
 				}
 				for offset := 0; offset < len(body); offset += 24 << 10 {
 					if mode == "mid-io-revoked" && offset > 0 {
@@ -271,7 +278,7 @@ func TestVolumeFileActualFollowerOwnerQuorumAndCurrentUserGates(t *testing.T) {
 				}
 				return VolumeFileReply{Schema: 1, ID: job.ID, Code: "ok", Result: &volumes.FileResult{Path: job.Request.Path, Size: int64(len(body)), Digest: sha256.Sum256(body)}}, nil
 			}
-			if err := f.meshes[0].OnManagement(mydcp.VolumeFile, f.service.handleVolumeFile); err != nil {
+			if err := f.meshes[0].OnManagement(sfcp.VolumeFile, f.service.handleVolumeFile); err != nil {
 				t.Fatal(err)
 			}
 			if mode == "pre-io-denied" {
@@ -296,7 +303,7 @@ func TestVolumeFileActualFollowerOwnerQuorumAndCurrentUserGates(t *testing.T) {
 			if mode == "node-relay-without-user-proof" {
 				relay := Client{Mesh: f.meshes[1], Self: f.nodes[1], Cluster: f.policy.Cluster}
 				q := VolumeFileRequest{Schema: 1, ID: f.job.ID, ExpiresAt: time.Now().Add(time.Minute).Unix(), Nonce: [32]byte{1}}
-				got, err = relay.volumeFileExchange(callCtx, f.peers[0], q, f.job, nil, &received, 3, func(conn *mydcp.Session, body []byte) (Envelope, error) {
+				got, err = relay.volumeFileExchange(callCtx, f.peers[0], q, f.job, nil, &received, 3, func(conn *sfcp.Session, body []byte) (Envelope, error) {
 					e := Envelope{Body: body, Session: &f.session}
 					e.Relay = &Relay{Node: f.nodes[1].Public, Target: f.nodes[0].Public, Caller: f.user.Public, Challenge: [32]byte{2}, Connection: conn.PeerChallenge()}
 					// A correctly signed node attestation must not mint the

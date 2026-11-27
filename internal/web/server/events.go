@@ -9,12 +9,12 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/jay94ks/mydcd/internal/eventlog"
-	"github.com/jay94ks/mydcd/internal/web/mydc"
+	"github.com/jay94ks/seafield/internal/eventlog"
+	"github.com/jay94ks/seafield/internal/web/sfc"
 )
 
 // webEvent: one observation event as the screens, incident watch and
-// webhooks use it (Unix seconds). It is made from mydcd's events row
+// webhooks use it (Unix seconds). It is made from sfcd's events row
 // (eventOf); the daemon also makes its own samples (route metrics,
 // listener limits, certificate ends) in the same shape. Target and Detail
 // are display text built from the row's Target and Detail fields.
@@ -48,7 +48,7 @@ type webCDEvent struct {
 }
 
 // webIngressEvent: the ingress-* details (Target.Gateway, RouteID, Host,
-// Prefix; Detail.Value). Listener / Metric / Threshold are not from mydcd:
+// Prefix; Detail.Value). Listener / Metric / Threshold are not from sfcd:
 // the daemon's own samples set them.
 type webIngressEvent struct {
 	Gateway   string
@@ -61,7 +61,7 @@ type webIngressEvent struct {
 	Threshold float64 `json:",omitempty"`
 }
 
-func eventOf(it mydc.EventItem) webEvent {
+func eventOf(it sfc.EventItem) webEvent {
 	t, d := it.Target, it.Detail
 	e := webEvent{Cursor: it.Cursor, Time: int64(it.At / 1000), Scope: it.Scope, Tenant: t.Tenant, App: t.App, Node: t.Node, Network: t.Network, PairID: t.PairID,
 		Kind: it.Kind, Target: eventTarget(t), Detail: eventDetail(d), ShellClosedBy: d.ClosedBy}
@@ -123,8 +123,8 @@ func nonEmpty(v ...string) []string {
 func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request, ws *webSession) {
 	q := r.URL.Query()
 	limit, _ := strconv.Atoi(q.Get("limit"))
-	query := mydc.EventQuery{Tenant: q.Get("tenant"), App: q.Get("app"), Node: q.Get("node"), Kind: q.Get("kind"), After: q.Get("since"), Limit: min(max(limit, 0), 100)}
-	read(s, w, r, ws, func(ctx context.Context, c mydc.Conn) (listPage, error) {
+	query := sfc.EventQuery{Tenant: q.Get("tenant"), App: q.Get("app"), Node: q.Get("node"), Kind: q.Get("kind"), After: q.Get("since"), Limit: min(max(limit, 0), 100)}
+	read(s, w, r, ws, func(ctx context.Context, c sfc.Conn) (listPage, error) {
 		p, err := c.Events(ctx, query)
 		if err != nil {
 			return listPage{}, err

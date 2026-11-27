@@ -6,10 +6,10 @@ import (
 	"encoding/hex"
 	"slices"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/config"
-	"github.com/jay94ks/mydcd/internal/secrets"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/config"
+	"github.com/jay94ks/seafield/internal/secrets"
 )
 
 type VaultWritePlanRequest struct {
@@ -26,6 +26,9 @@ type VaultWritePlan struct {
 	Write                                  *VaultWriteView           `json:",omitempty"`
 	Observation                            *secrets.WriteObservation `json:",omitempty"`
 	Receiver                               *config.Peer              `json:",omitempty"`
+	// Voters, for a builtin write no voter has reported yet: any of them
+	// may take the values. The client picks one it reaches and keeps it.
+	Voters []config.Peer `json:",omitempty"`
 }
 
 func (p Policy) PlanVaultWrite(s state.State, session access.Session, at int64, q VaultWritePlanRequest) (VaultWritePlan, error) {
@@ -83,6 +86,35 @@ func (p Policy) PlanVaultWrite(s state.State, session access.Session, at int64, 
 	members, err := p.Members(s)
 	if err != nil {
 		return plan, err
+	}
+	if profile.Builtin() {
+		// The voter that signed the observation holds the original sealed
+		// value; before one exists, the first current voter writes it.
+		voters := members.SessionIssuers()
+		reported := plan.Observation != nil && members.VoterKey(plan.Observation.Reporter)
+		if reported {
+			voters = [][32]byte{plan.Observation.Reporter}
+		}
+		for _, key := range voters {
+			for _, e := range members.Entries {
+				if e.CurrentPeer().Key == hex.EncodeToString(key[:]) {
+					peer := e.CurrentPeer()
+					if plan.Receiver == nil {
+						plan.Receiver = &peer
+					}
+					if !reported {
+						plan.Voters = append(plan.Voters, peer)
+					}
+				}
+			}
+		}
+		if plan.Receiver != nil {
+			return plan, nil
+		}
+		if plan.Write == nil {
+			return plan, access.ErrDenied
+		}
+		return plan, nil
 	}
 	entry, found := members.Entry(profile.Node)
 	if plan.Write == nil && (!found || !members.WorkKey(profile.Key)) {

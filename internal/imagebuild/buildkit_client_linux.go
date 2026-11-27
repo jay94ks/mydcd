@@ -10,7 +10,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/reconcile"
 	bkclient "github.com/moby/buildkit/client"
 	"golang.org/x/sys/unix"
 	"google.golang.org/grpc"

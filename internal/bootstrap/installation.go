@@ -18,11 +18,11 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/jay94ks/mydcd/internal/cluster/lifecycle"
-	"github.com/jay94ks/mydcd/internal/cluster/membership"
-	"github.com/jay94ks/mydcd/internal/config"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/storage"
+	"github.com/jay94ks/seafield/internal/cluster/lifecycle"
+	"github.com/jay94ks/seafield/internal/cluster/membership"
+	"github.com/jay94ks/seafield/internal/config"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/storage"
 )
 
 var ErrInstallation = errors.New("invalid, missing or conflicting explicit node installation")
@@ -38,19 +38,40 @@ type Record struct {
 	Signature []byte
 	Join      *membership.Invitation `json:",omitempty"`
 	Ack       *membership.Ack        `json:",omitempty"`
+	// Listen is node.yaml's listen address after the server moved
+	// (`sfcd set-listen`); Endpoint stays the address it was installed with,
+	// which the genesis and the invitation bind.
+	Listen string `json:",omitempty"`
+}
+
+// CurrentListen is the listen address node.yaml must have.
+func (r Record) CurrentListen() string {
+	if r.Listen != "" {
+		return r.Listen
+	}
+	return r.Endpoint
 }
 
 func signingBytes(r Record) []byte {
 	r.Signature = nil
 	b, _ := json.Marshal(r)
-	return append([]byte("mydc-installation-1\x00"), b...)
+	return append([]byte("sfc-installation-1\x00"), b...)
 }
 func (r Record) Validate() error {
 	key, err := identity.ParseKey(r.Genesis.Key)
 	if r.Schema != 1 || r.Root.Validate() != nil || r.Admin == ([32]byte{}) || err != nil || key != r.Root.TrustRoot || !r.Genesis.Voter || !lifecycle.ValidID(r.Genesis.ID) || config.ValidateCanonicalEndpoint(r.Genesis.Endpoint) != nil || config.ValidateCanonicalEndpoint(r.Endpoint) != nil || !ed25519.Verify(ed25519.PublicKey(r.Root.Self.Key[:]), signingBytes(r), r.Signature) {
 		return ErrInstallation
 	}
-	if r.Root.Intent == lifecycle.Init {
+	if r.Listen != "" && (r.Listen == r.Endpoint || config.ValidateCanonicalEndpoint(r.Listen) != nil) {
+		return ErrInstallation
+	}
+	if r.Root.Intent == lifecycle.RestoreIntent {
+		// A new server rebuilt the cluster from a backup: the genesis is the
+		// original one (it binds the stored records), not this server.
+		if r.Join != nil || r.Ack != nil || r.Genesis.ID == r.Root.Self.ID || key == r.Root.Self.Key {
+			return ErrInstallation
+		}
+	} else if r.Root.Intent == lifecycle.Init {
 		if r.Join != nil || r.Ack != nil || r.Genesis.ID != r.Root.Self.ID || r.Genesis.Endpoint != r.Endpoint {
 			return ErrInstallation
 		}
@@ -85,6 +106,14 @@ func checkManaged(c config.Node) error {
 }
 
 func Read(c config.Node) (Record, error) {
+	r, err := readRecord(c)
+	if err == nil && c.Node.Listen != r.CurrentListen() {
+		return Record{}, fmt.Errorf("%w: node.yaml listen %s is not this server's address %s; after the server moved, run 'sfcd set-listen'", ErrInstallation, c.Node.Listen, r.CurrentListen())
+	}
+	return r, err
+}
+
+func readRecord(c config.Node) (Record, error) {
 	if checkManaged(c) != nil {
 		return Record{}, ErrInstallation
 	}
@@ -120,7 +149,7 @@ func Read(c config.Node) (Record, error) {
 		return Record{}, err
 	}
 	defer clear(self.Private)
-	if r.Root.Resume(r.Root.Cluster, lifecycle.Member{ID: c.Node.ID, Key: self.Public}) != nil || c.Node.Listen != r.Endpoint {
+	if r.Root.Resume(r.Root.Cluster, lifecycle.Member{ID: c.Node.ID, Key: self.Public}) != nil {
 		return Record{}, ErrInstallation
 	}
 	if c.Common.Cluster != "" && c.Common.Cluster != hex.EncodeToString(r.Root.Cluster[:]) || c.Common.Admin != "" && c.Common.Admin != hex.EncodeToString(r.Admin[:]) {
@@ -144,6 +173,10 @@ func Effective(c config.Node) (config.Node, Record, error) {
 	}
 	c.Common.Cluster, c.Common.Admin = hex.EncodeToString(r.Root.Cluster[:]), hex.EncodeToString(r.Admin[:])
 	c.Common.Peers = []config.Peer{r.Genesis}
+	if r.Root.Intent == lifecycle.RestoreIntent {
+		// The original genesis is gone; this server is the only voter.
+		c.Common.Peers = []config.Peer{{ID: r.Root.Self.ID, Key: identityHex(r.Root.Self.Key), Endpoint: r.Endpoint, Voter: true}}
+	}
 	if r.Join != nil {
 		if r.Join.Source.ID != r.Genesis.ID {
 			c.Common.Peers = append(c.Common.Peers, r.Join.Source)
@@ -313,4 +346,36 @@ func emptyRoot(c config.Node) error {
 	}
 
 	return nil
+}
+
+// SetListen records node.yaml's listen address as this server's address
+// after the server moved (its IP or port changed). It changes only this
+// server's own signed installation record; the cluster learns the new
+// endpoint from `sfcli node set-endpoint`. sfcd must be stopped. It returns
+// the address the record had.
+func SetListen(c config.Node) (string, error) {
+	lock, err := storage.LockRoot(c.Node.StateDir)
+	if err != nil {
+		return "", fmt.Errorf("stop sfcd first: %w", err)
+	}
+	defer lock.Close()
+	r, err := readRecord(c)
+	if err != nil {
+		return "", err
+	}
+	old := r.CurrentListen()
+	if c.Node.Listen == old {
+		return old, fmt.Errorf("node.yaml listen is already %s; edit node.yaml first", old)
+	}
+	r.Listen = c.Node.Listen
+	if r.Listen == r.Endpoint {
+		r.Listen = ""
+	}
+	self, err := identity.Load(IdentityPath(c, r))
+	if err != nil {
+		return old, err
+	}
+	defer clear(self.Private)
+	r.Signature = ed25519.Sign(self.Private, signingBytes(r))
+	return old, write(c.Node.StateDir, r)
 }

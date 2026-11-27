@@ -9,12 +9,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/registry"
-	"github.com/jay94ks/mydcd/internal/workload"
-	"github.com/jay94ks/mydcd/internal/workload/volumes"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/registry"
+	"github.com/jay94ks/seafield/internal/workload"
+	"github.com/jay94ks/seafield/internal/workload/volumes"
 )
 
 func TestCurrentAppTrustDiagnosticPreservesOriginalTaskAndBinding(t *testing.T) {
@@ -46,7 +46,7 @@ func TestCurrentAppTrustDiagnosticPreservesOriginalTaskAndBinding(t *testing.T) 
 	assertDiagnostic(false)
 	catalog, _ := f.p.Catalog(f.s)
 	tenant, _ := catalog.Tenant("tenant")
-	managedDNSChange(t, f, "withdraw-app-image-trust", "set-trust", tenant.Revision, TrustAssignment{Tenant: "tenant", Rules: []access.TrustRule{}}, state.Applied)
+	managedDNSChange(t, f, "withdraw-app-image-trust", "set-trust", tenant.Revision, TrustChange{Tenant: "tenant", Remove: tenant.ImageSources}, state.Applied)
 	assertDiagnostic(true)
 	if _, err := f.p.RegistryImagePermit(f.s, owner, request); err == nil {
 		t.Fatal("diagnostic substituted for current pull/create admission")
@@ -62,7 +62,7 @@ func TestCurrentAppTrustDiagnosticPreservesOriginalTaskAndBinding(t *testing.T) 
 	assertDiagnostic(true)
 	catalog, _ = f.p.Catalog(f.s)
 	tenant, _ = catalog.Tenant("tenant")
-	managedDNSChange(t, f, "explicit-app-image-trust-restore", "set-trust", tenant.Revision, TrustAssignment{Tenant: "tenant", Rules: []access.TrustRule{{Registry: "docker.io", Repository: "**"}}}, state.Applied)
+	managedDNSChange(t, f, "explicit-app-image-trust-restore", "set-trust", tenant.Revision, TrustChange{Tenant: "tenant", Add: []access.TrustRule{{Registry: "docker.io", Repository: "**"}}}, state.Applied)
 	assertDiagnostic(false)
 }
 
@@ -132,7 +132,7 @@ func TestRegistryImagePermitBindsOriginalTaskAndAcceptedGrant(t *testing.T) {
 		t.Fatal(err)
 	}
 	tenant, _ := catalog.Tenant("tenant")
-	managedDNSChange(t, f, "remove-image-trust", "set-trust", tenant.Revision, TrustAssignment{Tenant: "tenant", Rules: []access.TrustRule{}}, state.Applied)
+	managedDNSChange(t, f, "remove-image-trust", "set-trust", tenant.Revision, TrustChange{Tenant: "tenant", Remove: tenant.ImageSources}, state.Applied)
 	if _, err = f.p.RegistryImagePermit(f.s, owner, q); err == nil {
 		t.Fatal("cached image bypassed current trust removal")
 	}

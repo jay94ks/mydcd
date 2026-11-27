@@ -15,18 +15,18 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/engine"
-	"github.com/jay94ks/mydcd/internal/network"
-	"github.com/jay94ks/mydcd/internal/workload"
-	contract "github.com/jay94ks/mydcd/lifecycle/v1"
-	"github.com/jay94ks/mydcd/tests/enginefixture"
+	"github.com/jay94ks/seafield/internal/engine"
+	"github.com/jay94ks/seafield/internal/network"
+	"github.com/jay94ks/seafield/internal/workload"
+	contract "github.com/jay94ks/seafield/lifecycle/v1"
+	"github.com/jay94ks/seafield/tests/enginefixture"
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/client"
 )
 
 func TestRealBoundaryFrozenImageProcessAndOriginalJournal(t *testing.T) {
-	tag := os.Getenv("MYDC_DOCKER_TEST_OWNER")
-	manifest, backend := os.Getenv("MYDC_NATIVE_MANIFEST"), os.Getenv("MYDC_DOCKER_TEST_BACKEND")
+	tag := os.Getenv("SFC_DOCKER_TEST_OWNER")
+	manifest, backend := os.Getenv("SFC_NATIVE_MANIFEST"), os.Getenv("SFC_DOCKER_TEST_BACKEND")
 	if tag == "" || manifest == "" || backend == "" {
 		t.Skip("requires owned Docker rollback prestate, manifest and user-prebuilt backend")
 	}
@@ -35,7 +35,7 @@ func TestRealBoundaryFrozenImageProcessAndOriginalJournal(t *testing.T) {
 	cluster, node := sha256.Sum256([]byte("process-cluster/"+tag)), sha256.Sum256([]byte("process-node/"+tag))
 	owner := engine.Owner(cluster, node)
 	t.Logf("nativeOwner=%s fixtureTag=%s", owner, tag)
-	root, err := os.MkdirTemp("", "mydc-l1-sdk-")
+	root, err := os.MkdirTemp("", "sfc-l1-sdk-")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -46,7 +46,7 @@ func TestRealBoundaryFrozenImageProcessAndOriginalJournal(t *testing.T) {
 			t.Error(err)
 		}
 	})
-	public := map[string]any{"Owner": owner, "Tag": tag, "Cluster": cluster, "NodeKey": node, "Root": root, "CIDR": os.Getenv("MYDC_DOCKER_TEST_CIDR"), "ImageRef": "mydc-boundary/" + tag + ":local"}
+	public := map[string]any{"Owner": owner, "Tag": tag, "Cluster": cluster, "NodeKey": node, "Root": root, "CIDR": os.Getenv("SFC_DOCKER_TEST_CIDR"), "ImageRef": "sfc-boundary/" + tag + ":local"}
 	file, err := os.OpenFile(manifest, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0644)
 	if err != nil {
 		t.Fatal(err)
@@ -71,7 +71,7 @@ func TestRealBoundaryFrozenImageProcessAndOriginalJournal(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = w.Close() }()
-	prefix := netip.MustParsePrefix(os.Getenv("MYDC_DOCKER_TEST_CIDR"))
+	prefix := netip.MustParsePrefix(os.Getenv("SFC_DOCKER_TEST_CIDR"))
 	bridgeKey := "network/image-process"
 	bridge := network.BridgeSpec{Schema: 1, Network: "image-process", Owner: owner, MTU: 1280, Internal: true, Pools: []network.Pool{{ID: "process", Network: "image-process", Owner: owner, Prefix: prefix, Gateway: prefix.Addr().Next(), MTU: 1280}}}
 	if err = n.Desired(bridgeKey, 1, 1, &bridge, 4); err != nil {

@@ -10,8 +10,8 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/network"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/network"
 )
 
 // TUNDefinition reserves one named management network and all its node-local
@@ -28,10 +28,23 @@ type TUNDefinition struct {
 }
 
 type TUNNode struct {
-	Node      string
-	Owner     [32]byte
-	Pools     []Subnet
-	Addresses []netip.Prefix
+	Node  string
+	Owner [32]byte
+	Pools []Subnet
+	// Addresses is left empty: the tunnel address is the server's reserved
+	// address (SystemPolicy.Nodes), which sfcd fills in.
+	Addresses []netip.Prefix `json:",omitempty"`
+}
+
+// fillTunnel gives a joining member its server's fixed address. A
+// definition may not name another one.
+func (n Networks) fillTunnel(member TUNNode) ([]netip.Prefix, bool) {
+	a, ok := n.NodeAddress(member.Node)
+	tunnel := []netip.Prefix{netip.PrefixFrom(a, 32)}
+	if !ok || len(member.Addresses) != 0 && !slices.Equal(member.Addresses, tunnel) {
+		return nil, false
+	}
+	return tunnel, true
 }
 
 type TUNSource struct {
@@ -42,7 +55,7 @@ type TUNSource struct {
 }
 
 func logicalMemberID(tenant, name, node string) string {
-	h := sha256.Sum256([]byte("mydc-managed-network-member-1\x00" + tenant + "/" + name + "/" + node))
+	h := sha256.Sum256([]byte("sfc-managed-network-member-1\x00" + tenant + "/" + name + "/" + node))
 	return "mtn-" + hex.EncodeToString(h[:28])
 }
 
@@ -50,29 +63,27 @@ func validLogicalMember(v Network) bool {
 	if v.Logical == "" {
 		return len(v.TunnelAddresses) == 0
 	}
-	if !validID(v.Logical) || v.ID != logicalMemberID(v.Tenant, v.Logical, v.Node) || len(v.TunnelAddresses) < 1 || len(v.TunnelAddresses) > 2 {
+	// One IPv4 tunnel address: the server's address (validateLogicalNetworks
+	// checks it against SystemPolicy.Nodes).
+	if !validID(v.Logical) || v.ID != logicalMemberID(v.Tenant, v.Logical, v.Node) || len(v.TunnelAddresses) != 1 {
 		return false
 	}
-	last := ""
-	families := map[bool]bool{}
-	for _, p := range v.TunnelAddresses {
-		a := p.Addr()
-		if !p.IsValid() || p.Bits() != a.BitLen() || a.Is4In6() || a.Zone() != "" || a.IsUnspecified() || a.IsMulticast() || a.IsLoopback() || a.IsLinkLocalUnicast() || p.String() <= last || families[a.Is4()] {
-			return false
-		}
-		families[a.Is4()] = true
-		last = p.String()
+	if p := v.TunnelAddresses[0]; !p.IsValid() || !p.Addr().Is4() || p.Bits() != 32 {
+		return false
 	}
+	// IPv6 pools ride the same TUN: its routes need no IPv6 address.
 	for _, p := range v.Pools {
-		if !families[p.Prefix.Addr().Is4()] || p.MTU != v.Pools[0].MTU {
+		if p.MTU != v.Pools[0].MTU {
 			return false
 		}
 	}
 	return true
 }
 
+// reservationPrefixes are what a network keeps for itself: its pools. A
+// tunnel address is the server's address, shared by all its networks.
 func reservationPrefixes(v Network) []netip.Prefix {
-	out := slices.Clone(v.TunnelAddresses)
+	out := make([]netip.Prefix, 0, len(v.Pools))
 	for _, p := range v.Pools {
 		out = append(out, p.Prefix)
 	}
@@ -100,12 +111,16 @@ func (n Networks) validateLogicalNetworks() error {
 		if v.Logical == "" {
 			continue
 		}
-		for _, address := range v.TunnelAddresses {
-			for _, p := range v.Pools {
-				if p.Prefix.Contains(address.Addr()) {
-					return ErrPolicy
-				}
-			}
+		// The tunnel address is the server's (checked where the view knows
+		// the servers: every change goes through one that does).
+		if a, ok := n.NodeAddress(v.Node); n.servers != nil && (!ok || v.TunnelAddresses[0] != netip.PrefixFrom(a, 32)) || !network.ServerBlock.Contains(v.TunnelAddresses[0].Addr()) {
+			return ErrPolicy
+		}
+		// The cluster and server blocks are no network's pool.
+		if slices.ContainsFunc(v.Pools, func(p Subnet) bool {
+			return p.Prefix.Overlaps(network.ServerBlock) || p.Prefix.Overlaps(network.ClusterBlock)
+		}) {
+			return ErrPolicy
 		}
 		for k, other := range n.networks {
 			if k == key(v.Tenant, v.ID) {
@@ -136,7 +151,7 @@ func (n Networks) CreateTUN(c access.Catalog, quotas Quotas, actor string, expec
 
 // CreateSystemTUN creates the system network (no tenant, System set) through
 // the same reservation, pool and quota rules as CreateTUN. It checks no user:
-// only mydcd's node app dependency reaches it, never a tenant network action.
+// only sfcd's cluster app dependency reaches it, never a tenant network action.
 // Members count against each node's server-wide network limit only.
 func (n Networks) CreateSystemTUN(quotas Quotas, expected uint64, d TUNDefinition) (Networks, error) {
 	if !d.System || d.Tenant != "" || d.Name != SystemNetwork {
@@ -172,6 +187,9 @@ func (n Networks) createTUN(quotas Quotas, expected uint64, d TUNDefinition, adm
 		return n, err
 	}
 	for _, member := range d.Members {
+		if member.Addresses, ok = q.fillTunnel(member); !ok {
+			return n, ErrPolicy
+		}
 		v := Network{Tenant: d.Tenant, ID: logicalMemberID(d.Tenant, d.Name, member.Node), Node: member.Node, Owner: member.Owner, Logical: d.Name, Pools: slices.Clone(member.Pools), TunnelAddresses: slices.Clone(member.Addresses), Generation: q.revision, Revision: q.revision, GatewayMode: d.GatewayMode, System: d.System, Toggles: slices.Clone(toggles)}
 		slices.SortFunc(v.Pools, func(a, b Subnet) int { return strings.Compare(a.ID, b.ID) })
 		slices.SortFunc(v.TunnelAddresses, func(a, b netip.Prefix) int { return strings.Compare(a.String(), b.String()) })
@@ -242,6 +260,10 @@ func (n Networks) TUNSources(tenant, name string) ([]TUNSource, error) {
 	if len(members) == 0 || !togglesAllowed(members) || n.validateLogicalNetworks() != nil {
 		return nil, ErrPolicy
 	}
+	var hosts map[string][]netip.Addr
+	if tenant == "" && name == SystemNetwork {
+		hosts = n.ClusterAppHosts()
+	}
 	var out []TUNSource
 	for _, v := range members {
 		owner := hex.EncodeToString(n.cluster[:]) + "/" + hex.EncodeToString(v.Owner[:])
@@ -267,6 +289,9 @@ func (n Networks) TUNSources(tenant, name string) ([]TUNSource, error) {
 				spec.Routes = append(spec.Routes, p.Prefix)
 			}
 			spec.Routes = append(spec.Routes, remote.TunnelAddresses...)
+			for _, a := range hosts[remote.Node] {
+				spec.Routes = append(spec.Routes, netip.PrefixFrom(a, 32))
+			}
 		}
 		slices.SortFunc(spec.Routes, func(a, b netip.Prefix) int { return strings.Compare(a.String(), b.String()) })
 		raw, _ = json.Marshal(spec)
@@ -294,7 +319,7 @@ func (n Networks) JoinTUN(c access.Catalog, quotas Quotas, actor string, expecte
 	})
 }
 
-// JoinSystemTUN adds one server to the system network (node app dependency).
+// JoinSystemTUN adds one server to the system network (cluster app dependency).
 func (n Networks) JoinSystemTUN(quotas Quotas, expected uint64, member TUNNode) (Networks, error) {
 	return n.joinTUN(quotas, expected, "", SystemNetwork, member, func(v Network, q Networks) error {
 		return quotas.admitScopes(v.Tenant, v.Node, v.Owner, q)
@@ -331,6 +356,10 @@ func (n Networks) joinTUN(quotas Quotas, expected uint64, tenant, name string, m
 	q, err := n.clone()
 	if err != nil {
 		return n, err
+	}
+	var filled bool
+	if member.Addresses, filled = q.fillTunnel(member); !filled {
+		return n, ErrPolicy
 	}
 	v := Network{Tenant: tenant, ID: logicalMemberID(tenant, name, member.Node), Node: member.Node, Owner: member.Owner, Logical: name, Pools: slices.Clone(member.Pools), TunnelAddresses: slices.Clone(member.Addresses), Generation: q.revision, Revision: q.revision, GatewayMode: first.GatewayMode, System: first.System, Toggles: slices.Clone(first.Toggles)}
 	slices.SortFunc(v.Pools, func(a, b Subnet) int { return strings.Compare(a.ID, b.ID) })

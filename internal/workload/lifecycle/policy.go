@@ -10,7 +10,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/jay94ks/mydcd/internal/access"
+	"github.com/jay94ks/seafield/internal/access"
 )
 
 type BuildPolicy struct {
@@ -79,7 +79,7 @@ func packageRules(values []string, pattern bool) bool {
 }
 
 func (p TenantPolicy) Validate() error {
-	// A query exposes one policy or one SourceFact per bounded MYDCP page.
+	// A query exposes one policy or one SourceFact per bounded SFCP page.
 	// Keep the same metadata budget at admission, including all module locks.
 	if raw, err := json.Marshal(p); err != nil || len(raw) > 24<<10 {
 		return ErrContract

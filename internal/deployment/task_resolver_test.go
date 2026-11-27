@@ -8,7 +8,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/workload"
+	"github.com/jay94ks/seafield/internal/workload"
 )
 
 func TestTaskRecipeResolverPreservesExplicitEmptyAndManagedInputs(t *testing.T) {
@@ -20,9 +20,9 @@ func TestTaskRecipeResolverPreservesExplicitEmptyAndManagedInputs(t *testing.T) 
 		want            *workload.Resolver
 	}{
 		{name: "unspecified"},
-		{name: "explicit", servers: []string{"10.240.20.2"}, search: []string{"explicit.mydc.test"}, want: &workload.Resolver{Servers: []netip.Addr{netip.MustParseAddr("10.240.20.2")}, Search: []string{"explicit.mydc.test"}}},
+		{name: "explicit", servers: []string{"10.240.20.2"}, search: []string{"explicit.sfc.test"}, want: &workload.Resolver{Servers: []netip.Addr{netip.MustParseAddr("10.240.20.2")}, Search: []string{"explicit.sfc.test"}}},
 		{name: "explicit-empty", servers: []string{}, search: []string{}, managed: true, want: &workload.Resolver{Search: []string{}}},
-		{name: "managed", managed: true, want: &workload.Resolver{Servers: []netip.Addr{netip.MustParseAddr("10.240.20.1")}, Search: []string{"app.mydc.test"}}},
+		{name: "managed", managed: true, want: &workload.Resolver{Servers: []netip.Addr{netip.MustParseAddr("10.240.20.1")}, Search: []string{"app.sfc.test"}}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			raw, _ := json.Marshal(baseline.d.Input)
@@ -34,8 +34,8 @@ func TestTaskRecipeResolverPreservesExplicitEmptyAndManagedInputs(t *testing.T) 
 			ctx := contextFor(t, f)
 			if test.managed {
 				n := input.Networks["app"]
-				n.MyDC.DNS = &DNSDeclaration{Enabled: true, Zone: "app.mydc.test", TTL: 30, NegativeTTL: 5, Transports: []string{"tcp", "udp"}}
-				n.MyDC.DNS.Limits.Cache, n.MyDC.DNS.Limits.Inflight, n.MyDC.DNS.Limits.TCP, n.MyDC.DNS.Limits.Timeout = 4, 8, 4, 1000
+				n.Sfc.DNS = &DNSDeclaration{Enabled: true, Zone: "app.sfc.test", TTL: 30, NegativeTTL: 5, Transports: []string{"tcp", "udp"}}
+				n.Sfc.DNS.Limits.Cache, n.Sfc.DNS.Limits.Inflight, n.Sfc.DNS.Limits.TCP, n.Sfc.DNS.Limits.Timeout = 4, 8, 4, 1000
 				input.Networks["app"] = n
 				ctx.Features["network-services"] = true
 			}

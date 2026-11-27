@@ -17,7 +17,7 @@ import (
 )
 
 func TestStreamSDKKeepsExplicitUDSAndContextBodyWithoutChangingMetadataDeadline(t *testing.T) {
-	root, err := os.MkdirTemp("", "mydc-rv5-sdk-")
+	root, err := os.MkdirTemp("", "sfc-rv5-sdk-")
 	if err != nil {
 		t.Fatal(err)
 	}

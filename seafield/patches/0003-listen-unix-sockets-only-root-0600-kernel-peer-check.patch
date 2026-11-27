@@ -1,0 +1,185 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: seafield <seafield@invalid>
+Date: Fri, 27 Nov 2026 08:03:05 +0000
+Subject: [PATCH 03/20] listen: unix sockets only, root 0600, kernel peer check
+
+
+diff --git a/daemon/command/daemon.go b/daemon/command/daemon.go
+index 34e5b28..cb66c40 100644
+--- a/daemon/command/daemon.go
++++ b/daemon/command/daemon.go
+@@ -976,6 +976,9 @@ func loadListeners(cfg *config.Config, tlsConfig *tls.Config) ([]net.Listener, [
+ 		if !ok {
+ 			return nil, nil, fmt.Errorf("bad format %s, expected PROTO://ADDR", protoAddr)
+ 		}
++		if proto != "unix" {
++			return nil, nil, fmt.Errorf("Seafield listens only on unix sockets, not %s", protoAddr)
++		}
+ 
+ 		// It's a bad idea to bind to TCP without tlsverify.
+ 		authEnabled := tlsConfig != nil && tlsConfig.ClientAuth == tls.RequireAndVerifyClientCert
+@@ -1029,7 +1032,7 @@ func loadListeners(cfg *config.Config, tlsConfig *tls.Config) ([]net.Listener, [
+ 		}
+ 		log.G(ctx).Debugf("Listener created for HTTP on %s (%s)", proto, addr)
+ 		hosts = append(hosts, addr)
+-		lss = append(lss, ls...)
++		lss = append(lss, guardListeners(ls)...)
+ 	}
+ 
+ 	return lss, hosts, nil
+diff --git a/daemon/command/seafield_peer_linux.go b/daemon/command/seafield_peer_linux.go
+new file mode 100644
+index 0000000..ae65415
+--- /dev/null
++++ b/daemon/command/seafield_peer_linux.go
+@@ -0,0 +1,134 @@
++// SPDX-License-Identifier: Apache-2.0
++
++package command
++
++import (
++	"bufio"
++	"context"
++	"errors"
++	"fmt"
++	"net"
++	"os"
++	"slices"
++	"strconv"
++	"strings"
++
++	"github.com/containerd/log"
++	"golang.org/x/sys/unix"
++)
++
++// defaultSeafieldPeers is where the sfc node package installs sfcd.
++const defaultSeafieldPeers = "/usr/lib/sfc/sfcd"
++
++// seafieldPeers lists the executables allowed to talk to the engine API.
++// SEAFIELD_ALLOWED_PEERS (colon separated absolute paths) replaces the
++// default, for tests and diagnostics.
++func seafieldPeers() []string {
++	v := os.Getenv("SEAFIELD_ALLOWED_PEERS")
++	if v == "" {
++		v = defaultSeafieldPeers
++	}
++	return strings.Split(v, ":")
++}
++
++// guardListeners accepts only unix-socket peers that the kernel reports as
++// root running one of the allowed executables. Anything else is closed
++// before a single byte of the API is read.
++func guardListeners(ls []net.Listener) []net.Listener {
++	peers := seafieldPeers()
++	out := make([]net.Listener, len(ls))
++	for i, l := range ls {
++		out[i] = &peerListener{Listener: l, peers: peers}
++	}
++	return out
++}
++
++type peerListener struct {
++	net.Listener
++	peers []string
++}
++
++func (l *peerListener) Accept() (net.Conn, error) {
++	for {
++		c, err := l.Listener.Accept()
++		if err != nil {
++			return nil, err
++		}
++		exe, err := checkPeer(c, l.peers)
++		if err == nil {
++			return c, nil
++		}
++		log.G(context.TODO()).WithError(err).WithField("peer", exe).Warn("Seafield refused an API connection")
++		_ = c.Close()
++	}
++}
++
++// checkPeer identifies the process on the other end of c with SO_PEERCRED
++// and SO_PEERPIDFD. The pidfd pins that exact process: after reading its
++// executable, a signal-0 probe through the pidfd proves the process did not
++// exit in between, so a reused pid cannot be mistaken for the peer.
++func checkPeer(c net.Conn, allowed []string) (string, error) {
++	uc, ok := c.(*net.UnixConn)
++	if !ok {
++		return "", errors.New("not a unix socket")
++	}
++	raw, err := uc.SyscallConn()
++	if err != nil {
++		return "", err
++	}
++	var (
++		cred  *unix.Ucred
++		pidfd int
++		serr  error
++	)
++	if err = raw.Control(func(fd uintptr) {
++		cred, serr = unix.GetsockoptUcred(int(fd), unix.SOL_SOCKET, unix.SO_PEERCRED)
++		if serr == nil {
++			pidfd, serr = unix.GetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_PEERPIDFD)
++		}
++	}); err != nil {
++		return "", err
++	}
++	if serr != nil {
++		return "", fmt.Errorf("peer credentials: %w", serr)
++	}
++	defer unix.Close(pidfd)
++	if cred.Uid != 0 {
++		return "", fmt.Errorf("peer uid %d is not root", cred.Uid)
++	}
++	pid, err := pidfdPid(pidfd)
++	if err != nil {
++		return "", err
++	}
++	exe, err := os.Readlink("/proc/" + strconv.Itoa(pid) + "/exe")
++	if err != nil {
++		return "", fmt.Errorf("peer executable: %w", err)
++	}
++	if err = unix.PidfdSendSignal(pidfd, 0, nil, 0); err != nil {
++		return exe, fmt.Errorf("peer exited while being checked: %w", err)
++	}
++	if !slices.Contains(allowed, exe) {
++		return exe, errors.New("peer executable is not allowed")
++	}
++	return exe, nil
++}
++
++// pidfdPid reads the pid a pidfd refers to from /proc/self/fdinfo.
++func pidfdPid(pidfd int) (int, error) {
++	f, err := os.Open("/proc/self/fdinfo/" + strconv.Itoa(pidfd))
++	if err != nil {
++		return 0, err
++	}
++	defer f.Close()
++	s := bufio.NewScanner(f)
++	for s.Scan() {
++		if v, ok := strings.CutPrefix(s.Text(), "Pid:"); ok {
++			pid, err := strconv.Atoi(strings.TrimSpace(v))
++			if err != nil || pid <= 0 {
++				return 0, errors.New("peer process is gone")
++			}
++			return pid, nil
++		}
++	}
++	return 0, errors.New("pidfd has no pid")
++}
+diff --git a/daemon/listeners/listeners_linux.go b/daemon/listeners/listeners_linux.go
+index bc281e1..527a7b5 100644
+--- a/daemon/listeners/listeners_linux.go
++++ b/daemon/listeners/listeners_linux.go
+@@ -47,6 +47,11 @@ func Init(proto, addr, socketGroup string, tlsConfig *tls.Config) ([]net.Listene
+ 		if err != nil {
+ 			return nil, errors.Wrapf(err, "can't create unix socket %s", addr)
+ 		}
++		// Seafield: only root may connect; the peer check does the rest.
++		if err := os.Chmod(addr, 0o600); err != nil {
++			_ = l.Close()
++			return nil, errors.Wrapf(err, "can't restrict unix socket %s", addr)
++		}
+ 		if _, err := homedir.StickRuntimeDirContents([]string{addr}); err != nil {
+ 			// StickRuntimeDirContents returns nil error if XDG_RUNTIME_DIR is just unset
+ 			log.G(context.TODO()).WithError(err).Warnf("cannot set sticky bit on socket %s under XDG_RUNTIME_DIR", addr)

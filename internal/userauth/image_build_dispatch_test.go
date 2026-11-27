@@ -8,10 +8,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/imagebuild"
-	"github.com/jay94ks/mydcd/internal/nodestorage"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/imagebuild"
+	"github.com/jay94ks/seafield/internal/nodestorage"
 )
 
 // Exercise the actual Service.execute dispatch and current catalog/session
@@ -33,7 +33,7 @@ func TestBuildMethodsReachTheirRealServiceAdmissionAndKeepReadSeparateFromPrepar
 	svc := Service{Policy: control.Policy{Cluster: client.Cluster, Issuers: [][32]byte{issuer.Public}}}
 	binding := userBinding{key: session.Key, challenge: [32]byte{1}}
 	now := uint64(time.Now().Unix())
-	git := imagebuild.GitSaveRequest{Plan: imagebuild.GitSavePlan{Schema: 1, Tenant: "tenant", Context: "source", ID: "save", Creator: session.User, Root: nodestorage.Reference{Cluster: client.Cluster, Node: "node", Key: issuer.Public, ID: "data", Generation: 1, Path: "/srv/mydc"}, ContextRevision: 1, PolicyRevision: 1, Dockerfile: "Dockerfile", ExpandedLimit: 1 << 20, Commit: strings.Repeat("a", 40), Tree: [32]byte{7}, CreatedAt: now, ExpiresAt: now + 600}}
+	git := imagebuild.GitSaveRequest{Plan: imagebuild.GitSavePlan{Schema: 1, Tenant: "tenant", Context: "source", ID: "save", Creator: session.User, Root: nodestorage.Reference{Cluster: client.Cluster, Node: "node", Key: issuer.Public, ID: "data", Generation: 1, Path: "/srv/sfc"}, ContextRevision: 1, PolicyRevision: 1, Dockerfile: "Dockerfile", ExpandedLimit: 1 << 20, Commit: strings.Repeat("a", 40), Tree: [32]byte{7}, CreatedAt: now, ExpiresAt: now + 600}}
 	for _, tc := range []struct {
 		q    Request
 		read bool

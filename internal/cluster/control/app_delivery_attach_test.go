@@ -6,9 +6,9 @@ import (
 	"crypto/ed25519"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/deployment"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/deployment"
 )
 
 // The first 'cd set' of an app deployed without CD turns CD on: the settled
@@ -19,7 +19,7 @@ func TestConfigureAppCDAttachesFirstPolicyToSettledApp(t *testing.T) {
 	f.session.Signature = ed25519.Sign(f.node, access.SessionBytes(f.session))
 	managedDNSTaskCoreBegin(t, f, "plain-app", "10.80.1.2", "web", func(*deployment.Compose, *deployment.PlanningContext) {})
 	policy := deployment.DeliveryDeclaration{Enabled: true}
-	policy.Source.Kind, policy.Source.Repository, policy.Source.Ref, policy.Source.Path = "git", "https://git.mydc.test/team/app.git", "refs/heads/main", "app.yaml"
+	policy.Source.Kind, policy.Source.Repository, policy.Source.Ref, policy.Source.Path = "git", "https://git.sfc.test/team/app.git", "refs/heads/main", "app.yaml"
 	policy.Poll, policy.Limits.Fetch, policy.Limits.Bytes, policy.Limits.Queued, policy.Limits.Active = 60, 30, 4<<20, 1, 1
 	policy.Sync.Mode, policy.Sync.Drift = "manual", "report"
 	policy.Runtime.Mode, policy.Runtime.Expiry = "require-explicit-override", "manual-release"

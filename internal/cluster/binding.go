@@ -6,15 +6,15 @@ import (
 	"encoding/hex"
 	"errors"
 
-	"github.com/jay94ks/mydcd/internal/cluster/lifecycle"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/mydcp"
+	"github.com/jay94ks/seafield/internal/cluster/lifecycle"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/sfcp"
 )
 
 func engineBinding(o Options) []byte {
 	key := o.Mesh.LocalKey()
 	if len(o.IdentityTransitions) != 0 {
-		key = mydcp.Identity(o.IdentityTransitions[0].Proof.Old)
+		key = sfcp.Identity(o.IdentityTransitions[0].Proof.Old)
 	}
 	return engineBindingKey(o, key)
 }
@@ -34,7 +34,7 @@ func ownEngineIdentity(o Options) (Options, error) {
 	return o, nil
 }
 
-func engineBindingKey(o Options, key mydcp.Identity) []byte {
+func engineBindingKey(o Options, key sfcp.Identity) []byte {
 	b := []byte(hex.EncodeToString(o.Cluster[:]) + "/" + o.ID + "/" + o.Admin + "/" + hex.EncodeToString(key[:]) + "/" + hex.EncodeToString(o.Manifest[:]))
 	if o.ModuleID != ([32]byte{}) {
 		b = append(b, []byte("/module/"+hex.EncodeToString(o.ModuleID[:]))...)

@@ -10,9 +10,9 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/deployment"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/deployment"
 )
 
 func beginCASFixture(t *testing.T) (*backupCoreFixture, AppBegin, uint64) {
@@ -247,7 +247,7 @@ func TestAppCreateTargetCASRejectsScopeCompetitionAndCurrentAuthorityLoss(t *tes
 			case "placement":
 				catalog, _ := f.p.Catalog(f.s)
 				tenant, _ := catalog.Tenant("tenant")
-				f.apply("remove-create-placement", "set-nodes", tenant.Revision, NodeAssignment{Tenant: "tenant", Nodes: []string{}}, state.Applied)
+				f.apply("remove-create-placement", "set-nodes", tenant.Revision, NodeChangeTo("tenant", tenant.AllowedNodes, nil), state.Applied)
 				want = state.Forbidden
 			}
 			_, command := signedBeginCAS(t, f, "refused-original-create", 0, root, q)

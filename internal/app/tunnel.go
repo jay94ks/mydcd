@@ -17,15 +17,16 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/desired"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/network"
-	"github.com/jay94ks/mydcd/internal/reconcile"
-	"github.com/jay94ks/mydcd/internal/schema"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/desired"
+	"github.com/jay94ks/seafield/internal/network"
+	"github.com/jay94ks/seafield/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/tenancy"
 	"github.com/vishvananda/netlink"
 	"slices"
 )
@@ -115,8 +116,8 @@ func pathScope(cluster [32]byte, v cluster.View, g tunnelView, a, b string) ([]b
 }
 
 // RouteGet is read-only and resolves the actual connection destination. An
-// underlay endpoint inside an overlay route would route MYDCP into itself.
-func currentRoute(s *mydcp.Session, spec network.TunnelSpec, mtu int) (routeStamp, error) {
+// underlay endpoint inside an overlay route would route SFCP into itself.
+func currentRoute(s *sfcp.Session, spec network.TunnelSpec, mtu int) (routeStamp, error) {
 	remote, ok := s.RemoteAddr().(*net.UDPAddr)
 	if !ok {
 		return routeStamp{}, errTunnelPending
@@ -128,7 +129,7 @@ func routeTo(a netip.Addr, spec network.TunnelSpec, mtu int) (routeStamp, error)
 	a = a.Unmap()
 	for _, p := range spec.Routes {
 		if p.Contains(a) {
-			return routeStamp{}, errors.New("MYDCP underlay endpoint overlaps TUN route")
+			return routeStamp{}, errors.New("SFCP underlay endpoint overlaps TUN route")
 		}
 	}
 	routes, err := netlink.RouteGet(net.IP(a.AsSlice()))
@@ -151,31 +152,31 @@ func routeTo(a netip.Addr, spec network.TunnelSpec, mtu int) (routeStamp, error)
 	}
 	// This is the minimum possible native payload cost. The negotiated CID,
 	// remote limit and actual ACK-based limit are checked by PathPair as well.
-	if limit < mtu+header+mydcp.PacketFrameOverhead+37 {
+	if limit < mtu+header+sfcp.PacketFrameOverhead+37 {
 		return stamp, fmt.Errorf("%w: underlay MTU=%d cannot carry TUN MTU=%d", errTunnelPending, limit, mtu)
 	}
 	return stamp, nil
 }
 
-func admitPair(p mydcp.PathPair, a, b mydcp.PathSample) error {
+func admitPair(p sfcp.PathPair, a, b sfcp.PathSample) error {
 	scope, err := schema.Decode[tunnelScope](a.Scope)
 	if err != nil || !bytes.Equal(a.Scope, b.Scope) {
 		return errTunnelPending
 	}
-	obs := func(s mydcp.PathSample) network.MTUObservation {
+	obs := func(s sfcp.PathSample) network.MTUObservation {
 		return network.MTUObservation{From: hex.EncodeToString(s.From[:]), To: hex.EncodeToString(s.To[:]), Source: scope.A.Revision, Generation: scope.A.Generation, At: uint64(s.At), PathMTU: s.Budget.UDPBytes, Overhead: s.Budget.UDPBytes - s.Budget.IPBytes}
 	}
 	return network.AdmitMTU(p.MTU(), scope.A.Revision, scope.A.Generation, uint64(time.Now().UnixMilli()), 30_000, obs(a), obs(b))
 }
 
-func (t *tunnelInstance) receive(s *mydcp.Session, f mydcp.Frame) error {
+func (t *tunnelInstance) receive(s *sfcp.Session, f sfcp.Frame) error {
 	plane := t.serving.Load()
 	if plane == nil {
 		return errTunnelPending
 	}
 	peer, known := t.r.Mesh.Peer(s.Peer().Key)
 	if !known || !peer.Tunnel {
-		return mydcp.ErrAdmission
+		return sfcp.ErrAdmission
 	}
 	return plane.Receive(s, f)
 }
@@ -325,6 +326,19 @@ func (t *tunnelInstance) Reconcile(v cluster.View, g tunnelView) (result error) 
 			}
 			capacity = old.Capacity
 		}
+		if target != nil && strings.HasPrefix(key, tenancy.ManagedNetworkSourcePrefix) && target.Network != tenancy.PacketNamespace("", tenancy.SystemNetwork) {
+			// The committed source routes remote server addresses like pools;
+			// sfc-system owns their main-table /32, so this server keeps them
+			// in the TUN's own host table, looked up only from its pools.
+			var pools []netip.Prefix
+			for _, p := range g.Topology.Pools {
+				if p.Network == target.Network && p.Owner == target.Owner {
+					pools = append(pools, p.Prefix)
+				}
+			}
+			local := network.LocalHostRoutes(*target, pools)
+			target = &local
+		}
 		if err := t.manager.Desired(key, o.Revision, o.Generation, target, capacity); err != nil {
 			return err
 		}
@@ -384,7 +398,7 @@ func (t *tunnelInstance) Reconcile(v cluster.View, g tunnelView) (result error) 
 		pub := g.Owners[owner]
 		peerWire := wireOwners[owner]
 		if peerWire == wire {
-			return errors.Join(mydcp.ErrAdmission, t.stopPlane())
+			return errors.Join(sfcp.ErrAdmission, t.stopPlane())
 		}
 		scope, mtu, e := pathScope(r.policy.Cluster, v, g, r.owner, owner)
 		if e != nil {
@@ -412,9 +426,9 @@ func (t *tunnelInstance) Reconcile(v cluster.View, g tunnelView) (result error) 
 			if bytes.Compare(wire[:], peerWire[:]) > 0 {
 				return errTunnelPending
 			}
-			peer, known := r.Mesh.Peer(mydcp.Identity(peerWire))
+			peer, known := r.Mesh.Peer(sfcp.Identity(peerWire))
 			if !known {
-				return mydcp.ErrAdmission
+				return sfcp.ErrAdmission
 			}
 			ctx, cancel := context.WithTimeout(r.ctx, 10*time.Second)
 			host, _, e := net.SplitHostPort(peer.Endpoint)
@@ -444,7 +458,7 @@ func (t *tunnelInstance) Reconcile(v cluster.View, g tunnelView) (result error) 
 					e = errors.Join(err, errTunnelPending)
 				}
 			}
-			var pair mydcp.PathPair
+			var pair sfcp.PathPair
 			var route routeStamp
 			if e == nil {
 				route, e = currentRoute(s, spec, mtu)
@@ -484,7 +498,7 @@ func (t *tunnelInstance) Reconcile(v cluster.View, g tunnelView) (result error) 
 	for _, owner := range owners {
 		path := t.paths[g.Owners[owner]]
 		a, b := path.Path.Samples()
-		bits, _ := json.Marshal([]mydcp.PacketBudget{a.Budget, b.Budget})
+		bits, _ := json.Marshal([]sfcp.PacketBudget{a.Budget, b.Budget})
 		encoded = append(encoded, bits...)
 	}
 	source := sha256.Sum256(encoded)
@@ -517,7 +531,7 @@ func (t *tunnelInstance) Reconcile(v cluster.View, g tunnelView) (result error) 
 type TunnelObservation struct {
 	PacketUsers    int
 	Connections    map[string][32]byte
-	TransportDrops *mydcp.PacketDropStats `json:",omitempty"`
+	TransportDrops *sfcp.PacketDropStats `json:",omitempty"`
 }
 
 func (t *tunnelInstance) Ready(key string) error { _, err := t.Observe(key); return err }

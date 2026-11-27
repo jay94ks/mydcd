@@ -20,7 +20,7 @@ builder 신뢰/이미지 삭제 예약을 확인한다. 같은 ID와 같은 cach
 중복 수락하지 않는다. 원 shared job의 ID/Spec digest로 scope를 고정하며 그 job이
 삭제 표시됐어도 보존 cache를 대상으로 삼을 수 있다. 새 빌드로 재등록하지 않는다.
 
-`mydc build cache prune`의 진행 조회는 기존 User
+`sfcli build cache prune`의 진행 조회는 기존 User
 `image-builds`에 `ImageBuild:{Part:"cache-prunes",ID?,Node?}`를 보낸다. 현재 tenant/node
 Read 또는 ManageRegistry를 요구한다. 페이지는 공통 Schema/Tenant/Part/RootRevision/
 Epoch/Next와 optional `CachePrunes`를 담으며 한 행은 다음 형식이다.
@@ -66,7 +66,7 @@ member Management `image-build-cache-prune-report`는 기존 latest quorum 경�
 ```
 
 `Intent`는 원 UserOperation/source ID/Spec digest의 domain-separated SHA-256이다.
-서명은 Signature를 nil로 한 JSON 앞에 `mydc-build-cache-prune-report-1`과 NUL을 붙인
+서명은 Signature를 nil로 한 JSON 앞에 `sfc-build-cache-prune-report-1`과 NUL을 붙인
 bytes에 대한 원 owner의 Ed25519 서명이다. Command는 ImageBuildKey의 ModuleReport,
 Actor는 `node/<owner hex>`, Expected는 RootRevision이며 RequestID는 기존
 ReportRequestID다. 원 row CAS·epoch·설치 owner를 확인하고 새 envelope의 At은 서버
@@ -97,7 +97,7 @@ Source 정책의 CPU·메모리·PID·tmpfs 제한과 pinned rootless BuildKit �
 격리를 사용한다. 빌드와 같은 SDK 생성/시작/Stop/Wait/Remove를 소비하되 Dockerfile/
 Secret 입력과 registry push를 실행하지 않는다.
 
-원 root 아래 `.mydc-imagebuild/cache-maintenance/<intent hex>/output`만 새로 준비하고
+원 root 아래 `.sfc-imagebuild/cache-maintenance/<intent hex>/output`만 새로 준비하고
 원 cache를 배타적으로 빌린다. 컨테이너에는 output·cache 두 mount만 제공하며 network
 mode는 none이다. 소켓은 output 안의 `buildkit.sock`이고 외부 TCP listener가 아니다.
 원 FD/inode·UID·동일 이미지/옵션·원 native ID와 pinned SDK server를 확인한다. 디렉터리
@@ -169,12 +169,12 @@ readback 실패는 이전 성공 관측을 남기고 LastAttemptCode를 UNAVAILA
 
 ### CLI 수동 정리
 
-`mydc build cache prune [CONTEXT] [--node NODE] [--cache CACHE] [--entry ID] [--unused-days N]`은
+`sfcli build cache prune [CONTEXT] [--node NODE] [--cache CACHE] [--entry ID] [--unused-days N]`은
 현재 cache 목록 하나(같은 epoch)에서 대상 cache를 고르고, 물어본 뒤 cache마다 위의
 `prune-build-cache` change를 하나씩 보낸다. 작업 ID는 `--id`(기본 새 ID)에 `-1`, `-2`, ...를
 붙인다. 이 일괄 제출은 원자적이지 않다. 중간에 거부되거나 결과를 모르면 뒤 cache는 보내지
 않고, 같은 명령을 같은 `--id`로 다시 실행하면 저장된 원 요청부터 이어 보낸다. 각 cache의
-실제 정리 완료는 owner 결과로 판단하며 `mydc op show ID-N`으로 확인한다.
+실제 정리 완료는 owner 결과로 판단하며 `sfcli op show ID-N`으로 확인한다.
 [명령](../../cli/build.md#빌드-캐시)
 
 

@@ -28,7 +28,7 @@ type CompiledBuild struct {
 func CompiledBuildBytes(b CompiledBuild) []byte {
 	b.Signature = nil
 	raw, _ := json.Marshal(b)
-	return append([]byte("mydc-checker-compiled-build-1\x00"), raw...)
+	return append([]byte("sfc-checker-compiled-build-1\x00"), raw...)
 }
 func (b CompiledBuild) Verify() error {
 	if b.Schema != 1 || b.Cluster == ([32]byte{}) || b.Builder == ([32]byte{}) || b.Job == ([32]byte{}) || !digest(b.ID) || b.Recipe.Validate() != nil || b.Digest == ([32]byte{}) || b.Length == 0 || b.Length > MaxCompiledArtifactBytes || !ed25519.Verify(b.Builder[:], CompiledBuildBytes(b), b.Signature) {
@@ -54,7 +54,7 @@ type CompiledFact struct {
 func CompiledFactBytes(f CompiledFact) []byte {
 	f.Signature = nil
 	raw, _ := json.Marshal(f)
-	return append([]byte("mydc-checker-compiled-cache-1\x00"), raw...)
+	return append([]byte("sfc-checker-compiled-cache-1\x00"), raw...)
 }
 func (f CompiledFact) Verify() error {
 	if f.Schema != 1 || f.Owner == ([32]byte{}) || len(f.Signature) != ed25519.SignatureSize || f.Build.Verify() != nil {
@@ -99,7 +99,7 @@ type CompiledCollection struct {
 func CompiledCollectionBytes(c CompiledCollection) []byte {
 	c.Signature = nil
 	raw, _ := json.Marshal(c)
-	return append([]byte("mydc-checker-compiled-collection-1\x00"), raw...)
+	return append([]byte("sfc-checker-compiled-collection-1\x00"), raw...)
 }
 func (c CompiledCollection) Digest() [32]byte { raw, _ := json.Marshal(c); return sha256.Sum256(raw) }
 func (c CompiledCollection) Clone() CompiledCollection {

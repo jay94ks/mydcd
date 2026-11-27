@@ -7,7 +7,7 @@ Target.Actions는 `["resolve","build"]`다. App/Deployment 필드는 빌드 전�
 원 job ID이며 실제 앱이나 Task를 생성하지 않는다. 앱 mount·외부 registry 승인을 재사용하지 않는다.
 
 ```sh
-mydc build run source --id build-one
+sfcli build run source --id build-one
 ```
 
 기존 Group 승인 경로를 사용하며 비밀번호는 원 operation·공유 상태에 넣지 않는다. 값은

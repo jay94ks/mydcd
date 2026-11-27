@@ -4,7 +4,7 @@ package network
 
 import (
 	"context"
-	"github.com/jay94ks/mydcd/internal/engine"
+	"github.com/jay94ks/seafield/internal/engine"
 	"sync"
 )
 

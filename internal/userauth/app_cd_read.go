@@ -10,11 +10,11 @@ import (
 	"reflect"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/mydcp"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/sfcp"
 )
 
 func (r Request) validCDReadFields() bool {
@@ -67,7 +67,7 @@ func (s Service) appCDReadReply(view cluster.View, session access.Session, r Req
 	return Reply{Schema: 1, Code: code}
 }
 
-func (c Client) AppDeliveryHistory(ctx context.Context, peer mydcp.Peer, session access.Session, tenant, app, after string) (control.AppCDHistoryPage, error) {
+func (c Client) AppDeliveryHistory(ctx context.Context, peer sfcp.Peer, session access.Session, tenant, app, after string) (control.AppCDHistoryPage, error) {
 	q := control.AppCDReadRequest{App: app}
 	if !q.Valid(true) || tenant == "" {
 		return control.AppCDHistoryPage{}, access.ErrInvalid
@@ -78,12 +78,12 @@ func (c Client) AppDeliveryHistory(ctx context.Context, peer mydcp.Peer, session
 	}
 	p := reply.AppCDHistory
 	if p == nil || p.Schema != 1 || p.Tenant != tenant || p.App != app || len(p.Records) > 16 || len(p.Next) > 1536 {
-		return control.AppCDHistoryPage{}, mydcp.ErrFrame
+		return control.AppCDHistoryPage{}, sfcp.ErrFrame
 	}
 	previous := ^uint64(0)
 	for i, row := range p.Records {
 		if row.Sequence == 0 || i > 0 && row.Sequence >= previous || row.Sequence < p.First || row.Sequence > p.Last {
-			return control.AppCDHistoryPage{}, mydcp.ErrFrame
+			return control.AppCDHistoryPage{}, sfcp.ErrFrame
 		}
 		previous = row.Sequence
 	}
@@ -102,27 +102,27 @@ func collectCDSnapshot(tenant, app, kind string, read func(int, [32]byte) (*cont
 			return nil, err
 		}
 		if p == nil || p.Schema != 1 || p.Tenant != tenant || p.App != app || p.Kind != kind || p.Part != i || p.Length < 1 || p.Length > 16<<20 || p.Digest == ([32]byte{}) {
-			return nil, mydcp.ErrFrame
+			return nil, sfcp.ErrFrame
 		}
 		if i == 0 {
 			length, digest = p.Length, p.Digest
 		} else if p.Length != length || p.Digest != digest {
-			return nil, mydcp.ErrFrame
+			return nil, sfcp.ErrFrame
 		}
 		if len(p.Data) != min(deployment.ArtifactPartBytes, length-len(raw)) {
-			return nil, mydcp.ErrFrame
+			return nil, sfcp.ErrFrame
 		}
 		raw = append(raw, p.Data...)
 		if len(raw) == length {
 			if sha256.Sum256(raw) != digest {
-				return nil, mydcp.ErrFrame
+				return nil, sfcp.ErrFrame
 			}
 			return raw, nil
 		}
 	}
 }
 
-func (c Client) AppDeliveryDiff(ctx context.Context, peer mydcp.Peer, session access.Session, tenant, app string) (control.AppCDDiff, error) {
+func (c Client) AppDeliveryDiff(ctx context.Context, peer sfcp.Peer, session access.Session, tenant, app string) (control.AppCDDiff, error) {
 	q := control.AppCDReadRequest{App: app}
 	if tenant == "" || !q.Valid(false) {
 		return control.AppCDDiff{}, access.ErrInvalid
@@ -137,10 +137,10 @@ func (c Client) AppDeliveryDiff(ctx context.Context, peer mydcp.Peer, session ac
 	}
 	var out control.AppCDDiff
 	if json.Unmarshal(raw, &out) != nil || out.Schema != 1 || out.Tenant != tenant || out.App != app || out.ChangeCount != len(out.Changes) {
-		return control.AppCDDiff{}, mydcp.ErrFrame
+		return control.AppCDDiff{}, sfcp.ErrFrame
 	}
 	if out.Replacement != nil && !out.Replacement.Valid(tenant, app) {
-		return control.AppCDDiff{}, mydcp.ErrFrame
+		return control.AppCDDiff{}, sfcp.ErrFrame
 	}
 	return out, nil
 }

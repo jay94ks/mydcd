@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Package store keeps the web daemon's own auxiliary records in one bbolt
-// file. mydcd stays the authority for cluster state; deleting this file does
+// file. sfcd stays the authority for cluster state; deleting this file does
 // not change the cluster. Passwords, tokens, private keys, session keys and
 // Vault values are never stored here.
 package store
@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"time"
 
 	bolt "go.etcd.io/bbolt"
@@ -49,7 +50,7 @@ var (
 		bucketACMEAcct, bucketACMECerts, bucketACMEOrders, bucketSaOrigins,
 		bucketAIConfig, bucketAICatalog, bucketAIUsage, bucketAIAudit, bucketAIConversations, bucketAIProposals,
 		bucketIncidents, bucketIncidentPolicy, bucketGuides, bucketWebhooks, bucketWebhookLinks, bucketWebhookDeliveries, bucketWebhookCDChecks,
-		bucketMCPServers, bucketWebhookCDCheckHistory}
+		bucketMCPServers, bucketWebhookCDCheckHistory, bucketTrash, bucketVPSDNS}
 
 	keySchema = []byte("schema")
 )
@@ -62,7 +63,32 @@ var ErrConflict = errors.New("store: conflict")
 
 // Store is the web daemon's bbolt database.
 type Store struct {
-	db *bolt.DB
+	db       *bolt.DB
+	onChange atomic.Pointer[func(Change)]
+}
+
+// Change is one committed write of a record the live socket reports
+// (internal/web/server/live.go): an op or notification of User, an
+// incident of Tenant ("" for a cluster incident).
+type Change struct {
+	Kind    string // "op", "notification", "incident"
+	User    string
+	Tenant  string
+	ID      string // "" when several records of User changed at once
+	Deleted bool
+}
+
+// OnChange sets the function told about every committed Change. It runs
+// after the transaction, outside it, and must not block.
+func (s *Store) OnChange(fn func(Change)) { s.onChange.Store(&fn) }
+
+func (s *Store) changed(err error, c Change) {
+	if err != nil {
+		return
+	}
+	if fn := s.onChange.Load(); fn != nil && *fn != nil {
+		(*fn)(c)
+	}
 }
 
 // Open opens (creating if needed) the DB file with mode 0600 and migrates the

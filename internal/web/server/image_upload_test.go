@@ -24,7 +24,7 @@ import (
 
 	ggcr "github.com/google/go-containerregistry/pkg/registry"
 
-	"github.com/jay94ks/mydcd/internal/web/store"
+	"github.com/jay94ks/seafield/internal/web/store"
 )
 
 // testRegistry is a distribution registry behind the bearer token flow the
@@ -41,7 +41,7 @@ func newTestRegistry(t *testing.T) *testRegistry {
 	tr.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/token" {
 			u, p, ok := r.BasicAuth()
-			if !ok || u == "" || !strings.HasPrefix(p, "mydc-fake-registry-login.") || !strings.HasPrefix(r.URL.Query().Get("scope"), "repository:shop/") {
+			if !ok || u == "" || !strings.HasPrefix(p, "sfc-fake-registry-login.") || !strings.HasPrefix(r.URL.Query().Get("scope"), "repository:shop/") {
 				w.WriteHeader(http.StatusUnauthorized)
 				return
 			}
@@ -51,7 +51,7 @@ func newTestRegistry(t *testing.T) *testRegistry {
 			return
 		}
 		if !strings.HasPrefix(r.Header.Get("Authorization"), "Bearer bearer-") {
-			w.Header().Set("WWW-Authenticate", `Bearer realm="https://registry.mydc.local/token",service="registry.mydc.local"`)
+			w.Header().Set("WWW-Authenticate", `Bearer realm="https://registry.sfc.local/token",service="registry.sfc.local"`)
 			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}
@@ -141,7 +141,7 @@ func TestImageUploadPushTagLayers(t *testing.T) {
 	raw := func(method, path string, body []byte) (int, map[string]any) {
 		t.Helper()
 		req, _ := http.NewRequest(method, f.http.URL+path, bytes.NewReader(body))
-		req.Header.Set("X-MyDC-Web", "1")
+		req.Header.Set("X-SFC-Web", "1")
 		res, err := f.hc.Do(req)
 		if err != nil {
 			t.Fatal(err)
@@ -247,7 +247,7 @@ func TestImageUploadPushTagLayers(t *testing.T) {
 	if wh["whiteout"] != true || wh["path"] != "/etc/old.conf" {
 		t.Fatalf("whiteout: %v", wh)
 	}
-	// Cached list again; without a pull credential from mydcd the cache is
+	// Cached list again; without a pull credential from sfcd the cache is
 	// not served (alice only views payments).
 	if code, _ := f.do("GET", base+"/images/layer?repository=shop/tool&digest="+layerDigest, nil); code != 200 {
 		t.Fatalf("cached: %d", code)
@@ -299,7 +299,7 @@ func TestLegacyDockerSave(t *testing.T) {
 	_, up := f.do("POST", base+"/uploads", map[string]any{"fileName": "legacy.tar", "bytes": len(arch)})
 	uid := up["id"].(string)
 	req, _ := http.NewRequest("PUT", f.http.URL+base+"/uploads/"+uid+"/chunks/0", bytes.NewReader(arch))
-	req.Header.Set("X-MyDC-Web", "1")
+	req.Header.Set("X-SFC-Web", "1")
 	if res, err := f.hc.Do(req); err != nil || res.StatusCode != 200 {
 		t.Fatalf("chunk: %v %v", res, err)
 	}

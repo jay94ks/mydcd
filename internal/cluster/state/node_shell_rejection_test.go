@@ -15,15 +15,15 @@ func TestNodeShellRefusalCodesKeepOriginalNumbersAndDeterministicReasons(t *test
 	for _, tc := range []struct {
 		code   Code
 		reason string
-	}{{NodeShellDisabled, "node-shell-disabled"}, {NodeShellNotReady, "node-shell-not-ready"}, {NodeShellLimit, "limit"}, {NodeShellUnreachable, "node-unreachable"}, {NetworkSystemRange, "system-range-overlap"}} {
+	}{{NodeShellDisabled, "node-shell-disabled"}, {NodeShellNotReady, "node-shell-not-ready"}, {NodeShellLimit, "limit"}, {NodeShellUnreachable, "node-unreachable"}, {NetworkSystemRange, "system-range-overlap"}, {BridgeExists, "bridge-exists"}, {BridgePeerClosed, "peer-closed"}, {NetworkChanging, "network-changing"}, {BridgeAttached, "bridge-attached"}} {
 		if RejectionReason(tc.code) != tc.reason || !(Result{Code: tc.code, Reason: tc.reason}).ValidReason() || (Result{Code: tc.code}).ValidReason() || (Result{Code: ConditionFailed, Reason: tc.reason}).ValidReason() {
 			t.Fatal("shell refusal reason was not fixed to its durable code", tc)
 		}
 	}
-	if NetworkSystemRange != 21 {
+	if NetworkSystemRange != 21 || BridgeAttached != 25 {
 		t.Fatal("the system range refusal was not appended")
 	}
-	if ValidResultCode(NetworkSystemRange+1) || (Result{Code: NetworkSystemRange + 1}).ValidReason() {
+	if ValidResultCode(BridgeAttached+1) || (Result{Code: BridgeAttached + 1}).ValidReason() {
 		t.Fatal("unknown future result code accepted")
 	}
 }

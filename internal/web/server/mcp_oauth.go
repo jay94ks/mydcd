@@ -17,10 +17,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/web/store"
+	"github.com/jay94ks/seafield/internal/web/store"
 )
 
-// OAuth for MCP servers (UI-B9, mydc-web). The MCP authorization flow
+// OAuth for MCP servers (UI-B9, sfc-web). The MCP authorization flow
 // (2025-06-18): protected resource metadata → authorization server
 // metadata → dynamic client registration → authorization code with PKCE
 // (S256) and the resource indicator. The browser opens loginUrl; the
@@ -203,7 +203,7 @@ func (s *Server) mcpOAuthDiscover(ctx context.Context, mcpURL, redirect string) 
 		return nil, mcpOAuthSecret{}, nil, mcpErrorf("authorization server does not offer dynamic client registration")
 	}
 	// RFC 7591 dynamic client registration (public client).
-	body, _ := json.Marshal(map[string]any{"client_name": "MyDC", "redirect_uris": []string{redirect},
+	body, _ := json.Marshal(map[string]any{"client_name": "Seafield Cluster", "redirect_uris": []string{redirect},
 		"grant_types": []string{"authorization_code", "refresh_token"}, "response_types": []string{"code"}, "token_endpoint_auth_method": "none"})
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, meta.RegistrationEndpoint, strings.NewReader(string(body)))
 	if err != nil {
@@ -298,17 +298,17 @@ func (s *Server) handleMCPOAuthCallback(w http.ResponseWriter, r *http.Request) 
 	page := func(code int, msg string) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(code)
-		_, _ = fmt.Fprintf(w, "<!doctype html><meta charset=utf-8><title>MyDC</title><p>%s</p>", msg)
+		_, _ = fmt.Fprintf(w, "<!doctype html><meta charset=utf-8><title>Seafield Cluster</title><p>%s</p>", msg)
 	}
 	if l == nil || q.Get("state") == "" {
-		page(http.StatusBadRequest, "로그인 요청을 찾지 못했습니다. MyDC에서 다시 로그인해 주세요.")
+		page(http.StatusBadRequest, "로그인 요청을 찾지 못했습니다. Sfc에서 다시 로그인해 주세요.")
 		return
 	}
 	fail := func(status, msg string) {
 		st.mu.Lock()
 		l.status, l.err = status, msg
 		st.mu.Unlock()
-		page(http.StatusBadRequest, "로그인하지 못했습니다. MyDC 화면에서 이유를 볼 수 있습니다. 이 창은 닫아도 됩니다.")
+		page(http.StatusBadRequest, "로그인하지 못했습니다. Seafield Cluster 화면에서 이유를 볼 수 있습니다. 이 창은 닫아도 됩니다.")
 	}
 	if s.now().After(l.expiresAt) {
 		fail("expired", "the login took too long; start it again")
@@ -342,7 +342,7 @@ func (s *Server) handleMCPOAuthCallback(w http.ResponseWriter, r *http.Request) 
 	st.mu.Lock()
 	l.status, l.err = "connected", ""
 	st.mu.Unlock()
-	page(http.StatusOK, "로그인을 마쳤습니다. 이 창을 닫고 MyDC로 돌아가 주세요.")
+	page(http.StatusOK, "로그인을 마쳤습니다. 이 창을 닫고 Sfc로 돌아가 주세요.")
 }
 
 // validBearer: a token that fits an Authorization header (at most 8 KiB).

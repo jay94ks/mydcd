@@ -5,8 +5,8 @@ package userauth
 import (
 	"maps"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	checker "github.com/jay94ks/mydcd/internal/workload/lifecycle"
+	"github.com/jay94ks/seafield/internal/access"
+	checker "github.com/jay94ks/seafield/internal/workload/lifecycle"
 )
 
 type CheckerModuleProgress struct {

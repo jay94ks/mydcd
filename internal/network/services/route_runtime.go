@@ -9,10 +9,10 @@ import (
 	"encoding/json"
 	"slices"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/network"
-	"github.com/jay94ks/mydcd/internal/reconcile"
-	"github.com/jay94ks/mydcd/internal/tenancy"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/network"
+	"github.com/jay94ks/seafield/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/tenancy"
 )
 
 // RouteNativeProof is original native-journal evidence, not a control commit.
@@ -33,7 +33,7 @@ type RouteNativeProof struct {
 func RouteNativeBytes(p RouteNativeProof) []byte {
 	p.Signature = nil
 	raw, _ := json.Marshal(p)
-	return append([]byte("mydc-route-native-1\x00"), raw...)
+	return append([]byte("sfc-route-native-1\x00"), raw...)
 }
 func ownRouteNative(p RouteNativeProof) RouteNativeProof {
 	p.Signature = slices.Clone(p.Signature)
@@ -65,7 +65,7 @@ type RouteTuple struct {
 
 func tupleHash(t RouteTuple) [32]byte {
 	raw, _ := json.Marshal(t)
-	return sha256.Sum256(append([]byte("mydc-route-flow-1\x00"), raw...))
+	return sha256.Sum256(append([]byte("sfc-route-flow-1\x00"), raw...))
 }
 func reverseTuple(t RouteTuple) RouteTuple {
 	return RouteTuple{t.Destination, t.Source, t.DestinationPort, t.SourcePort, t.Protocol}
@@ -108,7 +108,7 @@ type RouteFlowClose struct {
 func RouteFlowCloseBytes(p RouteFlowClose) []byte {
 	p.Signature = nil
 	raw, _ := json.Marshal(p)
-	return append([]byte("mydc-route-flow-close-1\x00"), raw...)
+	return append([]byte("sfc-route-flow-close-1\x00"), raw...)
 }
 
 // RouteRuntime owns one side's native journal and stateful flow references.

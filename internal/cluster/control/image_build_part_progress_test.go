@@ -10,10 +10,10 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/imagebuild"
-	"github.com/jay94ks/mydcd/internal/nodestorage"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/imagebuild"
+	"github.com/jay94ks/seafield/internal/nodestorage"
 )
 
 // Uses the real admission/reducer/FSM/signature and snapshot boundaries. Native
@@ -223,19 +223,14 @@ func TestImageBuildPartProgressRejectsForeignFactsProofChangesAndRevocation(t *t
 				r.Part.Proof.Session = &digest
 				r.Part.Proof.Signature = ed25519.Sign(f.manager, imagebuild.PartProofBytes(r.Part.Proof))
 			case "operation", "approval":
-				users, _ := f.p.Catalog(f.s)
-				u, _ := users.User("manager")
 				approver := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{71}, 32))
 				if name == "approval" {
-					u.Credentials = append(u.Credentials, access.Credential{ID: "approval", Method: access.PrivateKey, PublicKey: [32]byte(approver.Public().(ed25519.PublicKey)), Enabled: true, Operations: []string{"image-builds"}})
+					f.addKey("manager", "approval", [32]byte(approver.Public().(ed25519.PublicKey)), []string{"image-builds"})
 				} else {
-					u.Credentials[0].Operations = []string{"image-builds"}
+					f.limitAccount("manager", "image-builds")
 				}
-				expected := u.Revision
-				u.Revision = 0
-				f.apply("admin", "put-user", expected, u, state.Applied)
-				users, _ = f.p.Catalog(f.s)
-				u, _ = users.User("manager")
+				users, _ := f.p.Catalog(f.s)
+				u, _ := users.User("manager")
 				r.Part.Session.AccountRevision = u.Revision
 				r.Part.Session.Signature = ed25519.Sign(f.node, access.SessionBytes(r.Part.Session))
 				if name == "approval" {
@@ -370,7 +365,7 @@ func TestImageBuildOwnerReportPreservesOriginalSchemaOneSigningBytes(t *testing.
 		Signature                     []byte
 	}{current.Schema, current.Cluster, current.Owner, current.Tenant, current.Upload, current.Action, current.Expected, current.RootRevision, current.Epoch, current.Expiry, nil, nil}
 	raw, _ := json.Marshal(old)
-	if !bytes.Equal(ImageBuildOwnerReportBytes(current), append([]byte("mydc-imagebuild-owner-report-1\x00"), raw...)) {
+	if !bytes.Equal(ImageBuildOwnerReportBytes(current), append([]byte("sfc-imagebuild-owner-report-1\x00"), raw...)) {
 		t.Fatal("optional owner part progress changed retained report signing bytes")
 	}
 }

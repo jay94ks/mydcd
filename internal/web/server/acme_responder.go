@@ -11,17 +11,17 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/certstore"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/web/mydc"
-	"github.com/jay94ks/mydcd/internal/web/store"
+	"github.com/jay94ks/seafield/internal/certstore"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/web/sfc"
+	"github.com/jay94ks/seafield/internal/web/store"
 )
 
 // The cluster's ACME HTTP-01 responder setting (devel/design
-// certificate-store §8). mydc-web fills it with its own advertised responder
+// certificate-store §8). sfc-web fills it with its own advertised responder
 // address once it runs: the automation account must be delegated the
 // set-acme-responder action (docs/cli/domain.md). It never clears the
-// setting; an administrator does with `mydc domain acme-responder clear`.
+// setting; an administrator does with `sfcli domain acme-responder clear`.
 
 // acmeResponderRetry spaces attempts while the setting is not ours yet.
 const acmeResponderRetry = time.Minute
@@ -50,7 +50,7 @@ func (s *Server) acmeResponderSync(ctx context.Context, ws *webSession) {
 	if !due {
 		return
 	}
-	err := ws.do(ctx, func(ctx context.Context, c mydc.Conn) error {
+	err := ws.do(ctx, func(ctx context.Context, c sfc.Conn) error {
 		page, err := c.QueryCertificates(ctx, control.CertificateQuery{})
 		if err != nil {
 			return err
@@ -62,14 +62,14 @@ func (s *Server) acmeResponderSync(ctx context.Context, ws *webSession) {
 			return nil
 		}
 		raw, _ := json.Marshal(control.ACMEResponderChange{Address: address})
-		ch := mydc.Change{Schema: 1, Action: mydc.ActionSetACMEResponder, Principal: ws.user.ID, Expected: page.Revision, Payload: raw}
+		ch := sfc.Change{Schema: 1, Action: sfc.ActionSetACMEResponder, Principal: ws.user.ID, Expected: page.Revision, Payload: raw}
 		who, err := c.Whoami(ctx)
 		if err != nil {
 			return err
 		}
-		sum := sha256.Sum256(append([]byte(mydc.ActionSetACMEResponder+"\x00"), raw...))
-		o := &store.Op{ID: newOpID(), User: ws.user.ID, Username: ws.user.Username, Action: mydc.ActionSetACMEResponder, Target: address, Digest: hex.EncodeToString(sum[:])}
-		if _, err := s.sendStored(ctx, c, o, ch, who.RootFor(mydc.ActionSetACMEResponder)); err != nil {
+		sum := sha256.Sum256(append([]byte(sfc.ActionSetACMEResponder+"\x00"), raw...))
+		o := &store.Op{ID: newOpID(), User: ws.user.ID, Username: ws.user.Username, Action: sfc.ActionSetACMEResponder, Target: address, Digest: hex.EncodeToString(sum[:])}
+		if _, err := s.sendStored(ctx, c, o, ch, who.RootFor(sfc.ActionSetACMEResponder)); err != nil {
 			return err
 		}
 		if o.State == store.OpApplied {
@@ -94,7 +94,7 @@ func (s *Server) handleACMEResponder(w http.ResponseWriter, r *http.Request, ws 
 	ctx, cancel := s.callCtx(r)
 	defer cancel()
 	var page control.CertificatePage
-	if err := ws.do(ctx, func(ctx context.Context, c mydc.Conn) error {
+	if err := ws.do(ctx, func(ctx context.Context, c sfc.Conn) error {
 		var err error
 		page, err = c.QueryCertificates(ctx, control.CertificateQuery{})
 		return err

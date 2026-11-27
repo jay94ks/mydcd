@@ -5,12 +5,13 @@ package control
 import (
 	"crypto/sha256"
 	"encoding/json"
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/lifecycle"
-	"github.com/jay94ks/mydcd/internal/cluster/membership"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/maintenance"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/lifecycle"
+	"github.com/jay94ks/seafield/internal/cluster/membership"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/eventlog"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/maintenance"
 	"slices"
 )
 
@@ -72,7 +73,7 @@ func compactTarget(p CompactPlan) [32]byte {
 	p.Selection.Nodes = slices.Clone(p.Selection.Nodes)
 	slices.Sort(p.Selection.Nodes)
 	raw, _ := json.Marshal(p)
-	return sha256.Sum256(append([]byte("mydc-raft-compact-target-1\x00"), raw...))
+	return sha256.Sum256(append([]byte("sfc-raft-compact-target-1\x00"), raw...))
 }
 func (p CompactPlan) Valid() bool {
 	if p.Schema != 1 || p.Cluster == ([32]byte{}) || !p.Selection.Valid() || p.Target == ([32]byte{}) || p.Target != compactTarget(p) {
@@ -271,4 +272,49 @@ func (p Policy) reduceCompactions(s state.State, cmd state.Command) (map[string]
 	}
 
 	return p.compactCheckpoint(s, c)
+}
+
+// compactBook is the CompactKey Raft book (see book.go).
+var compactBook = Book{
+	Key:       CompactKey,
+	Actions:   []string{"raft-compact"},
+	Reduce:    Policy.reduceCompactions,
+	Authorize: authorizeCluster,
+	AdmitReport: func(p Policy, s state.State, cmd state.Command) error {
+		_, err := p.compactReport(s, cmd)
+		return err
+	},
+	Events: compactEvents,
+}
+
+func compactEvents(p Policy, before, after state.State, emit eventEmitter) error {
+	old, err := p.Compactions(before)
+	if err != nil {
+		return err
+	}
+	next, err := p.Compactions(after)
+	if err != nil {
+		return err
+	}
+	for _, job := range next.Records {
+		previous, _ := old.Record(job.Job.Operation)
+		for _, node := range job.Job.Nodes {
+			was, known := previous.Job.Node(node.Node)
+			if known && was.State == node.State {
+				continue
+			}
+			kind := ""
+			if node.State == "running" {
+				kind = "raft-compact-started"
+			} else if node.State == "done" || node.State == "failed" || node.State == "skipped" {
+				kind = "raft-compact-completed"
+			}
+			if kind != "" {
+				d := eventlog.Detail{Operation: job.Job.Operation, State: node.State, Code: node.Code}
+				eventReason(&d, job.Origin)
+				emit(kind, "cluster", eventlog.Target{Node: node.Node}, d)
+			}
+		}
+	}
+	return nil
 }

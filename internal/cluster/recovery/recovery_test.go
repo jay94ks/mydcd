@@ -5,7 +5,7 @@ package recovery
 import (
 	"crypto/sha256"
 	"errors"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/cluster/state"
 	"reflect"
 	"testing"
 )

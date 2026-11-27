@@ -10,8 +10,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/config"
-	"github.com/jay94ks/mydcd/internal/deployment"
+	"github.com/jay94ks/seafield/internal/config"
+	"github.com/jay94ks/seafield/internal/deployment"
 )
 
 func TestInstalledGitCredentialKeepsTenantRepositoryAndPrivateFileBoundary(t *testing.T) {
@@ -20,7 +20,7 @@ func TestInstalledGitCredentialKeepsTenantRepositoryAndPrivateFileBoundary(t *te
 	if err := os.WriteFile(file, []byte("private-token\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	p := config.GitCredential{Tenant: "tenant", Profile: "reader", Repository: "https://git.mydc.test/team/app.git", Username: "git-reader", PasswordFile: file}
+	p := config.GitCredential{Tenant: "tenant", Profile: "reader", Repository: "https://git.sfc.test/team/app.git", Username: "git-reader", PasswordFile: file}
 	access, err := installedGitAccess(p)
 	if err != nil || !bytes.Equal(access.Password, []byte("private-token")) {
 		t.Fatal("installed original credential", err)
@@ -56,7 +56,7 @@ func TestInstalledGitCredentialKeepsTenantRepositoryAndPrivateFileBoundary(t *te
 	if _, err = r.fetchGit(context.Background(), "other", policy, deployment.DeliveryFetch{}); err != deployment.ErrSource {
 		t.Fatal("foreign tenant profile", err)
 	}
-	policy.Source.Repository = "https://git.mydc.test/another/app.git"
+	policy.Source.Repository = "https://git.sfc.test/another/app.git"
 	if _, err = r.fetchGit(context.Background(), "tenant", policy, deployment.DeliveryFetch{}); err != deployment.ErrSource {
 		t.Fatal("credential widened to another repository", err)
 	}

@@ -6,7 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
-	"github.com/jay94ks/mydcd/internal/schema"
+	"github.com/jay94ks/seafield/internal/schema"
 	"slices"
 )
 
@@ -22,6 +22,6 @@ func ManagedNativeID(key string, generation uint64, spec Spec) string {
 		}
 	}
 	raw, _ := json.Marshal(spec)
-	h := sha256.Sum256(append([]byte(fmt.Sprintf("mydc-app-ingress-1\x00%s\x00%d\x00", key, generation)), raw...))
+	h := sha256.Sum256(append([]byte(fmt.Sprintf("sfc-app-ingress-1\x00%s\x00%d\x00", key, generation)), raw...))
 	return fmt.Sprintf("ingress/%x", h)
 }

@@ -12,9 +12,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/imagebuild"
-	"github.com/jay94ks/mydcd/internal/nodestorage"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/imagebuild"
+	"github.com/jay94ks/seafield/internal/nodestorage"
 )
 
 func imageBuildFixture(t *testing.T) (*nodeStorageFixture, imagebuild.ContextSpec) {
@@ -36,7 +36,7 @@ func imageBuildFixture(t *testing.T) (*nodeStorageFixture, imagebuild.ContextSpe
 		f.apply("admin", "set-node-quota", expected, limit, state.Applied)
 	}
 	f.apply("manager", "put-registry", 0, RegistryPut{registry}, state.Applied)
-	f.apply("admin", "add-node-storage", 0, nodestorage.Definition{Node: "node-a", ID: "hdd", Path: "/mnt/hdd", MaxVolumes: 2, Tenants: []string{"tenant"}}, state.Applied)
+	f.apply("admin", "add-node-storage", 0, nodestorage.Definition{Node: "node-a", ID: "hdd", Path: "/mnt/hdd", Tenants: []string{"tenant"}}, state.Applied)
 	f.observe()
 	root := f.root().Reference(f.p.Cluster)
 	policy := imagebuild.Policy{Schema: 1, Tenant: "tenant", Nodes: []imagebuild.NodeRoot{{Node: "node-a", Root: root}}, Concurrency: 1, Seconds: 600, CPUMillis: 1000, MemoryBytes: 128 << 20, WorkspaceBytes: 1 << 30, CacheBytes: 1 << 30, Registry: registry.ID, Platforms: []string{"linux/amd64"}, BuilderImage: "docker.io/moby/buildkit@sha256:" + strings.Repeat("a", 64), Cleanup: imagebuild.CleanupPolicy{HighWaterPercent: 80, UnusedDays: 7}}

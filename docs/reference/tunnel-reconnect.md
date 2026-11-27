@@ -1,13 +1,13 @@
 # 끊긴 노드 간 Mesh 링크 복구
 
-현재 RQ4 서버·CLI 연결 단계이며 마지막 실행 검증 전이다. 이 동작은 설치된 노드 쌍의 끊긴 MYDCP 멤버 연결을 기존 인증된 QUIC Dial로 복구한다. 살아 있는 inbound/outbound 경로를 강제로 닫지 않는다. TUN·Raft 멤버십·tenant 업무 권한·Task·Volume을 재생성하지 않는다.
+현재 RQ4 서버·CLI 연결 단계이며 마지막 실행 검증 전이다. 이 동작은 설치된 노드 쌍의 끊긴 SFCP 멤버 연결을 기존 인증된 QUIC Dial로 복구한다. 살아 있는 inbound/outbound 경로를 강제로 닫지 않는다. TUN·Raft 멤버십·tenant 업무 권한·Task·Volume을 재생성하지 않는다.
 
 ```sh
-mydc cluster mesh --all
-mydc cluster reconnect node-a node-b --dry-run
-mydc cluster reconnect node-a node-b
+sfcli cluster mesh --all
+sfcli cluster reconnect node-a node-b --dry-run
+sfcli cluster reconnect node-a node-b
 # 링크가 이미 up이어도 원 결과를 먼저 읽는다.
-mydc op show ID
+sfcli op show ID
 ```
 
 첫 인자는 실제 Dial을 수행할 owner이며 둘째 인자는 그 owner가 보는 설치된 상대 노드다. 두 값은 서로 달라야 한다. 현재 시스템 관리자(`ManageCluster`)와 credential의 `reconnect-tunnel` 허용 범위를 교차 검사한다. tenant 관리 권한만으로 실행할 수 없다. `cluster mesh`의 `PairID`는 노드 ID를 정렬한 `node-a/node-b` 형식으로 계획·결과와 같다.
@@ -31,23 +31,25 @@ CLI는 원 intent를 전송 전에 journal에 저장한다. 같은 request ID는
 
 ## User 메시지·포맷
 
-Unix 관리 소켓과 네트워크 MYDCP의 기존 User purpose/frame·Session·서명 envelope를 사용한다. 다음은 추가 본문 필드 예시이며 실제 client는 기존 Nonce와 채널 challenge 서명을 포함한다. JSON 필드는 대문자로 시작하며 schema는1이다.
+Unix 관리 소켓과 네트워크 SFCP의 기존 User purpose/frame·Session·서명 envelope를 사용한다. 다음은 추가 본문 필드 예시이며 실제 client는 기존 Nonce와 채널 challenge 서명을 포함한다. JSON 필드는 대문자로 시작하며 schema는1이다.
+
+두 method는 [typed method](unix-sockets/10-user.md#typed-method)다. Request에는 `Schema`, `Method`, `Nonce`, `Params`만 두고, Reply는 `Code`와 `Data`만 쓴다.
 
 ```json
-{"Schema":1,"Method":"tunnel-reconnect-plan","Tunnel":{"Node":"node-a","Peer":"node-b","Operation":""}}
+{"Schema":1,"Method":"tunnel-reconnect-plan","Params":{"Node":"node-a","Peer":"node-b"}}
 ```
 
 ```json
-{"Schema":1,"Method":"tunnel-reconnect-status","Tunnel":{"Node":"","Peer":"","Operation":"link-42"}}
+{"Schema":1,"Method":"tunnel-reconnect-status","Params":{"Operation":"link-42"}}
 ```
 
-Request.Tenant/Node/After는 비워 둔다. 다른 method의 selector와 섞을 수 없다.
+plan의 Node와 Peer는 서로 다른 서버여야 한다. Params에 다른 필드가 있으면 거절한다.
 
-| Method | Reply 추가 필드 |
+| Method | Reply `Data` |
 |---|---|
 | tunnel-reconnect-plan | TunnelPlan |
 | tunnel-reconnect-status | TunnelStatus |
-| whoami | TunnelRootRevision, 기존 ModuleEpoch |
+| whoami | `Data.Roots["control/tunnel-reconnects"]`, `Data.ModuleEpoch` |
 | 기존 operation/result | 기존 사용자 요청 Result/Found와 공개 사유 |
 
 | TunnelPlan 필드 | 내용 |
@@ -61,7 +63,7 @@ Request.Tenant/Node/After는 비워 둔다. 다른 method의 selector와 섞을 
 
 기존 `[32]byte`의 JSON은32개 숫자 배열이며 서명 바이트는 base64다. 관측과 원 사용자 승인을 혼동하지 않는다. 관측만으로는 관리 권한을 얻지 못한다.
 
-실행은 기존 UserOperation의 `Change.Action=reconnect-tunnel`, `Expected=0`, `Payload={Operation,Plan}`을 사용한다. whoami의 TunnelRootRevision은 operation.RootRevision에 넣고 현재 module epoch·원 request ID를 서명한다. 현재 멤버 키/주소와 원 관측의 유효 범위를 다시 검사한다. 사유·사건 ID는 공개 원 metadata이며 권한을 만들지 않는다.
+실행은 기존 UserOperation의 `Change.Action=reconnect-tunnel`, `Expected=0`, `Payload={Operation,Plan}`을 사용한다. whoami의 `Data.Roots["control/tunnel-reconnects"]`는 operation.RootRevision에 넣고 현재 module epoch·원 request ID를 서명한다. 현재 멤버 키/주소와 원 관측의 유효 범위를 다시 검사한다. 사유·사건 ID는 공개 원 metadata이며 권한을 만들지 않는다.
 
 | TunnelStatus 필드 | 내용 |
 |---|---|
@@ -84,7 +86,7 @@ Request.Tenant/Node/After는 비워 둔다. 다른 method의 selector와 섞을 
 
 공유 job은 시스템 관리 자원 `control/tunnel-reconnects`가 소유한다. queued/running은 owner와 peer 양쪽의 node activity·원장 회수에 outstanding 참조로 포함한다. owner의 원 private sent/result는 `maintenance/tunnel/`에 보관한다. 앱 종료·프로필 변경·연결 응답 유실로 삭제하지 않는다. job은 최대128개, 계획8KiB·결과4KiB·공유 checkpoint4MiB이며 수락 전에 pending 결과 공간을 예약한다.
 
-노드 Management `tunnel-reconnect-work`는 `{Operation}`을 받아 Schema/Cluster/Owner/Operation/State/Expected/RootRevision/Epoch/Index/Plan/Allowed를 반환하는 quorum read다. `tunnel-reconnect-report`는 `{Schema,Cluster,Owner,Operation,Action,Expected,RootRevision,Epoch,At,Result?,Signature}`를 받는다. Action은 begin/finish/cancel이며 해당 원 owner만 보고한다. 서명은 `mydc-tunnel-report-1` 뒤 NUL과 Signature를 null로 둔 JSON이다. Unix 사용자 연결에 이 노드 보고 권한을 부여하지 않는다.
+노드 Management `tunnel-reconnect-work`는 `{Operation}`을 받아 Schema/Cluster/Owner/Operation/State/Expected/RootRevision/Epoch/Index/Plan/Allowed를 반환하는 quorum read다. `tunnel-reconnect-report`는 `{Schema,Cluster,Owner,Operation,Action,Expected,RootRevision,Epoch,At,Result?,Signature}`를 받는다. Action은 begin/finish/cancel이며 해당 원 owner만 보고한다. 서명은 `sfc-tunnel-report-1` 뒤 NUL과 Signature를 null로 둔 JSON이다. Unix 사용자 연결에 이 노드 보고 권한을 부여하지 않는다.
 
 owner는 private sent를 동기 기록한 뒤 현재 grant로 기존 Transport.Dial을 호출한다. 저장 실패 시 Dial하지 않는다. 일반 Dial은15초의 유한 예산을 사용하며 실제 오류를 실패로 남긴다. daemon 종료 중 응답이 사라졌으면 원 sent를 유지한다. 재개 시 같은 원 쌍의 긍정적인 인증 연결을 먼저 관측하고, 없다면 현재 원 grant가 유효할 때만 멱등 복구 Dial을 이어갈 수 있다. 권한 회수 뒤 새 Dial은 금지하며 관측 부재를 미실행 증거로 바꾸지 않는다.
 

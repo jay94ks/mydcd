@@ -15,9 +15,9 @@ import (
 	"time"
 
 	cerrdefs "github.com/containerd/errdefs"
-	"github.com/jay94ks/mydcd/internal/engine"
-	"github.com/jay94ks/mydcd/internal/network"
-	"github.com/jay94ks/mydcd/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/engine"
+	"github.com/jay94ks/seafield/internal/network"
+	"github.com/jay94ks/seafield/internal/reconcile"
 	"github.com/moby/moby/client"
 	"github.com/vishvananda/netlink"
 )
@@ -27,7 +27,7 @@ import (
 // grant is covered by verifyManagedTUNReconfiguration, not fabricated below.
 func verifyLegacyBridgeGatewayNative(t *testing.T, ctx context.Context, root, socket, manifest string) {
 	t.Helper()
-	host, tag := os.Getenv("MYDC_KERNEL_HOST_NETNS"), os.Getenv("MYDC_KERNEL_TEST_OWNER")
+	host, tag := os.Getenv("SFC_KERNEL_HOST_NETNS"), os.Getenv("SFC_KERNEL_TEST_OWNER")
 	current, err := os.Readlink("/proc/self/ns/net")
 	relative, relativeErr := filepath.Rel(root, socket)
 	if err != nil || relativeErr != nil || host == "" || tag == "" || current == host || os.Geteuid() != 0 || !filepath.IsAbs(root) || !filepath.IsAbs(socket) || !filepath.IsLocal(relative) || socket == "/var/run/docker.sock" || socket == "/run/docker.sock" {
@@ -78,7 +78,7 @@ func verifyLegacyBridgeGatewayNative(t *testing.T, ctx context.Context, root, so
 	if err != nil || json.Unmarshal(input, &evidence) != nil || evidence == nil {
 		t.Fatal("original public fixture manifest", err)
 	}
-	foreignAlias := "mydc-legacy-kernel-conflict-" + devices[0]
+	foreignAlias := "sfc-legacy-kernel-conflict-" + devices[0]
 	evidence["legacy_gateway"] = map[string]any{"owner": owner, "key": key, "socket": socket, "journal": path, "resources": resources, "identities": identities, "devices": devices, "protection": protection, "admission": "model; actual SDK/kernel/journal only", "kernel_conflict": map[string]any{"device": devices[0], "alias": foreignAlias, "type": "bridge", "mtu": 1500}}
 	input, err = json.Marshal(evidence)
 	if err != nil {
@@ -88,7 +88,7 @@ func verifyLegacyBridgeGatewayNative(t *testing.T, ctx context.Context, root, so
 		t.Fatal(err)
 	}
 	listOwned := func(ctx context.Context) (int, error) {
-		rows, err := c.API.NetworkList(ctx, client.NetworkListOptions{Filters: client.Filters{}.Add("label", "org.mydc.owner="+owner)})
+		rows, err := c.API.NetworkList(ctx, client.NetworkListOptions{Filters: client.Filters{}.Add("label", "org.sfc.owner="+owner)})
 		return len(rows.Items), err
 	}
 	if count, err := listOwned(ctx); err != nil || count != 0 {

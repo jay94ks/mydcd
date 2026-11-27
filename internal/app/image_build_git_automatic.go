@@ -10,13 +10,13 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/imagebuild"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/reconcile"
-	"github.com/jay94ks/mydcd/internal/schema"
-	"github.com/jay94ks/mydcd/internal/storage"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/imagebuild"
+	"github.com/jay94ks/seafield/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/storage"
 )
 
 type imageBuildAutomaticGitLocal struct {
@@ -46,7 +46,7 @@ func (r *Runtime) submitImageBuildAutomaticGit(ctx context.Context, tenant, id s
 	defer cancel()
 	view, err := r.currentView(ctx)
 	if err != nil || view.Local {
-		return errors.Join(mydcp.ErrAdmission, err)
+		return errors.Join(sfcp.ErrAdmission, err)
 	}
 	book, err := r.controlPolicy.ImageBuilds(view.State)
 	if err != nil {
@@ -77,7 +77,7 @@ func (r *Runtime) submitImageBuildAutomaticGit(ctx context.Context, tenant, id s
 		return err
 	}
 	if r.reports == nil || r.nodeRoots == nil {
-		return mydcp.ErrAdmission
+		return sfcp.ErrAdmission
 	}
 	var local imageBuildAutomaticGitLocal
 	raw, err := r.reports.GetBounded(imageBuildAutomaticGitLocalKey(plan), 16<<10)
@@ -102,7 +102,7 @@ func (r *Runtime) submitImageBuildAutomaticGit(ctx context.Context, tenant, id s
 	current := func() (control.ImageBuildGitWork, error) {
 		fresh, err := r.currentView(ctx)
 		if err != nil || fresh.Local {
-			return control.ImageBuildGitWork{}, errors.Join(mydcp.ErrAdmission, err)
+			return control.ImageBuildGitWork{}, errors.Join(sfcp.ErrAdmission, err)
 		}
 		return r.controlPolicy.ImageBuildAutomaticGitSaveWork(fresh.State, r.Identity.Public, plan, time.Now().Unix())
 	}
@@ -120,7 +120,7 @@ func (r *Runtime) submitImageBuildAutomaticGit(ctx context.Context, tenant, id s
 	}
 	view, err = r.currentView(ctx)
 	if err != nil || view.Local {
-		return errors.Join(mydcp.ErrAdmission, err)
+		return errors.Join(sfcp.ErrAdmission, err)
 	}
 	if local.StartedAt == 0 {
 		local.StartedAt = uint64(time.Now().Unix())

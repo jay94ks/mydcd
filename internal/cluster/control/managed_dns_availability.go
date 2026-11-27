@@ -6,9 +6,9 @@ import (
 	"encoding/json"
 	"strings"
 
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/network/services"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/network/services"
 )
 
 // AppDNSUnavailable filters answers for explicit replicas without releasing
@@ -100,10 +100,10 @@ func (p Policy) ObserveAppReplicaHealth(s state.State, apps Apps, row *AppView, 
 			continue
 		}
 		var service deployment.ComposeService
-		if json.Unmarshal(step.Goal, &service) != nil || service.MyDC.Instance == nil {
+		if json.Unmarshal(step.Goal, &service) != nil || service.Sfc.Instance == nil {
 			continue
 		}
-		name := service.MyDC.Instance.Service
+		name := service.Sfc.Instance.Service
 		group := groups[name]
 		group.total++
 		if candidate, exists := byKey[step.Key]; exists && taskCandidateAvailable(s, candidate, now, members.WorkKey(p.currentResourceKey(s, candidate.goal.Owner, true))) {

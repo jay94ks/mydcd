@@ -6,15 +6,15 @@ import (
 	"context"
 	"errors"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/mydcp"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/sfcp"
 )
 
-func (c Client) UsersPage(ctx context.Context, peer mydcp.Peer, session access.Session, after string) (Reply, error) {
+func (c Client) UsersPage(ctx context.Context, peer sfcp.Peer, session access.Session, after string) (Reply, error) {
 	return c.query(ctx, peer, session, Request{Method: "users", After: after})
 }
 
-func (c Client) TenantMembersPage(ctx context.Context, peer mydcp.Peer, session access.Session, tenant, after string) (Reply, error) {
+func (c Client) TenantMembersPage(ctx context.Context, peer sfcp.Peer, session access.Session, tenant, after string) (Reply, error) {
 	return c.query(ctx, peer, session, Request{Method: "tenant-members", Tenant: tenant, After: after})
 }
 

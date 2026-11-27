@@ -15,7 +15,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/web/seal"
+	"github.com/jay94ks/seafield/internal/web/seal"
 )
 
 func TestAutoBackup(t *testing.T) {
@@ -36,7 +36,7 @@ func TestAutoBackup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if code, out := f.do("GET", "/api/v1/system/auto-backup", nil); code != 200 || out["prefix"] != "mydc-web-backups/" || out["enabled"] != false || out["account"] != nil {
+	if code, out := f.do("GET", "/api/v1/system/auto-backup", nil); code != 200 || out["prefix"] != "sfc-web-backups/" || out["enabled"] != false || out["account"] != nil {
 		t.Fatalf("default: %d %v", code, out)
 	}
 	put := func(tenant, volume string) (int, map[string]any) {
@@ -82,9 +82,9 @@ func TestAutoBackup(t *testing.T) {
 			t.Fatalf("run %d: %v", i, l)
 		}
 	}
-	_, files := f.do("GET", "/api/v1/t/payments/volumes/ledger-data/files?prefix=mydc-web-backups/", nil)
+	_, files := f.do("GET", "/api/v1/t/payments/volumes/ledger-data/files?prefix=sfc-web-backups/", nil)
 	items := files["items"].([]any)
-	if len(items) != 2 || items[0].(map[string]any)["path"] != "mydc-web-backups/web-"+time.Unix(clock.Load()-60, 0).UTC().Format("2006-01-02T1504")+"Z.db.gz.sealed" {
+	if len(items) != 2 || items[0].(map[string]any)["path"] != "sfc-web-backups/web-"+time.Unix(clock.Load()-60, 0).UTC().Format("2006-01-02T1504")+"Z.db.gz.sealed" {
 		t.Fatalf("files: %v", items)
 	}
 	path := last["last"].(map[string]any)["path"].(string)
@@ -99,7 +99,7 @@ func TestAutoBackup(t *testing.T) {
 	if bytes.HasPrefix(raw, []byte{0x1f, 0x8b}) || bytes.Contains(raw, []byte("u-alice")) {
 		t.Fatal("the backup in the volume is readable")
 	}
-	if !bytes.HasPrefix(raw, []byte("mydc-web-seal\x00")) {
+	if !bytes.HasPrefix(raw, []byte("sfc-web-seal\x00")) {
 		t.Fatal("the backup has no seal header")
 	}
 	gz, err := box.OpenBlob("web-backup", raw)

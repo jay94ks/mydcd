@@ -8,13 +8,13 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/membership"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/network"
-	"github.com/jay94ks/mydcd/internal/network/services"
-	"github.com/jay94ks/mydcd/internal/tenancy"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/membership"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/network"
+	"github.com/jay94ks/seafield/internal/network/services"
+	"github.com/jay94ks/seafield/internal/tenancy"
 )
 
 const ResourcesKey = "control/resources"
@@ -41,6 +41,10 @@ func (p Policy) Resources(s state.State) (Resources, error) {
 	if raw == nil {
 		n, _ := tenancy.New(p.Cluster)
 		q, _ := tenancy.NewQuotas(p.Cluster)
+		if members, err := p.Members(s); err == nil {
+			n = n.WithServers(members.ServerAddresses())
+			q = q.WithServerDefaults(serverOwners(members, n, q))
+		}
 		return Resources{Networks: n, Quotas: q}, nil
 	}
 	var record resourceRecord
@@ -52,13 +56,22 @@ func (p Policy) Resources(s state.State) (Resources, error) {
 		return Resources{}, err
 	}
 	q, err := tenancy.DecodeQuotas(record.Quotas)
-	if err != nil || n.Cluster() != p.Cluster || q.Cluster() != p.Cluster || n.Revision() > revision || q.Revision() > revision || q.ValidateNetworks(n) != nil {
+	if err != nil || n.Cluster() != p.Cluster || q.Cluster() != p.Cluster || n.Revision() > revision || q.Revision() > revision {
 		return Resources{}, ErrCatalog
 	}
 	members, err := p.Members(s)
 	if err != nil {
 		return Resources{}, err
 	}
+	// A server no administrator gave a node-wide limit uses everything it
+	// has (Jay 2026-11-27): its default limit follows from the membership,
+	// so nothing is written for it.
+	q = q.WithServerDefaults(serverOwners(members, n, q))
+	if q.ValidateNetworks(n) != nil {
+		return Resources{}, ErrCatalog
+	}
+	// Every TUN member's tunnel address is its server's fixed address.
+	n = n.WithServers(members.ServerAddresses())
 	for _, alias := range q.OwnerRotations() {
 		rotation, found := members.IdentityRotation(alias.Node, alias.Operation)
 		if !found || rotation.Proof == nil || rotation.Phase != "Activated" && rotation.Phase != "Installed" || alias.Index != rotation.ActivatedIndex || alias.Old != rotation.Proof.Old || alias.New != rotation.Proof.New {
@@ -110,13 +123,48 @@ func (p Policy) resourceCheckpoint(s state.State, r Resources) (map[string][]byt
 	if err != nil {
 		return nil, state.Invalid
 	}
-	r.Revision++
+	// One report can move the networks more than once (use, then create);
+	// on a cluster whose first resource write it is, the record must still
+	// be at least as new as what it holds.
+	r.Revision = max(r.Revision, r.Networks.Revision(), r.Quotas.Revision()) + 1
 	raw, err := json.Marshal(resourceRecord{Schema: 1, Cluster: p.Cluster, Revision: r.Revision, Networks: n, Quotas: q})
 	if err != nil {
 		return nil, state.Invalid
 	}
 	return writeCheckpoint(s, ResourcesKey, p.Cluster, p.TrustRoot, r.Revision, raw)
 }
+
+// serverOwners are the servers that have a default node-wide limit while
+// none is set: the full members with their current keys, and any server that
+// still holds a network or reservation after it left the cluster (removed,
+// force-removed), with the key that row was made with. Without the latter a
+// removed server's leftover rows would have no limit and no resources read
+// would succeed. A server outside the cluster is admitted no new work
+// anyway (workNodeOwner).
+func serverOwners(d membership.Directory, n tenancy.Networks, q tenancy.Quotas) map[string][32]byte {
+	out := map[string][32]byte{}
+	for _, e := range d.Entries {
+		if !membership.FullMember(e) {
+			continue
+		}
+		if key, err := identity.ParseKey(e.CurrentPeer().Key); err == nil {
+			out[e.Peer.ID] = key
+		}
+	}
+	held := func(node string, owner [32]byte) {
+		if _, known := out[node]; !known && owner != ([32]byte{}) {
+			out[node] = owner
+		}
+	}
+	for _, v := range n.AllNetworks() {
+		held(v.Node, v.Owner)
+	}
+	for _, v := range q.Reservations() {
+		held(v.Node, v.Owner)
+	}
+	return out
+}
+
 func (p Policy) nodeOwner(s state.State, id string) ([32]byte, error) {
 	directory, err := p.Members(s)
 	if err != nil {
@@ -169,6 +217,8 @@ func (p Policy) reduceResources(s state.State, cmd state.Command) (map[string][]
 	switch change.Action {
 	case "propose-route", "approve-route", "withdraw-route":
 		r.Networks, native, err = p.changeRoute(s, c, r, op)
+	case "create-virtual-bridge", "approve-virtual-bridge", "close-virtual-bridge":
+		r.Networks, err = p.changeBridge(c, r, op)
 	case "configure-network-dns":
 		native, err = p.configureManagedDNS(s, op)
 	case "plan-network-change":
@@ -207,12 +257,6 @@ func (p Policy) reduceResources(s state.State, cmd state.Command) (map[string][]
 		}
 	case "leave-tun-network":
 		r.Networks, native, err = p.leaveNetwork(s, c, r, op)
-	case "set-system-network-range":
-		var v SystemNetworkRange
-		if canonical(change.Payload, &v) != nil {
-			return nil, state.Invalid
-		}
-		r.Networks, err = r.Networks.SetSystemRange(change.Expected, v.Range)
 	case "set-network-toggle":
 		var v NetworkToggleSet
 		if canonical(change.Payload, &v) != nil {
@@ -290,6 +334,9 @@ func (p Policy) reduceResources(s state.State, cmd state.Command) (map[string][]
 	if errors.Is(err, access.ErrDenied) {
 		return nil, state.Forbidden
 	}
+	if code, ok := bridgeRefusalCode(err); ok {
+		return nil, code
+	}
 	if err != nil && systemRangeRefusal(original, change) {
 		return nil, state.NetworkSystemRange
 	}
@@ -328,6 +375,8 @@ func (p Policy) authorizeResource(s state.State, c access.Catalog, op UserOperat
 		tenant, node, action = v.Tenant, v.Target.Node, access.ManageNetwork
 	case "propose-route", "approve-route", "withdraw-route":
 		return p.authorizeRouteChange(s, c, op)
+	case "create-virtual-bridge", "approve-virtual-bridge", "close-virtual-bridge":
+		return p.authorizeBridgeChange(c, op)
 	case "cancel-network-change":
 		var v NetworkChangeCancel
 		if canonical(op.Change.Payload, &v) != nil {
@@ -380,7 +429,7 @@ func (p Policy) authorizeResource(s state.State, c access.Catalog, op UserOperat
 			return access.ErrInvalid
 		}
 		tenant, action = v.Tenant, access.ManageNetwork
-	case "set-node-quota", "set-system-network-range":
+	case "set-node-quota":
 		return c.AuthorizeSession(op.Session, p.Cluster, p.Issuer(op.Session.Issuer), op.At, "", access.ManageCluster, "")
 	case "reserve-task":
 		var v tenancy.Reservation
@@ -423,4 +472,19 @@ func (p Policy) authorizeResource(s state.State, c access.Catalog, op UserOperat
 		return c.AuthorizeSessionCleanup(op.Session, p.Cluster, p.Issuer(op.Session.Issuer), op.At, tenant, action)
 	}
 	return c.AuthorizeSession(op.Session, p.Cluster, p.Issuer(op.Session.Issuer), op.At, tenant, action, node)
+}
+
+// resourcesBook is the ResourcesKey book (books.go).
+var resourcesBook = Book{Key: ResourcesKey, Reduce: byKind(map[state.CommandKind]reducer{state.ModuleReport: reduceResourceReport, state.Module: Policy.reduceResources})}
+
+// reduceResourceReport takes a node's resource report: a closed Bridge or a
+// system network report. A report from anyone else is refused.
+func reduceResourceReport(p Policy, s state.State, cmd state.Command) (map[string][]byte, state.Code) {
+	if !nodeActor(cmd) {
+		return refuseKind(p, s, cmd)
+	}
+	if bridgeClosedValue(cmd.Value) {
+		return p.reduceBridgeClosedReport(s, cmd)
+	}
+	return p.reduceSystemNetworkReport(s, cmd)
 }

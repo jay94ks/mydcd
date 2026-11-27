@@ -16,13 +16,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/config"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/userauth"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/config"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/userauth"
 )
 
 // U0 final native integration: private temporary node DB/keys, loopback UDP,
@@ -30,7 +30,7 @@ import (
 // listeners and removes only this test root. No global socket/kernel/Docker
 // changes, external provider or retained E4 recovery state are involved.
 func TestU0UnixUserAuthOriginalOperationAndSameDB(t *testing.T) {
-	root, err := os.MkdirTemp("", "mydc-u0-auth-")
+	root, err := os.MkdirTemp("", "sfc-u0-auth-")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -99,21 +99,21 @@ func TestU0UnixUserAuthOriginalOperationAndSameDB(t *testing.T) {
 	start()
 	wait()
 	node := runtime.Identity
-	unixPeer := mydcp.Peer{ID: "node", Endpoint: "unix://" + c.Node.ManagementSocket, Policy: mydcp.Policy{Key: mydcp.Identity(node.Public), Respond: true}}
+	unixPeer := sfcp.Peer{ID: "node", Endpoint: "unix://" + c.Node.ManagementSocket, Policy: sfcp.Policy{Key: sfcp.Identity(node.Public), Respond: true}}
 	remotePeer := unixPeer
-	remotePeer.Endpoint = "mydcp://" + address
-	newClient := func(peer mydcp.Peer) userauth.Client {
+	remotePeer.Endpoint = "sfcp://" + address
+	newClient := func(peer sfcp.Peer) userauth.Client {
 		t.Helper()
 		self, err := identity.Ephemeral()
 		if err != nil {
 			t.Fatal(err)
 		}
-		mesh, err := mydcp.NewTransport(self, cluster, func(key mydcp.Identity) (mydcp.Peer, bool) { return peer, key == peer.Key })
+		mesh, err := sfcp.NewTransport(self, cluster, func(key sfcp.Identity) (sfcp.Peer, bool) { return peer, key == peer.Key })
 		if err != nil {
 			t.Fatal(err)
 		}
 		t.Cleanup(func() { _ = mesh.Close(); clear(self.Private) })
-		return userauth.Client{Mesh: mesh, Self: self, Cluster: cluster, Peers: []mydcp.Peer{peer}}
+		return userauth.Client{Mesh: mesh, Self: self, Cluster: cluster, Peers: []sfcp.Peer{peer}}
 	}
 	local := newClient(unixPeer)
 	intent := control.Enrollment{Schema: 1, RequestID: "u0-enrollment", User: access.User{ID: "operator", Username: "operator", Enabled: true, SystemAdmin: true, Credentials: []access.Credential{{ID: "key", Method: access.PrivateKey, PublicKey: admin.Public, Enabled: true}}}}
@@ -124,8 +124,8 @@ func TestU0UnixUserAuthOriginalOperationAndSameDB(t *testing.T) {
 	if err != nil {
 		t.Fatal("challenge/proof must retain one real TLS binding", err)
 	}
-	if reply, err := local.Query(ctx, unixPeer, session, "whoami", ""); err != nil || reply.User == nil || reply.User.ID != "operator" {
-		t.Fatal("Unix session", reply.Code, err)
+	if reply, err := local.Whoami(ctx, unixPeer, session); err != nil || reply.User.ID != "operator" {
+		t.Fatal("Unix session", reply, err)
 	}
 	change, err := control.ChangeBytes("create-tenant", "operator", 0, control.TenantID{ID: "apps"})
 	if err != nil {
@@ -157,8 +157,8 @@ func TestU0UnixUserAuthOriginalOperationAndSameDB(t *testing.T) {
 	if err != nil {
 		t.Fatal("remote authentication regressed", err)
 	}
-	if reply, err := remote.Query(ctx, remotePeer, remoteSession, "tenants", ""); err != nil || len(reply.Tenants) != 1 || reply.Tenants[0].ID != "apps" {
-		t.Fatal("same catalog through QUIC", reply.Code, err)
+	if reply, err := remote.Tenants(ctx, remotePeer, remoteSession); err != nil || len(reply.Tenants) != 1 || reply.Tenants[0].ID != "apps" {
+		t.Fatal("same catalog through QUIC", reply, err)
 	}
 	if err := local.Mesh.Close(); err != nil {
 		t.Fatal(err)
@@ -172,7 +172,7 @@ func TestU0UnixUserAuthOriginalOperationAndSameDB(t *testing.T) {
 	runtime = nil
 	start()
 	wait()
-	mesh, err := mydcp.NewTransport(local.Self, cluster, func(key mydcp.Identity) (mydcp.Peer, bool) { return unixPeer, key == unixPeer.Key })
+	mesh, err := sfcp.NewTransport(local.Self, cluster, func(key sfcp.Identity) (sfcp.Peer, bool) { return unixPeer, key == unixPeer.Key })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -223,7 +223,7 @@ func TestU0UnixUserAuthOriginalOperationAndSameDB(t *testing.T) {
 	_, fault := uncertain.Operation(faultCtx, proxyPeer, uncertainIntent, false)
 	faultCancel()
 	var transport *userauth.Error
-	if !errors.As(fault, &transport) || transport.Phase != mydcp.Unknown || dropped.Load() == 0 {
+	if !errors.As(fault, &transport) || transport.Phase != sfcp.Unknown || dropped.Load() == 0 {
 		t.Fatal("post-send reply loss was not Unknown", fault)
 	}
 	view, err := runtime.Engine().Read(ctx, true)

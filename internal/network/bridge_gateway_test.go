@@ -13,11 +13,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/engine"
-	"github.com/jay94ks/mydcd/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/engine"
+	"github.com/jay94ks/seafield/internal/reconcile"
 	dockernet "github.com/moby/moby/api/types/network"
 	"github.com/moby/moby/client"
-	"github.com/vishvananda/netlink"
 )
 
 func TestManagedBridgeGatewaySDKOptionsAndLegacyIdentity(t *testing.T) {
@@ -32,18 +31,18 @@ func TestManagedBridgeGatewaySDKOptionsAndLegacyIdentity(t *testing.T) {
 	if err != nil || string(before) != string(after) || !decoded.Internal || decoded.GatewayMode != "" {
 		t.Fatal("legacy spec was silently converted", err)
 	}
-	id := engine.Identity{Name: "mydc-bridge-0123456789ab", Labels: map[string]string{"owner": "test"}}
+	id := engine.Identity{Name: "sfc-bridge-0123456789ab", Labels: map[string]string{"owner": "test"}}
 	managed := legacy
 	managed.Internal, managed.GatewayMode = false, ManagedGatewayMode
 	opts := bridgeOptions(managed, id)
-	if opts.Internal || opts.Options["com.docker.network.bridge.gateway_mode_ipv4"] != ManagedGatewayMode || opts.Options["com.docker.network.bridge.enable_ip_masquerade"] != "false" || opts.Options["com.docker.network.bridge.gateway_mode_ipv6"] != "" {
+	if opts.Driver != EngineDriver || opts.Internal || opts.Options["com.docker.network.bridge.gateway_mode_ipv4"] != ManagedGatewayMode || opts.Options["com.docker.network.bridge.gateway_mode_ipv6"] != "" {
 		t.Fatal("SDK options lost managed filtering or original packet source", opts.Options)
 	}
-	native := dockernet.Inspect{Network: dockernet.Network{ID: "original", Name: id.Name, Labels: maps.Clone(id.Labels), Driver: "bridge", Scope: "local", EnableIPv4: true, Options: maps.Clone(opts.Options), IPAM: *opts.IPAM}}
+	native := dockernet.Inspect{Network: dockernet.Network{ID: "original", Name: id.Name, Labels: maps.Clone(id.Labels), Driver: EngineDriver, Scope: "local", EnableIPv4: true, Options: maps.Clone(opts.Options), IPAM: *opts.IPAM}}
 	if !matchBridge(native, managed, id) {
 		t.Fatal("exact managed SDK readback rejected")
 	}
-	for _, option := range []string{"com.docker.network.bridge.gateway_mode_ipv4", "com.docker.network.bridge.enable_ip_masquerade"} {
+	for _, option := range []string{"com.docker.network.bridge.gateway_mode_ipv4"} {
 		changed := native
 		changed.Options = maps.Clone(native.Options)
 		delete(changed.Options, option)
@@ -79,21 +78,19 @@ func (f bridgeSDKRoundTrip) RoundTrip(request *http.Request) (*http.Response, er
 	return f(request)
 }
 
-// Real SDK encoding/errors with simulated daemon replies and OS lookup only.
-// Actual Docker/kernel/forwarding remains the shared owner fixture.
-func TestManagedBridgeProtectionFailureNeverSendsSDKCreateAndUnknownNeverRecreates(t *testing.T) {
-	for _, mode := range []string{"missing", "denied", "allowed-reply-lost", "link-present", "link-unknown", "link-cancelled", "legacy-link-present", "legacy-link-unknown"} {
+// Real SDK encoding with simulated daemon replies. A create that the
+// protection or the missing hooks stop is never sent and is not applied.
+func TestManagedBridgeProtectionFailureNeverSendsSDKCreate(t *testing.T) {
+	for _, mode := range []string{"missing", "denied", "no-hooks", "legacy-no-hooks"} {
 		t.Run(mode, func(t *testing.T) {
-			reads, creates, guards, lookups := 0, 0, 0, 0
-			ctx, cancel := context.WithCancel(t.Context())
-			defer cancel()
+			reads, creates, guards := 0, 0, 0
 			api, err := client.New(client.WithHost("http://fixture.invalid"), client.WithAPIVersion("1.56"), client.WithHTTPClient(&http.Client{Transport: bridgeSDKRoundTrip(func(r *http.Request) (*http.Response, error) {
 				status, body := http.StatusNotFound, `{"message":"original absent"}`
 				if r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/networks/") {
 					reads++
 				} else if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/networks/create") {
 					creates++
-					return nil, errors.New("simulated lost SDK reply after create send")
+					return nil, errors.New("create must not be sent")
 				} else {
 					t.Errorf("unexpected SDK request: %s %s", r.Method, r.URL.Path)
 					status = http.StatusInternalServerError
@@ -113,28 +110,6 @@ func TestManagedBridgeProtectionFailureNeverSendsSDKCreateAndUnknownNeverRecreat
 			raw, _ := json.Marshal(spec)
 			target := reconcile.Resource{Generation: 7, Present: true, Spec: string(raw)}
 			driver := &BridgeDriver{Engine: &engine.Client{API: api, Owner: p.Owner}}
-			id, identityErr := driver.Engine.Identity("bridge", "bridge/original", target)
-			if identityErr != nil {
-				t.Fatal(identityErr)
-			}
-			foreign := &netlink.Bridge{LinkAttrs: netlink.LinkAttrs{Name: bridgeDeviceName(id), Alias: "foreign", MTU: 1500}}
-			unknown := errors.New("injected netlink lookup failure")
-			driver.lookupBridge = func(name string) (netlink.Link, error) {
-				lookups++
-				if name != foreign.Attrs().Name {
-					t.Fatal("lookup changed original deterministic native device")
-				}
-				if strings.HasSuffix(mode, "link-present") {
-					return foreign, nil
-				}
-				if strings.HasSuffix(mode, "link-unknown") {
-					return nil, unknown
-				}
-				if mode == "link-cancelled" {
-					cancel()
-				}
-				return nil, netlink.LinkNotFoundError{}
-			}
 			denied := errors.New("original native protection unavailable")
 			if mode != "missing" {
 				driver.Protect = func(_ context.Context, key string, actual reconcile.Resource) error {
@@ -149,39 +124,13 @@ func TestManagedBridgeProtectionFailureNeverSendsSDKCreateAndUnknownNeverRecreat
 				}
 			}
 			op := reconcile.Operation{ID: 1, Kind: reconcile.Apply, Phase: reconcile.Dispatched, Target: target}
-			outcome, err := driver.Execute(ctx, "bridge/original", op)
-			if mode == "allowed-reply-lost" {
-				if err == nil || outcome != reconcile.EffectUnknown || creates != 1 || guards != 1 || lookups != 1 {
-					t.Fatal("sent create was treated as nonexecution", outcome, err, creates, guards)
-				}
-				outcome, err = driver.Recover(t.Context(), "bridge/original", op)
-				if err != nil || outcome != reconcile.EffectUnknown || creates != 1 || guards != 1 || lookups != 1 {
-					t.Fatal("missing observation recreated original unknown effect", outcome, err, creates, guards)
-				}
-			} else {
-				wantLookup, wantGuard := 1, 1
-				var wantError error
-				switch mode {
-				case "missing":
-					wantLookup, wantGuard = 0, 0
-				case "denied":
-					wantLookup, wantError = 0, denied
-				case "link-present", "legacy-link-present":
-					wantError = engine.ErrOwnership
-				case "link-unknown", "legacy-link-unknown":
-					wantError = unknown
-				case "link-cancelled":
-					wantError = context.Canceled
-				}
-				if legacy {
-					wantGuard = 0
-				}
-				if err == nil || outcome != reconcile.EffectNotApplied || creates != 0 || reads != 1 || guards != wantGuard || lookups != wantLookup || wantError != nil && !errors.Is(err, wantError) {
-					t.Fatal("pre-create refusal sent SDK mutation or lost no-send evidence", outcome, err, creates, reads, guards, lookups)
-				}
+			outcome, err := driver.Execute(t.Context(), "bridge/original", op)
+			wantGuard := 1
+			if mode == "missing" || legacy {
+				wantGuard = 0
 			}
-			if foreign.Attrs().Alias != "foreign" || foreign.Attrs().MTU != 1500 {
-				t.Fatal("preflight modified existing kernel device")
+			if err == nil || outcome != reconcile.EffectNotApplied || creates != 0 || reads != 1 || guards != wantGuard || mode == "denied" && !errors.Is(err, denied) {
+				t.Fatal("pre-create refusal sent SDK mutation or lost no-send evidence", outcome, err, creates, reads, guards)
 			}
 		})
 	}

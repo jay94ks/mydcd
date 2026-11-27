@@ -5,8 +5,8 @@ package server
 import (
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/web/mydc"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/web/sfc"
 )
 
 func TestRotateLedger(t *testing.T) {
@@ -27,7 +27,7 @@ func TestRotateLedger(t *testing.T) {
 
 	// work in progress: condition failed, epoch unchanged
 	fake.SetLedgerBusy(true)
-	if code, out := f.do("POST", "/api/v1/ledger/rotate", map[string]any{"opId": op1, "expected": 1}); code != 200 || opState(t, code, out) != "failed" || out["op"].(map[string]any)["resultCode"] != float64(mydc.ResultConditionFailed) {
+	if code, out := f.do("POST", "/api/v1/ledger/rotate", map[string]any{"opId": op1, "expected": 1}); code != 200 || opState(t, code, out) != "failed" || out["op"].(map[string]any)["resultCode"] != float64(sfc.ResultConditionFailed) {
 		t.Fatalf("busy: %d %v", code, out)
 	}
 	if epoch() != 1 {
@@ -50,9 +50,9 @@ func TestRotateLedger(t *testing.T) {
 	if code, out := f.do("POST", "/api/v1/ledger/rotate", map[string]any{"opId": op4, "expected": 0}); code != 422 {
 		t.Fatalf("zero: %d %v", code, out)
 	}
-	// not an administrator: refused by mydcd
+	// not an administrator: refused by sfcd
 	fakeLogin(t, f, "alice")
-	if code, out := f.do("POST", "/api/v1/ledger/rotate", map[string]any{"opId": op4, "expected": 2}); opState(t, code, out) != "failed" || out["op"].(map[string]any)["resultCode"] != float64(mydc.ResultForbidden) {
+	if code, out := f.do("POST", "/api/v1/ledger/rotate", map[string]any{"opId": op4, "expected": 2}); opState(t, code, out) != "failed" || out["op"].(map[string]any)["resultCode"] != float64(sfc.ResultForbidden) {
 		t.Fatalf("manager: %d %v", code, out)
 	}
 }

@@ -1,0 +1,14 @@
+{
+  "data-root": "/var/lib/sfe",
+  "exec-root": "/run/sfe",
+  "pidfile": "/run/sfe/sfed.pid",
+  "hosts": ["unix:///run/sfe/sfed.sock"],
+  "bridge": "none",
+  "iptables": false,
+  "ip6tables": false,
+  "userland-proxy": false,
+  "live-restore": true,
+  "log-driver": "seafield-queue",
+  "log-opts": {"cache-disabled": "true", "notify-quiet": "500ms", "notify-max-wait": "5s", "max-size": "65536k"},
+  "features": {"buildkit": true}
+}

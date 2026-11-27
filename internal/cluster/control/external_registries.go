@@ -7,9 +7,9 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/imagesource"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/imagesource"
 )
 
 const ExternalRegistriesKey = "control/external-registries"
@@ -375,3 +375,6 @@ func (p Policy) externalRegistryDefinitions(s state.State, tenant string) ([]ima
 	}
 	return definitions, nil
 }
+
+// externalRegistriesBook is the ExternalRegistriesKey book (books.go).
+var externalRegistriesBook = Book{Key: ExternalRegistriesKey, Reduce: Policy.reduceExternalRegistries}

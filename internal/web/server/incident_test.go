@@ -15,8 +15,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/web/mydc"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/web/sfc"
 )
 
 func opSeq(prefix string) func() string {
@@ -34,7 +34,7 @@ func TestCDLocalAndDecisions(t *testing.T) {
 	if code != 200 || out["localRevision"] != 0.0 || len(out["gitServices"].([]any)) != 2 || len(out["services"].([]any)) != 0 {
 		t.Fatalf("local: %d %v", code, out)
 	}
-	local := "services:\n  report:\n    image: registry.mydc.local/shop/report:1\n    x-mydc:\n      node: node-a\n    networks: [shop-net]\n"
+	local := "services:\n  report:\n    image: registry.sfc.local/shop/report:1\n    x-sfc:\n      node: node-a\n    networks: [shop-net]\n"
 	if code, out := f.do("PUT", "/api/v1/t/shop/apps/php-shop/cd/local", map[string]any{"opId": op(), "document": local}); opState(t, code, out) != "applied" {
 		t.Fatalf("put local: %d %v", code, out)
 	}
@@ -66,7 +66,7 @@ func TestCDLocalAndDecisions(t *testing.T) {
 		t.Fatalf("reject with operation: %d %v", code, out)
 	}
 	if code, out := f.send("POST", "/api/v1/t/shop/apps/php-shop/cd/candidate/reject", []byte(`{"opId":"`+op()+`","candidate":"`+cand()+`","reason":"a"}`),
-		map[string]string{"X-MyDC-Reason": "b"}); code != 400 {
+		map[string]string{"X-SFC-Reason": "b"}); code != 400 {
 		t.Fatalf("reason twice: %d %v", code, out)
 	}
 	if code, out := f.do("POST", "/api/v1/t/shop/apps/php-shop/cd/candidate/reject", map[string]any{"opId": op(), "candidate": cand(), "reason": "웹훅 실패"}); opState(t, code, out) != "applied" {
@@ -91,15 +91,15 @@ func TestCDLocalAndDecisions(t *testing.T) {
 // phpShopDoc is the fixture's php-shop app.yaml.
 func phpShopDoc(*testing.T, *fixture) string {
 	return `name: php-shop
-x-mydc:
+x-sfc:
   lifecycle:
     scripts:
       ready:
         ref: {name: http-ready, revision: 2}
 services:
   web:
-    image: registry.mydc.local/shop/php-shop:1.4.2
-    x-mydc:
+    image: registry.sfc.local/shop/php-shop:1.4.2
+    x-sfc:
       node: node-a
       lifecycle:
         checks:
@@ -109,7 +109,7 @@ services:
     networks: [shop-net]
   db:
     image: mysql:8.4
-    x-mydc:
+    x-sfc:
       node: node-b
     networks: [shop-net]
     volumes:
@@ -121,7 +121,7 @@ services:
 func (f *fixture) send(method, path string, body []byte, hdr map[string]string) (int, map[string]any) {
 	f.t.Helper()
 	req, _ := http.NewRequest(method, f.http.URL+path, bytes.NewReader(body))
-	req.Header.Set("X-MyDC-Web", "1")
+	req.Header.Set("X-SFC-Web", "1")
 	for k, v := range hdr {
 		req.Header.Set(k, v)
 	}
@@ -162,8 +162,8 @@ func TestServiceCall(t *testing.T) {
 	if code != 200 || out["status"] != 200.0 || out["task"] == nil {
 		t.Fatalf("call: %d %v", code, out)
 	}
-	fake.SetServiceResponder("shop", "php-shop", "web", func(mydc.ServiceCallRequest) mydc.ServiceResponse { return mydc.ServiceResponse{Refused: true} })
-	if code, out := f.do("POST", "/api/v1/t/shop/apps/php-shop/call", call); code != 200 || out["code"] != mydc.ServiceCallRefused {
+	fake.SetServiceResponder("shop", "php-shop", "web", func(sfc.ServiceCallRequest) sfc.ServiceResponse { return sfc.ServiceResponse{Refused: true} })
+	if code, out := f.do("POST", "/api/v1/t/shop/apps/php-shop/call", call); code != 200 || out["code"] != sfc.ServiceCallRefused {
 		t.Fatalf("refused: %d %v", code, out)
 	}
 	if code, out := f.do("POST", "/api/v1/t/shop/apps/php-shop/call", map[string]any{"service": "web", "port": 8080, "path": "/x", "headers": map[string]string{"Authorization": "x"}}); code != 422 {
@@ -186,7 +186,7 @@ func TestAccountScopeAndReason(t *testing.T) {
 	if code, out := f.do("GET", "/api/v1/users/u-alice/scope", nil); code != 200 || out["revision"] == 0.0 || len(out["actions"].([]any)) != 0 || out["keyOnly"] != false {
 		t.Fatalf("own scope: %d %v", code, out)
 	}
-	if code, out := f.do("PUT", "/api/v1/users/u-bob/scope", map[string]any{"opId": op(), "actions": []string{"restart-task"}}); code != 403 {
+	if code, out := f.do("PATCH", "/api/v1/users/u-bob/scope", map[string]any{"opId": op(), "expected": 1, "add": []string{"restart-task"}}); code != 403 {
 		t.Fatalf("non-admin scope: %d %v", code, out)
 	}
 
@@ -195,7 +195,7 @@ func TestAccountScopeAndReason(t *testing.T) {
 	put := func(id, reason string) (int, map[string]any) {
 		hdr := map[string]string{"Content-Type": "application/json"}
 		if reason != "" {
-			hdr["X-MyDC-Reason"], hdr["X-MyDC-Incident"] = url.PathEscape(reason), "inc-7"
+			hdr["X-SFC-Reason"], hdr["X-SFC-Incident"] = url.PathEscape(reason), "inc-7"
 		}
 		return f.send("POST", "/api/v1/t/shop/apps/php-shop/cd/pause", []byte(`{"opId":"`+id+`"}`), hdr)
 	}
@@ -210,19 +210,52 @@ func TestAccountScopeAndReason(t *testing.T) {
 		t.Fatalf("reason: %d %v", code, out)
 	}
 	if code, out := f.send("POST", "/api/v1/t/shop/apps/php-shop/cd/pause", []byte(`{"opId":"`+op()+`"}`),
-		map[string]string{"X-MyDC-Reason": url.PathEscape(strings.Repeat("가", 513))}); code != 400 {
+		map[string]string{"X-SFC-Reason": url.PathEscape(strings.Repeat("가", 513))}); code != 400 {
 		t.Fatalf("long reason: %d %v", code, out)
 	}
 
 	fakeLogin(t, f, "admin")
-	if code, out := f.do("PUT", "/api/v1/users/u-bob/scope", map[string]any{"opId": op(), "actions": []string{"restart-task"}, "keyOnly": true}); opState(t, code, out) != "applied" {
+	revision := func() any {
+		_, out := f.do("GET", "/api/v1/users/u-bob/scope", nil)
+		return out["revision"]
+	}
+	patch := func(body map[string]any) (int, map[string]any) {
+		body["opId"] = op()
+		return f.do("PATCH", "/api/v1/users/u-bob/scope", body)
+	}
+	rev := revision()
+	for _, bad := range []map[string]any{
+		{"expected": rev},
+		{"expected": rev, "unlimited": true, "add": []string{"restart-task"}},
+		{"add": []string{"restart-task"}},
+	} {
+		if code, out := patch(bad); code != 422 {
+			t.Fatalf("bad change %v: %d %v", bad, code, out)
+		}
+	}
+	if code, out := patch(map[string]any{"expected": rev.(float64) + 1, "add": []string{"restart-task"}}); code != 409 || errCode(out) != "stale" {
+		t.Fatalf("stale: %d %v", code, out)
+	}
+	if code, out := patch(map[string]any{"expected": rev, "remove": []string{"restart-task"}}); code != 422 || errCode(out) != "no-such-action" {
+		t.Fatalf("remove a missing action: %d %v", code, out)
+	}
+	if code, out := patch(map[string]any{"expected": rev, "add": []string{"restart-task", "pause-app-cd"}, "keyOnly": true}); opState(t, code, out) != "applied" {
 		t.Fatalf("scope: %d %v", code, out)
 	}
-	if code, out := f.do("GET", "/api/v1/users/u-bob/scope", nil); code != 200 || out["keyOnly"] != true || out["revision"] == 0.0 {
+	if code, out := f.do("GET", "/api/v1/users/u-bob/scope", nil); code != 200 || out["keyOnly"] != true || len(out["actions"].([]any)) != 2 || out["revision"] == rev {
 		t.Fatalf("scope read: %d %v", code, out)
 	}
-	if code, out := f.do("PUT", "/api/v1/users/u-bob/scope", map[string]any{"opId": op(), "actions": []string{}}); opState(t, code, out) != "applied" {
+	if code, out := patch(map[string]any{"expected": revision(), "add": []string{"restart-task"}}); code != 422 || errCode(out) != "exists" {
+		t.Fatalf("add an action it has: %d %v", code, out)
+	}
+	if code, out := patch(map[string]any{"expected": revision(), "remove": []string{"pause-app-cd"}}); opState(t, code, out) != "applied" {
+		t.Fatalf("remove one: %d %v", code, out)
+	}
+	if code, out := patch(map[string]any{"expected": revision(), "unlimited": true, "keyOnly": false}); opState(t, code, out) != "applied" {
 		t.Fatalf("drop scope: %d %v", code, out)
+	}
+	if _, out := f.do("GET", "/api/v1/users/u-bob/scope", nil); len(out["actions"].([]any)) != 0 || out["keyOnly"] != false {
+		t.Fatalf("unlimited: %v", out)
 	}
 }
 

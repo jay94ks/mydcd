@@ -10,13 +10,13 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/network/services"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/network/services"
 	"gopkg.in/yaml.v3"
 )
 
 // This reuses the actual two-owner engines and CLI wallet: DNS policies go
-// through typed 'manage apply' changes over real authenticated MYDCP.
+// through typed 'manage apply' changes over real authenticated SFCP.
 func testRouteManagementRecovery(t *testing.T, ctx context.Context, a *Runtime, root, home string, definitions []services.ManagedDNSDefinition, read func() cluster.View, cli func(int, ...string) []byte) {
 	t.Helper()
 	if len(definitions) != 3 || definitions[1].Tenant != definitions[2].Tenant {

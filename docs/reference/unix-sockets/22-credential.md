@@ -1,6 +1,6 @@
 ## 최초 credential의 보호 메시지
 
-User kind1의 `initial-credential-stage`/`initial-credential-observe`는 현재 system-admin의 Session/challenge 서명과 InitialCredential 공개 선택자를 받는다. stage의 password만 선택 Secret byte[]를 사용한다. owner pin을 고정하고 relay/redirect를 금지하며 follower는 quorum-backed view를 읽는다. InitialCredentialFact와 첫 token의 private byte[] 응답, 공개 `issue-initial-credential` action payload·CAS·한 번의 반환/복구 규칙은 [전체 메시지·필드 명세](../initial-credentials.md#사용자-세션-메시지)에 있다. 일반 operation Result/이벤트에는 token/password를 넣지 않는다.
+User kind1의 `initial-credential-stage`/`initial-credential-observe`/`initial-credential-profile`은 현재 system-admin의 Session/challenge 서명과 InitialCredential 공개 선택자를 받는다. stage의 password만 선택 Secret byte[]를 사용한다. owner pin을 고정하고 relay/redirect를 금지하며 follower는 quorum-backed view를 읽는다. InitialCredentialFact와 첫 token의 private byte[] 응답, 공개 `issue-initial-credential` action payload·CAS·한 번의 반환/복구 규칙은 [전체 메시지·필드 명세](../initial-credentials.md#사용자-세션-메시지)에 있다. 일반 operation Result/이벤트에는 token/password를 넣지 않는다.
 
 ### 관측 이벤트 조회
 
@@ -17,7 +17,7 @@ CD 조회의 행/값/분할 형식과 권한·cursor 계약은 [CD 이력·설�
 
 보존 중인 stage의 `Previous`는 원 claim/command/result/native와 원 승인·참조다. 이 값이 새 목표의 Command/Result를 대신하지 않는다. 원 owner의 현재 서명 관측은 원 native 신원으로 확인하되 현재 rollout의 Plan/Operation에 고정한다. 실제 삭제/종료 증명 뒤에만 원 tombstone CAS로 새 세대를 Prepare한다. 다음 노드 진행에는 새 목표의 결과와 신선한 health가 필요하다. 실패·Unknown·만료 관측은 다음 노드 변경을 허용하지 않는다.
 
-내부 관리 MYDCP `app-progress`의 `Action:"advance-wave"`는 설치된 활성 WorkKey의 서명 보고다. Tenant·App·원 rollout Operation·Expected Inventory revision·At/Epoch/basis를 기존 형식으로 고정하며 Key/Observation/Retire/Release/Volume payload는 없다. reducer는 원 사용자 grant의 현재 권한과 같은 Inventory의 positive closure·새 세대 health를 재검사한다. 이 보고는 새 사용자 승인/배포나 Unknown 재제출을 만들지 않는다. 관리 Unix 사용자 연결은 이 내부 노드 보고를 직접 호출하는 통로가 아니다.
+내부 관리 SFCP `app-progress`의 `Action:"advance-wave"`는 설치된 활성 WorkKey의 서명 보고다. Tenant·App·원 rollout Operation·Expected Inventory revision·At/Epoch/basis를 기존 형식으로 고정하며 Key/Observation/Retire/Release/Volume payload는 없다. reducer는 원 사용자 grant의 현재 권한과 같은 Inventory의 positive closure·새 세대 health를 재검사한다. 이 보고는 새 사용자 승인/배포나 Unknown 재제출을 만들지 않는다. 관리 Unix 사용자 연결은 이 내부 노드 보고를 직접 호출하는 통로가 아니다.
 
 파동 retirement의 `KeepExecution:true`는 같은 원 Execution을 보존한다. 원 claim·retirement ID·서명된 종료/삭제 결과와 파동 좌표가 함께 검증되며, 해당 필드를 지워 일반 전체 종료로 바꾸거나 종료 증명 없이 다음 파동으로 건너뛴 checkpoint는 거부한다. 교체하지 않은 Task의 Secret/Volume/주소 참조는 반환하지 않는다.
 
@@ -29,7 +29,7 @@ CD 조회의 행/값/분할 형식과 권한·cursor 계약은 [CD 이력·설�
 
 기존 plain 앱 갱신에는 `AppView.BeginTarget`을 `AppBegin.Target`에 고정할 수 있다. `Expected`는 읽은 inventory revision floor이고 `UserOperation`은 그 원 root/epoch/ID와 Target을 함께 서명한다. 유효한 Target이 있는 요청만 기존 `ModuleAppCAS` kind를 사용한다. 지문은 원 Origin/sync, Scope, down/pending 의도, 원 active operation/plan/status, retirement, task restart/log clear 의도를 포함하며 health sequence/시각과 완료 시각·독립 upload revision은 제외한다. 현재 Target 일치와 미래 좌표 거부 뒤 같은 reducer가 원 Blueprint·현재 권한/배치/quota/소스·writer/retirement를 다시 검증한다. CAS가 native 종료나 가용성을 보장하지 않는다.
 
-`mydc app deploy`는 기존 plain 앱의 BeginTarget을 artifact/expected/epoch와 같은 로컬 intent에 보존하며 upload 전후나 resume에서 다시 선택하지 않는다. 신규 앱은 expected=0과 cluster/tenant/app/deployment별 부재 Target을 함께 고정한다. 서버는 해당 앱 entry가 여전히 없을 때만 수락하며 다른 앱의 checkpoint로 root만 바뀐 경우 현재 Blueprint·권한·배치·quota·소스를 다시 검증한다. 부재 지문은 `SHA-256("mydc-app-create-target-1\x00" || JSON({Cluster,Tenant,App,Deployment}))`이며 필드 순서와 대소문자는 이 순서대로, Cluster는 32바이트 정수 배열이다. 기존 앱에 expected=0으로 적용할 수 없으며 CD 앱도 덮어쓸 수 없다. Target 없는 과거 intent/서명은 기존 엄격 root/inventory CAS를 유지한다. 거부/불명 뒤 새 Target·서명·ID로 자동 재제출하지 않는다.
+`sfcli app deploy`는 기존 plain 앱의 BeginTarget을 artifact/expected/epoch와 같은 로컬 intent에 보존하며 upload 전후나 resume에서 다시 선택하지 않는다. 신규 앱은 expected=0과 cluster/tenant/app/deployment별 부재 Target을 함께 고정한다. 서버는 해당 앱 entry가 여전히 없을 때만 수락하며 다른 앱의 checkpoint로 root만 바뀐 경우 현재 Blueprint·권한·배치·quota·소스를 다시 검증한다. 부재 지문은 `SHA-256("sfc-app-create-target-1\x00" || JSON({Cluster,Tenant,App,Deployment}))`이며 필드 순서와 대소문자는 이 순서대로, Cluster는 32바이트 정수 배열이다. 기존 앱에 expected=0으로 적용할 수 없으며 CD 앱도 덮어쓸 수 없다. Target 없는 과거 intent/서명은 기존 엄격 root/inventory CAS를 유지한다. 거부/불명 뒤 새 Target·서명·ID로 자동 재제출하지 않는다.
 
 순차 교체의 내부 signed Observation에는 optional `IngressDrained:[{Key,Generation,Revision}]`가 있다. IngressBackends/IngressDrained는 원 Step.Identity/Goal.Follow의 복제본만 담으며 고정 backend의 관측·health와 구분한다. listener owner가 해당 원 Task 세대의 신규 요청 차단과 진행 중 HTTP lease의 내구 반환을 확인한 양의 사실이며, health 목록의 부재와 다르다. 정렬·고유·원 Task ref와 서명을 검증하고 해당 원 ref가 serving 목록과 동시에 존재하면 거부한다. Inventory는 이 사실 전에는 파동 Task의 첫 Drain을 dispatch하지 않는다. 기존 listener와 그 보존 중인 producer의 exact noop 준비·관측만 retirement 중 허용하며 listener 생성/변경은 허용하지 않는다. 이미 dispatch한 원 Drain의 Unknown/proof/delete 정산은 유지한다. nil 필드는 생략해 기존 schema1 서명 bytes를 유지한다. 관리 Unix의 사용자 호출 메시지를 추가하는 계약이 아니다.
 

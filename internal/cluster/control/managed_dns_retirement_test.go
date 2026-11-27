@@ -4,11 +4,11 @@ package control
 
 import (
 	"crypto/ed25519"
-	"github.com/jay94ks/mydcd/internal/network/services"
+	"github.com/jay94ks/seafield/internal/network/services"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/deployment"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/deployment"
 )
 
 func TestManagedDNSBorrowerRetirementCoreSelectsOnlyOriginalAppAddresses(t *testing.T) {
@@ -61,7 +61,7 @@ func TestManagedDNSPlacementWithdrawalKeepsPolicyAndClosesOriginalBeforeRestore(
 	first := apps.network.Groups[0]
 	catalog, _ := f.p.Catalog(f.s)
 	tenant, _ := catalog.Tenant(definition.Tenant)
-	f.apply("placement-withdraw", "set-nodes", tenant.Revision, NodeAssignment{Tenant: tenant.ID, Nodes: []string{"node-a"}}, state.Applied)
+	f.apply("placement-withdraw", "set-nodes", tenant.Revision, NodeChangeTo(tenant.ID, tenant.AllowedNodes, []string{"node-a"}), state.Applied)
 	// Every member is required for the logical view. One revoked member must
 	// stop the whole view's original admission without editing declared policy.
 	applyDNSCoreReport(t, f, managedDNSCoreReport(t, f, f.node), state.Applied)
@@ -89,7 +89,7 @@ func TestManagedDNSPlacementWithdrawalKeepsPolicyAndClosesOriginalBeforeRestore(
 	}
 	catalog, _ = f.p.Catalog(f.s)
 	tenant, _ = catalog.Tenant(definition.Tenant)
-	f.apply("placement-restore-before-close", "set-nodes", tenant.Revision, NodeAssignment{Tenant: tenant.ID, Nodes: []string{"node-a", "node-b"}}, state.Applied)
+	f.apply("placement-restore-before-close", "set-nodes", tenant.Revision, NodeChangeTo(tenant.ID, tenant.AllowedNodes, []string{"node-a", "node-b"}), state.Applied)
 	replacement := definition
 	replacement.Policy.TTL++
 	managedDNSChange(t, f, "no-replace-closing-placement", "configure-network-dns", originalSource.Revision, replacement, state.ConditionFailed)

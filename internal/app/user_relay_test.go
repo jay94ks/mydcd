@@ -12,12 +12,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/userauth"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/internal/userauth"
 )
 
 func TestRealUserRelayHandoffAndCurrentUserReceipt(t *testing.T) {
@@ -91,20 +91,20 @@ func TestRealUserRelayHandoffAndCurrentUserReceipt(t *testing.T) {
 	change("create-tenant", "admin", 0, control.TenantID{ID: "two"})
 	change("set-membership", "admin", 0, access.Membership{Tenant: "one", User: "alice", Role: access.Manager, Enabled: true})
 	change("set-membership", "admin", 0, access.Membership{Tenant: "two", User: "alice", Role: access.Viewer, Enabled: true})
-	approved := map[mydcp.Identity]mydcp.Peer{}
+	approved := map[sfcp.Identity]sfcp.Peer{}
 	for _, p := range peers {
 		k, _ := identity.ParseKey(p.Key)
-		peer := mydcp.Peer{ID: p.ID, Endpoint: p.Endpoint, Policy: mydcp.Policy{Key: mydcp.Identity(k), Respond: true}}
+		peer := sfcp.Peer{ID: p.ID, Endpoint: p.Endpoint, Policy: sfcp.Policy{Key: sfcp.Identity(k), Respond: true}}
 		approved[peer.Key] = peer
 	}
-	peerAt := func(i int) mydcp.Peer { k, _ := identity.ParseKey(peers[i].Key); return approved[mydcp.Identity(k)] }
+	peerAt := func(i int) sfcp.Peer { k, _ := identity.ParseKey(peers[i].Key); return approved[sfcp.Identity(k)] }
 	client := func() userauth.Client {
 		t.Helper()
 		self, err := identity.Ephemeral()
 		if err != nil {
 			t.Fatal(err)
 		}
-		mesh, err := mydcp.NewTransport(self, clusterID, func(k mydcp.Identity) (mydcp.Peer, bool) { p, ok := approved[k]; return p, ok })
+		mesh, err := sfcp.NewTransport(self, clusterID, func(k sfcp.Identity) (sfcp.Peer, bool) { p, ok := approved[k]; return p, ok })
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -122,23 +122,23 @@ func TestRealUserRelayHandoffAndCurrentUserReceipt(t *testing.T) {
 	}
 	follower := (leader + 1) % 3
 	wait(func() bool { p, ok := nodes[follower].Engine().LeaderPeer(); return ok && p.ID == peers[leader].ID })
-	query, err := c.Query(ctx, peerAt(follower), session, "whoami", "")
-	if err != nil || query.User == nil || query.User.ID != "alice" {
-		t.Fatal("follower user relay", query.Code, err)
+	query, route, err := c.WhoamiRoute(ctx, peerAt(follower), session)
+	if err != nil || query.User.ID != "alice" {
+		t.Fatal("follower user relay", err)
 	}
-	if query.RelayedBy != nodes[follower].Identity.Actor() || query.Node != nodes[leader].Identity.Actor() {
+	if route.RelayedBy != nodes[follower].Identity.Actor() || route.Node != nodes[leader].Identity.Actor() {
 		t.Fatal("query bypassed server relay")
 	}
-	visible, err := c.Query(ctx, peerAt(follower), session, "tenants", "")
+	visible, err := c.Tenants(ctx, peerAt(follower), session)
 	if err != nil || len(visible.Tenants) != 2 || visible.Tenants[0].Role != access.Manager || visible.Tenants[1].Role != access.Viewer {
 		t.Fatal("multiple current memberships", err)
 	}
-	selected, err := c.Query(ctx, peerAt(follower), session, "select-tenant", "two")
+	selected, err := c.SelectTenant(ctx, peerAt(follower), session, "two")
 	if err != nil || selected.Tenant != "two" {
 		t.Fatal("explicit second tenant selection", err)
 	}
 	tenant, _ := catalog().Tenant("one")
-	raw, _ := control.ChangeBytes("set-trust", "alice", tenant.Revision, control.TrustAssignment{Tenant: "one", Rules: []access.TrustRule{{Registry: "docker.io", Repository: "library/php"}}})
+	raw, _ := control.ChangeBytes("set-trust", "alice", tenant.Revision, control.TrustChange{Tenant: "one", Add: []access.TrustRule{{Registry: "docker.io", Repository: "library/php"}}})
 	var mutation control.Change
 	_ = json.Unmarshal(raw, &mutation)
 	op, err := c.Prepare(ctx, peerAt(follower), session, "relayed-user-write", mutation)
@@ -190,7 +190,7 @@ func TestRealUserRelayHandoffAndCurrentUserReceipt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	adminTenants, err := other.Query(ctx, peerAt(entry), otherSession, "tenants", "")
+	adminTenants, err := other.Tenants(ctx, peerAt(entry), otherSession)
 	if err != nil || len(adminTenants.Tenants) != 2 {
 		t.Fatal("implicit system admin tenant view", err)
 	}
@@ -205,7 +205,7 @@ func TestRealUserRelayHandoffAndCurrentUserReceipt(t *testing.T) {
 		t.Fatal(err)
 	}
 	foreignEnvelope := userauth.Envelope{Body: body, Session: &otherSession, Signature: ed25519.Sign(other.Self.Private, access.RequestBytes(otherSession, conn.PeerChallenge(), body))}
-	rawReply := func(conn *mydcp.Session, kind uint8, envelope userauth.Envelope) userauth.Reply {
+	rawReply := func(conn *sfcp.Session, kind uint8, envelope userauth.Envelope) userauth.Reply {
 		t.Helper()
 		payload, _ := json.Marshal(envelope)
 		digest := sha256.Sum256(payload)
@@ -215,14 +215,14 @@ func TestRealUserRelayHandoffAndCurrentUserReceipt(t *testing.T) {
 		}
 		defer stream.CancelRead(0)
 		defer stream.Close()
-		if err = mydcp.WriteFrame(stream, mydcp.Frame{Purpose: mydcp.User, Kind: kind, Request: 71, Fields: []mydcp.Field{{Tag: 1, Required: true, Value: payload}, {Tag: 2, Required: true, Value: digest[:]}}}); err != nil {
+		if err = sfcp.WriteFrame(stream, sfcp.Frame{Purpose: sfcp.User, Kind: kind, Request: 71, Fields: []sfcp.Field{{Tag: 1, Required: true, Value: payload}, {Tag: 2, Required: true, Value: digest[:]}}}); err != nil {
 			t.Fatal(err)
 		}
 		// Finite user RPCs send their write EOF before reading the reply.
 		if err = stream.Close(); err != nil {
 			t.Fatal(err)
 		}
-		frame, err := mydcp.ReadFrame(stream, 128<<10)
+		frame, err := sfcp.ReadFrame(stream, 128<<10)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -239,7 +239,7 @@ func TestRealUserRelayHandoffAndCurrentUserReceipt(t *testing.T) {
 	now := time.Now().Unix()
 	expired.IssuedAt, expired.ExpiresAt = now-600, now-1
 	expired.Signature = ed25519.Sign(nodes[leader].Identity.Private, access.SessionBytes(expired))
-	expiredBody, _ := json.Marshal(userauth.Request{Schema: 1, Method: "whoami", Nonce: [32]byte{10}})
+	expiredBody, _ := json.Marshal(userauth.Request{Schema: 1, Method: "whoami", Nonce: [32]byte{10}, Params: json.RawMessage(`{}`)})
 	expiredEnvelope := userauth.Envelope{Body: expiredBody, Session: &expired, Signature: ed25519.Sign(other.Self.Private, access.RequestBytes(expired, conn.PeerChallenge(), expiredBody))}
 	if r := rawReply(conn, 1, expiredEnvelope); r.Code != "denied" {
 		t.Fatal("expired session accepted by server", r.Code)
@@ -250,7 +250,7 @@ func TestRealUserRelayHandoffAndCurrentUserReceipt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	userBody, _ := json.Marshal(userauth.Request{Schema: 1, Method: "whoami", Nonce: [32]byte{8}})
+	userBody, _ := json.Marshal(userauth.Request{Schema: 1, Method: "whoami", Nonce: [32]byte{8}, Params: json.RawMessage(`{}`)})
 	challenge := [32]byte{9}
 	relayed := userauth.Envelope{Body: userBody, Session: &newSession, Signature: ed25519.Sign(newClient.Self.Private, access.RequestBytes(newSession, challenge, userBody)), Relay: &userauth.Relay{Node: member.Identity.Public, Target: member.Identity.Public, Caller: newClient.Self.Public, Challenge: challenge, Connection: relayConn.PeerChallenge()}}
 	relayed.Relay.Signature = ed25519.Sign(member.Identity.Private, userauth.RelayBytes(clusterID, relayed))
@@ -313,9 +313,8 @@ func TestRealUserRelayHandoffAndCurrentUserReceipt(t *testing.T) {
 	}
 	account, _ := catalog().User("alice")
 	expectedAccount := account.Revision
-	account.Revision, account.Enabled = 0, false
-	change("put-user", "admin", expectedAccount, account)
-	if _, err = newClient.Query(ctx, peerAt(leader), newSession, "whoami", ""); err == nil {
+	change("put-user", "admin", expectedAccount, access.User{ID: account.ID, Username: account.Username})
+	if _, err = newClient.Whoami(ctx, peerAt(leader), newSession); err == nil {
 		t.Fatal("disabled account read accepted")
 	}
 	if _, err = newClient.Result(ctx, peerAt(leader), newSession, op); err == nil {

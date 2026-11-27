@@ -8,9 +8,9 @@ import (
 	"encoding/hex"
 	"encoding/json"
 
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/network/services"
-	"github.com/jay94ks/mydcd/internal/tenancy"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/network/services"
+	"github.com/jay94ks/seafield/internal/tenancy"
 )
 
 // RouteRetirementReport joins the exact original instance and policy closure.
@@ -30,7 +30,7 @@ type RouteRetirementReport struct {
 func RouteRetirementReportBytes(r RouteRetirementReport) []byte {
 	r.Signature = nil
 	raw, _ := json.Marshal(r)
-	return append([]byte("mydc-route-retirement-report-1\x00"), raw...)
+	return append([]byte("sfc-route-retirement-report-1\x00"), raw...)
 }
 
 func (r RouteRetirementReport) Command() (state.Command, error) {

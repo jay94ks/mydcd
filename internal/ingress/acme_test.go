@@ -76,6 +76,13 @@ func TestACMEChallengeGoesToResponderAheadOfAppRoutes(t *testing.T) {
 	if code, _ := get("shop.example", "POST", path); code != 404 {
 		t.Fatal("only GET/HEAD reach the responder", code)
 	}
+	// The node enrollment path never reaches an app, and never runs on
+	// plain HTTP even with a handler set.
+	enrolled := false
+	m.SetNodeEnroll(func(w http.ResponseWriter, _ *http.Request, _ netip.Addr) { enrolled = true })
+	if code, body := get("shop.example", "POST", NodeEnrollPath+"enroll"); code != 404 || strings.HasPrefix(body, "app") || enrolled {
+		t.Fatal("enroll path on plain HTTP", code, body, enrolled)
+	}
 	if _, body := get("shop.example", "GET", "/.well-known/other"); body != "app /.well-known/other" {
 		t.Fatal("other well-known path left the app", body)
 	}

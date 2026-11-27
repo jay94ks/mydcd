@@ -1,0 +1,145 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Fri, 27 Nov 2026 08:24:16 +0000
+Subject: [PATCH 08/20] build: BuildKit only, classic builder refused;
+ features.buildkit=false turns building off
+
+
+diff --git a/daemon/command/daemon.go b/daemon/command/daemon.go
+index da89cf1..7c667fe 100644
+--- a/daemon/command/daemon.go
++++ b/daemon/command/daemon.go
+@@ -23,7 +23,6 @@
+ 	"github.com/moby/buildkit/util/tracing/detect"
+ 	"github.com/moby/moby/v2/daemon"
+ 	buildbackend "github.com/moby/moby/v2/daemon/builder/backend"
+-	"github.com/moby/moby/v2/daemon/builder/dockerfile"
+ 	"github.com/moby/moby/v2/daemon/command/debug"
+ 	"github.com/moby/moby/v2/daemon/command/trap"
+ 	"github.com/moby/moby/v2/daemon/config"
+@@ -337,15 +336,13 @@ func (cli *daemonCLI) start(ctx context.Context) (retErr error) {
+ 	c := noSwarm{}
+ 	d.SetCluster(c)
+ 
+-	b, shutdownBuildKit, err := initBuildkit(ctx, d, cdiCache, cli.containerdDialer)
+-	if err != nil {
+-		return fmt.Errorf("error initializing buildkit: %w", err)
+-	}
+-
+-	if runtime.GOOS == "windows" {
+-		if enabled, ok := d.Features()["buildkit"]; ok && enabled {
+-			log.G(ctx).Warn("Buildkit feature is enabled in the daemon.json configuration file. Support for BuildKit on Windows is experimental, and enabling this feature may not work. Use at your own risk!")
++	b, shutdownBuildKit := builderOptions{}, func() {}
++	if buildEnabled(d.Features()) {
++		if b, shutdownBuildKit, err = initBuildkit(ctx, d, cdiCache, cli.containerdDialer); err != nil {
++			return fmt.Errorf("error initializing buildkit: %w", err)
+ 		}
++	} else {
++		log.G(ctx).Info("Image builds are turned off on this node (features.buildkit=false)")
+ 	}
+ 
+ 	// Enable HTTP/1, HTTP/2 and h2c on the HTTP server. h2c won't be used for *tls.Conn listeners, and HTTP/2 won't be
+@@ -363,7 +360,9 @@ func (cli *daemonCLI) start(ctx context.Context) (retErr error) {
+ 		feed:     feed,
+ 	})
+ 	gs := newGRPCServer(ctx)
+-	b.backend.RegisterGRPC(gs)
++	if b.backend != nil {
++		b.backend.RegisterGRPC(gs)
++	}
+ 	// Publish extension gRPC services on the API socket.
+ 	extProxy, err := d.ExposeExtensionServices(gs)
+ 	if err != nil {
+@@ -475,11 +474,6 @@ func initBuildkit(ctx context.Context, d *daemon.Daemon, cdiCache *cdi.Cache, co
+ 		return builderOptions{}, closeFn, errors.Wrap(err, "failed to create sessionmanager")
+ 	}
+ 
+-	manager, err := dockerfile.NewBuildManager(d.BuilderBackend(), d.IdentityMapping())
+-	if err != nil {
+-		return builderOptions{}, closeFn, err
+-	}
+-
+ 	cfg := d.Config()
+ 
+ 	bk, err := buildkit.New(ctx, buildkit.Opt{
+@@ -513,7 +507,7 @@ func initBuildkit(ctx context.Context, d *daemon.Daemon, cdiCache *cdi.Cache, co
+ 		return builderOptions{}, closeFn, errors.Wrap(err, "error creating buildkit instance")
+ 	}
+ 
+-	bb, err := buildbackend.NewBackend(d.ImageService(), manager, bk, d.EventsService)
++	bb, err := buildbackend.NewBackend(d.ImageService(), classicRefused{}, bk, d.EventsService)
+ 	if err != nil {
+ 		return builderOptions{}, closeFn, errors.Wrap(err, "failed to create builder backend")
+ 	}
+@@ -853,10 +847,8 @@ func buildRouters(opts routerOptions) []router.Router {
+ 			opts.daemon.ImageService(),
+ 			opts.daemon.RegistryService(),
+ 		),
+-		systemrouter.NewRouter(opts.daemon, opts.cluster, opts.builder.buildkit, opts.daemon.Features),
++		systemrouter.NewRouter(opts.daemon, opts.cluster, systemBuilder(opts.builder), opts.daemon.Features),
+ 		volume.NewRouter(opts.daemon.VolumesService(), opts.cluster),
+-		build.NewRouter(opts.builder.backend, opts.daemon),
+-		sessionrouter.NewRouter(opts.builder.sessionManager), //nolint:staticcheck // Deprecated endpoint kept for backward compatibility
+ 		distributionrouter.NewRouter(opts.daemon.ImageBackend()),
+ 		network.NewRouter(opts.daemon, opts.cluster),
+ 		debugrouter.NewRouter(),
+@@ -871,7 +863,11 @@ func buildRouters(opts routerOptions) []router.Router {
+ 	}
+ 
+ 	if opts.builder.backend != nil {
+-		routers = append(routers, grpcrouter.NewRouter(opts.builder.backend)) //nolint:staticcheck // Deprecated endpoint kept for backward compatibility
++		routers = append(routers,
++			build.NewRouter(opts.builder.backend, opts.daemon),
++			sessionrouter.NewRouter(opts.builder.sessionManager), //nolint:staticcheck // Deprecated endpoint kept for backward compatibility
++			grpcrouter.NewRouter(opts.builder.backend),           //nolint:staticcheck // Deprecated endpoint kept for backward compatibility
++		)
+ 	}
+ 
+ 	if opts.daemon.HasExperimental() {
+diff --git a/daemon/command/seafield_build.go b/daemon/command/seafield_build.go
+new file mode 100644
+index 0000000..720358d
+--- /dev/null
++++ b/daemon/command/seafield_build.go
+@@ -0,0 +1,41 @@
++// SPDX-License-Identifier: Apache-2.0
++
++package command
++
++import (
++	"context"
++	"errors"
++
++	"github.com/moby/moby/v2/daemon/builder"
++	"github.com/moby/moby/v2/daemon/server/buildbackend"
++	"github.com/moby/moby/v2/daemon/server/router/system"
++)
++
++// errClassicBuild answers a build request without "version=2". Seafield
++// builds only through the built-in BuildKit; the classic Dockerfile builder
++// is not started (its package stays linked for commit/import --change).
++var errClassicBuild = errors.New("seafield builds only with BuildKit (version=2); the classic builder is removed")
++
++type classicRefused struct{}
++
++func (classicRefused) Build(context.Context, buildbackend.BuildConfig) (*builder.Result, error) {
++	return nil, errClassicBuild
++}
++
++// buildEnabled reports whether this node builds images. daemon.json
++// "features": {"buildkit": false} turns building off for the node (sfc
++// node.yaml engine build switch): BuildKit is not started and the build,
++// session and gRPC routes are not served.
++func buildEnabled(features map[string]bool) bool {
++	enabled, ok := features["buildkit"]
++	return !ok || enabled
++}
++
++// systemBuilder avoids handing the system router a typed nil when building
++// is off, so disk usage simply omits the build cache.
++func systemBuilder(b builderOptions) system.BuildBackend {
++	if b.buildkit == nil {
++		return nil
++	}
++	return b.buildkit
++}

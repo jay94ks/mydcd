@@ -19,8 +19,8 @@ import (
 	"testing/fstest"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/web/mydc"
-	"github.com/jay94ks/mydcd/internal/web/store"
+	"github.com/jay94ks/seafield/internal/web/sfc"
+	"github.com/jay94ks/seafield/internal/web/store"
 )
 
 // testClient is a minimal in-test adapter. Methods the tests do not use
@@ -28,23 +28,23 @@ import (
 type testClient struct {
 	mu      sync.Mutex
 	conns   []*testConn
-	submit  func(op mydc.SignedOp) (mydc.Result, error)
-	result  func(op mydc.SignedOp) (mydc.Result, bool, error)
-	source  func() (mydc.AppSource, error)
+	submit  func(op sfc.SignedOp) (sfc.Result, error)
+	result  func(op sfc.SignedOp) (sfc.Result, bool, error)
+	source  func() (sfc.AppSource, error)
 	whoErr  error
 	nextReq int
 	sent    []string
 }
 
 type testConn struct {
-	mydc.Conn
+	sfc.Conn
 	c        *testClient
 	closed   bool
 	loggedIn bool
 	user     string
 }
 
-func (c *testClient) Dial(ctx context.Context) (mydc.Conn, error) {
+func (c *testClient) Dial(ctx context.Context) (sfc.Conn, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	tc := &testConn{c: c}
@@ -54,87 +54,87 @@ func (c *testClient) Dial(ctx context.Context) (mydc.Conn, error) {
 
 func (t *testConn) Close() error { t.closed = true; return nil }
 
-func (t *testConn) CredentialChallenge(ctx context.Context, username string, m mydc.AuthMethod, cred string) (mydc.Ticket, error) {
+func (t *testConn) CredentialChallenge(ctx context.Context, username string, m sfc.AuthMethod, cred string) (sfc.Ticket, error) {
 	if username == "nobody" {
-		return mydc.Ticket{}, &mydc.Error{Code: mydc.CodeDenied, Method: "credential-challenge"}
+		return sfc.Ticket{}, &sfc.Error{Code: sfc.CodeDenied, Method: "credential-challenge"}
 	}
 	t.user = username
-	return mydc.Ticket{Username: username, Deadline: time.Now().Add(time.Minute).Unix()}, nil
+	return sfc.Ticket{Username: username, Deadline: time.Now().Add(time.Minute).Unix()}, nil
 }
 
-func (t *testConn) CredentialLogin(ctx context.Context, tk mydc.Ticket, secret []byte) (mydc.Session, error) {
+func (t *testConn) CredentialLogin(ctx context.Context, tk sfc.Ticket, secret []byte) (sfc.Session, error) {
 	if string(secret) != "pw" {
-		return mydc.Session{}, &mydc.Error{Code: mydc.CodeDenied, Method: "credential-login"}
+		return sfc.Session{}, &sfc.Error{Code: sfc.CodeDenied, Method: "credential-login"}
 	}
 	t.loggedIn = true
-	return mydc.Session{User: "u-" + t.user, ExpiresAt: time.Now().Add(time.Hour).Unix()}, nil
+	return sfc.Session{User: "u-" + t.user, ExpiresAt: time.Now().Add(time.Hour).Unix()}, nil
 }
 
-func (t *testConn) Challenge(ctx context.Context, username string, key [32]byte) (mydc.Ticket, error) {
+func (t *testConn) Challenge(ctx context.Context, username string, key [32]byte) (sfc.Ticket, error) {
 	t.user = username
-	return mydc.Ticket{Username: username, UserKey: key, Deadline: time.Now().Add(time.Minute).Unix()}, nil
+	return sfc.Ticket{Username: username, UserKey: key, Deadline: time.Now().Add(time.Minute).Unix()}, nil
 }
 
-func (t *testConn) Login(ctx context.Context, tk mydc.Ticket, p mydc.KeyProof) (mydc.Session, error) {
+func (t *testConn) Login(ctx context.Context, tk sfc.Ticket, p sfc.KeyProof) (sfc.Session, error) {
 	if len(p.Signature) != 64 || p.Signature[0] != 7 || p.Username != tk.Username {
-		return mydc.Session{}, &mydc.Error{Code: mydc.CodeDenied, Method: "login"}
+		return sfc.Session{}, &sfc.Error{Code: sfc.CodeDenied, Method: "login"}
 	}
 	t.loggedIn = true
-	return mydc.Session{User: "u-" + t.user, ExpiresAt: time.Now().Add(time.Hour).Unix()}, nil
+	return sfc.Session{User: "u-" + t.user, ExpiresAt: time.Now().Add(time.Hour).Unix()}, nil
 }
 
-func (t *testConn) ApproveSession(ctx context.Context, a mydc.SessionApproval) (mydc.Session, error) {
+func (t *testConn) ApproveSession(ctx context.Context, a sfc.SessionApproval) (sfc.Session, error) {
 	if !t.loggedIn || len(a.Signature) != 64 || a.Signature[0] != 8 {
-		return mydc.Session{}, &mydc.Error{Code: mydc.CodeDenied, Method: "approve-session"}
+		return sfc.Session{}, &sfc.Error{Code: sfc.CodeDenied, Method: "approve-session"}
 	}
-	return mydc.Session{User: "u-" + t.user, ExpiresAt: time.Now().Add(time.Hour).Unix(), Approval: &a}, nil
+	return sfc.Session{User: "u-" + t.user, ExpiresAt: time.Now().Add(time.Hour).Unix(), Approval: &a}, nil
 }
 
 func (t *testConn) check() error {
 	if t.closed {
-		return &mydc.Error{Code: mydc.CodeClosed}
+		return &sfc.Error{Code: sfc.CodeClosed}
 	}
 	if !t.loggedIn {
-		return &mydc.Error{Code: mydc.CodeNotLoggedIn}
+		return &sfc.Error{Code: sfc.CodeNotLoggedIn}
 	}
 	return nil
 }
 
-func (t *testConn) Whoami(ctx context.Context) (mydc.Whoami, error) {
+func (t *testConn) Whoami(ctx context.Context) (sfc.Whoami, error) {
 	if err := t.check(); err != nil {
-		return mydc.Whoami{}, err
+		return sfc.Whoami{}, err
 	}
 	if t.c.whoErr != nil {
-		return mydc.Whoami{}, t.c.whoErr
+		return sfc.Whoami{}, t.c.whoErr
 	}
-	return mydc.Whoami{User: mydc.UserView{ID: "u-" + t.user, Username: t.user, Revision: 3}}, nil
+	return sfc.Whoami{User: sfc.UserView{ID: "u-" + t.user, Username: t.user, Revision: 3}}, nil
 }
 
-func (t *testConn) Tenants(ctx context.Context) ([]mydc.TenantView, error) {
+func (t *testConn) Tenants(ctx context.Context) ([]sfc.TenantView, error) {
 	if err := t.check(); err != nil {
 		return nil, err
 	}
-	return []mydc.TenantView{{ID: "shop", Revision: 1, Role: mydc.RoleManager}, {ID: "pay", Revision: 2, Role: mydc.RoleViewer}}, nil
+	return []sfc.TenantView{{ID: "shop", Revision: 1, Role: sfc.RoleManager}, {ID: "pay", Revision: 2, Role: sfc.RoleViewer}}, nil
 }
 
-func (t *testConn) Apps(ctx context.Context, tenant, after string) (mydc.Page[mydc.AppView], error) {
+func (t *testConn) Apps(ctx context.Context, tenant, after string) (sfc.Page[sfc.AppView], error) {
 	if err := t.check(); err != nil {
-		return mydc.Page[mydc.AppView]{}, err
+		return sfc.Page[sfc.AppView]{}, err
 	}
 	if tenant != "shop" {
-		return mydc.Page[mydc.AppView]{}, &mydc.Error{Code: mydc.CodeDenied}
+		return sfc.Page[sfc.AppView]{}, &sfc.Error{Code: sfc.CodeDenied}
 	}
-	return mydc.Page[mydc.AppView]{Items: []mydc.AppView{{Tenant: "shop", App: "web", Health: "healthy", Operation: mydc.OperationSummary{Plan: [32]byte{0xab}}}}, Next: "c1", Revision: 9}, nil
+	return sfc.Page[sfc.AppView]{Items: []sfc.AppView{{Tenant: "shop", App: "web", Health: "healthy", Operation: sfc.OperationSummary{Plan: [32]byte{0xab}}}}, Next: "c1", Revision: 9}, nil
 }
 
-func (t *testConn) AppSource(ctx context.Context, tenant, app string, v uint64) (mydc.AppSource, error) {
+func (t *testConn) AppSource(ctx context.Context, tenant, app string, v uint64) (sfc.AppSource, error) {
 	if err := t.check(); err != nil {
-		return mydc.AppSource{}, err
+		return sfc.AppSource{}, err
 	}
 	return t.c.source()
 }
 
-func (t *testConn) Prepare(ctx context.Context, ch mydc.Change, root uint64) (mydc.SignedOp, error) {
+func (t *testConn) Prepare(ctx context.Context, ch sfc.Change, root uint64) (sfc.SignedOp, error) {
 	if err := t.check(); err != nil {
 		return nil, err
 	}
@@ -145,9 +145,9 @@ func (t *testConn) Prepare(ctx context.Context, ch mydc.Change, root uint64) (my
 	return json.Marshal(map[string]any{"RequestID": "req-" + string(rune('0'+id)), "Change": ch, "RootRevision": root})
 }
 
-func (t *testConn) Submit(ctx context.Context, op mydc.SignedOp) (mydc.Result, error) {
+func (t *testConn) Submit(ctx context.Context, op sfc.SignedOp) (sfc.Result, error) {
 	if err := t.check(); err != nil {
-		return mydc.Result{}, err
+		return sfc.Result{}, err
 	}
 	t.c.mu.Lock()
 	t.c.sent = append(t.c.sent, string(op))
@@ -155,9 +155,9 @@ func (t *testConn) Submit(ctx context.Context, op mydc.SignedOp) (mydc.Result, e
 	return t.c.submit(op)
 }
 
-func (t *testConn) Result(ctx context.Context, op mydc.SignedOp) (mydc.Result, bool, error) {
+func (t *testConn) Result(ctx context.Context, op sfc.SignedOp) (sfc.Result, bool, error) {
 	if err := t.check(); err != nil {
-		return mydc.Result{}, false, err
+		return sfc.Result{}, false, err
 	}
 	return t.c.result(op)
 }
@@ -179,12 +179,12 @@ func newFixture(t *testing.T) *fixture {
 	}
 	t.Cleanup(func() { st.Close() })
 	tc := &testClient{
-		submit: func(mydc.SignedOp) (mydc.Result, error) {
-			return mydc.Result{Code: mydc.ResultApplied, Index: 5, Revision: 6}, nil
+		submit: func(sfc.SignedOp) (sfc.Result, error) {
+			return sfc.Result{Code: sfc.ResultApplied, Index: 5, Revision: 6}, nil
 		},
-		result: func(mydc.SignedOp) (mydc.Result, bool, error) { return mydc.Result{}, false, nil },
-		source: func() (mydc.AppSource, error) {
-			return mydc.AppSource{Tenant: "shop", App: "web", Version: 4, Document: []byte("services: {}\n"), Digest: [32]byte{1}}, nil
+		result: func(sfc.SignedOp) (sfc.Result, bool, error) { return sfc.Result{}, false, nil },
+		source: func() (sfc.AppSource, error) {
+			return sfc.AppSource{Tenant: "shop", App: "web", Version: 4, Document: []byte("services: {}\n"), Digest: [32]byte{1}}, nil
 		},
 	}
 	static := fstest.MapFS{
@@ -207,7 +207,7 @@ func (f *fixture) do(method, path string, body any) (int, map[string]any) {
 	}
 	req, _ := http.NewRequest(method, f.http.URL+path, rd)
 	if method != http.MethodGet {
-		req.Header.Set("X-MyDC-Web", "1")
+		req.Header.Set("X-SFC-Web", "1")
 	}
 	resp, err := f.hc.Do(req)
 	if err != nil {
@@ -281,7 +281,7 @@ func TestCredentialLoginAndSession(t *testing.T) {
 		t.Fatalf("after logout: %d", code)
 	}
 	if !f.client.conns[1].closed {
-		t.Fatal("logout must close the MYDCP connection")
+		t.Fatal("logout must close the SFCP connection")
 	}
 }
 
@@ -303,7 +303,7 @@ func TestKeyLogin(t *testing.T) {
 		t.Fatalf("key challenge: %d %v", code, out)
 	}
 	proof, err := base64.StdEncoding.DecodeString(out["proof"].(string))
-	if err != nil || !strings.HasPrefix(string(proof), "mydc-user-key-proof-1\x00") {
+	if err != nil || !strings.HasPrefix(string(proof), "sfc-user-key-proof-1\x00") {
 		t.Fatalf("proof bytes: %q %v", proof, err)
 	}
 	ticket := out["ticket"].(map[string]any)
@@ -317,7 +317,7 @@ func TestKeyLogin(t *testing.T) {
 		t.Fatalf("key login: %d %v", code, out)
 	}
 	approval, err := base64.StdEncoding.DecodeString(out["approval"].(string))
-	if err != nil || !strings.HasPrefix(string(approval), "mydc-user-session-approval-1\x00") || len(out["sessionDigest"].(string)) != 64 {
+	if err != nil || !strings.HasPrefix(string(approval), "sfc-user-session-approval-1\x00") || len(out["sessionDigest"].(string)) != 64 {
 		t.Fatalf("approval bytes: %q %v", approval, err)
 	}
 	// no web session before the approval
@@ -343,7 +343,7 @@ func TestCSRFAndOrigin(t *testing.T) {
 		t.Fatalf("missing header: %d", resp.StatusCode)
 	}
 	req, _ = http.NewRequest("POST", f.http.URL+"/api/v1/auth/logout", nil)
-	req.Header.Set("X-MyDC-Web", "1")
+	req.Header.Set("X-SFC-Web", "1")
 	req.Header.Set("Origin", "https://evil.example")
 	resp, _ = f.hc.Do(req)
 	if resp.StatusCode != 403 {
@@ -380,7 +380,7 @@ const opB = "7f1c2d3e-4b5a-4c6d-9e7f-0a1b2c3d4e5f"
 func TestSubmitAppliedAndIdempotent(t *testing.T) {
 	f := newFixture(t)
 	f.login()
-	body := map[string]any{"opId": opA, "action": "create-tenant", "principal": "u-alice", "expected": 1, "payload": map[string]any{"Name": "x"}, "rootRevision": 3}
+	body := map[string]any{"opId": opA, "action": "create-tenant", "principal": "u-alice", "expected": 1, "payload": map[string]any{"ID": "x"}, "rootRevision": 3}
 	code, out := f.do("POST", "/api/v1/ops", body)
 	op := out["op"].(map[string]any)
 	if code != 200 || op["state"] != "applied" || op["requestId"] != "req-1" || op["index"].(float64) != 5 {
@@ -403,8 +403,8 @@ func TestSubmitAppliedAndIdempotent(t *testing.T) {
 func TestSubmitUnknownIsSettledByResult(t *testing.T) {
 	f := newFixture(t)
 	f.login()
-	f.client.submit = func(mydc.SignedOp) (mydc.Result, error) { return mydc.Result{}, &mydc.Error{Code: mydc.CodeUnknown} }
-	code, out := f.do("POST", "/api/v1/ops", map[string]any{"opId": opA, "action": "set-trust", "rootRevision": 1})
+	f.client.submit = func(sfc.SignedOp) (sfc.Result, error) { return sfc.Result{}, &sfc.Error{Code: sfc.CodeUnknown} }
+	code, out := f.do("POST", "/api/v1/ops", map[string]any{"opId": opA, "action": "set-trust", "rootRevision": 1, "payload": map[string]any{"Tenant": "shop", "Remove": []any{map[string]any{"Registry": "docker.io", "Repository": "**"}}}})
 	if code != 202 || out["op"].(map[string]any)["state"] != "unknown" {
 		t.Fatalf("unknown submit: %d %v", code, out)
 	}
@@ -418,9 +418,9 @@ func TestSubmitUnknownIsSettledByResult(t *testing.T) {
 		t.Fatalf("result not found: %d %v", code, out)
 	}
 	var got string
-	f.client.result = func(op mydc.SignedOp) (mydc.Result, bool, error) {
+	f.client.result = func(op sfc.SignedOp) (sfc.Result, bool, error) {
 		got = string(op)
-		return mydc.Result{Code: mydc.ResultConditionFailed, Index: 8}, true, nil
+		return sfc.Result{Code: sfc.ResultConditionFailed, Index: 8}, true, nil
 	}
 	code, out = f.do("POST", "/api/v1/ops/"+opA+"/result", nil)
 	if code != 200 || out["op"].(map[string]any)["state"] != "failed" || got != string(stored.Signed) {
@@ -443,8 +443,8 @@ func TestSubmitUnknownIsSettledByResult(t *testing.T) {
 func TestSubmitRejected(t *testing.T) {
 	f := newFixture(t)
 	f.login()
-	f.client.submit = func(mydc.SignedOp) (mydc.Result, error) { return mydc.Result{}, &mydc.Error{Code: mydc.CodeDenied} }
-	code, out := f.do("POST", "/api/v1/ops", map[string]any{"opId": opA, "action": "set-trust"})
+	f.client.submit = func(sfc.SignedOp) (sfc.Result, error) { return sfc.Result{}, &sfc.Error{Code: sfc.CodeDenied} }
+	code, out := f.do("POST", "/api/v1/ops", map[string]any{"opId": opA, "action": "set-trust", "payload": map[string]any{"Tenant": "shop", "Remove": []any{map[string]any{"Registry": "docker.io", "Repository": "**"}}}})
 	op := out["op"].(map[string]any)
 	if code != 200 || op["state"] != "rejected" || op["errorCode"] != "denied" {
 		t.Fatalf("rejected: %d %v", code, out)
@@ -466,14 +466,14 @@ func TestClosedConnectionEndsSession(t *testing.T) {
 func TestDownArchivesFirst(t *testing.T) {
 	f := newFixture(t)
 	f.login()
-	f.client.source = func() (mydc.AppSource, error) { return mydc.AppSource{}, &mydc.Error{Code: mydc.CodeUnavailable} }
+	f.client.source = func() (sfc.AppSource, error) { return sfc.AppSource{}, &sfc.Error{Code: sfc.CodeUnavailable} }
 	pl := map[string]any{"Tenant": "shop", "App": "web", "Operation": "op-1"}
 	code, _ := f.do("POST", "/api/v1/t/shop/apps/web/down", map[string]any{"opId": opA, "expected": 4, "rootRevision": 2, "payload": pl})
 	if code != 503 || len(f.client.sent) != 0 {
 		t.Fatalf("down without source must not be sent: %d sent=%d", code, len(f.client.sent))
 	}
-	f.client.source = func() (mydc.AppSource, error) {
-		return mydc.AppSource{Tenant: "shop", App: "web", Version: 4, Document: []byte("services: {}\n")}, nil
+	f.client.source = func() (sfc.AppSource, error) {
+		return sfc.AppSource{Tenant: "shop", App: "web", Version: 4, Document: []byte("services: {}\n")}, nil
 	}
 	code, out := f.do("POST", "/api/v1/t/shop/apps/web/down", map[string]any{"opId": opB, "expected": 4, "rootRevision": 2, "volumes": []string{"db"}, "payload": pl})
 	if code != 200 || out["op"].(map[string]any)["action"] != "down-app" {
@@ -583,9 +583,9 @@ func TestDownNotAppliedDropsArchive(t *testing.T) {
 	f := newFixture(t)
 	f.login()
 	pl := map[string]any{"Tenant": "shop", "App": "web", "Operation": "x"}
-	for i, res := range []func(mydc.SignedOp) (mydc.Result, error){
-		func(mydc.SignedOp) (mydc.Result, error) { return mydc.Result{}, &mydc.Error{Code: mydc.CodeDenied} },
-		func(mydc.SignedOp) (mydc.Result, error) { return mydc.Result{Code: mydc.ResultConditionFailed}, nil },
+	for i, res := range []func(sfc.SignedOp) (sfc.Result, error){
+		func(sfc.SignedOp) (sfc.Result, error) { return sfc.Result{}, &sfc.Error{Code: sfc.CodeDenied} },
+		func(sfc.SignedOp) (sfc.Result, error) { return sfc.Result{Code: sfc.ResultConditionFailed}, nil },
 	} {
 		f.client.submit = res
 		id := []string{opA, opB}[i]
@@ -598,20 +598,42 @@ func TestDownNotAppliedDropsArchive(t *testing.T) {
 		}
 	}
 	// unknown keeps the row until the result says it did not apply
-	f.client.submit = func(mydc.SignedOp) (mydc.Result, error) { return mydc.Result{}, &mydc.Error{Code: mydc.CodeUnknown} }
+	f.client.submit = func(sfc.SignedOp) (sfc.Result, error) { return sfc.Result{}, &sfc.Error{Code: sfc.CodeUnknown} }
 	if code, _ := f.do("POST", "/api/v1/t/shop/apps/web/down", map[string]any{"opId": opC, "expected": 4, "payload": pl}); code != 202 {
 		t.Fatalf("unknown down: %d", code)
 	}
 	if rows, _ := f.store.ListArchived("shop"); len(rows) != 1 {
 		t.Fatal("unknown down must keep its archive row")
 	}
-	f.client.result = func(mydc.SignedOp) (mydc.Result, bool, error) {
-		return mydc.Result{Code: mydc.ResultConditionFailed}, true, nil
+	f.client.result = func(sfc.SignedOp) (sfc.Result, bool, error) {
+		return sfc.Result{Code: sfc.ResultConditionFailed}, true, nil
 	}
 	if code, out := f.do("POST", "/api/v1/ops/"+opC+"/result", nil); code != 200 || out["op"].(map[string]any)["state"] != "failed" {
 		t.Fatalf("settle: %d %v", code, out)
 	}
 	if rows, _ := f.store.ListArchived("shop"); len(rows) != 0 {
 		t.Fatal("archive row of a down that failed on settle must be removed")
+	}
+}
+
+// ops sent together as one change set share a batch the list filters by
+func TestSubmitBatch(t *testing.T) {
+	f := newFixture(t)
+	f.login()
+	const batch = "0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d"
+	trust := map[string]any{"Tenant": "shop", "Remove": []any{map[string]any{"Registry": "docker.io", "Repository": "**"}}}
+	for _, id := range []string{opA, opB} {
+		if code, out := f.do("POST", "/api/v1/ops", map[string]any{"opId": id, "action": "set-trust", "payload": trust, "batch": batch}); code != 200 || out["op"].(map[string]any)["batch"] != batch {
+			t.Fatalf("submit %s: %d %v", id, code, out)
+		}
+	}
+	if code, _ := f.do("POST", "/api/v1/ops", map[string]any{"opId": opC, "action": "set-trust", "payload": trust}); code != 200 {
+		t.Fatalf("unbatched: %d", code)
+	}
+	if code, out := f.do("GET", "/api/v1/ops?batch="+batch, nil); code != 200 || len(out["items"].([]any)) != 2 {
+		t.Fatalf("batch list: %d %v", code, out)
+	}
+	if code, out := f.do("POST", "/api/v1/ops", map[string]any{"opId": opA, "action": "set-trust", "payload": trust, "batch": "B"}); code != 400 {
+		t.Fatalf("bad batch: %d %v", code, out)
 	}
 }

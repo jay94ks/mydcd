@@ -534,6 +534,24 @@ func (i *instance) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if enroll, ok := i.manager.nodeEnroll(r); ok {
+		if _, err := table.Host(h); err == nil {
+			event.Route = "node-enroll"
+			target := RequestTarget{Tenant: s.Tenant, App: s.App, Key: i.key, Route: Route{Host: h}, Source: event.Source, Node: i.manager.node, Gateway: gateway}
+			if i.blocked(w, r, target, &event) {
+				return
+			}
+			if headerBytes(r) > s.MaxHeaderBytes {
+				i.mu.Unlock()
+				http.Error(w, "request headers too large", http.StatusRequestHeaderFieldsTooLarge)
+				return
+			}
+			i.mu.Unlock()
+			r.Body = http.MaxBytesReader(w, r.Body, 4<<10)
+			enroll(w, r, event.Source)
+			return
+		}
+	}
 	route, err := table.Match(h, r.URL.Path)
 	if err != nil {
 		i.mu.Unlock()

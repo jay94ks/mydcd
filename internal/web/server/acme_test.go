@@ -14,14 +14,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/certstore"
-	"github.com/jay94ks/mydcd/internal/web/acme"
-	"github.com/jay94ks/mydcd/internal/web/dns"
-	"github.com/jay94ks/mydcd/internal/web/mydc"
-	"github.com/jay94ks/mydcd/internal/web/seal"
+	"github.com/jay94ks/seafield/internal/certstore"
+	"github.com/jay94ks/seafield/internal/web/acme"
+	"github.com/jay94ks/seafield/internal/web/dns"
+	"github.com/jay94ks/seafield/internal/web/seal"
+	"github.com/jay94ks/seafield/internal/web/sfc"
 )
 
-func acmeFixture(t *testing.T) (*fixture, *dns.FakeWorld, *acme.FakeCA, *mydc.Fake) {
+func acmeFixture(t *testing.T) (*fixture, *dns.FakeWorld, *acme.FakeCA, *sfc.Fake) {
 	f, fake := newFakeFixture(t)
 	world := dns.NewFakeWorld()
 	dreg := &dns.Registry{}
@@ -68,7 +68,7 @@ func (z *zoneResolver) Query(ctx context.Context, server, fqdn, rtype string, re
 	return dns.Answer{Values: vals}, err
 }
 
-func journalCount(fake *mydc.Fake, action string) int {
+func journalCount(fake *sfc.Fake, action string) int {
 	n := 0
 	for _, e := range fake.Journal() {
 		if e.Action == action {
@@ -121,7 +121,7 @@ func TestACMEIssueThroughDNS01(t *testing.T) {
 	if o["state"] != "done" || o["storeOp"] != "acme-"+opA || c["fingerprint"] == nil || c["keyType"] != "ec256" {
 		t.Fatalf("issued cert: %v", out)
 	}
-	if ca.Issued() != 1 || journalCount(fake, mydc.ActionPutCertificate) != 1 {
+	if ca.Issued() != 1 || journalCount(fake, sfc.ActionPutCertificate) != 1 {
 		t.Fatalf("issued %d, journal %v", ca.Issued(), fake.Journal())
 	}
 	// challenge TXT records are gone
@@ -146,7 +146,7 @@ func TestACMEIssueThroughDNS01(t *testing.T) {
 	// the cluster store serves it to ingress
 	var serving string
 	issued := c["fingerprint"]
-	_ = withAdminConn(t, fake, func(c mydc.Conn) error {
+	_ = withAdminConn(t, fake, func(c sfc.Conn) error {
 		all, err := certAll(context.Background(), c)
 		for _, e := range all {
 			if e.Metadata.ID.String() == issued && slices.ContainsFunc(e.Links, func(l certstore.Link) bool { return l.Host == "shop.example.com" }) {
@@ -177,8 +177,14 @@ func TestACMEIssueThroughDNS01(t *testing.T) {
 	if code, _ := f.do("POST", "/api/v1/acme/certs/shop/revoke", map[string]any{"confirm": "x"}); code != 400 {
 		t.Fatal("revoke without confirm")
 	}
-	if code, out := f.do("POST", "/api/v1/acme/certs/shop/revoke", map[string]any{"confirm": "shop"}); code != 200 || out["certificate"].(map[string]any)["autoRenew"] != false {
+	if code, out := f.do("POST", "/api/v1/acme/certs/shop/revoke", map[string]any{"confirm": "shop", "reason": "stolen"}); code != 422 {
+		t.Fatalf("unknown reason: %d %v", code, out)
+	}
+	if code, out := f.do("POST", "/api/v1/acme/certs/shop/revoke", map[string]any{"confirm": "shop", "reason": "superseded"}); code != 200 || out["certificate"].(map[string]any)["autoRenew"] != false {
 		t.Fatalf("revoke: %d %v", code, out)
+	}
+	if rs := ca.RevokeReasons(); len(rs) != 1 || rs[0] != "superseded" {
+		t.Fatalf("reason sent: %v", rs)
 	}
 	if code, _ := f.do("DELETE", "/api/v1/acme/accounts/"+acct, nil); code != 409 {
 		t.Fatal("account in use deleted")
@@ -201,7 +207,7 @@ func TestACMEStoreLostReply(t *testing.T) {
 		t.Fatalf("after one lost reply: %v", out)
 	}
 	first := out["certificate"].(map[string]any)["fingerprint"]
-	if n := journalCount(fake, mydc.ActionPutCertificate); n != 1 {
+	if n := journalCount(fake, sfc.ActionPutCertificate); n != 1 {
 		t.Fatalf("committed %d times", n)
 	}
 	_, n := f.do("GET", "/api/v1/notifications", nil)
@@ -229,7 +235,7 @@ func TestACMEStoreLostReply(t *testing.T) {
 	if code, out := f.do("POST", "/api/v1/ops/acme-"+opB+"/result", nil); code != 202 || out["op"].(map[string]any)["resultFound"] != false {
 		t.Fatalf("result: %d %v", code, out)
 	}
-	if n := journalCount(fake, mydc.ActionPutCertificate); n != 1 {
+	if n := journalCount(fake, sfc.ActionPutCertificate); n != 1 {
 		t.Fatalf("committed %d times", n)
 	}
 	_, n = f.do("GET", "/api/v1/notifications", nil)
@@ -241,7 +247,7 @@ func TestACMEStoreLostReply(t *testing.T) {
 	if code, out := f.do("POST", "/api/v1/ops/acme-"+opB+"/resume", nil); code != 200 || out["op"].(map[string]any)["state"] != "applied" {
 		t.Fatalf("resume: %d %v", code, out)
 	}
-	if n := journalCount(fake, mydc.ActionPutCertificate); n != 2 {
+	if n := journalCount(fake, sfc.ActionPutCertificate); n != 2 {
 		t.Fatalf("committed %d times", n)
 	}
 }
@@ -265,7 +271,7 @@ func TestACMECAABlocksAndRenewal(t *testing.T) {
 	}
 
 	// allow the fake CA; a manual issue falls back to the second key type
-	world.SetRecord("example.com", dns.RRSet{Name: "@", Type: "CAA", TTL: 3600, Records: []dns.Record{{Content: `0 issue "mydc-fake-ca.invalid"`}}})
+	world.SetRecord("example.com", dns.RRSet{Name: "@", Type: "CAA", TTL: 3600, Records: []dns.Record{{Content: `0 issue "sfc-fake-ca.invalid"`}}})
 	f.do("POST", "/api/v1/acme/certs/shop/issue", map[string]any{"opId": opB})
 	out = waitCert(t, f, "shop")
 	if o := lastOrder(out); o["state"] != "done" || o["keyType"] != "ec384" || out["certificate"].(map[string]any)["failures"] != float64(0) {
@@ -296,8 +302,8 @@ func TestACMECAABlocksAndRenewal(t *testing.T) {
 }
 
 // withAdminConn runs fn on a fresh admin login to the fake (what another
-// mydc client would see).
-func withAdminConn(t *testing.T, fake *mydc.Fake, fn func(mydc.Conn) error) error {
+// sfcli client would see).
+func withAdminConn(t *testing.T, fake *sfc.Fake, fn func(sfc.Conn) error) error {
 	t.Helper()
 	ctx := context.Background()
 	c, err := fake.Dial(ctx)
@@ -305,7 +311,7 @@ func withAdminConn(t *testing.T, fake *mydc.Fake, fn func(mydc.Conn) error) erro
 		t.Fatal(err)
 	}
 	defer c.Close()
-	tk, err := c.CredentialChallenge(ctx, "admin", mydc.MethodPassword, "")
+	tk, err := c.CredentialChallenge(ctx, "admin", sfc.MethodPassword, "")
 	if err != nil {
 		t.Fatal(err)
 	}

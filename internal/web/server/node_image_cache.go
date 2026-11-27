@@ -6,10 +6,10 @@ import (
 	"context"
 	"net/http"
 
-	"github.com/jay94ks/mydcd/internal/web/mydc"
+	"github.com/jay94ks/seafield/internal/web/sfc"
 )
 
-// Server image cache cleanup (node-image-cache.md, system admin). mydcd
+// Server image cache cleanup (node-image-cache.md, system admin). sfcd
 // lists a server's Docker images with how many containers and shared
 // references use each; only unused ones (both 0) can be removed, at most 8
 // a prune. The web reads every list page and offers the first 8 unused
@@ -38,12 +38,12 @@ type imagePruneView struct {
 	Total     int `json:"total"`
 }
 
-func imagePruneSelection(ctx context.Context, c mydc.Conn, node string) (imagePruneView, []string, error) {
+func imagePruneSelection(ctx context.Context, c sfc.Conn, node string) (imagePruneView, []string, error) {
 	v := imagePruneView{Node: node, Images: []imagePruneImage{}}
 	var ids []string
 	after := ""
 	for range imageCacheMaxPages {
-		p, err := c.ImageCachePlan(ctx, mydc.ImageCacheQuery{Node: node, After: after})
+		p, err := c.ImageCachePlan(ctx, sfc.ImageCacheQuery{Node: node, After: after})
 		if err != nil {
 			return v, nil, err
 		}
@@ -52,7 +52,7 @@ func imagePruneSelection(ctx context.Context, c mydc.Conn, node string) (imagePr
 			switch {
 			case !img.Unused():
 				v.InUse++
-			case len(ids) == mydc.ImageCacheMaxImages:
+			case len(ids) == sfc.ImageCacheMaxImages:
 				v.Remaining++
 			default:
 				ids = append(ids, img.ID)
@@ -80,7 +80,7 @@ func imagePruneSelection(ctx context.Context, c mydc.Conn, node string) (imagePr
 // digest, bytes}], bytes, plan, remaining, inUse, total} (image-cache-plan
 // pages). images are the next prune's selection, at most 8.
 func (s *Server) handleNodeImagePrunePlan(w http.ResponseWriter, r *http.Request, ws *webSession) {
-	read(s, w, r, ws, func(ctx context.Context, c mydc.Conn) (imagePruneView, error) {
+	read(s, w, r, ws, func(ctx context.Context, c sfc.Conn) (imagePruneView, error) {
 		v, _, err := imagePruneSelection(ctx, c, r.PathValue("node"))
 		return v, err
 	})
@@ -91,7 +91,7 @@ func imagePruneOperation(opID string) string { return "op-" + opID }
 
 // POST /nodes/{node}/image-prune {opId, plan} → prune-node-images
 // (ImageCacheChange{Operation: "op-"+opId, Plan}, Expected 0). The web
-// reads the selection again and asks mydcd for a plan of exactly those
+// reads the selection again and asks sfcd for a plan of exactly those
 // images; a selection that changed or is no longer all unused is 409
 // plan-changed. Progress: GET /image-prunes/{operation}.
 func (s *Server) handlePruneNodeImages(w http.ResponseWriter, r *http.Request, ws *webSession) {
@@ -103,7 +103,7 @@ func (s *Server) handlePruneNodeImages(w http.ResponseWriter, r *http.Request, w
 		return
 	}
 	node := r.PathValue("node")
-	s.sharedCreate(w, r, ws, req.OpID, req, func(ctx context.Context, c mydc.Conn, _ mydc.Session) (string, any, uint64, string, error) {
+	s.sharedCreate(w, r, ws, req.OpID, req, func(ctx context.Context, c sfc.Conn, _ sfc.Session) (string, any, uint64, string, error) {
 		if len(req.Plan) != 64 {
 			return "", nil, 0, "", invalid("plan: the plan as shown (64 hex)")
 		}
@@ -115,8 +115,8 @@ func (s *Server) handlePruneNodeImages(w http.ResponseWriter, r *http.Request, w
 		if cur.Plan != req.Plan || len(ids) == 0 {
 			return "", nil, 0, "", changed
 		}
-		p, err := c.ImageCachePlan(ctx, mydc.ImageCacheQuery{Node: node, Images: ids})
-		if isMydcCode(err, mydc.CodeConflict) {
+		p, err := c.ImageCachePlan(ctx, sfc.ImageCacheQuery{Node: node, Images: ids})
+		if isSfcCode(err, sfc.CodeConflict) {
 			return "", nil, 0, "", changed
 		}
 		if err != nil {
@@ -125,7 +125,7 @@ func (s *Server) handlePruneNodeImages(w http.ResponseWriter, r *http.Request, w
 		if !p.DeleteReady() {
 			return "", nil, 0, "", changed
 		}
-		return mydc.ActionPruneNodeImages, mydc.ImageCacheChange{Operation: imagePruneOperation(req.OpID), Plan: p}, 0, "node/" + node, nil
+		return sfc.ActionPruneNodeImages, sfc.ImageCacheChange{Operation: imagePruneOperation(req.OpID), Plan: p}, 0, "node/" + node, nil
 	})
 }
 
@@ -150,9 +150,9 @@ type imagePruneStatusView struct {
 
 // GET /image-prunes/{operation} → image-cache-status. Unknown is 404.
 func (s *Server) handleImagePruneStatus(w http.ResponseWriter, r *http.Request, ws *webSession) {
-	read(s, w, r, ws, func(ctx context.Context, c mydc.Conn) (imagePruneStatusView, error) {
+	read(s, w, r, ws, func(ctx context.Context, c sfc.Conn) (imagePruneStatusView, error) {
 		st, err := c.ImageCacheStatus(ctx, r.PathValue("operation"))
-		if isMydcCode(err, mydc.CodeMissing) || isMydcCode(err, mydc.CodeInvalid) {
+		if isSfcCode(err, sfc.CodeMissing) || isSfcCode(err, sfc.CodeInvalid) {
 			return imagePruneStatusView{}, &httpErr{http.StatusNotFound, "not-found", "no such image prune"}
 		}
 		if err != nil {

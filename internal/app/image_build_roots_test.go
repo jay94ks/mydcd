@@ -15,12 +15,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/engine"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/imagebuild"
-	"github.com/jay94ks/mydcd/internal/nodestorage"
-	"github.com/jay94ks/mydcd/internal/storage"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/engine"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/imagebuild"
+	"github.com/jay94ks/seafield/internal/nodestorage"
+	"github.com/jay94ks/seafield/internal/storage"
 	"github.com/moby/moby/client"
 )
 
@@ -33,7 +33,7 @@ func TestImageBuildRootAdapterRecoversBorrowAndReturnWithoutNewLease(t *testing.
 			private := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{7}, 32))
 			public := [32]byte(private.Public().(ed25519.PublicKey))
 			cluster := [32]byte{2}
-			root := nodestorage.Root{Definition: nodestorage.Definition{Node: "node-a", Key: public, ID: "data", Path: t.TempDir(), Tenants: []string{"tenant-a", "tenant-b"}, MaxVolumes: 3}, Generation: 1, Revision: 1}
+			root := nodestorage.Root{Definition: nodestorage.Definition{Node: "node-a", Key: public, ID: "data", Path: t.TempDir(), Tenants: []string{"tenant-a", "tenant-b"}}, Generation: 1, Revision: 1}
 			handle, err := nodestorage.OpenDirectory(root.Definition.Path)
 			if errors.Is(err, nodestorage.ErrUnsupported) {
 				t.Skip("host lacks required native ext4 identity")
@@ -71,7 +71,7 @@ func TestImageBuildRootAdapterRecoversBorrowAndReturnWithoutNewLease(t *testing.
 				t.Fatal(err)
 			}
 			defer db.Close()
-			api, err := client.New(client.WithHost("unix:///nonexistent-mydc-build.sock"), client.WithAPIVersion("1.56"), client.WithHTTPClient(&http.Client{Transport: checkerBuilderNoHTTP{t}}))
+			api, err := client.New(client.WithHost("unix:///nonexistent-sfc-build.sock"), client.WithAPIVersion("1.56"), client.WithHTTPClient(&http.Client{Transport: checkerBuilderNoHTTP{t}}))
 			if err != nil {
 				t.Fatal(err)
 			}

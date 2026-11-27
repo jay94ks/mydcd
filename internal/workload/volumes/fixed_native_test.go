@@ -9,7 +9,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/nodestorage"
+	"github.com/jay94ks/seafield/internal/nodestorage"
 )
 
 // Only the fact/codec contract is exercised here. Actual ext4/native mount
@@ -39,7 +39,7 @@ func TestFixedNativeFactBindsWholeDirectoryAndSeparateManagedDriver(t *testing.T
 	for name, mutate := range map[string]func(*NativeReady){
 		"leaf outside root":        func(r *NativeReady) { r.Fixed.Path = "/mnt/other/data" },
 		"mount replacement":        func(r *NativeReady) { r.Fixed.RootDirectory.MountID++ },
-		"fake Docker identity":     func(r *NativeReady) { r.Owner.Native = "mydc-unrelated" },
+		"fake Docker identity":     func(r *NativeReady) { r.Owner.Native = "sfc-unrelated" },
 		"materialization retarget": func(r *NativeReady) { r.Spec.Materialization = "new" },
 		"permission rewrite":       func(r *NativeReady) { r.Spec.UID = 10001 },
 		"other native generation":  func(r *NativeReady) { r.Generation++ },

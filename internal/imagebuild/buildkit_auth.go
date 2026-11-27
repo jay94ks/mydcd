@@ -16,7 +16,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/registryclient"
+	"github.com/jay94ks/seafield/internal/registryclient"
 	"github.com/moby/buildkit/session/auth"
 	"golang.org/x/crypto/nacl/sign"
 	"google.golang.org/grpc"

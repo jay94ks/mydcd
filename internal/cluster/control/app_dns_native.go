@@ -8,14 +8,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/network/services"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/network/services"
 )
 
 func AppDNSNativeDigest(row AppDNSOwner) [32]byte {
 	raw, _ := json.Marshal(row)
-	return sha256.Sum256(append([]byte("mydc-app-dns-native-1\x00"), raw...))
+	return sha256.Sum256(append([]byte("sfc-app-dns-native-1\x00"), raw...))
 }
 
 // AppDNSMaterial joins a single committed snapshot. Reading it grants no new

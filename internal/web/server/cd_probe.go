@@ -7,8 +7,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/web/mydc"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/web/sfc"
 )
 
 // POST /t/{t}/apps/{app}/cd/probe {repository, branch, path, credential?}
@@ -28,7 +28,7 @@ func (s *Server) handleCDProbe(w http.ResponseWriter, r *http.Request, ws *webSe
 	ctx, cancel := s.callCtx(r)
 	defer cancel()
 	var res deployment.GitProbeResult
-	err := ws.do(ctx, func(ctx context.Context, c mydc.Conn) error {
+	err := ws.do(ctx, func(ctx context.Context, c sfc.Conn) error {
 		var err error
 		res, err = c.ProbeCD(ctx, r.PathValue("t"), deployment.GitProbeRequest{App: r.PathValue("app"),
 			Repository: req.Repository, Branch: strings.TrimPrefix(req.Branch, "refs/heads/"), Path: req.Path, Credential: req.Credential})

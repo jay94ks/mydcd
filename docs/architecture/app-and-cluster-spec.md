@@ -18,7 +18,7 @@ node 저장 root와 `node-fixed` Volume의 계약은 노드 저장/고정 Volume
 
 ## app.yaml: tenant의 이름 있는 앱 묶음
 
-Compose 스타일의 `name/services/networks/volumes/secrets` 구조를 사용한다. 대상 tenant와 묶음 이름을 정하고, 각 컨테이너가 **어떤 승인된 노드에서 어떻게 실행되며 어떤 이름의 가상 망에 배치되는지**, 설정·Volume·Secret Vault 입력을 어떻게 소비하는지 정의한다. 앱별 Ingress와 선택 CD 정책도 이 묶음의 운영 범위다. 명칭은 `app.yaml` 명세이며 CLI의 기존 `mydc compose` 명령군은 이 명세를 소비한다.
+Compose 스타일의 `name/services/networks/volumes/secrets` 구조를 사용한다. 대상 tenant와 묶음 이름을 정하고, 각 컨테이너가 **어떤 승인된 노드에서 어떻게 실행되며 어떤 이름의 가상 망에 배치되는지**, 설정·Volume·Secret Vault 입력을 어떻게 소비하는지 정의한다. 앱별 Ingress와 선택 CD 정책도 이 묶음의 운영 범위다. 명칭은 `app.yaml` 명세이며 CLI의 기존 `sfcli compose` 명령군은 이 명세를 소비한다.
 
 | 앱에 정의할 내용 | 참조·권한 경계 |
 |---|---|
@@ -30,11 +30,11 @@ Compose 스타일의 `name/services/networks/volumes/secrets` 구조를 사용�
 | 앱 Ingress·서비스 DNS 등록 요청·앱 CD 정책 | 허가된 network/zone/노드 예산 안에서 앱 endpoint를 게시. tenant DNS/IPAM 정책·registry/trust·route를 관리하지 않음 |
 | 앱/서비스 lifecycle·inline Go script·named script 참조·optimizer/compile | lifecycle 계약. builtin은 직접 구현하며 script는 Yaegi/compiled CLI로 실행. tenant named registry·compiler spawn·의존/캐시 정책을 앱으로 변경하지 않음. 선언 parser는 제품 Program 코어로 shape/scope·기존 DAG를 검사한다. 고정 계획/source selection·Task projection과 실제 staging/runner 준비를 구분하며 담당 노드의 live capability가 없으면 배포를 명시 거부 |
 
-network 이름은 단순 표시 문자열이 아니라 현재 tenant의 관리 객체 참조다. MYDCP 기반 TUN 망 자체도 이름 있는 클러스터 관리 자원으로 먼저 정의하며, 참여 노드·CIDR/pool·TUN/Bridge·경로와 운영 상한은 관리 영역이 소유한다. 앱은 그 이름으로 연결하고 사용 참조만 소유한다. 계획 시 서비스별 node에 해당하는 pool/owner·source revision/generation을 고정하고 수락/사용 시 재검사한다. 같은 논리 망이 여러 노드의 CIDR을 포함해도 이름을 해석해 정확한 node-local 권위를 선택한다. 없는 이름을 암묵 생성하거나 다른 tenant/동명 객체로 대체하지 않는다.
+network 이름은 단순 표시 문자열이 아니라 현재 tenant의 관리 객체 참조다. SFCP 기반 TUN 망 자체도 이름 있는 클러스터 관리 자원으로 먼저 정의하며, 참여 노드·CIDR/pool·TUN/Bridge·경로와 운영 상한은 관리 영역이 소유한다. 앱은 그 이름으로 연결하고 사용 참조만 소유한다. 계획 시 서비스별 node에 해당하는 pool/owner·source revision/generation을 고정하고 수락/사용 시 재검사한다. 같은 논리 망이 여러 노드의 CIDR을 포함해도 이름을 해석해 정확한 node-local 권위를 선택한다. 없는 이름을 암묵 생성하거나 다른 tenant/동명 객체로 대체하지 않는다.
 
 앱 제거/prune는 그 앱이 소유한 inventory만 정산한다. 참조한 network/Group/외부 Volume의 삭제 권한으로 확대되지 않는다. Secret source 목록의 순서, 현재 승인, Volume writer/fence와 원 native 참조는 기존 제품 코어를 유지한다.
 
-새 입력은 `x-mydc.nodes/vault/routing/registries`와 network의 `driver/x-mydc`를 빈 값/null인 경우에도 거부한다. network는 기존 이름의 참조이며 `external: false`를 허용하지 않는다. `external`을 생략해도 참조로 정규화한다. CLI `config/plan`과 daemon의 새 계획·수락, CD의 새 파일/Git 후보는 같은 app 입력 계약을 사용한다. 새 `up --plan`도 앱 계약의 artifact만 수락한다.
+새 입력은 `x-sfc.nodes/vault/routing/registries`와 network의 `driver/x-sfc`를 빈 값/null인 경우에도 거부한다. network는 기존 이름의 참조이며 `external: false`를 허용하지 않는다. `external`을 생략해도 참조로 정규화한다. CLI `config/plan`과 daemon의 새 계획·수락, CD의 새 파일/Git 후보는 같은 app 입력 계약을 사용한다. 새 `up --plan`도 앱 계약의 artifact만 수락한다.
 
 schema1의 새 artifact에는 `InputKind: app`을 명시한다. 표시만으로 권한을 부여하지 않으며 현재 재컴파일로 선언과 그래프의 일치를 확인한다. 기존 표시 없는 artifact는 과거 수락 작업의 원 조회/재개·Raft 재생·checkpoint 복구에 보존한다. 과거 artifact를 새로운 앱 제출로 수락하거나 원 작업을 새 ID로 바꾸지 않는다.
 
@@ -69,18 +69,18 @@ services:
 services:
   web:
     # image, resources, networks 등은 일반 서비스 선언과 동일
-    x-mydc:
+    x-sfc:
       nodes: [node-a, node-b]
       per_node: 1
 ```
 
-기존 `x-mydc.node`는 단일 배치이며 `nodes`와 함께 쓸 수 없다. `nodes`의 노드 이름은 중복될 수 없고 `per_node` 기본값은1이다. 서비스와 앱 전체의 Task 수는 각각 최대128이며, 각 Task의 노드 허용·이미지 신뢰·자원 한도·Secret consumer를 별도로 검사한다. 모든 노드에 공유하는 명시 static IP와 복제본 2개 이상의 writable/node-fixed Volume은 거부한다. Volume 이관은 기존 명시 move/fence 절차를 따른다.
+기존 `x-sfc.node`는 단일 배치이며 `nodes`와 함께 쓸 수 없다. `nodes`의 노드 이름은 중복될 수 없고 `per_node` 기본값은1이다. 서비스와 앱 전체의 Task 수는 각각 최대128이며, 각 Task의 노드 허용·이미지 신뢰·자원 한도·Secret consumer를 별도로 검사한다. 모든 노드에 공유하는 명시 static IP와 복제본 2개 이상의 writable/node-fixed Volume은 거부한다. Volume 이관은 기존 명시 move/fence 절차를 따른다.
 
 논리 서비스 이름은 그대로 유지한다. 명시 `nodes` 배치의 Task ID는 `workload/task/<tenant>/<app>/<service>/<node>/r<ordinal>`이며 ordinal은1부터 시작한다. 기존 singleton Task ID는 유지한다. 내부 `Instance` metadata는 입력 필드가 아니며 사용자가 지정할 수 없다. Secret 사용의 `Use.Service`는 논리 서비스 이름이고, 별도 Task/consumer·`Needs.Instance`가 각 파일 투영과 세대를 구분한다.
 
 ### 서비스 재배치와 Volume
 
-Volume이 없는 서비스의 `x-mydc.node`를 바꾼 app.yaml은 기존 plan/upload/up 경로로 제출한다. 원 Task의 정확한 종료·Gone·참조 반환을 확인한 뒤 대상 노드에서 새 세대로 시작하며, 다른 노드의 무관한 Task는 유지한다. 응답 유실/Unknown을 원 종료로 간주하거나 원 native가 살아 있는 동안 같은 singleton을 새 노드에 만들지 않는다.
+Volume이 없는 서비스의 `x-sfc.node`를 바꾼 app.yaml은 기존 plan/upload/up 경로로 제출한다. 원 Task의 정확한 종료·Gone·참조 반환을 확인한 뒤 대상 노드에서 새 세대로 시작하며, 다른 노드의 무관한 Task는 유지한다. 응답 유실/Unknown을 원 종료로 간주하거나 원 native가 살아 있는 동안 같은 singleton을 새 노드에 만들지 않는다.
 
 서비스와 Volume의 배치 노드가 다르거나 기존 managed Volume의 owner를 일반 up으로 바꾸려 하면 `VOLUME_MOVE_REQUIRED`다. node-fixed Volume의 원 노드 변경은 `VOLUME_NOT_MOVABLE`이며, 서비스/Volume 선언 자체의 노드 불일치라면 앞선 배치 검사에서 `VOLUME_MOVE_REQUIRED`가 먼저 나올 수 있다. 복제본 2개 이상의 writer는 `REPLICA_SINGLE_WRITER_FORBIDDEN`, node-fixed 참조는 `REPLICA_FIXED_VOLUME_FORBIDDEN`으로 거부한다.
 
@@ -94,11 +94,11 @@ Task 범위 lifecycle 검사는 모든 replica에 적용한다. 기존 app 범�
 
 ## tenant 설정: 그룹 명령과 자원 파일
 
-tenant가 클러스터를 쓰는 데 필요한 설정(망·DNS, route, 구성원, 허용 서버, 한도 등)은 app.yaml에 넣지 않고 그룹 명령으로 바꾼다. 복잡한 자원 하나는 파일 하나(`network.yaml` 등), 단순한 자원은 옵션이다. 같은 파일을 다시 적용해도 결과가 같다. 명령과 파일 형식은 [mydc 명령](../cli/README.md)과 CLI 명령과 파일 형식을 따른다. 아직 그룹 명령으로 옮기지 않은 action은 `manage apply`의 typed 변경 하나로 보낸다. 옛 partial `cluster.yaml`과 `manage cluster`는 없다.
+tenant가 클러스터를 쓰는 데 필요한 설정(망·DNS, route, 구성원, 허용 서버, 한도 등)은 app.yaml에 넣지 않고 그룹 명령으로 바꾼다. 복잡한 자원 하나는 파일 하나(`network.yaml` 등), 단순한 자원은 옵션이다. 같은 파일을 다시 적용해도 결과가 같다. 명령과 파일 형식은 [sfc 명령](../cli/README.md)과 CLI 명령과 파일 형식을 따른다. 아직 그룹 명령으로 옮기지 않은 action은 `manage apply`의 typed 변경 하나로 보낸다. 옛 partial `cluster.yaml`과 `manage cluster`는 없다.
 
 - 파일에 없는 객체를 지우지 않는다. 삭제는 정확한 대상에 대한 명시 명령과 수명 정산을 요구한다.
 - 현재 인증 user/session·tenant·CAS·quorum을 같은 관리 코어가 검사한다. tenant 명령으로 system admin 권한·node 가입/투표 권한을 얻지 않는다.
-- 여러 단계가 필요한 변경(망 주소 변경, tenant 삭제)은 한 명령이 차례로 밟고, 끊기면 `mydc op resume`으로 이어 간다. 각 단계는 고정 ID로 한 번만 실행된다.
+- 여러 단계가 필요한 변경(망 주소 변경, tenant 삭제)은 한 명령이 차례로 밟고, 끊기면 `sfcli op resume`으로 이어 간다. 각 단계는 고정 ID로 한 번만 실행된다.
 - Secret 원문·비밀번호·개인키와 실제 데이터는 파일에 넣지 않는다.
 
 app.yaml과 tenant 설정은 include·자동 merge 관계가 아니다. tenant 설정을 먼저 확정한 뒤 앱이 그 이름을 참조한다.

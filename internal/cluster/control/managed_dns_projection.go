@@ -10,9 +10,9 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/network/services"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/network/services"
 )
 
 // This metadata binds the one management policy to an exact local owner and
@@ -47,7 +47,7 @@ type NetworkDNSProgress struct {
 func NetworkDNSProgressBytes(r NetworkDNSProgress) []byte {
 	r.Signature = nil
 	raw, _ := json.Marshal(r)
-	return append([]byte("mydc-network-dns-progress-1\x00"), raw...)
+	return append([]byte("sfc-network-dns-progress-1\x00"), raw...)
 }
 
 func (r NetworkDNSProgress) Command() (state.Command, error) {

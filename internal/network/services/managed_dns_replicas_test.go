@@ -14,11 +14,11 @@ func TestManagedDNSReplicaNamesShareLogicalOwnerButKeepExactTaskEndpoints(t *tes
 		{Tenant: "tenant", Network: "services", App: "shop", Service: "web", Task: "workload/task/tenant/shop/web/node-a/r1", Aliases: []string{"public"}, Addresses: []DNSAddressReference{{Endpoint: "workload/task/tenant/shop/web/node-a/r1/app/0", Generation: 7}}},
 		{Tenant: "tenant", Network: "services", App: "shop", Service: "web", Task: "workload/task/tenant/shop/web/node-b/r1", Aliases: []string{"public"}, Addresses: []DNSAddressReference{{Endpoint: "workload/task/tenant/shop/web/node-b/r1/app/0", Generation: 12}}},
 	}
-	names, err := d.registrationNames("apps.mydc.test.", registrations)
+	names, err := d.registrationNames("apps.sfc.test.", registrations)
 	if err != nil || len(names) != 4 {
 		t.Fatal("logical service replicas cannot share their default and explicit names", names, err)
 	}
-	for _, label := range []string{"web.shop.apps.mydc.test.", "public.apps.mydc.test."} {
+	for _, label := range []string{"web.shop.apps.sfc.test.", "public.apps.sfc.test."} {
 		var endpoints []string
 		for _, name := range names {
 			if name.Name == label {
@@ -30,7 +30,7 @@ func TestManagedDNSReplicaNamesShareLogicalOwnerButKeepExactTaskEndpoints(t *tes
 		}
 	}
 	slices.Reverse(registrations)
-	reversed, err := d.registrationNames("apps.mydc.test.", registrations)
+	reversed, err := d.registrationNames("apps.sfc.test.", registrations)
 	originalJSON, _ := json.Marshal(names)
 	reversedJSON, _ := json.Marshal(reversed)
 	if err != nil || string(originalJSON) != string(reversedJSON) {
@@ -53,7 +53,7 @@ func TestManagedDNSReplicaNamesShareLogicalOwnerButKeepExactTaskEndpoints(t *tes
 		var bad []DNSRegistration
 		_ = json.Unmarshal(raw, &bad)
 		mutate(&bad)
-		if _, err := d.registrationNames("apps.mydc.test.", bad); err == nil {
+		if _, err := d.registrationNames("apps.sfc.test.", bad); err == nil {
 			t.Fatal("foreign, duplicate, or mismatched replica registration accepted", bad)
 		}
 	}

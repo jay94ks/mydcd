@@ -83,6 +83,14 @@ func (h *DirectoryHandle) Close() error {
 // resolution of a mutable pathname.
 func (h *DirectoryHandle) FD() int { return int(h.file.Fd()) }
 
+// Release hands the held descriptor to the caller, who closes it; the
+// handle no longer owns it and Close becomes a no-op.
+func (h *DirectoryHandle) Release() *os.File {
+	f := h.file
+	h.file = nil
+	return f
+}
+
 func identifyDirectory(fd int, p string) (Directory, error) {
 	var fs unix.Statfs_t
 	if err := unix.Fstatfs(fd, &fs); err != nil {
@@ -134,12 +142,12 @@ func NativeContext() (boot, namespace [32]byte, err error) {
 	if err != nil || len(strings.TrimSpace(string(raw))) != 36 {
 		return boot, namespace, errors.Join(err, ErrStorage)
 	}
-	boot = sha256.Sum256(append([]byte("mydc-linux-boot-1/"), raw...))
+	boot = sha256.Sum256(append([]byte("sfc-linux-boot-1/"), raw...))
 	var st unix.Stat_t
 	if err = unix.Stat("/proc/self/ns/mnt", &st); err != nil {
 		return boot, namespace, err
 	}
-	namespace = sha256.Sum256([]byte(fmt.Sprintf("mydc-storage-mount-namespace-1/%x/%d/%d", boot, st.Dev, st.Ino)))
+	namespace = sha256.Sum256([]byte(fmt.Sprintf("sfc-storage-mount-namespace-1/%x/%d/%d", boot, st.Dev, st.Ino)))
 	return boot, namespace, nil
 }
 

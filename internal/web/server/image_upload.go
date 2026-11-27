@@ -18,16 +18,16 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/web/mydc"
+	"github.com/jay94ks/seafield/internal/web/sfc"
 )
 
 // Image upload (UI-88): the browser sends an image archive in chunks (it
 // can resume after a reload), the web lists the images in it, and pushes
 // the chosen one to a built-in registry under the name and tag the user
 // picks. The archive lives in the web's data folder until it is deleted or
-// a day passes. Pushing needs a push credential mydcd issues for the
+// a day passes. Pushing needs a push credential sfcd issues for the
 // repository; the web only gates the use of its disk on the workspace
-// manager role mydcd reports.
+// manager role sfcd reports.
 
 const (
 	uploadChunkBytes = 8 << 20
@@ -534,7 +534,7 @@ func (e *tagConflictErr) Error() string { return "tag-exists" }
 func (s *Server) tagConflict(ctx context.Context, ws *webSession, c *regClient, tenant, repo, tag, cur string) error {
 	e := &tagConflictErr{Current: cur}
 	ref := c.authority() + "/" + repo + ":" + tag
-	_ = ws.do(ctx, func(ctx context.Context, mc mydc.Conn) error {
+	_ = ws.do(ctx, func(ctx context.Context, mc sfc.Conn) error {
 		arch, err := s.archivedImages(tenant)
 		if err != nil {
 			return err
@@ -673,9 +673,9 @@ func pushErrorText(err error) string {
 	if errors.As(err, &he) {
 		return he.msg
 	}
-	var me *mydc.Error
+	var me *sfc.Error
 	if errors.As(err, &me) {
-		return "mydcd refused the registry credential (" + string(me.Code) + ")"
+		return "sfcd refused the registry credential (" + string(me.Code) + ")"
 	}
 	return err.Error()
 }

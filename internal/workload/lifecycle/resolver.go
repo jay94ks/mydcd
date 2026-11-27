@@ -27,10 +27,10 @@ import (
 )
 
 const (
-	checkerImport   = "mydc.local/checker"
-	productModule   = "github.com/jay94ks/mydcd"
+	checkerImport   = "sfc.local/checker"
+	productModule   = "github.com/jay94ks/seafield"
 	checkerSDK      = productModule + "/lifecycle/v1"
-	checkerBridge   = "mydc.internal/lifecyclebridge"
+	checkerBridge   = "sfc.internal/lifecyclebridge"
 	resolverGoPath  = "checker"
 	maxResolveBytes = 64 << 20
 	maxResolveFiles = 8192
@@ -242,7 +242,7 @@ func internalImport(importer, imported string) bool {
 // The product module is reserved too: only its checker SDK is importable, and
 // a locked module must not shadow the product packages placed in the view.
 func reservedSourcePath(pkg string) bool {
-	for _, root := range []string{"mydc.internal", "mydc.local", productModule} {
+	for _, root := range []string{"sfc.internal", "sfc.local", productModule} {
 		if pkg == root || strings.HasPrefix(pkg, root+"/") {
 			return true
 		}

@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/imagesource"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/imagesource"
 )
 
 func TestRegistryMaintenanceRequestCannotMixScopeOrMessage(t *testing.T) {
@@ -28,7 +28,7 @@ func TestRegistryMaintenanceRequestCannotMixScopeOrMessage(t *testing.T) {
 			func(r *Request) { r.Tenant = "" },
 			func(r *Request) { r.Node = "node-a" },
 			func(r *Request) { r.After = "cursor" },
-			func(r *Request) { r.App = "app" },
+			func(r *Request) { r.TargetUser = "app" },
 			func(r *Request) { r.Method = "whoami" },
 			func(r *Request) { r.RegistryMaintenance = nil },
 			func(r *Request) { r.RegistryCatalog = &control.RegistryCatalogueQuery{Kind: "managed", ID: "private"} },

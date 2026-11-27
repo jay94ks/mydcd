@@ -1,12 +1,12 @@
-# mydc events: 진단 이벤트
+# sfcli events: 진단 이벤트
 
 ```sh
-mydc events                          # 현재 작업 공간, 오래된 것부터 100개까지
-mydc events --app website --kind task-restarted
-mydc events --all --kind quorum-degraded   # 클러스터와 모든 작업 공간(시스템 관리자)
-mydc events -f                       # 새 이벤트를 계속 읽는다. Ctrl-C로 끝
-mydc events -o json                  # Cursor 포함
-mydc events --since CURSOR           # 지난번 -o json의 Cursor 다음부터
+sfcli events                          # 현재 작업 공간, 오래된 것부터 100개까지
+sfcli events --app website --kind task-restarted
+sfcli events --all --kind quorum-degraded   # 클러스터와 모든 작업 공간(시스템 관리자)
+sfcli events -f                       # 새 이벤트를 계속 읽는다. Ctrl-C로 끝
+sfcli events -o json                  # Cursor 포함
+sfcli events --since CURSOR           # 지난번 -o json의 Cursor 다음부터
 ```
 
 | 옵션 | 뜻 |

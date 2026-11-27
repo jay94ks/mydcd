@@ -3,10 +3,10 @@
 현재 RQ4 구현을 연결 중이며 마지막 통합 검증 전이다. UI는 이 문서의 서버·CLI 계약을 소비하며 별도 작업에서 구현한다.
 
 ```sh
-mydc --tenant team-a app restart shop web
-mydc --tenant team-a --reason '응답 중단' \
+sfcli --tenant team-a app restart shop web
+sfcli --tenant team-a --reason '응답 중단' \
   app restart shop web -y --id restart-web-42
-mydc --tenant team-a op show restart-web-42
+sfcli --tenant team-a op show restart-web-42
 ```
 
 선택자는 앱·서비스 이름이다. 해당 서비스에 후보가 여러 개면 `--instance TASK_KEY`로 논리 Task를 지정한다. Docker ID나 새 노드를 입력해 임의 컨테이너로 바꿀 수 없다. `restart`는 대상을 보여 주고 확인을 묻는다(스크립트는 `-y`). 앱 배포/복제 수/이미지/목표 세대를 변경하지 않고 원 컨테이너를 Stop한 뒤 Start한다. 원 Docker ID·writable layer·로컬 로그·Volume과 망 참조를 보존한다. 컨테이너 프로세스의 메모리 상태는 보존하지 않는다.
@@ -15,7 +15,7 @@ mydc --tenant team-a op show restart-web-42
 
 `task-restart-plan`은 `Request.TaskRestart.Selection={App,Service,Instance}`와 `Tenant`를 받는다. 현재 사용자에게 tenant `Read`와 해당 노드 `Deploy`가 있어야 한다. credential에 `Operations`가 있으면 `restart-task`도 포함되어야 한다. 원 앱이 종료/이관 중이거나 같은 Task의 미정산 재시작이 있으면 새 요청을 받지 않는다. 원 native·실행 시각이 있는 최근 30초 이내 서명 관측과 기존 Binding을 사용한다.
 
-`Reply.TaskRestartPlan`의 형식은 다음과 같다. `[32]byte`는 기존 MYDCP JSON 규칙인 32개 byte 배열이다.
+`Reply.TaskRestartPlan`의 형식은 다음과 같다. `[32]byte`는 기존 SFCP JSON 규칙인 32개 byte 배열이다.
 
 | 필드 | 의미 |
 |---|---|
@@ -53,19 +53,19 @@ CLI는 새 계획을 얻기 전에 로컬 원 operation journal을 확인한다.
 | Revision, At | 해당 진행 행의 revision과 마지막 보고 UTC Unix 초 |
 | Control | 실행 전 생략 가능. Schema/RunID/RequestDigest/Target/Action/Phase |
 
-원 승인/진행은 기존 Apps 저장소에, SDK 전송 단계는 원 owner의 private DB에 보관한다. 앱당 최대128개 원 행을 보존하며 한도가 차면 새 요청을 거부하고 미정산 원 기록을 덮지 않는다. 결과 조회는 노드 키만으로 새 작업을 발행하는 기능이 아니다. 관리 Unix 소켓과 네트워크 MYDCP User 요청은 같은 사용자 승인 코어를 쓴다.
+원 승인/진행은 기존 Apps 저장소에, SDK 전송 단계는 원 owner의 private DB에 보관한다. 앱당 최대128개 원 행을 보존하며 한도가 차면 새 요청을 거부하고 미정산 원 기록을 덮지 않는다. 결과 조회는 노드 키만으로 새 작업을 발행하는 기능이 아니다. 관리 Unix 소켓과 네트워크 SFCP User 요청은 같은 사용자 승인 코어를 쓴다.
 
 ## 노드의 새 배치 제외·복원
 
 ```sh
-mydc node cordon node-a '디스크 교체'
-mydc node uncordon node-a
-mydc node show node-a
+sfcli node cordon node-a '디스크 교체'
+sfcli node uncordon node-a
+sfcli node show node-a
 ```
 
 `cordon-node`/`uncordon-node`는 시스템 관리자의 사용자 서명 operation이다. credential 동작 제한이 있으면 해당 이름도 포함되어야 한다. payload는 `{ID:node-id}`이고 `cordon-node`는 선택 `Reason`(256자 이하, 줄바꿈·NUL 없음)을 더 받는다(`control.NodeCordonChange`). Reason은 서명된 원 operation에만 남고 `members`의 `NodeLifecycle[].Scheduling.Reason`으로 보인다. `Change.Expected`는 해당 노드의 **scheduling revision**이다. 미등록 scheduling 상태는 revision0/Enabled=false이며, 상태 변경마다 scheduling revision만 증가한다. join entry revision이나 node lifecycle revision/epoch와 혼동하지 않는다. 원 operation root는 Members root다. CLI는 현재 quorum에서 scheduling revision을 읽어 보내며 `--if-revision`으로 고정할 수 있다. 이미 같은 상태면 아무것도 보내지 않는다.
 
-상태는 기존 membership Directory 안의 별도 scheduling metadata로 보관하며 public `NodeLifecycle[].Scheduling={Enabled,Revision}`에 표시한다. 기존 `AdmitsWork`는 이미 맡은 업무를 계속할 수 있는 권한이며 scheduling 허용과 구분한다. 새 app 계획·수락·CD 재계획·이관 대상 선택은 cordoned 노드를 배치 불가로 본다. 이미 수락된 Task/Binding과 그 Secret·Volume·정산·명시 재시작 권한은 이 플래그로 회수하지 않는다. 기존 컨테이너를 중지·재배포하지 않으며 Raft voter·installed key·MYDCP 접속을 변경하지 않는다. 실제 격리/제거는 별도의 기존 node lifecycle 명령이다.
+상태는 기존 membership Directory 안의 별도 scheduling metadata로 보관하며 public `NodeLifecycle[].Scheduling={Enabled,Revision}`에 표시한다. 기존 `AdmitsWork`는 이미 맡은 업무를 계속할 수 있는 권한이며 scheduling 허용과 구분한다. 새 app 계획·수락·CD 재계획·이관 대상 선택은 cordoned 노드를 배치 불가로 본다. 이미 수락된 Task/Binding과 그 Secret·Volume·정산·명시 재시작 권한은 이 플래그로 회수하지 않는다. 기존 컨테이너를 중지·재배포하지 않으며 Raft voter·installed key·SFCP 접속을 변경하지 않는다. 실제 격리/제거는 별도의 기존 node lifecycle 명령이다.
 
 `uncordon`은 이 scheduling 제외만 해제한다. 이미 격리/제거된 노드를 복구하거나 업무 권한을 추가하지 않는다. 실행은 기존 원 operation journal/결과를 보존하며 `--resume-original`은 같은 원 요청의 명시 재개만 허용한다. 새 플래그 변경을 하려면 현재 scheduling revision과 새 요청 ID를 사용한다.
 

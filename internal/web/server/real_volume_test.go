@@ -15,17 +15,17 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/nodestorage"
-	"github.com/jay94ks/mydcd/internal/web/mydc"
-	"github.com/jay94ks/mydcd/tests/clusterfixture"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/nodestorage"
+	"github.com/jay94ks/seafield/internal/web/sfc"
+	"github.com/jay94ks/seafield/tests/clusterfixture"
 
 	dockerspec "github.com/moby/docker-image-spec/specs-go/v1"
 )
 
-// The web moves an app's data store from node-1 to node-0 through mydcd:
+// The web moves an app's data store from node-1 to node-0 through sfcd:
 // the nodes copy the volume's files between their fake engines' real
 // mountpoints and the app runs on node-0 (devel/refactor/16 step 5).
 func TestRealServerVolumeMove(t *testing.T) {
@@ -109,7 +109,7 @@ func TestRealServerVolumeMove(t *testing.T) {
 	}
 	refuse("POST", "/move-plan", map[string]any{"yaml": moved}, 409, "moving")
 	refuse("POST", "/move/cancel", map[string]any{"opId": op(), "id": "mv-other"}, 409, "not-moving")
-	// node-1 stops the app and sends the files over MyDCP; node-0 receives
+	// node-1 stops the app and sends the files over SFCP; node-0 receives
 	// them into its own volume, and the app starts there.
 	var v map[string]any
 	c.Wait("volume moved", func() bool {
@@ -154,7 +154,7 @@ func onlyMountpoint(t *testing.T, mounts map[string]string) string {
 	return ""
 }
 
-// The web's volume screens and operations on mydcd: the list row and
+// The web's volume screens and operations on sfcd: the list row and
 // detail, a backup the node really writes, a restore into a new volume,
 // capacity, backup limits and deleting an unused volume.
 func TestRealServerVolumes(t *testing.T) {
@@ -204,7 +204,7 @@ func TestRealServerVolumes(t *testing.T) {
 	if code, out := f.do("GET", "/api/v1/t/shop/volumes/nope", nil); code != 404 || errCode(out) != "not-found" {
 		t.Fatalf("missing: %d %v", code, out)
 	}
-	// Capacity only grows (the web says so before asking mydcd); a volume
+	// Capacity only grows (the web says so before asking sfcd); a volume
 	// its app still uses is not deleted.
 	if code, out := f.do("PUT", base+"/capacity", map[string]any{"opId": op(), "bytes": realDBCapacity / 2}); code != 422 || errCode(out) != "capacity-grow-only" {
 		t.Fatalf("shrink: %d %v", code, out)
@@ -214,7 +214,7 @@ func TestRealServerVolumes(t *testing.T) {
 	}
 
 	// A workspace manager sees that server-wide limits exist but not their
-	// values, and mydcd refuses them capacity and limit changes.
+	// values, and sfcd refuses them capacity and limit changes.
 	alice, err := identity.Ephemeral()
 	if err != nil {
 		t.Fatal(err)
@@ -226,7 +226,7 @@ func TestRealServerVolumes(t *testing.T) {
 	}
 	forbidden := func(what string, code int, out map[string]any) {
 		t.Helper()
-		if opState(t, code, out) != "failed" || out["op"].(map[string]any)["resultCode"] != float64(mydc.ResultForbidden) {
+		if opState(t, code, out) != "failed" || out["op"].(map[string]any)["resultCode"] != float64(sfc.ResultForbidden) {
 			t.Fatalf("%s as manager: %d %v", what, code, out)
 		}
 	}
@@ -244,7 +244,7 @@ func TestRealServerVolumes(t *testing.T) {
 		t.Fatalf("admin login: %d %v", code, out)
 	}
 
-	// A backup copies the volume's files as they are, so mydcd takes one
+	// A backup copies the volume's files as they are, so sfcd takes one
 	// only after the writer stopped cleanly: the app goes down first and the
 	// volume stays.
 	_, out = f.do("GET", "/api/v1/t/shop/apps", nil)
@@ -324,7 +324,7 @@ func TestRealServerVolumes(t *testing.T) {
 	code, out = f.do("PUT", "/api/v1/t/shop/backup-limits/node-1", map[string]any{"opId": o, "count": 2, "bytes": 2 * realDBCapacity, "stagingCount": 1, "stagingBytes": realDBCapacity})
 	applied("backup limit", code, out)
 	// The row's move budget (Original) goes back as it was.
-	var l mydc.VolumeBackupLimit
+	var l sfc.VolumeBackupLimit
 	userPayload(t, f, "u-admin", o, &l)
 	if l.Tenant != "shop" || l.Node != "node-1" || l.Count != 2 || l.Original == nil || l.Original.Count != 3 {
 		t.Fatalf("limit payload: %+v", l)
@@ -342,7 +342,7 @@ func TestRealServerVolumes(t *testing.T) {
 	applied("delete backup", code, out)
 	code, out = f.do("DELETE", "/api/v1/t/shop/volumes/data-copy", map[string]any{"opId": op()})
 	applied("delete volume", code, out)
-	// mydcd keeps the deleted backup's row (phase Deleted) while the restore
+	// sfcd keeps the deleted backup's row (phase Deleted) while the restore
 	// that came from it is listed.
 	c.Wait("backup deleted and copy gone", func() bool {
 		_, out = f.do("GET", base, nil)
@@ -375,7 +375,7 @@ func realDBApp(t *testing.T, f *fixture, c *clusterfixture.Cluster, op func() st
 	for _, n := range c.Nodes {
 		n.Engine.Publish(cfg, image)
 	}
-	doc := "name: db\nservices:\n db:\n  image: " + image + "\n  cpus: 0.1\n  mem_limit: 16m\n  volumes: [data:/data]\n  networks: {app: {}}\n  x-mydc: {node: node-1}\nvolumes:\n data:\n  x-mydc: {node: node-1, uid: 10001, gid: 10001, mode: \"0750\"}\nnetworks:\n app: {external: true, name: lan}\n"
+	doc := "name: db\nservices:\n db:\n  image: " + image + "\n  cpus: 0.1\n  mem_limit: 16m\n  volumes: [data:/data]\n  networks: {app: {}}\n  x-sfc: {node: node-1}\nvolumes:\n data:\n  x-sfc: {node: node-1, uid: 10001, gid: 10001, mode: \"0750\"}\nnetworks:\n app: {external: true, name: lan}\n"
 	code, out := f.do("POST", "/api/v1/t/shop/apps/deploy", map[string]any{"opId": op(), "yaml": doc, "deployment": "prod"})
 	if state := opState(t, code, out); state != "applied" {
 		t.Fatalf("deploy: %s %d %v", state, code, out)
@@ -406,7 +406,7 @@ func realDBApp(t *testing.T, f *fixture, c *clusterfixture.Cluster, op func() st
 	return doc
 }
 
-// Files in a workspace's fixed data store through the web on mydcd: put,
+// Files in a workspace's fixed data store through the web on sfcd: put,
 // no silent overwrite, overwrite, list, get and delete, and a folder grant
 // that lets a viewer work under one prefix only.
 func TestRealServerVolumeFiles(t *testing.T) {
@@ -422,7 +422,7 @@ func TestRealServerVolumeFiles(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(root, "uploads"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	c.Change(0, "storage", "add-node-storage", 0, nodestorage.Definition{Node: "node-0", Key: c.Nodes[0].Key, ID: "data", Path: root, Tenants: []string{"shop"}, MaxVolumes: 4})
+	c.Change(0, "storage", "add-node-storage", 0, nodestorage.Definition{Node: "node-0", Key: c.Nodes[0].Key, ID: "data", Path: root, Tenants: []string{"shop"}})
 	// node-0 attests the root before a volume is registered on it.
 	c.Wait("storage attested", func() bool {
 		roots, err := c.Policy.NodeStorage(c.State())
@@ -446,7 +446,7 @@ func TestRealServerVolumeFiles(t *testing.T) {
 	raw := func(method, path string, body []byte) (int, string, http.Header) {
 		t.Helper()
 		req, _ := http.NewRequest(method, f.http.URL+path, bytes.NewReader(body))
-		req.Header.Set("X-MyDC-Web", "1")
+		req.Header.Set("X-SFC-Web", "1")
 		res, err := f.hc.Do(req)
 		if err != nil {
 			t.Fatal(err)
@@ -455,7 +455,7 @@ func TestRealServerVolumeFiles(t *testing.T) {
 		b, _ := io.ReadAll(res.Body)
 		return res.StatusCode, string(b), res.Header
 	}
-	const pre = "mydc-web-backups/"
+	const pre = "sfc-web-backups/"
 	const first, second = "first-volume-file-content-7f3c9a1e", "overwritten-volume-file-content-b81d24c6"
 	if code, body, _ := raw("PUT", base+"/file?path="+pre+"a.db&opId="+op(), []byte(first)); code != 200 || !strings.Contains(body, `"applied"`) {
 		t.Fatalf("put: %d %s", code, body)
@@ -484,7 +484,7 @@ func TestRealServerVolumeFiles(t *testing.T) {
 		t.Fatalf("list: %d %v", code, out)
 	}
 	code, body, h := raw("GET", base+"/file?path="+pre+"a.db", nil)
-	if code != 200 || body != second || h.Get("Content-Disposition") != "attachment" || !strings.HasPrefix(h.Get("X-MyDC-Digest"), "sha256:") {
+	if code != 200 || body != second || h.Get("Content-Disposition") != "attachment" || !strings.HasPrefix(h.Get("X-SFC-Digest"), "sha256:") {
 		t.Fatalf("get: %d %q %v", code, body, h)
 	}
 
@@ -496,7 +496,7 @@ func TestRealServerVolumeFiles(t *testing.T) {
 	}
 	c.Change(0, "bob", "put-user", 0, access.User{ID: "u-bob", Username: "bob", Enabled: true, Credentials: []access.Credential{{ID: "key", Method: access.PrivateKey, PublicKey: bob.Public, Enabled: true}}})
 	c.Change(0, "bob-shop", "set-membership", 0, access.Membership{Tenant: "shop", User: "u-bob", Role: access.Viewer, Enabled: true})
-	if code, out := f.do("POST", base+"/file-grants", map[string]any{"opId": op(), "prefix": "mydc-web-backups", "user": "u-bob"}); code != 422 {
+	if code, out := f.do("POST", base+"/file-grants", map[string]any{"opId": op(), "prefix": "sfc-web-backups", "user": "u-bob"}); code != 422 {
 		t.Fatalf("prefix without /: %d %v", code, out)
 	}
 	if code, out := f.do("POST", base+"/file-grants", map[string]any{"opId": op(), "prefix": pre, "user": "u-bob"}); opState(t, code, out) != "applied" {

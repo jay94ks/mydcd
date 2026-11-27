@@ -10,13 +10,13 @@ import (
 	"slices"
 	"strconv"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/nodestorage"
-	"github.com/jay94ks/mydcd/internal/schema"
-	"github.com/jay94ks/mydcd/internal/secrets"
-	"github.com/jay94ks/mydcd/internal/workload/volumes"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/nodestorage"
+	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/secrets"
+	"github.com/jay94ks/seafield/internal/workload/volumes"
 )
 
 // VolumeCreate is a logical declaration, never a supplied native name/path.
@@ -130,7 +130,7 @@ func createSpec(q VolumeCreate, op UserOperation, owner [32]byte) volumes.Native
 		Origin UserOperation
 		Owner  [32]byte
 	}{op, owner})
-	digest := sha256.Sum256(append([]byte("mydc-volume-create-1\x00"), raw...))
+	digest := sha256.Sum256(append([]byte("sfc-volume-create-1\x00"), raw...))
 	return volumes.NativeSpec{Schema: 1, Scope: q.Scope, Node: q.Node, NodeKey: owner, Materialization: "c-" + hex.EncodeToString(digest[:24]), UID: q.UID, GID: q.GID, Mode: q.Mode, Retain: true}
 }
 func (p Policy) createCapacity(s state.State, spec volumes.NativeSpec) (int, error) {
@@ -303,7 +303,7 @@ func (p Policy) VolumeCreatePermit(s state.State, caller [32]byte, scope volumes
 func VolumeCreateReportBytes(r VolumeCreateReport) []byte {
 	r.Signature = nil
 	raw, _ := json.Marshal(r)
-	return append([]byte("mydc-volume-create-report-1\x00"), raw...)
+	return append([]byte("sfc-volume-create-report-1\x00"), raw...)
 }
 
 func (p Policy) volumeCreateReport(s state.State, cmd state.Command) (VolumeCreateReport, error) {

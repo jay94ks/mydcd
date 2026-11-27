@@ -8,8 +8,8 @@ import (
 	"encoding/json"
 	"errors"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/state"
 )
 
 type deliveryCandidate struct {
@@ -74,8 +74,8 @@ func NewDelivery(c access.Catalog, ctx PlanningContext, raw []byte) (Delivery, e
 	}
 	// Reuse Compose's own defaulting instead of creating CD-specific defaults.
 	normalized := b.d.Input
-	if normalized.MyDC.Delivery == nil {
-		normalized.MyDC.Delivery = &DeliveryDeclaration{}
+	if normalized.Sfc.Delivery == nil {
+		normalized.Sfc.Delivery = &DeliveryDeclaration{}
 		if normalized.normalize() != nil {
 			return Delivery{}, ErrInputs
 		}
@@ -84,7 +84,7 @@ func NewDelivery(c access.Catalog, ctx PlanningContext, raw []byte) (Delivery, e
 	if err != nil {
 		return Delivery{}, err
 	}
-	d := Delivery{deliveryRecord{Schema: 1, Revision: 1, PolicyRevision: 1, Principal: ctx.Actor, Policy: *normalized.MyDC.Delivery, Inventory: a.d, CatalogFloor: c.Revision(), NetworkFloor: ctx.Networks.Revision()}}
+	d := Delivery{deliveryRecord{Schema: 1, Revision: 1, PolicyRevision: 1, Principal: ctx.Actor, Policy: *normalized.Sfc.Delivery, Inventory: a.d, CatalogFloor: c.Revision(), NetworkFloor: ctx.Networks.Revision()}}
 	candidate := deliveryCandidate{Artifact: deliveryArtifact{Original: true, Kind: "file", Digest: sha256.Sum256(raw), Body: bytes.Clone(raw)}, Plan: b.d, PolicyRevision: 1, InventoryRevision: a.Revision()}
 	candidate.ID = candidateID(candidate)
 	d.d.Candidate = &candidate
@@ -92,7 +92,7 @@ func NewDelivery(c access.Catalog, ctx PlanningContext, raw []byte) (Delivery, e
 }
 func candidateID(c deliveryCandidate) [32]byte {
 	c.ID = [32]byte{}
-	return sha256.Sum256(append([]byte("mydc-delivery-candidate-1\x00"), goal(c)...))
+	return sha256.Sum256(append([]byte("sfc-delivery-candidate-1\x00"), goal(c)...))
 }
 func (d Delivery) Revision() uint64 { return d.d.Revision }
 
@@ -157,7 +157,7 @@ func (d Delivery) Configure(expected, policyRevision uint64, c access.Catalog, c
 	if err != nil {
 		return d, err
 	}
-	model.MyDC.Delivery = &policy
+	model.Sfc.Delivery = &policy
 	if model.normalize() != nil {
 		return d, ErrInputs
 	}
@@ -288,8 +288,8 @@ func (d Delivery) compile(c access.Catalog, ctx PlanningContext, a deliveryArtif
 	// A source update cannot reauthorize its own registration or policy.
 	// The policy lives on the server ('cd set'); a source without it follows
 	// that policy. A source that still names one must name the same.
-	if registered := input.MyDC.Delivery; registered != nil && !bytes.Equal(goal(registered), goal(d.d.Policy)) {
-		return deliveryCandidate{}, inputError("CD_POLICY_APPROVAL_REQUIRED", "x-mydc.delivery")
+	if registered := input.Sfc.Delivery; registered != nil && !bytes.Equal(goal(registered), goal(d.d.Policy)) {
+		return deliveryCandidate{}, inputError("CD_POLICY_APPROVAL_REQUIRED", "x-sfc.delivery")
 	}
 	var b Blueprint
 	if a.Kind == "git" || a.Original {

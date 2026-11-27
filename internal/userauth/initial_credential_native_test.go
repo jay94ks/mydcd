@@ -14,38 +14,38 @@ import (
 	"time"
 
 	"github.com/hashicorp/raft"
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster"
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/config"
-	"github.com/jay94ks/mydcd/internal/credentials"
-	"github.com/jay94ks/mydcd/internal/identity"
-	"github.com/jay94ks/mydcd/internal/mydcp"
-	"github.com/jay94ks/mydcd/internal/secrets"
-	"github.com/jay94ks/mydcd/tests/vaultfixture"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/config"
+	"github.com/jay94ks/seafield/internal/credentials"
+	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/secrets"
+	"github.com/jay94ks/seafield/internal/sfcp"
+	"github.com/jay94ks/seafield/tests/vaultfixture"
 )
 
 // Owns only a loopback Vault/TLS/file-store fixture, one Raft/bbolt root and
 // User transport sockets. No Docker/host routing effects. Execute once at the
 // final RQ4 gate with the explicitly pinned Vault binary already prepared.
 func TestInitialCredentialActualVaultManagedRaftAndUserLogin(t *testing.T) {
-	if os.Getenv("MYDC_TEST_RQ4_INITIAL_CREDENTIAL") != "1" {
+	if os.Getenv("SFC_TEST_RQ4_INITIAL_CREDENTIAL") != "1" {
 		t.Skip("requires explicit RQ4 owned Vault/system rollback gate")
 	}
-	if !filepath.IsAbs(os.Getenv("MYDC_TEST_CLI")) {
+	if !filepath.IsAbs(os.Getenv("SFC_TEST_CLI")) {
 		t.Fatal("explicit prebuilt CLI is required for initial-credential acceptance")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Second)
 	defer cancel()
 	v := vaultfixture.Open(t)
-	v.API("PUT", "sys/policies/acl/mydc-initial-writer", map[string]any{"policy": `path "kv/data/system/credentials/*" { capabilities = ["create", "read"] }`}, nil, v.Admin)
+	v.API("PUT", "sys/policies/acl/sfc-initial-writer", map[string]any{"policy": `path "kv/data/system/credentials/*" { capabilities = ["create", "read"] }`}, nil, v.Admin)
 	var token struct {
 		Auth struct {
 			Token string `json:"client_token"`
 		} `json:"auth"`
 	}
-	v.API("POST", "auth/token/create", map[string]any{"policies": []string{"mydc-initial-writer"}, "no_default_policy": true, "ttl": "5m"}, &token, v.Admin)
+	v.API("POST", "auth/token/create", map[string]any{"policies": []string{"sfc-initial-writer"}, "no_default_policy": true, "ttl": "5m"}, &token, v.Admin)
 	if token.Auth.Token == "" {
 		t.Fatal("owned system provider credential absent")
 	}
@@ -66,13 +66,13 @@ func TestInitialCredentialActualVaultManagedRaftAndUserLogin(t *testing.T) {
 	}
 	node, admin, proof, browser := key(), key(), key(), key()
 	clusterID := [32]byte{215}
-	peer := mydcp.Peer{ID: "node-a", Policy: mydcp.Policy{Key: mydcp.Identity(node.Public), Member: true, Read: true, Respond: true}}
-	server, err := mydcp.NewTransportWithPurposeLookup(node, clusterID, func(k mydcp.Identity, purpose mydcp.Purpose) (mydcp.Peer, bool) {
+	peer := sfcp.Peer{ID: "node-a", Policy: sfcp.Policy{Key: sfcp.Identity(node.Public), Member: true, Read: true, Respond: true}}
+	server, err := sfcp.NewTransportWithPurposeLookup(node, clusterID, func(k sfcp.Identity, purpose sfcp.Purpose) (sfcp.Peer, bool) {
 		if k == peer.Key {
 			return peer, true
 		}
-		if purpose == mydcp.Handshake || purpose == mydcp.User || purpose == mydcp.ContainerSession || purpose == 0 {
-			return mydcp.Peer{ID: "user-client", Policy: mydcp.Policy{Key: k, UserAuth: true}}, true
+		if purpose == sfcp.Handshake || purpose == sfcp.User || purpose == sfcp.ContainerSession || purpose == 0 {
+			return sfcp.Peer{ID: "user-client", Policy: sfcp.Policy{Key: k, UserAuth: true}}, true
 		}
 		return peer, k == peer.Key
 	})
@@ -87,7 +87,7 @@ func TestInitialCredentialActualVaultManagedRaftAndUserLogin(t *testing.T) {
 	policy := control.Policy{Cluster: clusterID, BootstrapKey: admin.Public, TrustRoot: node.Public, Genesis: config.Peer{ID: peer.ID, Key: hex.EncodeToString(node.Public[:]), Endpoint: peer.Endpoint, Voter: true}}
 	root := t.TempDir()
 	e, err := cluster.Open(cluster.Options{ID: peer.ID, Root: filepath.Join(root, "node-db"), Admin: admin.Actor(), Cluster: clusterID, Mesh: server, Bootstrap: true,
-		Servers: []raft.Server{{ID: raft.ServerID(peer.ID), Address: raft.ServerAddress(peer.Endpoint), Suffrage: raft.Voter}}, Resolve: func(id raft.ServerID, _ raft.ServerAddress) (mydcp.Peer, bool) { return peer, string(id) == peer.ID },
+		Servers: []raft.Server{{ID: raft.ServerID(peer.ID), Address: raft.ServerAddress(peer.Endpoint), Suffrage: raft.Voter}}, Resolve: func(id raft.ServerID, _ raft.ServerAddress) (sfcp.Peer, bool) { return peer, string(id) == peer.ID },
 		ModuleID: policy.ID(), Validate: policy.ValidateManaged, Reduce: policy.Reduce, AdmitModule: policy.AdmitModule, AdmitMutation: policy.AdmitAppMutation, AdmitModulePatch: policy.AdmitAppPatch})
 	if err != nil {
 		t.Fatal(err)
@@ -109,12 +109,12 @@ func TestInitialCredentialActualVaultManagedRaftAndUserLogin(t *testing.T) {
 	if err = (Service{Engine: e, Mesh: server, Self: node, Policy: policy, Credentials: backend}).Serve(); err != nil {
 		t.Fatal(err)
 	}
-	mesh, err := mydcp.NewTransport(proof, clusterID, func(k mydcp.Identity) (mydcp.Peer, bool) { return peer, k == peer.Key })
+	mesh, err := sfcp.NewTransport(proof, clusterID, func(k sfcp.Identity) (sfcp.Peer, bool) { return peer, k == peer.Key })
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer mesh.Close()
-	c := Client{Mesh: mesh, Self: proof, Cluster: clusterID, Peers: []mydcp.Peer{peer}}
+	c := Client{Mesh: mesh, Self: proof, Cluster: clusterID, Peers: []sfcp.Peer{peer}}
 	if _, err = c.Enroll(ctx, peer, control.Enrollment{Schema: 1, RequestID: "rq4-initial-enroll", User: access.User{ID: "admin", Username: "admin", Enabled: true, SystemAdmin: true, Credentials: []access.Credential{{ID: "key", Method: access.PrivateKey, PublicKey: admin.Public, Enabled: true}}}}, admin.Private); err != nil {
 		t.Fatal(err)
 	}
@@ -217,7 +217,7 @@ func TestInitialCredentialActualVaultManagedRaftAndUserLogin(t *testing.T) {
 	if _, err = c.LoginCredential(ctx, peer, "token.user", access.Token, "first-token", prepared.InitialCredentialToken); err == nil {
 		t.Fatal("actual token reused")
 	}
-	if _, err = c.Query(ctx, peer, tokenSession, "whoami", ""); err != nil {
+	if _, err = c.Whoami(ctx, peer, tokenSession); err != nil {
 		t.Fatal("consuming token invalidated issued session", err)
 	}
 	v.Stop()

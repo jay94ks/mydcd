@@ -14,8 +14,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/engine"
-	"github.com/jay94ks/mydcd/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/engine"
+	"github.com/jay94ks/seafield/internal/reconcile"
 	"github.com/moby/moby/api/types/volume"
 )
 
@@ -54,7 +54,7 @@ func (f *nativeSDKFixture) deleteCount() int { _, d := f.counts(); return d }
 
 func nativeSDK(t *testing.T, s NativeSpec) *nativeSDKFixture {
 	t.Helper()
-	root, err := os.MkdirTemp("/tmp", "mydc-volume-sdk-")
+	root, err := os.MkdirTemp("/tmp", "sfc-volume-sdk-")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -315,7 +315,7 @@ func TestNativeVolumeMissingUnknownAndForeignNeverRecreate(t *testing.T) {
 	}
 	f.mu.Lock()
 	f.exists = true
-	f.value.Labels["org.mydc.spec"] = "foreign"
+	f.value.Labels["org.sfc.spec"] = "foreign"
 	f.mu.Unlock()
 	if err = m.Step(ctx, key); !errors.Is(err, engine.ErrOwnership) || f.createCount() != 1 || f.deleteCount() != 0 {
 		t.Fatal("foreign volume adopted/mutated", err)

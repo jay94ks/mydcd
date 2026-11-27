@@ -7,10 +7,10 @@ import (
 	"crypto/ed25519"
 	"encoding/hex"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/nodestorage"
-	"github.com/jay94ks/mydcd/internal/workload/volumes"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/nodestorage"
+	"github.com/jay94ks/seafield/internal/workload/volumes"
 )
 
 // VolumeFixedRegister is tenant management input, never app/CD input. The
@@ -87,7 +87,7 @@ func (p Policy) reduceFixedRegistration(s state.State, users access.Catalog, v V
 	if selection.Validate() != nil || spec.Validate() != nil {
 		return nil, state.Invalid
 	}
-	if registeredOnRoot(v, root.Reference(p.Cluster)) >= root.Definition.MaxVolumes || !v.restoreTargetAvailable(q.Scope) || v.volumeReservations() >= maxVolumes || v.volumeMetadataSlots() >= maxVolumes {
+	if !rootAdmits(root, v, root.Reference(p.Cluster), q.CapacityBytes) || !v.restoreTargetAvailable(q.Scope) || v.volumeReservations() >= maxVolumes || v.volumeMetadataSlots() >= maxVolumes {
 		return nil, state.ConditionFailed
 	}
 	if old, exists := v.entries[volumeKey(q.Scope)]; exists && (!old.State.Fixed() || !old.State.Deleted() || old.State.Scope().Generation >= q.Scope.Generation) {

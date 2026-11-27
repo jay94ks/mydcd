@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jay94ks/mydcd/internal/workload"
+	"github.com/jay94ks/seafield/internal/workload"
 )
 
 func TestAppLoggingPinsDeclarationAndRejectsNonStringOptions(t *testing.T) {

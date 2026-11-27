@@ -1,28 +1,29 @@
 # 관리 자원·사용처 조회
 
-조회는 현재 사용자 Session·계정 revision·역할·서명된 scope를 검사한다. Unix 관리 소켓과 네트워크 MYDCP의 User 요청은 같은 코어를 사용한다. 조회로 자원을 만들거나 원 operation·정리 증거를 갱신하지 않는다.
+조회는 현재 사용자 Session·계정 revision·역할·서명된 scope를 검사한다. Unix 관리 소켓과 네트워크 SFCP의 User 요청은 같은 코어를 사용한다. 조회로 자원을 만들거나 원 operation·정리 증거를 갱신하지 않는다.
 
 ## 요청과 페이지
 
-일반 조회 요청은 다음 구조다. `Schema=1`, 매 교환의 새 `Nonce`와 기존 User envelope의 Session/Signature가 필요하다.
+공개 조회 12개 method는 [typed method](unix-sockets/10-user.md#typed-method)다. 요청은 `Schema=1`, 매 교환의 새 `Nonce`, `Params`와 기존 User envelope의 Session/Signature가 필요하다.
 
 ```json
-{"Schema":1,"Method":"network-users","Tenant":"payments","PublicRead":{"Name":"services","App":"","Node":""},"After":"","Nonce":[1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]}
+{"Schema":1,"Method":"network-users","Nonce":[1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"Params":{"Tenant":"payments","Query":{"Name":"services","App":"","Node":""}}}
 ```
 
-예시는 Nonce의 32바이트 형태를 보이며 실제 client는 교환마다 무작위 값을 만든다. 각 method가 허용한 selector만 전달한다. 공통 Request의 별도 App/Node, Secret·다른 method의 payload를 함께 전달하면 거부한다.
+예시는 Nonce의 32바이트 형태를 보이며 실제 client는 교환마다 무작위 값을 만든다. `Params`는 `{Tenant?,Query:{Name,App,Node},After?}`다. `Query`의 세 필드는 항상 쓰고, 각 method가 허용한 selector만 값을 채운다. 다른 selector에 값이 있거나, 모르는 필드가 있거나, 빈 Tenant/After를 생략하지 않으면 거부한다. network-closure는 After를 받지 않는다.
 
-응답의 `PublicRead`는 `{Schema,Method,Tenant,Index,RootRevision,CatalogRevision,TenantRevision,Rows,Next,Total}`이다. Rows는 최대 8개, 행 JSON 합은 최대 96KiB다. Total은 권한으로 먼저 거른 전체 행 수다. Next가 있으면 같은 method·tenant·selector로 After에 넣는다. 원 snapshot/현재 권한이 바뀌면 cursor는 conflict가 되며 처음부터 다시 조회한다. cursor는 권한이나 변경 승인이 아니다.
+성공 응답의 `Data`는 `{Schema,Method,Tenant,Index,RootRevision,CatalogRevision,TenantRevision,Rows,Next,Total}`이다. Rows는 최대 8개, 행 JSON 합은 최대 96KiB다. Total은 권한으로 먼저 거른 전체 행 수다. Next가 있으면 같은 method·tenant·selector로 After에 넣는다. 원 snapshot/현재 권한이 바뀌면 cursor는 conflict가 되며 처음부터 다시 조회한다. cursor는 권한이나 변경 승인이 아니다. CLI `manage <method>`는 이 페이지를 그대로 출력한다.
 
-각 행은 Key와 아래 지정한 단 하나의 payload만 가진다. RootRevision은 method의 상태 root CAS다. 사용자 요청의 공통 Reply.RootRevision과 CatalogRevision은 access catalog CAS다. volumes 계열은 Volumes root, 망 계열은 Resources root, lifecycle은 Lifecycle root, Vault는 Vault root, 나머지는 Catalog root를 사용한다.
+각 행은 Key와 아래 지정한 단 하나의 payload만 가진다. RootRevision은 method의 상태 root CAS다. CatalogRevision은 access catalog CAS다. volumes 계열은 Volumes root, 망 계열은 Resources root, lifecycle은 Lifecycle root, Vault는 Vault root, 나머지는 Catalog root를 사용한다.
 
-| Method | PublicRead selector | 행 payload | 현재 권한 |
+| Method | Query selector | 행 payload | 현재 권한 |
 |---|---|---|---|
 | network-users | Name=논리 망 이름 또는 멤버 ID | User | tenant Read |
 | network-closure | Name=draining 멤버 망 ID, After 금지 | Closure | tenant ManageNetwork cleanup |
 | volume-users | Name=Volume ID, 선택 App | User | tenant Read |
 | volume-backup-limits | 선택 Node | BackupLimit | tenant Read; Tenant가 비면 system-admin |
 | route-endpoints | 없음; Tenant=받는 tenant | RouteEndpoint | 어느 tenant에서든 현재 ManageRoutes |
+| bridge-endpoints | 없음; Tenant=상대 tenant | BridgeEndpoint `{Tenant, Network}`: `bridge-inbound`를 켰고 바뀌는 중이 아닌 TUN 망의 이름만 | 어느 tenant에서든 현재 ManageNetwork |
 | lifecycle-uses | Name=named script 이름 | Lifecycle | tenant ManageServices |
 | vault-approvals | 선택 App; Tenant=realm | Approval | realm ManageSecrets; 빈 realm은 system-admin |
 | vault-usages | Name=Secret/Group ID; Tenant=realm | SecretUsage | 위와 같음 |
@@ -36,7 +37,7 @@
 
 `BackupLimit`는 `{Tenant,Node,Revision,Bytes,Count,StagingBytes,StagingCount,UsedBytes,UsedCount,UsedStagingBytes,UsedStagingCount,GlobalPresent,GlobalOriginal,Original?}`다. `GlobalOriginal`은 같은 서버의 전역 한도 행에 원본 볼륨 예산(`Original`)이 있는지만 알린다. 예산이 생긴 서버에서 `--size`가 있는 볼륨 생성은 tenant와 전역 예산이 모두 있어야 하므로 CLI가 보내기 전에 이를 확인한다. `Original:{Bytes,Count}`는 그 행의 선택 이관 원본 예산이다. 없는 행은 필드를 생략한다. 현재 한도를 수정할 때 공개 행의 Revision을 Expected로 쓰고 Original이 있으면 그대로 보존한다. Used 값은 실제 디스크 측정치가 아니라 동일한 backup/restore/move 예산 검사에서 사용하는 원 archive/staging 예약량이다. tenant 응답에는 해당 tenant 한도·사용량과 전역 한도의 존재 여부만 있고 전역 수치는 없다.
 
-`RouteEndpoint`는 `{Tenant,Network,Node,Pool}`만 제공한다. Network는 `propose-route`가 받는 논리 망 이름이다. 현재 공개 발견 정책은 명시적으로 이름을 붙인 활성 MYDCP TUN 망의 멤버다. draining·변경 후보·원 legacy private Bridge는 제외한다. 받는 tenant의 Read를 요구하지 않으며 내부 멤버 ID·CIDR·주소·소유 키·generation은 반환하지 않는다. 제안 시 기존 propose-route가 원 카탈로그에서 다시 고정한다.
+`RouteEndpoint`는 `{Tenant,Network,Node,Pool}`만 제공한다. Network는 `propose-route`가 받는 논리 망 이름이다. 현재 공개 발견 정책은 명시적으로 이름을 붙인 활성 SFCP TUN 망의 멤버다. draining·변경 후보·원 legacy private Bridge는 제외한다. 받는 tenant의 Read를 요구하지 않으며 내부 멤버 ID·CIDR·주소·소유 키·generation은 반환하지 않는다. 제안 시 기존 propose-route가 원 카탈로그에서 다시 고정한다.
 
 `Lifecycle`은 `{ID,Kind,App,Service,Standalone,Node,Revision}`다. named revision을 삭제 차단하는 동일 Catalog.Uses를 읽고 app-binding과 build-job을 구분한다. build-job의 앱 정보는 원 AppUseID를 따라 같은 Binding에서 가져온다.
 
@@ -52,11 +53,11 @@
 
 `Closure`는 `{State,NativeGone?,PendingEndpoints?,PendingFlows?,PendingPins?,Closure?}`다. State는 pending/unreachable/closed다. pending의 endpoint 수는 종료를 막는 동일 IPAM allocation book, pin 수는 원 owner journal 관측이다. 측정되지 않은 flow 수·native 부재는 null이며 0으로 추정하지 않는다. owner에 닿지 않으면 unreachable이다. closed일 때 `Closure`는 원 owner가 서명한 `tenancy.NetworkClosure` 그대로이고, `fence-network-change`·`leave-tun-network`에 복사할 수 있다. 반환 직전 현재 사용자 권한과 정확한 owner·멤버 generation/revision·native source를 다시 비교한다. 조회가 fence나 leave를 대신 실행하지 않는다.
 
-`resources` 망 행에는 `DNS:{Revision,Policy,Resolvers,Ready?,State}`가 붙는다. Policy는 Enabled/Reverse/Zone/ClientZone/TTL/NegativeTTL/Transports/Upstreams와 MaxQueries/MaxCacheEntries/MaxResponseBytes/MaxConnections/RequestTimeoutMS 전체다. Revision은 configure-network-dns에 사용할 source CAS다. Resolvers는 현재 원 DNS owner가 실제 socket·동일 source/applied/observed revision을 확인한 주소:53만 반환한다. desired Gateway 주소로 Ready를 만들지 않으며 미기동·실패·접속 불가 시 주소 목록은 비고 Ready/State로 구분한다. 원 instance가 이미 종료된 뒤 비활성 정책 revision만 바뀐 경우에도 정책은 읽히며, 새 revision의 native 관측이 없으면 Ready를 생략하고 Resolvers를 비운다. 정책 비활성화만으로 실제 종료를 증명하지 않는다. 한 페이지의 owner 조회에는 2초의 공통 진단 예산을 사용하고 끝에 현재 권한·원 source를 한 번 재검사한다.
+`resources` 망 행에는 `DNS:{Revision,Policy,Resolvers,Ready?,State}`가 붙는다. Policy는 Enabled/Reverse/Zone/ClientZone/TTL/NegativeTTL/Transports/Upstreams와 MaxQueries/MaxCacheEntries/MaxResponseBytes/MaxConnections/RequestTimeoutMS, 직접 더한 레코드 Records(Name/Type/Value/TTL, A·AAAA·CNAME·TXT·MX·SRV·CAA) 전체다. Revision은 configure-network-dns에 사용할 source CAS다. Resolvers는 현재 원 DNS owner가 실제 socket·동일 source/applied/observed revision을 확인한 주소:53만 반환한다. desired Gateway 주소로 Ready를 만들지 않으며 미기동·실패·접속 불가 시 주소 목록은 비고 Ready/State로 구분한다. 원 instance가 이미 종료된 뒤 비활성 정책 revision만 바뀐 경우에도 정책은 읽히며, 새 revision의 native 관측이 없으면 Ready를 생략하고 Resolvers를 비운다. 정책 비활성화만으로 실제 종료를 증명하지 않는다. 한 페이지의 owner 조회에는 2초의 공통 진단 예산을 사용하고 끝에 현재 권한·원 source를 한 번 재검사한다.
 
 ## 선택·노드·이벤트
 
-`select-tenant`는 TenantRevision과 TenantAllowedNodes를 반환한다. `tenants` 행에도 AllowedNodes가 있으며 현재 Read·허용 node와 교차한 목록이다. 원 catalog slice를 외부에서 수정할 수 없다.
+`select-tenant`는 `Data:{User,Tenant,Revision,AllowedNodes}`를 반환한다. `tenants`의 `Data.Tenants` 행에도 AllowedNodes가 있으며 현재 Read·허용 node와 교차한 목록이다. 원 catalog slice를 외부에서 수정할 수 없다.
 
 `node-summary` 행에는 CordonedBy/CordonedAt을 제공하며 `members`의 NodeLifecycle.Scheduling과 `node-summary`의 Scheduling에도 Enabled/Revision 및 활성 cordon의 CordonedBy/CordonedAt이 있다. 원 서명 명령의 사용자와 At를 사용하고 시각은 UTC RFC3339다. `members`의 Scheduling.Reason은 활성 cordon-node 원 명령의 Reason이다(drain으로 막힌 경우는 없음). NodeLifecycle[].Identity.RequestedAt은 마지막 rotate-node-identity 원 명령의 At(UTC RFC3339)이다. uncordon 뒤 이전 actor/time을 남기지 않는다. node-summary의 ObserveLimitSeconds는 실제 관측 freshness 한도(현재 120초)와 같으며 활성 노드의 관측이 없거나 오래되면 State=unreachable이다.
 
@@ -64,19 +65,19 @@
 
 ## 로그인 전 서버 판 조회
 
-`server-version`은 `{Schema:1,Method:"server-version",Nonce:32바이트}`의 sessionless finite User 요청이다. envelope에 Session/Signature/Relay를 넣지 않는다. 응답 `ServerVersion:{Version:"1",Protocol:1,Commit?,BuildTime?}`은 접속한 mydcd 자신이다. TLS 키 pin 검증과 frame digest/EOF는 유지하며 leader로 전달하거나 quorum/login/wallet을 요구하지 않는다. `mydc version`은 로컬 CLI 판이고 `mydc server-version`은 원격 mydcd 판이다.
+`server-version`은 `{Schema:1,Method:"server-version",Nonce:32바이트,Params:{}}`의 sessionless typed User 요청이다. envelope에 Session/Signature/Relay를 넣지 않는다. 응답 `Data:{Version,Protocol:1,Commit?,BuildTime?}`은 접속한 sfcd 자신이다. `Version`은 `major.minor.build`(릴리스) 또는 `major.minor.0-dev`(개발 빌드)다. TLS 키 pin 검증과 frame digest/EOF는 유지하며 leader로 전달하거나 quorum/login/wallet을 요구하지 않는다. `sfcli version`은 로컬 CLI 판이고 `sfcli server-version`은 원격 sfcd 판이다.
 
 ```sh
-mydc --cluster production server-version
-mydc --tenant payments manage network-users --name services
-mydc --tenant payments manage network-closure --name MEMBER_ID
-mydc --tenant payments volume users ledger/ledger-data
-mydc --tenant payments volume backup limits --node node-a
-mydc volume backup limits --all
-mydc --tenant destination manage route-endpoints
-mydc --tenant payments manage lifecycle-uses --name ready
-mydc --tenant payments secret approvals --app ledger
-mydc --tenant payments secret usages signing-keys
-mydc --tenant payments manage image-trust
-mydc --tenant payments volume files grants ledger/ledger-data
+sfcli --cluster production server-version
+sfcli --tenant payments manage network-users --name services
+sfcli --tenant payments manage network-closure --name MEMBER_ID
+sfcli --tenant payments volume users ledger/ledger-data
+sfcli --tenant payments volume backup limits --node node-a
+sfcli volume backup limits --all
+sfcli --tenant destination manage route-endpoints
+sfcli --tenant payments manage lifecycle-uses --name ready
+sfcli --tenant payments secret approvals --app ledger
+sfcli --tenant payments secret usages signing-keys
+sfcli --tenant payments manage image-trust
+sfcli --tenant payments volume files grants ledger/ledger-data
 ```

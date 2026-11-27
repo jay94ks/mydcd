@@ -15,9 +15,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/network"
-	"github.com/jay94ks/mydcd/internal/storage"
-	"github.com/jay94ks/mydcd/internal/workload"
+	"github.com/jay94ks/seafield/internal/network"
+	"github.com/jay94ks/seafield/internal/storage"
+	"github.com/jay94ks/seafield/internal/workload"
 )
 
 func TestDNSProcessIdentityRequiresOriginalExit(t *testing.T) {
@@ -68,7 +68,7 @@ func TestDNSProcessIdentityRequiresOriginalExit(t *testing.T) {
 // are fixture input; this case proves process exit and atomic journal recovery,
 // not a Docker/Bridge/socket or cluster authorization boundary.
 func TestDNSOwnerUncleanSameDBChildExit(t *testing.T) {
-	if path := os.Getenv("MYDC_DNS_QUERY_CRASH_DB"); path != "" {
+	if path := os.Getenv("SFC_DNS_QUERY_CRASH_DB"); path != "" {
 		n, err := network.OpenManager(path+".network", nil)
 		if err != nil {
 			t.Fatal(err)
@@ -123,7 +123,7 @@ func TestDNSOwnerUncleanSameDBChildExit(t *testing.T) {
 	defer cancel()
 	path := filepath.Join(t.TempDir(), "dns.db")
 	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestDNSOwnerUncleanSameDBChildExit$", "-test.v")
-	cmd.Env = append(os.Environ(), "MYDC_DNS_QUERY_CRASH_DB="+path)
+	cmd.Env = append(os.Environ(), "SFC_DNS_QUERY_CRASH_DB="+path)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		t.Fatal(err)

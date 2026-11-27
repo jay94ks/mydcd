@@ -8,8 +8,8 @@ import (
 	"encoding/json"
 	"math"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/lifecycle"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/lifecycle"
 )
 
 // DraftProof preserves the user's approval of one exact staged edit through
@@ -49,7 +49,7 @@ func (q DraftRequest) RequiresProof() bool { return q.Mutation() || q.Result() }
 func DraftProofBytes(p DraftProof) []byte {
 	p.Signature = nil
 	raw, _ := json.Marshal(p)
-	return append([]byte("mydc-imagebuild-draft-request-1\x00"), raw...)
+	return append([]byte("sfc-imagebuild-draft-request-1\x00"), raw...)
 }
 
 type DraftRequest struct {

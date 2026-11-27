@@ -4,7 +4,7 @@ tenant 관리자는 기존 사용자 서명 관리 명령으로 외부 registry�
 
 ## 관리 입력
 
-`mydc manage apply`의 JSON 변경 문서에서 `put-external-registry`와 `delete-external-registry`를 사용한다. 원 operation·서명·root CAS·결과/재개 규칙은 기존 관리 명령과 같다.
+`sfcli manage apply`의 JSON 변경 문서에서 `put-external-registry`와 `delete-external-registry`를 사용한다. 원 operation·서명·root CAS·결과/재개 규칙은 기존 관리 명령과 같다.
 
 ```json
 {
@@ -41,8 +41,8 @@ authority는 scheme/path가 없는 정규 소문자 registry 주소다. 기본 �
 ## 공개 조회
 
 ```sh
-mydc --tenant payments registry external list
-mydc --tenant payments registry external show ghcr
+sfcli --tenant payments registry external list
+sfcli --tenant payments registry external show ghcr
 ```
 
 User method `external-registries`는 `{Schema:1,Method:"external-registries",Tenant,After?,Nonce}`를 받는다. 응답은 기존 Reply의 `ExternalRegistriesRootRevision`, `ExternalRegistries`(최대8개), `ExternalRegistriesNext`다. 행은 `{Spec,Revision,Deleted,Reader?}`이며 Reader는 `{Node,Owner,Generation,Draining}`만 담는다. 원 서명/Session·자격 값은 포함하지 않는다. 현재 tenant의 Read 또는 ManageRegistry 권한이 필요하다. 여러 페이지를 합칠 때 root revision이 달라지면 혼합하지 않고 처음부터 조회한다. CLI의 상세 조회도 같은 권한·페이지를 사용한다.
@@ -57,20 +57,20 @@ User method `external-registries`는 `{Schema:1,Method:"external-registries",Ten
 
 외부 인증은 `go-containerregistry`의 요청별 클라이언트에 자격과 CA를 고정한다. CA는 해당 호출의 인증서 pool에만 추가하고 호스트·Docker daemon 설정을 변경하지 않는다. HTTPS만 허용하며 다른 authority로 자격/header/인증 본문을 넘기지 않는다. Docker Hub의 공식 registry/auth host는 정규 docker.io source의 내부 주소로 취급한다. ambient Docker keychain·proxy·익명 재시도는 사용하지 않는다.
 
-정규 pinned ref가 Docker cache에 없으면 원 manifest/index digest와 선택한 실행 platform의 manifest M·config C를 검증한다. 로컬 조회는 C와 M만 사용하고 응답 ID가 조회한 digest와 정확히 같을 때 재사용한다. legacy image store는 C, containerd image store는 M을 native ID로 반환할 수 있으며 실제 Task는 그 검증된 native ID를 기존 Process recipe에 고정한다. 없을 때만 원 M/C와 압축 layer blob을 보존하는 OCI+Docker 호환 단일 tar stream을 SDK ImageLoad로 보낸다. `index.json`은 선택한 M 하나를 가리키고 Docker `manifest.json`도 같은 `blobs/sha256/` 경로를 사용하며 RepoTags는 비어 있다. manifest/config/layer의 digest·길이와 총량, archive 예산·EOF를 확인하고 중복 layer는 순서상 참조를 유지하며 blob은 한 번만 보낸다. 취소·실패 시 upstream reader와 pipe producer를 종료·join한다. 임시 전체 archive·mutable tag·별도 origin DB는 만들지 않고 load 로그의 ID나 RepoDigest를 origin 증거로 사용하지 않는다. `pull=false`는 새 layer 적재를 허용하지 않으며 canonical ref가 없는 이 cache 경로에서는 origin 증명을 위한 registry metadata 읽기가 필요할 수 있다.
+엔진(Seafield)은 registry에 직접 닿지 않는다. 고정된 ref가 엔진에 없으면 sfcd가 그 뿌리(`repository@sha256:…`, tag는 뗀다)로 pull ticket을 만든다. ticket은 이 요청별 클라이언트로 원 manifest/index와 그 아래 manifest를 읽어 graph를 적어 둔다. 그다음 sfcd가 엔진에 그 뿌리를 pull하라고 하고, 엔진이 묻는 manifest·blob(purpose 37)을 같은 클라이언트로 읽어 넘긴다. 엔진은 받은 모든 내용의 digest를 확인하고 실행 platform을 스스로 고른다. pull이 끝나면 ticket을 닫는다. 엔진에는 자격도 registry 주소도 가지 않는다. 끊긴 blob은 받은 만큼의 offset부터 다시 묻는다(지금 sfcd는 source에서 처음부터 읽고 그만큼을 버린다). 실제 Task는 엔진이 돌려준 native ID를 기존 Process recipe에 고정한다. `pull=false`는 새 pull을 하지 않는다. 관측 단계는 graph 읽기가 `resolve`, 엔진 pull이 `load`다.
 
 metadata/config는1MiB, layer 합은10GiB, layer 수는4096개로 제한한다. 적재 stream에는 tar framing을 위한 별도 여유 한도만 추가한다. 입력·원 context와 socket idle 예산을 유지하고 오류/취소 뒤 원 upstream/pipe writer를 정리한 후 반환한다. 공개 오류에는 제한된 코드만 남기며 서버 body·URL·auth challenge·자격을 포함하지 않는다. 이 제한과 코드 연결은 실제10GiB push 성공의 근거가 아니다.
 
-기존 내장 registry의 Task 자격 경로는 유지한다.
+내장 registry의 Task 이미지도 같은 길로 받는다. sfcd가 Task에 서명한 로그인으로 그 registry authority를 직접 읽고(시스템 인증서 신뢰), 엔진에는 ticket으로만 넘긴다.
 
 ## 앱 없는 관리 source 승인과 로그인 시험
 
 관리 source의 읽기는 앱 Task의 grant를 빌리지 않는다. 관리자가 source를 읽을 노드를 명시하여 기존 Vault Approvals의 사용 참조를 예약한다. source 정의 등록 자체는 Secret 읽기 승인이 아니다. `none` source도 관리 조회를 수행할 노드를 명시적으로 bind한다.
 
 ```sh
-mydc --tenant payments registry external bind ghcr --node node-a
-mydc --tenant payments registry external check ghcr
-mydc --tenant payments registry external check ghcr --image ghcr.io/my-org/app:release
+sfcli --tenant payments registry external bind ghcr --node node-a
+sfcli --tenant payments registry external check ghcr
+sfcli --tenant payments registry external check ghcr --image ghcr.io/my-org/app:release
 ```
 
 bind에는 현재 tenant ManageRegistry와 지정 노드 Deploy 권한이 필요하다. CLI는 먼저 공개 계획을 읽는다. 그다음 원 source 지문·record/root CAS·epoch·사용자 서명을 저장한 뒤 필요한 Group 승인을 진행한다. Group 비밀번호는 터미널에서 묻는다(`--no-input`이면 실패). 동일 Group은 한 번만 요청하며 비밀번호를 operation에 저장하지 않는다. 최초 bind 예약은
@@ -78,7 +78,7 @@ bind에는 현재 tenant ManageRegistry와 지정 노드 Deploy 권한이 필요
 소비한다. 모든 realm/Group이 함께 유효한 하나의 시각으로 기존 Acquire 검사를 수행하며,
 뒤 승인 때문에 앞 승인의 최대 나이가 지났으면 거부한다. 원 bind operation·ID·서명은 유지한다.
 이 시각은 최초 예약에만 쓰고 owner의 실제 읽기는 원 Grant.Pins와 현재 요청 시각으로
-권한·철회·max-age를 다시 검사한다. 불명 응답은 같은 `--id`로 다시 실행하거나 `mydc op resume ID`로 원 서명·선택을 그대로 보낸다.
+권한·철회·max-age를 다시 검사한다. 불명 응답은 같은 `--id`로 다시 실행하거나 `sfcli op resume ID`로 원 서명·선택을 그대로 보낸다.
 
 관리 source 사용의 `Use.Purpose`는 `registry-source`이고, Group 서명 대상의 `purpose`도 같은 값이다. 이 승인의 actions는 `resolve,registry`이며 앱의 기본 `resolve,mount`와 호환되지 않는다. source와 앱이 같은 이름·사용자를 사용해도 승인·usage·종료 증명을 교환할 수 없다. schema는1이며 기존 purpose 없는 앱 서명 형식은 유지한다.
 
@@ -93,7 +93,7 @@ bind에는 현재 tenant ManageRegistry와 지정 노드 Deploy 권한이 필요
 
 로그인만 지정하면 실제 HTTPS `/v2/` challenge를 확인한다. Image가 있으면 해당 source 범위 내 이름만 허용하고 tag를 immutable manifest/index digest로 해석한다. owner의 OS/architecture에서 선택한 config를 읽고 각 layer의 인증된 HEAD와 선언 크기를 확인한다. 응답 `Image`는 `{Normalized,Registry,Repository,Pinned,Digest,MediaType,ManifestBytes,Platforms?}`이며 config 원문은 없다. `Pull`은 `{ManifestDigest,Platform,Blobs,CompressedBytes}`로 선택 platform과 확인 범위를 표시한다. 전체 layer 다운로드·Docker 적재·실행 성공을 의미하지 않는다. 이미지 신뢰 정책이나 배포 권한도 추가하지 않는다.
 
-성공 Code는 `OK`다. `UNAUTHORIZED`, `DENIED`, `NOT_FOUND`, `UNSUPPORTED`, `UNAVAILABLE`, `TIMEOUT`, `CANCELLED`, `PLAIN_HTTP`, `PLATFORM_MISMATCH` 등 레지스트리 클라이언트의 제한된 코드(`registryclient.ValidResultCode`)를 그대로 반환하고 실패 시 Image/Pull을 성공 근거처럼 남기지 않는다. `PLAIN_HTTP`는 source가 TLS hello에 평문 HTTP로 답할 때다. source는 HTTPS로만 읽으며 SDK의 HTTP 재시도는 쓰지 않는다. `PLATFORM_MISMATCH`는 선택한 config의 OS/architecture(/variant)가 owner와 다르거나 비어 있을 때다. 예를 들어 `crane append`로 만든 이미지가 그렇다. `UNSUPPORTED`는 지원하지 않는 매니페스트 media type이나 registry의 405/501 응답에만 쓴다. `At`는 이 호출의 결과 시각이며 마지막 성공 이력을 내구 저장했다는 뜻이 아니다. provider 오류 body·URL·challenge·자격은 결과에 없다. CLI는 결과를 출력하고 성공은0, registry 시험 실패는3으로 종료한다. 정책/전송 실패는 기존 CLI 오류 규칙을 따른다.
+성공 Code는 `OK`다. `UNAUTHORIZED`, `DENIED`, `NOT_FOUND`, `UNSUPPORTED`, `UNAVAILABLE`, `TIMEOUT`, `CANCELLED`, `PLAIN_HTTP`, `PLATFORM_MISMATCH`, `RATE_LIMITED` 등 레지스트리 클라이언트의 제한된 코드(`registryclient.ValidResultCode`)를 그대로 반환하고 실패 시 Image/Pull을 성공 근거처럼 남기지 않는다. `PLAIN_HTTP`는 source가 TLS hello에 평문 HTTP로 답할 때다. source는 HTTPS로만 읽으며 SDK의 HTTP 재시도는 쓰지 않는다. `PLATFORM_MISMATCH`는 선택한 config의 OS/architecture(/variant)가 owner와 다르거나 비어 있을 때다. 예를 들어 `crane append`로 만든 이미지가 그렇다. `UNSUPPORTED`는 지원하지 않는 매니페스트 media type이나 registry의 405/501 응답에만 쓴다. `RATE_LIMITED`는 registry가 429로 읽기를 막을 때다(Docker Hub는 익명 pull 수를 주소마다 제한한다). 엔진에 이미 있는 digest 이미지는 조정이 반복돼도 source를 다시 읽지 않는다. 이 재사용은 source 자격 증명을 다시 확인하지 않는다. 배포마다 sfc의 이미지 허가(trust 규칙, binding)는 다시 확인하지만, source 쪽에서 자격을 회수해도 그 로컬 이미지가 지워질 때까지는 같은 이미지를 계속 쓴다. `At`는 이 호출의 결과 시각이며 마지막 성공 이력을 내구 저장했다는 뜻이 아니다. provider 오류 body·URL·challenge·자격은 결과에 없다. CLI는 결과를 출력하고 성공은0, registry 시험 실패는3으로 종료한다. 정책/전송 실패는 기존 CLI 오류 규칙을 따른다.
 
 ## source 읽기 중지와 사용 참조 반환
 
@@ -108,12 +108,12 @@ owner는 원 source 세대를 로컬에서 fence하고, 진행 중인 Secret fet
 
 노드 간 source work는 `external-registry-work:{Selection:{Tenant,ID,Generation},At}`이며 `{Reader,Inputs:{ReadSet,Entries},Index,Epoch}`를 owner에게만 반환한다. 기존 SecretFetch의 `AppInputFetch`에 선택 `ExternalRegistry:{Tenant,ID,Generation}`를 사용한다. 이 경우 Move·Task·Binding digest는 비우고 Binding.At, Consumer, MinimumIndex, ReadSet, Realm, Secret은 정확한 현재 허가를 따른다. 이 메시지를 관리 Unix listener의 일반 사용자 읽기로 노출하지 않는다.
 
-`mydc image usages --source ID`/User `image-usages`의 ExternalSource selector는 이 정의에 매칭되는 현재 tenant의 앱/Task·보존 버전 참조를 읽는다. 비활성/삭제 후에도 같은 source 선택 코어가 원 정의를 보존하여 사용처가 익명으로 사라지지 않는다. 승인된 Secret reader의 현재 성공 여부나 실제 컨테이너 생존 count와는 별개의 선언 참조다. [행과 페이지 명세](image-usages.md)를 따른다.
+`sfcli image usages --source ID`/User `image-usages`의 ExternalSource selector는 이 정의에 매칭되는 현재 tenant의 앱/Task·보존 버전 참조를 읽는다. 비활성/삭제 후에도 같은 source 선택 코어가 원 정의를 보존하여 사용처가 익명으로 사라지지 않는다. 승인된 Secret reader의 현재 성공 여부나 실제 컨테이너 생존 count와는 별개의 선언 참조다. [행과 페이지 명세](image-usages.md)를 따른다.
 
 
 ## 실제 이미지 받기 결과 조회
 
-`mydc registry external pulls` 또는 User `external-registry-pulls`로 선택한 tenant의 최근 실제 받기 결과를 읽는다. 로그인 시험이나 layer HEAD 검사는 이 관측을 쓰지 않는다. 이미 존재하는 config를 재사용한 경우도 새 받기 성공을 만들지 않는다.
+`sfcli registry external pulls` 또는 User `external-registry-pulls`로 선택한 tenant의 최근 실제 받기 결과를 읽는다. 로그인 시험이나 layer HEAD 검사는 이 관측을 쓰지 않는다. 이미 존재하는 config를 재사용한 경우도 새 받기 성공을 만들지 않는다.
 
 요청과 응답은 다음과 같다. `Schema`는 1이며 기존 Session/request proof·유한 User 요청의 EOF 규칙을 그대로 사용한다.
 
@@ -133,7 +133,7 @@ owner는 원 source 세대를 로컬에서 fence하고, 진행 중인 Secret fet
 | Sequence | 같은 노드의 tenant × authority별 내구 완료 순서 |
 | ReportedAt, Stale | 해당 노드에서 관측을 보고한 Unix 밀리초와 기존 노드 관측 한도 초과 여부 |
 
-노드마다 tenant × authority의 마지막 결과 하나를 기존 `observations.db`에 보관하고 기존 서명된 MYDCP Report 경로로 전달한다. 공개 응답에는 노드 서명·자격·Vault 사용 grant·원격 body·header를 담지 않는다. `Stage=load,Code=OK`는 해당 시도에서 Docker 적재 후 config inspect까지 성공했다는 뜻이며 컨테이너 배포 성공을 뜻하지 않는다. 현재 저장소 가용성·로그인 허가·이미지 삭제 허가로 사용하지 않는다.
+노드마다 tenant × authority의 마지막 결과 하나를 기존 `observations.db`에 보관하고 기존 서명된 SFCP Report 경로로 전달한다. 공개 응답에는 노드 서명·자격·Vault 사용 grant·원격 body·header를 담지 않는다. `Stage=load,Code=OK`는 해당 시도에서 Docker 적재 후 config inspect까지 성공했다는 뜻이며 컨테이너 배포 성공을 뜻하지 않는다. 현재 저장소 가용성·로그인 허가·이미지 삭제 허가로 사용하지 않는다.
 
 현재 tenant의 Read 또는 ManageRegistry 권한과 등록된 노드의 현재 키로 검사한다. 다른 tenant의 행·노드 서명·개인키는 반환하지 않는다. source가 변경/삭제되어도 원 결과의 Source 이름·완료 시각은 유지된다. 삭제된 노드나 교체된 키의 관측은 현재 키의 결과로 승격하지 않는다. 새 샘플을 못 받으면 이전 결과를 `Stale=true`로 반환할 수 있으며, 관측이 없으면 행이 없는 것이지 성공이 아니다.
 

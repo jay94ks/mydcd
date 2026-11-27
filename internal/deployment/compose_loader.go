@@ -11,8 +11,8 @@ import (
 
 	"github.com/compose-spec/compose-go/v2/loader"
 	ct "github.com/compose-spec/compose-go/v2/types"
-	"github.com/jay94ks/mydcd/internal/engine"
-	"github.com/jay94ks/mydcd/internal/workload"
+	"github.com/jay94ks/seafield/internal/engine"
+	"github.com/jay94ks/seafield/internal/workload"
 	"gopkg.in/yaml.v3"
 )
 
@@ -50,14 +50,14 @@ func fieldsOnly(n *yaml.Node, shape any) error {
 	return nil
 }
 func extension(n *yaml.Node, out any) error {
-	if x := nodeField(n, "x-mydc"); x != nil {
+	if x := nodeField(n, "x-sfc"); x != nil {
 		return strictNode(x, out)
 	}
 	return nil
 }
 
 // Compose's wider language is narrowed BEFORE the library loader can resolve
-// paths, environment, include/extends or extensions. These are MyDC admission
+// paths, environment, include/extends or extensions. These are Seafield Cluster admission
 // rules; union conversion and the standard model belong to compose-go.
 func composeSubset(root *yaml.Node) error {
 	if err := lifecycleSubset(root); err != nil {
@@ -236,9 +236,9 @@ func standardCompose(raw []byte) (*ct.Project, error) {
 	if yaml.Unmarshal(raw, &model) != nil {
 		return nil, ErrInputs
 	}
-	// A secret with neither file nor external is MyDC's final keyset, supplied by its Vault owner, outside Compose's
+	// A secret with neither file nor external is Seafield Cluster's final keyset, supplied by its Vault owner, outside Compose's
 	// file/environment source model. Project it as an external reference ONLY
-	// in the standard model, then restore the original MyDC declaration below.
+	// in the standard model, then restore the original Seafield Cluster declaration below.
 	// This neither grants access nor claims an external Docker secret exists.
 	if definitions, ok := model["secrets"].(map[string]any); ok {
 		for _, entry := range definitions {
@@ -251,8 +251,8 @@ func standardCompose(raw []byte) (*ct.Project, error) {
 			}
 		}
 	}
-	return loader.LoadWithContext(context.Background(), ct.ConfigDetails{WorkingDir: "/", ConfigFiles: []ct.ConfigFile{{Filename: "mydc-compose.yaml", Config: model}}, Environment: ct.Mapping{}}, func(o *loader.Options) {
-		o.SetProjectName("mydc", true)
+	return loader.LoadWithContext(context.Background(), ct.ConfigDetails{WorkingDir: "/", ConfigFiles: []ct.ConfigFile{{Filename: "sfc-compose.yaml", Config: model}}, Environment: ct.Mapping{}}, func(o *loader.Options) {
+		o.SetProjectName("sfc", true)
 		o.SkipInterpolation = true
 		o.SkipInclude = true
 		o.SkipExtends = true
@@ -278,7 +278,7 @@ func loadCompose(raw []byte, root *yaml.Node, standalone ...bool) (Compose, erro
 	if n := nodeField(root, "name"); n != nil {
 		c.Name = n.Value
 	}
-	if err = extension(root, &c.MyDC); err != nil {
+	if err = extension(root, &c.Sfc); err != nil {
 		return Compose{}, err
 	}
 	for name, s := range project.Services {
@@ -393,7 +393,7 @@ func loadCompose(raw []byte, root *yaml.Node, standalone ...bool) (Compose, erro
 				}
 			}
 		}
-		if err = extension(n, &v.MyDC); err != nil {
+		if err = extension(n, &v.Sfc); err != nil {
 			return Compose{}, err
 		}
 		c.Services[name] = v
@@ -403,7 +403,7 @@ func loadCompose(raw []byte, root *yaml.Node, standalone ...bool) (Compose, erro
 	}
 	for name, n := range project.Networks {
 		v := ComposeNetwork{Name: n.Name, External: bool(n.External), Driver: n.Driver}
-		if err = extension(nodeField(nodeField(root, "networks"), name), &v.MyDC); err != nil {
+		if err = extension(nodeField(nodeField(root, "networks"), name), &v.Sfc); err != nil {
 			return Compose{}, err
 		}
 		c.Networks[name] = v
@@ -413,7 +413,7 @@ func loadCompose(raw []byte, root *yaml.Node, standalone ...bool) (Compose, erro
 	}
 	for name, s := range project.Volumes {
 		v := ComposeVolume{Name: s.Name, External: bool(s.External), Driver: s.Driver}
-		if err = extension(nodeField(nodeField(root, "volumes"), name), &v.MyDC); err != nil {
+		if err = extension(nodeField(nodeField(root, "volumes"), name), &v.Sfc); err != nil {
 			return Compose{}, err
 		}
 		c.Volumes[name] = v
@@ -424,7 +424,7 @@ func loadCompose(raw []byte, root *yaml.Node, standalone ...bool) (Compose, erro
 	for name, s := range project.Secrets {
 		v := ComposeSecret{Name: s.Name, File: s.File, External: bool(s.External)}
 		rawDefinition := nodeField(nodeField(root, "secrets"), name)
-		if err = extension(rawDefinition, &v.MyDC); err != nil {
+		if err = extension(rawDefinition, &v.Sfc); err != nil {
 			return Compose{}, err
 		}
 		if nodeField(rawDefinition, "file") == nil {

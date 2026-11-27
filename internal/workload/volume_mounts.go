@@ -8,10 +8,10 @@ import (
 	"errors"
 	"reflect"
 
-	"github.com/jay94ks/mydcd/internal/engine"
-	"github.com/jay94ks/mydcd/internal/reconcile"
-	"github.com/jay94ks/mydcd/internal/storage"
-	"github.com/jay94ks/mydcd/internal/workload/volumes"
+	"github.com/jay94ks/seafield/internal/engine"
+	"github.com/jay94ks/seafield/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/storage"
+	"github.com/jay94ks/seafield/internal/workload/volumes"
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/api/types/mount"
 )
@@ -92,7 +92,7 @@ func matchTaskMounts(got container.InspectResponse, files []InputFile, values []
 			return false
 		}
 	}
-	return matchResolvedTaskMounts(got, files, values, namedMounts(values))
+	return matchResolvedTaskMounts(got, files, len(values), namedMounts(values))
 }
 
 func (d *DockerDriver) taskMounts(values []VolumeMount) ([]mount.Mount, error) {
@@ -107,21 +107,21 @@ func (d *DockerDriver) taskMounts(values []VolumeMount) ([]mount.Mount, error) {
 		}
 		m := mount.Mount{Type: mount.TypeVolume, Source: source, Target: v.Target, ReadOnly: !v.Consumer.Writable, VolumeOptions: &mount.VolumeOptions{NoCopy: true}}
 		if bind {
-			m.Type = mount.TypeBind
-			m.VolumeOptions = nil
-			m.BindOptions = &mount.BindOptions{Propagation: mount.PropagationRPrivate, CreateMountpoint: false, NonRecursive: true}
+			// A fixed volume is an engine "sfc" volume; the engine asks sfcd
+			// for the held directory when it mounts it (purpose 35).
+			m.VolumeOptions.DriverConfig = &mount.Driver{Name: volumes.EngineVolumeDriver}
 		}
 		result = append(result, m)
 	}
 	return result, nil
 }
 
-func matchResolvedTaskMounts(got container.InspectResponse, files []InputFile, values []VolumeMount, mounts []mount.Mount) bool {
+func matchResolvedTaskMounts(got container.InspectResponse, files []InputFile, values int, mounts []mount.Mount) bool {
 	files = mountedInputFiles(files)
-	if len(mounts) != len(values) {
+	if len(mounts) != values {
 		return false
 	}
-	if got.HostConfig == nil || len(got.Mounts) != len(files)+len(values) || len(got.HostConfig.Mounts) != len(files)+len(values) {
+	if got.HostConfig == nil || len(got.Mounts) != len(files)+values || len(got.HostConfig.Mounts) != len(files)+values {
 		return false
 	}
 	binds := got
@@ -129,31 +129,15 @@ func matchResolvedTaskMounts(got container.InspectResponse, files []InputFile, v
 	host := *got.HostConfig
 	host.Mounts = nil
 	binds.HostConfig = &host
+	// Every bind is an input file; volumes, fixed ones included, are
+	// engine volumes and are matched below.
 	for _, m := range got.Mounts {
 		if m.Type == mount.TypeBind {
-			fixed := false
-			for _, want := range mounts {
-				if want.Type == mount.TypeBind && m.Destination == want.Target {
-					fixed = true
-				}
-			}
-			if fixed {
-				continue
-			}
 			binds.Mounts = append(binds.Mounts, m)
 		}
 	}
 	for _, m := range got.HostConfig.Mounts {
 		if m.Type == mount.TypeBind {
-			fixed := false
-			for _, want := range mounts {
-				if want.Type == mount.TypeBind && m.Target == want.Target {
-					fixed = true
-				}
-			}
-			if fixed {
-				continue
-			}
 			host.Mounts = append(host.Mounts, m)
 		}
 	}
@@ -168,7 +152,7 @@ func matchResolvedTaskMounts(got container.InspectResponse, files []InputFile, v
 			}
 		}
 		for _, m := range got.Mounts {
-			if m.Destination == want.Target && m.RW == !want.ReadOnly && (want.Type == mount.TypeVolume && m.Type == mount.TypeVolume && m.Name == want.Source && m.Driver == "local" || want.Type == mount.TypeBind && m.Type == mount.TypeBind && m.Source == want.Source && m.Propagation == mount.PropagationRPrivate) {
+			if m.Destination == want.Target && m.RW == !want.ReadOnly && (want.Type == mount.TypeVolume && m.Type == mount.TypeVolume && m.Name == want.Source && m.Driver == mountDriver(want)) {
 				actual++
 			}
 		}

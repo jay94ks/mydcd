@@ -7,16 +7,16 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/jay94ks/mydcd/internal/cluster/control"
-	"github.com/jay94ks/mydcd/internal/web/mydc"
+	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/web/sfc"
 )
 
-// Image reference check (UI-3F image picker) in mydcd's real contract
-// (REQ-31 `image-resolve`, docs/reference/image-resolution.md): mydcd
+// Image reference check (UI-3F image picker) in sfcd's real contract
+// (REQ-31 `image-resolve`, docs/reference/image-resolution.md): sfcd
 // normalizes the ref, picks the source the tenant would pull from (the
 // built-in registry, an external source or an anonymous trusted host),
 // checks the tenant's image trust and resolves the immutable digest. It is
-// a preview: mydcd checks trust again at every pull. The web only shapes
+// a preview: sfcd checks trust again at every pull. The web only shapes
 // the answer.
 
 type imageResolveView struct {
@@ -32,7 +32,7 @@ type imageResolveView struct {
 	Trusted      bool                `json:"trusted"`
 	Rules        []resolveRuleView   `json:"rules"`
 	Reason       string              `json:"reason,omitempty"`
-	Code         string              `json:"code,omitempty"` // "" = resolved; else mydcd's code in lower case
+	Code         string              `json:"code,omitempty"` // "" = resolved; else sfcd's code in lower case
 }
 
 type imagePlatformView struct {
@@ -47,7 +47,7 @@ type resolveRuleView struct {
 
 var resolveKinds = map[string]string{"managed": "builtin", "external": "external", "unknown": "unknown"}
 
-// POST /t/{t}/images/resolve {ref} → imageResolveView. A ref mydcd cannot
+// POST /t/{t}/images/resolve {ref} → imageResolveView. A ref sfcd cannot
 // parse (INVALID_IMAGE) is 422 invalid-ref.
 func (s *Server) handleImageResolve(w http.ResponseWriter, r *http.Request, ws *webSession) {
 	var req struct {
@@ -62,7 +62,7 @@ func (s *Server) handleImageResolve(w http.ResponseWriter, r *http.Request, ws *
 		writeError(w, http.StatusUnprocessableEntity, "invalid-ref", "ref: 1 to 1024 bytes")
 		return
 	}
-	read(s, w, r, ws, func(ctx context.Context, c mydc.Conn) (imageResolveView, error) {
+	read(s, w, r, ws, func(ctx context.Context, c sfc.Conn) (imageResolveView, error) {
 		res, err := c.ResolveImage(ctx, tenant, q)
 		if err != nil {
 			return imageResolveView{}, err

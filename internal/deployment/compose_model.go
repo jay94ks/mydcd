@@ -3,9 +3,9 @@
 package deployment
 
 import (
-	"github.com/jay94ks/mydcd/internal/ingress"
-	"github.com/jay94ks/mydcd/internal/workload"
-	checker "github.com/jay94ks/mydcd/internal/workload/lifecycle"
+	"github.com/jay94ks/seafield/internal/ingress"
+	"github.com/jay94ks/seafield/internal/workload"
+	checker "github.com/jay94ks/seafield/internal/workload/lifecycle"
 )
 
 // Compose is the bounded, single-document application input. No field contains
@@ -18,7 +18,7 @@ type Compose struct {
 	Networks   map[string]ComposeNetwork `yaml:"networks,omitempty"`
 	Volumes    map[string]ComposeVolume  `yaml:"volumes,omitempty"`
 	Secrets    map[string]ComposeSecret  `yaml:"secrets,omitempty"`
-	MyDC       AppExtension              `yaml:"x-mydc,omitempty"`
+	Sfc        AppExtension              `yaml:"x-sfc,omitempty"`
 }
 type ComposeService struct {
 	Ports      []workload.PublishedPort `yaml:"ports,omitempty" json:",omitempty"`
@@ -53,7 +53,7 @@ type ComposeService struct {
 	Healthcheck     *Healthcheck               `yaml:"healthcheck,omitempty"`
 	DNS             []string                   `yaml:"dns,omitempty"`
 	DNSSearch       []string                   `yaml:"dns_search,omitempty"`
-	MyDC            ServiceExtension           `yaml:"x-mydc,omitempty"`
+	Sfc             ServiceExtension           `yaml:"x-sfc,omitempty"`
 	Labels          map[string]string          `yaml:"labels,omitempty" json:",omitempty"`
 }
 type Arguments []string
@@ -121,7 +121,7 @@ type ComposeNetwork struct {
 	Name     string           `yaml:"name,omitempty"`
 	External bool             `yaml:"external,omitempty"`
 	Driver   string           `yaml:"driver,omitempty"`
-	MyDC     NetworkExtension `yaml:"x-mydc,omitempty"`
+	Sfc      NetworkExtension `yaml:"x-sfc,omitempty"`
 }
 type NetworkExtension struct {
 	MTU             int                        `yaml:"mtu,omitempty"`
@@ -174,7 +174,7 @@ type ComposeVolume struct {
 	Name     string          `yaml:"name,omitempty"`
 	External bool            `yaml:"external,omitempty"`
 	Driver   string          `yaml:"driver,omitempty"`
-	MyDC     VolumeExtension `yaml:"x-mydc,omitempty"`
+	Sfc      VolumeExtension `yaml:"x-sfc,omitempty"`
 }
 type VolumeExtension struct {
 	Node string `yaml:"node,omitempty"`
@@ -203,12 +203,12 @@ type ComposeSecret struct {
 	File     string `yaml:"file,omitempty"`
 	Name     string `yaml:"name,omitempty"`
 	External bool   `yaml:"external,omitempty"`
-	MyDC     struct {
+	Sfc      struct {
 		// Source is service-final-keyset for a secret with neither file
 		// nor external (normalize); app.yaml gives only the key.
 		Source string `yaml:"-"`
 		Key    string `yaml:"key,omitempty"`
-	} `yaml:"x-mydc,omitempty"`
+	} `yaml:"x-sfc,omitempty"`
 }
 type AppExtension struct {
 	Lifecycle *LifecycleDeclaration `yaml:"lifecycle,omitempty" json:",omitempty"`

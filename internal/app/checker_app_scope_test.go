@@ -7,10 +7,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jay94ks/mydcd/internal/deployment"
-	"github.com/jay94ks/mydcd/internal/engine"
-	checker "github.com/jay94ks/mydcd/internal/workload/lifecycle"
-	contract "github.com/jay94ks/mydcd/lifecycle/v1"
+	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/engine"
+	checker "github.com/jay94ks/seafield/internal/workload/lifecycle"
+	contract "github.com/jay94ks/seafield/lifecycle/v1"
 )
 
 func appScopeState(t *testing.T, id string, phase contract.Phase, status contract.Status, fresh int64) appCheckerState {
@@ -80,7 +80,7 @@ func TestAppDependencyReadsBoundServiceFactsAndIgnoresAppGate(t *testing.T) {
 			t.Fatal("stale/foreign target accepted", got)
 		}
 	}
-	// A stable task keeps its last fact time; renewals go over MyDCP. Only the
+	// A stable task keeps its last fact time; renewals go over SFCP. Only the
 	// reducer's Expired mark makes it stale, never the stored At's age.
 	if got := appTargetDependency(target, s, "service_healthy", 100+10*30); got.Status != contract.Pass {
 		t.Fatal("stable task went stale by stored age", got)

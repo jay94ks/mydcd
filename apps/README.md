@@ -9,7 +9,7 @@
 | [lifecycle-compiler](lifecycle-compiler/README.md) | job이 있을 때만 기동하는 lifecycle Go 컴파일러 |
 | [php](php/README.md) | PHP/PDO 샘플 웹 컨테이너 |
 | [mysql](mysql/README.md) | MySQL 샘플 컨테이너의 bootstrap/health 명령 |
-| [mydc-web](mydc-web/README.md) | 웹 관리 UI 데몬 컨테이너(`cmd/mydc-web`, mydc.sock 마운트) |
+| [sfc-web](sfc-web/README.md) | 웹 관리 UI 데몬 컨테이너(`cmd/sfc-web`, sfcdp.sock 마운트) |
 | [authclient-fixture](authclient-fixture/README.md) | non-voter 소켓과 pin한 voter의 유한 실제 인증 시험 client |
 | [dockerbackend](dockerbackend/README.md) | 실제 Engine/Ingress 경계 시험에 넣는 컨테이너 앱 |
 

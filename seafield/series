@@ -1,0 +1,21 @@
+# 적용 순서. prune.txt를 지운 뒤 위에서부터 git am 한다. refresh-patches.sh가 쓴다.
+0001-logdrivers-keep-only-json-file-and-local.patch
+0002-swarm-run-without-the-cluster-component-drop-swarm-c.patch
+0003-listen-unix-sockets-only-root-0600-kernel-peer-check.patch
+0004-events-numbered-durable-event-feed-GET-seafield-even.patch
+0005-monitor-cgroup-v2-memory.events-and-PSI-triggers-as-.patch
+0006-logs-seafield-queue-log-driver-numbered-capped-queue.patch
+0007-volumes-built-in-sfc-volume-driver-over-the-sfcd-eng.patch
+0008-build-BuildKit-only-classic-builder-refused-features.patch
+0009-volumes-mount-the-directory-descriptor-sfcd-passes-o.patch
+0010-logs-data-free-debounced-lines-stored-event-pull-ack.patch
+0011-network-built-in-sfc-network-driver-bridge-driver-wi.patch
+0012-logs-bulk-only-read-in-the-segment-record-encoding.patch
+0013-plugins-no-v1-plugin-discovery-never-pick-up-a-co-in.patch
+0014-sfcp-copy-of-the-cluster-s-pkg-sfcp-wire-and-enginem.patch
+0015-sfcd-engine-only-SFCP-session-on-run-sfe-sfcd.sock-r.patch
+0016-restore-start-restart-policy-containers-that-failed-.patch
+0017-images-pull-only-from-sfcd-over-the-engine-socket-no.patch
+0018-sfcp-refresh-the-copy-of-pkg-sfcp-CheckPeerExe.patch
+0019-sfed-name-the-engine-in-version-no-docker-group-on-t.patch
+0020-exec-each-exec-in-its-own-sub-cgroup-sfe-runc-exec_d.patch

@@ -8,10 +8,10 @@ import (
 	"encoding/json"
 	"strings"
 
-	"github.com/jay94ks/mydcd/internal/access"
-	"github.com/jay94ks/mydcd/internal/cluster/state"
-	"github.com/jay94ks/mydcd/internal/credentials"
-	"github.com/jay94ks/mydcd/internal/deployment"
+	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/credentials"
+	"github.com/jay94ks/seafield/internal/deployment"
 )
 
 // UserOperation is immutable across transmission, relay and result recovery.
@@ -49,7 +49,7 @@ func AppFieldCASAllowed(change Change) bool {
 func OperationBytes(op UserOperation) []byte {
 	op.Signature = nil
 	b, _ := json.Marshal(op)
-	return append([]byte("mydc-user-operation-1\x00"), b...)
+	return append([]byte("sfc-user-operation-1\x00"), b...)
 }
 
 // VerifyOriginal proves immutable ownership without asserting current account
@@ -187,8 +187,11 @@ func (p Policy) AdmitModule(s state.State, command state.Command) bool {
 		return false
 	}
 	p = current
-	if command.Key == NodeShellKey && command.Kind == state.ModuleReport && strings.HasPrefix(command.Actor, "node/") {
-		_, err := p.nodeShellReport(s, command)
+	if book, ok := bookFor(command.Key); ok && book.AdmitReport != nil && strings.HasPrefix(command.Actor, "node/") && (!book.ReportOnly || command.Kind == state.ModuleReport) {
+		return book.AdmitReport(p, s, command) == nil
+	}
+	if command.Key == CredentialsKey && command.Kind == state.ModuleReport && strings.HasPrefix(command.Actor, "node/") {
+		_, err := p.credentialStoreReport(s, command)
 		return err == nil
 	}
 	if command.Key == CertificatesKey && command.Kind == state.ModuleReport && strings.HasPrefix(command.Actor, "node/") {
@@ -230,20 +233,12 @@ func (p Policy) AdmitModule(s state.State, command state.Command) bool {
 		_, err := p.registryMaintenanceReport(s, command)
 		return err == nil
 	}
-	if command.Key == ImageCacheKey && strings.HasPrefix(command.Actor, "node/") {
-		_, err := p.imageCacheReport(s, command)
+	if command.Key == ResourcesKey && strings.HasPrefix(command.Actor, "node/") && bridgeClosedValue(command.Value) {
+		_, err := p.bridgeClosedReport(s, command)
 		return err == nil
 	}
 	if command.Key == ResourcesKey && strings.HasPrefix(command.Actor, "node/") {
 		_, err := p.systemNetworkReport(s, command)
-		return err == nil
-	}
-	if command.Key == TunnelReconnectKey && strings.HasPrefix(command.Actor, "node/") {
-		_, err := p.tunnelReport(s, command)
-		return err == nil
-	}
-	if command.Key == CompactKey && strings.HasPrefix(command.Actor, "node/") {
-		_, err := p.compactReport(s, command)
 		return err == nil
 	}
 	if command.Key == RegistriesKey && strings.HasPrefix(command.Actor, "node/") {
@@ -280,6 +275,10 @@ func (p Policy) AdmitModule(s state.State, command state.Command) bool {
 			return err == nil
 		}
 		_, err := p.backupReport(s, command)
+		return err == nil
+	}
+	if command.Key == VaultKey && command.Kind == state.ModuleReport && strings.HasPrefix(command.Actor, "node/") {
+		_, err := p.vaultHolderReport(s, command)
 		return err == nil
 	}
 	if command.Key == VaultKey && strings.HasPrefix(command.Actor, "node/") {
@@ -341,14 +340,18 @@ func (p Policy) AuthorizeResume(s state.State, c access.Catalog, op UserOperatio
 }
 
 func (p Policy) authorizeChange(s state.State, c access.Catalog, op UserOperation) error {
-	if CommandKey(op.Change.Action) == NodeShellKey {
-		return p.authorizeNodeShell(s, c, op)
+	book, booked := actionBook(op.Change.Action)
+	if booked && book.Authorize != nil && book.OwnScope {
+		return book.Authorize(p, s, c, op)
 	}
 	if CommandKey(op.Change.Action) == ImageBuildKey {
 		return p.authorizeImageBuild(c, op)
 	}
 	if !selfLogout(op) && c.OperationAllowed(op.Session, op.Change.Action) != nil {
 		return access.ErrDenied
+	}
+	if booked && book.Authorize != nil {
+		return book.Authorize(p, s, c, op)
 	}
 	if CommandKey(op.Change.Action) == CertificatesKey {
 		return p.authorizeCertificate(c, op)
@@ -400,24 +403,32 @@ func (p Policy) authorizeChange(s state.State, c access.Catalog, op UserOperatio
 		}
 		return c.AuthorizeSession(op.Session, p.Cluster, issuer, op.At, v.Tenant, access.ManageVolumes, "")
 	case "add-credential":
+		// The account's own key (with its proof), or a system administrator
+		// changing any account, its own too, without a proof.
 		var v access.CredentialAddition
 		if canonical(op.Change.Payload, &v) != nil {
 			return access.ErrInvalid
 		}
-		return c.AuthorizeCredentialManagement(op.Session, p.Cluster, issuer, op.At, v.User)
+		if v.User == op.Session.User && (v.Proof != nil || !c.SystemAllowed(v.User)) {
+			return c.AuthorizeCredentialManagement(op.Session, p.Cluster, issuer, op.At, v.User)
+		}
 	case "disable-credential":
 		var v access.CredentialDisable
 		if canonical(op.Change.Payload, &v) != nil {
 			return access.ErrInvalid
 		}
-		return c.AuthorizeCredentialManagement(op.Session, p.Cluster, issuer, op.At, v.User)
+		if v.User == op.Session.User {
+			if err := c.AuthorizeCredentialManagement(op.Session, p.Cluster, issuer, op.At, v.User); err == nil || !c.SystemAllowed(v.User) {
+				return err
+			}
+		}
 	case "issue-initial-credential":
 		var fact credentials.InitialFact
 		if canonical(op.Change.Payload, &fact) != nil || !fact.Verify() || op.Change.Expected != fact.Request.ExpectedUserRevision {
 			return access.ErrInvalid
 		}
 		return p.InitialCredentialAllowed(s, op.Session, op.At, fact.Request)
-	case "prune-node-images", "reconnect-tunnel", "raft-compact", "put-user", "set-account-scope", "create-tenant", "begin-tenant-retirement", "finish-tenant-retirement", "set-nodes", "rotate-node-identity", "drain-node", "cordon-node", "uncordon-node", "invite-node", "promote-node", "demote-node", "rotate-ledger", "isolate-node", "restore-node", "remove-node", "force-remove-node", "resume-node-operation", "rotate-node-operations":
+	case "put-user", "set-account-scope", "create-tenant", "begin-tenant-retirement", "finish-tenant-retirement", "set-nodes", "rotate-node-identity", "set-node-endpoint", "drain-node", "cordon-node", "uncordon-node", "invite-node", "cancel-node-invite", "abort-node-join", "promote-node", "demote-node", "rotate-ledger", "isolate-node", "restore-node", "remove-node", "force-remove-node", "resume-node-operation", "rotate-node-operations":
 	case "set-membership":
 		var v access.Membership
 		if canonical(op.Change.Payload, &v) != nil {
@@ -425,7 +436,7 @@ func (p Policy) authorizeChange(s state.State, c access.Catalog, op UserOperatio
 		}
 		action, tenant = access.ManageMembers, v.Tenant
 	case "set-trust":
-		var v TrustAssignment
+		var v TrustChange
 		if canonical(op.Change.Payload, &v) != nil {
 			return access.ErrInvalid
 		}

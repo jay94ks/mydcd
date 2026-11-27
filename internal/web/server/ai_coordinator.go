@@ -16,8 +16,8 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/jay94ks/mydcd/internal/web/ai"
-	"github.com/jay94ks/mydcd/internal/web/store"
+	"github.com/jay94ks/seafield/internal/web/ai"
+	"github.com/jay94ks/seafield/internal/web/store"
 )
 
 // The coordinator (UI-B0~B2, W2.2): the person's own conversations. It
@@ -27,7 +27,7 @@ import (
 // them; tool results are never stored (only masked activity lines).
 
 const (
-	aiPromptVersion = "mydc-coordinator-v1"
+	aiPromptVersion = "sfc-coordinator-v1"
 	aiMaxSteps      = 24 // model calls in one turn
 	aiProposalTTL   = 10 * time.Minute
 	aiMaxText       = 20000
@@ -37,8 +37,8 @@ const (
 
 // aiCoordinatorSystem is the fixed system prompt. No dates, user names or
 // screens (those come with each turn): the prefix must stay byte-equal.
-const aiCoordinatorSystem = `You are the coordinator of MyDC, a small container cluster manager, inside its web console.
-You help the logged-in person understand and operate their cluster. You act as that person: tools run with their permissions, and the cluster (mydcd) decides what they may do.
+const aiCoordinatorSystem = `You are the coordinator of Seafield Cluster, a small container cluster manager, inside its web console.
+You help the logged-in person understand and operate their cluster. You act as that person: tools run with their permissions, and the cluster (sfcd) decides what they may do.
 
 Rules:
 - Read before you answer. Use the tool search to find tools; the catalog covers the console's screens.
@@ -821,15 +821,18 @@ func (t *aiTurn) loop(ctx context.Context, chat *ai.Chat, key string, fallback b
 	return nil
 }
 
-// runTool runs one call: a read on the person's session, or a proposal.
+// runTool runs one call through its kind (screen or MCP).
 func (t *aiTurn) runTool(ctx context.Context, c ai.ToolCall) ai.ToolResult {
-	d, ok := aiToolByName(c.Name)
-	if x, isMCP := t.mcp[c.Name]; !ok && isMCP {
-		return t.runMCPTool(ctx, c, x)
-	}
+	k, ok := t.toolKind(c.Name)
 	if !ok {
 		return ai.ToolResult{ID: c.ID, Text: "no such tool: search the catalog first", IsError: true}
 	}
+	return k.call(ctx, t, c)
+}
+
+// runScreenTool runs a screen tool: a read on the person's session, or a
+// proposal.
+func (t *aiTurn) runScreenTool(ctx context.Context, c ai.ToolCall, d aiToolDef) ai.ToolResult {
 	a, err := d.check(c.Input)
 	if err != nil {
 		return ai.ToolResult{ID: c.ID, Text: "invalid input: " + err.Error(), IsError: true}
