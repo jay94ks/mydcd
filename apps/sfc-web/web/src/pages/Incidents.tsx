@@ -617,7 +617,7 @@ function DesktopIncidents({ id }: { id?: string }) {
           </select>
           <input placeholder="사건·앱·서버 찾기" value={find} onChange={(e) => setFind(e.target.value)} aria-label="사건 찾기" style={{ flex: '1 1 200px' }} />
           {list.data && (
-            <button className="textbtn plain" style={{ color: 'var(--muted)', fontSize: 12 }} onClick={() => setDecision('pending')}>
+            <button type="button" className="textbtn plain" style={{ color: 'var(--muted)', fontSize: 12 }} onClick={() => setDecision('pending')}>
               승인 대기 {list.data.pending}
             </button>
           )}
@@ -661,10 +661,10 @@ function DesktopIncidents({ id }: { id?: string }) {
               <div className="row between muted small">
                 <span>{d.total ? `${from + 1}–${from + d.items.length} / ${d.total}` : '0 / 0'}</span>
                 <span className="row" style={{ gap: 6 }}>
-                  <button className="btn sm" disabled={!from} onClick={() => setFrom(Math.max(0, from - PAGE))}>
+                  <button type="button" className="btn sm" disabled={!from} onClick={() => setFrom(Math.max(0, from - PAGE))}>
                     이전
                   </button>
-                  <button className="btn sm" disabled={!d.cursor} onClick={() => setFrom(Number(d.cursor))}>
+                  <button type="button" className="btn sm" disabled={!d.cursor} onClick={() => setFrom(Number(d.cursor))}>
                     다음
                   </button>
                 </span>
@@ -746,7 +746,7 @@ function IncidentCard({ x, onDeleted }: { x: Incident; onDeleted: () => void }) 
               {t.conversation && (
                 <>
                   {' '}
-                  <button
+                  <button type="button"
                     className="textbtn"
                     style={{ color: 'var(--accent)' }}
                     onClick={() => {
@@ -765,7 +765,7 @@ function IncidentCard({ x, onDeleted }: { x: Incident; onDeleted: () => void }) 
               <span className="muted">{hm(t.at)}</span>
               <i style={{ background: color }} />
               {open ? (
-                <button className="textbtn plain" style={{ textAlign: 'left' }} onClick={() => setDrawer(t)}>
+                <button type="button" className="textbtn plain" style={{ textAlign: 'left' }} onClick={() => setDrawer(t)}>
                   {body}
                 </button>
               ) : (
@@ -776,7 +776,7 @@ function IncidentCard({ x, onDeleted }: { x: Incident; onDeleted: () => void }) 
         })}
       </div>
       <div className="row" style={{ justifyContent: 'flex-end', gap: 8 }}>
-        <button className="btn danger" onClick={() => setDel(true)}>
+        <button type="button" className="btn danger" onClick={() => setDel(true)}>
           사건 기록 지우기…
         </button>
         {(x.guides || x.mcpCalls) && (
@@ -806,7 +806,7 @@ function IncidentCard({ x, onDeleted }: { x: Incident; onDeleted: () => void }) 
             )}
           </Popover>
         )}
-        <button className="btn" onClick={() => navigate('/system/ops')}>
+        <button type="button" className="btn" onClick={() => navigate('/system/ops')}>
           작업 기록 보기
         </button>
       </div>
@@ -863,10 +863,10 @@ function DeleteDialog({ x, onClose, onDone }: { x: Incident; onClose: () => void
       onClose={onClose}
       footer={
         <>
-          <button className="btn" onClick={onClose}>
+          <button type="button" className="btn" onClick={onClose}>
             취소
           </button>
-          <button className="btn danger solid" disabled={busy || typed !== x.id} onClick={() => void go()}>
+          <button type="button" className="btn danger solid" disabled={busy || typed !== x.id} onClick={() => void go()}>
             지우기
           </button>
         </>
@@ -984,7 +984,7 @@ function ApprovalCard({ x, onDone }: { x: Incident; onDone: () => void }) {
           ) : changed ? (
             <div className="note wa small">
               그사이 사건의 임시 조치나 대상이 바뀌어 승인하지 않았습니다.{' '}
-              <button className="textbtn" onClick={() => (m.reset(), onDone())}>
+              <button type="button" className="textbtn" onClick={() => (m.reset(), onDone())}>
                 새로 읽기
               </button>
             </div>
@@ -995,7 +995,7 @@ function ApprovalCard({ x, onDone }: { x: Incident; onDone: () => void }) {
         {!m.op && !expired && (
           <footer>
             <RejectPopover x={x} disabled={!allowed} title={allowed ? undefined : need} onDone={(r) => (toast(`${x.id}를 반려했습니다 · ${r}`), onDone())} />
-            <button className="btn sm primary" disabled={!allowed || m.busy} title={allowed ? undefined : need} onClick={() => setConfirm(true)}>
+            <button type="button" className="btn sm primary" disabled={!allowed || m.busy} title={allowed ? undefined : need} onClick={() => setConfirm(true)}>
               승인하고 실행
             </button>
           </footer>
@@ -1010,10 +1010,10 @@ function ApprovalCard({ x, onDone }: { x: Incident; onDone: () => void }) {
           onClose={() => setConfirm(false)}
           footer={
             <>
-              <button className="btn" onClick={() => setConfirm(false)}>
+              <button type="button" className="btn" onClick={() => setConfirm(false)}>
                 취소
               </button>
-              <button className="btn danger solid" disabled={m.busy} onClick={() => void approve()}>
+              <button type="button" className="btn danger solid" disabled={m.busy} onClick={() => void approve()}>
                 {m.busy ? '보내는 중…' : '승인하고 실행'}
               </button>
             </>
@@ -1059,10 +1059,10 @@ function RejectPopover({ x, disabled, title, onDone }: { x: Incident; disabled?:
           </Field>
           {error !== undefined && <span className="small" style={{ color: 'var(--er)' }}>{errorText(error).message}</span>}
           <div className="row" style={{ justifyContent: 'flex-end', gap: 6 }}>
-            <button className="btn sm" onClick={close}>
+            <button type="button" className="btn sm" onClick={close}>
               취소
             </button>
-            <button
+            <button type="button"
               className="btn sm primary"
               disabled={busy || (reason === 'other' && !note.trim())}
               onClick={async () => {
@@ -1235,10 +1235,10 @@ function MPolicy({ q }: { q: ReturnType<typeof usePoll<Policy>> }) {
           onClose={() => setStop(false)}
           footer={
             <>
-              <button className="btn" onClick={() => setStop(false)}>
+              <button type="button" className="btn" onClick={() => setStop(false)}>
                 취소
               </button>
-              <button className="btn danger solid" disabled={busy} onClick={() => void stopGo()}>
+              <button type="button" className="btn danger solid" disabled={busy} onClick={() => void stopGo()}>
                 {busy ? '보내는 중…' : '모두 멈추기'}
               </button>
             </>
@@ -1302,7 +1302,7 @@ function PolicyBody({ p, onChange }: { p: Policy; onChange: () => void }) {
           </div>
           <div className="row" style={{ gap: 10, flexWrap: 'wrap' }}>
             <Segmented label="클러스터 장애 자동 대응" value={p.level} options={(['off', 'suggest', 'auto-low'] as Level[]).map((l) => [l, LEVEL_NAME[l]])} onChange={(l) => l !== p.level && (setError(undefined), setLv(l))} />
-            <button className="btn danger" onClick={() => (setError(undefined), setStop(true))}>
+            <button type="button" className="btn danger" onClick={() => (setError(undefined), setStop(true))}>
               {p.stopped ? '⏵ 다시 켜기' : '⏻ 지금 모두 멈추기'}
             </button>
           </div>
@@ -1310,14 +1310,14 @@ function PolicyBody({ p, onChange }: { p: Policy; onChange: () => void }) {
           <div className="kv2" style={{ gridTemplateColumns: '150px minmax(0,1fr)' }}>
             <span className="muted">클러스터 횟수 한도</span>
             <span>
-              <button className="textbtn" onClick={() => setDetail(true)}>
+              <button type="button" className="textbtn" onClick={() => setDetail(true)}>
                 시간당 {p.ratePerHour}회
               </button>{' '}
               (넘으면 승인 요청으로 전환)
             </span>
             <span className="muted">승인 요청 받는 사람</span>
             <span>
-              <button className="textbtn" onClick={() => setDetail(true)}>
+              <button type="button" className="textbtn" onClick={() => setDetail(true)}>
                 {p.approvers.label} · 응답 기한 {p.approvers.deadlineMinutes}분
               </button>
             </span>
@@ -1408,10 +1408,10 @@ function PolicyBody({ p, onChange }: { p: Policy; onChange: () => void }) {
           onClose={() => setLv(undefined)}
           footer={
             <>
-              <button className="btn" onClick={() => setLv(undefined)}>
+              <button type="button" className="btn" onClick={() => setLv(undefined)}>
                 취소
               </button>
-              <button className={`btn ${lv === 'auto-low' ? 'danger solid' : 'primary'}`} disabled={busy} onClick={() => void save({ level: lv }, () => setLv(undefined))}>
+              <button type="button" className={`btn ${lv === 'auto-low' ? 'danger solid' : 'primary'}`} disabled={busy} onClick={() => void save({ level: lv }, () => setLv(undefined))}>
                 바꾸기
               </button>
             </>
@@ -1429,10 +1429,10 @@ function PolicyBody({ p, onChange }: { p: Policy; onChange: () => void }) {
           onClose={() => setStop(false)}
           footer={
             <>
-              <button className="btn" onClick={() => setStop(false)}>
+              <button type="button" className="btn" onClick={() => setStop(false)}>
                 취소
               </button>
-              <button className={`btn ${p.stopped ? 'primary' : 'danger solid'}`} disabled={busy} onClick={() => void stopGo()}>
+              <button type="button" className={`btn ${p.stopped ? 'primary' : 'danger solid'}`} disabled={busy} onClick={() => void stopGo()}>
                 {p.stopped ? '다시 켜기' : '모두 멈추기'}
               </button>
             </>
@@ -1462,10 +1462,10 @@ function PolicyDetail({ p, busy, error, onClose, onSave }: { p: Policy; busy: bo
       onClose={onClose}
       footer={
         <>
-          <button className="btn" onClick={onClose}>
+          <button type="button" className="btn" onClick={onClose}>
             취소
           </button>
-          <button className="btn primary" disabled={busy || bad} onClick={() => onSave({ ratePerHour: n, approvers: { ...p.approvers, ...(opts.length && to ? { to } : {}), deadlineMinutes: deadline, banner } })}>
+          <button type="button" className="btn primary" disabled={busy || bad} onClick={() => onSave({ ratePerHour: n, approvers: { ...p.approvers, ...(opts.length && to ? { to } : {}), deadlineMinutes: deadline, banner } })}>
             저장
           </button>
         </>
@@ -1553,18 +1553,18 @@ function AutomationCard({ p }: { p: Policy }) {
         <div className="row" style={{ justifyContent: 'flex-end', gap: 8 }}>
           {a.configured ? (
             <>
-              <button className="btn" onClick={() => setWiz(true)}>
+              <button type="button" className="btn" onClick={() => setWiz(true)}>
                 키 교체
               </button>
-              <button className="btn" onClick={() => setWiz(true)}>
+              <button type="button" className="btn" onClick={() => setWiz(true)}>
                 설정 다시 하기
               </button>
-              <button className="btn danger" onClick={() => setRevoke(true)}>
+              <button type="button" className="btn danger" onClick={() => setRevoke(true)}>
                 계정 키 무효화…
               </button>
             </>
           ) : (
-            <button className="btn primary" disabled={!a.sealReady} title={a.sealReady ? undefined : '웹 앱 설정에서 봉인 키를 먼저 준비하세요'} onClick={() => setWiz(true)}>
+            <button type="button" className="btn primary" disabled={!a.sealReady} title={a.sealReady ? undefined : '웹 앱 설정에서 봉인 키를 먼저 준비하세요'} onClick={() => setWiz(true)}>
               자동 대응 계정 만들기…
             </button>
           )}

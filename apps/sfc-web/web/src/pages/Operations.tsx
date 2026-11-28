@@ -101,7 +101,7 @@ function DesktopOperations() {
               />
               {canRevert(selected) && (
                 <div className="row">
-                  <button className="btn" onClick={() => setReverting(selected)}>
+                  <button type="button" className="btn" onClick={() => setReverting(selected)}>
                     {selected.revert === 'link' ? '이 변경 되돌리기 (다른 화면)…' : '이 변경 되돌리기…'}
                   </button>
                   <span className="small muted">바꾸기 전 값으로 가는 반대 변경을 보냅니다.</span>

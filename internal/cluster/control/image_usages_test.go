@@ -110,17 +110,22 @@ func TestImageUsageCursorPinsVisibleRowsAndRejectsChangedViews(t *testing.T) {
 	}
 }
 
-func TestImageReferenceMatchesDoNotInventLegacyTagOrMissingVersionDigests(t *testing.T) {
+func TestImageReferenceMatchesDoNotInventTagOrMissingVersionDigests(t *testing.T) {
 	a, b := "sha256:"+strings.Repeat("a", 64), "sha256:"+strings.Repeat("b", 64)
 	pinned := ImageReference{Image: "ghcr.io/team/app@" + a}
-	for _, tc := range []struct{ ref, match string }{{a, "digest"}, {"ghcr.io/team/app@" + a, "exact"}, {"ghcr.io/team/app@" + b, ""}, {"foreign.example/team/app@" + a, ""}, {"ghcr.io/team/app:latest", "repository-unknown"}} {
+	for _, tc := range []struct{ ref, match string }{{a, "digest"}, {"ghcr.io/team/app@" + a, "exact"}, {"ghcr.io/team/app@" + b, ""}, {"foreign.example/team/app@" + a, ""}, {"ghcr.io/team/app:latest", ""}} {
 		if got := pinned.MatchImage(tc.ref); got != tc.match {
 			t.Fatal(tc, got)
 		}
 	}
-	legacy := ImageReference{Image: "ghcr.io/team/app:old"}
-	if legacy.MatchImage("ghcr.io/team/app@"+a) != "repository-unknown" {
-		t.Fatal("mutable legacy tag declared unused")
+	// A tag is never pinned to a digest: it protects no digest from
+	// deletion, and usage reads still show the repository.
+	tag := ImageReference{Image: "ghcr.io/team/app:old"}
+	if tag.MatchImage("ghcr.io/team/app@"+a) != "" || tag.MatchImage("ghcr.io/team/app:old") != "exact" {
+		t.Fatal("tag row match")
+	}
+	if (ImageUsageQuery{Refs: []string{"ghcr.io/team/app@" + a}}).Match(tag) != "repository-unknown" || (ImageUsageQuery{Refs: []string{"ghcr.io/team/app:latest"}}).Match(pinned) != "repository-unknown" {
+		t.Fatal("usage read lost the repository")
 	}
 	unknown := ImageReference{Tenant: "tenant", App: "demo", Deployment: "deploy", Kind: "app-previous-unknown", Version: 1, Unknown: true}
 	unknown.ID = imageReferenceID(unknown)

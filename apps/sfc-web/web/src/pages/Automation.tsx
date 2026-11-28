@@ -145,39 +145,39 @@ export function AutomationWizard({ cur, onClose }: { cur?: AutomationView; onClo
   const footer =
     step === 1 ? (
       <>
-        <button className="btn" onClick={onClose}>
+        <button type="button" className="btn" onClick={onClose}>
           취소
         </button>
-        <button className="btn primary" disabled={busy || !name || !!nameBad} onClick={() => void makeKey()}>
+        <button type="button" className="btn primary" disabled={busy || !name || !!nameBad} onClick={() => void makeKey()}>
           {busy ? '만드는 중…' : cur?.configured && cur.username === name ? '다음' : '키 만들기'}
         </button>
       </>
     ) : step === 2 ? (
       <>
-        <button className="btn" disabled={reg.busy || busy} onClick={() => setStep(1)}>
+        <button type="button" className="btn" disabled={reg.busy || busy} onClick={() => setStep(1)}>
           이전
         </button>
-        <button className="btn primary" disabled={reg.busy || busy || casFailed(reg.op)} onClick={() => void register()}>
+        <button type="button" className="btn primary" disabled={reg.busy || busy || casFailed(reg.op)} onClick={() => void register()}>
           {reg.busy ? '서명하는 중…' : plan === 'present' || reg.op?.state === 'applied' ? '다음' : '서명하고 등록'}
         </button>
       </>
     ) : step === 3 ? (
       <>
-        <button className="btn" disabled={scopeM.busy || busy} onClick={() => setStep(2)}>
+        <button type="button" className="btn" disabled={scopeM.busy || busy} onClick={() => setStep(2)}>
           이전
         </button>
-        <button className="btn primary" disabled={scopeM.busy || busy || !!badAction || actions.length > 64 || casFailed(scopeM.op)} onClick={() => void saveScope()}>
+        <button type="button" className="btn primary" disabled={scopeM.busy || busy || !!badAction || actions.length > 64 || casFailed(scopeM.op)} onClick={() => void saveScope()}>
           {scopeM.busy ? '보내는 중…' : scopeSame || scopeM.op?.state === 'applied' ? '다음' : '저장'}
         </button>
       </>
     ) : (
       <>
         {!check?.ok && (
-          <button className="btn" disabled={busy} onClick={() => void runCheck()}>
+          <button type="button" className="btn" disabled={busy} onClick={() => void runCheck()}>
             다시 확인
           </button>
         )}
-        <button className="btn primary" onClick={onClose}>
+        <button type="button" className="btn primary" onClick={onClose}>
           닫기
         </button>
       </>
@@ -218,7 +218,7 @@ export function AutomationWizard({ cur, onClose }: { cur?: AutomationView; onClo
                 </pre>
                 <span className="small muted">
                   시스템 관리자 서명이 필요합니다. 내 키로 승인합니다. 다른 로그인 수단은 그대로 둡니다.{' '}
-                  <button className="linkish" disabled={busy || reg.busy} onClick={() => void rotate()}>
+                  <button type="button" className="linkish" disabled={busy || reg.busy} onClick={() => void rotate()}>
                     키 새로 만들기
                   </button>
                 </span>

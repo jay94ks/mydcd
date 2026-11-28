@@ -156,10 +156,10 @@ export function PlacementTab({ a, current, services }: { a: AppView; current?: s
                 <>
                   <span className="small muted">데이터 저장소를 쓰는 서비스는 한 번에 하나씩 옮깁니다. 실패하면 원래 서버의 데이터로 다시 시작합니다.</span>
                   <div className="row" style={{ justifyContent: 'flex-end', gap: 8 }}>
-                    <button className="btn" onClick={() => setTo({})}>
+                    <button type="button" className="btn" onClick={() => setTo({})}>
                       취소
                     </button>
-                    <button className="btn primary" disabled={!canDeploy || !!mv.movePhase || blocked} title={mv.movePhase ? '이미 옮기는 중입니다' : blocked ? '옮기기 전 검사를 통과하지 못했습니다' : undefined} onClick={() => setMoving({ v: mv, node: to[volMove.name] })}>
+                    <button type="button" className="btn primary" disabled={!canDeploy || !!mv.movePhase || blocked} title={mv.movePhase ? '이미 옮기는 중입니다' : blocked ? '옮기기 전 검사를 통과하지 못했습니다' : undefined} onClick={() => setMoving({ v: mv, node: to[volMove.name] })}>
                       재배치 시작
                     </button>
                   </div>

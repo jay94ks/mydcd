@@ -261,7 +261,7 @@ export function AppContainerPage() {
                 </option>
               ))}
             </select>
-            <button className="btn" disabled={!canDeploy || !task} title={!canDeploy ? '이 작업 공간의 배포 권한이 필요합니다' : undefined} onClick={() => setRestarting(true)}>
+            <button type="button" className="btn" disabled={!canDeploy || !task} title={!canDeploy ? '이 작업 공간의 배포 권한이 필요합니다' : undefined} onClick={() => setRestarting(true)}>
               다시 시작…
             </button>
             <Menu
@@ -503,7 +503,7 @@ function Overview({ r, d, task, hist, revision, base, onRefresh }: { r: TaskRef;
             </h2>
           }
           actions={
-            <button className="btn sm" title="지금 바로 다시 읽기" disabled={stats.manual} onClick={stats.refreshByUser}>
+            <button type="button" className="btn sm" title="지금 바로 다시 읽기" disabled={stats.manual} onClick={stats.refreshByUser}>
               {stats.manual ? '읽는 중…' : '↻ 새로고침'}
             </button>
           }
@@ -1101,15 +1101,15 @@ function RestartDialog({ r, task, siblings, d, expected, onClose }: { r: TaskRef
       onClose={onClose}
       footer={
         m.op && !uncertain(m) ? (
-          <button className="btn" onClick={onClose}>
+          <button type="button" className="btn" onClick={onClose}>
             닫기
           </button>
         ) : (
           <>
-            <button className="btn" onClick={onClose}>
+            <button type="button" className="btn" onClick={onClose}>
               취소
             </button>
-            <button className="btn primary" disabled={m.busy} onClick={send}>
+            <button type="button" className="btn primary" disabled={m.busy} onClick={send}>
               {uncertain(m) ? '같은 작업 ID로 다시 보내기' : '다시 시작'}
             </button>
           </>
@@ -1330,7 +1330,7 @@ function LogsTab({ r, d, task, canDeploy }: { r: TaskRef; d: D.DTaskDetail; task
               {req20 === 'waiting' ? (
                 <span className="t">더 앞 줄 이어 읽기 · 서버 기능 대기</span>
               ) : (
-                <button className="btn sm" onClick={() => void older()} disabled={lines.length >= 5000}>
+                <button type="button" className="btn sm" onClick={() => void older()} disabled={lines.length >= 5000}>
                   더 앞 200줄 읽기
                 </button>
               )}
@@ -1398,13 +1398,13 @@ function LogsTab({ r, d, task, canDeploy }: { r: TaskRef; d: D.DTaskDetail; task
             <input type="checkbox" checked={time} onChange={(e) => setTime(e.target.checked)} style={{ width: 16, height: 16 }} />
             시각
           </label>
-          <button className={`btn${following ? ' primary' : ''}`} onClick={() => setFollowOn((f) => !f)} aria-pressed={following} disabled={!!until} title={until ? '기간 끝을 정하면 따라가기는 꺼집니다' : undefined}>
+          <button type="button" className={`btn${following ? ' primary' : ''}`} onClick={() => setFollowOn((f) => !f)} aria-pressed={following} disabled={!!until} title={until ? '기간 끝을 정하면 따라가기는 꺼집니다' : undefined}>
             {following ? (followErr ? '⚠ 따라가기 멈춤' : '● 따라가는 중') : '○ 따라가기'}
           </button>
-          <button className="btn" onClick={download} disabled={!shown.length}>
+          <button type="button" className="btn" onClick={download} disabled={!shown.length}>
             내려받기
           </button>
-          <button className="btn danger" onClick={() => setClearing(true)} disabled={!canDeploy} title={!canDeploy ? '이 작업 공간의 배포 권한이 필요합니다' : undefined}>
+          <button type="button" className="btn danger" onClick={() => setClearing(true)} disabled={!canDeploy} title={!canDeploy ? '이 작업 공간의 배포 권한이 필요합니다' : undefined}>
             로그 지우기…
           </button>
         </div>
@@ -1430,7 +1430,7 @@ function LogsTab({ r, d, task, canDeploy }: { r: TaskRef; d: D.DTaskDetail; task
         {following && followErr && (
           <div className="note er small" role="alert">
             새 줄 따라가기를 열지 못했습니다 · {streamEndText(followErr)}{' '}
-            <button className="btn sm" onClick={() => (setFollowErr(undefined), setFollowTry((n) => n + 1))}>
+            <button type="button" className="btn sm" onClick={() => (setFollowErr(undefined), setFollowTry((n) => n + 1))}>
               다시 따라가기
             </button>
           </div>
@@ -1449,7 +1449,7 @@ function LogsTab({ r, d, task, canDeploy }: { r: TaskRef; d: D.DTaskDetail; task
               {req20 === 'waiting' ? (
                 <span className="t">더 앞 줄 이어 읽기 · 서버 기능 대기</span>
               ) : (
-                <button className="btn sm" onClick={() => void older()} disabled={lines.length >= 5000}>
+                <button type="button" className="btn sm" onClick={() => void older()} disabled={lines.length >= 5000}>
                   더 앞 200줄 읽기
                 </button>
               )}
@@ -1463,7 +1463,7 @@ function LogsTab({ r, d, task, canDeploy }: { r: TaskRef; d: D.DTaskDetail; task
           {following && task && !loading && <Follower key={followTry} task={task} d={d} onFail={setFollowErr} onRetry={() => (setFollowErr(undefined), setFollowTry((n) => n + 1))} onLine={(l) => (setLines((old) => old.concat(l).slice(-MAX_LINES)), atEnd.current ? undefined : setUnseen((n) => n + 1))} onReload={() => setGen((g) => g + 1)} />}
         </pre>
         {unseen > 0 && (
-          <button className="btn sm" style={{ alignSelf: 'center' }} onClick={() => box.current && (box.current.scrollTop = box.current.scrollHeight)}>
+          <button type="button" className="btn sm" style={{ alignSelf: 'center' }} onClick={() => box.current && (box.current.scrollTop = box.current.scrollHeight)}>
             새 줄 {unseen}개 ↓
           </button>
         )}
@@ -1533,20 +1533,20 @@ export function LogClearDialog({ r, nativeID, onClose, onDone }: { r: TaskRef; n
         res ? (
           <>
             {missed.length > 0 && (
-              <button className="btn" disabled={busy} onClick={() => void send()}>
+              <button type="button" className="btn" disabled={busy} onClick={() => void send()}>
                 {busy ? '보내는 중…' : '다시 보내기'}
               </button>
             )}
-            <button className="btn primary" onClick={onClose}>
+            <button type="button" className="btn primary" onClick={onClose}>
               닫기
             </button>
           </>
         ) : (
           <>
-            <button className="btn" onClick={onClose}>
+            <button type="button" className="btn" onClick={onClose}>
               취소
             </button>
-            <button className="btn danger solid" disabled={busy || !sel} onClick={() => void send()}>
+            <button type="button" className="btn danger solid" disabled={busy || !sel} onClick={() => void send()}>
               {busy ? '지우는 중…' : '로그 지우기'}
             </button>
           </>
@@ -1692,7 +1692,7 @@ function Follower({ task, d, onLine, onReload, onFail, onRetry }: { task: TaskVi
         <div className="note er small">
           따라가기가 멈췄습니다 · {streamEndText(s.endCode ?? 'closed')}
           {s.endCode === 'session-expired' ? " 다시 로그인한 뒤 '다시 따라가기'를 누르세요." : ''} 이미 받은 줄은 그대로 둡니다.{' '}
-          <button className="btn sm" onClick={onRetry}>
+          <button type="button" className="btn sm" onClick={onRetry}>
             다시 따라가기
           </button>
         </div>
@@ -1758,10 +1758,10 @@ function ResTab({ r, d, task, base }: { r: TaskRef; d: D.DTaskDetail; task?: Tas
           }
           actions={
             <span className="row" style={{ gap: 6 }}>
-              <button className="btn sm" title="지금 바로 다시 읽기" disabled={stats.manual} onClick={stats.refreshByUser}>
+              <button type="button" className="btn sm" title="지금 바로 다시 읽기" disabled={stats.manual} onClick={stats.refreshByUser}>
                 {stats.manual ? '읽는 중…' : '↻ 새로고침'}
               </button>
-              <button className="btn sm" onClick={() => setPaused((p) => !p)}>
+              <button type="button" className="btn sm" onClick={() => setPaused((p) => !p)}>
                 {paused ? '▶ 다시 읽기' : '⏸ 멈춤'}
               </button>
             </span>
@@ -1894,7 +1894,7 @@ function InspectTab({ d }: { d: D.DTaskDetail }) {
     <Card
       title="실제 설정"
       actions={
-        <button className={`btn sm${only ? ' primary' : ''}`} onClick={() => setOnly((x) => !x)} disabled={!d.drift?.length} title={d.drift?.length ? '목표와 다른 칸만 거릅니다' : undefined}>
+        <button type="button" className={`btn sm${only ? ' primary' : ''}`} onClick={() => setOnly((x) => !x)} disabled={!d.drift?.length} title={d.drift?.length ? '목표와 다른 칸만 거릅니다' : undefined}>
           {d.drift?.length ? `목표와 다른 칸 ${d.drift.length}개${only ? ' · 모두 보기' : ''}` : '목표 = 실제'}
         </button>
       }

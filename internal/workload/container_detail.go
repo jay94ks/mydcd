@@ -159,7 +159,7 @@ func containerDetail(s ContainerSpec, id engine.Identity, got container.InspectR
 		drift(c.WorkingDir != s.Process.WorkingDir, "working_dir")
 		drift(!reflect.DeepEqual(c.Healthcheck, s.Process.Healthcheck), "healthcheck")
 	} else {
-		drift(c.Image != s.Image, "image")
+		drift(c.Image != s.RunImage(), "image")
 		drift(!slices.Equal(c.Cmd, s.Command), "command")
 	}
 	raw, _ := json.Marshal(s)

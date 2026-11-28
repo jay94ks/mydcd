@@ -229,7 +229,7 @@ func buildDNSView(c access.Catalog, n tenancy.Networks, a Authority, actor strin
 	seen := map[string]bool{}
 	for _, ref := range input.Names {
 		name, e := canonicalName(ref.Name, p.Config.Zone)
-		alloc, exists := a.book.Allocation(ref.Endpoint)
+		alloc, exists := a.book.AllocationOf(ref.Endpoint, ref.Generation)
 		member, belongs := memberPool(p, alloc.Pool)
 		if e != nil || !exists || !belongs || alloc.Owner != poolOwner(member) || ref.Generation == 0 || alloc.Generation != ref.Generation || strings.HasPrefix(alloc.Endpoint, "dhcp/") || p.Config.ClientZone != "" && dns.IsSubDomain(p.Config.ClientZone, name) {
 			return dnsProjection{}, ErrProtocol

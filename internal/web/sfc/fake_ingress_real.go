@@ -5,7 +5,6 @@ package sfc
 import (
 	"context"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -23,8 +22,9 @@ import (
 // (control.IngressQuery{Node, Tenant, App, Key, Part, After, Offset} →
 // control.IngressPage), the Raft blocks ingress-block {control.
 // IngressBlockChange} / ingress-unblock · ingress-block-extend {control.
-// IngressBlockSelection} and set-ingress-host-policy {control.
-// IngressHostPolicyChange} under control/ingress-management.
+// IngressBlockSelection} under control/ingress-management. Tenant hosts
+// follow domain owners (devel/design/tenant-domains.md); the old
+// set-ingress-host-policy grant is gone.
 //
 // Fake-only:
 //   - Mappings come from the old mock's instances (fixture Ingresses): key
@@ -45,12 +45,9 @@ import (
 //     ingress history (no sfcd counterpart) stay until the screens are
 //     decided; a real block / unblock / extend is added to that history.
 
-const ActionSetIngressHostPolicy = "set-ingress-host-policy"
-
 type ingressRealState struct {
 	revision uint64
 	blocks   []control.IngressBlockRecord
-	policies []control.IngressHostPolicyRecord
 	// Fake-only knobs (fake_ingress_runtime.go).
 	held         map[string]heldBlocks     // node → frozen installed policy
 	routeMetrics map[string]ingress.Metric // mapping key \x00 route
@@ -416,11 +413,6 @@ func (c *fakeConn) QueryIngresses(ctx context.Context, q control.IngressQuery) (
 			out.Blocks = append(out.Blocks, w.realBlockView(r, now))
 		}
 	}
-	for _, h := range w.ireal.policies {
-		if (q.Tenant == "" || q.Tenant == h.Tenant) && allowed(h.Tenant) {
-			out.HostPolicies = append(out.HostPolicies, control.IngressHostPolicyView{Tenant: h.Tenant, Policy: h.Policy, Revision: h.Revision})
-		}
-	}
 	instances := map[string]IngressInstance{}
 	for _, in := range w.ing.instances {
 		instances[ingressRealKey(in)] = in
@@ -480,7 +472,7 @@ func (c *fakeConn) QueryIngresses(ctx context.Context, q control.IngressQuery) (
 			delete(summaries, row.Node)
 		}
 	}
-	if q.Node != "" && len(out.Nodes) == 0 && q.Part != "blocks" && q.Part != "policies" && w.memberExists(q.Node) {
+	if q.Node != "" && len(out.Nodes) == 0 && q.Part != "blocks" && w.memberExists(q.Node) {
 		var tenants []string
 		switch {
 		case q.Tenant != "":
@@ -514,18 +506,7 @@ func (c *fakeConn) QueryIngresses(ctx context.Context, q control.IngressQuery) (
 		pageRealIngressMapping(row, q)
 	}
 	switch q.Part {
-	case "policies":
-		start := min(int(q.Offset), len(out.HostPolicies))
-		end := min(start+4, len(out.HostPolicies))
-		out.Next = ""
-		if end < len(out.HostPolicies) {
-			out.Next = fmt.Sprint(end)
-		}
-		out.HostPolicies = slices.Clone(out.HostPolicies[start:end])
-		out.Blocks, out.Mappings, out.Nodes = nil, nil, nil
-		return out, nil
 	case "blocks":
-		out.HostPolicies = nil
 		out.Next = ""
 		start := min(int(q.Offset), len(out.Blocks))
 		end := min(start+8, len(out.Blocks))
@@ -546,7 +527,7 @@ func (c *fakeConn) QueryIngresses(ctx context.Context, q control.IngressQuery) (
 		}
 		return out, nil
 	}
-	out.HostPolicies, out.Blocks = nil, nil
+	out.Blocks = nil
 	return out, nil
 }
 
@@ -652,19 +633,6 @@ func pageRealIngressMapping(row *control.IngressMapping, q control.IngressQuery)
 
 // --- actions ---
 
-func validHostPolicy(p ingress.HostPolicy) bool {
-	raw, err := json.Marshal(p)
-	if err != nil || len(raw) > 24<<10 || len(p.ExternalHosts) > 256 || len(p.LocalHosts) > 256 {
-		return false
-	}
-	for _, h := range append(slices.Clone(p.ExternalHosts), p.LocalHosts...) {
-		if _, err := ingress.NewTable([]ingress.Route{{ID: "host", Host: h, Prefix: "/", Service: "target"}}); err != nil {
-			return false
-		}
-	}
-	return true
-}
-
 // realBlockAuthorized: sfcd's ingressBlockAuthorized for block b.
 func (w *world) realBlockAuthorized(actor string, b ingress.Block) error {
 	if w.admin(actor) {
@@ -742,38 +710,7 @@ func (c *fakeConn) applyRealIngress(op UserOperation, actor string) error {
 		return errCAS
 	}
 	before := slices.Clone(book.blocks)
-	var beforePolicy ingress.HostPolicy
 	switch ch.Action {
-	case ActionSetIngressHostPolicy:
-		var q control.IngressHostPolicyChange
-		if decodePayload(ch.Payload, &q) != nil || q.Tenant == "" || !validHostPolicy(q.Policy) {
-			return errors.New("payload")
-		}
-		if !w.admin(actor) {
-			return errForbidden
-		}
-		if _, ok := w.tenants[q.Tenant]; !ok {
-			return errCAS
-		}
-		for _, r := range book.policies {
-			if r.Tenant == q.Tenant {
-				beforePolicy = r.Policy
-			}
-		}
-		i := slices.IndexFunc(book.policies, func(r control.IngressHostPolicyRecord) bool { return r.Tenant == q.Tenant })
-		if i < 0 {
-			if ch.Expected != 0 {
-				return errCAS
-			}
-			book.policies = append(book.policies, control.IngressHostPolicyRecord{Tenant: q.Tenant, Policy: q.Policy, Revision: 1, Origin: op})
-		} else {
-			r := &book.policies[i]
-			if r.Revision != ch.Expected {
-				return errCAS
-			}
-			r.Policy, r.Origin = q.Policy, op
-			r.Revision++
-		}
 	case ActionIngressBlock:
 		var q control.IngressBlockChange
 		if decodePayload(ch.Payload, &q) != nil {
@@ -829,7 +766,7 @@ func (c *fakeConn) applyRealIngress(op UserOperation, actor string) error {
 		return errors.New("action")
 	}
 	book.revision++
-	w.realIngressHistory(op, before, beforePolicy)
+	w.realIngressHistory(op, before)
 	return nil
 }
 

@@ -69,9 +69,8 @@ x-sfc:
 앱을 배포하는 것 자체가 그 앱의 host를 ingress에 맵핑하는 허가다. 따로 host 허가를 받지 않아도 된다. 배포 때 남는 검사는 넷이다.
 
 - 같은 서버·게이트웨이에서 같은 작업 공간의 다른 앱이 이미 쓰는 host+prefix면 계획을 `INGRESS_ROUTE_TAKEN`으로 멈춘다. `sfcli app deploy --force`(저장한 계획은 `sfcli app diff --save --force`)로 배포하면 두 앱이 그 route를 함께 받고, 게이트웨이가 요청을 두 앱에 돌아가며 나눠 보낸다. 기존 앱의 route는 그대로 둔다. 이미 함께 받는 route는 그 뒤 배포와 CD 동기화에서 다시 묻지 않는다. CD가 Git commit으로 새로 겹치는 route를 만들면 멈춘다.
-- 다른 작업 공간의 route가 쓰는 host와 그 아래 이름(`shop.example`을 쓰면 `api.shop.example`, `*.shop.example`도)은 어느 서버에서든 `INGRESS_HOST_OTHER_TENANT`로 거절한다. `--force`로도 풀리지 않는다. 예외는 시스템 관리자가 `sfcli ingress hosts set`으로 그 작업 공간에 허가한 host뿐이다(같은 서버·게이트웨이의 같은 host+prefix는 그래도 함께 쓸 수 없다).
+- 작업 공간 앱의 route host는 그 host를 덮는 가장 긴 등록 도메인의 주인이 정한다(작업 공간 단위 도메인, [sfcli domain](../cli/domain.md)). 자기 작업 공간 도메인 아래면 바로 받는다. 다른 작업 공간 도메인 아래면 `INGRESS_DOMAIN_OTHER_TENANT`, 등록된 도메인 아래가 아니면 `INGRESS_DOMAIN_UNKNOWN`으로 거절하며 `--force`로도 풀리지 않는다. 클러스터 수준 도메인 아래면 배포는 되고 그 host는 시스템 관리자가 `sfcli domain requests approve`로 승인할 때까지 기다린다(작업 공간마다 대기 host 64개까지, 넘으면 `INGRESS_HOST_REQUESTS_LIMIT`). 같은 서버·게이트웨이의 같은 host+prefix는 다른 작업 공간끼리 함께 쓸 수 없다.
 - 클러스터 앱(웹 등)이 쓰는 host는 다른 앱이 쓸 수 없다.
-- 시스템 관리자가 `sfcli ingress hosts set`으로 그 작업 공간의 host를 좁혀 두었으면 그 안의 host만 쓴다. 정해 두지 않은 작업 공간은 제한이 없다. [host 정책과 관리 명령](ingress-management.md)을 참고한다.
 
 공유 주소의 `*` 규칙은 시스템 관리자만 만든다. 앱 종료는 다른 앱의 규칙이나 공유 소켓을 제거하지 않는다.
 

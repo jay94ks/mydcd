@@ -208,6 +208,7 @@ func (s *Server) watchOnce(ctx context.Context) {
 	s.acmeAutoPoll(ctx, ws)
 	s.acmeResponderSync(ctx, ws)
 	s.vpsDNSPoll(ctx, ws)
+	s.ownedWarnPoll(ctx, ws)
 	if incidentsOff {
 		save("stopped", "")
 		return

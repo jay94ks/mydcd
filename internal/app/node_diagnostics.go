@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"errors"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/jay94ks/seafield/internal/access"
@@ -51,19 +52,23 @@ type diagnosticProfile struct {
 // packNodeDiagnostics writes the JSON members and then as many profiles as
 // fit the bundle budgets, in order; a profile that does not fit is left out
 // and the bundle is marked truncated.
-func packNodeDiagnostics(node string, at time.Time, config, status any, logs []nodeDiagnosticLog, truncated bool, profiles ...diagnosticProfile) (control.NodeDiagnosticsBundle, error) {
-	result, err := packNodeDiagnosticFiles(node, at, config, status, logs, truncated, profiles)
+// omitted holds control.NodeDiagnosticsOmissions codes for what the bundle
+// leaves out; a dropped profile adds its own.
+func packNodeDiagnostics(node string, at time.Time, config, status any, logs []nodeDiagnosticLog, omitted []string, profiles ...diagnosticProfile) (control.NodeDiagnosticsBundle, error) {
+	result, err := packNodeDiagnosticFiles(node, at, config, status, logs, omitted, profiles)
 	for err == errDiagnosticsBudget && len(profiles) > 0 {
+		dropped := profiles[len(profiles)-1]
 		profiles = profiles[:len(profiles)-1]
-		result, err = packNodeDiagnosticFiles(node, at, config, status, logs, true, profiles)
+		omitted = append(slices.Clone(omitted), strings.TrimSuffix(dropped.name, ".pb.gz"))
+		result, err = packNodeDiagnosticFiles(node, at, config, status, logs, omitted, profiles)
 	}
 	return result, err
 }
 
 var errDiagnosticsBudget = errors.New("node diagnostics budget exceeded")
 
-func packNodeDiagnosticFiles(node string, at time.Time, config, status any, logs []nodeDiagnosticLog, truncated bool, profiles []diagnosticProfile) (control.NodeDiagnosticsBundle, error) {
-	result := control.NodeDiagnosticsBundle{Schema: 1, Node: node, Format: "tar+gzip", CreatedAt: at.UTC().Format(time.RFC3339), LimitBytes: control.NodeDiagnosticsMaxBytes, ExpandedLimitBytes: control.NodeDiagnosticsExpandedBytes, Truncated: truncated}
+func packNodeDiagnosticFiles(node string, at time.Time, config, status any, logs []nodeDiagnosticLog, omitted []string, profiles []diagnosticProfile) (control.NodeDiagnosticsBundle, error) {
+	result := control.NodeDiagnosticsBundle{Schema: 1, Node: node, Format: "tar+gzip", CreatedAt: at.UTC().Format(time.RFC3339), LimitBytes: control.NodeDiagnosticsMaxBytes, ExpandedLimitBytes: control.NodeDiagnosticsExpandedBytes, Truncated: len(omitted) > 0, Omitted: omitted}
 	type member struct {
 		name string
 		raw  []byte
@@ -183,19 +188,18 @@ func (r *Runtime) nodeDiagnosticsLocal(ctx context.Context, read control.NodeDia
 		return control.NodeDiagnosticsBundle{}, sfcp.ErrAdmission
 	}
 	logs := []nodeDiagnosticLog{}
-	incomplete := true
 	r.life.RLock()
 	defer r.life.RUnlock()
 	if r.closed {
 		return control.NodeDiagnosticsBundle{}, sfcp.ErrAdmission
 	}
-	incomplete = false
+	unavailable, older, gap := false, false, false
 	for _, owner := range append([]*Runtime{r}, r.nativeOwners...) {
 		if owner != r {
 			owner.life.RLock()
 		}
 		if owner.closed || owner.events == nil {
-			incomplete = true
+			unavailable = true
 			if owner != r {
 				owner.life.RUnlock()
 			}
@@ -209,12 +213,21 @@ func (r *Runtime) nodeDiagnosticsLocal(ctx context.Context, read control.NodeDia
 			return control.NodeDiagnosticsBundle{}, e
 		}
 		logs = append(logs, diagnosticLogs(page.Items)...)
-		incomplete = incomplete || page.More || page.Incomplete
+		older, gap = older || page.More, gap || page.Incomplete
 	}
 	slices.SortFunc(logs, func(a, b nodeDiagnosticLog) int { return cmp.Compare(a.At, b.At) })
 	if len(logs) > 100 {
 		logs = logs[len(logs)-100:]
-		incomplete = true
+		older = true
+	}
+	omitted := []string{}
+	for _, o := range []struct {
+		on   bool
+		code string
+	}{{gap, "events-gap"}, {older, "events-older"}, {unavailable, "events-unavailable"}} {
+		if o.on {
+			omitted = append(omitted, o.code)
+		}
 	}
 	config := struct {
 		Schema                              uint8
@@ -227,7 +240,7 @@ func (r *Runtime) nodeDiagnosticsLocal(ctx context.Context, read control.NodeDia
 		Node, Phase                               string
 		Voter, Cordoned, AdmitsWork, NativeClosed bool
 	}{1, current.Index, current.MembersRoot, nodeConfigurationIndex(d), read.Node, string(node.Node.Phase), node.Node.Member.Voter, node.Scheduling.Enabled, node.AdmitsWork, node.Node.Closure != nil && node.Node.Closure.Closed}
-	return packNodeDiagnostics(read.Node, now, config, status, logs, incomplete, profiles...)
+	return packNodeDiagnostics(read.Node, now, config, status, logs, omitted, profiles...)
 }
 
 func nodeConfigurationIndex(d membership.Directory) uint64 {

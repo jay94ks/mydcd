@@ -98,7 +98,7 @@ export function MoveCard({ tenant, v, canDeploy, onRefresh, onStart }: { tenant:
               <span>
                 {r.node} <span className="mono muted">{r.moveID}</span> <Badge tone={RETAINED[r.state]?.[1] ?? 'un'}>{RETAINED[r.state]?.[0] ?? r.state}</Badge>
               </span>
-              <button className="btn sm danger" disabled={!canDeploy || r.state !== 'retained'} title={canDeploy ? undefined : '작업 공간 관리자 권한 필요'} onClick={() => setDel(r)}>
+              <button type="button" className="btn sm danger" disabled={!canDeploy || r.state !== 'retained'} title={canDeploy ? undefined : '작업 공간 관리자 권한 필요'} onClick={() => setDel(r)}>
                 원본 삭제
               </button>
             </div>
@@ -106,15 +106,15 @@ export function MoveCard({ tenant, v, canDeploy, onRefresh, onStart }: { tenant:
         </div>
       )}
       <div className="row" style={{ gap: 8 }}>
-        <button className="btn" onClick={onRefresh}>
+        <button type="button" className="btn" onClick={onRefresh}>
           결과 조회
         </button>
         {p ? (
-          <button className="btn danger" disabled={!canDeploy || committed || p === 'Cancelling'} title={committed ? '새 서버로 확정한 뒤에는 취소할 수 없습니다' : !canDeploy ? '작업 공간 관리자 권한 필요' : undefined} onClick={() => setCancel(true)}>
+          <button type="button" className="btn danger" disabled={!canDeploy || committed || p === 'Cancelling'} title={committed ? '새 서버로 확정한 뒤에는 취소할 수 없습니다' : !canDeploy ? '작업 공간 관리자 권한 필요' : undefined} onClick={() => setCancel(true)}>
             이관 취소
           </button>
         ) : (
-          <button className="btn" disabled={!!blocked} title={blocked} onClick={onStart}>
+          <button type="button" className="btn" disabled={!!blocked} title={blocked} onClick={onStart}>
             이관…
           </button>
         )}
@@ -166,24 +166,24 @@ export function MoveDialog({ tenant, v, initialNode = '', onClose, onDone }: { t
       onClose={onClose}
       footer={
         sent ? (
-          <button className="btn primary" onClick={onClose}>
+          <button type="button" className="btn primary" onClick={onClose}>
             닫기
           </button>
         ) : plan ? (
           <>
-            <button className="btn" onClick={stale ? replan : onClose}>
+            <button type="button" className="btn" onClick={stale ? replan : onClose}>
               {stale ? '다시 계획' : '취소'}
             </button>
-            <button className="btn danger solid" disabled={m.busy || stale} onClick={() => void start()}>
+            <button type="button" className="btn danger solid" disabled={m.busy || stale} onClick={() => void start()}>
               {m.busy ? '보내는 중…' : '이관 시작'}
             </button>
           </>
         ) : (
           <>
-            <button className="btn" onClick={onClose}>
+            <button type="button" className="btn" onClick={onClose}>
               취소
             </button>
-            <button className="btn primary" disabled={!target || planning} onClick={() => void makePlan()}>
+            <button type="button" className="btn primary" disabled={!target || planning} onClick={() => void makePlan()}>
               {planning ? '계획하는 중…' : '이관 계획'}
             </button>
           </>
@@ -288,15 +288,15 @@ function CancelMoveDialog({ tenant, v, onClose, onDone }: { tenant: string; v: V
       onClose={onClose}
       footer={
         m.op?.state === 'applied' ? (
-          <button className="btn primary" onClick={onClose}>
+          <button type="button" className="btn primary" onClick={onClose}>
             닫기
           </button>
         ) : (
           <>
-            <button className="btn" onClick={onClose}>
+            <button type="button" className="btn" onClick={onClose}>
               취소
             </button>
-            <button className="btn danger solid" disabled={m.busy} onClick={() => void send()}>
+            <button type="button" className="btn danger solid" disabled={m.busy} onClick={() => void send()}>
               {m.busy ? '보내는 중…' : '이관 취소'}
             </button>
           </>
@@ -327,15 +327,15 @@ function RetainedDeleteDialog({ tenant, v, r, onClose, onDone }: { tenant: strin
       onClose={onClose}
       footer={
         m.op?.state === 'applied' ? (
-          <button className="btn primary" onClick={onClose}>
+          <button type="button" className="btn primary" onClick={onClose}>
             닫기
           </button>
         ) : (
           <>
-            <button className="btn" onClick={onClose}>
+            <button type="button" className="btn" onClick={onClose}>
               취소
             </button>
-            <button className="btn danger solid" disabled={m.busy} onClick={() => void send()}>
+            <button type="button" className="btn danger solid" disabled={m.busy} onClick={() => void send()}>
               {m.busy ? '보내는 중…' : '삭제'}
             </button>
           </>

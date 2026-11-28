@@ -90,15 +90,15 @@ function Shell({ title, onClose, done, busy, ok, danger, label, onSend, children
       onClose={onClose}
       footer={
         done ? (
-          <button className="btn primary" onClick={onClose}>
+          <button type="button" className="btn primary" onClick={onClose}>
             닫기
           </button>
         ) : (
           <>
-            <button className="btn" onClick={onClose}>
+            <button type="button" className="btn" onClick={onClose}>
               취소
             </button>
-            <button className={danger ? 'btn danger solid' : 'btn primary'} disabled={busy || !ok} onClick={onSend}>
+            <button type="button" className={danger ? 'btn danger solid' : 'btn primary'} disabled={busy || !ok} onClick={onSend}>
               {busy ? '보내는 중…' : label}
             </button>
           </>
@@ -114,7 +114,7 @@ function Changed({ what, onReload }: { what: string; onReload: () => void }) {
   return (
     <div className="note wa small row between">
       <span>그사이 {what}이 바뀌었습니다. 새 계획을 읽은 뒤 다시 하세요.</span>
-      <button className="btn sm" onClick={onReload}>
+      <button type="button" className="btn sm" onClick={onReload}>
         새로 읽기
       </button>
     </div>

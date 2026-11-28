@@ -22,25 +22,40 @@ import (
 // unavailable) and what each account's vendor sells (no entry =
 // unavailable).
 type FixtureVPS struct {
+	// Accounts of either ownership; QueryVPS and QueryOwnedVPS each show
+	// only their own.
 	Accounts []control.VPSPublicAccount
 	Servers  []control.VPSServer
-	Status   *control.VPSStatus
-	Offers   map[string]control.VPSOffer
+	Owned    []control.OwnedVPS
+	// OwnedStatus seeds the leader's owned VPS readings (nil = unavailable).
+	OwnedStatus *control.OwnedVPSStatus
+	// OwnedInstances seeds each owned account's VMs at the vendor (no
+	// entry = unavailable); Attached is filled from the owned records.
+	OwnedInstances map[string][]control.OwnedVPSInstance
+	Status         *control.VPSStatus
+	Offers         map[string]control.VPSOffer
 }
 
 type vpsFakeState struct {
-	page   control.VPSPage
-	status *control.VPSStatus
-	offers map[string]control.VPSOffer
+	page  control.VPSPage
+	owned control.OwnedVPSCatalog
+	// ownedStatus is the leader's owned VPS readings (nil = unavailable).
+	ownedStatus    *control.OwnedVPSStatus
+	ownedInstances map[string][]control.OwnedVPSInstance
+	status         *control.VPSStatus
+	offers         map[string]control.VPSOffer
 }
 
 func (w *world) seedVPS(f Fixture) {
-	w.vps = vpsFakeState{page: control.VPSPage{Revision: 1, Accounts: []control.VPSPublicAccount{}, Servers: []control.VPSServer{}}, offers: map[string]control.VPSOffer{}}
+	w.vps = vpsFakeState{page: control.VPSPage{Revision: 1, Accounts: []control.VPSPublicAccount{}, Servers: []control.VPSServer{}}, owned: control.OwnedVPSCatalog{Revision: 1}, offers: map[string]control.VPSOffer{}}
 	if f.VPS == nil {
 		return
 	}
 	w.vps.page.Accounts = append(w.vps.page.Accounts, f.VPS.Accounts...)
 	w.vps.page.Servers = append(w.vps.page.Servers, f.VPS.Servers...)
+	w.vps.owned.Servers = append(w.vps.owned.Servers, f.VPS.Owned...)
+	w.vps.ownedStatus = f.VPS.OwnedStatus
+	w.vps.ownedInstances = f.VPS.OwnedInstances
 	w.vps.status = f.VPS.Status
 	for k, v := range f.VPS.Offers {
 		w.vps.offers[k] = v
@@ -53,7 +68,61 @@ func (c *fakeConn) QueryVPS(ctx context.Context) (control.VPSPage, error) {
 	}
 	defer c.unlock()
 	p := c.f.w.vps.page
-	return control.VPSPage{Revision: p.Revision, Accounts: slices.Clone(p.Accounts), Servers: slices.Clone(p.Servers)}, nil
+	accounts := []control.VPSPublicAccount{}
+	for _, a := range p.Accounts {
+		if _, ok := vps.LookupManaged(a.Vendor); ok {
+			accounts = append(accounts, a)
+		}
+	}
+	return control.VPSPage{Revision: p.Revision, Accounts: accounts, Servers: slices.Clone(p.Servers)}, nil
+}
+
+func (c *fakeConn) QueryOwnedVPS(ctx context.Context, status bool) (userauth.OwnedVPSReply, error) {
+	if err := c.adminOnly(ctx, "owned-vps"); err != nil {
+		return userauth.OwnedVPSReply{}, err
+	}
+	defer c.unlock()
+	v := c.f.w.vps
+	page := control.OwnedVPSPage{Revision: v.owned.Revision, AccountRevision: v.page.Revision, Accounts: []control.VPSPublicAccount{}, Servers: slices.Clone(v.owned.Servers)}
+	if page.Servers == nil {
+		page.Servers = []control.OwnedVPS{}
+	}
+	for _, a := range v.page.Accounts {
+		if _, ok := vps.LookupOwned(a.Vendor); ok {
+			page.Accounts = append(page.Accounts, a)
+		}
+	}
+	reply := userauth.OwnedVPSReply{Page: page, RootRevision: page.Revision, AccountRootRevision: page.AccountRevision}
+	if status {
+		if v.ownedStatus == nil {
+			return userauth.OwnedVPSReply{}, fail("owned-vps", CodeUnavailable, "leader")
+		}
+		st := *v.ownedStatus
+		reply.Status = &st
+	}
+	return reply, nil
+}
+
+func (c *fakeConn) QueryOwnedVPSInstances(ctx context.Context, account string) ([]control.OwnedVPSInstance, error) {
+	if err := c.adminOnly(ctx, "owned-vps"); err != nil {
+		return nil, err
+	}
+	defer c.unlock()
+	v := c.f.w.vps
+	list, ok := v.ownedInstances[account]
+	if !ok {
+		return nil, fail("owned-vps", CodeUnavailable, "vendor")
+	}
+	out := slices.Clone(list)
+	for i := range out {
+		out[i].Attached = ""
+		for _, s := range v.owned.Servers {
+			if s.Account == account && s.InstanceID == out[i].ID {
+				out[i].Attached = s.Name
+			}
+		}
+	}
+	return out, nil
 }
 
 func (c *fakeConn) QueryVPSStatus(ctx context.Context) (control.VPSStatus, error) {
@@ -84,7 +153,7 @@ func (c *fakeConn) QueryVPSOffer(ctx context.Context, q control.VPSOfferQuery) (
 
 func (c *fakeConn) SealVPSCredential(ctx context.Context, in userauth.VPSCredentialInput) (vps.SealedCredential, error) {
 	const m = "vps-credential"
-	if in.Request == "" || !vps.ValidAccountName(in.Account) || len(in.AccessKey) == 0 || len(in.AccessKey) > 256 || len(in.SecretKey) == 0 || len(in.SecretKey) > 256 {
+	if in.Request == "" || !vps.ValidAccountName(in.Account) || len(in.AccessKey) == 0 || len(in.AccessKey) > 256 || len(in.SecretKey) > 256 {
 		return vps.SealedCredential{}, fail(m, CodeInvalid, "credential input")
 	}
 	if err := c.adminOnly(ctx, m); err != nil {
@@ -150,7 +219,8 @@ func (c *fakeConn) applyVPS(op UserOperation, actor string) error {
 		if decodePayload(op.Change.Payload, &q) != nil {
 			return errors.New("payload")
 		}
-		if slices.ContainsFunc(p.Servers, func(v control.VPSServer) bool { return v.Account == q.Name }) {
+		if slices.ContainsFunc(p.Servers, func(v control.VPSServer) bool { return v.Account == q.Name }) ||
+			slices.ContainsFunc(w.vps.owned.Servers, func(v control.OwnedVPS) bool { return v.Account == q.Name }) {
 			return errVPSPhase
 		}
 		n := len(p.Accounts)
@@ -222,6 +292,83 @@ func (c *fakeConn) applyVPS(op UserOperation, actor string) error {
 	return nil
 }
 
+// applyOwnedVPS models the owned VPS reducer (control/owned_vps.go).
+func (c *fakeConn) applyOwnedVPS(op UserOperation, actor string) error {
+	w := c.f.w
+	if !w.admin(actor) {
+		return errForbidden
+	}
+	o := &w.vps.owned
+	if op.Change.Expected != o.Revision {
+		return errCAS
+	}
+	now := c.f.now().Unix()
+	index := func(name string) int {
+		return slices.IndexFunc(o.Servers, func(v control.OwnedVPS) bool { return v.Name == name })
+	}
+	switch op.Change.Action {
+	case ActionAttachOwnedVPS:
+		var q control.OwnedVPSAttach
+		if decodePayload(op.Change.Payload, &q) != nil {
+			return errors.New("payload")
+		}
+		if q.Protect == "" {
+			q.Protect = control.OwnedProtectExclude
+		}
+		phase := control.OwnedInstalling
+		ok := (q.Install == control.OwnedInstallSSH || q.Install == control.OwnedInstallManual || q.Install == control.OwnedInstallExisting) &&
+			(q.Protect == control.OwnedProtectExclude || q.Protect == control.OwnedProtectLowWeight) && (!q.Voter || q.Install == control.OwnedInstallManual) && q.InstanceID != "" && (q.Port == 0) == (q.Install == control.OwnedInstallExisting)
+		if !ok {
+			return errors.New("payload")
+		}
+		i := slices.IndexFunc(w.vps.page.Accounts, func(a control.VPSPublicAccount) bool { return a.Name == q.Account })
+		if i < 0 {
+			return errVPSPhase
+		}
+		if _, owned := vps.LookupOwned(w.vps.page.Accounts[i].Vendor); !owned || index(q.Name) >= 0 ||
+			slices.ContainsFunc(o.Servers, func(v control.OwnedVPS) bool { return v.Account == q.Account && v.InstanceID == q.InstanceID }) {
+			return errVPSPhase
+		}
+		o.Servers = append(o.Servers, control.OwnedVPS{Name: q.Name, Account: q.Account, InstanceID: q.InstanceID, Install: q.Install, Voter: q.Voter, Port: q.Port, Protect: q.Protect,
+			Phase: phase, Request: op.RequestID, AttachedBy: actor, AttachedAt: now, UpdatedBy: actor, UpdatedAt: now})
+		slices.SortFunc(o.Servers, func(a, b control.OwnedVPS) int { return cmpString(a.Name, b.Name) })
+	case ActionDetachOwnedVPS:
+		var q control.OwnedVPSSelection
+		if decodePayload(op.Change.Payload, &q) != nil {
+			return errors.New("payload")
+		}
+		i := index(q.Name)
+		if i < 0 {
+			return errors.New("no such server")
+		}
+		o.Servers = slices.Delete(o.Servers, i, i+1)
+	case ActionSetOwnedVPS:
+		var q control.OwnedVPSSet
+		if decodePayload(op.Change.Payload, &q) != nil || q.Protect == "" && !q.Restore || q.Protect != "" && q.Protect != control.OwnedProtectExclude && q.Protect != control.OwnedProtectLowWeight {
+			return errors.New("payload")
+		}
+		i := index(q.Name)
+		if i < 0 {
+			return errors.New("no such server")
+		}
+		v := &o.Servers[i]
+		if q.Restore {
+			if v.Limit == nil {
+				return errVPSPhase
+			}
+			v.Restored, v.Limit = &control.OwnedRestore{At: now, Month: v.Limit.Month, By: actor}, nil
+		}
+		if q.Protect != "" {
+			v.Protect = q.Protect
+		}
+		v.UpdatedBy, v.UpdatedAt = actor, now
+	default:
+		return errors.New("action")
+	}
+	o.Revision++
+	return nil
+}
+
 func cmpString(a, b string) int {
 	switch {
 	case a < b:
@@ -281,4 +428,33 @@ func (f *Fake) SetVPSPhase(name, phase string) {
 		p.Servers[i].Phase, p.Servers[i].PhaseAt = phase, f.now().Unix()
 	}
 	p.Revision++
+}
+
+// SetOwnedVPS puts v into the owned VPS catalog as the leader's reports
+// would (replacing a server of the same name; empty Phase removes it).
+// Tests only.
+func (f *Fake) SetOwnedVPS(v control.OwnedVPS) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	o := &f.w.vps.owned
+	o.Servers = slices.DeleteFunc(o.Servers, func(x control.OwnedVPS) bool { return x.Name == v.Name })
+	if v.Phase != "" {
+		o.Servers = append(o.Servers, v)
+		slices.SortFunc(o.Servers, func(a, b control.OwnedVPS) int { return cmpString(a.Name, b.Name) })
+	}
+	o.Revision++
+}
+
+// SetOwnedInstances sets what account's vendor lists (nil = unavailable).
+func (f *Fake) SetOwnedInstances(account string, list []control.OwnedVPSInstance) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.w.vps.ownedInstances == nil {
+		f.w.vps.ownedInstances = map[string][]control.OwnedVPSInstance{}
+	}
+	if list == nil {
+		delete(f.w.vps.ownedInstances, account)
+		return
+	}
+	f.w.vps.ownedInstances[account] = slices.Clone(list)
 }

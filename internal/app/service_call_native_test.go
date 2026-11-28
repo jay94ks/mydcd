@@ -14,8 +14,6 @@ import (
 	"strings"
 	"testing"
 
-	"gopkg.in/yaml.v3"
-
 	"github.com/jay94ks/seafield/internal/access"
 	"github.com/jay94ks/seafield/internal/cluster"
 	"github.com/jay94ks/seafield/internal/cluster/control"
@@ -219,18 +217,6 @@ func verifyManagedServiceDiagnostics(t *testing.T, ctx context.Context, r *Runti
 	var got servicecall.Result
 	if err = json.Unmarshal(cli("service-call", "app", "web", "--port", "8443", "--path", "/call", "--scheme", "https"), &got); err != nil || got.Code != "" || got.Status != 200 {
 		t.Fatal("CLI HTTPS actual Task", got, err)
-	}
-	var found deployment.GitProbeResult
-	probeFile := filepath.Join(root, "probe-cd.yaml")
-	rawProbe, err := yaml.Marshal(deployment.CDFile{Version: 1, Repository: source.Repository(), Branch: "main", Path: "app.yaml", Credential: "git-read"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err = os.WriteFile(probeFile, rawProbe, 0600); err != nil {
-		t.Fatal(err)
-	}
-	if err = json.Unmarshal(cli("cd", "probe", "app", "-f", probeFile), &found); err != nil || found.Commit != commit || found.Size != int64(len(original)) {
-		t.Fatal("CLI read-only Git", found, err)
 	}
 	if !reflect.DeepEqual(before, fingerprint()) {
 		t.Fatal("CLI probe changed app/CD state")

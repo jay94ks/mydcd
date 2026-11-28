@@ -189,7 +189,7 @@ func managedTunnelViews(cluster [32]byte, s state.State, p control.ResourceProje
 					material, materialErr := deployment.ResolveRetainedTaskNetwork(cluster, g.Goal, alias, objects)
 					packetOwner := material.NativeOwner(cluster)
 					endpoint := key + "/" + alias + "/" + strconv.Itoa(family)
-					allocation, held := p.Addresses.Allocation(endpoint)
+					allocation, held := p.Addresses.AllocationOf(endpoint, s.Object(key).Generation)
 					pool, pooled := p.Addresses.Pool(allocation.Pool)
 					if materialErr != nil || packetOwner == ([32]byte{}) || !held || !pooled || allocation.Owner != hex.EncodeToString(packetOwner[:]) || pool.Owner != allocation.Owner || allocation.Generation != s.Object(key).Generation || allocation.Address != a {
 						return nil, network.ErrPolicy

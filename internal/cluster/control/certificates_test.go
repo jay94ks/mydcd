@@ -224,4 +224,33 @@ func TestDomainOwnerTenantAndNesting(t *testing.T) {
 	if DomainTenant(users, certstore.Domain{Name: "x.example", Tenant: "gone"}) != "" {
 		t.Fatal("unknown tenant kept ownership")
 	}
+	// A live owner is not reported as deleted on the list page.
+	if page, err := f.p.CertificatePage(f.s, f.sessions["admin"], 3, CertificateQuery{}); err != nil || len(page.Domains) == 0 || len(page.DeletedOwners) != 0 {
+		t.Fatal("deleted owners", page.DeletedOwners, err)
+	}
+}
+
+// A tenant sees certificates linked to its own hosts only, without chain or
+// key material.
+func TestTenantCertificatesShowOnlyItsLinks(t *testing.T) {
+	f := newNodeStorageFixture(t)
+	v := controlCertificate(t, f, 1, fmt.Sprintf("user-%d", f.next+1))
+	f.apply("admin", "put-certificate", 0, CertificatePut{v}, state.Applied)
+	f.apply("admin", "add-domain", 1, DomainChange{Name: "shop.example"}, state.Applied)
+	rows, revision, err := f.p.TenantCertificates(f.s, "tenant", 3)
+	if err != nil || revision != 2 || len(rows) != 0 {
+		t.Fatal("cluster-level domain certificate shown to a tenant", rows, err)
+	}
+	f.apply("admin", "assign-domain", 2, DomainChange{Name: "shop.example", Tenant: "tenant"}, state.Applied)
+	rows, _, err = f.p.TenantCertificates(f.s, "tenant", 3)
+	if err != nil || len(rows) != 1 || rows[0].ID != v.Metadata.ID || len(rows[0].Links) == 0 || rows[0].Links[0].Host != "shop.example" || rows[0].NotAfter != 101 {
+		t.Fatal("own domain certificate", rows, err)
+	}
+	raw, _ := json.Marshal(rows)
+	if bytes.Contains(raw, []byte("Sealed")) || bytes.Contains(raw, []byte("Chain")) || bytes.Contains(raw, []byte("UploadedBy")) {
+		t.Fatal("tenant row exposed more than public facts", string(raw))
+	}
+	if rows, _, _ := f.p.TenantCertificates(f.s, "other", 3); len(rows) != 0 {
+		t.Fatal("another tenant saw the certificate")
+	}
 }

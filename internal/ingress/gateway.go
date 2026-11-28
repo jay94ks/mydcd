@@ -170,7 +170,7 @@ func (m *Manager) ConfigureGateways(c GatewayConfiguration, clusterAddresses []n
 	return nil
 }
 func (m *Manager) SetTenantPolicy(tenant string, policy HostPolicy) error {
-	if tenant == "" || len(policy.ExternalHosts) > 256 || len(policy.LocalHosts) > 256 {
+	if tenant == "" || len(policy.ExternalHosts) > maxPolicyHosts || len(policy.LocalHosts) > maxPolicyHosts {
 		return ErrRoute
 	}
 	for _, pattern := range append(append([]string(nil), policy.ExternalHosts...), policy.LocalHosts...) {
@@ -194,6 +194,11 @@ func (m *Manager) SetTenantPolicy(tenant string, policy HostPolicy) error {
 	}
 	return nil
 }
+
+// maxPolicyHosts bounds one tenant's host list: its domains (each as the
+// name and "*.name") and its approved hosts.
+const maxPolicyHosts = 2048
+
 func hostAllowed(name string, allowed []string) bool {
 	for _, pattern := range allowed {
 		if pattern == "*" || name == pattern || strings.HasPrefix(pattern, "*.") && strings.HasSuffix(name, pattern[1:]) {
@@ -224,15 +229,20 @@ func (m *Manager) attachShared(i *instance, s Spec, l Listener) error {
 		if !gatewayIncludes(r.Gateway, g.kind) {
 			continue
 		}
+		// A route whose host the tenant may not serve here (a host waiting
+		// for approval, a domain taken away) stays closed; the app's other
+		// routes still open.
 		if g.kind == "external" && !policy.ExternalAllowed {
-			return errors.New("INGRESS_EXTERNAL_NOT_ALLOWED")
+			continue
 		}
 		allowed := policy.LocalHosts
 		if g.kind == "external" {
 			allowed = policy.ExternalHosts
 		}
-		if !hostAllowed(r.Host, allowed) || r.Host == "*" && !s.SystemWildcard {
-			return errors.New("INGRESS_HOST_NOT_ALLOWED")
+		// "*" is a system administrator's route (SystemWildcard), never
+		// part of a tenant's host list.
+		if r.Host == "*" && !s.SystemWildcard || r.Host != "*" && !hostAllowed(r.Host, allowed) {
+			continue
 		}
 		routes = append(routes, r)
 	}
@@ -409,6 +419,9 @@ func (m *Manager) bindingAllowed(s Spec, r Route, kind string) bool {
 	policy, ok := m.hostPolicies[s.Tenant]
 	if !ok {
 		return false
+	}
+	if r.Host == "*" {
+		return s.SystemWildcard
 	}
 	if kind == "external" {
 		return policy.ExternalAllowed && hostAllowed(r.Host, policy.ExternalHosts)

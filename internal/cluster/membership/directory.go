@@ -663,6 +663,19 @@ func Decode(raw []byte) (Directory, error) {
 	return d, nil
 }
 
+// DecodeChecked decodes a directory whose exact bytes already passed Decode
+// (a caller's memo of checked bytes). It skips Validate and the canonical
+// re-encode, which are the costly part, and only refuses unknown fields.
+func DecodeChecked(raw []byte) (Directory, error) {
+	var d Directory
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	if decoder.Decode(&d) != nil {
+		return Directory{}, ErrMember
+	}
+	return d, nil
+}
+
 // ErrJoinStarted refuses to cancel an invitation whose join was already
 // dispatched to Raft: the server may be a learner, so it leaves through
 // the removal path once it is a member.

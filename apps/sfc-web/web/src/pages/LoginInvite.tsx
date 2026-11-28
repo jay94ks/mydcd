@@ -123,7 +123,7 @@ export function LoginInvitePage() {
           <>
             <div className="note ok small">키를 등록하고 로그인했습니다. 내 계정에서 키를 내보내 백업해 두세요.</div>
             {cleanupFailed && <div className="note wa small">쓴 초대 자격 증명을 끄지 못했습니다. 내 계정 › 로그인 수단에서 ‘초대 링크’ 줄을 꺼 주세요. 이미 쓴 링크라 다시 쓸 수는 없습니다.</div>}
-            <button className="btn primary" onClick={() => navigate('/account', { replace: true })}>
+            <button type="button" className="btn primary" onClick={() => navigate('/account', { replace: true })}>
               내 계정으로
             </button>
           </>
@@ -139,7 +139,7 @@ export function LoginInvitePage() {
             <Field label="암호 문구 확인" error={p2 && p1 !== p2 ? '두 암호 문구가 다릅니다' : undefined}>
               <input type="password" value={p2} onChange={(e) => setP2(e.target.value)} autoComplete="new-password" disabled={step !== 'form'} />
             </Field>
-            <button className="btn primary" disabled={!ready} onClick={() => void run()}>
+            <button type="button" className="btn primary" disabled={!ready} onClick={() => void run()}>
               {step === 'form' ? '키 만들고 등록' : '등록하는 중…'}
             </button>
             {step !== 'form' && (

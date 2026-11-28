@@ -26,6 +26,26 @@ type NodeShellPolicyView struct {
 	Revision, Index, RootRevision uint64
 }
 
+// NodeShellWatchAllowed is whether session may learn that the node shell
+// record ref changed: the gate of node-shell-policy and node-shell-sessions.
+// Server readiness names every server, so only managers hear of it;
+// others hear of the policy and of their own sessions.
+func NodeShellWatchAllowed(c access.Catalog, session access.Session, cluster [32]byte, issuer access.Issuer, at int64, ref WatchRef) bool {
+	if c.AuthorizeSession(session, cluster, issuer, at, "", access.ManageCluster, "") == nil {
+		return true
+	}
+	if !nodeShellReadScope(c, session, cluster, issuer, at) {
+		return false
+	}
+	switch ref.Kind {
+	case "node-shell":
+		return ref.Name == "policy"
+	case "node-shell-session":
+		return ref.User != "" && ref.User == session.User
+	}
+	return false
+}
+
 func nodeShellReadScope(c access.Catalog, session access.Session, cluster [32]byte, issuer access.Issuer, at int64) bool {
 	if c.VerifySession(session, cluster, issuer, at) != nil {
 		return false

@@ -3,9 +3,11 @@
 package control
 
 import (
+	"crypto/ed25519"
 	"fmt"
 	"testing"
 
+	"github.com/jay94ks/seafield/internal/access"
 	"github.com/jay94ks/seafield/internal/cluster/state"
 	"github.com/jay94ks/seafield/internal/ingress"
 )
@@ -33,7 +35,7 @@ func TestWatchRecordsCertificateBook(t *testing.T) {
 		t.Fatal("root revision did not move")
 	}
 	got := WatchDiff(empty, one)
-	if len(got) != 1 || got[0].WatchKey != (WatchKey{"certificate", "", v.Metadata.ID.String()}) {
+	if len(got) != 1 || got[0].WatchKey != (WatchKey{Kind: "certificate", Tenant: "", Name: v.Metadata.ID.String()}) {
 		t.Fatal("certificate refs", got)
 	}
 	c, _ := f.p.Certificates(f.s)
@@ -45,7 +47,7 @@ func TestWatchRecordsCertificateBook(t *testing.T) {
 	for _, r := range got {
 		names[r.WatchKey] = true
 	}
-	if !names[WatchKey{"domain", "", "shop.example"}] {
+	if !names[WatchKey{Kind: "domain", Tenant: "", Name: "shop.example"}] {
 		t.Fatal("domain refs", got)
 	}
 }
@@ -65,7 +67,6 @@ func TestWatchBookRevisionPrefix(t *testing.T) {
 func TestIngressWatchRecordNames(t *testing.T) {
 	b := IngressManagement{
 		Blocks:              []IngressBlockRecord{{Block: ingress.Block{ID: "x", Tenant: "a"}, Revision: 1}},
-		HostPolicies:        []IngressHostPolicyRecord{{Tenant: "a", Revision: 1}},
 		Balances:            []IngressBalanceRecord{{IngressBalanceChange: IngressBalanceChange{Tenant: "a", App: "web", Route: "r"}}},
 		Drains:              []IngressDrainRecord{{IngressDrainChange: IngressDrainChange{Tenant: "a", App: "web", Node: "n1"}}},
 		NodeGatewaysRecords: []NodeGatewaysRecord{{Node: "n1"}},
@@ -77,8 +78,8 @@ func TestIngressWatchRecordNames(t *testing.T) {
 		t.Fatal("watch records failed")
 	}
 	want := []WatchKey{
-		{"ingress", "a", "block/x"}, {"ingress", "a", "host-policy"}, {"ingress", "a", "balance/web/r"},
-		{"ingress", "a", "drain/web/n1"}, {"ingress", "", "gateway/n1"}, {"ingress", "", "cluster-app-route/sfc-web"}, {"ingress", "a", "history"},
+		{Kind: "ingress", Tenant: "a", Name: "block/x"}, {Kind: "ingress", Tenant: "a", Name: "balance/web/r"},
+		{Kind: "ingress", Tenant: "a", Name: "drain/web/n1"}, {Kind: "ingress", Tenant: "", Name: "gateway/n1"}, {Kind: "ingress", Tenant: "", Name: "cluster-app-route/sfc-web"}, {Kind: "ingress", Tenant: "a", Name: "history"},
 	}
 	if len(out) != len(want) {
 		t.Fatal("records", out)
@@ -88,11 +89,64 @@ func TestIngressWatchRecordNames(t *testing.T) {
 			t.Fatal("missing", k, out)
 		}
 	}
-	before := out[WatchKey{"ingress", "a", "history"}]
+	before := out[WatchKey{Kind: "ingress", Tenant: "a", Name: "history"}]
 	b.History = append(b.History, IngressHistoryRecord{Tenant: "a", Order: 3})
 	again := WatchRecords{}
 	b.watchRecords(again)
-	if again[WatchKey{"ingress", "a", "history"}] == before {
+	if again[WatchKey{Kind: "ingress", Tenant: "a", Name: "history"}] == before {
 		t.Fatal("a new history row did not change the history record")
+	}
+}
+
+// The node shell book always names its policy; an empty VPS book names
+// nothing.
+func TestWatchRecordsNodeShellAndVPS(t *testing.T) {
+	f := newNodeStorageFixture(t)
+	shell, err := f.p.WatchRecords(f.s, NodeShellKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := shell[WatchKey{Kind: "node-shell", Name: "policy"}]; !ok || len(shell) != 1 {
+		t.Fatal("node shell records", shell)
+	}
+	v, err := f.p.WatchRecords(f.s, VPSKey)
+	if err != nil || len(v) != 0 {
+		t.Fatal("vps records", v, err)
+	}
+}
+
+// Node shell refs follow the read gate: managers hear of everything, a
+// shell-scoped session of the policy and its own sessions, others nothing.
+func TestNodeShellWatchGate(t *testing.T) {
+	f := newNodeStorageFixture(t)
+	p, err := f.p.Current(f.s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := p.Catalog(f.s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	shell := f.sessions["manager"]
+	shell.ID = "session-shell"
+	shell.Scopes = []access.Scope{{Tenant: "*", Actions: []access.Action{access.NodeShell}}}
+	shell.Signature = ed25519.Sign(f.node, access.SessionBytes(shell))
+	policy := WatchRef{WatchKey: WatchKey{Kind: "node-shell", Name: "policy"}}
+	node := WatchRef{WatchKey: WatchKey{Kind: "node-shell", Name: "node/node-a"}}
+	mine := WatchRef{WatchKey: WatchKey{Kind: "node-shell-session", Name: "s1", User: "manager"}}
+	other := WatchRef{WatchKey: WatchKey{Kind: "node-shell-session", Name: "s2", User: "admin"}}
+	allowed := func(s access.Session, r WatchRef) bool {
+		return NodeShellWatchAllowed(c, s, p.Cluster, p.Issuer(s.Issuer), 2, r)
+	}
+	for _, r := range []WatchRef{policy, node, mine, other} {
+		if !allowed(f.sessions["admin"], r) {
+			t.Fatal("admin denied", r)
+		}
+		if allowed(f.sessions["manager"], r) {
+			t.Fatal("unscoped manager allowed", r)
+		}
+	}
+	if !allowed(shell, policy) || allowed(shell, node) || !allowed(shell, mine) || allowed(shell, other) {
+		t.Fatal("shell-scoped session gate")
 	}
 }

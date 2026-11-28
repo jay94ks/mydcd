@@ -125,7 +125,7 @@ function Body({ a, c, canWrite, onSaved, base }: { a: AppView; c: AppIncidentCon
                     <span key={x} className="pillc" style={{ marginRight: 6 }}>
                       {quietText(x)}{' '}
                       {canWrite && (
-                        <button className="textbtn plain" aria-label={`${x} 빼기`} onClick={() => setD((o) => ({ ...o, quiet: o.quiet.filter((y) => y !== x) }))}>
+                        <button type="button" className="textbtn plain" aria-label={`${x} 빼기`} onClick={() => setD((o) => ({ ...o, quiet: o.quiet.filter((y) => y !== x) }))}>
                           ✕
                         </button>
                       )}
@@ -137,7 +137,7 @@ function Body({ a, c, canWrite, onSaved, base }: { a: AppView; c: AppIncidentCon
                 {canWrite && addQuiet === undefined && (
                   <>
                     {' · '}
-                    <button className="textbtn" style={{ color: 'var(--accent)' }} onClick={() => setAddQuiet('')}>
+                    <button type="button" className="textbtn" style={{ color: 'var(--accent)' }} onClick={() => setAddQuiet('')}>
                       추가
                     </button>
                   </>
@@ -147,7 +147,7 @@ function Body({ a, c, canWrite, onSaved, base }: { a: AppView; c: AppIncidentCon
                 <Field label="막는 시간" hint="백업 시간 등. 이 시간에는 모든 조치를 승인 요청으로 바꿉니다." error={addQuiet && !QUIET_RE.test(addQuiet) ? '02:00-03:00 꼴로 적어 주세요' : undefined}>
                   <span className="row" style={{ gap: 6 }}>
                     <input autoFocus placeholder="02:00-03:00" value={addQuiet} onChange={(e) => setAddQuiet(e.target.value.trim())} style={{ width: 140 }} />
-                    <button
+                    <button type="button"
                       className="btn sm"
                       disabled={!QUIET_RE.test(addQuiet)}
                       onClick={() => {
@@ -157,7 +157,7 @@ function Body({ a, c, canWrite, onSaved, base }: { a: AppView; c: AppIncidentCon
                     >
                       넣기
                     </button>
-                    <button className="btn sm" onClick={() => setAddQuiet(undefined)}>
+                    <button type="button" className="btn sm" onClick={() => setAddQuiet(undefined)}>
                       취소
                     </button>
                   </span>
@@ -173,7 +173,7 @@ function Body({ a, c, canWrite, onSaved, base }: { a: AppView; c: AppIncidentCon
             </span>
           </div>
           <div className="row" style={{ justifyContent: 'flex-end' }}>
-            <button className="btn primary" disabled={!canWrite || !diff.length || rateBad} title={title} onClick={() => (setError(undefined), setReview(true))}>
+            <button type="button" className="btn primary" disabled={!canWrite || !diff.length || rateBad} title={title} onClick={() => (setError(undefined), setReview(true))}>
               변경 저장
             </button>
           </div>
@@ -272,10 +272,10 @@ function Body({ a, c, canWrite, onSaved, base }: { a: AppView; c: AppIncidentCon
           onClose={() => setReview(false)}
           footer={
             <>
-              <button className="btn" onClick={() => setReview(false)}>
+              <button type="button" className="btn" onClick={() => setReview(false)}>
                 취소
               </button>
-              <button className="btn primary" disabled={busy} onClick={() => void save()}>
+              <button type="button" className="btn primary" disabled={busy} onClick={() => void save()}>
                 {busy ? '저장 중…' : '저장'}
               </button>
             </>
@@ -358,10 +358,10 @@ function Versions({ a, canWrite, base }: { a: AppView; canWrite: boolean; base: 
           onClose={() => setAsk(undefined)}
           footer={
             <>
-              <button className="btn" onClick={() => setAsk(undefined)}>
+              <button type="button" className="btn" onClick={() => setAsk(undefined)}>
                 취소
               </button>
-              <button className="btn primary" disabled={busy} onClick={() => void set(ask, true)}>
+              <button type="button" className="btn primary" disabled={busy} onClick={() => void set(ask, true)}>
                 표시
               </button>
             </>

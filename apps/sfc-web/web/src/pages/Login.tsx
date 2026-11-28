@@ -219,10 +219,10 @@ export function ImportKeyDialog({ fixedUser, onClose, onDone }: { fixedUser?: st
       onClose={close}
       footer={
         <>
-          <button className="btn" onClick={close} disabled={busy}>
+          <button type="button" className="btn" onClick={close} disabled={busy}>
             취소
           </button>
-          <button className="btn primary" disabled={!valid || busy} onClick={() => void run()}>
+          <button type="button" className="btn primary" disabled={!valid || busy} onClick={() => void run()}>
             {busy ? '암호화하는 중…' : '가져오기'}
           </button>
         </>

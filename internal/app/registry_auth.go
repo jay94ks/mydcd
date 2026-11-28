@@ -6,6 +6,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"log"
 	"slices"
 	"time"
 
@@ -23,15 +25,41 @@ func registryWorkMatchesRun(work control.RegistryWork, run control.RegistryRunRe
 	return work.MayStart && active != nil && run.Owner == owner && active.Generation == run.Generation && active.SpecRevision == run.SpecRevision && active.Spec == run.Spec && active.Owner == owner && active.Consumer == run.Consumer && active.Budget.Generation == run.Budget.Generation && active.DefinitionDigest == run.DefinitionDigest && active.OriginDigest == run.OriginDigest
 }
 
+// registryWorkMismatch says which part of registryWorkMatchesRun failed.
+func registryWorkMismatch(work control.RegistryWork, run control.RegistryRunRef, owner [32]byte, err error) string {
+	active := work.Entry.Active
+	switch {
+	case err != nil:
+		return "reply: " + err.Error()
+	case !work.MayStart && work.Blocked != "":
+		return work.Blocked
+	case !work.MayStart:
+		return "the leader does not allow it to start"
+	case active == nil:
+		return "no active run"
+	case run.Owner != owner || active.Owner != owner:
+		return "run owned by another node key"
+	case active.Generation != run.Generation || active.SpecRevision != run.SpecRevision || active.Spec != run.Spec:
+		return fmt.Sprintf("run generation/definition changed (active %d/%d, local %d/%d)", active.Generation, active.SpecRevision, run.Generation, run.SpecRevision)
+	case active.Consumer != run.Consumer:
+		return "volume consumer changed"
+	case active.Budget.Generation != run.Budget.Generation:
+		return "quota reservation changed"
+	}
+	return "definition or origin digest changed"
+}
+
 func (r *Runtime) registryCurrent(ctx context.Context, run control.RegistryRunRef) (state.State, control.Policy, error) {
 	request := control.RegistryWorkRequest{RegistrySelection: control.RegistrySelection{Tenant: run.Spec.Tenant, ID: run.Spec.ID}, At: time.Now().Unix()}
 	raw, _ := json.Marshal(request)
 	reply, err := r.appCall(ctx, "registry-work", raw)
 	if err != nil || reply.Local {
+		log.Printf("registry %s/%s: registry-work not answered by the leader: %v", run.Spec.Tenant, run.Spec.ID, err)
 		return state.State{}, control.Policy{}, registry.ErrUnavailable
 	}
 	work, err := schema.Decode[control.RegistryWork](reply.Data)
 	if err != nil || !registryWorkMatchesRun(work, run, r.Identity.Public) {
+		log.Printf("registry %s/%s: current registry work does not allow this run: %s", run.Spec.Tenant, run.Spec.ID, registryWorkMismatch(work, run, r.Identity.Public, err))
 		return state.State{}, control.Policy{}, registry.ErrUnavailable
 	}
 	view, err := r.Engine().ReadAtLeast(ctx, work.Index)
@@ -47,6 +75,7 @@ func (r *Runtime) registryCurrent(ctx context.Context, run control.RegistryRunRe
 	// at this at-least barrier; exact root equality is a mutation CAS contract.
 	current, err := p.RegistryWork(view.State, r.Identity.Public, request)
 	if err != nil || !registryWorkMatchesRun(current, run, r.Identity.Public) {
+		log.Printf("registry %s/%s: local registry work does not allow this run: %s", run.Spec.Tenant, run.Spec.ID, registryWorkMismatch(current, run, r.Identity.Public, err))
 		return state.State{}, control.Policy{}, registry.ErrUnavailable
 	}
 	return view.State, p, nil

@@ -131,7 +131,7 @@ func (p Policy) reduceClusterAppRoute(s state.State, book *IngressManagement, op
 		if canonical(op.Change.Payload, &q) != nil {
 			return state.Invalid
 		}
-		if !p.clusterAppRouteFree(s, q.Ingress) {
+		if !p.clusterAppRouteFree(s, q.Ingress) || !p.clusterAppHostsOnClusterDomains(s, q.Ingress) {
 			return state.ConditionFailed
 		}
 		next.Ingress = q.Ingress

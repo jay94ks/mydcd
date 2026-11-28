@@ -224,7 +224,7 @@ export function ImageListActions() {
   return (
     <>
       <Menu label="정리" button="🧹 정리 ▾" items={items} />
-      <button className="btn sm" disabled={refreshing || q.loading} onClick={() => reload(true)}>
+      <button type="button" className="btn sm" disabled={refreshing || q.loading} onClick={() => reload(true)}>
         {refreshing ? '받는 중…' : '↻ 목록 새로 받기'}
       </button>
       <Link className="btn sm" to="/images/builds">
@@ -563,10 +563,10 @@ export function ImageListTab() {
                           </label>
                         ))}
                         <hr />
-                        <button className="pop-item" onClick={() => (setRegs(null), close())}>
+                        <button type="button" className="pop-item" onClick={() => (setRegs(null), close())}>
                           모두
                         </button>
-                        <button className="pop-item" onClick={() => (setRegs(canDeploy ? null : new Set()), close())}>
+                        <button type="button" className="pop-item" onClick={() => (setRegs(canDeploy ? null : new Set()), close())}>
                           관리 권한 있는 곳만
                         </button>
                       </div>
@@ -575,7 +575,7 @@ export function ImageListTab() {
                   {conds.map((c, i) => (
                     <span key={i} className="chip on">
                       {condLabel(c)}
-                      <button className="chip-x" aria-label={`${condLabel(c)} 조건 빼기`} onClick={() => setConds(conds.filter((_, j) => j !== i))}>
+                      <button type="button" className="chip-x" aria-label={`${condLabel(c)} 조건 빼기`} onClick={() => setConds(conds.filter((_, j) => j !== i))}>
                         ✕
                       </button>
                     </span>
@@ -619,10 +619,10 @@ export function ImageListTab() {
                       합계 {fmtBytes(selBytes)} · {selRegs.length === 1 ? `모두 ${selRegs[0]}` : `저장소 ${selRegs.length}곳`}
                     </span>
                     <span className="grow" />
-                    <button className="btn sm" onClick={() => copy([...new Set(selRows.map((r) => r.img.digest))].join('\n'), '다이제스트')}>
+                    <button type="button" className="btn sm" onClick={() => copy([...new Set(selRows.map((r) => r.img.digest))].join('\n'), '다이제스트')}>
                       다이제스트 복사
                     </button>
-                    <button
+                    <button type="button"
                       className="btn sm"
                       disabled={new Set(selRows.map((r) => r.img.digest)).size !== 1}
                       title={new Set(selRows.map((r) => r.img.digest)).size !== 1 ? '이미지 하나만 고르면 새 앱 폼을 그 이미지로 엽니다' : '새 앱 폼을 이 이미지로 엽니다'}
@@ -634,7 +634,7 @@ export function ImageListTab() {
                     >
                       배포에 쓰기
                     </button>
-                    <button className="btn sm danger" onClick={() => setDel(selRows)}>
+                    <button type="button" className="btn sm danger" onClick={() => setDel(selRows)}>
                       삭제…
                     </button>
                   </div>
@@ -645,7 +645,7 @@ export function ImageListTab() {
                     title={rows.length ? '조건에 맞는 이미지가 없습니다' : '이미지가 없습니다'}
                     action={
                       rows.length ? (
-                        <button className="btn sm" onClick={() => (setFind(''), setConds([]), setRegs(null))}>
+                        <button type="button" className="btn sm" onClick={() => (setFind(''), setConds([]), setRegs(null))}>
                           조건 지우기
                         </button>
                       ) : undefined
@@ -757,10 +757,10 @@ export function ImageListTab() {
                         ))}
                       </select>
                     </label>
-                    <button className="btn sm" disabled={cur === 0} onClick={() => setPageIdx(cur - 1)}>
+                    <button type="button" className="btn sm" disabled={cur === 0} onClick={() => setPageIdx(cur - 1)}>
                       이전
                     </button>
-                    <button className="btn sm" disabled={cur >= pages - 1} onClick={() => setPageIdx(cur + 1)}>
+                    <button type="button" className="btn sm" disabled={cur >= pages - 1} onClick={() => setPageIdx(cur + 1)}>
                       다음 ›
                     </button>
                   </span>
@@ -893,7 +893,7 @@ function CondForm({ onAdd }: { onAdd: (c: Cond) => void }) {
       {kind === 'tag' && <input className="mono" value={pattern} onChange={(e) => setPattern(e.target.value)} aria-label="태그 패턴" placeholder="pr-*" />}
       <span className="small muted">다른 조건: 올린 시각(n일 넘음) · 쓰는 앱 없음 · 삭제 가능 · 태그 없음 · 태그 패턴(pr-*)</span>
       <span className="row" style={{ justifyContent: 'flex-end' }}>
-        <button className="btn sm primary" disabled={((kind === 'bigger' || kind === 'older') && !okNum) || (kind === 'tag' && !pattern.trim())} onClick={add}>
+        <button type="button" className="btn sm primary" disabled={((kind === 'bigger' || kind === 'older') && !okNum) || (kind === 'tag' && !pattern.trim())} onClick={add}>
           적용
         </button>
       </span>
@@ -1004,15 +1004,15 @@ function DeleteDialog({ tenant, rows, onClose, onDone }: { tenant: string; rows:
       onClose={onClose}
       footer={
         allDone ? (
-          <button className="btn primary" onClick={onClose}>
+          <button type="button" className="btn primary" onClick={onClose}>
             닫기
           </button>
         ) : (
           <>
-            <button className="btn" onClick={onClose}>
+            <button type="button" className="btn" onClick={onClose}>
               {started ? '닫기(진행은 계속됨)' : '취소'}
             </button>
-            <button className="btn danger" disabled={busy || !check.data || typed.trim() !== String(n)} onClick={() => void send()}>
+            <button type="button" className="btn danger" disabled={busy || !check.data || typed.trim() !== String(n)} onClick={() => void send()}>
               {busy ? '보내는 중…' : started ? '남은 것 다시 보내기' : `${n}개 삭제`}
             </button>
           </>
@@ -1113,15 +1113,15 @@ function GcDialog({ tenant, groups, onClose, onDone }: { tenant: string; groups:
       onClose={onClose}
       footer={
         finished ? (
-          <button className="btn primary" onClick={onClose}>
+          <button type="button" className="btn primary" onClick={onClose}>
             닫기
           </button>
         ) : (
           <>
-            <button className="btn" onClick={onClose}>
+            <button type="button" className="btn" onClick={onClose}>
               {m.op?.state === 'applied' ? '닫기(진행은 계속됨)' : '취소'}
             </button>
-            <button className="btn primary" disabled={m.busy || !g || m.op?.state === 'applied' || !!mn?.pendingOperation} onClick={() => void send()}>
+            <button type="button" className="btn primary" disabled={m.busy || !g || m.op?.state === 'applied' || !!mn?.pendingOperation} onClick={() => void send()}>
               {m.busy ? '보내는 중…' : m.op && uncertain(m) ? '같은 작업으로 다시 보내기' : '회수 시작'}
             </button>
           </>
@@ -1282,11 +1282,11 @@ function PruneDialog({ tenant, groups, onClose, onDone }: { tenant: string; grou
       onClose={onClose}
       footer={
         finished ? (
-          <button className="btn primary" onClick={onClose}>
+          <button type="button" className="btn primary" onClick={onClose}>
             닫기
           </button>
         ) : m.op?.state === 'applied' ? (
-          <button className="btn" onClick={onClose}>
+          <button type="button" className="btn" onClick={onClose}>
             닫기(진행은 계속됨)
           </button>
         ) : (
@@ -1296,19 +1296,19 @@ function PruneDialog({ tenant, groups, onClose, onDone }: { tenant: string; grou
               <input value={typed} onChange={(e) => setTyped(e.target.value)} inputMode="numeric" style={{ width: 80 }} disabled={locked} aria-label={`확인: ${count} 입력`} />
             </label>
             <span className="row">
-              <button className="btn" onClick={onClose}>
+              <button type="button" className="btn" onClick={onClose}>
                 취소
               </button>
               {ended(m) || expired ? (
-                <button className="btn primary" onClick={replan}>
+                <button type="button" className="btn primary" onClick={replan}>
                   새 미리 보기 받기
                 </button>
               ) : m.op && uncertain(m) ? (
-                <button className="btn primary" disabled={m.busy} onClick={() => void send()}>
+                <button type="button" className="btn primary" disabled={m.busy} onClick={() => void send()}>
                   {m.busy ? '보내는 중…' : '같은 작업으로 다시 보내기'}
                 </button>
               ) : (
-                <button className="btn danger" disabled={m.busy || !!m.op || !p?.preview || !count || typed.trim() !== String(count)} onClick={() => void send()}>
+                <button type="button" className="btn danger" disabled={m.busy || !!m.op || !p?.preview || !count || typed.trim() !== String(count)} onClick={() => void send()}>
                   {m.busy ? '보내는 중…' : conditions.gc ? `${count}개 지우고 공간 회수` : `${count}개 지우기`}
                 </button>
               )}
@@ -1356,7 +1356,7 @@ function PruneDialog({ tenant, groups, onClose, onDone }: { tenant: string; grou
             {skipped.map((r) => (
               <span key={r} className="chip on mono">
                 {r}
-                <button className="chip-x" aria-label={`${r} 다시 넣기`} disabled={locked} onClick={() => setSkipped(skipped.filter((x) => x !== r))}>
+                <button type="button" className="chip-x" aria-label={`${r} 다시 넣기`} disabled={locked} onClick={() => setSkipped(skipped.filter((x) => x !== r))}>
                   ✕
                 </button>
               </span>
@@ -1473,7 +1473,7 @@ function PruneDialog({ tenant, groups, onClose, onDone }: { tenant: string; grou
               </div>
             )}
             {lastShown?.next && (
-              <button className="linkish small" style={{ width: 'fit-content' }} onClick={() => void load(part, lastShown.next)}>
+              <button type="button" className="linkish small" style={{ width: 'fit-content' }} onClick={() => void load(part, lastShown.next)}>
                 더 보기 ({shown.reduce((a, pg) => a + (part === 'items' ? pg.rows.length : pg.retainedRows.length), 0)} / {part === 'items' ? p.items : p.retained})
               </button>
             )}
@@ -1543,7 +1543,7 @@ function PruneProgress({ tenant, op, status }: { tenant: string; op: OpView; sta
         </div>
       )}
       {last?.next && (
-        <button className="linkish small" style={{ width: 'fit-content' }} onClick={() => void load(last.next)}>
+        <button type="button" className="linkish small" style={{ width: 'fit-content' }} onClick={() => void load(last.next)}>
           더 보기
         </button>
       )}

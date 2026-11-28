@@ -123,6 +123,21 @@ func (e Execution) TagImages() []string {
 	return out
 }
 
+// StepImageDigests lists the digests the deploy resolved step's tags (its
+// image and lifecycle compiler image) to; none before resolution or for a
+// tag the deploy could not resolve.
+func (e Execution) StepImageDigests(s Step) []string {
+	var out []string
+	for _, pick := range []func(Step) (string, bool){stepImage, stepCompilerImage} {
+		if ref, ok := pick(s); ok {
+			if r, ok := e.Image(ref); ok && r.Digest != "" && !slices.Contains(out, r.Digest) {
+				out = append(out, r.Digest)
+			}
+		}
+	}
+	return out
+}
+
 // ImagesPending reports whether the deploy still has to resolve its tags.
 func (e Execution) ImagesPending() bool {
 	return e.d.Images == nil && len(e.TagImages()) > 0

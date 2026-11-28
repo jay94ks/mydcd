@@ -18,14 +18,14 @@
 ```sh
 sfcli volume create shop/data --node node-a --uid 10001 --gid 10001
 sfcli volume delete shop/data
-sfcli volume register files --node node-a --storage disk1 --root-generation 1 --path /srv/files
+sfcli volume register files --node node-a --storage disk1 --path /srv/files
 sfcli volume unregister files
 ```
 
 - `create`: `--mode`(기본 0750), `--generation`(기본 1), `--size`(예약할 공간)를 더 받는다. UID와 GID는 0이 아닌 값을 직접 정한다.
 - `delete`: 볼륨과 데이터를 지운다. 아직 만들어지는 중이면 만들기를 취소한다. 서비스가 쓰는 동안은 서버가 거절한다.
 - `delete 앱/볼륨 --retained 이동ID`: 이동이 끝난 뒤 원래 서버에 남은 옛 사본만 지운다. 볼륨은 그대로다.
-- `register`는 `sfcli node storage`로 등록한 저장 위치 안의 디렉터리를 볼륨으로 올린다. 파일은 그 자리에 있고, `unregister`도 파일을 지우지 않는다.
+- `register`는 `sfcli node storage`로 등록한 저장 위치 안의 디렉터리를 볼륨으로 올린다. 파일은 그 자리에 있고, `unregister`도 파일을 지우지 않는다. `--root-generation`을 주지 않으면 작업 공간의 저장 위치 목록(`sfcli node storage list`)에서 그 저장 위치의 지금 세대를 읽어 쓴다. 그 사이 저장 위치가 다시 등록됐으면 서버가 거절한다.
 
 **받음과 끝남은 다르다.** 서버가 변경을 받으면 `accepted`이고, 실제 서버에서 디렉터리를 만들거나 지우고 확인을 받아야 `done`이다. 명령은 끝날 때까지 기다리며 단계를 보여 준다. `--no-wait`이면 받은 뒤 바로 돌아오고, 나중에 `sfcli op show ID`로 확인한다.
 

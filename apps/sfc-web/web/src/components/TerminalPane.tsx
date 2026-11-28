@@ -119,10 +119,10 @@ export default function TerminalPane({ task }: { task: TaskView }) {
             {receipt && <span className="muted">· {receipt.phase === 'started' ? '실행 중' : receipt.phase}</span>}
           </span>
           <span className="row">
-            <button className="btn sm" onClick={() => handle.current?.closeStdin()} title="입력 끝(EOF)을 보냅니다">
+            <button type="button" className="btn sm" onClick={() => handle.current?.closeStdin()} title="입력 끝(EOF)을 보냅니다">
               입력 닫기
             </button>
-            <button className="btn sm" onClick={() => handle.current?.cancel()} title="화면 연결만 끊습니다. 프로세스는 계속 돌 수 있습니다">
+            <button type="button" className="btn sm" onClick={() => handle.current?.cancel()} title="화면 연결만 끊습니다. 프로세스는 계속 돌 수 있습니다">
               연결 끊기
             </button>
           </span>
@@ -132,7 +132,7 @@ export default function TerminalPane({ task }: { task: TaskView }) {
           <Field label="실행할 명령" hint="컨테이너 안에서 실행합니다. 이 작업은 작업 기록에 남습니다.">
             <input value={cmd} onChange={(e) => setCmd(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && void connect()} style={{ width: 280 }} />
           </Field>
-          <button className="btn primary" disabled={!splitArgs(cmd).length} onClick={() => void connect()}>
+          <button type="button" className="btn primary" disabled={!splitArgs(cmd).length} onClick={() => void connect()}>
             {phase === 'ended' ? '새 터미널 열기' : '터미널 열기'}
           </button>
         </div>
@@ -143,7 +143,7 @@ export default function TerminalPane({ task }: { task: TaskView }) {
           {opId && (
             <>
               {' '}
-              <button className="btn sm" onClick={() => void check()}>
+              <button type="button" className="btn sm" onClick={() => void check()}>
                 결과 확인
               </button>
             </>

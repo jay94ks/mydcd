@@ -114,10 +114,10 @@ function AccountCard({ sq }: { sq: SessionsQ }) {
         ]}
       />
       <div className="row">
-        <button className="btn" onClick={() => setDlg('relogin')}>
+        <button type="button" className="btn" onClick={() => setDlg('relogin')}>
           세션 새로 로그인
         </button>
-        <button className="btn danger" onClick={() => setDlg('logout')}>
+        <button type="button" className="btn danger" onClick={() => setDlg('logout')}>
           로그아웃
         </button>
       </div>
@@ -129,10 +129,10 @@ function AccountCard({ sq }: { sq: SessionsQ }) {
           onClose={() => setDlg(undefined)}
           footer={
             <>
-              <button className="btn" onClick={() => setDlg(undefined)}>
+              <button type="button" className="btn" onClick={() => setDlg(undefined)}>
                 취소
               </button>
-              <button className="btn danger solid" disabled={busy} onClick={() => void out()}>
+              <button type="button" className="btn danger solid" disabled={busy} onClick={() => void out()}>
                 로그아웃
               </button>
             </>
@@ -176,7 +176,7 @@ function TenantsCard() {
                   {t.id === tenant ? (
                     <Badge tone="ok">현재 선택</Badge>
                   ) : (
-                    <button className="btn sm" onClick={() => (setTenant(t.id), toast(`작업 공간을 ${t.id}로 바꿨습니다. 이 화면 상태만 바뀌며 서버에는 저장하지 않습니다.`))}>
+                    <button type="button" className="btn sm" onClick={() => (setTenant(t.id), toast(`작업 공간을 ${t.id}로 바꿨습니다. 이 화면 상태만 바뀌며 서버에는 저장하지 않습니다.`))}>
                       선택
                     </button>
                   )}
@@ -210,10 +210,10 @@ function CredentialsCard({ creds, local, onImport, onCreate, createDisabled, onC
       title={`내 로그인 수단${n === undefined ? '' : ` (${n})`}`}
       actions={
         <>
-          <button className="btn" onClick={onImport}>
+          <button type="button" className="btn" onClick={onImport}>
             개인키 가져오기…
           </button>
-          <button className="btn primary" disabled={createDisabled} title={createDisabled ? '이 페이지에서 안전한 난수를 만들 수 없어 키를 만들 수 없습니다' : undefined} onClick={onCreate}>
+          <button type="button" className="btn primary" disabled={createDisabled} title={createDisabled ? '이 페이지에서 안전한 난수를 만들 수 없어 키를 만들 수 없습니다' : undefined} onClick={onCreate}>
             이 브라우저에서 새 키 만들기
           </button>
         </>
@@ -325,15 +325,15 @@ function DisableDialog({ c, own, local, onClose, onDone }: { c: UserCredential; 
       onClose={onClose}
       footer={
         m.op ? (
-          <button className="btn primary" onClick={onClose}>
+          <button type="button" className="btn primary" onClick={onClose}>
             닫기
           </button>
         ) : (
           <>
-            <button className="btn" onClick={onClose}>
+            <button type="button" className="btn" onClick={onClose}>
               취소
             </button>
-            <button className="btn danger solid" disabled={m.busy || (current && confirm !== name)} onClick={run}>
+            <button type="button" className="btn danger solid" disabled={m.busy || (current && confirm !== name)} onClick={run}>
               {verb}
             </button>
           </>
@@ -401,7 +401,7 @@ function SessionsCard({ sq, creds, local }: { sq: SessionsQ; creds?: OwnCredenti
       <Card
         title={`열린 세션${sq.data ? ` (${all.length})` : ''}`}
         actions={
-          <button className="btn danger" disabled={!rest.length} title={wait ? WAIT : !rest.length ? '다른 세션이 없습니다' : undefined} onClick={() => setEnding(rest)}>
+          <button type="button" className="btn danger" disabled={!rest.length} title={wait ? WAIT : !rest.length ? '다른 세션이 없습니다' : undefined} onClick={() => setEnding(rest)}>
             이 세션 말고 모두 끝내기
           </button>
         }
@@ -449,7 +449,7 @@ function SessionsCard({ sq, creds, local }: { sq: SessionsQ; creds?: OwnCredenti
                         <td>{until(x.current ? session.expiresAt : x.expiresAt)}</td>
                         <td style={{ textAlign: 'right' }}>
                           {!x.current && (
-                            <button className="btn sm" onClick={() => setEnding([x])}>
+                            <button type="button" className="btn sm" onClick={() => setEnding([x])}>
                               끝내기
                             </button>
                           )}
@@ -518,10 +518,10 @@ function EndSessionsDialog({ list, onClose, onDone }: { list: OwnSession[]; onCl
       onClose={onClose}
       footer={
         <>
-          <button className="btn" onClick={onClose}>
+          <button type="button" className="btn" onClick={onClose}>
             취소
           </button>
-          <button className="btn danger solid" disabled={busy} onClick={() => void go()}>
+          <button type="button" className="btn danger solid" disabled={busy} onClick={() => void go()}>
             {busy ? '끝내는 중…' : '끝내기'}
           </button>
         </>
@@ -666,10 +666,10 @@ function KeyUserDialog({ k, onClose, onDone }: { k: StoredKey; onClose: () => vo
       onClose={onClose}
       footer={
         <>
-          <button className="btn" onClick={onClose}>
+          <button type="button" className="btn" onClick={onClose}>
             취소
           </button>
-          <button className="btn primary" disabled={!ok} onClick={() => (setKeyUser(k.id, name.trim()), onDone(), onClose())}>
+          <button type="button" className="btn primary" disabled={!ok} onClick={() => (setKeyUser(k.id, name.trim()), onDone(), onClose())}>
             바꾸기
           </button>
         </>
@@ -690,10 +690,10 @@ function RemoveKeyDialog({ k, registered, onClose, onDone }: { k: StoredKey; reg
       onClose={onClose}
       footer={
         <>
-          <button className="btn" onClick={onClose}>
+          <button type="button" className="btn" onClick={onClose}>
             취소
           </button>
-          <button className="btn danger solid" onClick={() => (removeKey(k.id), onDone(), onClose())}>
+          <button type="button" className="btn danger solid" onClick={() => (removeKey(k.id), onDone(), onClose())}>
             지우기
           </button>
         </>
@@ -735,15 +735,15 @@ function RegisterKeyDialog({ k, rev, onClose, onDone }: { k: StoredKey; rev: num
       onClose={onClose}
       footer={
         m.op ? (
-          <button className="btn primary" onClick={onClose}>
+          <button type="button" className="btn primary" onClick={onClose}>
             닫기
           </button>
         ) : (
           <>
-            <button className="btn" onClick={onClose}>
+            <button type="button" className="btn" onClick={onClose}>
               취소
             </button>
-            <button className="btn primary" disabled={m.busy || busy || !pass} onClick={() => void run()}>
+            <button type="button" className="btn primary" disabled={m.busy || busy || !pass} onClick={() => void run()}>
               {busy || m.busy ? '서명하는 중…' : '등록'}
             </button>
           </>
@@ -839,7 +839,7 @@ function PrefsCard() {
       <span className="small muted">{st.wait ? '이 서버는 아직 화면 설정을 저장하지 않습니다.' : '이 설정은 내 계정에 저장돼 다른 브라우저에서도 같습니다(웹 앱 데이터).'}</span>
       <MutationError error={error ?? st.error} />
       <div className="row" style={{ justifyContent: 'flex-end' }}>
-        <button className="btn primary" disabled={!st.data || busy} onClick={() => void save()}>
+        <button type="button" className="btn primary" disabled={!st.data || busy} onClick={() => void save()}>
           저장
         </button>
       </div>

@@ -153,7 +153,7 @@ export function OpsResourcesPage() {
         <div className="row between small">
           <span className="muted">위쪽 막대에서 고른 작업 공간의 공유 자원만 보입니다. 버전은 자원이 바뀔 때마다 오르는 번호입니다.{first.data ? ` 자원 목록 기준 버전 ${first.data.revision} · ${rows.length}개` : ''}</span>
           {next ? (
-            <button className="btn sm" onClick={() => void loadMore()}>
+            <button type="button" className="btn sm" onClick={() => void loadMore()}>
               다음 페이지
             </button>
           ) : null}

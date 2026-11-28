@@ -85,6 +85,9 @@ func legacyReduce(p Policy, s state.State, command state.Command) (map[string][]
 	if command.Key == ClusterFirewallKey {
 		return p.reduceClusterFirewall(s, command)
 	}
+	if command.Key == OwnedVPSKey {
+		return p.reduceOwnedVPS(s, command)
+	}
 	if command.Kind != state.Module || command.Key != CatalogKey {
 		return nil, state.Invalid
 	}

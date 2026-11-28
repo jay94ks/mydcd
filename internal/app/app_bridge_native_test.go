@@ -28,7 +28,6 @@ import (
 	"github.com/jay94ks/seafield/internal/deployment"
 	"github.com/jay94ks/seafield/internal/engine"
 	"github.com/jay94ks/seafield/internal/identity"
-	"github.com/jay94ks/seafield/internal/ingress"
 	"github.com/jay94ks/seafield/internal/network"
 	"github.com/jay94ks/seafield/internal/reconcile"
 	"github.com/jay94ks/seafield/internal/registry"
@@ -862,8 +861,8 @@ func runManagedAppOwnerWithVolumeFileRead(t *testing.T, withWorkload, withVolume
 	if withIngress {
 		compose = []byte(strings.Replace(string(compose), "x-sfc: {}", ingressYAML, 1))
 		// Routes run on the node's shared gateway listeners, so the tenant
-		// needs its host granted first.
-		change("ingress-hosts", "set-ingress-host-policy", 0, control.IngressHostPolicyChange{Tenant: "tenant", Policy: ingress.HostPolicy{ExternalAllowed: true, ExternalHosts: []string{"app.test"}}})
+		// needs to own the host's domain first.
+		giveTestDomain(t, ctx, user, peer, session, change, "app.test", "tenant")
 	}
 	if scenario == managedAppTenantIsolation {
 		compose = []byte(strings.Replace(string(compose), "SFC_READINESS_FIXTURE: \"1\"", "SFC_READINESS_FIXTURE: \"1\", SFC_TENANT_FIXTURE: tenant", 1))

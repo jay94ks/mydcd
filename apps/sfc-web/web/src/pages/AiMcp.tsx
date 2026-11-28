@@ -125,7 +125,7 @@ function DesktopMcp() {
         ids="UI-B9"
         after={<span className="muted small">시스템 관리자</span>}
         actions={
-          <button className="btn primary" disabled={!admin} title={admin ? undefined : '시스템 관리자 권한이 필요합니다'} onClick={() => setAdding(true)}>
+          <button type="button" className="btn primary" disabled={!admin} title={admin ? undefined : '시스템 관리자 권한이 필요합니다'} onClick={() => setAdding(true)}>
             ＋ MCP 서버 연결
           </button>
         }
@@ -195,7 +195,7 @@ function Body({ servers, onChange }: { servers: McpServer[]; onChange: () => voi
             </div>
             {servers.map((x) => (
               <div key={x.name} className={`gr mcps ${x.name === s?.name ? 'on' : ''}`}>
-                <button className="textbtn" onClick={() => setSel(x.name)}>
+                <button type="button" className="textbtn" onClick={() => setSel(x.name)}>
                   {x.name}
                 </button>
                 <span className="mono ellip" title={x.url}>
@@ -234,7 +234,7 @@ function Body({ servers, onChange }: { servers: McpServer[]; onChange: () => voi
                 <span>
                   ⚠ <b>{x.name} 연결 실패</b> · {ago(x.checkedAt)}부터 {x.error ?? '응답 없음'}. 코디네이터는 이 서버 도구를 "지금 못 씀"으로 받습니다. {diag ? '장애 진단도 이 서버 도구를 쓰지 못합니다.' : '장애 진단은 이 서버를 쓰지 않으므로 영향 없음.'}
                 </span>
-                <button className="btn sm" disabled={busy === x.name} onClick={() => retest(x)}>
+                <button type="button" className="btn sm" disabled={busy === x.name} onClick={() => retest(x)}>
                   다시 시험
                 </button>
               </div>
@@ -298,10 +298,10 @@ function Tools({ s, onChange, onPick, picked, onRetest, onToken, busy }: { s: Mc
           {s.name} · 도구 {s.tools.length}개
         </h2>
         <span className="row" style={{ gap: 6 }}>
-          <button className="btn sm" disabled={busy} onClick={onRetest}>
+          <button type="button" className="btn sm" disabled={busy} onClick={onRetest}>
             도구 목록 다시 읽기
           </button>
-          <button className="btn sm" disabled={s.auth.kind === 'none'} title={s.auth.kind === 'none' ? '인증 없이 연결한 서버입니다' : undefined} onClick={onToken}>
+          <button type="button" className="btn sm" disabled={s.auth.kind === 'none'} title={s.auth.kind === 'none' ? '인증 없이 연결한 서버입니다' : undefined} onClick={onToken}>
             {s.auth.kind === 'oauth' ? '다시 로그인' : '토큰 바꾸기'}
           </button>
         </span>
@@ -327,7 +327,7 @@ function Tools({ s, onChange, onPick, picked, onRetest, onToken, busy }: { s: Mc
               {t.description}
             </span>
             <span>
-              <button className="textbtn plain" aria-pressed={t.coordinator} title={t.coordinator ? '코디네이터에서 빼기' : '코디네이터에서 쓰기'} onClick={() => patch(t, { coordinator: !t.coordinator })}>
+              <button type="button" className="textbtn plain" aria-pressed={t.coordinator} title={t.coordinator ? '코디네이터에서 빼기' : '코디네이터에서 쓰기'} onClick={() => patch(t, { coordinator: !t.coordinator })}>
                 {t.coordinator ? '✓ 씀' : <span className="muted">—</span>}
               </button>
             </span>
@@ -378,7 +378,7 @@ function Tools({ s, onChange, onPick, picked, onRetest, onToken, busy }: { s: Mc
       </div>
       {s.tools.length > 6 && (
         <span className="muted small">
-          <button className="textbtn" onClick={() => setAll((v) => !v)}>
+          <button type="button" className="textbtn" onClick={() => setAll((v) => !v)}>
             {all ? '줄이기' : `나머지 ${s.tools.length - 6}개`}
           </button>{' '}
           · 도구 종류는 서버의 읽기 표시(readOnlyHint)를 기본으로 하되 관리자가 '바꾸기'로 올릴 수 있습니다(내릴 수는 없음). 도구 목록이 바뀌면 새 도구는 꺼진 채로 들어오고 관리자에게 알립니다.
@@ -494,10 +494,10 @@ function AutoCard({ s, name, initialUse, onSaved }: { s: McpServer; name?: strin
       <div className="row between wrap">
         <h2>{t.name} · 자동 대응에서 쓰는 방법</h2>
         <span className="row" style={{ gap: 6 }}>
-          <button className="btn" onClick={() => setTest(true)}>
+          <button type="button" className="btn" onClick={() => setTest(true)}>
             지난 사건으로 시험
           </button>
-          <button className="btn primary" disabled={busy || miss.length > 0} title={miss.length ? `빠진 것: ${miss.join(', ')}` : undefined} onClick={save}>
+          <button type="button" className="btn primary" disabled={busy || miss.length > 0} title={miss.length ? `빠진 것: ${miss.join(', ')}` : undefined} onClick={save}>
             저장
           </button>
         </span>
@@ -538,7 +538,7 @@ function AutoCard({ s, name, initialUse, onSaved }: { s: McpServer; name?: strin
                 <span className="muted">입력 제한</span>
                 <span>
                   {ruleText || <span className="muted">정하지 않음</span>}{' '}
-                  <button className="textbtn small" onClick={() => setInputs(true)}>
+                  <button type="button" className="textbtn small" onClick={() => setInputs(true)}>
                     고치기…
                   </button>
                 </span>
@@ -607,10 +607,10 @@ function InputsDialog({ t, value, onClose, onSave }: { t: McpTool; value: Record
       onClose={onClose}
       footer={
         <>
-          <button className="btn" onClick={onClose}>
+          <button type="button" className="btn" onClick={onClose}>
             취소
           </button>
-          <button className="btn primary" disabled={bad.length > 0} title={bad.length ? `값이 빈 인자: ${bad.join(', ')}` : undefined} onClick={() => onSave(v)}>
+          <button type="button" className="btn primary" disabled={bad.length > 0} title={bad.length ? `값이 빈 인자: ${bad.join(', ')}` : undefined} onClick={() => onSave(v)}>
             저장
           </button>
         </>
@@ -682,7 +682,7 @@ function ToolTestDialog({ s, t, onClose }: { s: McpServer; t: McpTool; onClose: 
       width={420}
       onClose={onClose}
       footer={
-        <button className="btn" onClick={onClose}>
+        <button type="button" className="btn" onClick={onClose}>
           닫기
         </button>
       }
@@ -827,10 +827,10 @@ function AddDialog({ onClose, onSaved }: { onClose: () => void; onSaved: () => v
         onClose={onClose}
         footer={
           <>
-            <button className="btn" onClick={onClose} title="연결은 이미 저장됐습니다. 도구는 꺼진 채로 둡니다.">
+            <button type="button" className="btn" onClick={onClose} title="연결은 이미 저장됐습니다. 도구는 꺼진 채로 둡니다.">
               나중에
             </button>
-            <button className="btn primary" disabled={busy} onClick={save}>
+            <button type="button" className="btn primary" disabled={busy} onClick={save}>
               저장
             </button>
           </>
@@ -880,10 +880,10 @@ function AddDialog({ onClose, onSaved }: { onClose: () => void; onSaved: () => v
       onClose={onClose}
       footer={
         <>
-          <button className="btn" onClick={onClose}>
+          <button type="button" className="btn" onClick={onClose}>
             취소
           </button>
-          <button className="btn primary" disabled={busy || !!login || (kind === 'oauth' && oauthWait) || !name || nameBad || urlBad || url === 'https://' || (kind === 'bearer' && !token)} onClick={connect}>
+          <button type="button" className="btn primary" disabled={busy || !!login || (kind === 'oauth' && oauthWait) || !name || nameBad || urlBad || url === 'https://' || (kind === 'bearer' && !token)} onClick={connect}>
             {busy ? '시험 중…' : login ? '로그인 대기 중…' : kind === 'oauth' ? '로그인해서 연결' : '연결 시험'}
           </button>
         </>
@@ -982,7 +982,7 @@ function ReloginDialog({ s, onClose, onSaved }: { s: McpServer; onClose: () => v
       onClose={onClose}
       footer={
         <>
-          <button className="btn" onClick={onClose}>
+          <button type="button" className="btn" onClick={onClose}>
             닫기
           </button>
           {login ? (
@@ -990,7 +990,7 @@ function ReloginDialog({ s, onClose, onSaved }: { s: McpServer; onClose: () => v
               로그인 창 열기 ↗
             </a>
           ) : (
-            <button className="btn primary" disabled={busy} onClick={() => void start()}>
+            <button type="button" className="btn primary" disabled={busy} onClick={() => void start()}>
               로그인 시작
             </button>
           )}
@@ -1033,10 +1033,10 @@ function TokenDialog({ s, onClose, onSaved }: { s: McpServer; onClose: () => voi
       onClose={onClose}
       footer={
         <>
-          <button className="btn" onClick={onClose}>
+          <button type="button" className="btn" onClick={onClose}>
             취소
           </button>
-          <button className="btn primary" disabled={busy || !token} onClick={go}>
+          <button type="button" className="btn primary" disabled={busy || !token} onClick={go}>
             바꾸기
           </button>
         </>

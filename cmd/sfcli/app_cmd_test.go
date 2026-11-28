@@ -190,17 +190,12 @@ func TestAppCommandsAgainstManagedNode(t *testing.T) {
 			t.Fatal("clear-logs exit", code, out, e)
 		}
 	}
-	// The first 'cd set' turns CD on for an app deployed without it.
-	cdFile := filepath.Join(root, "cd.yaml")
-	if err := os.WriteFile(cdFile, []byte("version: 1\nrepository: https://git.sfc.test/team/app.git\nbranch: main\npath: app.yaml\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if code, _, e := sfcli(t, "cd", "show", "app"); code == 0 || !strings.Contains(e, "has no CD policy") {
+	// CD lives in app.yaml x-sfc.cd: there is no cd set or cd.yaml.
+	if code, _, e := sfcli(t, "cd", "show", "app"); code == 0 || !strings.Contains(e, "add x-sfc.cd") {
 		t.Fatal("app without CD shown as CD", code, e)
 	}
-	ok("cd", "set", "app", "-f", cdFile, "--id", "first-cd", "-y")
-	if out := ok("cd", "show", "app"); !strings.Contains(out, "git.sfc.test/team/app.git") {
-		t.Fatal("first cd set did not turn CD on", out)
+	if code, _, _ := sfcli(t, "cd", "set", "app", "-f", "cd.yaml"); code != 2 {
+		t.Fatal("cd set still exists", code)
 	}
 	// Down needs confirmation; without a terminal -y gives it.
 	if code, _, e := sfcli(t, "app", "down", "app", "--no-wait"); code == 0 || !strings.Contains(e, "-y") {

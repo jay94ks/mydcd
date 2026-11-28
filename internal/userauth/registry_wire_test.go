@@ -49,6 +49,18 @@ func TestRegistryQueriesActualWire(t *testing.T) {
 	if _, err = f.client.QueryTenantDomains(f.ctx, f.peers[0], f.session, "other"); !errors.As(err, &refused) || refused.Code != "denied" {
 		t.Fatal("another tenant's domains", err)
 	}
+	if r, err := f.client.QueryHostRequests(f.ctx, f.peers[0], f.session, "tenant"); err != nil || len(r.Requests) != 0 {
+		t.Fatal("tenant host requests", r, err)
+	}
+	if _, err = f.client.QueryHostRequests(f.ctx, f.peers[0], f.session, ""); !errors.As(err, &refused) || refused.Code != "denied" {
+		t.Fatal("every tenant's host requests without cluster administration", err)
+	}
+	if r, err := f.client.QueryTenantCertificates(f.ctx, f.peers[0], f.session, "tenant"); err != nil || len(r.Certificates) != 0 {
+		t.Fatal("tenant certificates", r, err)
+	}
+	if _, err = f.client.QueryTenantCertificates(f.ctx, f.peers[0], f.session, "other"); !errors.As(err, &refused) || refused.Code != "denied" {
+		t.Fatal("another tenant's certificates", err)
+	}
 	if page, err := f.client.ImageUsages(f.ctx, f.peers[0], f.session, "tenant", control.ImageUsageQuery{}, ""); err != nil || page.Tenant != "tenant" {
 		t.Fatal("image usages", err)
 	}

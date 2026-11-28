@@ -217,7 +217,7 @@ func replicaAddresses(b Blueprint, ctx PlanningContext, instance TaskInstance, s
 			if family == 1 {
 				prior = previous.Networks[alias].IPv6
 			}
-			if prior != "" {
+			if prior != "" && !ctx.FreshAddresses[key] {
 				ref, known := ctx.Addresses[prior]
 				object := ctx.Current[key]
 				if known && ref.Key == key && ref.Generation > 0 && ref.Generation == object.Generation && ref.Revision == object.Revision {

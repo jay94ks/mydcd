@@ -35,6 +35,8 @@ type vpsFlavorRead struct {
 }
 
 type vpsWatch struct {
+	// owned is the owned VPS readings (vps_owned_watch.go), its own lock.
+	owned    *ownedWatch
 	mu       sync.Mutex
 	last     time.Time // the last round
 	month    string
@@ -69,7 +71,7 @@ type vpsTXState struct {
 const vpsTXKeep = time.Duration(vps.MaxGuardAverageMin+2*vps.MaxGuardWindowMin) * time.Minute
 
 func newVPSWatch() *vpsWatch {
-	return &vpsWatch{samples: map[string][]vps.Sample{}, servers: map[string]control.VPSServerStatus{}, accounts: map[string]control.VPSAccountStatus{}, flavors: map[string]vpsFlavorRead{}, tx: map[string]*vpsTXState{}}
+	return &vpsWatch{samples: map[string][]vps.Sample{}, servers: map[string]control.VPSServerStatus{}, accounts: map[string]control.VPSAccountStatus{}, flavors: map[string]vpsFlavorRead{}, tx: map[string]*vpsTXState{}, owned: newOwnedWatch()}
 }
 
 // observeTX counts a server's counter reading; true asks it for its
@@ -152,6 +154,7 @@ func (w *vpsWatch) reset() {
 	defer w.mu.Unlock()
 	w.last, w.month, w.guardLast, w.tx = time.Time{}, "", time.Time{}, map[string]*vpsTXState{}
 	w.samples, w.servers, w.accounts, w.flavors = map[string][]vps.Sample{}, map[string]control.VPSServerStatus{}, map[string]control.VPSAccountStatus{}, map[string]vpsFlavorRead{}
+	w.owned.reset()
 }
 
 func (w *vpsWatch) status(leader string) control.VPSStatus {
@@ -210,7 +213,7 @@ type vpsReading struct {
 }
 
 // readVPSServer reads what Project needs for one running server.
-func (w *vpsWatch) readVPSServer(ctx context.Context, p vps.Provider, account string, server control.VPSServer, now time.Time) (vpsReading, error) {
+func (w *vpsWatch) readVPSServer(ctx context.Context, p vps.ManagedProvider, account string, server control.VPSServer, now time.Time) (vpsReading, error) {
 	inst, err := p.Instance(ctx, server.InstanceID)
 	if err != nil {
 		return vpsReading{}, err
@@ -323,7 +326,7 @@ func (r *Runtime) vpsWatchRound(ctx context.Context, w *vpsWatch, now time.Time)
 	}
 	shown, running, accounts := map[string]bool{}, map[string]bool{}, map[string]bool{}
 	ours := map[string]int64{}
-	providers := map[string]vps.Provider{}
+	providers := map[string]vps.ManagedProvider{}
 	var stop *vpsOutcome
 	stopServer := ""
 	for _, server := range catalog.Servers {
@@ -340,7 +343,7 @@ func (r *Runtime) vpsWatchRound(ctx context.Context, w *vpsWatch, now time.Time)
 		accounts[account.Name] = true
 		p, ok := providers[account.Name]
 		if !ok {
-			vendor, found := vps.Lookup(account.Vendor)
+			vendor, found := vps.LookupManaged(account.Vendor)
 			if !found {
 				continue
 			}
@@ -358,7 +361,7 @@ func (r *Runtime) vpsWatchRound(ctx context.Context, w *vpsWatch, now time.Time)
 			continue
 		}
 		st, e := w.project(server, account, reading, now)
-		if v, ok := vps.Lookup(account.Vendor); ok {
+		if v, ok := vps.LookupManaged(account.Vendor); ok {
 			st.TrafficCounting = v.TrafficCounting
 		}
 		ours[account.Name] += st.SoFarKRW

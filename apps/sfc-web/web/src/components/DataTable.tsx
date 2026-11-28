@@ -105,7 +105,7 @@ export function DataTable<T>({
       {rows.length === 0 ? (
         <Empty kind="first" title={emptyTitle} action={emptyAction} />
       ) : filtered.length === 0 ? (
-        <Empty kind="filtered" title="조건에 맞는 항목이 없습니다" action={<button className="btn sm" onClick={() => setQuery('')}>찾기 지우기</button>} />
+        <Empty kind="filtered" title="조건에 맞는 항목이 없습니다" action={<button type="button" className="btn sm" onClick={() => setQuery('')}>찾기 지우기</button>} />
       ) : phone ? (
         <div className="m-col" style={{ gap: 8 }}>
           {shown.map((r) => {

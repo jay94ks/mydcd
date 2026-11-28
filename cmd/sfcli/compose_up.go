@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"reflect"
 
 	"github.com/jay94ks/seafield/internal/cliprofile"
 	"github.com/jay94ks/seafield/internal/cluster/control"
@@ -241,7 +242,7 @@ func runComposeUp(ctx context.Context, o composeOptions, tenant, home string, c 
 			return code
 		}
 	}
-	begin := control.AppBegin{Target: intent.Target, Tenant: tenant, App: intent.Scope.App, Deployment: intent.Scope.Deployment, Upload: intent.ID, Operation: intent.ID}
+	begin := control.AppBegin{Target: intent.Target, Tenant: tenant, App: intent.Scope.App, Deployment: intent.Scope.Deployment, Upload: intent.ID, Operation: intent.ID, DisableCD: o.disableCD}
 	if plan, err := deployment.DecodeBlueprint(intent.Artifact); err == nil {
 		if policy, enabled := plan.DeliveryPolicy(); enabled {
 			begin.Prune, begin.DefaultNode = policy.Sync.Prune, plan.CDDefaultNode()
@@ -254,6 +255,15 @@ func runComposeUp(ctx context.Context, o composeOptions, tenant, home string, c 
 	if err != nil {
 		return userFailure(diagnostic, err)
 	}
+	// An app that follows Git took only the file's x-sfc.cd policy; there is
+	// no new execution to follow.
+	if plan, decodeErr := deployment.DecodeBlueprint(intent.Artifact); decodeErr == nil && (!found || current.Operation.ID != intent.ID) {
+		if policy, enabled := plan.DeliveryPolicy(); enabled {
+			if cd, cdErr := composeCDPolicy(ctx, c, target, stored, tenant, intent.Scope.App); cdErr == nil && cd != nil && reflect.DeepEqual(cd.Policy, policy) {
+				return userOutput(out, diagnostic, map[string]any{"schema": 1, "operation": intent.ID, "tenant": tenant, "app": intent.Scope.App, "status": "cd-policy-changed", "policy_revision": cd.PolicyRevision})
+			}
+		}
+	}
 	if !found || current.Operation.ID != intent.ID || current.Retirement != nil && current.Retirement.Status == "Retired" {
 		reply, err := c.AppOperation(ctx, target, stored.Session, tenant, control.AppOperationRequest{App: intent.Scope.App, ID: intent.ID})
 		if err != nil {
@@ -262,6 +272,27 @@ func runComposeUp(ctx context.Context, o composeOptions, tenant, home string, c 
 		return composeOriginalResult(intent, reply.AppOperation, home, c, stored, out, diagnostic)
 	}
 	return userOutput(out, diagnostic, map[string]any{"schema": 1, "operation": intent.ID, "tenant": tenant, "app": intent.Scope.App, "status": "accepted", "observed": current, "local_intent_preserved": true})
+}
+
+// composeCDPolicy is the app's CD view from the app list (nil without CD).
+func composeCDPolicy(ctx context.Context, c userauth.Client, target sfcp.Peer, stored userauth.Stored, tenant, app string) (*control.AppCDView, error) {
+	after := ""
+	for range 4096 {
+		page, err := c.AppPage(ctx, target, stored.Session, tenant, after)
+		if err != nil {
+			return nil, err
+		}
+		for _, row := range page.Apps {
+			if row.Tenant == tenant && row.App == app {
+				return row.CD, nil
+			}
+		}
+		if page.AppsNext == "" || page.AppsNext <= after {
+			break
+		}
+		after = page.AppsNext
+	}
+	return nil, nil
 }
 
 func composeOriginalResult(intent userauth.ComposeIntent, operation *control.AppOperationView, home string, c userauth.Client, stored userauth.Stored, out, diagnostic io.Writer) int {

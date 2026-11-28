@@ -26,7 +26,6 @@ import (
 	"github.com/jay94ks/seafield/internal/config"
 	"github.com/jay94ks/seafield/internal/deployment"
 	"github.com/jay94ks/seafield/internal/identity"
-	"github.com/jay94ks/seafield/internal/ingress"
 	"github.com/jay94ks/seafield/internal/sfcp"
 	"github.com/jay94ks/seafield/internal/tenancy"
 	"github.com/jay94ks/seafield/internal/userauth"
@@ -182,7 +181,11 @@ func verifyManagedTenantIsolation(t *testing.T, ctx context.Context, r *Runtime,
 		t.Fatal(err)
 	}
 	change("second-network", "create-tun-network", resources.Networks.Revision(), tenancy.TUNDefinition{Tenant: "second", Name: "second-services", Members: []tenancy.TUNNode{{Node: "node-a", Pools: []tenancy.Subnet{{ID: "pool", Prefix: second, Gateway: second.Addr().Next(), MTU: 1280}}}}})
-	change("second-hosts", "set-ingress-host-policy", 0, control.IngressHostPolicyChange{Tenant: "second", Policy: ingress.HostPolicy{ExternalAllowed: true, ExternalHosts: []string{"second.test"}}})
+	certificates, err := p.Certificates(read().State)
+	if err != nil {
+		t.Fatal(err)
+	}
+	change("second-domain", "add-domain", certificates.Revision, control.DomainChange{Name: "second.test", Tenant: "second"})
 	document := []byte(fmt.Sprintf(`name: second
 x-sfc:
  ingress:
@@ -372,7 +375,7 @@ networks:
 		t.Fatal("primary actual Ingress")
 	}
 	// Trust the public chain the store serves for the host.
-	certificates, err := p.Certificates(read().State)
+	certificates, err = p.Certificates(read().State)
 	if err != nil {
 		t.Fatal(err)
 	}

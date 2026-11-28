@@ -598,6 +598,9 @@ type AppBindingPermit struct {
 	MaxConsumers int
 	ReadSet      [32]byte
 	CommandIndex uint64
+	// SocketReadSet names the sfev.sock reads of the binding's socket
+	// grants (AppSocketReads); zero when the task has no secret socket.
+	SocketReadSet [32]byte `json:",omitempty"`
 }
 
 type AppInputRead struct {
@@ -803,7 +806,42 @@ func (p Policy) appBindingPermitFromApps(s state.State, caller [32]byte, request
 		return AppBindingPermit{}, err
 	}
 	readBytes, _ := json.Marshal(reads)
-	return AppBindingPermit{Task: source.Task, Inputs: source.Inputs, Binding: raw, MaxConsumers: capacity, ReadSet: sha256.Sum256(readBytes), CommandIndex: s.Index()}, nil
+	permit := AppBindingPermit{Task: source.Task, Inputs: source.Inputs, Binding: raw, MaxConsumers: capacity, ReadSet: sha256.Sum256(readBytes), CommandIndex: s.Index()}
+	if grants := b.SocketGrants(); len(grants) > 0 {
+		socket, err := p.bindingGrantReads(s, vault, c, grants, request.At)
+		if err != nil {
+			return AppBindingPermit{}, err
+		}
+		socketBytes, _ := json.Marshal(socket)
+		permit.SocketReadSet = sha256.Sum256(append([]byte("sfc-secret-socket-reads-1\x00"), socketBytes...))
+	}
+	return permit, nil
+}
+
+// AppSocketReads is AppInputReads for the binding's sfev.sock grants: the
+// exact socket read-set the current owner-only quorum permit named.
+func (p Policy) AppSocketReads(s state.State, caller [32]byte, request AppBindingRequest, permit AppBindingPermit) ([]AppInputRead, error) {
+	local, err := p.AppBindingPermit(s, caller, request)
+	if err != nil || permit.SocketReadSet == ([32]byte{}) || s.Index() < permit.CommandIndex || local.Task != permit.Task || local.Inputs != permit.Inputs || local.SocketReadSet != permit.SocketReadSet || !bytes.Equal(local.Binding, permit.Binding) {
+		return nil, access.ErrDenied
+	}
+	a, err := p.Apps(s)
+	if err != nil {
+		return nil, err
+	}
+	b, ok := a.Binding(request.Task)
+	if !ok {
+		return nil, access.ErrDenied
+	}
+	v, err := p.Vault(s)
+	if err != nil {
+		return nil, err
+	}
+	c, err := p.Catalog(s)
+	if err != nil {
+		return nil, err
+	}
+	return p.bindingGrantReads(s, v, c, b.SocketGrants(), request.At)
 }
 
 // AppInputReads uses a locally committed replica only if it contains the exact

@@ -189,7 +189,7 @@ func (p Policy) memberReport(s state.State, cmd state.Command) (MemberReport, er
 		if r.Expected != d.Revision || r.JobID != 0 || r.ConfigurationIndex != 0 || r.Ack != nil || r.Peer.ID != r.Node || r.Peer.Voter || !d.MemberKey(r.Reporter) {
 			return r, ErrCatalog
 		}
-		if _, err := p.vpsEnrollServer(s, r); err != nil {
+		if _, err := p.vpsEnrollJoinID(s, r); err != nil {
 			return r, err
 		}
 	case "installed":
@@ -289,14 +289,15 @@ func (p Policy) reduceMemberReport(s state.State, d membership.Directory, cmd st
 	case "installed":
 		d, err = d.Installed(*r.Ack, r.Expected)
 	case "vps-enroll":
-		// The authority is the signed create-vps-node the server record
-		// came from; the reporter only attests the source address.
-		v, verr := p.vpsEnrollServer(s, r)
+		// The authority is the signed create-vps-node (or attach-owned-vps)
+		// the server record came from; the reporter only attests the
+		// source address.
+		joinID, verr := p.vpsEnrollJoinID(s, r)
 		res, rerr := p.Resources(s)
 		if verr != nil || rerr != nil {
 			return nil, state.ConditionFailed
 		}
-		d, err = d.Invite(r.Peer, v.JoinID(), res.Networks.TunnelAddressesInUse())
+		d, err = d.Invite(r.Peer, joinID, res.Networks.TunnelAddressesInUse())
 	}
 	if err != nil {
 		return nil, state.ConditionFailed

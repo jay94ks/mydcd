@@ -15,7 +15,7 @@ import (
 
 func projectionReferences(a Authority, p dnsProjection) bool {
 	for _, r := range p.Records {
-		alloc, ok := a.book.Allocation(r.Allocation.Endpoint)
+		alloc, ok := a.book.AllocationOf(r.Allocation.Endpoint, r.Allocation.Generation)
 		if !ok || alloc != r.Allocation {
 			return false
 		}
@@ -224,7 +224,7 @@ func (m DNSManager) zoneAnswer(a Authority, p dnsProjection, zone, qname string,
 			exists = true // reserved name with no currently available address
 			continue
 		}
-		alloc, held := a.book.Allocation(r.Allocation.Endpoint)
+		alloc, held := a.book.AllocationOf(r.Allocation.Endpoint, r.Allocation.Generation)
 		if !held || alloc != r.Allocation || m.addressBlocked(a, r.Allocation) {
 			return nil, true, true, nil
 		}

@@ -312,18 +312,18 @@ function AppRow({
             row.lines.map((l) => <VolumeLine key={l.name} line={l} archiveTitle={archiveTitle} onArchive={() => onArchive(l)} onCancel={() => onCancel(l)} canDeploy={canDeploy} />)
           )}
           <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
-            <button className="btn sm" onClick={onYaml}>
+            <button type="button" className="btn sm" onClick={onYaml}>
               app.yaml 보기
             </button>
-            <button className="btn sm primary" disabled={!!reupTitle} title={reupTitle} onClick={onReup}>
+            <button type="button" className="btn sm primary" disabled={!!reupTitle} title={reupTitle} onClick={onReup}>
               다시 올리기
             </button>
             {archivable.length > 1 && (
-              <button className="btn sm" disabled={!!archiveTitle} title={archiveTitle} onClick={onArchiveAll}>
+              <button type="button" className="btn sm" disabled={!!archiveTitle} title={archiveTitle} onClick={onArchiveAll}>
                 남은 데이터 모두 보관…
               </button>
             )}
-            <button className="btn sm danger" disabled={!!purgeTitle} title={purgeTitle} onClick={onPurge}>
+            <button type="button" className="btn sm danger" disabled={!!purgeTitle} title={purgeTitle} onClick={onPurge}>
               완전 삭제
             </button>
           </div>
@@ -391,7 +391,7 @@ export function VolumeLine({ line: l, archiveTitle, canDeploy, onArchive, onCanc
             </span>
           )}
           {a.phase === 'Packing' && (
-            <button className="btn sm" disabled={!canDeploy} title={canDeploy ? undefined : '배포 권한이 필요합니다'} onClick={onCancel}>
+            <button type="button" className="btn sm" disabled={!canDeploy} title={canDeploy ? undefined : '배포 권한이 필요합니다'} onClick={onCancel}>
               취소…
             </button>
           )}
@@ -419,7 +419,7 @@ export function VolumeLine({ line: l, archiveTitle, canDeploy, onArchive, onCanc
         )}
         <span className="small">{fmtBytes(used)}</span>
         {canArchive(a) && (
-          <button className="btn sm" disabled={!!archiveTitle} title={archiveTitle} onClick={onArchive}>
+          <button type="button" className="btn sm" disabled={!!archiveTitle} title={archiveTitle} onClick={onArchive}>
             데이터 보관…
           </button>
         )}
@@ -445,10 +445,10 @@ function YamlDrawer({ tenant, row, onClose }: { tenant: string; row: Row; onClos
       </span>
       <Load q={src}>{(text) => <CodeView text={text} />}</Load>
       <div className="row">
-        <button className="btn sm" disabled={!src.data} onClick={() => void navigator.clipboard?.writeText(src.data ?? '')}>
+        <button type="button" className="btn sm" disabled={!src.data} onClick={() => void navigator.clipboard?.writeText(src.data ?? '')}>
           복사
         </button>
-        <button className="btn sm" onClick={() => void download(tenant, row)}>
+        <button type="button" className="btn sm" onClick={() => void download(tenant, row)}>
           내려받기
         </button>
       </div>
@@ -512,10 +512,10 @@ function ArchiveDialog({ tenant, row, line, roots, onClose, onDone }: { tenant: 
       width={560}
       footer={
         <>
-          <button className="btn" onClick={onClose}>
+          <button type="button" className="btn" onClick={onClose}>
             취소
           </button>
-          <button className="btn primary" disabled={m.busy || !!idErr} onClick={() => void start()}>
+          <button type="button" className="btn primary" disabled={m.busy || !!idErr} onClick={() => void start()}>
             보관 시작
           </button>
         </>
@@ -591,10 +591,10 @@ function ArchiveAllDialog({ tenant, row, roots, onClose, onDone }: { tenant: str
       width={720}
       footer={
         <>
-          <button className="btn" onClick={onClose}>
+          <button type="button" className="btn" onClick={onClose}>
             취소
           </button>
-          <button className="btn primary" disabled={lines.length === 0} onClick={begin}>
+          <button type="button" className="btn primary" disabled={lines.length === 0} onClick={begin}>
             {lines.length}개 보관 시작
           </button>
         </>
@@ -656,10 +656,10 @@ function CancelDialog({ tenant, row, line, onClose, onDone }: { tenant: string; 
       width={420}
       footer={
         <>
-          <button className="btn" onClick={onClose}>
+          <button type="button" className="btn" onClick={onClose}>
             계속 보관
           </button>
-          <button className="btn danger" disabled={m.busy} onClick={() => void cancel()}>
+          <button type="button" className="btn danger" disabled={m.busy} onClick={() => void cancel()}>
             보관 취소
           </button>
         </>
@@ -711,15 +711,15 @@ function RestoreDialog({ tenant, row, onClose, onRefresh, onDeploy }: { tenant: 
       width={560}
       footer={
         <>
-          <button className="btn" onClick={onClose}>
+          <button type="button" className="btn" onClick={onClose}>
             닫기
           </button>
           {pending.length > 0 ? (
-            <button className="btn primary" disabled={busy} onClick={() => void start()}>
+            <button type="button" className="btn primary" disabled={busy} onClick={() => void start()}>
               {Object.keys(sent).length ? '못 되살린 저장소 다시 되살리기' : `${pending.length}개 되살리기`}
             </button>
           ) : (
-            <button className="btn primary" disabled={!allDone} onClick={() => onDeploy(row)}>
+            <button type="button" className="btn primary" disabled={!allDone} onClick={() => onDeploy(row)}>
               검사하고 다시 올리기
             </button>
           )}

@@ -3,7 +3,10 @@
 package control
 
 import (
+	"crypto/sha256"
+	"encoding/binary"
 	"strings"
+	"sync"
 	"unicode/utf8"
 
 	"encoding/json"
@@ -70,9 +73,9 @@ func CommandKey(action string) string {
 		return b.Key
 	}
 	switch action {
-	case "put-certificate", "delete-certificate", "disable-certificate", "add-domain", "assign-domain", "remove-domain", "set-acme-responder":
+	case "put-certificate", "delete-certificate", "disable-certificate", "add-domain", "assign-domain", "remove-domain", "approve-ingress-host", "deny-ingress-host", "revoke-ingress-host", "set-acme-responder":
 		return CertificatesKey
-	case "set-node-gateways", "set-ingress-balance", "drain-ingress", "undrain-ingress", "set-ingress-host-policy", "ingress-block", "ingress-unblock", "ingress-block-extend", "put-cluster-app-route", "remove-cluster-app-route":
+	case "set-node-gateways", "set-ingress-balance", "drain-ingress", "undrain-ingress", "ingress-block", "ingress-unblock", "ingress-block-extend", "put-cluster-app-route", "remove-cluster-app-route":
 		return IngressManagementKey
 	case ImageBuildCachePruneAction:
 		return ImageBuildKey
@@ -122,6 +125,14 @@ func (p Policy) Members(s state.State) (membership.Directory, error) {
 	if raw == nil {
 		return membership.New(p.Cluster, p.Genesis)
 	}
+	checked := p.membersKey(raw, revision)
+	if checkedMembers.has(checked) {
+		// The same bytes passed every check below under this policy before;
+		// only the decode is repeated, so callers still own their copy.
+		if d, err := membership.DecodeChecked(raw); err == nil {
+			return d, nil
+		}
+	}
 	d, err := membership.Decode(raw)
 	if err != nil || d.Revision != revision || d.Cluster != p.Cluster || d.Genesis != p.Genesis {
 		return membership.Directory{}, ErrCatalog
@@ -129,7 +140,60 @@ func (p Policy) Members(s state.State) (membership.Directory, error) {
 	if err := p.validateNodeOrigins(d); err != nil {
 		return membership.Directory{}, err
 	}
+	checkedMembers.add(checked)
 	return d, nil
+}
+
+// membersKey names one members checkpoint under this policy: the bytes,
+// their checkpoint revision and every policy field Members checks them by.
+func (p Policy) membersKey(raw []byte, revision uint64) [32]byte {
+	h := sha256.New()
+	h.Write([]byte("sfc-members-checked-1\x00"))
+	h.Write(p.Cluster[:])
+	h.Write(p.TrustRoot[:])
+	genesis, _ := json.Marshal(p.Genesis)
+	h.Write(binary.BigEndian.AppendUint64(nil, uint64(len(genesis))))
+	h.Write(genesis)
+	h.Write(binary.BigEndian.AppendUint64(nil, revision))
+	h.Write(raw)
+	return [32]byte(h.Sum(nil))
+}
+
+// checkedMembers remembers members checkpoints that already passed
+// Members' full validation (decode, Validate, signed origins). Every
+// reconcile pass, tunnel and member step reads the directory, and on lab
+// the validation was most of sfcd's idle CPU. It is a pure memo: a key
+// covers everything the result depends on, failures are never kept, and
+// a few recent keys cover the views still being read.
+var checkedMembers = &checkedSet{}
+
+type checkedSet struct {
+	mu   sync.Mutex
+	keys [8][32]byte
+	next int
+}
+
+func (c *checkedSet) has(key [32]byte) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, k := range c.keys {
+		if k == key {
+			return true
+		}
+	}
+	return false
+}
+
+func (c *checkedSet) add(key [32]byte) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, k := range c.keys {
+		if k == key {
+			return
+		}
+	}
+	c.keys[c.next] = key
+	c.next = (c.next + 1) % len(c.keys)
 }
 
 // Current derives new session authority from active installed voters. Installed

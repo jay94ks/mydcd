@@ -149,11 +149,11 @@ export function AddServerWizard({ initial, onClose }: { initial?: string; onClos
             가입 승인·초대 서명은 클러스터가 하고 웹은 아무것도 보관하지 않습니다.
           </span>
           {inProgress && (
-            <button className="btn" onClick={() => setLeaving(true)}>
+            <button type="button" className="btn" onClick={() => setLeaving(true)}>
               나중에 이어 하기
             </button>
           )}
-          <button className="btn primary" onClick={() => (inProgress ? setLeaving(true) : onClose())}>
+          <button type="button" className="btn primary" onClick={() => (inProgress ? setLeaving(true) : onClose())}>
             닫기
           </button>
         </>
@@ -189,7 +189,7 @@ export function AddServerWizard({ initial, onClose }: { initial?: string; onClos
               </div>
               <div className="row" style={{ justifyContent: 'space-between', gap: 8 }}>
                 <span className="muted small">CLI로 하려면:</span>
-                <button className="btn primary" disabled={!ok || m.busy || !!m.op} onClick={() => void invite()}>
+                <button type="button" className="btn primary" disabled={!ok || m.busy || !!m.op} onClick={() => void invite()}>
                   {m.busy ? '보내는 중…' : '가입 승인'}
                 </button>
               </div>
@@ -201,10 +201,10 @@ export function AddServerWizard({ initial, onClose }: { initial?: string; onClos
         </Step>
         <Step n={3} done={got || past('learner')} title="초대 파일 받기" where="웹에서">
           <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
-            <button className="btn primary" disabled={!canGet} title={canGet ? undefined : row ? '초대 파일은 가입 대기·설치 확인 단계에서만 받을 수 있습니다' : '먼저 가입을 승인하세요'} onClick={() => void download()}>
+            <button type="button" className="btn primary" disabled={!canGet} title={canGet ? undefined : row ? '초대 파일은 가입 대기·설치 확인 단계에서만 받을 수 있습니다' : '먼저 가입을 승인하세요'} onClick={() => void download()}>
               초대 파일 내려받기 ({file})
             </button>
-            <button className="btn" disabled={!canGet} onClick={() => void copyInvite()}>
+            <button type="button" className="btn" disabled={!canGet} onClick={() => void copyInvite()}>
               초대 복사
             </button>
           </div>
@@ -232,7 +232,7 @@ export function AddServerWizard({ initial, onClose }: { initial?: string; onClos
         <Step n={5} done={join === 'active' && !!row?.voter} title="설치 확인 후 투표 서버로 승격 (선택)" where="웹에서">
           <div className="row" style={{ justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
             {join ? <Badge tone={JOIN[join]?.[1] ?? 'un'}>{join === 'ready' ? '설치 확인됨' : join === 'active' ? (row?.voter ? '투표 서버' : '참여 중') : `${JOIN[join]?.[0] ?? join} · 자동으로 갱신`}</Badge> : <span className="muted small">가입을 승인하면 진행 상태가 보입니다.</span>}
-            <button className="btn" disabled={join !== 'ready'} title={join === 'ready' ? undefined : '설치 확인(ready) 뒤에 올릴 수 있습니다'} onClick={() => setPromote(true)}>
+            <button type="button" className="btn" disabled={join !== 'ready'} title={join === 'ready' ? undefined : '설치 확인(ready) 뒤에 올릴 수 있습니다'} onClick={() => setPromote(true)}>
               투표 서버로 승격
             </button>
           </div>
@@ -246,10 +246,10 @@ export function AddServerWizard({ initial, onClose }: { initial?: string; onClos
           onClose={() => setLeaving(false)}
           footer={
             <>
-              <button className="btn" onClick={() => setLeaving(false)}>
+              <button type="button" className="btn" onClick={() => setLeaving(false)}>
                 계속 하기
               </button>
-              <button className="btn primary" onClick={onClose}>
+              <button type="button" className="btn primary" onClick={onClose}>
                 닫기
               </button>
             </>
@@ -281,15 +281,15 @@ function PromoteDialog({ row, voters, onClose, onDone }: { row: NodeView; voters
       onClose={onClose}
       footer={
         finished ? (
-          <button className="btn primary" onClick={onClose}>
+          <button type="button" className="btn primary" onClick={onClose}>
             닫기
           </button>
         ) : (
           <>
-            <button className="btn" onClick={onClose}>
+            <button type="button" className="btn" onClick={onClose}>
               취소
             </button>
-            <button className="btn danger solid" disabled={m.busy || typed !== row.id} onClick={() => void send()}>
+            <button type="button" className="btn danger solid" disabled={m.busy || typed !== row.id} onClick={() => void send()}>
               {m.busy ? '보내는 중…' : '승격'}
             </button>
           </>

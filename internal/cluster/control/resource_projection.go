@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"maps"
 	"net/netip"
 	"slices"
 	"strconv"
@@ -16,6 +17,7 @@ import (
 	"github.com/jay94ks/seafield/internal/network"
 	"github.com/jay94ks/seafield/internal/network/services"
 	"github.com/jay94ks/seafield/internal/tenancy"
+	"github.com/jay94ks/seafield/internal/workload"
 )
 
 // ResourceProjection is an owned read-only view of the one committed state.
@@ -138,6 +140,7 @@ func (p Policy) projectResources(s state.State, base Resources, apps Apps, volum
 	if err != nil {
 		return result, err
 	}
+	reservations = append(reservations, supersededReservations(objects, apps)...)
 	builds, err := p.imageBuildReservations(s)
 	if err != nil {
 		return result, err
@@ -362,7 +365,7 @@ func projectStaticAddress(book network.Book, authority *services.Authority, endp
 	if err != nil || authority == nil {
 		return next, err
 	}
-	allocation, found := next.Allocation(endpoint)
+	allocation, found := next.AllocationOf(endpoint, generation)
 	if !found {
 		return book, ErrCatalog
 	}
@@ -375,4 +378,21 @@ func projectStaticAddress(book network.Book, authority *services.Authority, endp
 }
 func hasSource(g deployment.GoalCommand, key string, o state.Object) bool {
 	return o.Present && o.Generation > 0 && slices.Contains(g.Dependencies, deployment.ObjectRef{Key: key, Revision: o.Revision, Generation: o.Generation})
+}
+
+// supersededReservations holds the need of each surged original that still
+// runs once its Task object moved to the new generation, so the quota covers
+// both generations until the original is gone.
+func supersededReservations(objects map[string]state.Object, apps Apps) []tenancy.Reservation {
+	var out []tenancy.Reservation
+	keys := slices.Sorted(maps.Keys(apps.entries))
+	for _, k := range keys {
+		for _, r := range apps.entries[k].Inventory.SupersededReservations() {
+			task, _, _ := workload.ParkedTask(r.Key)
+			if o := objects[task]; o.Present && o.Generation > r.Generation {
+				out = append(out, r)
+			}
+		}
+	}
+	return out
 }

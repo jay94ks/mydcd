@@ -48,15 +48,15 @@ export function StepsDialog({ title, steps: initial, intro, action, renderError,
       width={width}
       footer={
         finished ? (
-          <button className="btn primary" onClick={onClose}>
+          <button type="button" className="btn primary" onClick={onClose}>
             닫기
           </button>
         ) : (
           <>
-            <button className="btn" onClick={onClose}>
+            <button type="button" className="btn" onClick={onClose}>
               취소
             </button>
-            <button className="btn primary" disabled={busy} onClick={() => void run()}>
+            <button type="button" className="btn primary" disabled={busy} onClick={() => void run()}>
               {steps.some((s) => s.op || s.error) ? '남은 변경 다시 보내기' : (action ?? `적용 (${steps.length}건)`)}
             </button>
           </>

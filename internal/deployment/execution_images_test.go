@@ -180,3 +180,19 @@ func TestCompilerTagIsResolvedByTheDeploy(t *testing.T) {
 		t.Fatal("an interpreted-only program needs no compiler image")
 	}
 }
+
+// While a deploy runs, the digests it resolved its tags to are in use; a tag
+// it could not resolve names none.
+func TestStepImageDigests(t *testing.T) {
+	e := imageExecution(t, "ghcr.io/team/web:1", "alpine")
+	e, err := e.ResolveImages(1, []ImageResolution{{Ref: "docker.io/library/alpine:latest", Code: "UNREACHABLE"}, {Ref: "ghcr.io/team/web:1", Digest: webDigest}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := e.StepImageDigests(e.d.Plan.Steps[0]); !slices.Equal(got, []string{webDigest}) {
+		t.Fatal("resolved", got)
+	}
+	if got := e.StepImageDigests(e.d.Plan.Steps[1]); len(got) != 0 {
+		t.Fatal("unresolved", got)
+	}
+}

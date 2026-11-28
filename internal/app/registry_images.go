@@ -113,9 +113,9 @@ func (r *Runtime) appTaskImageAuthority(ctx context.Context, key string, op reco
 		source, ok := apps.BindingSource(b.Digest())
 		if ok && source.Task.Key == key && source.Task.Generation == op.Target.Generation {
 			if spec.Process != nil {
-				return r.appRegistryImageAuth(ctx, source.Task, b.Digest(), spec.Image, spec.Process.ImageID)
+				return r.appRegistryImageAuth(ctx, source.Task, b.Digest(), spec.RunImage(), spec.Process.ImageID)
 			}
-			return r.appRegistryImageAuth(ctx, source.Task, b.Digest(), spec.Image)
+			return r.appRegistryImageAuth(ctx, source.Task, b.Digest(), spec.RunImage())
 		}
 	}
 	return engine.RegistryAuth{}, deployment.ErrInputs

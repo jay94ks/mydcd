@@ -34,3 +34,17 @@ export function gwaWa(name: string): string {
   const r = eulReul(name);
   return r === '을' ? '과' : r === '를' ? '와' : '과(와)';
 }
+
+/** 이름 뒤 으로/로. 받침이 없거나 ㄹ 받침이면 로(1·7·8로, 9로, 3으로). */
+export function euro(name: string): string {
+  const c = name.trim().slice(-1);
+  const code = c.charCodeAt(0);
+  if (code >= 0xac00 && code <= 0xd7a3) {
+    const jong = (code - 0xac00) % 28;
+    return jong === 0 || jong === 8 ? '로' : '으로';
+  }
+  if (/[0-9]/.test(c)) return '036'.includes(c) ? '으로' : '로';
+  const r = eulReul(name);
+  if (r === '을') return /[lr]$/i.test(name.trim()) ? '로' : '으로';
+  return r === '를' ? '로' : '(으)로';
+}

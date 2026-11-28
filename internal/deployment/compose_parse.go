@@ -627,7 +627,7 @@ func (c Compose) validate() error {
 }
 
 func (c Compose) allowEmpty() bool {
-	return c.Services != nil && len(c.Services) == 0 && c.Sfc.Delivery != nil && c.Sfc.Delivery.Sync.AllowEmpty
+	return c.Services != nil && len(c.Services) == 0 && c.Sfc.Delivery != nil && c.Sfc.Delivery.Enabled
 }
 
 func domain(s string) bool {

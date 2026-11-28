@@ -20,7 +20,7 @@ import (
 func TestNodeDiagnosticsArchiveUsesAllowlistedLogsAndBoundedPrivateFiles(t *testing.T) {
 	const secret = "never-copy-this-token-or-private-error"
 	logs := diagnosticLogs([]eventlog.Item{{Event: eventlog.Event{Kind: "probe-failed", Scope: "node", At: 10, Target: eventlog.Target{Node: "node-a"}, Detail: eventlog.Detail{Reason: secret, OperatorReason: secret, Code: "CHECK_FAILED", State: "failed"}}}})
-	bundle, err := packNodeDiagnostics("node-a", time.Unix(10, 0), struct{ Managed bool }{true}, struct{ Ready bool }{false}, logs, false)
+	bundle, err := packNodeDiagnostics("node-a", time.Unix(10, 0), struct{ Managed bool }{true}, struct{ Ready bool }{false}, logs, nil)
 	if err != nil || !bundle.Valid("node-a") {
 		t.Fatal(bundle, err)
 	}
@@ -81,7 +81,7 @@ func TestNodeDiagnosticsCarryProfiles(t *testing.T) {
 			t.Fatal("profile is not gzip pprof", p.name)
 		}
 	}
-	bundle, err := packNodeDiagnostics("node-a", time.Unix(1, 0), struct{}{}, struct{}{}, nil, false, profiles...)
+	bundle, err := packNodeDiagnostics("node-a", time.Unix(1, 0), struct{}{}, struct{}{}, nil, nil, profiles...)
 	if err != nil || !bundle.Valid("node-a") || bundle.Truncated {
 		t.Fatal(bundle.Truncated, err)
 	}
@@ -91,9 +91,20 @@ func TestNodeDiagnosticsCarryProfiles(t *testing.T) {
 	}
 	// Profiles that do not fit are dropped from the end; the bundle says so.
 	big := diagnosticProfile{"profile-goroutine.pb.gz", bytes.Repeat([]byte{0x1f}, control.NodeDiagnosticsExpandedBytes)}
-	bundle, err = packNodeDiagnostics("node-a", time.Unix(1, 0), struct{}{}, struct{}{}, nil, false, profiles[0], big)
-	if err != nil || !bundle.Valid("node-a") || !bundle.Truncated {
-		t.Fatal(bundle.Truncated, err)
+	bundle, err = packNodeDiagnostics("node-a", time.Unix(1, 0), struct{}{}, struct{}{}, nil, []string{"events-gap"}, profiles[0], big)
+	if err != nil || !bundle.Valid("node-a") || !bundle.Truncated || !slices.Equal(bundle.Omitted, []string{"events-gap", "profile-goroutine"}) {
+		t.Fatal(bundle.Truncated, bundle.Omitted, err)
+	}
+	// Omitted names only fixed codes, and only on a truncated bundle.
+	for _, bad := range []struct {
+		truncated bool
+		omitted   []string
+	}{{false, []string{"events-gap"}}, {true, []string{"free text"}}, {true, []string{"events-gap", "events-gap"}}} {
+		copy := bundle
+		copy.Truncated, copy.Omitted = bad.truncated, bad.omitted
+		if copy.Valid("node-a") {
+			t.Fatal("invalid omissions accepted", bad)
+		}
 	}
 	if names = diagnosticMembers(t, bundle.Data); !slices.Contains(names, "profile-cpu.pb.gz") || slices.Contains(names, "profile-goroutine.pb.gz") {
 		t.Fatal(names)

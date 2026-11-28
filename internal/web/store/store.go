@@ -50,7 +50,7 @@ var (
 		bucketACMEAcct, bucketACMECerts, bucketACMEOrders, bucketSaOrigins,
 		bucketAIConfig, bucketAICatalog, bucketAIUsage, bucketAIAudit, bucketAIConversations, bucketAIProposals,
 		bucketIncidents, bucketIncidentPolicy, bucketGuides, bucketWebhooks, bucketWebhookLinks, bucketWebhookDeliveries, bucketWebhookCDChecks,
-		bucketMCPServers, bucketWebhookCDCheckHistory, bucketTrash, bucketVPSDNS}
+		bucketMCPServers, bucketWebhookCDCheckHistory, bucketTrash, bucketVPSDNS, bucketOwnedVPSWarn}
 
 	keySchema = []byte("schema")
 )

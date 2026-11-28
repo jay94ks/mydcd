@@ -387,7 +387,7 @@ type CDCheckAction struct {
 // It is also kept per candidate (CDCheckHistoryKeep per app) for the
 // history rows.
 func (s *Store) PutCDCheck(c *CDCheck) error {
-	return s.db.Update(func(tx *bolt.Tx) error {
+	err := s.db.Update(func(tx *bolt.Tx) error {
 		if err := putJSON(tx.Bucket(bucketWebhookCDChecks), key(c.Kind, c.Tenant, c.App), c); err != nil {
 			return err
 		}
@@ -422,6 +422,8 @@ func (s *Store) PutCDCheck(c *CDCheck) error {
 		}
 		return nil
 	})
+	s.changed(err, Change{Kind: "cd-check", Tenant: c.Tenant, ID: c.App})
+	return err
 }
 
 // CDCheckHistoryKeep is how many checks each app keeps for its history.

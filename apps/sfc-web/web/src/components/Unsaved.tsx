@@ -81,11 +81,11 @@ export function useUnsaved<T>(o: UnsavedOptions<T>): { guard: ReactNode; badge: 
         onClose={() => blocker.reset()}
         footer={
           <>
-            <button className="btn" onClick={() => blocker.reset()} autoFocus>
+            <button type="button" className="btn" onClick={() => blocker.reset()} autoFocus>
               머무르기
             </button>
             {o.draft && (
-              <button
+              <button type="button"
                 className="btn"
                 onClick={() => {
                   const d = o.draft!;
@@ -96,7 +96,7 @@ export function useUnsaved<T>(o: UnsavedOptions<T>): { guard: ReactNode; badge: 
                 나가기 (초안 남김)
               </button>
             )}
-            <button
+            <button type="button"
               className="btn danger"
               onClick={() => {
                 clear();

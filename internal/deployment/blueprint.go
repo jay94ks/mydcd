@@ -83,14 +83,17 @@ type PlanningContext struct {
 	FixedVolumes                                    map[string]volumes.NativeReady // current permitted signed registrations; never caller-supplied app paths
 	Shares                                          map[string]VolumeShare         // volume key -> committed volume-shares record
 	Checkers                                        checker.Catalog
-	CheckerPrograms                                 map[AppScope]checker.FrozenProgram      // exact accepted app programs, not current authority
-	CheckerProviders                                map[[32]byte]bool                       // exact source owners served by current installed members in this committed view; never authentication
-	CheckerSources                                  map[string]checker.SourceFact           // actually staged inline facts supplied separately from app.yaml
-	Features                                        map[string]bool                         // verified adapter capability set, not YAML grants
-	Current                                         map[string]state.Object                 // same committed view used by the plan
-	Reserved                                        map[string]workload.Resources           // per-resource desired reservation already counted in Nodes.Used
-	Gateways                                        map[string]ingress.GatewayConfiguration // node -> committed gateway settings (shared listeners for file ingress)
-	IngressLimits                                   map[string]IngressRuntime               // node -> this tenant's ingress ceiling (requests, connections, buffer)
+	CheckerPrograms                                 map[AppScope]checker.FrozenProgram // exact accepted app programs, not current authority
+	CheckerProviders                                map[[32]byte]bool                  // exact source owners served by current installed members in this committed view; never authentication
+	CheckerSources                                  map[string]checker.SourceFact      // actually staged inline facts supplied separately from app.yaml
+	Features                                        map[string]bool                    // verified adapter capability set, not YAML grants
+	// FreshAddresses names the Tasks whose automatic addresses are chosen
+	// anew instead of kept (compile sets it for surge candidates).
+	FreshAddresses map[string]bool                         `json:"-"`
+	Current        map[string]state.Object                 // same committed view used by the plan
+	Reserved       map[string]workload.Resources           // per-resource desired reservation already counted in Nodes.Used
+	Gateways       map[string]ingress.GatewayConfiguration // node -> committed gateway settings (shared listeners for file ingress)
+	IngressLimits  map[string]IngressRuntime               // node -> this tenant's ingress ceiling (requests, connections, buffer)
 	// SecretRevisions digests the current value references of the Vault
 	// objects a service's inputs read (hex). A service's inputs step carries
 	// it, so a secret updated since the last deploy makes the same app.yaml
@@ -206,6 +209,22 @@ func Compile(c Compose, policy access.Catalog, ctx PlanningContext) (Blueprint, 
 }
 
 func compile(c Compose, policy access.Catalog, ctx PlanningContext, move *VolumeMovePlacement, inputKind string) (Blueprint, error) {
+	b, err := compileOnce(c, policy, ctx, move, inputKind)
+	if err != nil || !ctx.Features[FeatureTaskSurge] {
+		return b, err
+	}
+	// A surged Task's new generation runs next to its original, so it needs
+	// addresses of its own: plan again without reusing the original's
+	// automatic addresses for the Tasks a surge may replace.
+	fresh := surgeFreshAddresses(b, ctx)
+	if len(fresh) == 0 {
+		return b, nil
+	}
+	ctx.FreshAddresses = fresh
+	return compileOnce(c, policy, ctx, move, inputKind)
+}
+
+func compileOnce(c Compose, policy access.Catalog, ctx PlanningContext, move *VolumeMovePlacement, inputKind string) (Blueprint, error) {
 	if c.Standalone != (inputKind == "standalone") {
 		return Blueprint{}, ErrInputs
 	}

@@ -304,6 +304,7 @@ type summaryView struct {
 	Reason       string   `json:"reason,omitempty"`
 	FailedSteps  []string `json:"failedSteps,omitempty"`
 	FailingSince int64    `json:"failingSince,omitempty"`
+	WaitingPeers []string `json:"waitingPeers,omitempty"`
 	// admitsWork: false for a server that takes no work; it can still be
 	// ready.
 	AdmitsWork bool     `json:"admitsWork"`
@@ -367,7 +368,7 @@ func newSummaryView(n sfc.NodeSummaryView) summaryView {
 	if n.State == "unready" {
 		v.Status = "degraded"
 	}
-	v.Reason, v.FailedSteps, v.FailingSince, v.AdmitsWork = n.Reason, n.FailedSteps, int64(n.FailingSince/1000), n.AdmitsWork
+	v.Reason, v.FailedSteps, v.FailingSince, v.AdmitsWork, v.WaitingPeers = n.Reason, n.FailedSteps, int64(n.FailingSince/1000), n.AdmitsWork, n.WaitingPeers
 	if u := n.Usage; u != nil {
 		v.MemUsed = u.MemoryUsed
 		if u.Containers != nil {

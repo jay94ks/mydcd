@@ -31,16 +31,18 @@ func (r *Runtime) applyIngressBlocks(ctx context.Context, v cluster.View) error 
 	if err != nil {
 		return err
 	}
+	certificates, err := r.controlPolicy.Certificates(v.State)
+	if err != nil {
+		return err
+	}
+	// Tenant hosts come from domain owners and approved hosts
+	// (devel/design/tenant-domains.md).
 	for _, tenant := range users.Tenants() {
-		if err = r.ingress.SetTenantPolicy(tenant.ID, book.HostPolicy(tenant.ID)); err != nil {
+		if err = r.ingress.SetTenantPolicy(tenant.ID, control.TenantHostPolicy(certificates, users, tenant.ID)); err != nil {
 			return err
 		}
 	}
 	if err = r.ingress.SetTenantPolicy(deployment.ClusterAppTenant, book.ClusterAppHostPolicy()); err != nil {
-		return err
-	}
-	certificates, err := r.controlPolicy.Certificates(v.State)
-	if err != nil {
 		return err
 	}
 	responder := ""
@@ -60,6 +62,11 @@ func (r *Runtime) applyIngressBlocks(ctx context.Context, v cluster.View) error 
 	if err = r.ingress.SetRuntimeControls(book.Revision, book.Controls(r.Engine().ObservedNodeID())); err != nil {
 		return err
 	}
+	owned, err := r.controlPolicy.OwnedVPS(v.State)
+	if err != nil {
+		return err
+	}
+	r.ingress.SetTrafficHolds(owned.TrafficHolds())
 	if gateways, found := book.NodeGateways(r.Engine().ObservedNodeID()); found {
 		return r.ingress.UpdateGateways(ctx, gateways.Configuration, gateways.Revision)
 	}

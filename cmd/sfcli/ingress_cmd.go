@@ -40,7 +40,6 @@ listeners, load balancing and drains on top of the app's routes.`,
 			ingressBlockCommand(g),
 			ingressUnblockCommand(g),
 			ingressExtendCommand(g),
-			ingressHostsCommand(g),
 			ingressGatewaysCommand(g),
 			ingressBalanceCommand(g),
 			ingressDrainCommand(g, "drain"),
@@ -91,9 +90,9 @@ func ingressPages(c *cli.Context, g *globals, s *session, q control.IngressQuery
 		switch {
 		case next != 0 && next > q.Offset:
 			q.Offset = next
-		case page.Next != "" && page.Next != q.After && q.Part != "blocks" && q.Part != "policies":
+		case page.Next != "" && page.Next != q.After && q.Part != "blocks":
 			q.After, q.Offset = page.Next, 0
-		case page.Next != "" && (q.Part == "blocks" || q.Part == "policies"):
+		case page.Next != "" && q.Part == "blocks":
 			n, err := strconv.ParseUint(page.Next, 10, 32)
 			if err != nil || uint32(n) <= q.Offset {
 				return errors.New("the server returned a bad page cursor")
@@ -433,97 +432,6 @@ func ingressExtendCommand(g *globals) *cli.Command {
 			opID := id.Get()
 			return g.sendAndPrint(c, s, fmt.Sprintf("Keep block %s until %s.", args[0], expires.Local().Format("2006-01-02 15:04")), change{ID: opID, Summary: "ingress extend " + args[0], Action: "ingress-block-extend", Expected: expected, Epoch: epoch, Payload: control.IngressBlockSelection{ID: args[0], ExpiresAt: uint64(expires.Unix())}})
 		}),
-	}
-}
-
-// ingressHostsCommand is the tenant's host grant: which host names its apps
-// may serve on the external and local gateways.
-func ingressHostsCommand(g *globals) *cli.Command {
-	var id cli.IDFlag
-	var revision cli.RevisionFlag
-	var external, local string
-	var externalAllowed bool
-	policies := func(c *cli.Context, s *session, tenant string) ([]control.IngressHostPolicyView, uint64, error) {
-		rows := []control.IngressHostPolicyView{}
-		var epoch uint64
-		err := ingressPages(c, g, s, control.IngressQuery{Tenant: tenant, Part: "policies"}, func(p control.IngressPage) uint32 {
-			rows = append(rows, p.HostPolicies...)
-			epoch = p.Epoch
-			return 0
-		})
-		return rows, epoch, err
-	}
-	split := func(s string) []string {
-		if s == "" {
-			return []string{}
-		}
-		return strings.Split(s, ",")
-	}
-	return &cli.Command{
-		Name:  "hosts",
-		Short: "Show or set which host names a tenant may serve",
-		Sub: []*cli.Command{
-			{
-				Name:  "show",
-				Short: "Show the tenant's host grant",
-				Run: g.withSession(func(c *cli.Context, s *session, args []string) error {
-					if len(args) != 0 {
-						return cli.Usagef("show takes no arguments")
-					}
-					tenant, err := g.Tenant(s, false)
-					if err != nil {
-						return err
-					}
-					rows, _, err := policies(c, s, tenant)
-					if err != nil {
-						return err
-					}
-					return cli.Print(c.Out, g.output.Format(), rows, func() cli.Rows {
-						t := cli.Rows{Header: []string{"tenant", "external", "external hosts", "local hosts", "revision"}}
-						for _, p := range rows {
-							t.Add(p.Tenant, p.Policy.ExternalAllowed, strings.Join(p.Policy.ExternalHosts, ","), strings.Join(p.Policy.LocalHosts, ","), p.Revision)
-						}
-						return t
-					})
-				}),
-			},
-			{
-				Name:  "set",
-				Short: "Replace the tenant's host grant (system administrators)",
-				Long:  "Replaces the whole grant. Host patterns may start with '*.'.",
-				Flags: func(fs *flag.FlagSet) {
-					fs.BoolVar(&externalAllowed, "external-allowed", false, "allow serving on the external gateway")
-					fs.StringVar(&external, "external", "", "comma-separated external host `patterns`")
-					fs.StringVar(&local, "local", "", "comma-separated local host `patterns`")
-					fs.Var(&id, "id", "operation `ID` (default: a new one)")
-					fs.Var(&revision, "if-revision", "only if the grant is still at this `revision`")
-				},
-				Run: g.withSession(func(c *cli.Context, s *session, args []string) error {
-					if len(args) != 0 {
-						return cli.Usagef("set takes no arguments")
-					}
-					tenant, err := g.Tenant(s, true)
-					if err != nil {
-						return err
-					}
-					rows, epoch, err := policies(c, s, tenant)
-					if err != nil {
-						return err
-					}
-					expected, _ := revision.Resolve(func() (uint64, error) {
-						for _, p := range rows {
-							if p.Tenant == tenant {
-								return p.Revision, nil
-							}
-						}
-						return 0, nil
-					})
-					policy := control.IngressHostPolicyChange{Tenant: tenant, Policy: ingress.HostPolicy{ExternalAllowed: externalAllowed, ExternalHosts: split(external), LocalHosts: split(local)}}
-					opID := id.Get()
-					return g.sendAndPrint(c, s, fmt.Sprintf("Tenant %s may serve external=%v hosts [%s], local hosts [%s].", tenant, externalAllowed, external, local), change{ID: opID, Summary: "ingress hosts set --tenant " + tenant, Action: "set-ingress-host-policy", Expected: expected, Epoch: epoch, Payload: policy})
-				}),
-			},
-		},
 	}
 }
 

@@ -28,28 +28,14 @@ x-sfc:
     service: web
     port: 8080
     health: /readyz
-  delivery:
-    enabled: true
-    source:
-      kind: git
-      repository: https://example.invalid/team/php-mysql.git
-      ref: main
-      path: sfc-compose.yaml
-      credential_profile: git-readonly
-    poll_interval_seconds: 60
-    sync:
-      mode: manual
-      drift: report
-      prune: false
-      allow_empty: false
-    runtime_edits:
-      mode: require-explicit-override
-      expiry: manual-release
-    limits:
-      fetch_timeout_seconds: 30
-      source_bytes: 4194304
-      queued_revisions: 1
-      active_operations: 1
+  cd:
+    repository: https://example.invalid/team/php-mysql.git
+    branch: main
+    path: sfc-compose.yaml
+    credential: git-readonly
+    poll: 1m
+    sync: manual
+    drift: report
   # 신뢰 출처는 이 파일에서 자가 부여하지 않는다. tenant 생성 기본값은 docker.io/**뿐이다.
   # 아래 registry는 생성만 하고 자동 신뢰하지 않는다. private ref 사용 전 manager가 명시 추가한다.
   routing:

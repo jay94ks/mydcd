@@ -131,3 +131,35 @@
 ### `DELETE /system/vps/servers/{name}/dns-holds/{domain}`
 
 되돌리지 못한 레코드 표시를 지운다('이대로 둠'). 영역은 바꾸지 않는다. 아직 중지 중이라 빼 둔 레코드가 있으면 409 `held`.
+
+## 보유 VPS (Hostinger)
+
+내가 공급자에서 사서 갱신하는 VPS를 붙이는 화면이다(설계). 클러스터는 사거나 지우지 않는다. 관리형 화면(`GET /system/vps`)에는 보유형 계정이 나오지 않고, 이 화면에는 관리형 계정·서버가 나오지 않는다. 모두 시스템 관리자만 쓴다.
+
+### `GET /system/owned-vps`
+
+`{revision, accountRevision, accounts, servers}`. `accounts`는 보유형 공급자 계정만이고 모양은 `GET /system/vps`의 계정 줄과 같다(`keyHint`는 토큰 끝 4자). `servers`는 `{name, account, instanceID, install(ssh/manual/existing), voter?, port?, protect(exclude/low-weight), phase(installing/running/failed), failure?, publicIP?, build?, invitation?, limit?{at, month, mode, usedMB, monthMB, reachAt}, restored?{at, month, by?}, request, attachedBy, attachedAt, updatedBy, updatedAt}`. 서버 변경의 Expected는 `revision`, 계정 변경은 `accountRevision`이다.
+
+- `installSteps`: 서버 이름 → 설치 단계 1–4. 1 VPS 읽는 중, 2 확인됨(공인 IP·빌드 기록), 3 초대 발급(서버가 가입할 수 있음), 4 가입함(`running`). 0은 `failed`이고 이유는 `failure`다. `failure`: `EXPIRED`(구독이 끝나 VM이 사라짐), `INSTANCE_NOT_FOUND`, `NOT_RUNNING`, `NO_PUBLIC_IP`, `IP_MISMATCH`, `TIMEOUT`(30분 안에 가입하지 않음).
+- `status`: 리더가 공급자에서 읽은 값. `{leader, servers: [{name, updatedAt, usedMB, monthMB, reachAt, plan?, zone?, image?, instanceStatus?, subscriptionStatus?, expiresAt?, autoRenew?, currency?, renewalCost?, failure?, failureAt?}]}`. 대역폭(`usedMB`·`monthMB`·`reachAt`)은 보류와 상관없이 늘 있다. `instanceStatus`는 `pending`·`active`·`working`·`off`·`error`이고, 기록이 `running`인데 `off`면 공급자 쪽에서 멈춘 것이다. `renewalCost`는 `currency`의 최소 단위(USD면 센트)다. 리더를 읽지 못하면 `status`는 `null`이고 `statusError`에 코드가 있다.
+- 직접 설치 명령은 `installSteps`가 2나 3일 때 언제든 다시 보여 줄 수 있다. 초대는 기록에 남아 있어 따로 다시 받을 필요가 없다. 명령: `curl -fsS "https://CLUSTER_HOST/.well-known/sfc/node/install.sh?name=NAME" | sh`([설치](../vps-enroll.md)).
+
+### 계정
+
+| 요청 | 동작 |
+|---|---|
+| `POST /system/owned-vps/accounts` `{opId, name, vendor, token}` | 투표 서버가 API 토큰을 봉인한 뒤 `put-vps-account`. 웹은 토큰을 보관하지 않는다. `vendor`는 `hostinger`(관리형 공급자는 422) |
+| `POST /system/owned-vps/accounts/{account}/rotate-key` `{opId, token, expected?}` | 토큰 교체(새 SSH 키도 받는다) |
+| `GET /system/owned-vps/accounts/{account}/instances` | 붙이기 목록: 리더가 지금 공급자에서 읽은 그 계정의 VM `{instances: [{id, plan, zone, publicIP, image, status, expiresAt?, attached?}]}`. `attached`는 그 VM을 쓰는 보유 VPS 이름(비어 있으면 붙일 수 있음). 공급자에서 바꾸는 것은 없다. 없는 계정은 404, 리더나 공급자를 읽지 못하면 503 |
+| `DELETE /system/owned-vps/accounts/{account}` `{opId, expected?}` | 붙은 서버가 있으면 409 `in-use` |
+
+### 서버
+
+| 요청 | 동작 |
+|---|---|
+| `POST /system/owned-vps/servers` `{opId, name, account, instanceId, install, port, voter?, protect?, expected?}` | `attach-owned-vps`. `port`는 새 서버의 SFCP 포트(`existing`이면 빼기). `install`: `ssh`(리더가 SSH로 설치, 투표 안 함), `manual`(직접 설치 명령), `existing`(이미 가입한 서버 `name`에 기록만 묶음). `voter`는 `manual`에서만. `protect` 기본 `exclude` |
+| `PATCH /system/owned-vps/servers/{name}` `{opId, protect?, restore?, expected?}` | `set-owned-vps`: 월 대역폭이 다 되기 전 동작(`exclude`는 DNS·라우팅에서 잠시 뺌, `low-weight`는 다른 backend의 1/16 몫만 보냄). `restore:true`는 지금의 트래픽 보류를 바로 끝낸다(그달에는 다시 보류하지 않음, 보류 중이 아니면 409 `not-limited`) |
+| `DELETE /system/owned-vps/servers/{name}` `{opId, expected?}` | `detach-owned-vps`: 기록만 지운다. VPS와 구독은 공급자에 그대로 남는다. 가입한 서버는 `node drain`·`node remove`로 따로 뺀다 |
+
+- 트래픽 보류는 커밋된 기록을 각 서버의 ingress가 읽어 다음 요청부터 반영한다. `exclude`여도 route에 다른 backend가 없으면 그 서버 backend를 남기고 작은 몫만 보낸다.
+- 구독이 끝나기 14일·3일·1일 전에 서버를 붙인 사람에게 알림(종류 `vps-subscription`)을 보낸다. 끝나는 날짜와 "갱신은 Hostinger 패널에서"를 적고, 투표 서버면 심각도가 `error`다. 갱신으로 끝나는 날짜가 바뀌면 알림을 처음부터 다시 센다.

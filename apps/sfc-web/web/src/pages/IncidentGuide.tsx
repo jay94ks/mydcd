@@ -219,10 +219,10 @@ function Editor({ scope, g, canWrite, top, layers, versions, onSaved }: { scope:
   const lines = d.text.split('\n').filter((l) => l.trim() && !l.startsWith('#')).length;
   const actions = (
     <>
-      <button className="btn" onClick={() => setDialog('test')}>
+      <button type="button" className="btn" onClick={() => setDialog('test')}>
         지난 사건으로 시험…
       </button>
-      <button className="btn primary" disabled={!canWrite || !dirty || over} title={!canWrite ? need : !dirty ? '바뀐 것이 없습니다' : over ? `${GUIDE_MAX.toLocaleString()}자를 넘었습니다` : undefined} onClick={() => setDialog('save')}>
+      <button type="button" className="btn primary" disabled={!canWrite || !dirty || over} title={!canWrite ? need : !dirty ? '바뀐 것이 없습니다' : over ? `${GUIDE_MAX.toLocaleString()}자를 넘었습니다` : undefined} onClick={() => setDialog('save')}>
         저장 (v{next})
       </button>
     </>
@@ -430,7 +430,7 @@ function Editor({ scope, g, canWrite, top, layers, versions, onSaved }: { scope:
                   <span>{cur ? <Badge tone="ok">지금</Badge> : v.incidents === undefined ? <span className="muted">—</span> : v.incidents ? <Badge tone="un">사건 {v.incidents}건</Badge> : <span className="muted">사건 없음</span>}</span>
                   <span>
                     {!cur && (
-                      <button className="textbtn small" disabled={!canWrite} title={canWrite ? undefined : need} onClick={() => setDialog({ restore: v.version })}>
+                      <button type="button" className="textbtn small" disabled={!canWrite} title={canWrite ? undefined : need} onClick={() => setDialog({ restore: v.version })}>
                         되돌리기…
                       </button>
                     )}
@@ -532,10 +532,10 @@ function SaveDialog({ scope, g, text, fields, deliver, onClose, onSaved }: { sco
       onClose={onClose}
       footer={
         <>
-          <button className="btn" onClick={onClose}>
+          <button type="button" className="btn" onClick={onClose}>
             취소
           </button>
-          <button className="btn primary" disabled={busy} onClick={save}>
+          <button type="button" className="btn primary" disabled={busy} onClick={save}>
             저장
           </button>
         </>
@@ -580,10 +580,10 @@ function RestoreDialog({ scope, g, version, onClose, onSaved }: { scope: GuideSc
       onClose={onClose}
       footer={
         <>
-          <button className="btn" onClick={onClose}>
+          <button type="button" className="btn" onClick={onClose}>
             취소
           </button>
-          <button className="btn danger" disabled={busy} onClick={go}>
+          <button type="button" className="btn danger" disabled={busy} onClick={go}>
             되돌리기
           </button>
         </>
@@ -638,11 +638,11 @@ function TestDialog({ scope, g, dirty, text, fields, canSave, onClose, onSave }:
       onClose={onClose}
       footer={
         <>
-          <button className="btn" onClick={onClose}>
+          <button type="button" className="btn" onClick={onClose}>
             닫기
           </button>
           {dirty && (
-            <button className="btn primary" disabled={!canSave} onClick={onSave}>
+            <button type="button" className="btn primary" disabled={!canSave} onClick={onSave}>
               v{g.version + 1} 저장
             </button>
           )}

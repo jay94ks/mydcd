@@ -156,26 +156,6 @@ func NewAcceptedDelivery(b Blueprint, i Inventory, catalog access.Catalog) (Deli
 	return newDelivery(b, i, catalog, b.d.Actor, *policy)
 }
 
-// AttachDelivery turns CD on for an app deployed without it ('cd set'). The
-// running execution becomes the first candidate; the policy lives only on
-// the server, so the app's own file never carries it.
-func AttachDelivery(i Inventory, catalog access.Catalog, actor string, policy DeliveryDeclaration) (Delivery, error) {
-	e, active := i.Execution()
-	if !active {
-		return Delivery{}, ErrInputs
-	}
-	b := e.Blueprint()
-	if b.d.Input.Sfc.Delivery != nil {
-		return Delivery{}, ErrInputs
-	}
-	model := b.d.Input
-	model.Sfc.Delivery = &policy
-	if model.normalize() != nil || !bytes.Equal(goal(*model.Sfc.Delivery), goal(policy)) {
-		return Delivery{}, ErrInputs
-	}
-	return newDelivery(b, i, catalog, actor, policy)
-}
-
 func newDelivery(b Blueprint, i Inventory, catalog access.Catalog, principal string, p DeliveryDeclaration) (Delivery, error) {
 	e, active := i.Execution()
 	policy := &p

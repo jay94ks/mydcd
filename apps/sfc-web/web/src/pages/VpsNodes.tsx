@@ -54,7 +54,7 @@ import { usePoll } from '../lib/usePoll';
 import { drainRunning } from '../lib/drain';
 import { ago, dayTime, fmtTime, hhmm } from '../lib/format';
 import { SERVER_TABS } from './Servers';
-import { serversMeasured } from '../lib/liveTopics';
+import { serversMeasured, vpsLive } from '../lib/liveTopics';
 
 const POLL_MS = 30_000;
 /** 단계 배지: 생성 1 · 설치 2 · 가입 3 · (투표 서버면) 승격 4 */
@@ -92,7 +92,7 @@ type Dlg =
   | { kind: 'rotate' | 'price' | 'unlink'; a: VpsAccount };
 
 export function VpsNodesPage() {
-  const q = usePoll((s) => vpsView(s), [], POLL_MS);
+  const q = usePoll((s) => vpsView(s), [], POLL_MS, vpsLive);
   const nodes = usePoll((s) => nodesOverview(s), [], POLL_MS, serversMeasured);
   const [dlg, setDlg] = useState<Dlg>();
   const members = new Set((nodes.data?.nodes ?? []).map((n) => n.id));
@@ -179,7 +179,7 @@ function Body({ v, members, onDlg, onRefresh }: { v: VpsView; members: Set<strin
                 </option>
               ))}
             </select>
-            <button className="btn primary sm" disabled={!v.accounts.length} title={v.accounts.length ? undefined : '먼저 공급자를 연결하세요'} onClick={() => onDlg({ kind: 'new' })}>
+            <button type="button" className="btn primary sm" disabled={!v.accounts.length} title={v.accounts.length ? undefined : '먼저 공급자를 연결하세요'} onClick={() => onDlg({ kind: 'new' })}>
               ＋ 새 VPS 서버
             </button>
           </>
@@ -287,7 +287,7 @@ function Body({ v, members, onDlg, onRefresh }: { v: VpsView; members: Set<strin
       <TrafficBoard v={v} />
       <GuardBoard v={v} />
       <CostBoard v={v} />
-      <Card title="공급자 계정" actions={<button className="btn sm" onClick={() => onDlg({ kind: 'account' })}>＋ 공급자 연결</button>}>
+      <Card title="공급자 계정" actions={<button type="button" className="btn sm" onClick={() => onDlg({ kind: 'account' })}>＋ 공급자 연결</button>}>
         {!v.accounts.length ? (
           <span className="small muted">연결한 공급자가 없습니다.</span>
         ) : (
@@ -686,15 +686,15 @@ function CostBoard({ v }: { v: VpsView }) {
 function Footer({ m, label, ok, onSend, onClose, danger }: { m: ReturnType<typeof useMutation>; label: string; ok: boolean; onSend: () => void; onClose: () => void; danger?: boolean }) {
   const done = m.op?.state === 'applied';
   return done ? (
-    <button className="btn primary" onClick={onClose}>
+    <button type="button" className="btn primary" onClick={onClose}>
       닫기
     </button>
   ) : (
     <>
-      <button className="btn" onClick={onClose}>
+      <button type="button" className="btn" onClick={onClose}>
         취소
       </button>
-      <button className={danger ? 'btn danger solid' : 'btn primary'} disabled={!ok || m.busy || (!!m.op && !['unknown', 'failed', 'rejected'].includes(m.op.state))} onClick={onSend}>
+      <button type="button" className={danger ? 'btn danger solid' : 'btn primary'} disabled={!ok || m.busy || (!!m.op && !['unknown', 'failed', 'rejected'].includes(m.op.state))} onClick={onSend}>
         {m.busy ? '보내는 중…' : label}
       </button>
     </>
@@ -1310,6 +1310,6 @@ function UnlinkDialog({ v, a, onClose }: { v: VpsView; a: VpsAccount; onClose: (
 
 /** 목록의 VPS 서버 이름(다른 화면에서 쓰기) */
 export const useVpsNames = () => {
-  const q = usePoll((s) => vpsView(s).catch(() => undefined), [], 60_000);
+  const q = usePoll((s) => vpsView(s).catch(() => undefined), [], 60_000, vpsLive);
   return useMemo(() => new Set((q.data?.servers ?? []).map((s) => s.name)), [q.data]);
 };

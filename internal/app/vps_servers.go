@@ -65,6 +65,14 @@ func (r *Runtime) vpsLoop() {
 		if err := r.vpsStep(ctx, sshTried, hostKeys); err != nil {
 			log.Printf("vps: %s", vpsLogCause(err))
 		}
+		if err := r.ownedVPSStep(ctx, sshTried, hostKeys); err != nil {
+			log.Printf("owned-vps: step failed: %s", vpsLogCause(err))
+		}
+		if local, err := r.Engine().Read(ctx, false); err == nil && ownedRunningAny(r.controlPolicy, local.State) && r.vpsWatcher.owned.due(time.Now()) {
+			if err := r.ownedWatchRound(ctx, r.vpsWatcher.owned, time.Now()); err != nil {
+				log.Printf("owned-vps: watch failed: %s", vpsLogCause(err))
+			}
+		}
 		// The cost watch needs the provider only while a server runs.
 		if local, err := r.Engine().Read(ctx, false); err == nil && vpsRunningAny(r.controlPolicy, local.State) && r.vpsWatcher.due(time.Now()) {
 			if err := r.vpsWatchRound(ctx, r.vpsWatcher, time.Now()); err != nil {
@@ -100,20 +108,21 @@ func (r *Runtime) vpsStep(ctx context.Context, sshTried map[string]time.Time, ho
 		return err
 	}
 	for _, server := range catalog.Servers {
-		if server.Phase == control.VPSInstalling && vpsJoined(server, members) {
+		if server.Phase == control.VPSInstalling && vpsJoined(managedTarget(server), members) {
 			return r.reportVPS(ctx, v.State, server.Name, vpsOutcome{Action: control.VPSRunning})
 		}
 		if server.Phase == control.VPSInstalling {
 			if server.Invitation == nil {
 				// Enrolled (ingress or SSH): sign its invitation once.
-				if inv, ok := r.vpsInvitation(v, members, server); ok {
+				if inv, ok := r.vpsInvitation(v, members, managedTarget(server)); ok {
 					return r.reportVPS(ctx, v.State, server.Name, vpsOutcome{Action: control.VPSInvited, Invitation: inv})
 				}
 			}
 			entry, entered := members.Entry(server.Name)
 			if vpsSSHPending(server, entry, entered) && time.Now().After(sshTried[server.Name]) {
 				sshTried[server.Name] = time.Now().Add(vpsSSHRetry)
-				if err := r.vpsSSHStep(ctx, v, catalog, server, entered, hostKeys); err != nil {
+				account, _ := catalog.Account(server.Account)
+				if err := r.vpsSSHStep(ctx, v, account, managedTarget(server), entered, hostKeys); err != nil {
 					log.Printf("vps: ssh install of %s: %v", server.Name, err)
 				}
 				return nil
@@ -130,7 +139,7 @@ func (r *Runtime) vpsStep(ctx context.Context, sshTried map[string]time.Time, ho
 		if !ok {
 			continue
 		}
-		vendor, ok := vps.Lookup(account.Vendor)
+		vendor, ok := vps.LookupManaged(account.Vendor)
 		if !ok {
 			continue
 		}
@@ -198,7 +207,7 @@ func vpsBusy(p control.Policy, s state.State) bool {
 		return false
 	}
 	for _, server := range catalog.Servers {
-		if server.Phase == control.VPSCreating || server.Phase == control.VPSDeleting || server.Phase == control.VPSStopping || server.Phase == control.VPSStarting || server.Phase == control.VPSInstalling && vpsJoined(server, members) {
+		if server.Phase == control.VPSCreating || server.Phase == control.VPSDeleting || server.Phase == control.VPSStopping || server.Phase == control.VPSStarting || server.Phase == control.VPSInstalling && vpsJoined(managedTarget(server), members) {
 			return true
 		}
 		e, ok := members.Entry(server.Name)
@@ -248,7 +257,7 @@ type vpsOutcome struct {
 // and only Create (sendVPSCreate), so a slow list, a create whose reply was
 // lost, or a new leader can never make a second billed instance. After it,
 // an instance that does not show up is waited for until the deadline.
-func lookupVPSCreate(ctx context.Context, p vps.Provider, server control.VPSServer, tag string, now time.Time) vpsOutcome {
+func lookupVPSCreate(ctx context.Context, p vps.ManagedProvider, server control.VPSServer, tag string, now time.Time) vpsOutcome {
 	since := server.CreatedAt
 	if server.CreateSentAt != 0 {
 		since = server.CreateSentAt
@@ -286,7 +295,7 @@ func lookupVPSCreate(ctx context.Context, p vps.Provider, server control.VPSServ
 
 // sendVPSCreate sends the single Create after create-sent is committed. A
 // refusal is a failure; an unknown result is settled by lookups.
-func sendVPSCreate(ctx context.Context, p vps.Provider, server control.VPSServer, tag string) vpsOutcome {
+func sendVPSCreate(ctx context.Context, p vps.ManagedProvider, server control.VPSServer, tag string) vpsOutcome {
 	_, err := p.Create(ctx, vps.CreateRequest{Name: server.Name, Description: tag, Zone: server.Zone, Image: server.Image, Flavor: server.Flavor, SSHKeys: server.SSHKeys, Script: server.Script})
 	if err == nil {
 		return vpsOutcome{}
@@ -302,7 +311,7 @@ const vpsPowerRetry = 2 * time.Minute
 // instance first: off (stopping) or active (starting) is the result to
 // report; otherwise it asks the vendor, at most once per vpsPowerRetry
 // (mayAsk), and reports sent so the caller paces the next request.
-func powerVPS(ctx context.Context, p vps.Provider, server control.VPSServer, mayAsk bool) (outcome vpsOutcome, sent bool) {
+func powerVPS(ctx context.Context, p vps.ManagedProvider, server control.VPSServer, mayAsk bool) (outcome vpsOutcome, sent bool) {
 	instances, err := p.Instances(ctx)
 	if err != nil {
 		return vpsOutcome{}, false
@@ -331,12 +340,12 @@ func powerVPS(ctx context.Context, p vps.Provider, server control.VPSServer, may
 
 // vpsJoined reports whether an installing server's invited key is a full
 // member now, so the server moves to running.
-func vpsJoined(server control.VPSServer, members membership.Directory) bool {
+func vpsJoined(server vpsTarget, members membership.Directory) bool {
 	if server.Invitation == nil {
 		return false
 	}
 	e, ok := members.Entry(server.Name)
-	return ok && membership.FullMember(e) && e.JoinID == server.JoinID() && e.CurrentPeer().Key == server.Invitation.Target.Key && !members.Gone(server.Name)
+	return ok && membership.FullMember(e) && e.JoinID == server.JoinID && e.CurrentPeer().Key == server.Invitation.Target.Key && !members.Gone(server.Name)
 }
 
 // deleteVPSInstance deletes a deleting server's instance. Once the vendor
@@ -344,7 +353,7 @@ func vpsJoined(server control.VPSServer, members membership.Directory) bool {
 // known instance ID the instance is found by its tag; if a Create was sent
 // and nothing carries the tag yet, the record stays until the create
 // timeout, so a late instance is still found and deleted.
-func deleteVPSInstance(ctx context.Context, p vps.Provider, server control.VPSServer, tag string, now time.Time) vpsOutcome {
+func deleteVPSInstance(ctx context.Context, p vps.ManagedProvider, server control.VPSServer, tag string, now time.Time) vpsOutcome {
 	id := server.InstanceID
 	if id == "" {
 		if server.CreateSentAt == 0 {

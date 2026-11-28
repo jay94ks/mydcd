@@ -21,14 +21,20 @@ func (b Book) Checkpoint() Journal {
 	for _, p := range b.pools {
 		j.Pools = append(j.Pools, p)
 	}
-	for _, a := range b.allocations {
+	b.each(func(a Allocation) bool {
 		j.Allocations = append(j.Allocations, a)
-	}
+		return true
+	})
 	for id, g := range b.floors {
 		j.Floors = append(j.Floors, Generation{id, g})
 	}
 	sort.Slice(j.Pools, func(i, k int) bool { return j.Pools[i].ID < j.Pools[k].ID })
-	sort.Slice(j.Allocations, func(i, k int) bool { return j.Allocations[i].Endpoint < j.Allocations[k].Endpoint })
+	// An endpoint's older generation first, so Restore rebuilds it the
+	// same way it was reserved.
+	sort.Slice(j.Allocations, func(i, k int) bool {
+		x, y := j.Allocations[i], j.Allocations[k]
+		return x.Endpoint < y.Endpoint || x.Endpoint == y.Endpoint && x.Generation < y.Generation
+	})
 	sort.Slice(j.Floors, func(i, k int) bool { return j.Floors[i].Endpoint < j.Floors[k].Endpoint })
 	return j
 }
@@ -49,12 +55,12 @@ func Restore(j Journal) (Book, error) {
 			return Book{}, err
 		}
 	}
-	seen = map[string]bool{}
+	held := map[string]uint64{}
 	for _, a := range j.Allocations {
-		if seen[a.Endpoint] {
+		if last, ok := held[a.Endpoint]; ok && last >= a.Generation {
 			return Book{}, ErrPolicy
 		}
-		seen[a.Endpoint] = true
+		held[a.Endpoint] = a.Generation
 		p, ok := b.pools[a.Pool]
 		if !ok {
 			return Book{}, ErrPolicy

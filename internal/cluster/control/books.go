@@ -11,6 +11,7 @@ var books = []Book{
 	nodeShellBook,
 	clusterFirewallBook,
 	vpsBook,
+	ownedVPSBook,
 	volumeSharesBook,
 	imageCacheBook,
 	tunnelReconnectBook,

@@ -49,3 +49,23 @@
 - sfc-web이 돌고 있으면 `stopping`을 보고 그 서버가 '연결된 서버'인 외부 도메인의 Seafield Cluster A·AAAA 레코드에서 그 주소를 잠시 빼고, 다시 `running`이 되면 되돌린다([웹 API](../reference/web-api/54-vps.md#중지할-때-dns-웹이-하는-임시-변경)). 그 서버 주소만 있는 레코드는 남기고, 그 밖의 DNS 레코드는 직접 고친다. `--dns-wait`는 그 레코드의 TTL보다 길게 준다.
 - `start`를 하면 `starting`이 되고, 리더가 켠 뒤 실행 중인 것을 확인하면 `running`이 된다. 그다음 `sfcli node uncordon NAME`으로 작업을 다시 받게 한다.
 - 리더는 공급자 상태를 먼저 읽고, 끄기·켜기는 2분에 한 번까지만 보낸다. 공급자 작업이 도는 동안에는 다시 보내지 않는다.
+
+## 보유 VPS (Hostinger)
+
+내가 공급자에서 이미 사서 갱신하는 VPS를 클러스터에 붙인다. 클러스터는 사지도, 갱신하지도, 지우지도 않는다. 위의 `vps list`·`vps account`에는 나오지 않고 여기에만 나온다(관리형과 목적이 달라서다). 설계: Hostinger 보유 VPS.
+
+| 명령 | 하는 일 |
+|---|---|
+| `vps owned account list` | 보유 VPS 공급자 계정 |
+| `vps owned account add NAME [--vendor hostinger] [--token-file FILE]` | API 토큰 하나로 계정 연결(접속한 투표 서버가 봉인) |
+| `vps owned account rotate-key NAME [--token-file FILE]` | 토큰 교체 |
+| `vps owned account remove NAME [--if-revision R]` | 계정 연결 끊기(붙은 서버가 있으면 거절) |
+| `vps owned list` | 붙인 보유 VPS |
+| `vps owned attach NAME --account A --instance ID [--ssh \| --existing NAME] [--voter] [--port P] [--near-limit exclude\|low-weight]` | VPS를 서버 NAME으로 붙이기 |
+| `vps owned set NAME [--near-limit exclude\|low-weight] [--restore] [--if-revision R]` | 월 대역폭이 다 되기 전 동작 바꾸기, `--restore`는 지금의 보류를 바로 끝냄(그달에는 다시 보류하지 않음) |
+| `vps owned detach NAME [--if-revision R]` | 붙인 기록만 지우기(VPS는 공급자에 그대로) |
+
+- 설치 방법은 운영자가 고른다. `--ssh`면 리더가 계정 SSH 키로 sfcd를 넣는다(이 서버는 투표하지 않는다). 기본은 직접 설치로, 보이는 설치 명령을 VPS에서 30분 안에 실행한다. `--existing NAME`은 손으로 넣어 이미 가입한 서버에 기록만 묶는다.
+- `--near-limit`: 공급자는 월 대역폭을 다 쓰면 그달 끝까지 10 Mbps로 느리게 한다. 그 전에 `exclude`(기본)는 그 서버를 DNS와 라우팅 대상에서 잠시 빼고, `low-weight`는 그 서버 backend에 다른 backend의 1/16 몫만 보낸다. `exclude`여도 route에 다른 backend가 없으면 빼지 않고 작은 몫을 남긴다. 다음 달이 되면 되돌린다.
+- 남은 구독 기간만 보여 주고, 갱신과 결제는 Hostinger 패널에서 한다. 금액은 공급자 통화 그대로다.
+- `detach`는 언제든 할 수 있다. 가입한 서버는 `sfcli node drain NAME`, `sfcli node remove NAME`으로 따로 뺀다.

@@ -74,6 +74,7 @@ var nodeMethods = map[string]nodeMethod{
 	"credential-store-report":            report(ReportWork),
 	"vault-holder-report":                report(ReportWork),
 	"vps-report":                         report(ReportWork),
+	"owned-vps-report":                   report(ReportWork),
 
 	"certificate-expiry-report":          report(ReportFact),
 	"image-build-git-observation-report": report(ReportFact),
@@ -143,6 +144,8 @@ var nodeMethods = map[string]nodeMethod{
 	"node-disk-permit":                leaderRead(),
 	"node-firewall-permit":            leaderRead(),
 	"vps-status":                      leaderRead(),
+	"owned-vps-status":                leaderRead(),
+	"owned-vps-instances":             leaderRead(),
 	"vps-traffic":                     leaderRead(),
 	"vps-traffic-history":             leaderRead(),
 

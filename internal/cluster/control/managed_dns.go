@@ -286,7 +286,7 @@ func (p Policy) managedDNSRegistrationsFromApps(s state.State, apps Apps, projec
 					continue
 				}
 				endpoint := key + "/" + alias + "/" + strconv.Itoa(family)
-				allocation, held := projection.Addresses.Allocation(endpoint)
+				allocation, held := projection.Addresses.AllocationOf(endpoint, s.Object(key).Generation)
 				address, err := netip.ParseAddr(raw)
 				if err != nil || !held || allocation.Generation != s.Object(key).Generation || allocation.Address != address {
 					return nil, ErrCatalog

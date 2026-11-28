@@ -355,6 +355,11 @@ func knownVendor(id string) bool {
 	return ok
 }
 
+func managedVendor(id string) bool {
+	_, ok := vps.LookupManaged(id)
+	return ok
+}
+
 // VPS reads the account catalog (an empty one before the first write).
 func (p Policy) VPS(s state.State) (VPSCatalog, error) {
 	c := VPSCatalog{Schema: 1, Cluster: p.Cluster}
@@ -394,8 +399,12 @@ func (p Policy) VPSPage(s state.State, session access.Session, at int64, _ VPSQu
 		return VPSPage{}, err
 	}
 	out := VPSPage{Revision: c.Revision, Accounts: []VPSPublicAccount{}}
+	// Owned-vendor accounts belong to OwnedVPSPage only (never shown with
+	// managed ones, Jay 2026-11-28 14:04 KST).
 	for _, a := range c.Accounts {
-		out.Accounts = append(out.Accounts, a.Public())
+		if managedVendor(a.Vendor) {
+			out.Accounts = append(out.Accounts, a.Public())
+		}
 	}
 	out.Servers = append([]VPSServer{}, c.Servers...)
 	return out, nil
@@ -431,6 +440,11 @@ func (p Policy) reduceVPS(s state.State, cmd state.Command) (map[string][]byte, 
 	case "put-vps-account":
 		var q VPSAccountPut
 		if canonical(op.Change.Payload, &q) != nil || !vps.ValidAccountName(q.Name) || !knownVendor(q.Vendor) || q.OverageKRWPerGB < 0 || q.OverageKRWPerGB > MaxOverageKRWPerGB || !q.Guard.valid() {
+			return nil, state.Invalid
+		}
+		// An Owned vendor bills a fixed subscription with no overage, and its
+		// traffic is protected per server, not by the account guard.
+		if ownedVendor(q.Vendor) && (q.OverageKRWPerGB != 0 || q.Guard != (VPSGuard{}) || q.SSHKeyID != "") {
 			return nil, state.Invalid
 		}
 		old, exists := c.Account(q.Name)
@@ -477,6 +491,13 @@ func (p Policy) reduceVPS(s state.State, cmd state.Command) (map[string][]byte, 
 			return nil, state.Invalid
 		}
 		if _, exists := c.Account(q.Name); !exists || slices.ContainsFunc(c.Servers, func(v VPSServer) bool { return v.Account == q.Name }) {
+			return nil, state.ConditionFailed
+		}
+		owned, err := p.OwnedVPS(s)
+		if err != nil {
+			return nil, state.Invalid
+		}
+		if slices.ContainsFunc(owned.Servers, func(v OwnedVPS) bool { return v.Account == q.Name }) {
 			return nil, state.ConditionFailed
 		}
 		c.Accounts = slices.DeleteFunc(c.Accounts, func(x VPSAccount) bool { return x.Name == q.Name })
@@ -552,7 +573,15 @@ func (p Policy) reduceVPS(s state.State, cmd state.Command) (map[string][]byte, 
 			return nil, state.Invalid
 		}
 		account, ok := c.Account(q.Account)
-		if !ok || len(c.Servers) >= maxVPSServers {
+		// Only a Managed vendor's account may create servers here; an
+		// Owned vendor's instances are attached, never bought (Jay
+		// 2026-11-28 14:02 KST).
+		if !ok || len(c.Servers) >= maxVPSServers || !managedVendor(account.Vendor) {
+			return nil, state.ConditionFailed
+		}
+		if owned, err := p.OwnedVPS(s); err != nil {
+			return nil, state.Invalid
+		} else if _, taken := owned.Server(q.Name); taken {
 			return nil, state.ConditionFailed
 		}
 		// Without a user script the leader installs over SSH with the
@@ -747,6 +776,9 @@ func VPSVoterSpare(d membership.Directory, name string) bool {
 // vpsJoinAllowed refuses a join dispatch for a VPS invitation whose server
 // is no longer installing (for example being deleted).
 func (p Policy) vpsJoinAllowed(s state.State, e membership.Entry) bool {
+	if e.Phase == membership.Invited && strings.HasPrefix(e.JoinID, "owned-") {
+		return p.ownedJoinAllowed(s, e)
+	}
 	if e.Phase != membership.Invited || !strings.HasPrefix(e.JoinID, "vps-") {
 		return true
 	}
@@ -771,6 +803,19 @@ func (p Policy) vpsEnrollServer(s state.State, r MemberReport) (VPSServer, error
 		return VPSServer{}, ErrCatalog
 	}
 	return v, nil
+}
+
+// vpsEnrollJoinID is the join ID a vps-enroll report invites with: the
+// managed server's, or else the owned server's.
+func (p Policy) vpsEnrollJoinID(s state.State, r MemberReport) (string, error) {
+	if v, err := p.vpsEnrollServer(s, r); err == nil {
+		return v.JoinID(), nil
+	}
+	v, err := p.ownedEnrollServer(s, r)
+	if err != nil {
+		return "", err
+	}
+	return v.JoinID(), nil
 }
 
 // Tag is the description the instance is created with, so that a new

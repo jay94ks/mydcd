@@ -12,7 +12,7 @@ const noble = {
   gcm: () => import('@noble/ciphers/aes.js').then((m) => m.gcm),
   pbkdf2: () => Promise.all([import('@noble/hashes/pbkdf2.js'), import('@noble/hashes/sha2.js')]).then(([p, h]) => ({ pbkdf2Async: p.pbkdf2Async, sha256: h.sha256 })),
 };
-import { randomUUID } from '../lib/cryptoCompat';
+import { bufferSource, randomUUID } from '../lib/cryptoCompat';
 
 const STORE_KEY = 'sfc.browser-keys.v1';
 export const PBKDF2_ITERATIONS = 600_000;
@@ -106,10 +106,10 @@ async function deriveWrapKey(passphrase: string, salt: Uint8Array, iterations: n
   const pass = new TextEncoder().encode(passphrase);
   if (globalThis.crypto?.subtle) {
     const base = await crypto.subtle.importKey('raw', pass, 'PBKDF2', false, ['deriveKey']);
-    const key = await crypto.subtle.deriveKey({ name: 'PBKDF2', hash: 'SHA-256', salt, iterations }, base, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
+    const key = await crypto.subtle.deriveKey({ name: 'PBKDF2', hash: 'SHA-256', salt: bufferSource(salt), iterations }, base, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
     return {
-      encrypt: async (iv, additionalData, plain) => new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv, additionalData }, key, plain)),
-      decrypt: async (iv, additionalData, data) => new Uint8Array(await crypto.subtle.decrypt({ name: 'AES-GCM', iv, additionalData }, key, data)),
+      encrypt: async (iv, additionalData, plain) => new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv: bufferSource(iv), additionalData: bufferSource(additionalData) }, key, bufferSource(plain))),
+      decrypt: async (iv, additionalData, data) => new Uint8Array(await crypto.subtle.decrypt({ name: 'AES-GCM', iv: bufferSource(iv), additionalData: bufferSource(additionalData) }, key, bufferSource(data))),
     };
   }
   const [{ pbkdf2Async, sha256 }, gcm] = await Promise.all([noble.pbkdf2(), noble.gcm()]);
@@ -171,7 +171,7 @@ export async function importKey(username: string, label: string, pem: string, pa
 /** PKCS#8 개인키의 공개키 hex. WebCrypto Ed25519가 있으면 JWK의 x로 얻고, 없으면 @noble로 계산한다. */
 async function publicKeyOf(pkcs8: Uint8Array): Promise<string> {
   if (await subtleEd25519()) {
-    const k = await crypto.subtle.importKey('pkcs8', pkcs8, { name: 'Ed25519' }, true, ['sign']);
+    const k = await crypto.subtle.importKey('pkcs8', bufferSource(pkcs8), { name: 'Ed25519' }, true, ['sign']);
     const x = (await crypto.subtle.exportKey('jwk', k)).x ?? '';
     return hex(b64d(x.replace(/-/g, '+').replace(/_/g, '/')));
   }
@@ -232,7 +232,7 @@ export async function unlockKey(key: StoredKey, passphrase: string): Promise<Unl
     throw new Error('암호 문구가 맞지 않습니다.');
   }
   try {
-    if (await subtleEd25519()) return { kind: 'webcrypto', key: await crypto.subtle.importKey('pkcs8', pkcs8, { name: 'Ed25519' }, false, ['sign']) };
+    if (await subtleEd25519()) return { kind: 'webcrypto', key: await crypto.subtle.importKey('pkcs8', bufferSource(pkcs8), { name: 'Ed25519' }, false, ['sign']) };
     const seed = pkcs8ToSeed(pkcs8);
     if (hex((await noble.ed25519()).getPublicKey(seed)) !== key.publicKey.toLowerCase()) {
       seed.fill(0);
@@ -245,7 +245,7 @@ export async function unlockKey(key: StoredKey, passphrase: string): Promise<Unl
 }
 
 export async function sign(privateKey: UnlockedKey, message: Uint8Array): Promise<string> {
-  if (privateKey.kind === 'webcrypto') return hex(await crypto.subtle.sign({ name: 'Ed25519' }, privateKey.key, message));
+  if (privateKey.kind === 'webcrypto') return hex(await crypto.subtle.sign({ name: 'Ed25519' }, privateKey.key, bufferSource(message)));
   return hex((await noble.ed25519()).sign(message, privateKey.seed));
 }
 

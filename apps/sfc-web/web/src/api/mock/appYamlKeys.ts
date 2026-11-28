@@ -34,6 +34,12 @@ export function appYamlOldKeys(doc: Record<string, unknown>): string {
   if (clusterKey) return `x-sfc.${clusterKey}: 받지 않는 키입니다. 클러스터 설정은 클러스터 설정 파일로 정합니다.`;
   for (const [n, v] of Object.entries((doc.networks ?? {}) as Record<string, Record<string, unknown> | null>))
     for (const k of ['driver', 'x-sfc']) if (v && k in v) return `networks.${n}.${k}: 받지 않는 키입니다. 망은 작업 공간의 공유 자원을 이름으로 씁니다.`;
+  // A3'(yaml-formats): CD는 x-sfc.cd {repository, branch, path, credential?, poll?, sync, drift, prune}. 옛 delivery는 INVALID_FIELD
+  if ('delivery' in xs) return 'x-sfc.delivery: 받지 않는 키입니다. 자동 배포는 x-sfc.cd {repository, branch, path, …}로 씁니다.';
+  if (xs.cd !== undefined) {
+    const msg = cdProblem(xs.cd);
+    if (msg) return msg;
+  }
   // A2(#910): x-sfc.ingress는 route 목록. 모든 route는 같은 서버(INGRESS_NODE_MIXED), id는 겹치지 않는다
   if (xs.ingress !== undefined) {
     const msg = ingressListProblem(xs.ingress, 'x-sfc.ingress', ['id', 'node', 'host', 'prefix', 'service', 'port', 'network', 'health', 'gateway', 'balance']);
@@ -67,4 +73,34 @@ export function ingressListProblem(ing: unknown, at: string, keys: string[]): st
     if (bal && typeof bal === 'object') for (const k of ['slow_start', 'slow_start_ms']) if (k in bal) return `${at}[${i}].balance.${k}: 받지 않는 키입니다. warmup(예: 30s)을 쓰세요.`;
   }
   return '';
+}
+
+const CD_KEYS = ['repository', 'branch', 'path', 'credential', 'poll', 'sync', 'drift', 'prune'];
+/** x-sfc.cd 검사(INVALID_CD). 문제 없으면 '' */
+export function cdProblem(cd: unknown): string {
+  if (!cd || typeof cd !== 'object' || Array.isArray(cd)) return 'x-sfc.cd: repository·branch·path를 가진 블록이어야 합니다.';
+  const c = cd as Record<string, unknown>;
+  const bad = Object.keys(c).find((k) => !CD_KEYS.includes(k));
+  if (bad) return `x-sfc.cd.${bad}: 받지 않는 키입니다(${CD_KEYS.join(', ')}만).`;
+  for (const k of ['repository', 'branch', 'path']) if (typeof c[k] !== 'string' || !c[k]) return `x-sfc.cd.${k}: 꼭 적어야 합니다.`;
+  if (c.credential !== undefined && typeof c.credential !== 'string') return 'x-sfc.cd.credential: 자격 증명 이름(문자열)이어야 합니다.';
+  if (c.poll !== undefined) {
+    const sec = typeof c.poll === 'string' ? goDurationSeconds(c.poll) : undefined;
+    if (sec === undefined) return 'x-sfc.cd.poll: 30s·1m·1h30m 꼴이어야 합니다(없으면 1m).';
+    if (sec < 1 || sec > 86400) return 'x-sfc.cd.poll: 1s 이상 24h 이하여야 합니다.';
+    if (Math.abs(sec - Math.round(sec)) > 1e-9) return 'x-sfc.cd.poll: 초 단위로 떨어져야 합니다(1.5s는 안 됨).';
+  }
+  if (c.sync !== undefined && c.sync !== 'manual' && c.sync !== 'auto') return 'x-sfc.cd.sync: manual 또는 auto입니다.';
+  if (c.drift !== undefined && c.drift !== 'report' && c.drift !== 'reconcile') return 'x-sfc.cd.drift: report 또는 reconcile입니다.';
+  if (c.prune !== undefined && typeof c.prune !== 'boolean') return 'x-sfc.cd.prune: true 또는 false입니다.';
+  return '';
+}
+
+/** Go time.ParseDuration 꼴(1h30m, 500ms, 1.5s)을 초로. 못 읽으면 undefined */
+export function goDurationSeconds(v: string): number | undefined {
+  if (!/^(\d+(\.\d+)?(ns|us|µs|ms|s|m|h))+$/.test(v)) return undefined;
+  const unit: Record<string, number> = { ns: 1e-9, us: 1e-6, µs: 1e-6, ms: 1e-3, s: 1, m: 60, h: 3600 };
+  let total = 0;
+  for (const m of v.matchAll(/(\d+(?:\.\d+)?)(ns|us|µs|ms|s|m|h)/g)) total += Number(m[1]) * unit[m[2]];
+  return total;
 }

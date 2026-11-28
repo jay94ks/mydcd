@@ -238,6 +238,14 @@ func (r *Runtime) collectNodeObservations(ctx context.Context, v cluster.View) (
 		if len(host.Unready.Steps) > 32 {
 			host.Unready.Steps = host.Unready.Steps[:32]
 		}
+		var only bool
+		host.Unready.Peers, only = waitedPeers(r.moduleError)
+		if len(host.Unready.Peers) > 32 {
+			host.Unready.Peers = host.Unready.Peers[:32]
+		}
+		if only {
+			host.Unready.Reason = "PEER_WAIT"
+		}
 	}
 	r.mu.RUnlock()
 	if r.tunnel != nil {

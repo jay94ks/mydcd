@@ -143,3 +143,17 @@ func TestOtherPIDNamespaceDoesNotMatch(t *testing.T) {
 		t.Fatalf("other PID namespace matched: %v", err)
 	}
 }
+
+func TestOpenPinsAProcessWithItsIDs(t *testing.T) {
+	p, err := Open(os.Getpid())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer p.Close()
+	if p.UID != uint32(os.Getuid()) || p.GID != uint32(os.Getgid()) || Alive(p.FD) != nil {
+		t.Fatalf("open = %+v", p)
+	}
+	if _, err := Open(0); err == nil {
+		t.Fatal("pid 0 accepted")
+	}
+}

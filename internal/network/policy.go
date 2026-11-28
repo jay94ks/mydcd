@@ -25,9 +25,16 @@ type Allocation struct {
 	Generation            uint64
 	Address               netip.Addr
 }
+
+// Book holds at most one allocation per endpoint and generation, and at
+// most two generations per endpoint: while a surged Task's new generation
+// runs next to its original (devel/design/zero-downtime-apply.md), both hold
+// an address under the same endpoint. allocations is the newest generation of
+// each endpoint, previous an older one still held.
 type Book struct {
 	pools       map[string]Pool
 	allocations map[string]Allocation
+	previous    map[string]Allocation
 	floors      map[string]uint64
 	capacity    int
 }
@@ -36,12 +43,13 @@ func NewBook(capacity int) (Book, error) {
 	if capacity <= 0 {
 		return Book{}, ErrPolicy
 	}
-	return Book{map[string]Pool{}, map[string]Allocation{}, map[string]uint64{}, capacity}, nil
+	return Book{map[string]Pool{}, map[string]Allocation{}, map[string]Allocation{}, map[string]uint64{}, capacity}, nil
 }
 func (b Book) copy() Book {
 	q := b
 	q.pools = map[string]Pool{}
 	q.allocations = map[string]Allocation{}
+	q.previous = map[string]Allocation{}
 	q.floors = map[string]uint64{}
 	for k, v := range b.pools {
 		q.pools[k] = v
@@ -49,14 +57,44 @@ func (b Book) copy() Book {
 	for k, v := range b.allocations {
 		q.allocations[k] = v
 	}
+	for k, v := range b.previous {
+		q.previous[k] = v
+	}
 	for k, v := range b.floors {
 		q.floors[k] = v
 	}
 	return q
 }
-func (b Book) Count() int                              { return len(b.allocations) }
+func (b Book) Count() int { return len(b.allocations) + len(b.previous) }
+
+// Allocation is the newest generation's allocation of endpoint.
 func (b Book) Allocation(id string) (Allocation, bool) { a, ok := b.allocations[id]; return a, ok }
-func (b Book) Pool(id string) (Pool, bool)             { p, ok := b.pools[id]; return p, ok }
+
+// AllocationOf is endpoint's allocation of exactly generation.
+func (b Book) AllocationOf(endpoint string, generation uint64) (Allocation, bool) {
+	if a, ok := b.allocations[endpoint]; ok && a.Generation == generation {
+		return a, true
+	}
+	if a, ok := b.previous[endpoint]; ok && a.Generation == generation {
+		return a, true
+	}
+	return Allocation{}, false
+}
+func (b Book) Pool(id string) (Pool, bool) { p, ok := b.pools[id]; return p, ok }
+
+// each calls f for every allocation, newest generations first.
+func (b Book) each(f func(Allocation) bool) {
+	for _, a := range b.allocations {
+		if !f(a) {
+			return
+		}
+	}
+	for _, a := range b.previous {
+		if !f(a) {
+			return
+		}
+	}
+}
 
 // AllocationAt reads the same authoritative Book without allocating/sorting a
 // complete checkpoint for each native DNS packet. Pool CIDRs never overlap.
@@ -64,12 +102,16 @@ func (b Book) AllocationAt(address netip.Addr) (Allocation, bool) {
 	if !address.IsValid() {
 		return Allocation{}, false
 	}
-	for _, a := range b.allocations {
-		if a.Address == address {
-			return a, true
-		}
+	var found Allocation
+	ok := false
+	b.each(func(a Allocation) bool {
+		found, ok = a, a.Address == address
+		return !ok
+	})
+	if !ok {
+		return Allocation{}, false
 	}
-	return Allocation{}, false
+	return found, true
 }
 func validPool(p Pool) bool {
 	return p.ID != "" && p.Network != "" && p.Owner != "" && p.Prefix.IsValid() && p.Prefix == p.Prefix.Masked() && !p.Prefix.Addr().Is4In6() && p.Prefix.Addr().Zone() == "" && p.Gateway.IsValid() && p.Gateway.Zone() == "" && p.Prefix.Contains(p.Gateway) && p.MTU >= 1280 && p.MTU <= 65535
@@ -108,10 +150,13 @@ func (b Book) RemovePool(id, owner string) (Book, error) {
 	if !ok || p.Owner != owner || !p.Draining {
 		return b, ErrPolicy
 	}
-	for _, a := range b.allocations {
-		if a.Pool == id {
-			return b, ErrPolicy
-		}
+	used := false
+	b.each(func(a Allocation) bool {
+		used = a.Pool == id
+		return !used
+	})
+	if used {
+		return b, ErrPolicy
 	}
 	q := b.copy()
 	delete(q.pools, id)
@@ -151,14 +196,17 @@ func (b Book) reserve(endpoint, owner, network, pool string, generation uint64, 
 	if endpoint == "" || owner == "" || network == "" || generation == 0 || want.Is4In6() {
 		return b, Allocation{}, ErrPolicy
 	}
-	if old, ok := b.allocations[endpoint]; ok {
+	if old, ok := b.AllocationOf(endpoint, generation); ok {
 		p := b.pools[old.Pool]
-		if old.Owner == owner && p.Network == network && old.Generation == generation && (pool == "" || old.Pool == pool) && (!want.IsValid() || want == old.Address) {
+		if old.Owner == owner && p.Network == network && (pool == "" || old.Pool == pool) && (!want.IsValid() || want == old.Address) {
 			return b.copy(), old, nil
 		}
 		return b, Allocation{}, ErrPolicy
 	}
-	if len(b.allocations) >= b.capacity || generation <= b.floors[endpoint] {
+	// A newer generation may join one still-held older one (surge); a third,
+	// or an older one, is refused.
+	_, held := b.allocations[endpoint]
+	if _, two := b.previous[endpoint]; two || b.Count() >= b.capacity || generation <= b.floors[endpoint] {
 		return b, Allocation{}, ErrPolicy
 	}
 	ids := []string{}
@@ -180,16 +228,13 @@ func (b Book) reserve(endpoint, owner, network, pool string, generation uint64, 
 			if !a.IsValid() || !p.Prefix.Contains(a) {
 				break
 			}
-			used := false
-			for _, old := range b.allocations {
-				if old.Address == a {
-					used = true
-					break
-				}
-			}
+			_, used := b.AllocationAt(a)
 			if usable(p, a) && !used {
 				q := b.copy()
 				r := Allocation{endpoint, owner, id, generation, a}
+				if held {
+					q.previous[endpoint] = q.allocations[endpoint]
+				}
 				q.allocations[endpoint] = r
 				q.floors[endpoint] = generation
 				return q, r, nil
@@ -205,16 +250,24 @@ func (b Book) reserve(endpoint, owner, network, pool string, generation uint64, 
 
 // Release requires the whole receipt; a stale completion cannot free a new owner.
 func (b Book) Release(a Allocation) (Book, error) {
-	old, ok := b.allocations[a.Endpoint]
-	if !ok || old != a {
+	q := b.copy()
+	switch {
+	case b.allocations[a.Endpoint] == a && a.Endpoint != "":
+		// The older generation, if still held, is the newest again.
+		delete(q.allocations, a.Endpoint)
+		if older, ok := q.previous[a.Endpoint]; ok {
+			q.allocations[a.Endpoint] = older
+			delete(q.previous, a.Endpoint)
+		}
+	case b.previous[a.Endpoint] == a && a.Endpoint != "":
+		delete(q.previous, a.Endpoint)
+	default:
 		return b, ErrPolicy
 	}
-	q := b.copy()
-	delete(q.allocations, a.Endpoint)
 	return q, nil
 }
 func (b Book) Resize(capacity int) (Book, error) {
-	if capacity <= 0 || capacity < len(b.allocations) {
+	if capacity <= 0 || capacity < b.Count() {
 		return b, ErrPolicy
 	}
 	q := b.copy()

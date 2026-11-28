@@ -143,7 +143,7 @@ func (p Policy) ManagedTaskDNS(s state.State, task deployment.ObjectRef) ([]AppD
 				continue
 			}
 			endpoint := task.Key + "/" + network.Alias + "/" + strconv.Itoa(family)
-			allocation, held := authority.AddressBook().Allocation(endpoint)
+			allocation, held := authority.AddressBook().AllocationOf(endpoint, task.Generation)
 			if !held || allocation.Generation != task.Generation || allocation.Address.String() != address {
 				return nil, ErrCatalog
 			}

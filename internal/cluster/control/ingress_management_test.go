@@ -86,11 +86,11 @@ func TestIngressReadRevocationCannotPublishPriorBroadSelection(t *testing.T) {
 	f.apply("admin", "create-tenant", 0, TenantID{ID: "other"}, state.Applied)
 	f.apply("admin", "set-membership", 0, access.Membership{Tenant: "other", User: "manager", Role: access.Manager, Enabled: true}, state.Applied)
 	for _, tenant := range []string{"tenant", "other"} {
-		f.apply("admin", "set-ingress-host-policy", 0, IngressHostPolicyChange{Tenant: tenant, Policy: ingress.HostPolicy{LocalHosts: []string{tenant + ".internal.example"}}}, state.Applied)
+		f.apply("admin", "ingress-block", 0, IngressBlockChange{Block: ingress.Block{ID: tenant + "-source", Scope: "tenant", Tenant: tenant, Response: "503"}}, state.Applied)
 	}
-	query := IngressQuery{Part: "policies"}
+	query := IngressQuery{Part: "blocks"}
 	collected, err := f.p.IngressPage(f.s, f.sessions["manager"], 2, query)
-	if err != nil || len(collected.HostPolicies) != 2 {
+	if err != nil || len(collected.Blocks) != 2 {
 		t.Fatal("original broad selection", collected, err)
 	}
 	users, err := f.p.Catalog(f.s)
@@ -100,7 +100,7 @@ func TestIngressReadRevocationCannotPublishPriorBroadSelection(t *testing.T) {
 	membership, _ := users.Membership("tenant", "manager")
 	f.apply("admin", "set-membership", membership.Revision, access.Membership{Tenant: "tenant", User: "manager", Role: access.Manager, Enabled: false}, state.Applied)
 	current, err := f.p.IngressPage(f.s, f.sessions["manager"], 2, query)
-	if err != nil || len(current.HostPolicies) != 1 || current.HostPolicies[0].Tenant != "other" {
+	if err != nil || len(current.Blocks) != 1 || current.Blocks[0].Block.Tenant != "other" {
 		t.Fatal("remaining tenant read must still be authorized", current, err)
 	}
 	if collected.SameSelection(current) {
@@ -144,32 +144,31 @@ func TestIngressBlockFSMOriginalCASPermissionAndRestore(t *testing.T) {
 		t.Fatal("checkpoint lost block evidence", err)
 	}
 }
-func TestIngressHostPolicyIsSystemAdminOwned(t *testing.T) {
-	f, _ := imageBuildFixture(t)
-	q := IngressHostPolicyChange{Tenant: "tenant", Policy: ingress.HostPolicy{LocalHosts: []string{"*.internal.example"}}}
-	f.apply("manager", "set-ingress-host-policy", 0, q, state.Forbidden)
-	f.apply("admin", "set-ingress-host-policy", 0, q, state.Applied)
-	book, err := f.p.IngressManagement(f.s)
-	if err != nil || !reflect.DeepEqual(book.HostPolicy("tenant"), q.Policy) || !book.HostPolicy("unknown").ExternalAllowed || !reflect.DeepEqual(book.HostPolicy("unknown").LocalHosts, []string{"*"}) {
-		t.Fatal("host default/ownership", err)
-	}
-}
 
-func TestIngressHostPolicyRevocationPreservesStateAndDeniesNewEffects(t *testing.T) {
-	f, _ := imageBuildFixture(t)
-	d := deployment.IngressDeclaration{Listeners: []deployment.ListenerDeclaration{{Shared: "web"}}, Host: "shop.internal.example"}
+// Tenant hosts come from domain owners and approved hosts; "*" stays a
+// system administrator's route.
+func TestTenantHostPolicyFollowsDomainsAndApprovals(t *testing.T) {
+	f := newNodeStorageFixture(t)
+	f.apply("admin", "add-domain", 0, DomainChange{Name: "example.com"}, state.Applied)
+	f.apply("admin", "add-domain", 1, DomainChange{Name: "shop.example.com", Tenant: "tenant"}, state.Applied)
+	f.apply("admin", "add-domain", 2, DomainChange{Name: "192.0.2.7", Tenant: "tenant"}, state.Applied)
+	f.apply("admin", "approve-ingress-host", 3, HostDecision{"tenant", "www.example.com"}, state.Applied)
+	f.apply("admin", "deny-ingress-host", 4, HostDecision{"tenant", "cdn.example.com"}, state.Applied)
+	c, _ := f.p.Certificates(f.s)
+	users, _ := f.p.Catalog(f.s)
+	got := TenantHostPolicy(c, users, "tenant")
+	want := []string{"*.shop.example.com", "192.0.2.7", "shop.example.com", "www.example.com"}
+	if !got.ExternalAllowed || !reflect.DeepEqual(got.LocalHosts, want) || !reflect.DeepEqual(got.ExternalHosts, want) {
+		t.Fatal("tenant hosts", got)
+	}
+	if p := TenantHostPolicy(c, users, "missing"); len(p.LocalHosts) != 0 {
+		t.Fatal("unknown tenant hosts", p)
+	}
+	d := deployment.IngressDeclaration{Listeners: []deployment.ListenerDeclaration{{Shared: "web"}}, Host: "*"}
+	if err := f.p.admitIngressDeclaration(f.s, "tenant", "manager", d); err == nil {
+		t.Fatal("a tenant manager routed *")
+	}
 	if err := f.p.admitIngressDeclaration(f.s, "tenant", "admin", d); err != nil {
-		t.Fatal("a tenant without a host policy is unrestricted", err)
-	}
-	f.apply("admin", "set-ingress-host-policy", 0, IngressHostPolicyChange{Tenant: "tenant", Policy: ingress.HostPolicy{LocalHosts: []string{"*.internal.example"}}}, state.Applied)
-	if err := f.p.admitIngressDeclaration(f.s, "tenant", "admin", d); err != nil {
-		t.Fatal("explicit host grant rejected", err)
-	}
-	f.apply("admin", "set-ingress-host-policy", 1, IngressHostPolicyChange{Tenant: "tenant"}, state.Applied)
-	if err := f.p.admitIngressDeclaration(f.s, "tenant", "admin", d); err == nil {
-		t.Fatal("revoked grant admitted new effect")
-	}
-	if _, err := f.p.ProjectResources(f.s); err != nil {
-		t.Fatal("revocation invalidated management state", err)
+		t.Fatal("a system administrator's * route", err)
 	}
 }

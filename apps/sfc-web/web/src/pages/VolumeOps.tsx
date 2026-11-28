@@ -106,12 +106,12 @@ export function BackupCard({ tenant, v, q, canDeploy, isAdmin, onChanged }: { te
                 </td>
                 <td style={{ textAlign: 'right' }}>
                   {b.phase === 'Reserved' && (
-                    <button className="btn sm" disabled={!canDeploy} onClick={() => setCancel(b)}>
+                    <button type="button" className="btn sm" disabled={!canDeploy} onClick={() => setCancel(b)}>
                       취소
                     </button>
                   )}
                   {b.phase === 'Ready' && (
-                    <button className="btn sm danger" disabled={!canDeploy} onClick={() => setDel(b)}>
+                    <button type="button" className="btn sm danger" disabled={!canDeploy} onClick={() => setDel(b)}>
                       지우기
                     </button>
                   )}
@@ -138,13 +138,13 @@ export function BackupCard({ tenant, v, q, canDeploy, isAdmin, onChanged }: { te
           {isAdmin && lq.data && (
             <>
               {' '}
-              <button className="btn sm" onClick={() => setLimitEdit(true)}>
+              <button type="button" className="btn sm" onClick={() => setLimitEdit(true)}>
                 한도 바꾸기…
               </button>
             </>
           )}
         </span>
-        <button className="btn primary" disabled={!!reason || m.busy} title={reason} onClick={start}>
+        <button type="button" className="btn primary" disabled={!!reason || m.busy} title={reason} onClick={start}>
           지금 백업
         </button>
       </div>
@@ -210,7 +210,7 @@ export function RestoreCard({ tenant, v, q, canDeploy, taken, onChanged }: { ten
         <input className="mono" aria-label="새 데이터 저장소 이름" value={name} onChange={(e) => setName(e.target.value.trim())} />
       </Field>
       <div className="row" style={{ justifyContent: 'flex-end' }}>
-        <button className="btn primary" disabled={!b || !!nameErr || !canDeploy} title={canDeploy ? undefined : '작업 공간 관리자 권한 필요'} onClick={() => setPlan(b)}>
+        <button type="button" className="btn primary" disabled={!b || !!nameErr || !canDeploy} title={canDeploy ? undefined : '작업 공간 관리자 권한 필요'} onClick={() => setPlan(b)}>
           복원 계획
         </button>
       </div>
@@ -226,7 +226,7 @@ export function RestoreCard({ tenant, v, q, canDeploy, taken, onChanged }: { ten
                 <td>{phaseBadge(RESTORE, r.phase)}</td>
                 <td style={{ textAlign: 'right' }}>
                   {r.phase === 'Reserved' && (
-                    <button className="btn sm" disabled={!canDeploy} onClick={() => setCancel(r)}>
+                    <button type="button" className="btn sm" disabled={!canDeploy} onClick={() => setCancel(r)}>
                       취소
                     </button>
                   )}
@@ -265,15 +265,15 @@ function RestorePlanDialog({ tenant, v, b, target, onClose, onDone }: { tenant: 
       onClose={onClose}
       footer={
         m.op ? (
-          <button className="btn primary" onClick={onClose}>
+          <button type="button" className="btn primary" onClick={onClose}>
             닫기
           </button>
         ) : (
           <>
-            <button className="btn" onClick={onClose}>
+            <button type="button" className="btn" onClick={onClose}>
               취소
             </button>
-            <button className="btn primary" disabled={m.busy} onClick={() => void m.run(`${volumePath(tenant, v.name)}/restore`, body).then((o) => o?.state === 'applied' && onDone())}>
+            <button type="button" className="btn primary" disabled={m.busy} onClick={() => void m.run(`${volumePath(tenant, v.name)}/restore`, body).then((o) => o?.state === 'applied' && onDone())}>
               복원 시작
             </button>
           </>
@@ -316,15 +316,15 @@ export function CapacityDialog({ tenant, v, onClose, onDone }: { tenant: string;
       onClose={onClose}
       footer={
         m.op ? (
-          <button className="btn primary" onClick={onClose}>
+          <button type="button" className="btn primary" onClick={onClose}>
             닫기
           </button>
         ) : (
           <>
-            <button className="btn" onClick={onClose}>
+            <button type="button" className="btn" onClick={onClose}>
               취소
             </button>
-            <button className="btn primary" disabled={(!!bad && sent === undefined) || m.busy} onClick={go}>
+            <button type="button" className="btn primary" disabled={(!!bad && sent === undefined) || m.busy} onClick={go}>
               늘리기
             </button>
           </>
@@ -384,15 +384,15 @@ function OpConfirm({ title, action, danger, path, body, method = 'POST', confirm
       onClose={onClose}
       footer={
         m.op ? (
-          <button className="btn primary" onClick={onClose}>
+          <button type="button" className="btn primary" onClick={onClose}>
             닫기
           </button>
         ) : (
           <>
-            <button className="btn" onClick={onClose}>
+            <button type="button" className="btn" onClick={onClose}>
               취소
             </button>
-            <button className={danger ? 'btn danger solid' : 'btn primary'} disabled={m.busy || (!!confirmName && typed !== confirmName)} onClick={() => void m.run(path, body, method).then((o) => o?.state === 'applied' && onDone())}>
+            <button type="button" className={danger ? 'btn danger solid' : 'btn primary'} disabled={m.busy || (!!confirmName && typed !== confirmName)} onClick={() => void m.run(path, body, method).then((o) => o?.state === 'applied' && onDone())}>
               {action}
             </button>
           </>
@@ -450,24 +450,24 @@ function BackupLimitDialog({ tenant, node, rows, onClose, onDone }: { tenant: st
       onClose={onClose}
       footer={
         m.op?.state === 'applied' ? (
-          <button className="btn primary" onClick={onClose}>
+          <button type="button" className="btn primary" onClick={onClose}>
             닫기
           </button>
         ) : review ? (
           <>
-            <button className="btn" disabled={m.busy} onClick={() => setReview(false)}>
+            <button type="button" className="btn" disabled={m.busy} onClick={() => setReview(false)}>
               취소
             </button>
-            <button className="btn primary" disabled={m.busy} onClick={() => void m.run(backupLimitPath(tenant, node), body, 'PUT').then((o) => o?.state === 'applied' && onDone())}>
+            <button type="button" className="btn primary" disabled={m.busy} onClick={() => void m.run(backupLimitPath(tenant, node), body, 'PUT').then((o) => o?.state === 'applied' && onDone())}>
               적용
             </button>
           </>
         ) : (
           <>
-            <button className="btn" onClick={onClose}>
+            <button type="button" className="btn" onClick={onClose}>
               취소
             </button>
-            <button className="btn primary" disabled={!!bad || hidden} onClick={toReview}>
+            <button type="button" className="btn primary" disabled={!!bad || hidden} onClick={toReview}>
               변경 검토
             </button>
           </>

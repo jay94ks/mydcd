@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from 'vitest';
-import { eulReul, eunNeun, iGa } from './josa';
+import { eulReul, eunNeun, iGa, euro } from './josa';
 
 describe('eulReul', () => {
   it('picks by the final sound', () => {
@@ -26,5 +26,13 @@ describe('iGa', () => {
     expect(iGa('php-shop · web')).toBe('이');
     expect(iGa('worker')).toBe('가');
     expect(iGa('보관된 앱')).toBe('이');
+  });
+  it('으로/로와 숫자 뒤 을/를', () => {
+    expect(euro('9')).toBe('로');
+    expect(euro('3')).toBe('으로');
+    expect(euro('7')).toBe('로');
+    expect(euro('서울')).toBe('로');
+    expect(euro('작업')).toBe('으로');
+    expect(eulReul('9')).toBe('를');
   });
 });

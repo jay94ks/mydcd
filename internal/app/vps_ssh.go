@@ -213,7 +213,7 @@ WantedBy=multi-user.target
 `
 
 // vpsSSHJoin writes the invitation and node.yaml, joins and starts sfcd.
-func vpsSSHJoin(ctx context.Context, sh vpsShell, server control.VPSServer, inv *membership.Invitation) error {
+func vpsSSHJoin(ctx context.Context, sh vpsShell, name string, inv *membership.Invitation) error {
 	raw, err := inv.Encode()
 	if err != nil {
 		return err
@@ -222,7 +222,7 @@ func vpsSSHJoin(ctx context.Context, sh vpsShell, server control.VPSServer, inv 
 	if err != nil {
 		return err
 	}
-	for path, body := range map[string]string{"/etc/sfc/invitation.json": string(raw), "/etc/sfc/node.yaml": vpsNodeYAML(server.Name, inv.Target.Endpoint), "/etc/systemd/system/sfcd.service": vpsServiceUnit} {
+	for path, body := range map[string]string{"/etc/sfc/invitation.json": string(raw), "/etc/sfc/node.yaml": vpsNodeYAML(name, inv.Target.Endpoint), "/etc/systemd/system/sfcd.service": vpsServiceUnit} {
 		if _, err := sh.Run(ctx, "set -e; umask 022; cat > "+path, strings.NewReader(body)); err != nil {
 			return fmt.Errorf("write %s: %w", path, err)
 		}
@@ -253,9 +253,8 @@ func openOwnBinary() (*os.File, error) {
 
 // vpsSSHStep does the next SSH step for server: install and enroll, or,
 // once the invitation is signed, join and start.
-func (r *Runtime) vpsSSHStep(ctx context.Context, v cluster.View, catalog control.VPSCatalog, server control.VPSServer, entered bool, hostKeys map[string][]byte) error {
-	account, ok := catalog.Account(server.Account)
-	if !ok || server.Build == nil {
+func (r *Runtime) vpsSSHStep(ctx context.Context, v cluster.View, account control.VPSAccount, server vpsTarget, entered bool, hostKeys map[string][]byte) error {
+	if account.Name != server.Account || server.Build == nil {
 		return fmt.Errorf("no account or build")
 	}
 	cred, err := r.vpsCredential(account)
@@ -277,7 +276,7 @@ func (r *Runtime) vpsSSHStep(ctx context.Context, v cluster.View, catalog contro
 	defer sh.Close()
 	hostKeys[pin] = seen
 	if entered {
-		return vpsSSHJoin(ctx, sh, server, server.Invitation)
+		return vpsSSHJoin(ctx, sh, server.Name, server.Invitation)
 	}
 	own, err := selfBuild()
 	if err != nil || own != *server.Build {
@@ -298,5 +297,5 @@ func (r *Runtime) vpsSSHStep(ctx context.Context, v cluster.View, catalog contro
 	}
 	// The leader itself reached the key over SSH at the server's address.
 	return r.memberReport(ctx, v, control.MemberReport{Action: "vps-enroll", Node: server.Name, Expected: members.Revision, Source: server.PublicIP,
-		Peer: config.Peer{ID: server.Name, Key: public, Endpoint: server.Endpoint()}})
+		Peer: config.Peer{ID: server.Name, Key: public, Endpoint: server.Endpoint}})
 }

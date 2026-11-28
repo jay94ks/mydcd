@@ -25,6 +25,7 @@ func TestBookActionsKeepCommandKeys(t *testing.T) {
 		"set-volume-remote": VolumeSharesKey,
 		// Books added after the move (no old switch row).
 		"set-cluster-firewall": ClusterFirewallKey,
+		AttachOwnedVPSAction:   OwnedVPSKey, DetachOwnedVPSAction: OwnedVPSKey, SetOwnedVPSAction: OwnedVPSKey,
 	}
 	for action, key := range want {
 		if got := CommandKey(action); got != key {

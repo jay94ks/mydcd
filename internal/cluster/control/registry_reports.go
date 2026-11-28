@@ -6,6 +6,8 @@ import (
 	"crypto/ed25519"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"slices"
 
 	"github.com/jay94ks/seafield/internal/access"
@@ -110,6 +112,8 @@ type RegistryWork struct {
 	MayStart                   bool
 	Index, Epoch, RootRevision uint64
 	Native                     *volumes.NativeReady `json:",omitempty"`
+	// Blocked names why MayStart is false, for the owner's log only.
+	Blocked string `json:",omitempty"`
 }
 
 // Work carries verified references, not several copies of potentially large
@@ -187,9 +191,16 @@ func (p Policy) RegistryWork(s state.State, caller [32]byte, q RegistryWorkReque
 		return RegistryWork{}, err
 	}
 	work := RegistryWork{Entry: registryWorkEntry(entry), Index: s.Index(), Epoch: s.ModuleEpoch(), RootRevision: s.Object(RegistriesKey).Revision}
-	work.MayStart = ownerErr == nil && owner == caller && p.registryStartAllowed(s, c, entry) == nil
-	if entry.Active != nil {
-		work.MayStart = work.MayStart && !entry.Active.Draining && entry.Active.SpecRevision == entry.Revision && entry.Active.Spec == entry.Spec
+	startErr := p.registryStartAllowed(s, c, entry)
+	work.MayStart = ownerErr == nil && owner == caller && startErr == nil
+	switch {
+	case ownerErr != nil || owner != caller:
+		work.Blocked = "not the registry node's current owner"
+	case startErr != nil:
+		work.Blocked = "start not allowed: " + startErr.Error()
+	}
+	if entry.Active != nil && work.MayStart && (entry.Active.Draining || entry.Active.SpecRevision != entry.Revision || entry.Active.Spec != entry.Spec) {
+		work.MayStart, work.Blocked = false, "active run is draining or its definition changed"
 	}
 	if work.MayStart {
 		v, e := p.Volumes(s)
@@ -198,10 +209,30 @@ func (p Policy) RegistryWork(s state.State, caller [32]byte, q RegistryWorkReque
 		}
 		row, e := p.registryVolume(v, entry.Spec)
 		volumeOwner, _ := row.State.Owner()
-		if e != nil || volumeOwner.Key != owner || p.canUseFixedVolume(s, c, entry.Origin.Session.User, row) != nil {
-			work.MayStart = false
-		} else if entry.Active != nil {
-			work.MayStart = row.State.CheckActivation(entry.Active.Consumer) == nil
+		switch {
+		case e != nil:
+			work.MayStart, work.Blocked = false, "fixed volume: "+e.Error()
+		case volumeOwner.Key != owner:
+			work.MayStart, work.Blocked = false, "fixed volume is owned by another node key"
+		default:
+			if e = p.canUseFixedVolume(s, c, entry.Origin.Session.User, row); e != nil {
+				work.MayStart, work.Blocked = false, "fixed volume not usable by the registry's creator: "+e.Error()
+			} else if entry.Active != nil {
+				if e = row.State.CheckActivation(entry.Active.Consumer); e != nil {
+					work.MayStart, work.Blocked = false, "fixed volume activation: "+e.Error()
+				}
+			}
+		}
+		if work.MayStart && entry.Active == nil {
+			// The same quota reserve checks, so a refusal has a reason.
+			user := entry.Origin.Session.User
+			if e = p.registryReserveQuota(s, entry, owner); e != nil {
+				work.MayStart, work.Blocked = false, e.Error()
+			} else if c.Authorize(user, entry.Spec.Tenant, access.ManageRegistry, entry.Spec.Node) != nil || c.Authorize(user, entry.Spec.Tenant, access.ManageVolumes, entry.Spec.Node) != nil {
+				work.MayStart, work.Blocked = false, "the registry's creator "+user+" no longer manages registries and volumes on "+entry.Spec.Node
+			} else if _, _, e = row.State.Acquire(c, user, row.State.Revision(), registryConsumer(p.Cluster, entry.Spec.Tenant, entry.Spec.ID), entry.Generation+1, true); e != nil {
+				work.MayStart, work.Blocked = false, "fixed volume cannot take the registry as its writer: "+e.Error()
+			}
 		}
 		if work.MayStart {
 			ready := row.Native
@@ -209,6 +240,34 @@ func (p Policy) RegistryWork(s state.State, caller [32]byte, q RegistryWorkReque
 		}
 	}
 	return work, nil
+}
+
+// registryReserveQuota is reserve's quota check: the node's cluster and
+// tenant limits must still hold the registry's budget and request count.
+func (p Policy) registryReserveQuota(s state.State, entry RegistryEntry, owner [32]byte) error {
+	projected, err := p.ProjectResources(s)
+	if err != nil {
+		return ErrCatalog
+	}
+	for _, scope := range []string{"", entry.Spec.Tenant} {
+		name := "workspace " + scope
+		if scope == "" {
+			name = "cluster"
+		}
+		limit, ok := projected.Resources.Quotas.Limit(scope, entry.Spec.Node)
+		used, err := projected.Resources.Quotas.Usage(scope, entry.Spec.Node)
+		switch {
+		case !ok || err != nil:
+			return fmt.Errorf("%s quota on %s: none", name, entry.Spec.Node)
+		case limit.Owner != owner:
+			return fmt.Errorf("%s quota on %s: set for another node key", name, entry.Spec.Node)
+		case used.CPU > limit.Capacity.CPU || used.Memory > limit.Capacity.Memory || entry.Spec.Budget.CPU > limit.Capacity.CPU-used.CPU || entry.Spec.Budget.Memory > limit.Capacity.Memory-used.Memory:
+			return fmt.Errorf("%s quota on %s: needs cpu %d memory %d, free cpu %d memory %d", name, entry.Spec.Node, entry.Spec.Budget.CPU, entry.Spec.Budget.Memory, limit.Capacity.CPU-used.CPU, limit.Capacity.Memory-used.Memory)
+		case entry.Spec.MaxRequests > limit.MaxConsumers:
+			return fmt.Errorf("%s quota on %s: max_requests %d over the limit's %d consumers", name, entry.Spec.Node, entry.Spec.MaxRequests, limit.MaxConsumers)
+		}
+	}
+	return nil
 }
 
 func (p Policy) reduceRegistryReport(s state.State, cmd state.Command) (map[string][]byte, state.Code) {
@@ -252,16 +311,10 @@ func (p Policy) reduceRegistryReport(s state.State, cmd state.Command) (map[stri
 		if p.canUseFixedVolume(s, users, entry.Origin.Session.User, row) != nil {
 			return nil, state.Forbidden
 		}
-		projected, e := p.ProjectResources(s)
-		if e != nil {
+		if e = p.registryReserveQuota(s, entry, owner); errors.Is(e, ErrCatalog) {
 			return nil, state.Invalid
-		}
-		for _, scope := range []string{"", entry.Spec.Tenant} {
-			limit, ok := projected.Resources.Quotas.Limit(scope, entry.Spec.Node)
-			used, e := projected.Resources.Quotas.Usage(scope, entry.Spec.Node)
-			if !ok || e != nil || limit.Owner != owner || used.CPU > limit.Capacity.CPU || used.Memory > limit.Capacity.Memory || entry.Spec.Budget.CPU > limit.Capacity.CPU-used.CPU || entry.Spec.Budget.Memory > limit.Capacity.Memory-used.Memory || entry.Spec.MaxRequests > limit.MaxConsumers {
-				return nil, state.ConditionFailed
-			}
+		} else if e != nil {
+			return nil, state.ConditionFailed
 		}
 		var consumer volumes.Consumer
 		row.State, consumer, e = row.State.Acquire(users, entry.Origin.Session.User, row.State.Revision(), registryConsumer(p.Cluster, r.Tenant, r.ID), r.Generation, true)

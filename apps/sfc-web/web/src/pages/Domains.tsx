@@ -239,15 +239,15 @@ function DesktopDomains() {
         actions={
           <>
             {admin && <Badge tone="un">클러스터 전체 · 시스템 관리자</Badge>}
-            <button className="btn" onClick={refreshAll}>
+            <button type="button" className="btn" onClick={refreshAll}>
               목록 새로 받기
             </button>
             {admin && (
               <>
-                <button className="btn" onClick={() => setDlg({ kind: 'connect' })}>
+                <button type="button" className="btn" onClick={() => setDlg({ kind: 'connect' })}>
                   DNS 공급자 연결
                 </button>
-                <button className="btn primary" disabled={!!pending} title={pending} onClick={() => setDlg({ kind: 'register' })}>
+                <button type="button" className="btn primary" disabled={!!pending} title={pending} onClick={() => setDlg({ kind: 'register' })}>
                   ＋ 도메인 등록
                 </button>
               </>
@@ -269,7 +269,7 @@ function DesktopDomains() {
           <Load q={pq}>
             {(ps) =>
               ps.length === 0 ? (
-                <Empty title="연결한 공급자가 없습니다" action={<button className="btn primary" onClick={() => setDlg({ kind: 'connect' })}>＋ DNS 공급자 연결</button>}>
+                <Empty title="연결한 공급자가 없습니다" action={<button type="button" className="btn primary" onClick={() => setDlg({ kind: 'connect' })}>＋ DNS 공급자 연결</button>}>
                   공급자 API 토큰 하나가 연결 하나입니다.
                 </Empty>
               ) : (
@@ -305,11 +305,11 @@ function DesktopDomains() {
                           <td>
                             <span className="row" style={{ gap: 6 }}>
                               {p.lastCheck && !p.lastCheckOk ? (
-                                <button className="btn primary sm" onClick={() => setDlg({ kind: 'token', provider: p })}>
+                                <button type="button" className="btn primary sm" onClick={() => setDlg({ kind: 'token', provider: p })}>
                                   토큰 바꾸기
                                 </button>
                               ) : (
-                                <button className="btn sm" onClick={() => void test(p)}>
+                                <button type="button" className="btn sm" onClick={() => void test(p)}>
                                   시험
                                 </button>
                               )}
@@ -346,7 +346,7 @@ function DesktopDomains() {
         <Load q={dq}>
           {(ds) =>
             ds.length === 0 ? (
-              <Empty title={admin ? '등록한 도메인이 없습니다' : '내 작업 공간에 배정된 도메인이 없습니다'} action={admin && !pending ? <button className="btn primary" onClick={() => setDlg({ kind: 'register' })}>＋ 도메인 등록</button> : undefined}>
+              <Empty title={admin ? '등록한 도메인이 없습니다' : '내 작업 공간에 배정된 도메인이 없습니다'} action={admin && !pending ? <button type="button" className="btn primary" onClick={() => setDlg({ kind: 'register' })}>＋ 도메인 등록</button> : undefined}>
                 {admin ? '도메인을 등록하면 그 아래 이름에 인증서를 링크할 수 있습니다. DNS 공급자는 나중에 붙여도 됩니다.' : '시스템 관리자가 도메인의 이름 범위를 작업 공간에 배정하면 여기에 보입니다.'}
               </Empty>
             ) : rows.length === 0 ? (
@@ -605,28 +605,28 @@ function ConnectDialog({ vendors, existing, domains, legacy, onClose, onDone }: 
       onClose={onClose}
       footer={
         <>
-          <button className="btn" disabled={step === 1 || busy || (step === 3 && !!saved)} onClick={() => setStep((s) => s - 1)}>
+          <button type="button" className="btn" disabled={step === 1 || busy || (step === 3 && !!saved)} onClick={() => setStep((s) => s - 1)}>
             이전
           </button>
           <span className="row">
             {step === 1 && (
-              <button className="btn primary" disabled={!v?.ready} onClick={() => setStep(2)}>
+              <button type="button" className="btn primary" disabled={!v?.ready} onClick={() => setStep(2)}>
                 다음
               </button>
             )}
             {step === 2 && (
-              <button className="btn primary" disabled={!!nameBad || !token || busy} onClick={() => void save()}>
+              <button type="button" className="btn primary" disabled={!!nameBad || !token || busy} onClick={() => void save()}>
                 {busy ? '시험하는 중…' : '시험하고 저장'}
               </button>
             )}
             {step === 3 && (
               <>
                 {saved && !existing && (
-                  <button className="btn" disabled={busy} onClick={onClose}>
+                  <button type="button" className="btn" disabled={busy} onClick={onClose}>
                     나중에 고르기
                   </button>
                 )}
-                <button className="btn primary" disabled={!saved || pick.size === 0 || busy} onClick={() => void importAll()}>
+                <button type="button" className="btn primary" disabled={!saved || pick.size === 0 || busy} onClick={() => void importAll()}>
                   {busy ? '붙이는 중…' : `${existing ? '' : '연결 저장 · '}고른 도메인 ${pick.size}개${existing ? ' 붙이기' : ''}${!legacy && newCount ? ` (새로 등록 ${newCount})` : ''}`}
                 </button>
               </>
@@ -816,10 +816,10 @@ function TokenDialog({ provider, onClose, onDone }: { provider: DnsProvider; onC
       onClose={onClose}
       footer={
         <>
-          <button className="btn" onClick={onClose}>
+          <button type="button" className="btn" onClick={onClose}>
             취소
           </button>
-          <button className="btn primary" disabled={!token || busy} onClick={() => void save()}>
+          <button type="button" className="btn primary" disabled={!token || busy} onClick={() => void save()}>
             {busy ? '시험하는 중…' : '시험하고 저장'}
           </button>
         </>
@@ -856,10 +856,10 @@ function RenameDialog({ provider, onClose, onDone }: { provider: DnsProvider; on
       onClose={onClose}
       footer={
         <>
-          <button className="btn" onClick={onClose}>
+          <button type="button" className="btn" onClick={onClose}>
             취소
           </button>
-          <button className="btn primary" disabled={!!bad || name.trim() === provider.name || busy} onClick={() => void save()}>
+          <button type="button" className="btn primary" disabled={!!bad || name.trim() === provider.name || busy} onClick={() => void save()}>
             저장
           </button>
         </>
@@ -942,10 +942,10 @@ function RegisterDomainDialog({ onClose, onDone }: { onClose: () => void; onDone
       onClose={onClose}
       footer={
         <>
-          <button className="btn" onClick={onClose}>
+          <button type="button" className="btn" onClick={onClose}>
             취소
           </button>
-          <button className="btn primary" disabled={!name || busy} onClick={() => void go()}>
+          <button type="button" className="btn primary" disabled={!name || busy} onClick={() => void go()}>
             {busy ? '등록하는 중…' : '등록'}
           </button>
         </>
@@ -1045,10 +1045,10 @@ function AttachProviderDialog({ domain, providers, onClose, onDone, onConnect }:
       onClose={onClose}
       footer={
         <>
-          <button className="btn" onClick={onClose}>
+          <button type="button" className="btn" onClick={onClose}>
             취소
           </button>
-          <button className="btn primary" disabled={!pick || pick === domain.provider?.id || busy} onClick={() => void go()}>
+          <button type="button" className="btn primary" disabled={!pick || pick === domain.provider?.id || busy} onClick={() => void go()}>
             {busy ? '붙이는 중…' : '붙이기'}
           </button>
         </>
@@ -1059,7 +1059,7 @@ function AttachProviderDialog({ domain, providers, onClose, onDone, onConnect }:
         <Empty
           title="연결한 공급자가 없습니다"
           action={
-            <button className="btn primary" onClick={onConnect}>
+            <button type="button" className="btn primary" onClick={onConnect}>
               DNS 공급자 연결
             </button>
           }
@@ -1105,10 +1105,10 @@ function DetachProviderDialog({ domain, onClose, onDone }: { domain: DnsDomain; 
       onClose={onClose}
       footer={
         <>
-          <button className="btn" onClick={onClose}>
+          <button type="button" className="btn" onClick={onClose}>
             취소
           </button>
-          <button className="btn danger" disabled={busy} onClick={() => void go()}>
+          <button type="button" className="btn danger" disabled={busy} onClick={() => void go()}>
             {busy ? '떼는 중…' : '떼기'}
           </button>
         </>

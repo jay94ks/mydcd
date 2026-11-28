@@ -402,18 +402,12 @@ func (w *world) syncGatewayRows(node string, c ingress.GatewayConfiguration) {
 	w.ing.gateways[node] = rows
 }
 
-// realIngressHistory: ingress-block / unblock / extend and host policy
-// changes in the same public history (Detail = the block after, Previous
-// = before; host policy Detail = the payload).
-func (w *world) realIngressHistory(op UserOperation, before []control.IngressBlockRecord, beforePolicy ingress.HostPolicy) {
+// realIngressHistory: ingress-block / unblock / extend in the same public
+// history (Detail = the block after, Previous = before).
+func (w *world) realIngressHistory(op UserOperation, before []control.IngressBlockRecord) {
 	book := &w.ireal
 	h := control.IngressHistoryRecord{Order: book.revision, Origin: op, Detail: slices.Clone(op.Change.Payload)}
-	if op.Change.Action == ActionSetIngressHostPolicy {
-		var q control.IngressHostPolicyChange
-		_ = json.Unmarshal(op.Change.Payload, &q)
-		h.Tenant = q.Tenant
-		h.Previous, _ = json.Marshal(beforePolicy)
-	} else {
+	{
 		for _, r := range book.blocks {
 			if r.Last.RequestID != op.RequestID {
 				continue

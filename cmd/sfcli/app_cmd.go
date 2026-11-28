@@ -260,6 +260,11 @@ setting: diff compares it with the routes the cluster has now.`,
 			if force {
 				fileArgs = append(fileArgs, "--force")
 			}
+			if name, withCD, err := appDeployTarget(file, ""); err == nil {
+				if _, err := g.cdNotice(c, s, name, withCD); err != nil {
+					return err
+				}
+			}
 			var d control.AppDiff
 			if err := g.composeJSON(ctx, c, s, &d, append([]string{"diff"}, fileArgs...)...); err != nil {
 				return err
@@ -282,7 +287,43 @@ setting: diff compares it with the routes the cluster has now.`,
 	}
 }
 
-const forceRouteUsage = "share a route's host and path with another app of the workspace (both serve it)"
+const forceRouteUsage = "share a route's host and path with another app of the workspace (both serve it); without a terminal, also turn CD off"
+
+// cdNotice says, before the changes, what deploying the file does to an app
+// that follows Git (app diff and app deploy).
+func (g *globals) cdNotice(c *cli.Context, s *session, app string, withCD bool) (bool, error) {
+	tenant, err := g.Tenant(s, true)
+	if err != nil {
+		return false, err
+	}
+	row, rowErr := cdAppRow(c, g, s, tenant, app)
+	if rowErr != nil || row.CD == nil {
+		return false, nil
+	}
+	if withCD {
+		fmt.Fprintf(c.Err, "App %s follows Git: this changes only its CD policy (x-sfc.cd). Services come from Git; the services in this file are not used.\n", app)
+	} else {
+		fmt.Fprintf(c.Err, "WARNING: CD off. This file has no x-sfc.cd, so deploying it turns CD off for %s and deploys this file instead of Git.\n", app)
+	}
+	return true, nil
+}
+
+// deployCDCheck: deploying an app that follows Git. A file with x-sfc.cd
+// changes only the CD policy (services keep coming from Git); one without it
+// turns CD off, which the person confirms (or gives --force without a
+// terminal). It reports whether CD is on and whether to turn it off.
+func (g *globals) deployCDCheck(c *cli.Context, s *session, app string, withCD, force bool) (cdOn, disable bool, err error) {
+	cdOn, err = g.cdNotice(c, s, app, withCD)
+	if err != nil || !cdOn || withCD {
+		return cdOn, false, err
+	}
+	if !force {
+		if err := g.Prompter(c).Confirm("Turn CD off and deploy this file?"); err != nil {
+			return true, false, fmt.Errorf("%w (without a terminal, pass --force to turn CD off)", err)
+		}
+	}
+	return true, true, nil
+}
 
 // appWait is --no-wait (follow.go) plus how long deploy and down wait.
 type appWait struct {
@@ -301,26 +342,34 @@ func (w *appWait) context(c *cli.Context) (context.Context, context.CancelFunc) 
 
 // appName reads the app name from FILE or a saved plan.
 func appName(file, plan string) (string, error) {
+	name, _, err := appDeployTarget(file, plan)
+	return name, err
+}
+
+// appDeployTarget reads the app name from FILE or a saved plan, and whether it
+// carries x-sfc.cd.
+func appDeployTarget(file, plan string) (string, bool, error) {
 	if plan != "" {
 		raw, err := composeDocument(plan)
 		if err != nil {
-			return "", err
+			return "", false, err
 		}
 		p, err := deployment.DecodeBlueprint(bytes.TrimSpace(raw))
 		if err != nil {
-			return "", fmt.Errorf("%s: %w", plan, err)
+			return "", false, fmt.Errorf("%s: %w", plan, err)
 		}
-		return p.Scope().App, nil
+		_, cd := p.DeliveryPolicy()
+		return p.Scope().App, cd, nil
 	}
 	raw, err := composeDocument(file)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	app, err := deployment.ParseApp(raw)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
-	return app.Name, nil
+	return app.Name, app.Sfc.Delivery != nil, nil
 }
 
 func appDeployCommand(g *globals) *cli.Command {
@@ -365,7 +414,11 @@ administrators) and does not wait.`,
 					return g.clusterAppRouteDeploy(c, s, id, app, routes)
 				}
 			}
-			name, err := appName(file, plan)
+			name, withCD, err := appDeployTarget(file, plan)
+			if err != nil {
+				return err
+			}
+			cdOn, disableCD, err := g.deployCDCheck(c, s, name, withCD, force)
 			if err != nil {
 				return err
 			}
@@ -382,6 +435,9 @@ administrators) and does not wait.`,
 			}
 			if force {
 				flow = append(flow, "--force")
+			}
+			if disableCD {
+				flow = append(flow, "--disable-cd")
 			}
 			for _, name := range slices.Sorted(maps.Keys(passwords.values)) {
 				flow = append(flow, "--group-password-fd", fmt.Sprintf("%s=%d", name, passwords.values[name]))
@@ -403,6 +459,10 @@ administrators) and does not wait.`,
 				// The flow's reply goes to a buffer; say which step the server refused.
 				_, detail := changeState(*reply.Result, false)
 				fmt.Fprintf(c.Err, "the server refused the %s step: %s\n", reply.Phase, detail)
+			}
+			if err == nil && cdOn && withCD {
+				fmt.Fprintf(c.Err, "Changed the CD policy of %s; 'sfcli cd show %s' shows it.\n", name, name)
+				return g.finishAppOp(c, s, cli.Op{ID: op, Kind: "app-deploy"}, nil)
 			}
 			if err == nil && reply.Status == "accepted" && !wait.noWait {
 				fmt.Fprintf(c.Err, "Deploying %s. Waiting until it is healthy (Ctrl-C stops waiting, not the deployment).\n", reply.App)

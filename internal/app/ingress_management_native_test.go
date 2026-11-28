@@ -314,9 +314,22 @@ func verifyManagedIngressManagement(t *testing.T, ctx context.Context, a, b *Run
 	}
 	dns := services.ManagedDNSDefinition{Schema: 1, Tenant: "tenant", Network: "shared-services", Policy: services.ManagedDNSPolicy{Enabled: true, Zone: "rq7.sfc.test.", TTL: 1, NegativeTTL: 1, Transports: []string{"udp", "tcp"}, Upstreams: []netip.AddrPort{}, MaxQueries: 8, MaxCacheEntries: 8, MaxResponseBytes: 4096, MaxConnections: 8, RequestTimeoutMS: 1000}}
 	change("rq7-dns", "configure-network-dns", 0, dns)
-	for _, grant := range []control.IngressHostPolicyChange{{Tenant: "tenant", Policy: ingress.HostPolicy{ExternalAllowed: true, LocalHosts: []string{"shop.example"}, ExternalHosts: []string{"shop.example"}}}, {Tenant: "second", Policy: ingress.HostPolicy{LocalHosts: []string{"grafana.internal", "metrics.example"}, ExternalHosts: []string{"metrics.example"}}}} {
-		call(true, nil, "ingress", "host-policy", writeJSON("rq7-hosts-"+grant.Tenant, grant), "--tenant", grant.Tenant, "--request-id", "rq7-hosts-"+grant.Tenant)
+	// Tenant route hosts open under the tenant's own domains
+	// (devel/design/tenant-domains.md); second gets its domains later.
+	giveDomain := func(name, tenant string) {
+		certificates, err := p.Certificates(read().State)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if d, ok := certificates.Domain(name); ok {
+			if d.Tenant != tenant {
+				change("rq7-assign-"+name, "assign-domain", certificates.Revision, control.DomainChange{Name: name, Tenant: tenant})
+			}
+			return
+		}
+		change("rq7-domain-"+name, "add-domain", certificates.Revision, control.DomainChange{Name: name, Tenant: tenant})
 	}
+	giveDomain("shop.example", "tenant")
 	rq7ExerciseIngressApps(t, ctx, a, b, root, cfg, user, peer, session, follower, provider, p, read, change, wait, call, writeJSON, put, image, primary, second, remote, shop, next, internal, leaf, nextLeaf, internalLeaf, run)
 }
 
@@ -351,16 +364,24 @@ func rq7ExerciseIngressApps(t *testing.T, ctx context.Context, a, b *Runtime, ro
 		}
 		files[item.name] = file
 	}
-	// Reject current external grant denial before accepting the real second app.
+	// A host under no registered domain is refused before the second
+	// tenant owns its domains.
 	denied, err := os.ReadFile(files["rq7-internal"])
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err = user.StreamAppPlan(ctx, peer, session, "second", control.AppPlanRequest{Document: denied}); err == nil {
-		t.Fatal("external app bypassed the default tenant grant")
+		t.Fatal("an app routed a host under no registered domain")
 	}
-	grant := control.IngressHostPolicyChange{Tenant: "second", Policy: ingress.HostPolicy{ExternalAllowed: true, LocalHosts: []string{"grafana.internal", "metrics.example"}, ExternalHosts: []string{"metrics.example"}}}
-	call(true, nil, "ingress", "host-policy", writeJSON("rq7-second-external", grant), "--tenant", "second", "--expected-revision", "1", "--request-id", "rq7-second-external")
+	for _, name := range []string{"metrics.example", "grafana.internal"} {
+		certificates, err := p.Certificates(read().State)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := certificates.Domain(name); !ok {
+			change("rq7-second-domain-"+name, "add-domain", certificates.Revision, control.DomainChange{Name: name, Tenant: "second"})
+		}
+	}
 	// Existing CLI down/wait handles original accepted apps even after a lost up
 	// reply. Register before the first extra app can create native resources.
 	retirementStarted := false
@@ -1269,7 +1290,6 @@ func rq7ExerciseUserAuthority(t *testing.T, ctx context.Context, root string, ad
 				t.Fatal("tenant manager wrote a cluster certificate")
 			}
 			if name == "rq7-second-manager" {
-				change("rq7-cross-tenant-grant", "set-ingress-host-policy", 2, control.IngressHostPolicyChange{Tenant: "second", Policy: ingress.HostPolicy{ExternalAllowed: true, ExternalHosts: []string{"metrics.example", "shop.example"}, LocalHosts: []string{"grafana.internal", "metrics.example", "shop.example"}}})
 				raw, err := os.ReadFile(filepath.Join(root, "rq7-internal.yaml"))
 				if err != nil {
 					t.Fatal(err)

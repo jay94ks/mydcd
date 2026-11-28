@@ -186,7 +186,7 @@ function DesktopNetworkChange() {
           <>
             {label && <Badge tone="pr">{label}</Badge>}
             <Refresh q={q} />
-            <button className="btn danger" disabled={!canDeploy || !reserved.length} title={!reserved.length ? (active ? '비우기를 시작한 뒤에는 취소할 수 없습니다' : '진행 중인 변경이 없습니다') : undefined} onClick={() => setDlg('cancel')}>
+            <button type="button" className="btn danger" disabled={!canDeploy || !reserved.length} title={!reserved.length ? (active ? '비우기를 시작한 뒤에는 취소할 수 없습니다' : '진행 중인 변경이 없습니다') : undefined} onClick={() => setDlg('cancel')}>
               변경 취소
             </button>
           </>
@@ -254,14 +254,14 @@ function DesktopNetworkChange() {
                   <div className="note">새 앱·논리 망 입장만 막히고, 이미 배포된 앱의 원 참조는 유지됩니다.</div>
                   {!active && tun && (
                     <div className="row" style={{ justifyContent: 'flex-end' }}>
-                      <button className="btn primary" disabled={!canDeploy || !changed.length || bad} onClick={() => setDlg('plan')}>
+                      <button type="button" className="btn primary" disabled={!canDeploy || !changed.length || bad} onClick={() => setDlg('plan')}>
                         변경 계획
                       </button>
                     </div>
                   )}
                   {reserved.length > 0 && (
                     <div className="row" style={{ justifyContent: 'flex-end' }}>
-                      <button className="btn primary" disabled={!canDeploy} onClick={() => setDlg('drain')}>
+                      <button type="button" className="btn primary" disabled={!canDeploy} onClick={() => setDlg('drain')}>
                         비우기 시작
                       </button>
                     </div>
@@ -298,11 +298,11 @@ function DesktopNetworkChange() {
                   <span className="small muted">모든 참여 서버가 사용 중지됨이 되어야 적용할 수 있습니다. 적용은 실제 통신 재개와 별도로 표시됩니다.</span>
                   <div className="row" style={{ justifyContent: 'flex-end', flexWrap: 'wrap' }}>
                     {draining.map((m) => (
-                      <button key={m.node} className="btn" disabled={!canDeploy} onClick={() => setFence(m.node)}>
+                      <button type="button" key={m.node} className="btn" disabled={!canDeploy} onClick={() => setFence(m.node)}>
                         {m.node} 사용 중지 확인
                       </button>
                     ))}
-                    <button className="btn primary" disabled={!canDeploy || notFenced.length > 0 || !tun} title={notFenced.length ? `${notFenced.map((m) => m.node).join(', ')}가 아직 사용 중지되지 않아 적용할 수 없습니다.` : undefined} onClick={() => setDlg('commit')}>
+                    <button type="button" className="btn primary" disabled={!canDeploy || notFenced.length > 0 || !tun} title={notFenced.length ? `${notFenced.map((m) => m.node).join(', ')}가 아직 사용 중지되지 않아 적용할 수 없습니다.` : undefined} onClick={() => setDlg('commit')}>
                       적용
                     </button>
                   </div>
@@ -315,7 +315,7 @@ function DesktopNetworkChange() {
                     <Field label="목표 참여 서버">
                       <input className="mono" value={want ?? d.members.map((m) => m.node).join(', ')} onChange={(e) => setWant(e.target.value)} style={{ minWidth: 300 }} />
                     </Field>
-                    <button className="btn" disabled={!canDeploy || notFenced.length > 0} title={notFenced.length ? '모든 참여 서버가 사용 중지되어야 재구성할 수 있습니다' : undefined} onClick={() => setDlg('reconf')}>
+                    <button type="button" className="btn" disabled={!canDeploy || notFenced.length > 0} title={notFenced.length ? '모든 참여 서버가 사용 중지되어야 재구성할 수 있습니다' : undefined} onClick={() => setDlg('reconf')}>
                       재구성 계획
                     </button>
                   </div>
@@ -374,15 +374,15 @@ function FenceDialog({ base, tenant, name, node, closure: c, reload, loading, on
       onClose={onClose}
       footer={
         m.op ? (
-          <button className="btn primary" onClick={onClose}>
+          <button type="button" className="btn primary" onClick={onClose}>
             닫기
           </button>
         ) : (
           <>
-            <button className="btn" onClick={onClose}>
+            <button type="button" className="btn" onClick={onClose}>
               {busy ? '닫기' : '취소'}
             </button>
-            <button className="btn primary" disabled={m.busy || busy || !!c?.unreachable} onClick={() => void m.run(`${base}/change/fence`, { node }).then((o) => o?.state === 'applied' && onDone())}>
+            <button type="button" className="btn primary" disabled={m.busy || busy || !!c?.unreachable} onClick={() => void m.run(`${base}/change/fence`, { node }).then((o) => o?.state === 'applied' && onDone())}>
               사용 중지 확인
             </button>
           </>
@@ -397,11 +397,11 @@ function FenceDialog({ base, tenant, name, node, closure: c, reload, loading, on
             <span className="small muted">
               {left === null ? `${node} 서버가 아직 옛 주소를 쓰는 컨테이너를 세지 않았습니다. 잠시 뒤 새로고침하세요.` : `${node}에 아직 옛 주소를 쓰는 컨테이너가 ${left}개 있습니다.`}
             </span>
-            <button className="btn sm" title="새로고침" aria-label="새로고침" disabled={loading} onClick={reload}>
+            <button type="button" className="btn sm" title="새로고침" aria-label="새로고침" disabled={loading} onClick={reload}>
               ↻
             </button>
           </div>
-          <button className="btn sm" style={{ alignSelf: 'flex-start' }} onClick={() => setUsers(true)}>
+          <button type="button" className="btn sm" style={{ alignSelf: 'flex-start' }} onClick={() => setUsers(true)}>
             어느 컨테이너인지 보기
           </button>
           <div className="note wa">이 컨테이너를 새 주소로 다시 시작하거나 멈춰야 사용 중지를 확인할 수 있습니다.</div>
@@ -428,15 +428,15 @@ function CommitDialog({ base, name, view, onClose, onDone }: { base: string; nam
       onClose={onClose}
       footer={
         m.op ? (
-          <button className="btn primary" onClick={onClose}>
+          <button type="button" className="btn primary" onClick={onClose}>
             닫기
           </button>
         ) : (
           <>
-            <button className="btn" onClick={onClose}>
+            <button type="button" className="btn" onClick={onClose}>
               취소
             </button>
-            <button className="btn primary" disabled={m.busy} onClick={() => void m.run(`${base}/change/commit`, { expected }).then((o) => o?.state === 'applied' && onDone())}>
+            <button type="button" className="btn primary" disabled={m.busy} onClick={() => void m.run(`${base}/change/commit`, { expected }).then((o) => o?.state === 'applied' && onDone())}>
               적용
             </button>
           </>
@@ -481,15 +481,15 @@ function ReconfigureDialog({ base, name, view, want, onClose, onDone }: { base: 
       onClose={onClose}
       footer={
         m.op ? (
-          <button className="btn primary" onClick={onClose}>
+          <button type="button" className="btn primary" onClick={onClose}>
             닫기
           </button>
         ) : (
           <>
-            <button className="btn" onClick={onClose}>
+            <button type="button" className="btn" onClick={onClose}>
               취소
             </button>
-            <button className={`btn ${empty ? 'danger solid' : 'primary'}`} disabled={m.busy || missing} onClick={() => void send().then((o) => o?.state === 'applied' && onDone())}>
+            <button type="button" className={`btn ${empty ? 'danger solid' : 'primary'}`} disabled={m.busy || missing} onClick={() => void send().then((o) => o?.state === 'applied' && onDone())}>
               계획 만들기
             </button>
           </>
@@ -627,25 +627,25 @@ export function DeleteNetworkDialog({ tenant, net, bridges = [], onClose, onDone
       onClose={onClose}
       footer={
         gone ? (
-          <button className="btn primary" onClick={onClose}>
+          <button type="button" className="btn primary" onClick={onClose}>
             닫기
           </button>
         ) : (
           <>
-            <button className="btn" onClick={onClose}>
+            <button type="button" className="btn" onClick={onClose}>
               {started || running ? '닫기' : '취소'}
             </button>
             {dnsOn && net.dns && (
-              <button className="btn" disabled={dnsOff.busy} onClick={turnOff}>
+              <button type="button" className="btn" disabled={dnsOff.busy} onClick={turnOff}>
                 도메인 이름 끄기
               </button>
             )}
             {attached && (
-              <button className="btn" onClick={() => navigate('/shared/networks/bridges')}>
+              <button type="button" className="btn" onClick={() => navigate('/shared/networks/bridges')}>
                 가상 브릿지 보기
               </button>
             )}
-            <button className="btn danger solid" disabled={confirm !== net.name || dnsOn || attached || running || !q.data} onClick={() => (setError(undefined), setRunning(true))}>
+            <button type="button" className="btn danger solid" disabled={confirm !== net.name || dnsOn || attached || running || !q.data} onClick={() => (setError(undefined), setRunning(true))}>
               {started ? '지우기 계속' : '지우기'}
             </button>
           </>
@@ -767,15 +767,15 @@ export function DnsReviewDialog({ tenant, net, draft, onClose, onDone }: { tenan
       onClose={onClose}
       footer={
         m.op ? (
-          <button className="btn primary" onClick={onClose}>
+          <button type="button" className="btn primary" onClick={onClose}>
             닫기
           </button>
         ) : (
           <>
-            <button className="btn" onClick={onClose} disabled={m.busy}>
+            <button type="button" className="btn" onClick={onClose} disabled={m.busy}>
               취소
             </button>
-            <button className="btn primary" disabled={m.busy} onClick={() => void m.run(`${networkPath(tenant, net.name)}/dns`, dnsBody(draft.d, draft.next)).then((o) => o?.state === 'applied' && onDone())}>
+            <button type="button" className="btn primary" disabled={m.busy} onClick={() => void m.run(`${networkPath(tenant, net.name)}/dns`, dnsBody(draft.d, draft.next)).then((o) => o?.state === 'applied' && onDone())}>
               적용
             </button>
           </>

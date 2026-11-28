@@ -33,6 +33,9 @@ func TestClusterAppRoutesAreAClusterSetting(t *testing.T) {
 	bad.Ingress.Routes = []deployment.IngressRouteDeclaration{{ID: "ui", Host: "sfc.example.com", Port: 9000}}
 	managedDNSChange(t, f, "bad-backend", "put-cluster-app-route", 0, bad, state.Invalid)
 	managedDNSChange(t, f, "remove-none", "remove-cluster-app-route", 0, ClusterAppRouteSelection{App: "web"}, state.ConditionFailed)
+	// Cluster app hosts sit under a registered cluster-level domain.
+	managedDNSChange(t, f, "no-domain", "put-cluster-app-route", 0, put, state.ConditionFailed)
+	managedDNSChange(t, f, "domain", "add-domain", 0, DomainChange{Name: "example.com"}, state.Applied)
 	managedDNSChange(t, f, "put", "put-cluster-app-route", 0, put, state.Applied)
 	if r, found := book().ClusterAppRoute("web"); !found || r.Revision != 1 || r.Ingress.Routes[0].Host != "sfc.example.com" {
 		t.Fatalf("put: %+v %v", r, found)

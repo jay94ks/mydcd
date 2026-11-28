@@ -7,6 +7,8 @@ import (
 	"flag"
 	"fmt"
 	"net/netip"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/jay94ks/seafield/internal/certstore"
@@ -30,6 +32,8 @@ list the tenant's own domains with --tenant.`,
 			domainListCommand(g),
 			domainChangeCommand(g, "add", "Register a domain"),
 			domainAssignCommand(g),
+			domainRequestsCommand(g),
+			domainCertificatesCommand(g),
 			domainChangeCommand(g, "remove", "Remove a domain; certificates under it lose their links"),
 			domainResponderCommand(g),
 		},
@@ -40,9 +44,12 @@ type domainRow struct {
 	Name    string `json:"name"`
 	Unicode string `json:"unicode,omitempty"`
 	Tenant  string `json:"tenant,omitempty"`
-	AddedBy string `json:"added_by"`
-	AddedAt string `json:"added_at"`
-	at      int64
+	// TenantDeleted: Tenant no longer exists, so the domain counts as
+	// cluster-level until it is assigned again.
+	TenantDeleted bool   `json:"tenant_deleted,omitempty"`
+	AddedBy       string `json:"added_by"`
+	AddedAt       string `json:"added_at"`
+	at            int64
 }
 
 // domainList reads the domain list and the catalog revision it belongs to.
@@ -68,6 +75,7 @@ func domainListCommand(g *globals) *cli.Command {
 				return cli.Usagef("list takes no arguments")
 			}
 			var domains []certstore.Domain
+			var deleted []string
 			if tenant != "" {
 				if !cli.ValidID(tenant) {
 					return cli.Usagef("invalid tenant %q", tenant)
@@ -80,14 +88,17 @@ func domainListCommand(g *globals) *cli.Command {
 				}
 				domains = reply.Domains
 			} else {
-				var err error
-				if domains, _, err = domainList(c, g, s); err != nil {
+				ctx, cancel := g.Deadline(c)
+				defer cancel()
+				page, err := s.Client.QueryCertificates(ctx, s.Target, s.Stored.Session, control.CertificateQuery{})
+				if err != nil {
 					return err
 				}
+				domains, deleted = page.Domains, page.DeletedOwners
 			}
 			rows := []domainRow{}
 			for _, d := range domains {
-				r := domainRow{Name: d.Name, Tenant: d.Tenant, AddedBy: d.AddedBy, AddedAt: time.Unix(d.AddedAt, 0).UTC().Format(time.RFC3339), at: d.AddedAt}
+				r := domainRow{Name: d.Name, Tenant: d.Tenant, TenantDeleted: d.Tenant != "" && slices.Contains(deleted, d.Tenant), AddedBy: d.AddedBy, AddedAt: time.Unix(d.AddedAt, 0).UTC().Format(time.RFC3339), at: d.AddedAt}
 				if u := certstore.DisplayDomain(d.Name); u != d.Name {
 					r.Unicode = u
 				}
@@ -99,6 +110,8 @@ func domainListCommand(g *globals) *cli.Command {
 					owner := r.Tenant
 					if owner == "" {
 						owner = "(cluster)"
+					} else if r.TenantDeleted {
+						owner = "(cluster; deleted tenant " + owner + ")"
 					}
 					t.Add(r.Name, r.Unicode, owner, r.AddedBy, time.Unix(r.at, 0).Local().Format("2006-01-02"))
 				}
@@ -310,6 +323,146 @@ func domainResponderChange(g *globals, verb, short string) *cli.Command {
 				impact = "Ingress will stop forwarding ACME HTTP-01 challenges; that path answers 404."
 			}
 			return g.sendAndPrint(c, s, impact, change{ID: id.Get(), Summary: "acme-responder " + verb + " " + address, Action: "set-acme-responder", Expected: expected, Payload: control.ACMEResponderChange{Address: address}})
+		}),
+	}
+}
+
+// domainRequestsCommand: tenant route hosts under cluster-level domains,
+// waiting for (or decided by) a system administrator.
+func domainRequestsCommand(g *globals) *cli.Command {
+	return &cli.Command{
+		Name:  "requests",
+		Short: "Tenant route hosts under cluster-level domains, and their approval",
+		Long: `A tenant app may route a host under a cluster-level domain; the deploy goes
+on, and the host opens only after a system administrator approves it for
+that tenant. One host is approved to one tenant. revoke drops a decision:
+an approved host waits again.`,
+		Sub: []*cli.Command{
+			domainRequestsListCommand(g),
+			domainDecisionCommand(g, "approve", "Approve a waiting host for a tenant"),
+			domainDecisionCommand(g, "deny", "Deny a host for a tenant"),
+			domainDecisionCommand(g, "revoke", "Drop the decision on a host"),
+		},
+	}
+}
+
+type hostRequestRow struct {
+	Tenant    string   `json:"tenant"`
+	Host      string   `json:"host"`
+	State     string   `json:"state"`
+	Apps      []string `json:"apps,omitempty"`
+	DecidedBy string   `json:"decided_by,omitempty"`
+	DecidedAt string   `json:"decided_at,omitempty"`
+}
+
+func domainRequestsListCommand(g *globals) *cli.Command {
+	return &cli.Command{
+		Name:  "list",
+		Short: "List host requests (--tenant T: that tenant's only)",
+		Run: g.withSession(func(c *cli.Context, s *session, args []string) error {
+			if len(args) != 0 {
+				return cli.Usagef("list takes no arguments")
+			}
+			tenant := g.tenant // explicit --tenant only
+			if tenant != "" && !cli.ValidID(tenant) {
+				return cli.Usagef("invalid tenant %q", tenant)
+			}
+			ctx, cancel := g.Deadline(c)
+			defer cancel()
+			reply, err := s.Client.QueryHostRequests(ctx, s.Target, s.Stored.Session, tenant)
+			if err != nil {
+				return err
+			}
+			rows := []hostRequestRow{}
+			for _, r := range reply.Requests {
+				row := hostRequestRow{Tenant: r.Tenant, Host: r.Host, State: r.State, Apps: r.Apps, DecidedBy: r.DecidedBy}
+				if r.DecidedAt > 0 {
+					row.DecidedAt = time.Unix(r.DecidedAt, 0).UTC().Format(time.RFC3339)
+				}
+				rows = append(rows, row)
+			}
+			return cli.Print(c.Out, g.output.Format(), rows, func() cli.Rows {
+				t := cli.Rows{Header: []string{"tenant", "host", "state", "apps", "decided by"}}
+				for _, r := range rows {
+					t.Add(r.Tenant, r.Host, r.State, strings.Join(r.Apps, ","), r.DecidedBy)
+				}
+				return t
+			})
+		}),
+	}
+}
+
+func domainDecisionCommand(g *globals, verb, short string) *cli.Command {
+	var id cli.IDFlag
+	var revision cli.RevisionFlag
+	return &cli.Command{
+		Name:  verb,
+		Args:  "TENANT HOST",
+		Short: short,
+		Flags: func(fs *flag.FlagSet) {
+			fs.Var(&id, "id", "operation `ID` (default: a new one)")
+			fs.Var(&revision, "if-revision", "only if the certificate store is still at this `revision`")
+		},
+		Run: g.withSession(func(c *cli.Context, s *session, args []string) error {
+			if len(args) != 2 {
+				return cli.Usagef("%s needs a tenant and a host", verb)
+			}
+			tenant := args[0]
+			if !cli.ValidID(tenant) {
+				return cli.Usagef("invalid tenant %q", tenant)
+			}
+			host, ok := certstore.NormalizeRouteHost(args[1])
+			if !ok {
+				return cli.Usagef("%q is not a route host", args[1])
+			}
+			ctx, cancel := g.Deadline(c)
+			defer cancel()
+			reply, err := s.Client.QueryHostRequests(ctx, s.Target, s.Stored.Session, "")
+			if err != nil {
+				return err
+			}
+			expected, _ := revision.Resolve(func() (uint64, error) { return reply.Revision, nil })
+			impact := map[string]string{
+				"approve": fmt.Sprintf("Approve host %s for tenant %s. Its routes under that host start taking traffic.", host, tenant),
+				"deny":    fmt.Sprintf("Deny host %s for tenant %s. Its routes under that host stay closed.", host, tenant),
+				"revoke":  fmt.Sprintf("Drop the decision on host %s for tenant %s. An approved host waits again and stops taking traffic.", host, tenant),
+			}[verb]
+			return g.sendAndPrint(c, s, impact, change{ID: id.Get(), Summary: "domain requests " + verb + " " + tenant + " " + host, Action: verb + "-ingress-host", Expected: expected, Payload: control.HostDecision{Tenant: tenant, Host: host}})
+		}),
+	}
+}
+
+// domainCertificatesCommand: what a tenant user sees of the certificates
+// serving its domains and approved hosts (no chain, no key).
+func domainCertificatesCommand(g *globals) *cli.Command {
+	return &cli.Command{
+		Name:  "certificates",
+		Short: "Certificates linked to a tenant's hosts (--tenant T)",
+		Run: g.withSession(func(c *cli.Context, s *session, args []string) error {
+			tenant := g.tenant // explicit --tenant only
+			if len(args) != 0 {
+				return cli.Usagef("certificates takes no arguments")
+			}
+			if !cli.ValidID(tenant) {
+				return cli.Usagef("certificates needs --tenant")
+			}
+			ctx, cancel := g.Deadline(c)
+			defer cancel()
+			reply, err := s.Client.QueryTenantCertificates(ctx, s.Target, s.Stored.Session, tenant)
+			if err != nil {
+				return err
+			}
+			rows := reply.Certificates
+			if rows == nil {
+				rows = []control.TenantCertificate{}
+			}
+			return cli.Print(c.Out, g.output.Format(), rows, func() cli.Rows {
+				t := cli.Rows{Header: []string{"id", "hosts", "issuer", "expires", "state", "links"}}
+				for _, r := range rows {
+					t.Add(shortID(r.ID), hostsLabel(r.Hosts), r.Issuer, expiresLabel(r.NotAfter), r.State, len(r.Links))
+				}
+				return t
+			})
 		}),
 	}
 }

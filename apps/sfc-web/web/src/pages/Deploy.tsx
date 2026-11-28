@@ -150,7 +150,7 @@ function DesktopDeployedApps() {
         actions={
           <>
             <Refresh q={apps} />
-            <button className="btn primary" disabled={!canDeploy} title={canDeploy ? undefined : '이 작업 공간의 배포 권한이 필요합니다'} onClick={() => navigate('/deploy/new')}>
+            <button type="button" className="btn primary" disabled={!canDeploy} title={canDeploy ? undefined : '이 작업 공간의 배포 권한이 필요합니다'} onClick={() => navigate('/deploy/new')}>
               새 앱 배포
             </button>
           </>

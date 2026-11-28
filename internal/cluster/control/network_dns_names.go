@@ -102,7 +102,7 @@ func (p Policy) NetworkDNSNames(s state.State, session access.Session, now int64
 	for _, n := range names {
 		r := owner[n.Endpoint]
 		row := NetworkDNSName{Name: n.Name, App: r.App, Service: r.Service, Task: r.Task}
-		if a, found := book.Allocation(n.Endpoint); found && a.Generation == n.Generation {
+		if a, found := book.AllocationOf(n.Endpoint, n.Generation); found && a.Generation == n.Generation {
 			row.Address, row.Family = a.Address.String(), "ipv4"
 			if a.Address.Is6() && !a.Address.Is4In6() {
 				row.Family = "ipv6"

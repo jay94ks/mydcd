@@ -16,7 +16,7 @@ import (
 // description: clusters made before it must be re-initialized (no
 // compatibility code before 0.1.0).
 var reinitRequired = map[string]string{
-	"lab-c1370ba0-app.yaml": "#910 x-sfc.ingress is a route list",
+	"lab-c1370ba0-app.yaml": "#910 x-sfc.ingress is a route list; A3' x-sfc.delivery became x-sfc.cd",
 }
 
 func TestStoredAppFormatsParseOrNeedReinit(t *testing.T) {

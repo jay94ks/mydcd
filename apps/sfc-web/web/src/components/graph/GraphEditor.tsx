@@ -453,17 +453,17 @@ export default function GraphEditor({
     <div ref={shell} className={`graph-shell${full ? ' full' : ''}`}>
       <div className="graph-toolbar row">
         <AddMenu disabled={readOnly || !graph} choices={choices} graph={graph} onAdd={(k, n) => void addNode(k, n)} />
-        <button className="btn sm" disabled={readOnly || (!sel.node && !sel.edge)} onClick={() => void removeSelected()}>
+        <button type="button" className="btn sm" disabled={readOnly || (!sel.node && !sel.edge)} onClick={() => void removeSelected()}>
           고른 것 지우기
         </button>
         <span className="grow" />
-        <button className="btn sm" onClick={() => void arrange()} disabled={!graph}>
+        <button type="button" className="btn sm" onClick={() => void arrange()} disabled={!graph}>
           자동 정렬
         </button>
-        <button className="btn sm" onClick={fit}>
+        <button type="button" className="btn sm" onClick={fit}>
           화면에 맞추기
         </button>
-        <button className="btn sm" onClick={() => void toggleFull()}>
+        <button type="button" className="btn sm" onClick={() => void toggleFull()}>
           {full ? '전체 화면 끝내기' : '전체 화면'}
         </button>
       </div>
@@ -471,7 +471,7 @@ export default function GraphEditor({
       {notice && (
         <div className="note wa small row between">
           <span>{notice}</span>
-          <button className="btn ghost sm" onClick={() => setNotice(undefined)}>
+          <button type="button" className="btn ghost sm" onClick={() => setNotice(undefined)}>
             닫기
           </button>
         </div>
@@ -526,7 +526,7 @@ function AddMenu({ disabled, choices, graph, onAdd }: { disabled: boolean; choic
       ) : (
         <input value={name} disabled={disabled} placeholder={kind === 'service' ? '서비스 이름' : '호스트 이름'} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && add()} style={{ width: 150 }} />
       )}
-      <button className="btn sm" disabled={disabled || !name.trim()} onClick={add}>
+      <button type="button" className="btn sm" disabled={disabled || !name.trim()} onClick={add}>
         블록 더하기
       </button>
     </span>
@@ -549,7 +549,7 @@ function NodePanel({ n, graph, choices, readOnly, onChange }: { n: GNode; graph:
           <Field label="이름">
             <input defaultValue={n.name} disabled={readOnly} onBlur={(e) => e.target.value.trim() && e.target.value !== n.name && onChange((x) => ({ ...x, name: e.target.value.trim(), id: nodeId('service', e.target.value.trim()) }))} />
           </Field>
-          <Field label="이미지" hint="다이제스트(@sha256:…)로 고정하기를 권합니다">
+          <Field label="이미지" hint="저장소/이름:태그. 컨테이너를 만들 때 digest가 정해집니다">
             <input value={s.image} disabled={readOnly} onChange={(e) => onChange((x) => ({ ...x, service: { ...x.service!, image: e.target.value } }))} />
           </Field>
           <div className="row" style={{ flexWrap: 'nowrap' }}>

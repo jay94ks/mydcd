@@ -67,7 +67,7 @@ export function PasswordApprove({ children, send, off, onSettled }: { children: 
             onChange={(x) => setPw(x.target.value)}
             onKeyDown={(x) => x.key === 'Enter' && pw && !busy && void go()}
           />
-          <button className="btn primary" disabled={!pw || busy || !!off} title={off} onClick={() => void go()}>
+          <button type="button" className="btn primary" disabled={!pw || busy || !!off} title={off} onClick={() => void go()}>
             {busy ? '보내는 중…' : '승인'}
           </button>
         </span>
@@ -277,7 +277,7 @@ export function GrantedCard({ tenant, reload }: { tenant: string; reload: number
                   <td>{g.revoking ? <Badge tone="pr">회수 중{g.consumers ? ` · 쓰는 곳 ${g.consumers}` : ''}</Badge> : g.expiresAt && Date.parse(g.expiresAt) < Date.now() ? <Badge tone="un">끝남</Badge> : <Badge tone="ok">유효</Badge>}</td>
                   <td>
                     {!g.revoking && (
-                      <button className="btn sm danger" onClick={() => setRevoke({ g, expected: granted.data!.collection })}>
+                      <button type="button" className="btn sm danger" onClick={() => setRevoke({ g, expected: granted.data!.collection })}>
                         승인 회수
                       </button>
                     )}
@@ -310,15 +310,15 @@ function RevokeApprovalDialog({ tenant, g, expected, onClose, onDone }: { tenant
       onClose={onClose}
       footer={
         finished ? (
-          <button className="btn primary" onClick={onClose}>
+          <button type="button" className="btn primary" onClick={onClose}>
             닫기
           </button>
         ) : (
           <>
-            <button className="btn" onClick={onClose}>
+            <button type="button" className="btn" onClick={onClose}>
               취소
             </button>
-            <button className="btn danger solid" disabled={m.busy} onClick={() => void send()}>
+            <button type="button" className="btn danger solid" disabled={m.busy} onClick={() => void send()}>
               {m.busy ? '보내는 중…' : '승인 회수'}
             </button>
           </>

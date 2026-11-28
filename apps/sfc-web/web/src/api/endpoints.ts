@@ -544,10 +544,18 @@ export async function bridges(t: string, signal?: AbortSignal): Promise<{ items:
 export const bridgeEndpoints = async (t: string, peer: string, signal?: AbortSignal) =>
   arr((await api.get<{ tenant: string; items: { tenant: string; network: string }[] | null }>(`/t/${enc(t)}/bridge-endpoints?tenant=${enc(peer)}`, signal)).items);
 export const bridgePath = (t: string, b?: { owner: string; name: string }) => `/t/${enc(t)}/bridges${b ? `/${enc(b.owner)}/${enc(b.name)}` : ''}`;
+/** 서버 전체 한도를 정하지 않은 서버는 sfcd가 "모든 자원"(#607)을 아주 큰 값으로 보낸다. 그 값은 한도가 없다는 뜻이라 뺀다 */
+const UNLIMITED_CPUS = 1e6;
+const UNLIMITED_BYTES = 2 ** 50;
 export const tenantLimits = async (t: string, signal?: AbortSignal) =>
   arr((await api.get<D.ListPage<D.DResourceEntry>>(`/t/${enc(t)}/resources`, signal)).items)
     .filter((e) => e.limit)
-    .map((e) => e.limit!) as V.NodeLimit[];
+    .map((e) => {
+      const l = { ...e.limit! };
+      if (l.nodeCpus !== undefined && l.nodeCpus >= UNLIMITED_CPUS) delete l.nodeCpus;
+      if (l.nodeMemoryBytes !== undefined && l.nodeMemoryBytes >= UNLIMITED_BYTES) delete l.nodeMemoryBytes;
+      return l;
+    }) as V.NodeLimit[];
 
 const credKind = (m: string): V.UserCredential['kind'] => (m === 'private-key' ? 'key' : m === 'token' ? 'token' : 'password');
 export const toUser = (u: D.DUserRecord): V.UserRecord => ({

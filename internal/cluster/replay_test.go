@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/jay94ks/seafield/internal/cluster/state"
@@ -83,5 +84,47 @@ func TestReplayStateRoot(t *testing.T) {
 	_ = logs.Close()
 	if _, err = Replay(Options{Root: compacted, Admin: "admin", Cluster: id, TrackConfiguration: true}); err == nil {
 		t.Fatal("a compacted log replayed")
+	}
+
+	// The dry run continues from a compacted log's checkpoint and applies
+	// the tail; a build that refuses a stored record fails on the checkpoint.
+	tailed := root(t)
+	logs, err = boltdb.NewBoltStore(filepath.Join(tailed, "control", "raft.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := state.EncodeCommand(state.Command{Actor: "admin", Epoch: 1, RequestID: "c", Key: "network/x", Value: "c", Expected: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = logs.StoreLog(&raft.Log{Index: 5, Term: 1, Type: raft.LogCommand, Data: b}); err == nil {
+		err = logs.DeleteRange(1, 2)
+	}
+	_ = logs.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, err := DryRun(Options{Root: tailed, Admin: "admin", Cluster: id, TrackConfiguration: true})
+	if err != nil || r.Replayed || r.FirstLog != 3 || r.Checkpoint != 4 || r.Tail != 1 || r.State.Object("network/x").Value != "c" {
+		t.Fatal(r.Replayed, r.FirstLog, r.Checkpoint, r.Tail, r.State.Object("network/x"), err)
+	}
+	stored := func(before, _ state.State, c state.Command) error {
+		if c.RequestID == "" && before.Object("network/x").Value == "b" {
+			return errors.New("this build no longer reads b")
+		}
+		return nil
+	}
+	if _, err = DryRun(Options{Root: root(t), Admin: "admin", Cluster: id, TrackConfiguration: true, Validate: stored}); !errors.Is(err, ErrReplay) {
+		t.Fatal("a stored record this build refuses passed", err)
+	}
+	// The refusal names the check (stage) that refused, as a start does.
+	stage := func(before, _ state.State, c state.Command) (string, error) {
+		if err := stored(before, before, c); err != nil {
+			return "network", err
+		}
+		return "", nil
+	}
+	if _, err = DryRun(Options{Root: root(t), Admin: "admin", Cluster: id, TrackConfiguration: true, Validate: stored, ValidateStage: stage}); !errors.Is(err, ErrReplay) || !strings.Contains(err.Error(), "(stage network)") {
+		t.Fatal("the refusing stage is not named", err)
 	}
 }

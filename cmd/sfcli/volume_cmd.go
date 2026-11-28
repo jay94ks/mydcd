@@ -764,7 +764,7 @@ are; unregister keeps them too.`,
 			f.register(fs, true, true)
 			fs.StringVar(&node, "node", "", "`server` with the directory")
 			fs.StringVar(&storage, "storage", "", "storage `root` ID on that server")
-			fs.Uint64Var(&rootGeneration, "root-generation", 0, "generation `number` of that storage root registration")
+			fs.Uint64Var(&rootGeneration, "root-generation", 0, "generation `number` of that storage root registration (default: its current one)")
 			fs.StringVar(&path, "path", "", "existing `directory` under the storage root")
 			fs.Uint64Var(&generation, "generation", 1, "volume generation `number`")
 			fs.Var(&size, "size", "space to reserve, such as 2GiB")
@@ -780,14 +780,22 @@ are; unregister keeps them too.`,
 			if !lifecycle.ValidID(node) || !lifecycle.ValidID(storage) || nodestorage.ValidateRootPath(path) != nil {
 				return cli.Usagef("register needs --node, --storage and an absolute, clean --path")
 			}
-			if rootGeneration == 0 || generation == 0 || size > 1<<40 {
-				return cli.Usagef("--root-generation and --generation must be 1 or more; --size is at most 1TiB")
+			if generation == 0 || size > 1<<40 {
+				return cli.Usagef("--generation must be 1 or more; --size is at most 1TiB")
 			}
 			s, tenant, err := g.volumeSession(c, args, 1, "register needs one volume name")
 			if err != nil {
 				return err
 			}
 			defer s.Close()
+			if rootGeneration == 0 {
+				ctx, cancel := g.Deadline(c)
+				rootGeneration, err = currentRootGeneration(ctx, s, tenant, node, storage)
+				cancel()
+				if err != nil {
+					return err
+				}
+			}
 			q := control.VolumeFixedRegister{Scope: volumes.Scope{Cluster: s.Client.Cluster, Tenant: tenant, ID: ref.ID, Generation: generation}, Node: node, Storage: storage, Path: path, RootGeneration: rootGeneration, CapacityBytes: uint64(size), QuotaMode: "observe"}
 			ok, err := g.confirm(c, &f, fmt.Sprintf("Register %s on %s (storage %s) as volume %s of tenant %s.", path, node, storage, ref, tenant))
 			if !ok || err != nil {
@@ -802,6 +810,27 @@ are; unregister keeps them too.`,
 			return g.volumeChange(c, s, &f, "volume register "+ref.String(), "register-fixed-volume", 0, epoch, q)
 		},
 	}
+}
+
+// currentRootGeneration reads the generation of storage root id on node
+// from the tenant's storage list, for register without --root-generation.
+func currentRootGeneration(ctx context.Context, s *session, tenant, node, id string) (uint64, error) {
+	after := ""
+	for pages := 0; pages < 256; pages++ {
+		reply, err := s.Client.TenantStoragePage(ctx, s.Target, s.Stored.Session, tenant, node, after)
+		if err != nil {
+			return 0, err
+		}
+		for _, r := range reply.Items {
+			if r.Node == node && r.ID == id && r.Generation != 0 {
+				return r.Generation, nil
+			}
+		}
+		if after = reply.Next; after == "" {
+			return 0, fmt.Errorf("no storage %s on %s for tenant %s (see 'sfcli node storage list')", id, node, tenant)
+		}
+	}
+	return 0, errors.New("too many storage pages")
 }
 
 func volumeUnregisterCommand(g *globals) *cli.Command {

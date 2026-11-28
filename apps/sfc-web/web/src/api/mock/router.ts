@@ -1568,7 +1568,7 @@ on('GET', '/tenants', () => {
 on('GET', '/tenants/:t', (m) => {
   const { user } = requireSession();
   requireTenant(user, m[0]);
-  return ok({ id: m[0], revision: fx.tenantRev[m[0]], role: roleIn(user, m[0]) ?? 'manager', nodes: fx.tenantNodes[m[0]] ?? [] });
+  return ok({ id: m[0], revision: fx.tenantRev[m[0]], role: roleIn(user, m[0]) ?? 'manager', allowedNodes: fx.tenantNodes[m[0]] ?? [] });
 });
 on('GET', '/tenants/:t/members', (m) => {
   const { user } = requireSession();
@@ -3893,7 +3893,8 @@ function parseApp(tenant: string, text: string): ParsedApp | RawResponse {
   const svc = (doc.services ?? {}) as Record<string, Record<string, unknown>>;
   const oldKeys = appYamlOldKeys(doc);
   if (oldKeys) return err(422, 'invalid', oldKeys, { inputCode: 'x-sfc' });
-  if (!Object.keys(svc).length) return err(422, 'invalid', 'services가 비어 있습니다.', { inputCode: 'services' });
+  // A3': 서비스 없이 name과 x-sfc.cd만 있는 파일(CD 연결만)도 받는다
+  if (!Object.keys(svc).length && xm.cd === undefined) return err(422, 'invalid', 'services가 비어 있습니다.', { inputCode: 'services' });
   const refs: [string, Set<string>, string][] = [
     ['networks', new Set(byTenant(fx.resources, tenant).flatMap((e) => (e.network ? [e.network.name] : []))), '망'],
     ['volumes', new Set(byTenant(fx.volumes, tenant).map((v) => v.name)), '데이터 저장소'],

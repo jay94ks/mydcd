@@ -82,6 +82,17 @@ func catalogUserOperation(c Command) bool {
 	return c.Kind == Module && c.Key == "control/access" && strings.HasPrefix(c.Actor, "user/")
 }
 
+// certificateUserOperation: the same for the certificate store. Every user
+// change names its own record: put-certificate a new ID (Expected 0, a used
+// ID is refused), delete/disable-certificate one ID checked at apply, and
+// the domain, host decision and ACME responder changes the store revision in
+// their own Expected. A root read before an unrelated write to the store (a
+// domain change committed a moment earlier, an expiry report) must not fail
+// them.
+func certificateUserOperation(c Command) bool {
+	return c.Kind == Module && c.Key == "control/certificates" && strings.HasPrefix(c.Actor, "user/")
+}
+
 func applyModule(before, candidate State, index uint64, c Command, validate Validator, reduce Reducer, admitPatch ModulePatchAuthorizer) (State, Result) {
 	n, r, _ := applyModuleStage(before, candidate, index, c, validate, reduce, admitPatch)
 	return n, r
@@ -103,7 +114,7 @@ func applyModuleStage(before, candidate State, index uint64, c Command, validate
 	if reduce == nil || !strings.HasPrefix(c.Key, "control/") || len(c.Key) <= len("control/") || len(c.Key) > 512 || !utf8.ValidString(c.Key) || c.Delete || c.Target != "" && !scopedAppReport(c) || c.Rights != 0 || len(c.Value) > 64<<10 {
 		return candidate, result, "command"
 	}
-	if c.Expected != old.Revision && (c.Kind != ModuleUpload && c.Kind != ModuleAppDown && !scopedAppReport(c) && !nodeShellUserOperation(c) && !catalogUserOperation(c) || c.Expected > old.Revision) {
+	if c.Expected != old.Revision && (c.Kind != ModuleUpload && c.Kind != ModuleAppDown && !scopedAppReport(c) && !nodeShellUserOperation(c) && !catalogUserOperation(c) && !certificateUserOperation(c) || c.Expected > old.Revision) {
 		result.Code = ConditionFailed
 		return candidate, result, "cas"
 	}

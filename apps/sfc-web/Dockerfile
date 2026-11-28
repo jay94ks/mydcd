@@ -7,7 +7,7 @@
 # The build does not fetch or patch anything.
 
 # 1) Web UI (skipped when apps/sfc-web/web has no package.json yet)
-FROM node:22.11.0-bookworm-slim AS ui
+FROM node:22.23.0-bookworm-slim AS ui
 WORKDIR /src
 COPY apps/sfc-web/ /src/apps/sfc-web/
 RUN set -eu; mkdir -p /out; \

@@ -15,6 +15,7 @@ import (
 	"github.com/jay94ks/seafield/internal/workload/volumes"
 	"log"
 	"net/netip"
+	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
@@ -62,11 +63,46 @@ type ContainerSpec struct {
 	// copy because the deploy could not resolve the tag (ImageSources).
 	ImageDigest string `json:",omitempty"`
 	ImageSource string `json:",omitempty"`
+	// SecretSocket binds this container's sfev.sock directory at
+	// SecretSocketTarget (secret_socket.go). The socket's approval is not
+	// part of the spec: renewing it leaves the container as it is.
+	SecretSocket bool `json:",omitempty"`
 }
 
 // ImageSources: the registry could not be reached, or it no longer has the
 // tag; the container was made from this server's last copy of it.
 var ImageSources = []string{"registry-unreachable", "registry-missing"}
+
+// RunImage is the reference the container is made from: ImageDigest when
+// Image names a tag, else Image itself.
+func (s ContainerSpec) RunImage() string {
+	if s.ImageDigest != "" {
+		return s.ImageDigest
+	}
+	return s.Image
+}
+
+// validRunImage accepts a digested image alone, or a tag with the digest of
+// the same repository.
+func validRunImage(image, digest string) bool {
+	r, err := reference.ParseAnyReference(image)
+	if err != nil {
+		return false
+	}
+	if digest == "" {
+		_, ok := r.(reference.Digested)
+		return ok
+	}
+	tagged, ok := r.(reference.Named)
+	pinned, err := reference.ParseNormalizedNamed(digest)
+	if !ok || err != nil {
+		return false
+	}
+	if _, ok = pinned.(reference.Digested); !ok {
+		return false
+	}
+	return tagged.Name() == pinned.Name()
+}
 
 func DecodeContainer(value string) (ContainerSpec, error) {
 	s, err := schema.Decode[ContainerSpec]([]byte(value))
@@ -100,6 +136,9 @@ func DecodeContainer(value string) (ContainerSpec, error) {
 	if !s.validBridgeOwner() || validateVolumeMounts(s) != nil || validateRemoteVolumes(s) != nil {
 		return s, ErrVolumeMount
 	}
+	if s.SecretSocket && (s.Process == nil || !slices.Contains(s.Process.Env, SecretSocketEnv+"="+SecretSocketPath)) {
+		return s, ErrPlacement
+	}
 	if s.Readiness != nil && (s.Process == nil || !s.Readiness.Valid()) {
 		return s, ErrProcess
 	}
@@ -110,12 +149,10 @@ func DecodeContainer(value string) (ContainerSpec, error) {
 		return s, ErrPlacement
 	}
 	// A mutable tag cannot silently change the executable on another node or
-	// after restart. An image ID or repository digest is explicit Desired.
-	r, err := reference.ParseAnyReference(s.Image)
-	if err != nil {
-		return s, ErrPlacement
-	}
-	if _, ok := r.(reference.Digested); !ok {
+	// after restart. An image ID or repository digest is explicit Desired; a
+	// tag is allowed only with the digest of the same repository it was
+	// resolved to (ImageDigest), which is what the container is made from.
+	if !validRunImage(s.Image, s.ImageDigest) {
 		return s, ErrPlacement
 	}
 	if !s.validAttachments() {
@@ -134,7 +171,8 @@ type DockerDriver struct {
 	Network        BridgeProvider
 	Inputs         InputProvider
 	Volumes        *volumes.Activations
-	Remote         RemoteVolumes // nil: tasks with remote Volumes are refused
+	Remote         RemoteVolumes  // nil: tasks with remote Volumes are refused
+	Sockets        *SecretSockets // nil: tasks with a secret socket are refused
 	Authority      TaskAuthority
 	ImageAuthority TaskImageAuthority
 	// These belong to one Manager.Step invocation; never shared across actors.
@@ -174,6 +212,9 @@ func (d *DockerDriver) parameters(key string, op reconcile.Operation) (Container
 	}
 	if len(s.RemoteVolumes) > 0 && d.Remote == nil {
 		return s, engine.Identity{}, ErrVolumeMount
+	}
+	if s.SecretSocket && d.Sockets == nil {
+		return s, engine.Identity{}, ErrSecretSocket
 	}
 	id, err := d.Engine.Identity("container", key, TaskIdentityResource(op.Target))
 	return s, id, err
@@ -216,7 +257,7 @@ func (d *DockerDriver) options(ctx context.Context, s ContainerSpec, id engine.I
 		return client.ContainerCreateOptions{}, err
 	}
 	l := leases[0]
-	config := &container.Config{Image: s.Image, Cmd: s.Command, Env: s.Env, Labels: id.Labels}
+	config := &container.Config{Image: s.RunImage(), Cmd: s.Command, Env: s.Env, Labels: id.Labels}
 	if s.Process != nil {
 		config, err = s.Process.ContainerConfig(id.Labels)
 		if err != nil {
@@ -289,7 +330,7 @@ func (d *DockerDriver) matchContainer(ctx context.Context, got container.Inspect
 		return false
 	}
 	networkID := leases[0].NetworkID
-	image, command, env := s.Image, s.Command, s.Env
+	image, command, env := s.RunImage(), s.Command, s.Env
 	if s.Process != nil {
 		image, command, env = s.Process.ImageID, s.Process.Command, s.Process.Env
 		env, err = inputEnvironment(ctx, env, files)
@@ -374,7 +415,7 @@ func (d *DockerDriver) Execute(ctx context.Context, key string, op reconcile.Ope
 				return d.beforeCreateFailed(ctx, s, id, key, op, err)
 			}
 		}
-		image, imageErr := d.Engine.ImageWithAuth(ctx, s.Image, s.Pull, auth)
+		image, imageErr := d.Engine.ImageWithAuth(ctx, s.RunImage(), s.Pull, auth)
 		if imageErr != nil {
 			return d.beforeCreateFailed(ctx, s, id, key, op, imageErr)
 		}
@@ -480,6 +521,14 @@ func (d *DockerDriver) releaseDependencies(_ context.Context, s ContainerSpec, i
 			return reconcile.EffectUnknown, ErrInputMount
 		}
 		if err := d.Inputs.ReturnInputs(*s.Inputs, consumer, key, generation); err != nil {
+			return reconcile.EffectUnknown, err
+		}
+	}
+	if s.SecretSocket {
+		if d.Sockets == nil {
+			return reconcile.EffectUnknown, ErrSecretSocket
+		}
+		if err := d.Sockets.Remove(id.Name); err != nil {
 			return reconcile.EffectUnknown, err
 		}
 	}
@@ -714,6 +763,16 @@ func OpenManagerWithImageAuthority(path string, c *engine.Client, n BridgeProvid
 	}
 	m.driver.ImageAuthority = images
 	return m, nil
+}
+
+// AttachSecretSockets is Runtime assembly, before the module loop runs any
+// Step: the root of the per-container sfev.sock directories.
+func (m *Manager) AttachSecretSockets(root string) error {
+	if m.driver.Sockets != nil || !filepath.IsAbs(root) {
+		return ErrPlacement
+	}
+	m.driver.Sockets = &SecretSockets{Root: filepath.Clean(root)}
+	return nil
 }
 
 // AttachRemoteVolumes is Runtime assembly, before the module loop runs any

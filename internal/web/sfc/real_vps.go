@@ -38,3 +38,22 @@ func (c *realConn) SealVPSCredential(ctx context.Context, in userauth.VPSCredent
 		return u.SealVPSCredential(ctx, c.peer, s, in)
 	})
 }
+
+func (c *realConn) QueryOwnedVPS(ctx context.Context, status bool) (userauth.OwnedVPSReply, error) {
+	return realCall(ctx, c, "owned-vps", func(u userauth.Client, s access.Session) (userauth.OwnedVPSReply, error) {
+		return u.QueryOwnedVPS(ctx, c.peer, s, status)
+	})
+}
+
+func (c *realConn) QueryOwnedVPSInstances(ctx context.Context, account string) ([]control.OwnedVPSInstance, error) {
+	return realCall(ctx, c, "owned-vps", func(u userauth.Client, s access.Session) ([]control.OwnedVPSInstance, error) {
+		reply, err := u.QueryOwnedVPSInstances(ctx, c.peer, s, account)
+		if err != nil {
+			return nil, err
+		}
+		if reply.Instances == nil {
+			return nil, fail("owned-vps", CodeUnavailable, "instances")
+		}
+		return *reply.Instances, nil
+	})
+}

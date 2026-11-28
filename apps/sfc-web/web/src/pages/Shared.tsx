@@ -77,7 +77,7 @@ export function NetworkRoutesPage() {
       rq={rq}
       bq={bq}
       actions={
-        <button className="btn primary" disabled={!canDeploy || !rq.data || !nq.data} title={canDeploy ? undefined : NEED} onClick={() => setProposing(true)}>
+        <button type="button" className="btn primary" disabled={!canDeploy || !rq.data || !nq.data} title={canDeploy ? undefined : NEED} onClick={() => setProposing(true)}>
           연결 제안
         </button>
       }
@@ -101,10 +101,10 @@ function CreateButtons({ second, primary, onSecond, onPrimary }: { second: strin
   const { canDeploy } = useTenantRole();
   return (
     <span className="row">
-      <button className="btn" disabled={!canDeploy} title={canDeploy ? undefined : NEED} onClick={onSecond}>
+      <button type="button" className="btn" disabled={!canDeploy} title={canDeploy ? undefined : NEED} onClick={onSecond}>
         {second}
       </button>
-      <button className="btn primary" disabled={!canDeploy} title={canDeploy ? undefined : NEED} onClick={onPrimary}>
+      <button type="button" className="btn primary" disabled={!canDeploy} title={canDeploy ? undefined : NEED} onClick={onPrimary}>
         {primary}
       </button>
     </span>
@@ -214,7 +214,7 @@ function DesktopNetworks() {
       rq={rq}
       bq={bq}
       actions={
-        <button className="btn primary" disabled={!canDeploy} title={canDeploy ? undefined : NEED} onClick={() => setDlg('create')}>
+        <button type="button" className="btn primary" disabled={!canDeploy} title={canDeploy ? undefined : NEED} onClick={() => setDlg('create')}>
           망 만들기
         </button>
       }
@@ -268,11 +268,11 @@ function DesktopNetworks() {
                   return (
                     <span className="row" style={{ gap: 6, justifyContent: 'flex-end' }}>
                       {deleting(n) ? (
-                        <button className="btn sm danger" disabled={!canDeploy} title={canDeploy ? undefined : NEED} onClick={() => setDel(n)}>
+                        <button type="button" className="btn sm danger" disabled={!canDeploy} title={canDeploy ? undefined : NEED} onClick={() => setDel(n)}>
                           지우기 계속
                         </button>
                       ) : (
-                        <button className="btn sm" onClick={() => go(n)}>
+                        <button type="button" className="btn sm" onClick={() => go(n)}>
                           변경
                         </button>
                       )}
@@ -344,15 +344,15 @@ function NetworkScopeDialog({ tenant, net, onClose, onDone }: { tenant: string; 
       onClose={onClose}
       footer={
         m.op && m.op.state !== 'applied' ? (
-          <button className="btn primary" onClick={onClose}>
+          <button type="button" className="btn primary" onClick={onClose}>
             닫기
           </button>
         ) : (
           <>
-            <button className="btn" onClick={onClose}>
+            <button type="button" className="btn" onClick={onClose}>
               취소
             </button>
-            <button className="btn primary" disabled={m.busy} onClick={() => void send()}>
+            <button type="button" className="btn primary" disabled={m.busy} onClick={() => void send()}>
               바꾸기
             </button>
           </>
@@ -455,7 +455,7 @@ function DefaultRootsCard({ tenant, isAdmin, canDeploy, volumes, onRegister }: {
                   <td>{r.capacityBytes === undefined ? '—' : r.capacityBytes ? fmtBytes(r.capacityBytes) : '제한 없음'}</td>
                   <td>{volumes.filter((v) => v.kind === 'fixed' && v.node === r.node && v.storage === r.name).length}개</td>
                   <td style={{ textAlign: 'right' }}>
-                    <button className="btn sm" disabled={!canDeploy || r.draining || r.allowed === false} title={!canDeploy ? NEED : r.draining ? '비우는 중인 경로입니다' : undefined} onClick={() => onRegister(`${r.node}/${r.name}`)}>
+                    <button type="button" className="btn sm" disabled={!canDeploy || r.draining || r.allowed === false} title={!canDeploy ? NEED : r.draining ? '비우는 중인 경로입니다' : undefined} onClick={() => onRegister(`${r.node}/${r.name}`)}>
                       여기에 고정 데이터 저장소 등록
                     </button>
                   </td>
@@ -554,15 +554,15 @@ function DesktopVolumes() {
                 render: (v) => (
                   <span className="row" style={{ gap: 6, justifyContent: 'flex-end' }}>
                     {v.kind === 'fixed' && !v.app ? (
-                      <button className="btn sm danger" disabled={!canDeploy} title={canDeploy ? undefined : NEED} onClick={() => setDel(v)}>
+                      <button type="button" className="btn sm danger" disabled={!canDeploy} title={canDeploy ? undefined : NEED} onClick={() => setDel(v)}>
                         등록 해제
                       </button>
                     ) : (
                       <>
-                        <button className="btn sm" onClick={() => pick(v)}>
+                        <button type="button" className="btn sm" onClick={() => pick(v)}>
                           백업
                         </button>
-                        <button className="btn sm" disabled={!!moveBlocked(v, canDeploy)} title={moveBlocked(v, canDeploy)} onClick={() => (pick(v), setMove(v))}>
+                        <button type="button" className="btn sm" disabled={!!moveBlocked(v, canDeploy)} title={moveBlocked(v, canDeploy)} onClick={() => (pick(v), setMove(v))}>
                           이관
                         </button>
                       </>

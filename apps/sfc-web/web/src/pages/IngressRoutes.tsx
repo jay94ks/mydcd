@@ -439,11 +439,11 @@ export function MappingDialog({ d, v, cluster, onClose, onDone, onShow }: { d: E
       onClose={onClose}
       footer={
         <>
-          <button className="btn" onClick={onClose}>
+          <button type="button" className="btn" onClick={onClose}>
             {sent ? '닫기' : '취소'}
           </button>
           {!sent || m1.error !== undefined || m2.error !== undefined || (changes.length > 1 && !m2.op) ? (
-            <button className="btn primary" disabled={!ready || m1.busy || m2.busy} onClick={() => void send()}>
+            <button type="button" className="btn primary" disabled={!ready || m1.busy || m2.busy} onClick={() => void send()}>
               {m1.busy || m2.busy ? '보내는 중…' : verb}
             </button>
           ) : null}
@@ -609,11 +609,11 @@ export function RemoveMappingDialog({ m, v, cluster, onClose, onDone }: { m: Map
       onClose={onClose}
       footer={
         <>
-          <button className="btn" onClick={onClose}>
+          <button type="button" className="btn" onClick={onClose}>
             {mu.op ? '닫기' : '취소'}
           </button>
           {!mu.op && (
-            <button className="btn danger solid" disabled={!change?.after || mu.busy} onClick={() => void go()}>
+            <button type="button" className="btn danger solid" disabled={!change?.after || mu.busy} onClick={() => void go()}>
               {mu.busy ? '보내는 중…' : m.cluster ? '빼고 저장' : '빼고 배포'}
             </button>
           )}

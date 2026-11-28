@@ -104,7 +104,7 @@ func (r *Runtime) appTaskAuthority(ctx context.Context, key string, op reconcile
 				}
 			}
 		}
-		if _, err = r.controlPolicy.RegistryImagePermit(v.State, r.Identity.Public, control.RegistryImageRequest{AppBindingRequest: control.AppBindingRequest{Task: source.Task, Digest: b.Digest(), At: time.Now().Unix()}, Image: spec.Image}); err != nil {
+		if _, err = r.controlPolicy.RegistryImagePermit(v.State, r.Identity.Public, control.RegistryImageRequest{AppBindingRequest: control.AppBindingRequest{Task: source.Task, Digest: b.Digest(), At: time.Now().Unix()}, Image: spec.RunImage()}); err != nil {
 			return fmt.Errorf("task start authority registry image: %w", err)
 		}
 		if err := r.restoredTaskWriter(v.State, material, spec); err != nil {
@@ -371,6 +371,7 @@ func (r *Runtime) reconcileAppWorkloads(ctx context.Context, v cluster.View, app
 	}
 	works := appWorkloads(apps, r.Identity.Public)
 	r.forgetStaleAppInputs(works)
+	r.retainSecretSockets(works)
 	var failures []error
 	for _, work := range works {
 		progressed, err := r.reconcileAppWorkload(ctx, v, apps, work)
@@ -720,7 +721,7 @@ func (r *Runtime) reconcileAppWorkload(ctx context.Context, v cluster.View, apps
 			// An earlier bare-config cache delete may be Unknown even though
 			// this exact image was loaded again. Do not publish a new recipe
 			// until that original deletion's shared admission fence is gone.
-			if _, err = r.appRegistryImagePermit(ctx, source, b.Digest(), spec.Image, spec.Process.ImageID); err != nil {
+			if _, err = r.appRegistryImagePermit(ctx, source, b.Digest(), spec.RunImage(), spec.Process.ImageID); err != nil {
 				return false, err
 			}
 		}
@@ -736,6 +737,9 @@ func (r *Runtime) reconcileAppWorkload(ctx context.Context, v cluster.View, apps
 		status, err := r.workload.Status(ctx, step.Key)
 		if err != nil {
 			return false, err
+		}
+		if spec.SecretSocket {
+			r.syncSecretSocket(ctx, step.Key, control.AppBindingRequest{Task: source, Digest: b.Digest()})
 		}
 		status, err = r.observeAppCheckers(ctx, v, b, source, status)
 		if err != nil {

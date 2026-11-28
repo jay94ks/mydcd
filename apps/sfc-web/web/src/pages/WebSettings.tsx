@@ -25,7 +25,7 @@ const SEAL: Record<string, [Tone, string]> = {
   ready: ['ok', '잠김 · 정상'],
   'no-key': ['wa', '봉인 키 없음'],
   'wrong-key': ['er', '키가 맞지 않음'],
-  broken: ['er', '파일 문제'],
+  broken: ['er', '파일 손상'],
 };
 const KIND_NAME: Record<string, string> = {
   ai: 'AI 제공자 키 (Claude · OpenAI)',
@@ -198,11 +198,11 @@ function SealCard({ seal, onChanged }: { seal: DSealStatus; onChanged: () => voi
       <span className="muted small">값은 이 화면에서도 보이지 않습니다. 봉인 키를 잃으면 이 값들은 되살릴 수 없고 다시 넣어야 합니다. 웹 데이터 백업에는 봉인 파일이 들어가지 않습니다.</span>
       <div className="row" style={{ justifyContent: 'flex-end', gap: 8 }}>
         {!seal.ready && seal.state !== 'no-key' && (
-          <button className="btn danger" onClick={() => setDlg('reset')}>
+          <button type="button" className="btn danger" onClick={() => setDlg('reset')}>
             봉인 파일 초기화…
           </button>
         )}
-        <button className="btn" disabled={!canRekey} title={seal.fingerprint === undefined ? READY : undefined} onClick={() => setDlg('rekey')}>
+        <button type="button" className="btn" disabled={!canRekey} title={seal.fingerprint === undefined ? READY : undefined} onClick={() => setDlg('rekey')}>
           봉인 키 바꾸기…
         </button>
       </div>
@@ -219,7 +219,7 @@ function RekeyDialog({ seal, onClose }: { seal: DSealStatus; onClose: () => void
       title="봉인 키 바꾸기"
       onClose={onClose}
       footer={
-        <button className="btn primary" onClick={onClose}>
+        <button type="button" className="btn primary" onClick={onClose}>
           닫기
         </button>
       }
@@ -281,10 +281,10 @@ function ResetDialog({ seal, onClose, onDone }: { seal: DSealStatus; onClose: ()
       onClose={onClose}
       footer={
         <>
-          <button className="btn" onClick={onClose}>
+          <button type="button" className="btn" onClick={onClose}>
             취소
           </button>
-          <button className="btn danger solid" disabled={typed !== 'secrets' || busy} onClick={() => void go()}>
+          <button type="button" className="btn danger solid" disabled={typed !== 'secrets' || busy} onClick={() => void go()}>
             {busy ? '지우는 중…' : '초기화'}
           </button>
         </>
@@ -389,7 +389,7 @@ function Settings({ d, onSaved, aside }: { d: DSettingsReply; onSaved: () => voi
     );
   };
   const saveBtn = (
-    <button className="btn primary" disabled={!dirty || busy} onClick={ask}>
+    <button type="button" className="btn primary" disabled={!dirty || busy} onClick={ask}>
       {busy ? '저장 중…' : '변경 저장'}
     </button>
   );
@@ -435,10 +435,10 @@ function Settings({ d, onSaved, aside }: { d: DSettingsReply; onSaved: () => voi
           onClose={() => setShrink(undefined)}
           footer={
             <>
-              <button className="btn" onClick={() => setShrink(undefined)}>
+              <button type="button" className="btn" onClick={() => setShrink(undefined)}>
                 취소
               </button>
-              <button className="btn primary" disabled={busy} onClick={() => void save()}>
+              <button type="button" className="btn primary" disabled={busy} onClick={() => void save()}>
                 줄이기
               </button>
             </>

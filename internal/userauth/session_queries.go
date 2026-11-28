@@ -38,7 +38,7 @@ var whoamiRoots = []string{
 	control.CatalogKey, control.AppsKey, control.ResourcesKey, control.VolumesKey, control.VaultKey,
 	control.LifecycleKey, control.RegistriesKey, control.ExternalRegistriesKey, control.RegistryMaintenanceKey,
 	control.ImageBuildKey, control.ImageCacheKey, control.NodeStorageKey, control.StorageKey,
-	control.CertificatesKey, control.VPSKey, control.IngressManagementKey, control.CompactKey,
+	control.CertificatesKey, control.VPSKey, control.OwnedVPSKey, control.IngressManagementKey, control.CompactKey,
 	control.ClusterBackupKey, control.TunnelReconnectKey, control.MembersKey, control.NodeShellKey,
 }
 

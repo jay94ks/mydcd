@@ -267,22 +267,15 @@ func verifyNativeGitDelivery(t *testing.T, ctx context.Context, owners *[2]*Runt
 		execution, found := apps.Execution("tenant", "next")
 		return found && execution.ActiveOperation() == "git-manual-operation" && execution.Health(uint64(time.Now().Unix())) == "Degraded"
 	})
-	automaticFile := deployment.CDFileOf(manualPolicy)
-	automaticFile.Sync = "auto"
-	policyFile := filepath.Join(root, "automatic-cd.yaml")
-	rawPolicy, err := yaml.Marshal(automaticFile)
-	if err != nil {
+	// The policy is app.yaml x-sfc.cd: deploying the app with a changed
+	// block changes only the policy; the services keep coming from Git.
+	automatic := manualPolicy
+	automatic.Sync.Mode = "automatic"
+	policyFile := filepath.Join(root, "automatic-app.yaml")
+	if err := os.WriteFile(policyFile, nativeGitRevision(t, original, "3", &automatic), 0600); err != nil {
 		t.Fatal(err)
 	}
-	// The policy the Git revisions embed is what cd.yaml sets on the server.
-	automatic, err := deployment.ParseCDFile(rawPolicy)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(policyFile, rawPolicy, 0600); err != nil {
-		t.Fatal(err)
-	}
-	cli("cd", "set", "next", "--tenant", "tenant", "--id", "git-automatic-policy", "-f", policyFile)
+	cli("app", "deploy", "--tenant", "tenant", "--id", "git-automatic-policy", "-f", policyFile, "--no-wait")
 	lead(0)
 	thirdCommit := source.Commit(nativeGitRevision(t, original, "3", &automatic))
 	lead(1) // actual SDK handoff while the next registered source is selected

@@ -4,6 +4,7 @@ package deployment
 
 import (
 	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 
@@ -266,5 +267,26 @@ func TestBindingReservesAndReleasesSocketGrants(t *testing.T) {
 	plain := f.web()
 	if len(realms(socketInputNeeds(plain))) != 0 {
 		t.Fatal("socket grant without a socket")
+	}
+}
+
+// A socket service's native recipe asks for the socket directory, and its
+// resolved process names the socket; neither is the user's to set.
+func TestTaskRecipeAsksForTheSecretSocket(t *testing.T) {
+	_, b, material := taskMaterialFixtureIn(t, makeFixture(t), func(c *Compose) {
+		db := c.Services["db"]
+		db.Sfc.Socket = slices.Clone(c.Services["web"].Sfc.Sources[1:])
+		c.Services["db"] = db
+	}, func(ctx *PlanningContext) { ctx.Features["secret-socket"] = true })
+	if material.Binding.Needs().Socket == nil {
+		t.Fatal("binding has no socket needs")
+	}
+	_, spec, err := b.taskRecipe("db", material, material.Bridge.Owner)
+	if err != nil || !spec.SecretSocket {
+		t.Fatalf("recipe: socket=%t err=%v", spec.SecretSocket, err)
+	}
+	_, plain, material := taskMaterialFixtureWith(t, nil)
+	if _, spec, err = plain.taskRecipe("db", material, material.Bridge.Owner); err != nil || spec.SecretSocket {
+		t.Fatalf("plain recipe: socket=%t err=%v", spec.SecretSocket, err)
 	}
 }

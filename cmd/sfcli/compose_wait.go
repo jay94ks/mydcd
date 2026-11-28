@@ -94,7 +94,7 @@ func waitComposeOperation(ctx context.Context, o composeOptions, tenant string, 
 			}
 		} else {
 			if row.Operation.ID != o.operation.value || row.Retirement != nil {
-				if pendingComposeDelivery(row, o.operation.value) {
+				if pendingComposeDelivery(row, o.operation.value) || replacingComposeWave(row, o.operation.value) {
 					if !pause() {
 						return finish(false)
 					}
@@ -113,6 +113,13 @@ func waitComposeOperation(ctx context.Context, o composeOptions, tenant string, 
 			return finish(false)
 		}
 	}
+}
+
+// A rolling replacement keeps this operation's execution while a wave
+// retires the containers it replaces (AppView.Replacement with a "roll-"
+// retirement). That is this deployment in progress, not another one.
+func replacingComposeWave(row control.AppView, operation string) bool {
+	return row.Operation.ID == operation && row.Replacement != nil && row.Retirement != nil && row.Retirement.Status == "Retiring"
 }
 
 // Only an accepted current transition selects a future execution. A queued

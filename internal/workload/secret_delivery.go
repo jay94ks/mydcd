@@ -54,6 +54,9 @@ func validInputDelivery(f InputFile) bool {
 	if f.Kind == "env" {
 		return SecretEnvironmentName(f.Target) && f.UID == 0 && f.GID == 0 && f.Mode == 0400
 	}
+	if f.Kind == "socket" {
+		return false // a directory, never read as a value
+	}
 	return (f.Kind == "" || f.Kind == "file") && SecretFileTarget(f.Target) && (f.Mode == 0400 || f.Mode == 0440)
 }
 

@@ -8,6 +8,7 @@ import (
 	"github.com/jay94ks/seafield/internal/desired"
 	"github.com/jay94ks/seafield/internal/engine"
 	"github.com/jay94ks/seafield/internal/workload"
+	"maps"
 	"slices"
 	"strconv"
 )
@@ -74,6 +75,16 @@ func (s ComposeService) resolveProcess(ctx context.Context, docker *engine.Clien
 		overrides.StopSignal = stop.Signal
 	}
 	overrides.MountTargets = slices.Clone(secretTargets)
+	if len(s.Sfc.Socket) > 0 {
+		// sfcd binds the socket directory and names the socket; the user's
+		// environment and mounts cannot (compose_parse.go).
+		overrides.Environment = maps.Clone(overrides.Environment)
+		if overrides.Environment == nil {
+			overrides.Environment = map[string]string{}
+		}
+		overrides.Environment[workload.SecretSocketEnv] = workload.SecretSocketPath
+		overrides.MountTargets = append(overrides.MountTargets, workload.SecretSocketTarget)
+	}
 	for i, m := range mounts {
 		if m.Target != s.Volumes[i].Target || m.Consumer.Writable == s.Volumes[i].ReadOnly {
 			return workload.Process{}, ErrInputs

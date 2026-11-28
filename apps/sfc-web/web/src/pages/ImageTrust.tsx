@@ -47,7 +47,7 @@ export function TrustTab() {
                 <>
                   <span className="small muted">rev {v.revision}</span>
                   <Refresh q={q} poll={false} />
-                  <button className="btn primary" disabled={!canDeploy} title={canDeploy ? undefined : NEED} onClick={() => setDlg({ kind: 'add' })}>
+                  <button type="button" className="btn primary" disabled={!canDeploy} title={canDeploy ? undefined : NEED} onClick={() => setDlg({ kind: 'add' })}>
                     ＋ 신뢰 출처 추가
                   </button>
                 </>
@@ -113,7 +113,7 @@ export function TrustTab() {
               </Card>
             )}
             {dlg?.kind === 'uses' && (
-              <Dialog title={`${key(dlg.r)}를 쓰는 곳`} onClose={() => setDlg(undefined)} footer={<button className="btn" onClick={() => setDlg(undefined)}>닫기</button>}>
+              <Dialog title={`${key(dlg.r)}를 쓰는 곳`} onClose={() => setDlg(undefined)} footer={<button type="button" className="btn" onClick={() => setDlg(undefined)}>닫기</button>}>
                 <UseList uses={dlg.r.uses} only={dlg.r.index} />
               </Dialog>
             )}
@@ -187,15 +187,15 @@ const RULE_RE = { registry: /^[a-z0-9.-]+(:\d{1,5})?$/, repository: /^(\*\*|[a-z
 
 function SaveFooter({ m, finished, label, disabled, onClose, onSend, danger }: { m: ReturnType<typeof useMutation>; finished: boolean; label: string; disabled: boolean; onClose: () => void; onSend: () => void; danger?: boolean }) {
   return finished ? (
-    <button className="btn primary" onClick={onClose}>
+    <button type="button" className="btn primary" onClick={onClose}>
       닫기
     </button>
   ) : (
     <>
-      <button className="btn" onClick={onClose}>
+      <button type="button" className="btn" onClick={onClose}>
         취소
       </button>
-      <button className={danger ? 'btn danger solid' : 'btn primary'} disabled={m.busy || disabled} onClick={onSend}>
+      <button type="button" className={danger ? 'btn danger solid' : 'btn primary'} disabled={m.busy || disabled} onClick={onSend}>
         {m.busy ? '보내는 중…' : label}
       </button>
     </>
@@ -253,10 +253,10 @@ function RuleDialog({ tenant, v, edit, onClose, onDone }: { tenant: string; v: I
       onClose={onClose}
       footer={
         <>
-          <button className="btn" onClick={onClose}>
+          <button type="button" className="btn" onClick={onClose}>
             취소
           </button>
-          <button className="btn primary" disabled={!ok} onClick={() => setReview(edit ? before.map((x) => (key(x) === key(edit) ? r : x)) : [...before, r])}>
+          <button type="button" className="btn primary" disabled={!ok} onClick={() => setReview(edit ? before.map((x) => (key(x) === key(edit) ? r : x)) : [...before, r])}>
             변경 검토
           </button>
         </>

@@ -24,7 +24,7 @@ func newTransitionFixture(t *testing.T, prune, empty bool) *deliveryFixture {
 		t.Fatal(err)
 	}
 	c.Sfc.Delivery.Sync.Prune = prune
-	c.Sfc.Delivery.Sync.AllowEmpty = empty
+	_ = empty // an empty services map is allowed whenever x-sfc.cd is present
 	f.body, err = yaml.Marshal(c)
 	if err != nil {
 		t.Fatal(err)
@@ -344,50 +344,13 @@ func TestDeliveryTransitionEmptySourceRequiresPolicyAndRetainsData(t *testing.T)
 			t.Fatal("prune empty left unclosed task")
 		}
 	}
-	c.Sfc.Delivery.Sync.AllowEmpty = false
+	c.Sfc.Delivery = nil
 	bad, _ := yaml.Marshal(c)
 	if _, err := ParseCompose(bad); err == nil {
-		t.Fatal("empty services without allow_empty")
+		t.Fatal("empty services without x-sfc.cd")
 	}
-	if _, err := ParseCompose([]byte("name: app\nx-sfc: {schema: 1, delivery: {sync: {allow_empty: true}}}\n")); err == nil {
+	if _, err := ParseCompose([]byte("name: app\nx-sfc: {schema: 1, cd: {repository: r, branch: b, path: p}}\n")); err == nil {
 		t.Fatal("absent services treated as explicit empty map")
-	}
-	// Non-Git empty input may legitimately have zero resource goals.
-	c.Sfc.Delivery.Enabled = false
-	c.Sfc.Delivery.Sync.AllowEmpty = true
-	local, _ := yaml.Marshal(c)
-	parsed, err := ParseCompose(local)
-	if err != nil {
-		t.Fatal(err)
-	}
-	zero, err := Compile(parsed, f.f.c, f.ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(zero.Steps()) != 0 {
-		t.Fatal("synthetic resource for empty local app")
-	}
-	e, err := NewExecution(zero, f.f.c, f.ctx, "local-empty", "submitter", 1)
-	if err != nil {
-		t.Fatal(err)
-	}
-	e, err = e.Finish(e.Revision(), 100)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err = e.Encode(); err != nil {
-		t.Fatal(err)
-	}
-	nonempty, _ := ParseCompose(f.body)
-	nonempty.Sfc.Delivery.Enabled = false
-	erased := zero
-	erased.d.Input = nonempty
-	// Encode or Decode must refuse it (Encode validates since the input
-	// projection check moved there).
-	if raw, err := erased.Encode(); err == nil {
-		if _, err = DecodeBlueprint(raw); err == nil {
-			t.Fatal("allow_empty hid erased goals of a nonempty declaration")
-		}
 	}
 }
 func TestDeliveryTransitionDownPreservesAndSettlesLateUnknownBeforeDrain(t *testing.T) {

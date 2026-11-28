@@ -18,7 +18,9 @@ import (
 	"github.com/jay94ks/seafield/internal/vps"
 )
 
-// VPSCredentialInput is a provider key pair to seal for Account. Like
+// VPSCredentialInput is a provider key pair to seal for Account; a vendor
+// with one bearer token (vps.Vendor.TokenOnly) sends it as AccessKey and no
+// SecretKey. Like
 // CertificateInput it travels only on the sensitive input purpose and never
 // enters a Request, a UserOperation or a journal. Request is the write ID of
 // the put-vps-account the sealed result will go into.
@@ -33,7 +35,7 @@ func (VPSCredentialInput) Format(s fmt.State, _ rune) {
 
 func validVPSCredentialInput(q VPSCredentialInput) bool {
 	return q.Request != "" && len(q.Request) <= 128 && utf8.ValidString(q.Request) && !strings.ContainsAny(q.Request, "\x00\r\n") &&
-		vps.ValidAccountName(q.Account) && len(q.AccessKey) > 0 && len(q.AccessKey) <= 256 && len(q.SecretKey) > 0 && len(q.SecretKey) <= 256
+		vps.ValidAccountName(q.Account) && len(q.AccessKey) > 0 && len(q.AccessKey) <= 256 && len(q.SecretKey) <= 256
 }
 
 // SealVPSCredential asks the target, which must be a current voter, to seal

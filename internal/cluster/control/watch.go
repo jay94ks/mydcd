@@ -25,7 +25,8 @@ import (
 type WatchKey struct {
 	// Kind is "app", "volume", "network", "node", "tenant", "registry",
 	// "registry-maintenance" (a built-in registry's GC and prune jobs, named
-	// by the registry ID), "ingress", "dns", "certificate", "domain" or
+	// by the registry ID), "ingress", "dns", "certificate", "domain",
+	// "host-grant" (a route host decision, named "<tenant>/<host>") or
 	// "acme-responder".
 	Kind string
 	// Tenant is the owning tenant, "" for a cluster record (a node, a
@@ -34,10 +35,13 @@ type WatchKey struct {
 	// Name is the record's own name in that query: the app name, the
 	// volume key, the network ID, the node ID, the tenant ID, the registry
 	// ID, the network ID of a managed DNS, the certificate ID, the domain.
-	// An ingress record is named by its part: "block/<id>", "host-policy",
+	// An ingress record is named by its part: "block/<id>",
 	// "balance/<app>/<route>", "drain/<app>/<node>", "gateway/<node>",
 	// "cluster-app-route/<app>" or "history".
 	Name string
+	// User is the owner of a per-user record (a node shell session): it
+	// and cluster managers hear of it.
+	User string `json:",omitempty"`
 }
 
 // WatchRef is one changed record. Deleted is true when the record no longer
@@ -52,7 +56,7 @@ type WatchRecords map[WatchKey][32]byte
 
 // WatchBooks is every book a change watch follows, by its root key. Managed
 // DNS is one row per network under services.ManagedDNSPrefix.
-var WatchBooks = []string{AppsKey, VolumesKey, ResourcesKey, MembersKey, CatalogKey, RegistriesKey, RegistryMaintenanceKey, IngressManagementKey, CertificatesKey, services.ManagedDNSPrefix}
+var WatchBooks = []string{AppsKey, VolumesKey, ResourcesKey, MembersKey, CatalogKey, RegistriesKey, RegistryMaintenanceKey, IngressManagementKey, CertificatesKey, VPSKey, NodeShellKey, services.ManagedDNSPrefix}
 
 // WatchBookRevision is the root row revision of book: it moves with every
 // write to the book, so an unchanged revision means unchanged records. A
@@ -111,7 +115,7 @@ func (p Policy) WatchRecords(s state.State, book string) (WatchRecords, error) {
 			return nil, err
 		}
 		for _, v := range apps.Records() {
-			if !out.add(WatchKey{"app", v.Tenant, v.App}, v) {
+			if !out.add(WatchKey{Kind: "app", Tenant: v.Tenant, Name: v.App}, v) {
 				return nil, ErrCatalog
 			}
 		}
@@ -127,7 +131,7 @@ func (p Policy) WatchRecords(s state.State, book string) (WatchRecords, error) {
 		slices.Sort(keys)
 		for _, k := range keys {
 			e := v.entries[k]
-			if !out.add(WatchKey{"volume", e.State.Scope().Tenant, k}, e) {
+			if !out.add(WatchKey{Kind: "volume", Tenant: e.State.Scope().Tenant, Name: k}, e) {
 				return nil, ErrCatalog
 			}
 		}
@@ -141,7 +145,7 @@ func (p Policy) WatchRecords(s state.State, book string) (WatchRecords, error) {
 			if n.System {
 				tenant = ""
 			}
-			if !out.add(WatchKey{"network", tenant, n.ID}, n) {
+			if !out.add(WatchKey{Kind: "network", Tenant: tenant, Name: n.ID}, n) {
 				return nil, ErrCatalog
 			}
 		}
@@ -162,7 +166,7 @@ func (p Policy) WatchRecords(s state.State, book string) (WatchRecords, error) {
 		}
 		for node, values := range perNode {
 			for _, v := range values {
-				if !out.add(WatchKey{"node", "", node}, v) {
+				if !out.add(WatchKey{Kind: "node", Tenant: "", Name: node}, v) {
 					return nil, ErrCatalog
 				}
 			}
@@ -175,7 +179,7 @@ func (p Policy) WatchRecords(s state.State, book string) (WatchRecords, error) {
 		tenants := c.Tenants()
 		slices.SortFunc(tenants, func(a, b access.Tenant) int { return strings.Compare(a.ID, b.ID) })
 		for _, t := range tenants {
-			if !out.add(WatchKey{"tenant", t.ID, t.ID}, t) {
+			if !out.add(WatchKey{Kind: "tenant", Tenant: t.ID, Name: t.ID}, t) {
 				return nil, ErrCatalog
 			}
 		}
@@ -185,7 +189,7 @@ func (p Policy) WatchRecords(s state.State, book string) (WatchRecords, error) {
 			return nil, err
 		}
 		for _, e := range r.Entries() {
-			if !out.add(WatchKey{"registry", e.Spec.Tenant, e.Spec.ID}, e) {
+			if !out.add(WatchKey{Kind: "registry", Tenant: e.Spec.Tenant, Name: e.Spec.ID}, e) {
 				return nil, ErrCatalog
 			}
 		}
@@ -198,7 +202,7 @@ func (p Policy) WatchRecords(s state.State, book string) (WatchRecords, error) {
 			if row.Change.External != nil {
 				continue
 			}
-			if !out.add(WatchKey{"registry-maintenance", row.Change.Tenant, row.Change.RegistryID()}, row) {
+			if !out.add(WatchKey{Kind: "registry-maintenance", Tenant: row.Change.Tenant, Name: row.Change.RegistryID()}, row) {
 				return nil, ErrCatalog
 			}
 		}
@@ -216,17 +220,55 @@ func (p Policy) WatchRecords(s state.State, book string) (WatchRecords, error) {
 			return nil, err
 		}
 		for _, e := range c.Certificates {
-			if !out.add(WatchKey{"certificate", "", e.Certificate.Metadata.ID.String()}, e) {
+			if !out.add(WatchKey{Kind: "certificate", Tenant: "", Name: e.Certificate.Metadata.ID.String()}, e) {
 				return nil, ErrCatalog
 			}
 		}
 		for _, d := range c.Domains {
-			if !out.add(WatchKey{"domain", "", d.Name}, d) {
+			if !out.add(WatchKey{Kind: "domain", Tenant: "", Name: d.Name}, d) {
 				return nil, ErrCatalog
 			}
 		}
-		if c.ACMEResponder != nil && !out.add(WatchKey{"acme-responder", "", "acme-responder"}, c.ACMEResponder) {
+		for _, g := range c.Grants {
+			if !out.add(WatchKey{Kind: "host-grant", Tenant: g.Tenant, Name: g.Tenant + "/" + g.Host}, g) {
+				return nil, ErrCatalog
+			}
+		}
+		if c.ACMEResponder != nil && !out.add(WatchKey{Kind: "acme-responder", Tenant: "", Name: "acme-responder"}, c.ACMEResponder) {
 			return nil, ErrCatalog
+		}
+	case VPSKey:
+		v, err := p.VPS(s)
+		if err != nil {
+			return nil, err
+		}
+		for _, a := range v.Accounts {
+			if !out.add(WatchKey{Kind: "vps", Name: "account/" + a.Name}, a) {
+				return nil, ErrCatalog
+			}
+		}
+		for _, x := range v.Servers {
+			if !out.add(WatchKey{Kind: "vps", Name: "server/" + x.Name}, x) {
+				return nil, ErrCatalog
+			}
+		}
+	case NodeShellKey:
+		b, err := p.NodeShells(s)
+		if err != nil {
+			return nil, err
+		}
+		if !out.add(WatchKey{Kind: "node-shell", Name: "policy"}, b.Policy) {
+			return nil, ErrCatalog
+		}
+		for _, r := range b.Readiness {
+			if !out.add(WatchKey{Kind: "node-shell", Name: "node/" + r.Node}, r) {
+				return nil, ErrCatalog
+			}
+		}
+		for _, r := range b.Records {
+			if !out.add(WatchKey{Kind: "node-shell-session", Name: r.Session.SessionID, User: r.Session.User}, r) {
+				return nil, ErrCatalog
+			}
 		}
 	case services.ManagedDNSPrefix:
 		sources, err := p.ManagedDNS(s)
@@ -234,7 +276,7 @@ func (p Policy) WatchRecords(s state.State, book string) (WatchRecords, error) {
 			return nil, err
 		}
 		for _, v := range sources {
-			if !out.add(WatchKey{"dns", v.Definition.Tenant, v.Definition.Network}, v) {
+			if !out.add(WatchKey{Kind: "dns", Tenant: v.Definition.Tenant, Name: v.Definition.Network}, v) {
 				return nil, ErrCatalog
 			}
 		}
@@ -248,12 +290,11 @@ func (p Policy) WatchRecords(s state.State, book string) (WatchRecords, error) {
 // they follow from app goals, whose "app" records already move.
 func (b IngressManagement) watchRecords(out WatchRecords) bool {
 	ok := true
-	add := func(tenant, name string, v any) { ok = out.add(WatchKey{"ingress", tenant, name}, v) && ok }
+	add := func(tenant, name string, v any) {
+		ok = out.add(WatchKey{Kind: "ingress", Tenant: tenant, Name: name}, v) && ok
+	}
 	for _, r := range b.Blocks {
 		add(r.Block.Tenant, "block/"+r.Block.ID, r)
-	}
-	for _, r := range b.HostPolicies {
-		add(r.Tenant, "host-policy", r)
 	}
 	for _, r := range b.Balances {
 		add(r.Tenant, "balance/"+r.App+"/"+r.Route, r)

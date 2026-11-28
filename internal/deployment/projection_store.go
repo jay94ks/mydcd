@@ -237,6 +237,12 @@ func (m *ProjectionStore) Publish(ctx context.Context, b Binding, stage Stage, r
 	if err != nil && !errors.Is(err, storage.ErrMissing) {
 		return ref, err
 	}
+	if err == nil && m.park(ref, old) {
+		if err = m.journal.Move(ref.Key, workload.ParkedKey(ref.Key, old.State.Applied.Generation), func(r reconcile.Record) bool { return m.park(ref, r) }); err != nil {
+			return ref, err
+		}
+		old, err = reconcile.Record{}, storage.ErrMissing
+	}
 	if err == nil && old.State.Pending != nil {
 		if old.State.Desired != d {
 			return ref, reconcile.ErrPending
@@ -282,8 +288,28 @@ func (m *ProjectionStore) Publish(ctx context.Context, b Binding, stage Stage, r
 	return ref, m.journal.Step(ctx, ref.Key, projectionDriver{m})
 }
 
+// A surge (devel/design/zero-downtime-apply.md) publishes a Task's new inputs
+// generation while the original container still holds the original one.
+// park reports whether old is that original: applied, settled, older than ref
+// and still lent out. Publish then moves it under workload.ParkedKey, where it
+// is drained like any retiring generation once its consumer is gone.
+func (m *ProjectionStore) park(ref workload.InputRef, old reconcile.Record) bool {
+	s := old.State
+	return s.Pending == nil && s.Applied.Present && s.Applied.Generation < ref.Generation && s.Desired.Resource == s.Applied && len(old.Consumers) != 0
+}
+
+// recordKey is the journal key holding ref's generation: its parked record
+// when one exists, else the inputs key.
+func (m *ProjectionStore) recordKey(ref workload.InputRef) string {
+	parked := workload.ParkedKey(ref.Key, ref.Generation)
+	if _, err := m.journal.Read(parked); err == nil {
+		return parked
+	}
+	return ref.Key
+}
+
 func (m *ProjectionStore) expected(ref workload.InputRef, consumer, key string, generation uint64) (Binding, reconcile.Record, error) {
-	r, err := m.journal.Read(ref.Key)
+	r, err := m.journal.Read(m.recordKey(ref))
 	if err != nil || generation != ref.Generation || !r.State.Applied.Present || r.State.Applied.Generation != generation {
 		return Binding{}, r, ErrProjectionStore
 	}
@@ -306,7 +332,7 @@ func (m *ProjectionStore) Ready(ctx context.Context, ref workload.InputRef) (boo
 	if m.closed {
 		return false, ErrProjectionStore
 	}
-	r, err := m.journal.Read(ref.Key)
+	r, err := m.journal.Read(m.recordKey(ref))
 	if errors.Is(err, storage.ErrMissing) {
 		return false, nil
 	}
@@ -385,7 +411,7 @@ func (m *ProjectionStore) AcquireInputs(ctx context.Context, ref workload.InputR
 	if err = m.verify(b, nil); err != nil {
 		return workload.InputLease{}, err
 	}
-	pin, err := m.journal.Borrow(ref.Key, consumer, generation)
+	pin, err := m.journal.Borrow(m.recordKey(ref), consumer, generation)
 	if err != nil {
 		return workload.InputLease{}, err
 	}
@@ -433,7 +459,8 @@ func (m *ProjectionStore) ReturnInputs(ref workload.InputRef, consumer, key stri
 	if m.closed {
 		return ErrProjectionStore
 	}
-	current, err := m.journal.Read(ref.Key)
+	record := m.recordKey(ref)
+	current, err := m.journal.Read(record)
 	if err != nil {
 		return err
 	}
@@ -450,7 +477,7 @@ func (m *ProjectionStore) ReturnInputs(ref workload.InputRef, consumer, key stri
 	if !ok {
 		return nil
 	}
-	return m.journal.Return(ref.Key, consumer, pin)
+	return m.journal.Return(record, consumer, pin)
 }
 
 func (m *ProjectionStore) Drain(ctx context.Context, ref workload.InputRef, revision uint64) error {
@@ -459,7 +486,8 @@ func (m *ProjectionStore) Drain(ctx context.Context, ref workload.InputRef, revi
 	if m.closed {
 		return ErrProjectionStore
 	}
-	r, err := m.journal.Read(ref.Key)
+	record := m.recordKey(ref)
+	r, err := m.journal.Read(record)
 	if err != nil {
 		return err
 	}
@@ -474,10 +502,10 @@ func (m *ProjectionStore) Drain(ctx context.Context, ref workload.InputRef, revi
 	if err != nil || projectionReference(b) != ref {
 		return ErrProjectionStore
 	}
-	if err = m.journal.Desired(ref.Key, reconcile.Desired{Revision: revision, Retiring: ref.Generation}, r.Capacity); err != nil {
+	if err = m.journal.Desired(record, reconcile.Desired{Revision: revision, Retiring: ref.Generation}, r.Capacity); err != nil {
 		return err
 	}
-	return m.journal.Step(ctx, ref.Key, projectionDriver{m})
+	return m.journal.Step(ctx, record, projectionDriver{m})
 }
 func (m *ProjectionStore) Gone(ref workload.InputRef) (bool, error) {
 	m.mu.Lock()
@@ -492,7 +520,7 @@ func (m *ProjectionStore) gone(ref workload.InputRef) (bool, error) {
 	if err != nil || projectionReference(b) != ref {
 		return false, ErrProjectionStore
 	}
-	r, err := m.journal.Read(ref.Key)
+	r, err := m.journal.Read(m.recordKey(ref))
 	if err != nil {
 		return false, err
 	}
@@ -635,6 +663,12 @@ func (d projectionDriver) Execute(ctx context.Context, key string, op reconcile.
 	m := d.m
 	if ctx.Err() != nil {
 		return reconcile.EffectUnknown, ctx.Err()
+	}
+	if original, generation, parked := workload.ParkedTask(key); parked {
+		if generation != op.Target.Generation {
+			return reconcile.EffectUnknown, ErrProjectionStore
+		}
+		key = original
 	}
 	b, err := m.scope(op.Target.Spec)
 	if err != nil || key != projectionKey(b) || op.Target.Generation != b.d.Needs.Generation {

@@ -17,14 +17,21 @@
    sfcli cluster backup create --out cluster-before-0.1.4.backup
    ```
 
-3. 서버 한 대씩 패키지를 바꾼다. 패키지는 돌고 있던 `sfed`·`sfcd`만 다시 시작한다. 컨테이너는 엔진이 다시 시작하는 동안에도 계속 돈다.
+3. 설치하기 전에 새 `sfcd` 바이너리로 각 서버에서 미리 돌려 본다(dry run). 서버에 저장된 control 상태의 사본을 새 빌드로 읽고 다시 적용해 보며, 서버는 그대로 돌아도 되고 아무것도 바뀌지 않는다. 사본은 임시 디렉터리에 만들었다가 지운다(`control/raft.db`, `control/fsm.db` 크기만큼의 공간이 필요하면 `--scratch DIR`).
+
+   ```sh
+   sudo ./sfcd-0.1.4 --config /etc/sfc/node.yaml upgrade-dry-run
+   ```
+
+   "can start on …"이면 다음으로 간다. "would not start on …"이면 그 빌드는 이 서버의 저장 상태를 읽지 못하니 설치하지 않는다(릴리스 문제로 알린다). 출력의 `(stage …)`는 어느 검사가 거절했는지다. 서버가 도는 동안 복사한 사본은 복사 중 쓰기로 드물게 깨질 수 있으니, 실패하면 그 서버의 sfcd를 멈추고 한 번 더 돌려 확인한다.
+4. 서버 한 대씩 패키지를 바꾼다. 패키지는 돌고 있던 `sfed`·`sfcd`만 다시 시작한다. 컨테이너는 엔진이 다시 시작하는 동안에도 계속 돈다.
 
    ```sh
    sudo apt install ./sfcd_0.1.4_amd64.deb        # Debian·Ubuntu
    ```
 
    `sfcli node show <서버>`가 새 버전과 Ready를 보일 때까지 기다린 뒤 다음 서버로 간다. 리더는 마지막에 바꾼다. 리더인 `sfcd`는 멈추라는 신호(SIGTERM)를 받으면 다른 투표 서버에게 리더를 넘긴 뒤 멈추므로(최대 10초), 리더를 바꾸는 동안에도 쓰기가 오래 멈추지 않는다.
-4. 바꾸는 동안 `sfcli cluster upgrade status`로 서버별 버전과 기능, 클러스터가 지금 쓸 수 있는 기능, 서버마다 모자란 기능을 본다.
+5. 바꾸는 동안 `sfcli cluster upgrade status`로 서버별 버전과 기능, 클러스터가 지금 쓸 수 있는 기능, 서버마다 모자란 기능을 본다.
 
    ```text
    Connected to jay2 (sfcd 0.1.4)
@@ -37,7 +44,7 @@
    jay4  0.1.3    network-transit-v1                      network-transit-v2
    ```
 
-5. 모든 서버를 바꾼 뒤 같은 명령에서 `LACKS`가 모두 `-`이고 섞인 버전 줄이 없는지 본다.
+6. 모든 서버를 바꾼 뒤 같은 명령에서 `LACKS`가 모두 `-`이고 섞인 버전 줄이 없는지 본다.
 
 ## 되돌리기
 

@@ -210,7 +210,7 @@ func ingressMetrics(ctx context.Context, c sfc.Conn, key, tenant, part string) (
 	return out, nil
 }
 
-// ingressPaged reads Part blocks or policies (numeric Offset in Next).
+// ingressPaged reads Part blocks (numeric Offset in Next).
 func ingressPaged(ctx context.Context, c sfc.Conn, q control.IngressQuery) (control.IngressPage, error) {
 	var out control.IngressPage
 	q.Offset, q.After = 0, ""
@@ -223,7 +223,6 @@ func ingressPaged(ctx context.Context, c sfc.Conn, q control.IngressQuery) (cont
 			out = p
 		} else {
 			out.Blocks = append(out.Blocks, p.Blocks...)
-			out.HostPolicies = append(out.HostPolicies, p.HostPolicies...)
 			for _, n := range p.Nodes {
 				if len(out.Nodes) == 0 {
 					out.Nodes = append(out.Nodes, n)

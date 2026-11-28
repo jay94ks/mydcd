@@ -36,7 +36,7 @@ import { ContainerConsole } from '../components/ContainerConsole';
 import { useSession, useTenantRole } from '../auth/session';
 import { Sheet } from '../mobile/Sheet';
 import { M_BADGE, opLine, opTitle } from './Operations';
-import { drainLive, ingressLive, opsLive, serverLive } from '../lib/liveTopics';
+import { drainLive, ingressLive, opsLive, serverLive, serverMeasured } from '../lib/liveTopics';
 
 export function TaskTable({ tasks, showNode = false, showApp = true }: { tasks: TaskView[]; showNode?: boolean; showApp?: boolean }) {
   const session = useSession();
@@ -89,7 +89,7 @@ export function TaskTable({ tasks, showNode = false, showApp = true }: { tasks: 
           key: 'console',
           header: '',
           render: (t) => (
-            <button className="btn sm" onClick={(e) => (e.stopPropagation(), setOpen(t))} title="로그 따라가기 · 자원 사용 · 프로세스 · 터미널">
+            <button type="button" className="btn sm" onClick={(e) => (e.stopPropagation(), setOpen(t))} title="로그 따라가기 · 자원 사용 · 프로세스 · 터미널">
               로그 · 터미널
             </button>
           ),
@@ -112,14 +112,45 @@ function downloadDiagnostics(node: string, toast: (s: string) => void) {
   toast(`${node} 진단 묶음을 내려받습니다. 비밀값·개인키는 들어 있지 않습니다.`);
 }
 
-function NodeActions({ node, onDone }: { node: NodeView; onDone: () => void }) {
+type LatestDrain = ReturnType<typeof useLatestDrain>;
+
+/**
+ * 이 서버의 가장 최근 비우기. 서버 행의 drain.operation(데몬 #341)으로, 없으면 operation 없이 drain-status를 읽는다.
+ * 기록이 없으면(404) null이다. 비우는 중일 때만 서버 보고에 맞춰 다시 읽고, 기록이 없거나 끝났으면 다시 읽지 않는다
+ * (서버 보고마다 404를 다시 받지 않게). 서버 행의 비우기가 바뀌거나 이 화면에서 비우기를 보내면 다시 읽는다.
+ */
+function useLatestDrain(node: string | undefined, operation: string | undefined, rowState: string | undefined) {
+  const [follow, setFollow] = useState(true);
+  const q = usePoll(
+    async (s) => {
+      if (!node) return null;
+      try {
+        return await nodeDrainStatus(node, operation, s);
+      } catch (e) {
+        if (e instanceof ApiError && e.status === 404) return null;
+        throw e;
+      }
+    },
+    [node, operation, rowState],
+    follow ? 10_000 : 0,
+    follow ? drainLive : undefined,
+  );
+  const running = !!q.data && drainRunning(q.data.state);
+  const settled = q.data !== undefined && !running;
+  const { setInterval: setPollInterval } = q;
+  useEffect(() => {
+    setFollow(!settled);
+    setPollInterval(settled ? 0 : 10_000);
+  }, [settled, setPollInterval]);
+  return q;
+}
+
+function NodeActions({ node, drain: ds, onDone }: { node: NodeView; drain: LatestDrain; onDone: () => void }) {
   const [act, setAct] = useState<'isolate' | 'restore'>();
   // 창을 연 순간의 서버 revision이 expected
   const [actRev, setActRev] = useState<number>();
   const openAct = (a: 'isolate' | 'restore') => (setActRev(node.revision), setAct(a));
   const [dlg, setDlg] = useState<'cordon' | 'uncordon' | 'prune' | 'remove' | 'drain' | 'demote' | 'rotate' | 'force'>();
-  // 가장 최근 비우기: 서버 행의 drain이 없으면(REQ-70은 operation 없는 drain-status만) drain-status로 본다. 없으면 404
-  const ds = usePoll((s) => nodeDrainStatus(node.id, node.drain?.operation, s), [node.id, node.drain?.operation], 30_000, drainLive);
   const drainState = ds.data?.state ?? node.drain?.state;
   const toast = useToast();
   const navigate = useNavigate();
@@ -149,13 +180,13 @@ function NodeActions({ node, onDone }: { node: NodeView; onDone: () => void }) {
   };
   return (
     <>
-      <button className="btn" onClick={() => openAct('isolate')} disabled={node.phase === 'isolated'} title={node.phase === 'isolated' ? '이미 격리됨' : undefined}>
+      <button type="button" className="btn" onClick={() => openAct('isolate')} disabled={node.phase === 'isolated'} title={node.phase === 'isolated' ? '이미 격리됨' : undefined}>
         격리
       </button>
-      <button className="btn" onClick={() => openAct('restore')} disabled={node.phase !== 'isolated'} title={node.phase !== 'isolated' ? '격리된 서버만' : undefined}>
+      <button type="button" className="btn" onClick={() => openAct('restore')} disabled={node.phase !== 'isolated'} title={node.phase !== 'isolated' ? '격리된 서버만' : undefined}>
         복귀
       </button>
-      <button className="btn danger" onClick={() => setDlg('remove')}>
+      <button type="button" className="btn danger" onClick={() => setDlg('remove')}>
         서버 제거
       </button>
       <Menu
@@ -178,7 +209,7 @@ function NodeActions({ node, onDone }: { node: NodeView; onDone: () => void }) {
       />
       {(dlg === 'cordon' || dlg === 'uncordon') && <CordonDialog node={node} on={dlg === 'cordon'} onClose={() => (setDlg(undefined), onDone())} />}
       {dlg === 'remove' && <RemoveDialog node={node} onClose={() => (setDlg(undefined), onDone())} />}
-      {dlg === 'drain' && <DrainDialog node={node} onClose={() => (setDlg(undefined), onDone())} />}
+      {dlg === 'drain' && <DrainDialog node={node} onClose={() => (setDlg(undefined), onDone(), ds.refresh())} />}
       {dlg === 'demote' && <DemoteDialog node={node} onClose={() => (setDlg(undefined), onDone())} />}
       {dlg === 'rotate' && <RotateIdentityDialog node={node} onClose={() => (setDlg(undefined), onDone())} />}
       {dlg === 'force' && <ForceRemoveDialog node={node} onClose={() => setDlg(undefined)} onRemoved={() => navigate('/servers')} />}
@@ -190,15 +221,15 @@ function NodeActions({ node, onDone }: { node: NodeView; onDone: () => void }) {
           width={560}
           footer={
             m.op?.state === 'applied' ? (
-              <button className="btn primary" onClick={close}>
+              <button type="button" className="btn primary" onClick={close}>
                 닫기
               </button>
             ) : (
               <>
-                <button className="btn" onClick={close}>
+                <button type="button" className="btn" onClick={close}>
                   취소
                 </button>
-                <button className={act === 'isolate' ? 'btn danger solid' : 'btn primary'} disabled={m.busy} onClick={() => void sendOp(m, nodeIsolatePath(node.id, act), actRev ? { expected: actRev } : {})}>
+                <button type="button" className={act === 'isolate' ? 'btn danger solid' : 'btn primary'} disabled={m.busy} onClick={() => void sendOp(m, nodeIsolatePath(node.id, act), actRev ? { expected: actRev } : {})}>
                   {m.busy ? '보내는 중…' : labels[act]}
                 </button>
               </>
@@ -232,15 +263,15 @@ function RemoveDialog({ node, onClose }: { node: NodeView; onClose: () => void }
       onClose={done ? () => navigate('/servers') : onClose}
       footer={
         done ? (
-          <button className="btn primary" onClick={() => navigate('/servers')}>
+          <button type="button" className="btn primary" onClick={() => navigate('/servers')}>
             서버 목록으로
           </button>
         ) : (
           <>
-            <button className="btn" onClick={onClose}>
+            <button type="button" className="btn" onClick={onClose}>
               취소
             </button>
-            <button className="btn danger solid" disabled={m.busy || typed !== node.id || (!!p && !p.removable)} onClick={() => void send()}>
+            <button type="button" className="btn danger solid" disabled={m.busy || typed !== node.id || (!!p && !p.removable)} onClick={() => void send()}>
               {m.busy ? '보내는 중…' : '제거'}
             </button>
           </>
@@ -325,15 +356,15 @@ function CordonDialog({ node, on, onClose }: { node: NodeView; on: boolean; onCl
       onClose={onClose}
       footer={
         done ? (
-          <button className="btn primary" onClick={onClose}>
+          <button type="button" className="btn primary" onClick={onClose}>
             닫기
           </button>
         ) : (
           <>
-            <button className="btn" onClick={onClose}>
+            <button type="button" className="btn" onClick={onClose}>
               취소
             </button>
-            <button className="btn primary" disabled={m.busy || long} onClick={() => void send()}>
+            <button type="button" className="btn primary" disabled={m.busy || long} onClick={() => void send()}>
               {m.busy ? '보내는 중…' : on ? '새 배치 막기' : '다시 받기'}
             </button>
           </>
@@ -401,15 +432,15 @@ function PruneDialog({ node, onClose }: { node: string; onClose: () => void }) {
       onClose={onClose}
       footer={
         done ? (
-          <button className="btn primary" onClick={onClose}>
+          <button type="button" className="btn primary" onClick={onClose}>
             닫기
           </button>
         ) : (
           <>
-            <button className="btn" onClick={onClose}>
+            <button type="button" className="btn" onClick={onClose}>
               취소
             </button>
-            <button className="btn danger solid" disabled={m.busy || !shown || !shown.images.length || (changed && plan === shown.plan)} onClick={() => void send()}>
+            <button type="button" className="btn danger solid" disabled={m.busy || !shown || !shown.images.length || (changed && plan === shown.plan)} onClick={() => void send()}>
               {m.busy ? '보내는 중…' : shown ? `${shown.images.length}개 지우기 · ${fmtBytes(shown.bytes)}` : '지우기'}
             </button>
           </>
@@ -465,7 +496,7 @@ function PruneDialog({ node, onClose }: { node: string; onClose: () => void }) {
       {changed && (
         <div className="note wa small row between">
           <span>그사이 이 서버의 이미지가 바뀌었습니다. 새 계획을 읽은 뒤 다시 지우세요.</span>
-          <button className="btn sm" onClick={() => void q.refresh()}>
+          <button type="button" className="btn sm" onClick={() => void q.refresh()}>
             새로 읽기
           </button>
         </div>
@@ -586,7 +617,8 @@ function ShellOnlyDetail() {
 
 function FullServerDetail() {
   const { id = '' } = useParams();
-  const n = usePoll((s) => fetchNode(id, s), [id], DEFAULT_POLL_MS, serverLive(id));
+  const n = usePoll((s) => fetchNode(id, s), [id], DEFAULT_POLL_MS, serverMeasured(id));
+  const drain = useLatestDrain(n.data?.id, n.data?.drain?.operation, n.data?.drain?.state);
   const base = `/servers/${id}`;
   const phone = usePhone();
   const admin = !!useSession().user.systemAdmin;
@@ -628,7 +660,7 @@ function FullServerDetail() {
         actions={
           phone ? undefined : <>
             <Refresh q={n} />
-            {n.data && <NodeActions node={n.data} onDone={n.refresh} />}
+            {n.data && <NodeActions node={n.data} drain={drain} onDone={n.refresh} />}
           </>
         }
       />
@@ -646,7 +678,7 @@ function FullServerDetail() {
         ]}
       />
       {/* 제목 → 탭 → 내용 순서는 모든 화면이 같다. 요약 타일은 탭 아래 */}
-      {n.data && !phone && <ServerTiles node={n.data} />}
+      {n.data && !phone && <ServerTiles node={n.data} drain={drain} />}
       {/* 셸은 서버 읽기 권한과 따로다(서버 셸 권한만 있는 사람도 연다) */}
       {onShell ? (
         <NodeShellTab node={id} />
@@ -672,18 +704,16 @@ function FullServerDetail() {
 
 const OBSERVE_LIMIT_SEC = 300;
 
-/** 이 서버의 가장 최근 비우기. 서버 행의 drain.operation(데몬 #341)으로, 없으면 operation 없이 drain-status를 읽는다. 없으면(404) 그리지 않는다 */
-function DrainTile({ node, operation }: { node: string; operation?: string }) {
-  const q = usePoll((s) => nodeDrainStatus(node, operation, s), [node, operation], 10_000, drainLive);
-  const d = q.data;
+/** 가장 최근 비우기 타일. 기록이 없으면 그리지 않는다 */
+function DrainTile({ drain }: { drain: LatestDrain }) {
+  const d = drain.data;
   if (!d) return null;
   return <Tile label="비우기" value={`${drainStateText(d.state)} ${d.moved}/${d.total}`} sub={d.blocked ? `그대로 둠 ${d.blocked}` : undefined} />;
 }
 
 /** 위쪽 요약 타일 (캔버스 NodeDetail v114): 역할 · 접속 주소 · CPU/메모리 · 마지막 보고, 있으면 비우기 · 서버 신원 교체 */
-function ServerTiles({ node }: { node: NodeView }) {
+function ServerTiles({ node, drain }: { node: NodeView; drain: LatestDrain }) {
   const gib = (b: number) => (b / 1024 ** 3).toFixed(1).replace(/\.0$/, '');
-  const d = node.drain;
   // 응답 없음은 sfcd status(unreachable)를 따르고, 근접만 관측 한도(REQ-53, 오기 전에는 5분)의 절반으로 계산한다
   const limit = node.observeLimitSeconds || OBSERVE_LIMIT_SEC;
   const age = node.observedAt ? (Date.now() - new Date(node.observedAt).getTime()) / 1000 : undefined;
@@ -713,7 +743,7 @@ function ServerTiles({ node }: { node: NodeView }) {
         tone={late === 'over' ? 'er' : undefined}
         sub={late === 'over' ? '응답 없음' : late === 'near' ? <span className="wa-text">관측 한도 근접</span> : undefined}
       />
-      <DrainTile node={node.id} operation={d?.operation} />
+      <DrainTile drain={drain} />
       {node.identity && <Tile label="서버 신원 교체" value={identityText(node.identity.phase)} tone={node.identity.failure ? 'er' : undefined} sub={node.identity.failure ?? `${node.identityRotatedAt ? `${fmtTime(node.identityRotatedAt)} · ` : ''}${node.identity.operation}`} />}
     </div>
   );
@@ -910,7 +940,7 @@ function Storage({ id }: { id: string }) {
         actions={
           <>
             <Refresh q={r} poll={false} />
-            <button className="btn primary" onClick={() => setDlg({ kind: 'add' })}>
+            <button type="button" className="btn primary" onClick={() => setDlg({ kind: 'add' })}>
               경로 추가
             </button>
           </>
@@ -1040,15 +1070,15 @@ function RootDialog({ node, root, taken, initialPath, onClose, onDone }: { node:
       width={560}
       footer={
         m.op ? (
-          <button className="btn primary" onClick={onClose}>
+          <button type="button" className="btn primary" onClick={onClose}>
             닫기
           </button>
         ) : (
           <>
-            <button className="btn" onClick={onClose}>
+            <button type="button" className="btn" onClick={onClose}>
               취소
             </button>
-            <button className="btn primary" disabled={!ready || m.busy} onClick={() => void send().then((op) => op?.state === 'applied' && onDone())}>
+            <button type="button" className="btn primary" disabled={!ready || m.busy} onClick={() => void send().then((op) => op?.state === 'applied' && onDone())}>
               {root ? '저장' : '추가'}
             </button>
           </>
@@ -1109,15 +1139,15 @@ function RootStepDialog({ kind, root, onClose, onDone }: { kind: 'drain' | 'remo
       width={560}
       footer={
         m.op ? (
-          <button className="btn primary" onClick={onClose}>
+          <button type="button" className="btn primary" onClick={onClose}>
             닫기
           </button>
         ) : (
           <>
-            <button className="btn" onClick={onClose}>
+            <button type="button" className="btn" onClick={onClose}>
               취소
             </button>
-            <button className={`btn ${kind === 'drain' ? 'primary' : 'danger solid'}`} disabled={confirm !== root.name || m.busy} onClick={() => void send().then((op) => op?.state === 'applied' && onDone())}>
+            <button type="button" className={`btn ${kind === 'drain' ? 'primary' : 'danger solid'}`} disabled={confirm !== root.name || m.busy} onClick={() => void send().then((op) => op?.state === 'applied' && onDone())}>
               {kind === 'drain' ? '비우기 시작' : '등록 해제'}
             </button>
           </>
@@ -1158,7 +1188,7 @@ function Gateway({ id }: { id: string }) {
     <Card
       title="외부 접속 게이트웨이"
       actions={
-        <button className="btn" disabled={!admin || !x} title={admin ? undefined : '시스템 관리자만 바꿉니다'} onClick={() => x && setEdit(x)}>
+        <button type="button" className="btn" disabled={!admin || !x} title={admin ? undefined : '시스템 관리자만 바꿉니다'} onClick={() => x && setEdit(x)}>
           게이트웨이 설정
         </button>
       }

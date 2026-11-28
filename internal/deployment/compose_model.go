@@ -123,8 +123,8 @@ type ServiceExtension struct {
 	Node      string              `yaml:"node,omitempty"`
 	Readiness *Readiness          `yaml:"ready,omitempty"`
 	Sources   SecretSources       `yaml:"-"`
-	// Socket is `secrets.socket` (sfev.sock). It is not served yet, so
-	// validate refuses a non-empty list.
+	// Socket is `secrets.socket` (sfev.sock): sources the container reads
+	// over its socket, under a separate approval (secret_socket.go).
 	Socket    SecretSources     `yaml:"-" json:",omitempty"`
 	Lifecycle *ServiceLifecycle `yaml:"lifecycle,omitempty" json:",omitempty"`
 	// Logs is this service's stored-log policy (x-sfc.logs); it overrides
@@ -244,7 +244,7 @@ type AppExtension struct {
 	} `yaml:"nodes,omitempty"`
 	Ingress  *IngressDeclaration  `yaml:"ingress,omitempty"`
 	Vault    *VaultDeclaration    `yaml:"vault,omitempty"`
-	Delivery *DeliveryDeclaration `yaml:"delivery,omitempty"`
+	Delivery *DeliveryDeclaration `yaml:"cd,omitempty"`
 	Routing  *struct {
 		Default string             `yaml:"cross_tenant_default"`
 		Routes  []RouteDeclaration `yaml:"routes"`
@@ -340,10 +340,9 @@ type DeliveryDeclaration struct {
 	} `yaml:"source"`
 	Poll uint64 `yaml:"poll_interval_seconds"`
 	Sync struct {
-		Mode       string `yaml:"mode"`
-		Drift      string `yaml:"drift"`
-		Prune      bool   `yaml:"prune"`
-		AllowEmpty bool   `yaml:"allow_empty"`
+		Mode  string `yaml:"mode"`
+		Drift string `yaml:"drift"`
+		Prune bool   `yaml:"prune"`
 	} `yaml:"sync"`
 	Runtime struct {
 		Mode   string `yaml:"mode"`

@@ -128,20 +128,20 @@ export function InviteDialog({ u, mode, onClose, onDone }: { u: UserRecord; mode
       footer={
         c.result ? (
           <>
-            <button className="btn" onClick={() => void copy(c.result!.link)}>
+            <button type="button" className="btn" onClick={() => void copy(c.result!.link)}>
               복사
             </button>
-            <button className="btn primary" onClick={close}>
+            <button type="button" className="btn primary" onClick={close}>
               닫기
             </button>
           </>
         ) : (
           <>
-            <button className="btn" onClick={close}>
+            <button type="button" className="btn" onClick={close}>
               {c.op ? '닫기' : '취소'}
             </button>
             {!lost && (
-              <button className="btn primary" disabled={blocked || c.busy || rv.busy || (!!c.op && !['unknown', 'rejected', 'failed'].includes(c.op.state))} onClick={() => void go()}>
+              <button type="button" className="btn primary" disabled={blocked || c.busy || rv.busy || (!!c.op && !['unknown', 'rejected', 'failed'].includes(c.op.state))} onClick={() => void go()}>
                 {c.busy || rv.busy ? '만드는 중…' : c.op?.state === 'unknown' ? '같은 요청 다시 보내기' : '초대 링크 만들기'}
               </button>
             )}
@@ -196,10 +196,10 @@ export function RevokeInviteDialog({ u, onClose, onDone }: { u: UserRecord; onCl
       onClose={() => (m.op && onDone(), onClose())}
       footer={
         <>
-          <button className="btn" onClick={() => (m.op && onDone(), onClose())}>
+          <button type="button" className="btn" onClick={() => (m.op && onDone(), onClose())}>
             닫기
           </button>
-          <button className="btn danger" disabled={blocked || m.busy || noInvite || (!!m.op && m.op.state !== 'unknown' && m.op.state !== 'failed')} onClick={() => void send()}>
+          <button type="button" className="btn danger" disabled={blocked || m.busy || noInvite || (!!m.op && m.op.state !== 'unknown' && m.op.state !== 'failed')} onClick={() => void send()}>
             {m.busy ? '보내는 중…' : '초대 취소'}
           </button>
         </>

@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/jay94ks/seafield/internal/cluster"
@@ -106,10 +107,12 @@ func (r *Runtime) registryWork(ctx context.Context, tenant, id string) (control.
 	raw, _ := json.Marshal(control.RegistryWorkRequest{RegistrySelection: control.RegistrySelection{Tenant: tenant, ID: id}, At: time.Now().Unix()})
 	reply, err := r.appCall(ctx, "registry-work", raw)
 	if err != nil || reply.Local {
+		log.Printf("registry %s/%s: registry-work not answered by the leader (local=%v): %v", tenant, id, reply.Local, err)
 		return control.RegistryWork{}, registry.ErrUnavailable
 	}
 	work, err := schema.Decode[control.RegistryWork](reply.Data)
 	if err != nil || work.Entry.Spec.Tenant != tenant || work.Entry.Spec.ID != id || work.Index == 0 || work.Epoch == 0 {
+		log.Printf("registry %s/%s: registry-work reply invalid: %v", tenant, id, err)
 		return control.RegistryWork{}, registry.ErrUnavailable
 	}
 	return work, nil
@@ -131,9 +134,28 @@ func (r *Runtime) reportRegistry(ctx context.Context, work control.RegistryWork,
 		return err
 	}
 	if reply.Committed == nil || reply.Committed.Result.Code != state.Applied {
+		code := "no committed result"
+		if reply.Committed != nil {
+			code = fmt.Sprint(reply.Committed.Result.Code)
+		}
+		log.Printf("registry %s/%s: %s report refused: %s", work.Entry.Spec.Tenant, work.Entry.Spec.ID, action, code)
 		return registry.ErrUnavailable
 	}
 	return nil
+}
+
+// registryBlocked remembers the last start refusal logged per registry, so
+// an unchanged reason is logged once rather than every pass.
+var registryBlocked sync.Map
+
+func logRegistryBlocked(key, reason string) {
+	if old, ok := registryBlocked.Load(key); ok && old == reason {
+		return
+	}
+	registryBlocked.Store(key, reason)
+	if reason != "" {
+		log.Printf("registry %s: not started: %s", key, reason)
+	}
 }
 
 // Quiescing joins live I/O but retains the local/shared writer for the SAME run.
@@ -460,10 +482,12 @@ func (r *Runtime) reconcileRegistries(ctx context.Context, v cluster.View) error
 					continue
 				}
 			}
+			logRegistryBlocked(key, work.Blocked)
 			if !work.MayStart || local && row.Phase == "closed" && row.SpecRevision >= work.Entry.Revision {
 				continue
 			}
 			if r.nativeVolumes == nil || work.Native == nil {
+				log.Printf("registry %s: cannot reserve: workload volumes on this server %v, leader volume record %v", key, r.nativeVolumes != nil, work.Native != nil)
 				failed = errors.Join(failed, registry.ErrUnavailable)
 				continue
 			}
@@ -492,6 +516,7 @@ func (r *Runtime) reconcileRegistries(ctx context.Context, v cluster.View) error
 			continue
 		}
 		if r.nativeVolumes == nil {
+			log.Printf("registry %s: this server has no workload volumes", key)
 			failed = errors.Join(failed, registry.ErrUnavailable)
 			continue
 		}

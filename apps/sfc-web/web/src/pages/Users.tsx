@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { usePhone } from '../lib/viewport';
 import { MCards, MTiles, useReadOnlyTop } from '../mobile/ReadOnly';
 import { accountScope, accountScopePath, sameActions, scopeDelta, putUserPayload, rawUser, users } from '../api/endpoints';
+import { euro } from '../lib/josa';
 import type { AccountScope } from '../api/endpoints';
 import { ApiError, noEndpoint } from '../api/client';
 import type { UserRecord } from '../api/types';
@@ -51,23 +52,23 @@ function NewUserDialog({ onClose, onDone }: { onClose: () => void; onDone: () =>
       footer={
         inv.result ? (
           <>
-            <button className="btn" onClick={() => void copy(inv.result!.link)}>
+            <button type="button" className="btn" onClick={() => void copy(inv.result!.link)}>
               복사
             </button>
-            <button className="btn primary" onClick={() => (onDone(), onClose())}>
+            <button type="button" className="btn primary" onClick={() => (onDone(), onClose())}>
               닫기
             </button>
           </>
         ) : finished && !retryInvite ? (
-          <button className="btn primary" onClick={() => (onDone(), onClose())}>
+          <button type="button" className="btn primary" onClick={() => (onDone(), onClose())}>
             닫기
           </button>
         ) : (
           <>
-            <button className="btn" onClick={() => (m.op && onDone(), onClose())}>
+            <button type="button" className="btn" onClick={() => (m.op && onDone(), onClose())}>
               {m.op ? '닫기' : '취소'}
             </button>
-            <button className="btn primary" disabled={!valid || m.busy || inv.busy || (!!m.op && !userDone)} onClick={() => void create()}>
+            <button type="button" className="btn primary" disabled={!valid || m.busy || inv.busy || (!!m.op && !userDone)} onClick={() => void create()}>
               {m.busy || inv.busy ? '보내는 중…' : retryInvite ? '초대 링크 다시 만들기' : '만들기'}
             </button>
           </>
@@ -150,14 +151,14 @@ function UserDrawer({ u, onClose, onDone }: { u: UserRecord; onClose: () => void
         ]}
       />
       <div className="row">
-        <button className="btn sm" disabled={m.busy} onClick={() => void toggle({ Enabled: !u.enabled })}>
+        <button type="button" className="btn sm" disabled={m.busy} onClick={() => void toggle({ Enabled: !u.enabled })}>
           {u.enabled ? '비활성화' : '활성화'}
         </button>
-        <button className="btn sm" disabled={m.busy} onClick={() => void toggle({ SystemAdmin: !u.systemAdmin })}>
+        <button type="button" className="btn sm" disabled={m.busy} onClick={() => void toggle({ SystemAdmin: !u.systemAdmin })}>
           {u.systemAdmin ? '관리자 권한 빼기' : '관리자로 지정'}
         </button>
       </div>
-      <span className="small muted">기대 버전 {u.revision}으로 보냅니다. 그사이 버전이 바뀌면 적용하지 않습니다(결과 1). 목록을 다시 읽은 뒤 해 주세요.</span>
+      <span className="small muted">기대 버전 {u.revision}{euro(String(u.revision))} 보냅니다. 그사이 버전이 바뀌면 적용하지 않습니다(결과 1). 목록을 다시 읽은 뒤 해 주세요.</span>
       {casFailed(m.op) && <div className="note wa small">그사이 이 사용자가 바뀌었습니다. 새로 읽은 값으로 다시 해 주세요.</div>}
       <MutationError error={m.error ?? err} />
       {m.op && <OpPanel op={m.op} onChange={m.setOp} />}
@@ -166,19 +167,19 @@ function UserDrawer({ u, onClose, onDone }: { u: UserRecord; onClose: () => void
       <div className="row">
         {u.invite ? (
           <>
-            <button className="btn sm" onClick={() => setInv('again')}>
+            <button type="button" className="btn sm" onClick={() => setInv('again')}>
               초대 링크 다시 만들기…
             </button>
-            <button className="btn sm danger" disabled={revokeBlocked(u)} title={revokeBlocked(u) ? '시스템 관리자 계정은 로그인 수단이 하나는 남아야 합니다' : undefined} onClick={() => setInv('revoke')}>
+            <button type="button" className="btn sm danger" disabled={revokeBlocked(u)} title={revokeBlocked(u) ? '시스템 관리자 계정은 로그인 수단이 하나는 남아야 합니다' : undefined} onClick={() => setInv('revoke')}>
               초대 취소…
             </button>
           </>
         ) : live ? (
-          <button className="btn sm" onClick={() => setInv('recover')}>
+          <button type="button" className="btn sm" onClick={() => setInv('recover')}>
             초대 링크로 키 다시 등록…
           </button>
         ) : (
-          <button className="btn sm" onClick={() => setInv('new')}>
+          <button type="button" className="btn sm" onClick={() => setInv('new')}>
             초대 링크 만들기…
           </button>
         )}
@@ -232,7 +233,7 @@ function ScopeSection({ u }: { u: UserRecord }) {
       <hr className="sep" />
       <div className="row between">
         <b>동작 범위</b>
-        <button className="btn sm" disabled={!q.data} onClick={() => setEdit(q.data)}>
+        <button type="button" className="btn sm" disabled={!q.data} onClick={() => setEdit(q.data)}>
           바꾸기…
         </button>
       </div>
@@ -273,15 +274,15 @@ function ScopeDialog({ u, cur, onClose }: { u: UserRecord; cur: AccountScope; on
       onClose={onClose}
       footer={
         done ? (
-          <button className="btn primary" onClick={onClose}>
+          <button type="button" className="btn primary" onClick={onClose}>
             닫기
           </button>
         ) : (
           <>
-            <button className="btn" onClick={onClose}>
+            <button type="button" className="btn" onClick={onClose}>
               취소
             </button>
-            <button className="btn primary" disabled={locked || !!bad || same || (keyOnly && !hasKey)} onClick={() => void send()}>
+            <button type="button" className="btn primary" disabled={locked || !!bad || same || (keyOnly && !hasKey)} onClick={() => void send()}>
               {m.busy ? '보내는 중…' : '변경 검토'}
             </button>
           </>
@@ -366,7 +367,7 @@ function DesktopUsers() {
         actions={
           <>
             <Refresh q={list} poll={false} />
-            <button className="btn primary" onClick={() => setCreating(true)}>
+            <button type="button" className="btn primary" onClick={() => setCreating(true)}>
               사용자 만들기
             </button>
           </>

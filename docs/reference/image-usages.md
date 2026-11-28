@@ -55,7 +55,7 @@ Read 또는 ManageRegistry 권한이 필요하다. 관리 operation이나 자격
 | `legacy-task` | 명시 매핑된 과거 Task. 미매핑 legacy 행은 사용자 조회에 노출하지 않음 |
 | `app-previous-unknown` | 원문을 보관하지 않은 과거 버전이라 이미지 부재를 증명할 수 없음 |
 
-`Match`는 `exact`, `digest`, `repository-unknown`, `unknown`, `scope`다. bare digest는 named pinned 참조의 manifest digest와 비교한다. named ref는 authority/repository를 함께 비교하므로 다른 registry의 같은 digest를 같은 사용처로 간주하지 않는다. mutable tag와 digest 사이에 대응 증거가 없으면 `repository-unknown`으로 표시한다. 이는 정확한 digest를 안다는 뜻이 아니다. 원문 없는 직전 버전은 Image가 비고 Unknown=true이며 `unknown`으로 반환한다.
+`Match`는 `exact`, `digest`, `repository-unknown`, `unknown`, `scope`다. bare digest는 named pinned 참조의 manifest digest와 비교한다. named ref는 authority/repository를 함께 비교하므로 다른 registry의 같은 digest를 같은 사용처로 간주하지 않는다. 태그와 digest(또는 다른 태그)가 같은 repository면 `repository-unknown`으로 표시한다. 이는 정확한 digest를 안다는 뜻이 아니다. 태그는 digest로 고정하지 않으므로(devel/design/image-tags.md), `repository-unknown` 행은 저장소 digest 삭제를 막지 않는다. 진행 중인 배포가 태그를 해석한 digest는 그 배포의 `app-execution` 행으로 따로 나오고, 이 행이 그 digest를 지키는 근거다. 이미 만든 컨테이너는 그 서버의 로컬 이미지로 돌기 때문에 저장소에서 지워도 영향이 없다. 다시 만들 때는 태그를 새로 해석하고, 없으면 그 서버의 마지막 사본을 쓴다(Jay 2026-11-28 18:21 KST). 원문 없는 직전 버전은 Image가 비고 Unknown=true이며 `unknown`으로 반환한다.
 
 같은 Task/image가 여러 근거에 등장할 수 있다. 따라서 행 수를 실제 컨테이너 개수로 취급하지 않는다. 과거 버전의 node가 원문에 없으면 현재 기본 노드로 추측하지 않고 Node를 비운다. 직전 버전은 앱 종료로 그 선언 의도가 반환될 때 해제하며, 진행 중 원 native는 별도의 claim/retirement가 계속 보호한다.
 

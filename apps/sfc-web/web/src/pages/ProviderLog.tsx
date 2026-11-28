@@ -72,13 +72,13 @@ export function ProviderLogCard() {
               <a className="btn" href={providerLogDownloadUrl} download="provider-log.jsonl">
                 내려받기 (JSONL)
               </a>
-              <button className="btn danger" onClick={() => setDlg('disable')}>
+              <button type="button" className="btn danger" onClick={() => setDlg('disable')}>
                 끄기
               </button>
             </>
           ) : (
             <>
-              <button className="btn" onClick={() => setDlg('enable')}>
+              <button type="button" className="btn" onClick={() => setDlg('enable')}>
                 켜기
               </button>
               <a className="btn" href={providerLogDownloadUrl} download="provider-log.jsonl">
@@ -123,7 +123,7 @@ export function ProviderLogCard() {
                 {st.entries > 0 && (
                   <>
                     {' · '}
-                    <button className="linkish" onClick={() => setDrawer(true)}>
+                    <button type="button" className="linkish" onClick={() => setDrawer(true)}>
                       최근 항목 보기
                     </button>
                   </>
@@ -162,10 +162,10 @@ function EnableDialog({ onClose, onDone }: { onClose: () => void; onDone: (t: DP
       onClose={onClose}
       footer={
         <>
-          <button className="btn" onClick={onClose}>
+          <button type="button" className="btn" onClick={onClose}>
             취소
           </button>
-          <button className="btn primary" disabled={busy} onClick={() => void go()}>
+          <button type="button" className="btn primary" disabled={busy} onClick={() => void go()}>
             {busy ? '켜는 중…' : '켜기'}
           </button>
         </>
@@ -188,7 +188,7 @@ function TokenDialog({ t, onClose }: { t: DProviderLogEnable; onClose: () => voi
       title="진단 로그를 켰습니다"
       onClose={onClose}
       footer={
-        <button className="btn primary" onClick={onClose}>
+        <button type="button" className="btn primary" onClick={onClose}>
           토큰을 복사했습니다 · 닫기
         </button>
       }
@@ -239,10 +239,10 @@ function DisableDialog({ count, onClose, onDone }: { count: number; onClose: () 
       onClose={onClose}
       footer={
         <>
-          <button className="btn" onClick={onClose}>
+          <button type="button" className="btn" onClick={onClose}>
             취소
           </button>
-          <button className="btn danger" disabled={busy} onClick={() => void go()}>
+          <button type="button" className="btn danger" disabled={busy} onClick={() => void go()}>
             {busy ? '끄는 중…' : '끄기'}
           </button>
         </>
@@ -367,7 +367,7 @@ function ItemsDrawer({ onClose }: { onClose: () => void }) {
       </div>
       {loading && <span className="small muted">읽는 중…</span>}
       {hasOlder && !loading && (
-        <button className="btn sm" onClick={() => void older()}>
+        <button type="button" className="btn sm" onClick={() => void older()}>
           더 보기
         </button>
       )}

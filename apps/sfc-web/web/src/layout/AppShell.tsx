@@ -19,7 +19,7 @@ import { MobileTopProvider } from '../mobile/top';
 import { GlobalSearch, useSearchHotkey } from '../components/GlobalSearch';
 import { LiveBand, LiveIndicator } from '../components/LiveIndicator';
 import { startLive } from '../lib/live';
-import { incidentsLive, notificationsLive } from '../lib/liveTopics';
+import { incidentsLive, nodeShellLive, notificationsLive } from '../lib/liveTopics';
 import { BrandMark } from '../components/BrandMark';
 
 interface NavItem {
@@ -134,7 +134,7 @@ function Shell() {
   const [finding, setFinding] = useState(false);
   useSearchHotkey(setFinding);
   // 서버 셸 권한만 받은 사람에게 '서버 셸' 메뉴. 허용 서버가 0개면(또는 403) 없다
-  const shellGrant = usePoll((s) => (admin ? Promise.resolve(0) : nodeShellPolicy(s).then((p) => p.nodes.length).catch(() => 0)), [admin, session.user.username], DEFAULT_POLL_MS);
+  const shellGrant = usePoll((s) => (admin ? Promise.resolve(0) : nodeShellPolicy(s).then((p) => p.nodes.length).catch(() => 0)), [admin, session.user.username], 0, nodeShellLive);
   // 아래 탭 '장애 대응' 숫자: 승인 대기 사건 수 (휴대폰 틀에서만 읽는다)
   const inc = usePoll((s) => (vp === 'phone' ? incidents({ limit: 1 }, s).catch(() => undefined) : Promise.resolve(undefined)), [vp, session.user.username], DEFAULT_POLL_MS, incidentsLive);
 

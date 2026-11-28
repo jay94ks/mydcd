@@ -172,3 +172,40 @@ func TestComposeWaitRejectsUnselectedOrForeignCDOperations(t *testing.T) {
 		})
 	}
 }
+
+// A same-yaml redeploy that replaces containers retires the old ones in a
+// wave of its own execution first; wait follows it to Healthy instead of
+// calling the operation inactive.
+func TestComposeWaitFollowsReplacementWaveOfItsOwnOperation(t *testing.T) {
+	o, err := parseComposeOptions([]string{"wait", "-p", "app", "--operation", "next"}, io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	calls := 0
+	observe := func(context.Context) (control.AppView, bool, error) {
+		calls++
+		row := control.AppView{Operation: deployment.OperationSummary{ID: "next", Status: "Running"}}
+		if calls <= 2 {
+			row.Replacement = &deployment.ReplacementProgress{Wave: 1, Waves: 1, Node: "jay2", Phase: "retiring"}
+			row.Retirement = &control.AppRetirementStatus{ID: "roll-1", Status: "Retiring"}
+		} else {
+			row.Operation.Status = "Succeeded"
+			row.Health = "Healthy"
+			row.ObservedAt = 1
+			row.ObservationMaxAge = control.AppObservationMaxAge
+		}
+		return row, true, nil
+	}
+	if code := waitComposeOperation(ctx, o, "tenant", observe, io.Discard, io.Discard); code != 0 || calls != 3 {
+		t.Fatal("replacement wave was not followed", code, calls)
+	}
+	// Another operation's wave is still not this one.
+	other := func(context.Context) (control.AppView, bool, error) {
+		return control.AppView{Operation: deployment.OperationSummary{ID: "previous", Status: "Running"}, Replacement: &deployment.ReplacementProgress{Wave: 1, Waves: 1}, Retirement: &control.AppRetirementStatus{ID: "roll-1", Status: "Retiring"}}, true, nil
+	}
+	if code := waitComposeOperation(ctx, o, "tenant", other, io.Discard, io.Discard); code != 4 {
+		t.Fatal("foreign replacement wave followed", code)
+	}
+}

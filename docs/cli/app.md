@@ -20,7 +20,7 @@ sfcli app down shop
 |---|---|
 | `app check [-f FILE]` | 서버에 보내지 않고 파일을 읽어 본다. `-o json`이면 정규화한 앱을 출력한다 |
 | `app diff [-f FILE] [--save PLAN]` | 서버가 계획한 변경 목록. `--save`는 고정한 계획을 파일로 남긴다. ingress 규칙이 인증서 자동화 경로(`/.well-known/acme-challenge` 이하)를 쓰면 무시된다는 경고를 stderr에 쓴다([자세히](../reference/ingress-gateways.md#인증서-자동화-경로)) |
-| `app deploy [-f FILE \| --plan PLAN] [--force]` | 계획하고 올리고 배포를 시작한 뒤 healthy까지 기다린다. `--plan`은 `diff --save`로 남긴 계획을 그대로 배포한다. 자동화 경로 경고는 diff와 같다. 같은 작업 공간의 다른 앱이 같은 서버·게이트웨이에서 쓰는 host+prefix면 `INGRESS_ROUTE_TAKEN`으로 멈추고, `--force`면 두 앱이 함께 받는다(`--plan`에는 `diff --save --force`로 준다, [게이트웨이](../reference/ingress-gateways.md)) |
+| `app deploy [-f FILE \| --plan PLAN] [--force]` | 계획하고 올리고 배포를 시작한 뒤 healthy까지 기다린다. `--plan`은 `diff --save`로 남긴 계획을 그대로 배포한다. 자동화 경로 경고는 diff와 같다. 같은 작업 공간의 다른 앱이 같은 서버·게이트웨이에서 쓰는 host+prefix면 `INGRESS_ROUTE_TAKEN`으로 멈추고, `--force`면 두 앱이 함께 받는다(`--plan`에는 `diff --save --force`로 준다, [게이트웨이](../reference/ingress-gateways.md)). Git을 따르는 앱이면 파일의 `x-sfc.cd`로 정책만 바꾸거나, 블록이 없으면 확인 뒤 CD를 끈다([cd](cd.md#appyaml-x-sfccd)) |
 | `app down APP` | 앱의 컨테이너를 모두 멈추고 지운다(확인 질문). 다 지워질 때까지 기다린다 |
 | `app archive APP [--store NAME] [--no-compress]` | 내린 앱의 볼륨을 모두 압축·봉인해 보관하고 비운다. 되살리기는 `volume unarchive`. [볼륨 보관](volume.md#내린-앱의-볼륨-보관하기) |
 | `app resend APP [STEP]` | 배포가 `unknown`이면, 보냈지만 도착했는지 모르는 단계를 한 번 더 보낸다(확인 질문). 같은 명령이라 이미 도착했으면 두 번 적용되지 않는다. 그런 단계가 하나면 STEP을 빼도 된다 |

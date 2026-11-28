@@ -245,6 +245,20 @@ func (r *Runtime) appCommand(method, caller string, input []byte, v cluster.View
 		}
 		return cmd, nil
 	}
+	if method == "owned-vps-report" {
+		cmd, err := r.controlPolicy.ResolveOwnedVPSReport(v.State, key, input)
+		if err != nil {
+			return cmd, err
+		}
+		if _, found := v.State.LookupResult(cmd); !found {
+			report, e := schema.Decode[control.OwnedVPSReport](input)
+			now := uint64(time.Now().Unix())
+			if e != nil || !access.Recent(report.At, now, 60) {
+				return cmd, sfcp.ErrAdmission
+			}
+		}
+		return cmd, nil
+	}
 	if method == "certificate-expiry-report" {
 		cmd, err := r.controlPolicy.ResolveCertificateExpiry(v.State, key, input)
 		if err != nil {

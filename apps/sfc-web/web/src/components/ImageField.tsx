@@ -11,10 +11,13 @@ import { Badge, Field, Segmented } from './ui';
 import { Empty, Load } from './states';
 import { registriesLive } from '../lib/liveTopics';
 
-/** 고른 이미지를 원문에 쓸 이름으로: 저장소 주소/repo:tag 또는 @digest(내용 고정) */
-export function imageRef(i: ImageView, endpoint: string | undefined, pin: boolean): string {
+/**
+ * 고른 이미지를 원문에 쓸 이름으로: 저장소 주소/repo:tag. 태그를 digest로 바꿔 고정하지 않는다(Jay 2026-11-28:
+ * digest 고정은 이미 만들어진 컨테이너에만 해당). 태그가 없는 이미지만 digest로 적는다.
+ */
+export function imageRef(i: ImageView, endpoint: string | undefined): string {
   const host = endpoint ? `${endpoint.replace(/\/+$/, '')}/` : '';
-  return pin && i.digest ? `${host}${i.repo}@${i.digest}` : `${host}${i.repo}:${i.tag}`;
+  return i.tag ? `${host}${i.repo}:${i.tag}` : `${host}${i.repo}@${i.digest}`;
 }
 
 /** 형식 검사(브라우저에서 할 수 있는 것만): 저장소/경로[:태그][@sha256:64hex] */
@@ -24,7 +27,6 @@ export function imageRefProblem(v: string): string | undefined {
   if (!/^[a-z0-9][a-z0-9._\-/:]*[a-z0-9](:[\w][\w.-]{0,127})?(@sha256:[0-9a-f]{64})?$/.test(v)) return '저장소/이름:태그 또는 @sha256:… 형식이 아닙니다.';
   return undefined;
 }
-const pinTo = (ref: string, digest?: string) => (digest ? `${ref.replace(/@sha256:[0-9a-f]{64}$/, '').replace(/:[\w][\w.-]{0,127}$/, (t) => (ref.lastIndexOf('/') < ref.lastIndexOf(t) ? '' : t))}@${digest}` : ref);
 
 // 최근 사용: 이 브라우저에만(서버에 저장하지 않음). 저장이 막혀도 동작은 그대로.
 const RECENT_KEY = 'sfc.recent-images';
@@ -132,13 +134,12 @@ function ResolveSteps({ problem, r, waiting, failed }: { problem?: string; r?: I
 }
 
 /**
- * 이미지 고르기 다이얼로그(캔버스 UI-3F 눌렀을 때): 목록에서 고르기 / 직접 입력 / 최근 사용, 공통으로 digest 고정.
+ * 이미지 고르기 다이얼로그(캔버스 UI-3F 눌렀을 때): 목록에서 고르기 / 직접 입력 / 최근 사용. 고른 참조를 그대로 넣는다.
  * 목록은 이미지 관리(UI-84)와 같은 웹 캐시이고 sfcd 목록 조회 전까지 목업에만 있다.
  */
 export function ImagePickDialog({ tenant, current = '', onPick, onClose }: { tenant: string; current?: string; onPick: (ref: string) => void; onClose: () => void }) {
   const listReady = API_MODE === 'mock';
   const [tab, setTab] = useState<Tab>(listReady ? 'list' : 'manual');
-  const [pin, setPin] = useState(true);
   // 목록
   const list = usePoll((s) => (listReady ? images(tenant, s) : Promise.resolve(emptyPage())), [tenant], 0);
   const regs = usePoll((s) => registries(tenant, s), [tenant], 0, registriesLive(tenant));
@@ -185,7 +186,7 @@ export function ImagePickDialog({ tenant, current = '', onPick, onClose }: { ten
 
   const endpoint = (name: string) => regs.data?.items.find((r) => r.name === name)?.endpoint;
   const result: string | undefined =
-    tab === 'list' ? (sel ? imageRef(sel, endpoint(sel.registry), pin) : undefined) : tab === 'recent' ? recentSel : problem ? undefined : pin && res?.digest && checked === manual ? (res.pinned ?? pinTo(manual, res.digest)) : manual;
+    tab === 'list' ? (sel ? imageRef(sel, endpoint(sel.registry)) : undefined) : tab === 'recent' ? recentSel : problem ? undefined : manual;
   const use = () => {
     if (!result) return;
     rememberImage(result);
@@ -279,10 +280,6 @@ export function ImagePickDialog({ tenant, current = '', onPick, onClose }: { ten
                 );
               }}
             </Load>
-            <label className="check small">
-              <input type="checkbox" checked={pin} onChange={(e) => setPin(e.target.checked)} /> 태그 대신 digest로 고정
-              <span className="muted">{sel ? ` ${middle(sel.digest, 11, 4)}로 넣어 나중에 태그가 바뀌어도 같은 이미지` : ' 나중에 태그가 바뀌어도 같은 이미지'}</span>
-            </label>
             <span className="small muted">
               이미지 관리와 같은 목록(웹 캐시, {list.asOf ? `${hhmmss(list.asOf)} 기준` : '읽는 중'} ·{' '}
               <button type="button" className="btn ghost sm" onClick={() => list.refreshByUser()}>
@@ -315,16 +312,13 @@ export function ImagePickDialog({ tenant, current = '', onPick, onClose }: { ten
               <ResolveSteps problem={manual ? problem : undefined} r={checked === manual ? res : undefined} waiting={resolving} failed={checked === manual ? resFail : undefined} />
             </div>
           )}
-          <label className="check small">
-            <input type="checkbox" checked={pin} onChange={(e) => setPin(e.target.checked)} /> 확인한 digest로 고정
-          </label>
           {res && checked === manual && !!res.platforms?.length && (
             <span className="small muted">
-              여러 플랫폼 이미지: {res.platforms.map((p) => p.platform ?? '플랫폼 미상').join(', ')}. 고정하면 목록 전체(index) digest로 고정하고, 서버가 자기 플랫폼을 고릅니다.
+              여러 플랫폼 이미지: {res.platforms.map((p) => p.platform ?? '플랫폼 미상').join(', ')}. 서버가 자기 플랫폼을 고릅니다.
             </span>
           )}
           {res && checked === manual && (res.trusted === false || res.code === 'untrusted') && <div className="note er small">신뢰 출처가 아니라 이대로는 실행할 수 없습니다. 신뢰 출처에 추가하거나 다른 이미지를 고르세요.</div>}
-          <span className="small muted">입력이 끝나면(포커스를 옮기거나 [확인]) 저장소에서 digest를 확인합니다. 목록에 없는 이미지도 쓸 수 있습니다.</span>
+          <span className="small muted">입력이 끝나면(포커스를 옮기거나 [확인]) 저장소에서 이미지가 있는지 확인합니다. 적은 참조는 그대로 넣습니다(태그를 digest로 바꾸지 않음). 목록에 없는 이미지도 쓸 수 있습니다.</span>
         </div>
       )}
       {tab === 'recent' &&
@@ -357,7 +351,7 @@ export function ImageInput({ tenant, value, onChange, sub }: { tenant: string; v
     <span className="image-field">
       <span className="col grow" style={{ minWidth: 0, gap: 0 }}>
         {value ? <b className="mono el">{value.replace(/@sha256:[0-9a-f]{64}$/, '')}</b> : <span className="muted">아직 고르지 않았습니다</span>}
-        {value && <span className="muted mono small el">{sub ?? (digest ? `digest 고정 · ${middle(digest, 11, 4)}` : '태그 (digest 고정 아님)')}</span>}
+        {value && <span className="muted mono small el">{sub ?? (digest ? `digest로 적음 · ${middle(digest, 11, 4)}` : '태그 그대로 · 컨테이너를 만들 때 digest가 정해집니다')}</span>}
       </span>
       <button type="button" className="btn sm" onClick={() => setOpen(true)}>
         이미지 고르기…

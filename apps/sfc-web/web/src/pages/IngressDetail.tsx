@@ -93,10 +93,10 @@ function DesktopIngressDetail() {
             <Link className="btn" to={`/deploy/apps/${tenant}/${app}/edit`}>
               app.yaml에서 고치기
             </Link>
-            <button className="btn" disabled={!canNet || !ins} title={canNet ? undefined : NEED_NET} onClick={() => setDrain(true)}>
+            <button type="button" className="btn" disabled={!canNet || !ins} title={canNet ? undefined : NEED_NET} onClick={() => setDrain(true)}>
               {ins?.draining ? '비우기 해제…' : '비우기 (drain)…'}
             </button>
-            <button className="btn estop" disabled={!canNet || !vq.data} title={canNet ? undefined : NEED_NET} onClick={() => setBlock('app')}>
+            <button type="button" className="btn estop" disabled={!canNet || !vq.data} title={canNet ? undefined : NEED_NET} onClick={() => setBlock('app')}>
               ⛔ 이 앱 전체 차단
             </button>
           </>
@@ -266,15 +266,15 @@ function RoutesCard({ d, blocks, canNet, onBlock, onRelease }: { d: RouteDetail;
                         <span className="mono small">{rb ? `${n(b.rps)}/s (차단)` : `${n(b.rps)}/s${b.p95Ms ? ` · p95 ${b.p95Ms}ms` : ''}`}</span>
                         <span>
                           {tb ? (
-                            <button className="btn sm" disabled={!canNet} title={canNet ? undefined : NEED_NET} onClick={() => onRelease(tb)}>
+                            <button type="button" className="btn sm" disabled={!canNet} title={canNet ? undefined : NEED_NET} onClick={() => onRelease(tb)}>
                               해제
                             </button>
                           ) : rb ? (
-                            <button className="btn sm" disabled={!canNet} title={canNet ? undefined : NEED_NET} onClick={() => onRelease(rb)}>
+                            <button type="button" className="btn sm" disabled={!canNet} title={canNet ? undefined : NEED_NET} onClick={() => onRelease(rb)}>
                               해제
                             </button>
                           ) : (
-                            <button className="btn stop" disabled={!canNet} title={canNet ? '이 컨테이너로 요청을 보내지 않습니다' : NEED_NET} onClick={() => onBlock({ kind: 'task', tenant: ins.tenant, app: ins.app, task: b.task })}>
+                            <button type="button" className="btn stop" disabled={!canNet} title={canNet ? '이 컨테이너로 요청을 보내지 않습니다' : NEED_NET} onClick={() => onBlock({ kind: 'task', tenant: ins.tenant, app: ins.app, task: b.task })}>
                               ⛔ 차단
                             </button>
                           )}
@@ -322,10 +322,10 @@ function BalanceCard({ d, r, tenant, app, canEdit, onDone }: { d: RouteDetail; r
       }
       actions={
         <>
-          <button className="btn" onClick={() => setHist(true)}>
+          <button type="button" className="btn" onClick={() => setHist(true)}>
             분배 기록
           </button>
-          <button className="btn" disabled={!canEdit} title={canEdit ? undefined : '이 작업 공간의 배포 권한이 필요합니다'} onClick={() => setEdit(true)}>
+          <button type="button" className="btn" disabled={!canEdit} title={canEdit ? undefined : '이 작업 공간의 배포 권한이 필요합니다'} onClick={() => setEdit(true)}>
             분배 방식 바꾸기…
           </button>
         </>
@@ -457,10 +457,10 @@ function BalanceDialog({ r, tenant, app, onClose, onDone }: { r: IngressRoute; t
       onClose={onClose}
       footer={
         <>
-          <button className="btn" onClick={onClose}>
+          <button type="button" className="btn" onClick={onClose}>
             취소
           </button>
-          <button className="btn primary" disabled={busy || badW || badSlow || badKey} onClick={() => void save()}>
+          <button type="button" className="btn primary" disabled={busy || badW || badSlow || badKey} onClick={() => void save()}>
             저장 · 적용
           </button>
         </>
@@ -570,7 +570,7 @@ function RouteHooks({ d, tenant, app, canEdit }: { d: RouteDetail; tenant: strin
     <Card
       title="장애 시 웹훅 · 경로 규칙별"
       actions={
-        <button className="btn" disabled={!canEdit} title={canEdit ? undefined : '이 작업 공간의 관리자 권한이 필요합니다'} onClick={() => setAdd(true)}>
+        <button type="button" className="btn" disabled={!canEdit} title={canEdit ? undefined : '이 작업 공간의 관리자 권한이 필요합니다'} onClick={() => setAdd(true)}>
           + 웹훅 연결
         </button>
       }
@@ -676,10 +676,10 @@ function RouteHookDialog({ d, tenant, app, hooks, onClose, onDone }: { d: RouteD
       onClose={onClose}
       footer={
         <>
-          <button className="btn" onClick={onClose}>
+          <button type="button" className="btn" onClick={onClose}>
             취소
           </button>
-          <button
+          <button type="button"
             className="btn"
             disabled={!hook}
             onClick={async () => {
@@ -693,7 +693,7 @@ function RouteHookDialog({ d, tenant, app, hooks, onClose, onDone }: { d: RouteD
           >
             시험 보내기
           </button>
-          <button className="btn primary" disabled={busy || !hook || !route || badLimit || badMins} onClick={() => void save()}>
+          <button type="button" className="btn primary" disabled={busy || !hook || !route || badLimit || badMins} onClick={() => void save()}>
             연결
           </button>
         </>
@@ -793,7 +793,7 @@ function AppBlocks({ blocks, canNet, onRelease }: { blocks: IngressBlock[]; canN
                 {b.by} · {b.scope.kind === 'route' ? since(b.at) : fmtTime(b.at)}
               </span>
               <span>
-                <button className="btn sm" disabled={!canNet} title={canNet ? undefined : NEED_NET} onClick={() => onRelease(b)}>
+                <button type="button" className="btn sm" disabled={!canNet} title={canNet ? undefined : NEED_NET} onClick={() => onRelease(b)}>
                   해제
                 </button>
               </span>
@@ -855,7 +855,7 @@ function ErrorsCard({ d, canNet, onBlockSource }: { d: RouteDetail; canNet: bool
             <span>user-agent만 · 쿠키·본문 없음</span>
           </div>
           <div style={{ marginTop: 14 }}>
-            <button
+            <button type="button"
               className="btn stop"
               disabled={!canNet}
               title={canNet ? undefined : NEED_NET}

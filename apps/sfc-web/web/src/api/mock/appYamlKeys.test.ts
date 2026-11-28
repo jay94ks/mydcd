@@ -32,4 +32,17 @@ describe('app.yaml A2 형식(#910)', () => {
     expect(check('services: {}\nx-sfc:\n  ingress:\n    - {id: route-2, node: n1, host: a.example}\n    - {node: n1, host: b.example}\n')).toMatch(/겹칩니다/);
     expect(check('services: {}\nx-sfc:\n  ingress:\n    - {node: n1, host: a.example, listeners: []}\n')).toMatch(/listeners/);
   });
+  it("A3': x-sfc.delivery는 받지 않고 x-sfc.cd를 검사한다", () => {
+    expect(check('services: {}\nx-sfc:\n  delivery: {repository: r}\n')).toMatch(/x-sfc.delivery: 받지 않는 키/);
+    expect(check('services: {}\nx-sfc:\n  cd: {repository: https://git.example/a.git, branch: main, path: app.yaml, poll: 1m, sync: auto, drift: report, prune: false}\n')).toBe('');
+    expect(check('services: {}\nx-sfc:\n  cd: {repository: r, branch: main}\n')).toMatch(/cd.path: 꼭/);
+    expect(check('services: {}\nx-sfc:\n  cd: {repository: r, branch: main, path: a.yaml, sync: automatic}\n')).toMatch(/cd.sync/);
+    expect(check('services: {}\nx-sfc:\n  cd: {repository: r, branch: main, path: a.yaml, drift: fix}\n')).toMatch(/cd.drift/);
+    expect(check('services: {}\nx-sfc:\n  cd: {repository: r, branch: main, path: a.yaml, poll: soon}\n')).toMatch(/cd.poll/);
+    expect(check('services: {}\nx-sfc:\n  cd: {repository: r, branch: main, path: a.yaml, poll: 1h30m}\n')).toBe('');
+    expect(check('services: {}\nx-sfc:\n  cd: {repository: r, branch: main, path: a.yaml, poll: 500ms}\n')).toMatch(/1s 이상/);
+    expect(check('services: {}\nx-sfc:\n  cd: {repository: r, branch: main, path: a.yaml, poll: 25h}\n')).toMatch(/24h 이하/);
+    expect(check('services: {}\nx-sfc:\n  cd: {repository: r, branch: main, path: a.yaml, poll: 1.5s}\n')).toMatch(/초 단위/);
+    expect(check('services: {}\nx-sfc:\n  cd: {repository: r, branch: main, path: a.yaml, mode: auto}\n')).toMatch(/cd.mode: 받지 않는 키/);
+  });
 });

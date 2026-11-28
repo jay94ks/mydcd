@@ -74,7 +74,7 @@ function OrdersCard({ orders }: { orders: AcmeOrder[] | null | undefined }) {
                   </td>
                   <td className="el small">{o.state === 'failed' ? (o.steps.find((s) => s.state === 'failed')?.detail ?? acmeErrorText(o.errorCode)) : o.state === 'done' ? `${keyLabel(o.keyType)} · 보관함에 올림` : `${o.steps.filter((s) => s.state === 'done').length}/8 단계`}</td>
                   <td>
-                    <button className="btn sm" onClick={() => setLog(o)}>
+                    <button type="button" className="btn sm" onClick={() => setLog(o)}>
                       단계 로그
                     </button>
                   </td>
@@ -158,15 +158,15 @@ function StoreCertDetail({ id }: { id: string }) {
                 공개 체인 내려받기
               </a>
               {def && (
-                <button className="btn" disabled={def.running} onClick={() => void renew()}>
+                <button type="button" className="btn" disabled={def.running} onClick={() => void renew()}>
                   {def.running ? '발급 중…' : '지금 갱신'}
                 </button>
               )}
-              <button className="btn danger" disabled={c.state !== 'linked'} title={c.state !== 'linked' ? '연결된 인증서만 끊을 수 있습니다' : undefined} onClick={() => setDlg('disable')}>
+              <button type="button" className="btn danger" disabled={c.state !== 'linked'} title={c.state !== 'linked' ? '연결된 인증서만 끊을 수 있습니다' : undefined} onClick={() => setDlg('disable')}>
                 끊기…
               </button>
               {def && (
-                <button className="btn danger" onClick={() => setDlg('revoke')}>
+                <button type="button" className="btn danger" onClick={() => setDlg('revoke')}>
                   해지…
                 </button>
               )}
@@ -310,14 +310,14 @@ function StoreCertDetail({ id }: { id: string }) {
                 <div className="row small muted" style={{ gap: 16, flexWrap: 'wrap', alignItems: 'flex-start', lineHeight: '18px' }}>
                   {def && (
                     <div style={{ flex: '1 1 300px', display: 'flex', flexDirection: 'column', gap: 6 }}>
-                      <button className="btn danger" style={{ width: 'fit-content' }} onClick={() => setDlg('defDelete')}>
+                      <button type="button" className="btn danger" style={{ width: 'fit-content' }} onClick={() => setDlg('defDelete')}>
                         정의 지우기…
                       </button>
                       <span>웹의 자동 발급·갱신 정의({def.name})만 지웁니다. 보관함의 인증서와 링크는 그대로입니다.</span>
                     </div>
                   )}
                   <div style={{ flex: '1 1 300px', display: 'flex', flexDirection: 'column', gap: 6 }}>
-                    <button className="btn danger" style={{ width: 'fit-content' }} disabled={!deletable(cc)} onClick={() => setDlg('delete')}>
+                    <button type="button" className="btn danger" style={{ width: 'fit-content' }} disabled={!deletable(cc)} onClick={() => setDlg('delete')}>
                       지우기
                     </button>
                     <span>{deletable(cc) ? '체인과 암호화한 비공개 키를 지웁니다. 되돌릴 수 없습니다.' : <>연결됨 인증서는 지울 수 없습니다. 링크를 다른 인증서가 모두 가져가거나 ‘끊기’로 떼어 <b>파기 대기</b>가 되거나, 도메인을 빼서 <b>미연결</b>이 되면 지울 수 있습니다.</>}</span>
@@ -378,7 +378,7 @@ function DefinitionDetail({ name }: { name: string }) {
               <a className={`btn ${c.fingerprint ? '' : 'disabled'}`} aria-disabled={!c.fingerprint} href={c.fingerprint ? acmeChainUrl(name) : undefined} download={`${name}-chain.pem`}>
                 공개 체인 내려받기
               </a>
-              <button className="btn" disabled={c.running} onClick={() => void renew()}>
+              <button type="button" className="btn" disabled={c.running} onClick={() => void renew()}>
                 {c.running ? '발급 중…' : '지금 갱신'}
               </button>
             </>
@@ -389,7 +389,7 @@ function DefinitionDetail({ name }: { name: string }) {
         {({ certificate: cc, orders, methods, methodReasons }) => (
           <>
             {cc.renewBlocked && <div className="note wa">갱신할 때가 됐지만 웹 자동 작업 계정이 없어 사람 없는 갱신을 시작하지 않습니다. '지금 갱신'으로 직접 받으세요.</div>}
-            <Card title="발급 정의 (웹)" actions={<button className="btn sm" onClick={() => setDlg('keys')}>발급 설정</button>}>
+            <Card title="발급 정의 (웹)" actions={<button type="button" className="btn sm" onClick={() => setDlg('keys')}>발급 설정</button>}>
               <KV
                 items={[
                   ['포함한 이름', <span key="n" className="mono">{cc.names.join(', ')}</span>],
@@ -405,7 +405,7 @@ function DefinitionDetail({ name }: { name: string }) {
             <OrdersCard orders={orders} />
             <Card title="지우기" className="danger-card">
               <div className="small muted" style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                <button className="btn danger" style={{ width: 'fit-content' }} onClick={() => setDlg('delete')}>
+                <button type="button" className="btn danger" style={{ width: 'fit-content' }} onClick={() => setDlg('delete')}>
                   정의 지우기…
                 </button>
                 <span>웹의 자동 발급·갱신 정의만 지웁니다. 보관함의 인증서와 링크는 그대로입니다.</span>
@@ -643,10 +643,10 @@ export function UploadCertDialog({ onClose, onDone }: { onClose: () => void; onD
       onClose={close}
       footer={
         <>
-          <button className="btn" onClick={close}>
+          <button type="button" className="btn" onClick={close}>
             취소
           </button>
-          <button className="btn primary" disabled={busy || !chain.trim() || !key || chainBad || keyBad || !!invalid} onClick={() => void send()}>
+          <button type="button" className="btn primary" disabled={busy || !chain.trim() || !key || chainBad || keyBad || !!invalid} onClick={() => void send()}>
             올리기
           </button>
         </>
@@ -718,10 +718,10 @@ function KeysDialog({ c, onClose, onDone }: { c: AcmeCert; onClose: () => void; 
       onClose={onClose}
       footer={
         <>
-          <button className="btn" onClick={onClose}>
+          <button type="button" className="btn" onClick={onClose}>
             취소
           </button>
-          <button className="btn primary" disabled={!keys.length || busy} onClick={() => void save()}>
+          <button type="button" className="btn primary" disabled={!keys.length || busy} onClick={() => void save()}>
             저장
           </button>
         </>

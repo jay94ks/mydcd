@@ -12,7 +12,7 @@ import (
 )
 
 type fakeWatchProvider struct {
-	vps.Provider
+	vps.ManagedProvider
 	trafficMB   int64
 	trafficErr  error
 	flavorReads int

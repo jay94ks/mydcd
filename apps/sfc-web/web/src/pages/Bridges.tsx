@@ -126,7 +126,7 @@ export function NetworkBridgesPage() {
       rq={rq}
       bq={bq}
       actions={
-        <button className="btn primary" disabled={!canDeploy || !nq.data || !bq.data} title={need} onClick={() => setCreating(true)}>
+        <button type="button" className="btn primary" disabled={!canDeploy || !nq.data || !bq.data} title={need} onClick={() => setCreating(true)}>
           가상 브릿지 만들기
         </button>
       }
@@ -218,21 +218,21 @@ export function NetworkBridgesPage() {
                         <span className="row" style={{ gap: 6, justifyContent: 'flex-end' }}>
                           {b.state === 'waiting-me' && (
                             <>
-                              <button className="btn sm primary" disabled={!canDeploy || !!off} title={need ?? off} onClick={() => setAct({ kind: 'approve', b })}>
+                              <button type="button" className="btn sm primary" disabled={!canDeploy || !!off} title={need ?? off} onClick={() => setAct({ kind: 'approve', b })}>
                                 승인
                               </button>
-                              <button className="btn sm danger" disabled={!canDeploy} title={need} onClick={() => setAct({ kind: 'close', b })}>
+                              <button type="button" className="btn sm danger" disabled={!canDeploy} title={need} onClick={() => setAct({ kind: 'close', b })}>
                                 거절…
                               </button>
                             </>
                           )}
                           {b.state === 'waiting-peer' && (
-                            <button className="btn sm danger" disabled={!canDeploy} title={need} onClick={() => setAct({ kind: 'close', b })}>
+                            <button type="button" className="btn sm danger" disabled={!canDeploy} title={need} onClick={() => setAct({ kind: 'close', b })}>
                               요청 취소…
                             </button>
                           )}
                           {b.state === 'open' && (
-                            <button className="btn sm danger" disabled={!canDeploy} title={need} onClick={() => setAct({ kind: 'close', b })}>
+                            <button type="button" className="btn sm danger" disabled={!canDeploy} title={need} onClick={() => setAct({ kind: 'close', b })}>
                               끊기…
                             </button>
                           )}
@@ -285,7 +285,7 @@ export function NetworkBridgesPage() {
                       <Badge tone={on ? 'ok' : 'un'}>{on ? '켜짐' : '꺼짐'}</Badge>
                     </td>
                     <td style={{ textAlign: 'right' }}>
-                      <button className="btn sm" disabled={!canDeploy} title={need} onClick={() => setInbound(n)}>
+                      <button type="button" className="btn sm" disabled={!canDeploy} title={need} onClick={() => setInbound(n)}>
                         {on ? '끄기…' : '켜기…'}
                       </button>
                     </td>
@@ -375,15 +375,15 @@ function BridgeCreateDialog({ tenant, nets, bridges, onClose, onDone }: { tenant
       onClose={onClose}
       footer={
         m.op ? (
-          <button className="btn primary" onClick={onClose}>
+          <button type="button" className="btn primary" onClick={onClose}>
             닫기
           </button>
         ) : (
           <>
-            <button className="btn" onClick={onClose}>
+            <button type="button" className="btn" onClick={onClose}>
               취소
             </button>
-            <button className="btn primary" disabled={!ready || m.busy} onClick={go}>
+            <button type="button" className="btn primary" disabled={!ready || m.busy} onClick={go}>
               만들기
             </button>
           </>
@@ -496,15 +496,15 @@ function BridgeActionDialog({ tenant, act, onClose, onDone }: { tenant: string; 
       onClose={onClose}
       footer={
         m.op ? (
-          <button className="btn primary" onClick={onClose}>
+          <button type="button" className="btn primary" onClick={onClose}>
             닫기
           </button>
         ) : (
           <>
-            <button className="btn" onClick={onClose}>
+            <button type="button" className="btn" onClick={onClose}>
               취소
             </button>
-            <button className={kind === 'close' ? 'btn danger solid' : 'btn primary'} disabled={m.busy} onClick={() => void m.run(`${bridgePath(tenant, b)}/${kind}`, { expected }).then((o) => o?.state === 'applied' && onDone())}>
+            <button type="button" className={kind === 'close' ? 'btn danger solid' : 'btn primary'} disabled={m.busy} onClick={() => void m.run(`${bridgePath(tenant, b)}/${kind}`, { expected }).then((o) => o?.state === 'applied' && onDone())}>
               {verb}
             </button>
           </>
@@ -540,15 +540,15 @@ export function InboundDialog({ tenant, net, bridges, onClose, onDone }: { tenan
       onClose={onClose}
       footer={
         m.op ? (
-          <button className="btn primary" onClick={onClose}>
+          <button type="button" className="btn primary" onClick={onClose}>
             닫기
           </button>
         ) : (
           <>
-            <button className="btn" onClick={onClose}>
+            <button type="button" className="btn" onClick={onClose}>
               취소
             </button>
-            <button className="btn primary" disabled={m.busy} onClick={() => void m.run(`${networkPath(tenant, net.name)}/toggles`, { toggle: 'bridge-inbound', on: !on }).then((o) => o?.state === 'applied' && (onDone(), onClose()))}>
+            <button type="button" className="btn primary" disabled={m.busy} onClick={() => void m.run(`${networkPath(tenant, net.name)}/toggles`, { toggle: 'bridge-inbound', on: !on }).then((o) => o?.state === 'applied' && (onDone(), onClose()))}>
               {on ? '끄기' : '켜기'}
             </button>
           </>

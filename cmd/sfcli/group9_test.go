@@ -205,21 +205,19 @@ func indent(text, prefix string) string {
 	return b.String()
 }
 
-func TestIngressHostAndBlockCommands(t *testing.T) {
+func TestIngressBlockCommands(t *testing.T) {
 	n := newGroup9Node(t)
-	n.run(0, "ingress", "hosts", "set", "--external-allowed", "--external", "shop.example.com,*.shop.example.com", "--local", "shop.lan")
-	out := n.run(0, "ingress", "hosts", "show")
-	if !strings.Contains(out, "*.shop.example.com") || !strings.Contains(out, "shop.lan") {
-		t.Fatal("hosts show:\n" + out)
-	}
+	// Tenant hosts come from domains now (sfcli domain); the old grant
+	// command is gone.
+	n.run(2, "ingress", "hosts", "show")
 	n.run(2, "ingress", "block", "b1", "--scope", "route")
 	n.run(0, "--reason", "maintenance", "ingress", "block", "b1", "--scope", "tenant", "--for", "1h")
-	if out = n.run(0, "ingress", "blocks"); !strings.Contains(out, "b1") {
+	if out := n.run(0, "ingress", "blocks"); !strings.Contains(out, "b1") {
 		t.Fatal("blocks:\n" + out)
 	}
 	n.run(0, "ingress", "extend", "b1", "--for", "2h")
 	n.run(0, "ingress", "unblock", "b1")
-	if out = n.run(0, "ingress", "blocks"); !strings.Contains(out, "removed") {
+	if out := n.run(0, "ingress", "blocks"); !strings.Contains(out, "removed") {
 		t.Fatal("unblocked block not shown as removed:\n" + out)
 	}
 }
@@ -313,6 +311,22 @@ func TestDomainCommands(t *testing.T) {
 	n.run(0, "domain", "assign", "shop.example.org")
 	if out = n.run(0, "domain", "list", "-o", "json"); !strings.Contains(out, `"tenant": "shop"`) && !strings.Contains(out, `"tenant":"shop"`) {
 		t.Fatal("assigned owner:\n" + out)
+	}
+	// Host requests under a cluster-level domain.
+	n.run(0, "--tenant", "", "domain", "add", "example.net")
+	n.run(2, "domain", "requests", "approve", "shop", "bad host")
+	n.run(0, "domain", "requests", "approve", "shop", "WWW.example.net")
+	n.run(1, "domain", "requests", "approve", "shop", "www.example.net")
+	if out = n.run(0, "--tenant", "", "domain", "requests", "list"); !strings.Contains(out, "www.example.net") || !strings.Contains(out, "open") {
+		t.Fatal("requests list:\n" + out)
+	}
+	n.run(0, "domain", "requests", "revoke", "shop", "www.example.net")
+	n.run(2, "--tenant", "", "domain", "certificates")
+	if out = n.run(0, "domain", "certificates", "-o", "json"); strings.TrimSpace(out) != "[]" {
+		t.Fatal("tenant certificates:\n" + out)
+	}
+	if out = n.run(0, "domain", "requests", "list", "-o", "json"); strings.Contains(out, "www.example.net") {
+		t.Fatal("revoked decision still listed:\n" + out)
 	}
 }
 

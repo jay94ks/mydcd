@@ -64,7 +64,6 @@ func TestVPSSSHInstallAndJoin(t *testing.T) {
 		t.Fatal("checksum failure ignored")
 	}
 
-	server := control.VPSServer{Name: "edge-1", Phase: control.VPSInstalling, PublicIP: "203.0.113.9", Port: 7443}
 	sourceKey := ed25519.NewKeyFromSeed(make([]byte, 32))
 	sourceHex := hex.EncodeToString(sourceKey.Public().(ed25519.PublicKey))
 	genesis := config.Peer{ID: "node-a", Key: sourceHex, Endpoint: "192.0.2.1:7443", Voter: true}
@@ -72,7 +71,7 @@ func TestVPSSSHInstallAndJoin(t *testing.T) {
 		JoinID: "vps-x", ApprovalRevision: 2, MinimumIndex: 1}
 	inv.Signature = ed25519.Sign(sourceKey, membership.InvitationBytes(*inv))
 	sh = &fakeShell{}
-	if err := vpsSSHJoin(context.Background(), sh, server, inv); err != nil {
+	if err := vpsSSHJoin(context.Background(), sh, "edge-1", inv); err != nil {
 		t.Fatal(err)
 	}
 	all := strings.Join(sh.stdin, "\n")

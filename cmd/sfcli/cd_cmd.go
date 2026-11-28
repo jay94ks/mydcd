@@ -18,9 +18,9 @@ import (
 	"github.com/jay94ks/seafield/internal/userauth"
 )
 
-// sfcli cd: apps that follow a Git branch. The policy is cd.yaml, kept by the
-// server (`cd set`); app.yaml in Git is what gets deployed. Usage:
-// docs/cli/cd.md.
+// sfcli cd: apps that follow a Git branch. The policy is app.yaml `x-sfc.cd`:
+// deploying the app with it turns CD on or changes it, without it turns CD
+// off. app.yaml in Git is what gets deployed. Usage: docs/cli/cd.md.
 
 func cdCommand(g *globals) *cli.Command {
 	return &cli.Command{
@@ -28,11 +28,11 @@ func cdCommand(g *globals) *cli.Command {
 		Short: "Deploy apps from a Git branch",
 		Long: `An app with a CD policy follows one file (app.yaml) in a Git branch. New
 commits become candidates; with sync: manual a person approves each one,
-with sync: auto it is deployed when it passes the checks.`,
+with sync: auto it is deployed when it passes the checks. The policy is the
+app.yaml x-sfc.cd block: 'sfcli app deploy' with it turns CD on or changes
+it, and deploying the app without it turns CD off.`,
 		Sub: []*cli.Command{
 			cdShowCommand(g),
-			cdSetCommand(g),
-			cdProbeCommand(g),
 			cdSyncCommand(g),
 			cdDecisionCommand(g, "approve"),
 			cdDecisionCommand(g, "reject"),
@@ -64,7 +64,7 @@ func cdAppArg(args []string, verb string, extra int) (string, error) {
 func cdApp(c *cli.Context, g *globals, s *session, tenant, app string) (control.AppView, error) {
 	row, err := cdAppRow(c, g, s, tenant, app)
 	if err == nil && row.CD == nil {
-		return row, fmt.Errorf("app %s has no CD policy; set one with 'sfcli cd set %s -f cd.yaml'", app, app)
+		return row, fmt.Errorf("app %s has no CD policy; add x-sfc.cd to its app.yaml and deploy it", app)
 	}
 	return row, err
 }
@@ -92,11 +92,11 @@ func cdAppRow(c *cli.Context, g *globals, s *session, tenant, app string) (contr
 	return control.AppView{}, fmt.Errorf("app %q not found in tenant %s", app, tenant)
 }
 
-// cdStatus is `cd show` for scripts: the policy as cd.yaml plus the state.
+// cdStatus is `cd show` for scripts: the policy as app.yaml x-sfc.cd plus the state.
 type cdStatus struct {
 	Tenant    string                        `json:"tenant"`
 	App       string                        `json:"app"`
-	Policy    deployment.CDFile             `json:"policy"`
+	Policy    deployment.CDBlock            `json:"policy"`
 	Revision  uint64                        `json:"revision"`
 	Paused    bool                          `json:"paused"`
 	Status    *deployment.DeliveryStatus    `json:"status,omitempty"`
@@ -126,7 +126,7 @@ func cdShowCommand(g *globals) *cli.Command {
 				return err
 			}
 			v := row.CD
-			out := cdStatus{Tenant: tenant, App: app, Policy: deployment.CDFileOf(v.Policy), Revision: v.Revision, Paused: v.Paused, Status: v.Status, Candidate: v.Candidate, Running: v.Running, Error: v.SourceError, Health: row.Health, View: v}
+			out := cdStatus{Tenant: tenant, App: app, Policy: deployment.CDBlockOf(v.Policy), Revision: v.Revision, Paused: v.Paused, Status: v.Status, Candidate: v.Candidate, Running: v.Running, Error: v.SourceError, Health: row.Health, View: v}
 			if g.output.Format() != cli.Table {
 				return cli.Print(c.Out, g.output.Format(), out, nil)
 			}
@@ -164,18 +164,6 @@ func shortCommit(commit string) string {
 	return commit
 }
 
-func readCDFile(c *cli.Context, path string) (deployment.DeliveryDeclaration, error) {
-	raw, err := readInputFile(c, path, 32<<10)
-	if err != nil {
-		return deployment.DeliveryDeclaration{}, err
-	}
-	p, err := deployment.ParseCDFile(raw)
-	if err != nil {
-		return p, fmt.Errorf("%s: %w", path, err)
-	}
-	return p, nil
-}
-
 // cdTarget is the execution target CAS of a CD change: the change applies
 // only while the app still runs what was read. --if-revision asks for the
 // stricter CD record revision instead.
@@ -189,115 +177,6 @@ func cdTarget(v *control.AppCDView, revision *cli.RevisionFlag) (*[32]byte, uint
 	}
 	t := v.Target
 	return &t, v.Revision, nil
-}
-
-func cdSetCommand(g *globals) *cli.Command {
-	var file string
-	var id cli.IDFlag
-	var revision cli.RevisionFlag
-	return &cli.Command{
-		Name:  "set",
-		Args:  "APP",
-		Short: "Replace an app's CD policy with cd.yaml",
-		Flags: func(fs *flag.FlagSet) {
-			fs.StringVar(&file, "f", "", "cd.yaml `file`")
-			fs.Var(&id, "id", "operation `ID` (default: a new one)")
-			fs.Var(&revision, "if-revision", "only if the CD record is still at this `revision`")
-		},
-		Run: g.withSession(func(c *cli.Context, s *session, args []string) error {
-			app, err := cdAppArg(args, "set", 0)
-			if err != nil {
-				return err
-			}
-			if done, err := g.savedChange(c, s, id.String(), "cd set "+app, "configure-app-cd"); done {
-				return err
-			}
-			if file == "" {
-				return cli.Usagef("set needs -f cd.yaml")
-			}
-			policy, err := readCDFile(c, file)
-			if err != nil {
-				return err
-			}
-			tenant, err := g.Tenant(s, true)
-			if err != nil {
-				return err
-			}
-			row, err := cdAppRow(c, g, s, tenant, app)
-			if err != nil {
-				return err
-			}
-			var q control.AppCDChange
-			var expected uint64
-			if row.CD == nil {
-				// The first policy turns CD on; the app's own revision guards it.
-				expected, err = revision.Resolve(func() (uint64, error) { return row.Revision, nil })
-				q = control.AppCDChange{Tenant: tenant, App: app, Policy: &policy}
-			} else {
-				var target *[32]byte
-				target, expected, err = cdTarget(row.CD, &revision)
-				q = control.AppCDChange{Tenant: tenant, App: app, Policy: &policy, PolicyRevision: row.CD.PolicyRevision, Target: target}
-			}
-			if err != nil {
-				return err
-			}
-			impact := fmt.Sprintf("App %s follows %s %s:%s (sync %s).", app, policy.Source.Repository, policy.Source.Ref, policy.Source.Path, deployment.CDFileOf(policy).Sync)
-			return g.sendAndPrint(c, s, impact, change{ID: id.Get(), Summary: "cd set " + app, Action: "configure-app-cd", Expected: expected, Payload: q})
-		}),
-	}
-}
-
-func cdProbeCommand(g *globals) *cli.Command {
-	var file string
-	return &cli.Command{
-		Name:  "probe",
-		Args:  "APP",
-		Short: "Check that the server can read the file cd.yaml points to",
-		Long:  "Fetches the branch head once and reports the commit and size. Nothing is changed.",
-		Flags: func(fs *flag.FlagSet) { fs.StringVar(&file, "f", "", "cd.yaml `file`") },
-		Run: g.withSession(func(c *cli.Context, s *session, args []string) error {
-			app, err := cdAppArg(args, "probe", 0)
-			if err != nil {
-				return err
-			}
-			if file == "" {
-				return cli.Usagef("probe needs -f cd.yaml")
-			}
-			policy, err := readCDFile(c, file)
-			if err != nil {
-				return err
-			}
-			tenant, err := g.Tenant(s, true)
-			if err != nil {
-				return err
-			}
-			q := deployment.GitProbeRequest{App: app, Repository: policy.Source.Repository, Branch: policy.Source.Ref, Path: policy.Source.Path, Credential: policy.Source.Credential}
-			if !q.Valid() {
-				return fmt.Errorf("%s: repository must be https without a user name, branch a branch name", file)
-			}
-			ctx, cancel := g.Deadline(c)
-			result, err := s.Client.ProbeCD(ctx, s.Target, s.Stored.Session, tenant, q)
-			cancel()
-			if err != nil {
-				return err
-			}
-			if err = cli.Print(c.Out, g.output.Format(), result, func() cli.Rows {
-				t := cli.Rows{Header: []string{"result", "commit", "size", "node"}}
-				code := result.Code
-				if code == "" {
-					code = "ok"
-				}
-				t.Add(code, shortCommit(result.Commit), result.Size, result.Node)
-				return t
-			}); err != nil {
-				return err
-			}
-			if result.Code != "" {
-				return cli.ExitError{Code: 3}
-			}
-			return nil
-		}),
-	}
 }
 
 func cdSyncCommand(g *globals) *cli.Command {

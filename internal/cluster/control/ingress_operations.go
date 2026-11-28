@@ -489,12 +489,6 @@ func validIngressHistoryScope(h IngressHistoryRecord) bool {
 			return false
 		}
 		tenant, app, node = q.Tenant, q.App, q.Node
-	case "set-ingress-host-policy":
-		var q IngressHostPolicyChange
-		if canonical(h.Origin.Change.Payload, &q) != nil {
-			return false
-		}
-		tenant = q.Tenant
 	case "put-cluster-app-route", "remove-cluster-app-route":
 		var q ClusterAppRouteSelection
 		if json.Unmarshal(h.Origin.Change.Payload, &q) != nil {

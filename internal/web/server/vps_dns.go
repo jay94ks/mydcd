@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/userauth"
 	"github.com/jay94ks/seafield/internal/web/dns"
 	"github.com/jay94ks/seafield/internal/web/sfc"
 	"github.com/jay94ks/seafield/internal/web/store"
@@ -40,6 +41,8 @@ const vpsDNSEvery = time.Minute
 type vpsDNSState struct {
 	mu     sync.Mutex
 	polled time.Time
+	// warned: when owned VPS subscription notices were last checked.
+	warned time.Time
 	// ok: the last round could read the VPS page (shown as dnsAuto).
 	ok bool
 	// failed: when a withdrawal last failed per server/domain, so the
@@ -233,6 +236,36 @@ func (s *Server) vpsDNSApply(ctx context.Context, ws *webSession, v vpsDNSDomain
 	return h.ID, nil
 }
 
+// vpsDNSWhy is why a server's addresses are out of DNS: stopped, or an
+// owned VPS whose traffic is held before its monthly bandwidth runs out
+// (devel/design/vps-hostinger.md §4). Only the labels and notices differ.
+type vpsDNSWhy struct {
+	out, back string // history labels' prefixes
+	// failed, withdrawn and blocked are the notices' text codes (texts.go):
+	// a withdrawal failed, addresses taken out, a set not put back.
+	failed, withdrawn, blocked string
+	link                       string
+}
+
+var (
+	vpsDNSStop  = vpsDNSWhy{out: "vps-stop:", back: "vps-start:", failed: "vps-dns-failed", withdrawn: "vps-stopped", blocked: "vps-restore-failed", link: "/nodes/vps"}
+	vpsDNSLimit = vpsDNSWhy{out: "owned-vps-limit:", back: "owned-vps-restore:", failed: "owned-dns-failed", withdrawn: "owned-limited", blocked: "owned-restore-failed", link: "/nodes/owned-vps"}
+)
+
+// ownedDNSServer is an owned VPS in the shape the DNS hold code reads:
+// out (stopping) while held in exclude mode, back (running) otherwise.
+// Request names the hold; PhaseAt is when the hold ended.
+func ownedDNSServer(v control.OwnedVPS) (control.VPSServer, bool) {
+	out := control.VPSServer{Name: v.Name, PublicIP: v.PublicIP, Phase: control.VPSRunning}
+	if v.Restored != nil {
+		out.PhaseAt = v.Restored.At
+	}
+	if v.Limit != nil && v.Limit.Mode == control.OwnedProtectExclude {
+		out.Phase, out.PowerRequest = control.VPSStopping, "owned-limit:"+v.Limit.Month+":"+itoa(int(v.Limit.At))
+	}
+	return out, v.Phase == control.OwnedRunning
+}
+
 // vpsDNSPoll runs one round as ws (the watcher's automation session).
 func (s *Server) vpsDNSPoll(ctx context.Context, ws *webSession) {
 	st := &s.vpsDNS
@@ -247,10 +280,14 @@ func (s *Server) vpsDNSPoll(ctx context.Context, ws *webSession) {
 		return
 	}
 	var page control.VPSPage
+	var owned userauth.OwnedVPSReply
 	var nodes map[string]dnsNode
 	err := ws.do(ctx, func(ctx context.Context, c sfc.Conn) error {
 		var err error
-		page, err = c.QueryVPS(ctx)
+		if page, err = c.QueryVPS(ctx); err != nil {
+			return err
+		}
+		owned, err = c.QueryOwnedVPS(ctx, false)
 		return err
 	})
 	st.mu.Lock()
@@ -272,10 +309,20 @@ func (s *Server) vpsDNSPoll(ctx context.Context, ws *webSession) {
 		held[h.Server][h.Domain] = h
 	}
 	servers := map[string]control.VPSServer{}
+	why := map[string]vpsDNSWhy{}
 	for _, v := range page.Servers {
-		servers[v.Name] = v
+		servers[v.Name], why[v.Name] = v, vpsDNSStop
 	}
-	for _, v := range page.Servers {
+	var rows []control.VPSServer
+	rows = append(rows, page.Servers...)
+	for _, o := range owned.Page.Servers {
+		v, active := ownedDNSServer(o)
+		servers[v.Name], why[v.Name] = v, vpsDNSLimit // a failed one keeps its holds until detached
+		if active {
+			rows = append(rows, v)
+		}
+	}
+	for _, v := range rows {
 		switch {
 		case vpsWithdrawn(v.Phase):
 			if nodes == nil {
@@ -284,9 +331,9 @@ func (s *Server) vpsDNSPoll(ctx context.Context, ws *webSession) {
 					return
 				}
 			}
-			s.vpsDNSWithdrawServer(ctx, ws, v, nodes[v.Name], held[v.Name])
+			s.vpsDNSWithdrawServer(ctx, ws, v, nodes[v.Name], held[v.Name], why[v.Name])
 		case v.Phase == control.VPSRunning && len(held[v.Name]) > 0:
-			s.vpsDNSRestoreServer(ctx, ws, v, held[v.Name])
+			s.vpsDNSRestoreServer(ctx, ws, v, held[v.Name], why[v.Name])
 		}
 	}
 	for name, hs := range held {
@@ -306,7 +353,7 @@ func (s *Server) vpsDNSPoll(ctx context.Context, ws *webSession) {
 	}
 }
 
-func (s *Server) vpsDNSWithdrawServer(ctx context.Context, ws *webSession, v control.VPSServer, n dnsNode, held map[string]*store.VPSDNSHold) {
+func (s *Server) vpsDNSWithdrawServer(ctx context.Context, ws *webSession, v control.VPSServer, n dnsNode, held map[string]*store.VPSDNSHold, why vpsDNSWhy) {
 	domains, err := s.vpsDNSDomains(ctx, v.Name, func(domain string) bool { return held[domain] == nil || held[domain].Request != v.PowerRequest })
 	if err != nil {
 		s.log.Error("vps dns: domains", "err", err)
@@ -328,12 +375,12 @@ func (s *Server) vpsDNSWithdrawServer(ctx context.Context, ws *webSession, v con
 			}
 		}
 		if len(p.upsert) > 0 {
-			id, err := s.vpsDNSApply(ctx, ws, dom, p.upsert, "vps-stop:"+v.Name)
+			id, err := s.vpsDNSApply(ctx, ws, dom, p.upsert, why.out+v.Name)
 			if err != nil {
 				if !s.vpsDNSFailed(v.Name + "\x00" + dom.d.Domain) {
 					continue
 				}
-				s.notify(&store.Notification{User: dom.row.By, Kind: NotifyOpFailed, Severity: "error", Text: notice("vps-dns-failed", map[string]string{"domain": dom.d.Domain, "vps": v.Name, "kind": string(dns.KindOf(err))}, "vps-dns-failed.body"),
+				s.notify(&store.Notification{User: dom.row.By, Kind: NotifyOpFailed, Severity: "error", Text: notice(why.failed, map[string]string{"domain": dom.d.Domain, "vps": v.Name, "kind": string(dns.KindOf(err))}, why.failed+".body"),
 					Link: "/dns/" + dom.d.Domain})
 				continue
 			}
@@ -343,10 +390,10 @@ func (s *Server) vpsDNSWithdrawServer(ctx context.Context, ws *webSession, v con
 			s.log.Error("vps dns: hold", "err", err)
 			continue
 		}
-		body := notice("vps-stopped", map[string]string{"domain": dom.d.Domain, "vps": v.Name, "sets": itoa(len(p.hold.Sets)), "kept": itoa(len(p.hold.Kept))},
-			append([]string{"vps-stopped.body"}, bodyIf(len(p.hold.Kept) > 0, "vps-stopped.kept")...)...)
+		body := notice(why.withdrawn, map[string]string{"domain": dom.d.Domain, "vps": v.Name, "sets": itoa(len(p.hold.Sets)), "kept": itoa(len(p.hold.Kept))},
+			append([]string{why.withdrawn + ".body"}, bodyIf(len(p.hold.Kept) > 0, "vps-stopped.kept")...)...)
 		if len(p.hold.Sets)+len(p.hold.Kept) > 0 {
-			s.notify(&store.Notification{User: dom.row.By, Kind: NotifyVPSDNS, Severity: "info", Text: body, Link: "/nodes/vps"})
+			s.notify(&store.Notification{User: dom.row.By, Kind: NotifyVPSDNS, Severity: "info", Text: body, Link: why.link})
 		}
 	}
 }
@@ -382,7 +429,7 @@ func (s *Server) vpsDNSReady(ctx context.Context, v control.VPSServer, held map[
 	return s.reach(ctx, addrs).OK
 }
 
-func (s *Server) vpsDNSRestoreServer(ctx context.Context, ws *webSession, v control.VPSServer, held map[string]*store.VPSDNSHold) {
+func (s *Server) vpsDNSRestoreServer(ctx context.Context, ws *webSession, v control.VPSServer, held map[string]*store.VPSDNSHold, why vpsDNSWhy) {
 	if !s.vpsDNSReady(ctx, v, held) {
 		return // the next round checks again
 	}
@@ -427,7 +474,7 @@ func (s *Server) vpsDNSRestoreServer(ctx context.Context, ws *webSession, v cont
 			upsert = append(upsert, back)
 		}
 		if len(upsert) > 0 {
-			if _, err := s.vpsDNSApply(ctx, ws, dom, upsert, "vps-start:"+v.Name); err != nil {
+			if _, err := s.vpsDNSApply(ctx, ws, dom, upsert, why.back+v.Name); err != nil {
 				continue // the hold stays; try again next round
 			}
 		}
@@ -441,7 +488,7 @@ func (s *Server) vpsDNSRestoreServer(ctx context.Context, ws *webSession, v cont
 		for _, b := range blocked {
 			names = append(names, b.Name+" "+b.Type)
 		}
-		s.notify(&store.Notification{User: dom.row.By, Kind: NotifyVPSDNS, Severity: "warning", Action: true, Text: notice("vps-restore-failed", map[string]string{"domain": domain, "vps": v.Name, "records": strings.Join(names, ", ")}, "vps-restore-failed.body"),
+		s.notify(&store.Notification{User: dom.row.By, Kind: NotifyVPSDNS, Severity: "warning", Action: true, Text: notice(why.blocked, map[string]string{"domain": domain, "vps": v.Name, "records": strings.Join(names, ", ")}, why.blocked+".body"),
 			Link: "/dns/" + domain})
 	}
 }

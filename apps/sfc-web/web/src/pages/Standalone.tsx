@@ -218,13 +218,13 @@ function DesktopStandalone() {
         actions={
           <>
             <span className="pill">작업 공간 {tenant}</span>
-            <button className="btn" title="지금 바로 다시 읽기" onClick={() => q.refreshByUser()}>
+            <button type="button" className="btn" title="지금 바로 다시 읽기" onClick={() => q.refreshByUser()}>
               ↻ 새로고침
             </button>
-            <button className="btn" disabled={!canDeploy} title={canDeploy ? undefined : NEED} onClick={() => setDlg({ kind: 'quick' })}>
+            <button type="button" className="btn" disabled={!canDeploy} title={canDeploy ? undefined : NEED} onClick={() => setDlg({ kind: 'quick' })}>
               ▶ 임시로 바로 쉘
             </button>
-            <button className="btn primary" disabled={!canDeploy} title={canDeploy ? undefined : NEED} onClick={() => navigate('/standalone/new')}>
+            <button type="button" className="btn primary" disabled={!canDeploy} title={canDeploy ? undefined : NEED} onClick={() => navigate('/standalone/new')}>
               ＋ 새로 실행
             </button>
           </>
@@ -262,10 +262,10 @@ function DesktopStandalone() {
                 title="이 작업 공간에 단독 컨테이너가 없습니다."
                 action={
                   <span className="row">
-                    <button className="btn" disabled={!canDeploy} title={canDeploy ? undefined : NEED} onClick={() => setDlg({ kind: 'quick' })}>
+                    <button type="button" className="btn" disabled={!canDeploy} title={canDeploy ? undefined : NEED} onClick={() => setDlg({ kind: 'quick' })}>
                       ▶ 임시로 바로 쉘
                     </button>
-                    <button className="btn primary" disabled={!canDeploy} title={canDeploy ? undefined : NEED} onClick={() => navigate('/standalone/new')}>
+                    <button type="button" className="btn primary" disabled={!canDeploy} title={canDeploy ? undefined : NEED} onClick={() => navigate('/standalone/new')}>
                       ＋ 새로 실행
                     </button>
                   </span>
@@ -352,10 +352,10 @@ function DesktopStandalone() {
           onClose={() => setDlg(undefined)}
           footer={
             <>
-              <button className="btn" onClick={() => setDlg(undefined)}>
+              <button type="button" className="btn" onClick={() => setDlg(undefined)}>
                 취소
               </button>
-              <button className="btn primary" onClick={() => (setConsole({ s: dlg.s, tab: 'exec' }), setDlg(undefined))}>
+              <button type="button" className="btn primary" onClick={() => (setConsole({ s: dlg.s, tab: 'exec' }), setDlg(undefined))}>
                 붙기
               </button>
             </>
@@ -413,49 +413,49 @@ function Summary({ s, me, canDeploy, onConsole, onDialog, onEdit, onChanged }: {
       }
       actions={
         ended ? (
-          <button className="btn" onClick={() => onDialog('yaml')}>
+          <button type="button" className="btn" onClick={() => onDialog('yaml')}>
             정의 YAML 보기
           </button>
         ) : s.lifetime === 'temp' ? (
           <>
-            <button className="btn" disabled={!!dis || outputOnly(s)} title={dis ?? (outputOnly(s) ? '출력만 보는 방식입니다' : undefined)} onClick={() => onConsole('exec')}>
+            <button type="button" className="btn" disabled={!!dis || outputOnly(s)} title={dis ?? (outputOnly(s) ? '출력만 보는 방식입니다' : undefined)} onClick={() => onConsole('exec')}>
               터미널 열기
             </button>
-            <button className="btn" onClick={() => onConsole('logs')}>
+            <button type="button" className="btn" onClick={() => onConsole('logs')}>
               자세히 (개요·로그·자원·상태 검사)
             </button>
             <ExtendMenu s={s} disabled={dis} onDone={onChanged} />
-            <button className="btn primary" disabled={!!dis} title={dis} onClick={() => onDialog('pin')}>
+            <button type="button" className="btn primary" disabled={!!dis} title={dis} onClick={() => onDialog('pin')}>
               📌 고정으로 바꾸기…
             </button>
-            <button className="btn danger" disabled={!!dis} title={dis} onClick={() => onDialog('end')}>
+            <button type="button" className="btn danger" disabled={!!dis} title={dis} onClick={() => onDialog('end')}>
               끝내기…
             </button>
           </>
         ) : (
           <>
-            <button className="btn" onClick={() => onConsole('logs')}>
+            <button type="button" className="btn" onClick={() => onConsole('logs')}>
               자세히 (개요·로그·자원·상태 검사·이벤트)
             </button>
-            <button className="btn" disabled={!!dis || s.state !== 'running'} title={dis} onClick={() => onConsole('exec')}>
+            <button type="button" className="btn" disabled={!!dis || s.state !== 'running'} title={dis} onClick={() => onConsole('exec')}>
               터미널 열기 (exec)
             </button>
-            <button className="btn" disabled={!!dis} title={dis} onClick={onEdit}>
+            <button type="button" className="btn" disabled={!!dis} title={dis} onClick={onEdit}>
               정의 고치기…
             </button>
-            <button className="btn" disabled={!!dis} title={dis} onClick={() => onDialog('restart')}>
+            <button type="button" className="btn" disabled={!!dis} title={dis} onClick={() => onDialog('restart')}>
               다시 시작
             </button>
             {s.state === 'exited' ? (
-              <button className="btn" disabled={!!dis} title={dis} onClick={() => onDialog('start')}>
+              <button type="button" className="btn" disabled={!!dis} title={dis} onClick={() => onDialog('start')}>
                 시작
               </button>
             ) : (
-              <button className="btn" disabled={!!dis} title={dis} onClick={() => onDialog('stop')}>
+              <button type="button" className="btn" disabled={!!dis} title={dis} onClick={() => onDialog('stop')}>
                 멈추기
               </button>
             )}
-            <button className="btn danger" disabled={!!dis} title={dis} onClick={() => onDialog('remove')}>
+            <button type="button" className="btn danger" disabled={!!dis} title={dis} onClick={() => onDialog('remove')}>
               지우기…
             </button>
           </>
@@ -467,7 +467,7 @@ function Summary({ s, me, canDeploy, onConsole, onDialog, onEdit, onChanged }: {
           <span>
             ⓘ {s.name} 연결이 끊겼습니다. {fmtDur(Math.max(0, g))} 안에 다시 붙지 않으면 지웁니다.
           </span>
-          <button className="btn sm" disabled={!!dis} onClick={() => onConsole('exec')}>
+          <button type="button" className="btn sm" disabled={!!dis} onClick={() => onConsole('exec')}>
             다시 붙기
           </button>
         </div>
@@ -478,10 +478,10 @@ function Summary({ s, me, canDeploy, onConsole, onDialog, onEdit, onChanged }: {
             {s.name}이(가) {s.restarts}번 다시 시작됐습니다{s.exitCode !== undefined ? `(종료 코드 ${s.exitCode})` : ''}. 로그를 확인하거나 멈추세요.
           </span>
           <span className="row">
-            <button className="btn sm" onClick={() => onConsole('logs')}>
+            <button type="button" className="btn sm" onClick={() => onConsole('logs')}>
               로그 보기
             </button>
-            <button className="btn sm" disabled={!!dis} onClick={() => onDialog('stop')}>
+            <button type="button" className="btn sm" disabled={!!dis} onClick={() => onDialog('stop')}>
               멈추기
             </button>
           </span>
@@ -519,7 +519,7 @@ function ExtendMenu({ s, disabled, onDone }: { s: StandaloneView; disabled?: str
   });
   if (disabled)
     return (
-      <button className="btn" disabled title={disabled}>
+      <button type="button" className="btn" disabled title={disabled}>
         수명 늘리기…
       </button>
     );
@@ -552,15 +552,15 @@ function OpDialog({ title, children, actionLabel, danger, busy, onRun, onClose, 
       danger={danger}
       footer={
         op ? (
-          <button className="btn" onClick={onClose}>
+          <button type="button" className="btn" onClick={onClose}>
             닫기
           </button>
         ) : (
           <>
-            <button className="btn" onClick={onClose}>
+            <button type="button" className="btn" onClick={onClose}>
               취소
             </button>
-            <button className={`btn ${danger ? 'danger solid' : 'primary'}`} disabled={busy || disabled} onClick={onRun}>
+            <button type="button" className={`btn ${danger ? 'danger solid' : 'primary'}`} disabled={busy || disabled} onClick={onRun}>
               {busy ? '보내는 중…' : actionLabel}
             </button>
           </>
@@ -671,7 +671,7 @@ function RemoveDialog({ s, onClose }: { s: StandaloneView; onClose: () => void }
         title={`${s.name} 지우기`}
         onClose={onClose}
         footer={
-          <button className="btn" onClick={onClose}>
+          <button type="button" className="btn" onClick={onClose}>
             닫기
           </button>
         }
@@ -719,10 +719,10 @@ function YamlDrawer({ s, onClose }: { s: StandaloneView; onClose: () => void }) 
       width={720}
       footer={
         <>
-          <button className="btn" onClick={() => void navigator.clipboard?.writeText(s.yaml).then(() => setCopied(true))}>
+          <button type="button" className="btn" onClick={() => void navigator.clipboard?.writeText(s.yaml).then(() => setCopied(true))}>
             {copied ? '복사했습니다' : '복사'}
           </button>
-          <button className="btn" onClick={download}>
+          <button type="button" className="btn" onClick={download}>
             내려받기
           </button>
         </>

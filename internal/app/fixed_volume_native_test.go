@@ -205,7 +205,7 @@ func prepareFixedAppNativeSource(t *testing.T, ctx context.Context, r *Runtime, 
 		t.Fatal("same filesystem space counted twice")
 	}
 	hdd := storageRoot("hdd")
-	f.cli(t, ctx, 0, "volume", "register", "data", "--node", "node-a", "--storage", "hdd", "--root-generation", fmt.Sprint(hdd.Generation), "--path", f.source, "--generation", "3", "--id", "fixed-register", "--no-wait")
+	f.cli(t, ctx, 0, "volume", "register", "data", "--node", "node-a", "--storage", "hdd", "--path", f.source, "--generation", "3", "--id", "fixed-register", "--no-wait")
 	fixedNativeWait(t, ctx, "actual fixed native registration", func() bool {
 		v, err := p.Volumes(read().State)
 		if err != nil {

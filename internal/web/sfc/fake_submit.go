@@ -285,8 +285,6 @@ func (c *fakeConn) apply(op UserOperation, actor string, next uint64) (bool, err
 		return true, c.applyBridge(op, actor, next)
 	case ActionDeleteRegistryImage, ActionGCRegistry, ActionPruneRegistryImages:
 		return true, c.applyRegistryMaintenance(op, actor)
-	case ActionSetIngressHostPolicy:
-		return true, c.applyRealIngress(op, actor)
 	case ActionIngressBlock, ActionIngressUnblock, ActionIngressBlockExtend:
 		return true, c.applyRealIngress(op, actor)
 	case ActionSetNodeGateways, ActionSetIngressBalance, ActionDrainIngress, ActionUndrainIngress, ActionPutClusterAppRoute, ActionRemoveClusterAppRoute:
@@ -316,6 +314,8 @@ func (c *fakeConn) apply(op UserOperation, actor string, next uint64) (bool, err
 		return true, c.applyClusterFirewall(op, actor)
 	case ActionPutVPSAccount, ActionRemoveVPSAccount, ActionCreateVPSNode, ActionStopVPSNode, ActionStartVPSNode, ActionDeleteVPSNode, ActionSetVPSNodeCap:
 		return true, c.applyVPS(op, actor)
+	case ActionAttachOwnedVPS, ActionDetachOwnedVPS, ActionSetOwnedVPS:
+		return true, c.applyOwnedVPS(op, actor)
 	case ActionBeginBuildZipUpload, ActionPutBuildZipPart, ActionUploadBuildZip, ActionAbortBuildZipUpload:
 		return true, c.applyRealZipUpload(op, actor, next)
 	case ActionDrainNode, ActionDemoteNode, ActionRotateNodeIdentity, ActionForceRemoveNode:

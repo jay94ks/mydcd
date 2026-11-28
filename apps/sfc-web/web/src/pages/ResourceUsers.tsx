@@ -18,7 +18,7 @@ export function ResourceUsersDialog({ tenant, kind, name, app, onClose }: { tena
       title={`${name}${eulReul(name)} 쓰는 앱`}
       onClose={onClose}
       footer={
-        <button className="btn primary" onClick={onClose}>
+        <button type="button" className="btn primary" onClick={onClose}>
           닫기
         </button>
       }

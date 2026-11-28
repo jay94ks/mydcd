@@ -7,6 +7,7 @@ import (
 	"github.com/jay94ks/seafield/internal/access"
 	"github.com/jay94ks/seafield/internal/cluster/lifecycle"
 	"github.com/jay94ks/seafield/internal/cluster/state"
+	"slices"
 	"time"
 )
 
@@ -35,12 +36,33 @@ type NodeDiagnosticsBundle struct {
 	ExpandedLimitBytes      uint64
 	Digest                  [32]byte
 	Truncated               bool
-	Data                    []byte
+	// Omitted says what Truncated stands for, in fixed codes:
+	// events-gap (the server's event log itself missed events, e.g. engine
+	// events before it started), events-older (only the newest 100 events
+	// are kept), events-unavailable (an event log could not be read),
+	// profile-goroutine / profile-cpu (a profile did not fit the limits).
+	Omitted []string `json:",omitempty"`
+	Data    []byte
+}
+
+// NodeDiagnosticsOmissions are the codes Omitted may hold.
+var NodeDiagnosticsOmissions = []string{"events-gap", "events-older", "events-unavailable", "profile-goroutine", "profile-cpu"}
+
+func validOmissions(codes []string, truncated bool) bool {
+	if len(codes) > len(NodeDiagnosticsOmissions) || len(codes) > 0 && !truncated {
+		return false
+	}
+	for i, c := range codes {
+		if !slices.Contains(NodeDiagnosticsOmissions, c) || slices.Contains(codes[:i], c) {
+			return false
+		}
+	}
+	return true
 }
 
 func (b NodeDiagnosticsBundle) Valid(node string) bool {
 	_, err := time.Parse(time.RFC3339, b.CreatedAt)
-	return b.Schema == 1 && b.Node == node && lifecycle.ValidID(node) && b.Format == "tar+gzip" && err == nil && b.LimitBytes == NodeDiagnosticsMaxBytes && b.ExpandedLimitBytes == NodeDiagnosticsExpandedBytes && b.Bytes == uint64(len(b.Data)) && len(b.Data) > 0 && len(b.Data) <= NodeDiagnosticsMaxBytes && sha256.Sum256(b.Data) == b.Digest
+	return b.Schema == 1 && b.Node == node && lifecycle.ValidID(node) && b.Format == "tar+gzip" && err == nil && b.LimitBytes == NodeDiagnosticsMaxBytes && b.ExpandedLimitBytes == NodeDiagnosticsExpandedBytes && b.Bytes == uint64(len(b.Data)) && len(b.Data) > 0 && len(b.Data) <= NodeDiagnosticsMaxBytes && sha256.Sum256(b.Data) == b.Digest && validOmissions(b.Omitted, b.Truncated)
 }
 func (p Policy) ReadNodeDiagnostics(s state.State, session access.Session, at int64, node string) (NodeDiagnosticsRead, error) {
 	current, err := p.Current(s)

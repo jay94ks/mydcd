@@ -360,9 +360,6 @@ func (p Policy) reduceUserCD(s state.State, a Apps, op UserOperation) (map[strin
 	}
 	key := appKey(q.Tenant, q.App)
 	entry, exists := a.entries[key]
-	if exists && entry.Delivery == nil && op.Change.Action == "configure-app-cd" {
-		return p.attachUserCD(s, a, op, q, entry)
-	}
 	if !exists || entry.Delivery == nil {
 		return nil, state.ConditionFailed
 	}
@@ -467,28 +464,5 @@ func (p Policy) reduceUserCD(s state.State, a Apps, op UserOperation) (map[strin
 		return nil, state.ConditionFailed
 	}
 	a.entries[key] = entry
-	return p.appsCheckpoint(s, a, uint64(op.At))
-}
-
-// attachUserCD is the first 'cd set' of an app deployed without CD. The
-// app's current execution becomes the running candidate; CAS is the app's
-// inventory revision, as for any other change of the app itself.
-func (p Policy) attachUserCD(s state.State, a Apps, op UserOperation, q AppCDChange, entry appEntry) (map[string][]byte, state.Code) {
-	if q.Choice != nil || q.Policy == nil || q.PolicyRevision != 0 || q.Target != nil || entry.Standalone != nil || entry.Down != nil || entry.PendingSync != nil || op.Change.Expected != entry.Inventory.Revision() {
-		return nil, state.ConditionFailed
-	}
-	c, err := p.Catalog(s)
-	if err != nil {
-		return nil, state.Invalid
-	}
-	d, err := deployment.AttachDelivery(entry.Inventory, c, op.Session.User, *q.Policy)
-	if errors.Is(err, access.ErrDenied) {
-		return nil, state.Forbidden
-	}
-	if err != nil {
-		return nil, state.ConditionFailed
-	}
-	entry.Delivery = &d
-	a.entries[appKey(q.Tenant, q.App)] = entry
 	return p.appsCheckpoint(s, a, uint64(op.At))
 }

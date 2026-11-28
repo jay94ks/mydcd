@@ -65,6 +65,49 @@ func (m *Manager) SetRuntimeControls(revision uint64, controls []RuntimeControl)
 	}
 	return nil
 }
+
+// Traffic hold modes (the owned VPS catalog's TrafficHolds values).
+const (
+	HoldExclude   = "exclude"
+	HoldLowWeight = "low-weight"
+)
+
+// SetTrafficHolds installs the committed owned VPS traffic holds, node name
+// to mode. An exclude hold leaves the node's backends out unless nothing else
+// can serve the route; a low-weight hold gives them a small share. Requests in
+// flight keep their backend.
+func (m *Manager) SetTrafficHolds(holds map[string]string) {
+	owned := make(map[string]string, len(holds))
+	for node, mode := range holds {
+		if mode == HoldExclude || mode == HoldLowWeight {
+			owned[node] = mode
+		}
+	}
+	m.trafficHolds.Store(&owned)
+}
+
+// holdSelection marks the selection's backends on held nodes.
+func (m *Manager) holdSelection(q *Selection) {
+	holds := m.trafficHolds.Load()
+	if holds == nil || len(*holds) == 0 {
+		return
+	}
+	for id, b := range q.Backends {
+		switch (*holds)[b.Node] {
+		case HoldExclude:
+			if q.Avoid == nil {
+				q.Avoid = map[string]bool{}
+			}
+			q.Avoid[id] = true
+		case HoldLowWeight:
+			if q.Light == nil {
+				q.Light = map[string]bool{}
+			}
+			q.Light[id] = true
+		}
+	}
+}
+
 func (i *instance) applyRuntimeControlsLocked() {
 	for _, timer := range i.controlTimers {
 		timer.Stop()

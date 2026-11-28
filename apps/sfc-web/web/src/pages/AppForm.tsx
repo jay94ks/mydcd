@@ -193,7 +193,7 @@ export function ServiceFields({ tenant, value: s, onChange: set, nodes, choices:
             <input value={s.name} onChange={(e) => set({ name: e.target.value.trim() })} />
           </Field>
         )}
-        <Field group label="이미지" hint="digest 고정 권장 (repo@sha256:…)">
+        <Field group label="이미지" hint="저장소/이름:태그. 컨테이너를 만들 때 digest가 정해집니다">
           <ImageInput tenant={tenant} value={s.image} onChange={(image) => set({ image })} />
         </Field>
         <Field label="서버">

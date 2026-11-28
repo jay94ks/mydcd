@@ -83,14 +83,19 @@ func (a Authority) WithCommittedStaticAllocation(v network.Allocation, networkID
 	if !known || pool.Network != networkID || pool.Owner != v.Owner {
 		return a, ErrLease
 	}
-	if old, found := a.book.Allocation(v.Endpoint); found {
+	// Each generation of an endpoint is its own hold: a surged Task's new
+	// generation joins its original's (network.Book).
+	if old, found := a.book.AllocationOf(v.Endpoint, v.Generation); found {
 		if old != v {
 			return a, ErrLease
 		}
 		return a, nil
 	}
+	if old, found := a.book.Allocation(v.Endpoint); found && old.Generation > v.Generation {
+		return a, ErrLease
+	}
 	book, err := a.book.WithCommittedAllocation(v.Endpoint, v.Owner, networkID, v.Generation, v.Address)
-	got, found := book.Allocation(v.Endpoint)
+	got, found := book.AllocationOf(v.Endpoint, v.Generation)
 	if err != nil || !found || got != v {
 		return a, ErrLease
 	}
@@ -210,7 +215,7 @@ func (a Authority) ReserveStatic(endpoint, owner, networkID, pool string, genera
 	if pool == "" || strings.HasPrefix(endpoint, "dhcp/") {
 		return a, network.Allocation{}, ErrLease
 	}
-	if old, ok := a.book.Allocation(endpoint); ok {
+	if old, ok := a.book.AllocationOf(endpoint, generation); ok {
 		if a.addressFenced(old) {
 			return a, network.Allocation{}, ErrLease
 		}

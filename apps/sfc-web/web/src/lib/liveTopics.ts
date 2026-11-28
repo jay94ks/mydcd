@@ -145,3 +145,17 @@ export const serversMeasured = measured(serversLive);
 export const serverMeasured = (id: string | undefined) => measured(serverLive(id));
 export const dashboardMeasured = measured(dashboardLive);
 export const appMeasured = (tenant: string | undefined, app: string | undefined) => measured(appLive(tenant, app));
+/** 앱 자동 배포(CD): 앱 기록과 그 작업의 보고, 웹이 남긴 배포 전후 점검 */
+export const cdLive = (tenant: string | undefined, app: string | undefined): LiveTopic<never> => ({
+  match: (r) => appLive(tenant, app).match(r) || (r.kind === 'cd-check' && r.tenant === tenant && r.name === app),
+});
+/** CD 상태: Git 확인 시각처럼 서버가 그때 아는 값이 섞여 주기도 남긴다 */
+export const cdStateLive = (tenant: string | undefined, app: string | undefined) => measured(cdLive(tenant, app));
+/** 서버 셸 정책·서버별 준비 상태 */
+export const nodeShellLive: LiveTopic<never> = { match: (r) => r.kind === 'node-shell' };
+/** 서버 셸 세션 (내 것, 관리자는 전부). 끊김은 잰 값이라 주기도 남긴다 */
+export const nodeShellSessionsLive: LiveTopic<never> = { match: (r) => r.kind === 'node-shell-session' || r.kind === 'node-shell', measured: true };
+/** VPS 계정·서버 기록. 업체 쪽 상태는 잰 값이다 */
+export const vpsLive: LiveTopic<never> = { match: (r) => r.kind === 'vps' || r.kind === 'node', measured: true };
+/** 웹 감사 기록 첫 쪽 (작업 공간을 고르면 그 작업 공간 것만) */
+export const auditLive = (tenant: string | undefined): LiveTopic<never> => ({ match: (r) => r.kind === 'audit' && (!tenant || r.tenant === tenant) });

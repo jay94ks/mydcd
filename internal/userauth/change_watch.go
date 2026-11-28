@@ -211,8 +211,14 @@ func changeWatchAllowed(c access.Catalog, session access.Session, cluster [32]by
 		// The registry list also shows registries to their tenant's
 		// ManageRegistry holders.
 		return ref.Tenant != "" && (c.AuthorizeSession(session, cluster, issuer, now, ref.Tenant, access.Read, "") == nil || c.AuthorizeSession(session, cluster, issuer, now, ref.Tenant, access.ManageRegistry, "") == nil)
-	case "node", "certificate", "domain", "acme-responder":
+	case "node", "certificate", "domain", "acme-responder", "vps":
 		return c.AuthorizeSession(session, cluster, issuer, now, "", access.ManageCluster, "") == nil
+	case "host-grant":
+		// A route host decision: system administrators, and the tenant's
+		// readers (they read their own requests).
+		return c.AuthorizeSession(session, cluster, issuer, now, "", access.ManageCluster, "") == nil || ref.Tenant != "" && c.AuthorizeSession(session, cluster, issuer, now, ref.Tenant, access.Read, "") == nil
+	case "node-shell", "node-shell-session":
+		return control.NodeShellWatchAllowed(c, session, cluster, issuer, now, ref)
 	}
 	return false
 }

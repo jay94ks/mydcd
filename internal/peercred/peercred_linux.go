@@ -228,3 +228,57 @@ func pidNamespaceOf(pid int) (namespace, error) {
 	}
 	return namespace{dev: st.Dev, ino: st.Ino}, nil
 }
+
+const maxStatusFile = 16 << 10
+
+// Open pins process pid by pidfd and reads its real UID and GID. The caller
+// proves pid is the process it means (for example by asking the container
+// engine again after Open) and must Close the result.
+func Open(pid int) (Process, error) {
+	if pid <= 0 {
+		return Process{FD: -1}, ErrIdentity
+	}
+	pidfd, err := unix.PidfdOpen(pid, unix.PIDFD_NONBLOCK)
+	if err != nil {
+		return Process{FD: -1}, errors.Join(ErrIdentity, err)
+	}
+	unix.CloseOnExec(pidfd)
+	p := Process{PID: pid, FD: pidfd}
+	f, err := os.Open("/proc/" + strconv.Itoa(pid) + "/status")
+	if err != nil {
+		_ = p.Close()
+		return Process{FD: -1}, errors.Join(ErrIdentity, err)
+	}
+	data, err := io.ReadAll(io.LimitReader(f, maxStatusFile+1))
+	_ = f.Close()
+	uid, uidOK := statusID(data, "Uid:")
+	gid, gidOK := statusID(data, "Gid:")
+	if err != nil || len(data) > maxStatusFile || !uidOK || !gidOK {
+		_ = p.Close()
+		return Process{FD: -1}, errors.Join(ErrIdentity, err)
+	}
+	p.UID, p.GID = uid, gid
+	// The status read above is that pid's only if it is still the pinned one.
+	if err = Alive(pidfd); err != nil {
+		_ = p.Close()
+		return Process{FD: -1}, err
+	}
+	return p, nil
+}
+
+// statusID is the real ID (first field) of a /proc status line.
+func statusID(data []byte, field string) (uint32, bool) {
+	for _, line := range bytes.Split(data, []byte("\n")) {
+		rest, ok := bytes.CutPrefix(line, []byte(field))
+		if !ok {
+			continue
+		}
+		fields := bytes.Fields(rest)
+		if len(fields) == 0 {
+			return 0, false
+		}
+		v, err := strconv.ParseUint(string(fields[0]), 10, 32)
+		return uint32(v), err == nil
+	}
+	return 0, false
+}

@@ -132,21 +132,7 @@ func TestIngressesReal(t *testing.T) {
 		t.Fatalf("removed %+v", bl.Blocks)
 	}
 
-	// Host policy: system admin only; Expected = Revision.
-	pol := control.IngressHostPolicyChange{Tenant: "shop", Policy: ingress.HostPolicy{ExternalAllowed: true, ExternalHosts: []string{"shop.example.com"}, LocalHosts: []string{"*.internal.example"}}}
-	if code := run(alice, ActionSetIngressHostPolicy, 0, pol); code != ResultForbidden {
-		t.Fatalf("tenant policy %v", code)
-	}
-	if code := run(admin, ActionSetIngressHostPolicy, 0, pol); code != ResultApplied {
-		t.Fatalf("policy %v", code)
-	}
-	if code := run(admin, ActionSetIngressHostPolicy, 0, pol); code != ResultConditionFailed {
-		t.Fatalf("policy stale %v", code)
-	}
-	hp := read(alice, control.IngressQuery{Tenant: "shop", Part: "policies"})
-	if len(hp.HostPolicies) != 1 || hp.HostPolicies[0].Revision != 1 || !hp.HostPolicies[0].Policy.ExternalAllowed {
-		t.Fatalf("policies %+v", hp)
-	}
+	hp := read(alice, control.IngressQuery{Tenant: "shop", Part: "blocks"})
 	if hp.RootRevision != rootFor(t, alice, ActionIngressBlock) {
 		t.Fatalf("root %d", hp.RootRevision)
 	}

@@ -378,7 +378,7 @@ func (t *Transport) Dial(ctx context.Context, peer Peer) (*Session, error) {
 		if dialErr == nil {
 			dialErr = net.ErrClosed
 		}
-		return nil, fmt.Errorf("SFCP authentication/dial failed for %s: %w", peer.ID, dialErr)
+		return nil, &PeerUnreachableError{Peer: peer.ID, Err: dialErr}
 	}
 }
 func (t *Transport) authenticate(parent context.Context, c *quic.Conn, client bool) (*Session, error) {
@@ -906,3 +906,15 @@ func (t *Transport) DialWait(ctx context.Context, peer Peer) (*Session, error) {
 		}
 	}
 }
+
+// PeerUnreachableError: no session to Peer (a server name) could be opened.
+// Work that needs that server waits for it; it is not this server's fault.
+type PeerUnreachableError struct {
+	Peer string
+	Err  error
+}
+
+func (e *PeerUnreachableError) Error() string {
+	return fmt.Sprintf("SFCP authentication/dial failed for %s: %v", e.Peer, e.Err)
+}
+func (e *PeerUnreachableError) Unwrap() error { return e.Err }

@@ -121,7 +121,7 @@ function DesktopDashboard() {
               <div className="grid tiles">
                 <Tile label="서버" value={`${ready} / ${v.nodes.length} 준비됨`} sub={joining.length ? `가입 대기 ${joining.length} (${joining.map((n) => n.id).join(', ')})` : notReady ? `준비 안 됨 ${notReady}` : '모두 준비됨'} />
                 <Tile label="컨테이너" value={`${containers}개`} sub="보이는 서버의 합" />
-                <Tile label="앱" value={v.apps.length} sub={`정상 ${count('healthy')} · 진행 중 ${count('progressing')} · 일부 오류 ${count('degraded')}${count('unhealthy') ? ` · 오류 ${count('unhealthy')}` : ''}${count('unknown') ? ` · 확인 불가 ${count('unknown')}` : ''}`} />
+                <Tile label="앱" value={v.apps.length} sub={`정상 ${count('healthy')} · 진행 중 ${count('progressing')} · 일부 오류 ${count('degraded')} · 오류 ${count('unhealthy')}${count('unknown') ? ` · 확인 불가 ${count('unknown')}` : ''}`} />
                 <Tile label="주의" value={`${v.attention.length}건`} tone={v.attention.length ? 'wa' : 'ok'} sub={v.attention.length ? '아래 목록 참고' : '지금 주의할 것 없음'} />
               </div>
               <section className="col">

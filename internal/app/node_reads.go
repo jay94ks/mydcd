@@ -65,6 +65,8 @@ func (r *Runtime) readModule(ctx context.Context, method, key string, input []by
 
 func init() {
 	defineNodeRead((*Runtime).nodeReadVpsStatus, false, "vps-status")
+	defineNodeRead((*Runtime).nodeReadOwnedVPSStatus, false, "owned-vps-status")
+	defineNodeRead((*Runtime).nodeReadOwnedVPSInstances, false, "owned-vps-instances")
 	defineNodeRead((*Runtime).nodeReadNodeShellOwnerView, false, "node-shell-owner-view")
 	defineNodeRead((*Runtime).nodeReadNodeShellPermit, false, "node-shell-permit")
 	defineNodeRead((*Runtime).nodeReadNodeIdentityActivation, false, "node-identity-activation")
@@ -96,6 +98,14 @@ func (r *Runtime) nodeReadVpsStatus(ctx context.Context, method, key string, inp
 		return nil, sfcp.ErrAdmission
 	}
 	return json.Marshal(r.vpsWatchStatus())
+}
+
+func (r *Runtime) nodeReadOwnedVPSStatus(ctx context.Context, method, key string, input []byte, v cluster.View) (json.RawMessage, error) {
+	// Leader memory only; the asking node checked the user session.
+	if !r.Engine().IsLeader() {
+		return nil, sfcp.ErrAdmission
+	}
+	return json.Marshal(r.vpsWatcher.owned.status(r.installation.record.Root.Self.ID))
 }
 
 func (r *Runtime) nodeReadNodeShellOwnerView(ctx context.Context, method, key string, input []byte, v cluster.View) (json.RawMessage, error) {

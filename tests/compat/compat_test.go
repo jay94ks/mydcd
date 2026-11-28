@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/app"
 	"github.com/jay94ks/seafield/internal/cluster/control"
 	"github.com/jay94ks/seafield/internal/deployment"
 	"github.com/jay94ks/seafield/internal/identity"
@@ -109,6 +110,10 @@ func TestReplayScenario(t *testing.T) {
 	c := clusterfixture.New(t, ctx, 2)
 	scenario(t, c)
 	n := c.Nodes[0]
+	// The upgrade dry run works on a copy while the server runs.
+	if r, err := app.DryRun(n.Config, t.TempDir()); err != nil || !r.Replayed || r.Checkpoint == 0 {
+		t.Fatal("dry run", r.Replayed, r.Checkpoint, err)
+	}
 	if err := n.Runtime.Close(); err != nil {
 		t.Fatal(err)
 	}

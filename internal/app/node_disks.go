@@ -9,6 +9,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"path/filepath"
 	"slices"
@@ -142,6 +143,11 @@ func (r *Runtime) nodeDiskChange(ctx context.Context, read control.NodeDiskRead)
 	peer, ok := r.Mesh.Peer(sfcp.Identity(read.Owner))
 	if !ok || !peer.Member || peer.ID != read.Op.Node {
 		return control.NodeDiskResult{}, sfcp.ErrAdmission
+	}
+	// Only over a session that is up now: dialing a stopped server would
+	// hold the request until the handshake times out.
+	if !r.Mesh.Connected(peer.Key) {
+		return control.NodeDiskResult{}, fmt.Errorf("%w: %s", sfcp.ErrNotConnected, peer.ID)
 	}
 	raw, _ := json.Marshal(read)
 	reply, err := cluster.CallManagement(ctx, r.Mesh, r.Identity, r.controlPolicy.Cluster, peer, cluster.ManagementRequest{Method: "node-disk-owner", Input: raw})

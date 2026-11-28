@@ -72,7 +72,7 @@ export function RegistryTab() {
         actions={
           <>
             <Refresh q={q} poll={false} />
-            <button className="btn primary" disabled={!canDeploy} title={canDeploy ? undefined : NEED} onClick={() => setDlg({ kind: 'create' })}>
+            <button type="button" className="btn primary" disabled={!canDeploy} title={canDeploy ? undefined : NEED} onClick={() => setDlg({ kind: 'create' })}>
               이미지 저장소 만들기
             </button>
           </>
@@ -112,21 +112,21 @@ export function RegistryTab() {
                             <td>{st ? <Badge tone={st[1]}>{st[0]}</Badge> : <Badge tone={r.active ? 'ok' : 'un'}>{r.active ? '사용 중' : '꺼짐'}</Badge>}</td>
                             <td className="row" style={{ gap: 6, justifyContent: 'flex-end' }} onClick={(e) => e.stopPropagation()}>
                               {r.deleted ? null : r.enabled ? (
-                                <button className="btn sm" disabled={!canDeploy} title={canDeploy ? undefined : NEED} onClick={() => setDlg({ kind: 'stop', r })}>
+                                <button type="button" className="btn sm" disabled={!canDeploy} title={canDeploy ? undefined : NEED} onClick={() => setDlg({ kind: 'stop', r })}>
                                   정지
                                 </button>
                               ) : (
-                                <button className="btn sm" disabled={!canDeploy} title={canDeploy ? undefined : NEED} onClick={() => setDlg({ kind: 'start', r })}>
+                                <button type="button" className="btn sm" disabled={!canDeploy} title={canDeploy ? undefined : NEED} onClick={() => setDlg({ kind: 'start', r })}>
                                   시작
                                 </button>
                               )}
                               {!r.deleted && !r.enabled && (
-                                <button className="btn sm danger" disabled={!canDeploy || !stopped} title={!canDeploy ? NEED : !stopped ? '완전히 멈춘 뒤에 지울 수 있습니다' : undefined} onClick={() => setDlg({ kind: 'delete', r })}>
+                                <button type="button" className="btn sm danger" disabled={!canDeploy || !stopped} title={!canDeploy ? NEED : !stopped ? '완전히 멈춘 뒤에 지울 수 있습니다' : undefined} onClick={() => setDlg({ kind: 'delete', r })}>
                                   삭제
                                 </button>
                               )}
                               {!r.deleted && (
-                                <button className="btn sm" disabled={!r.enabled} title={r.enabled ? undefined : '켜진 저장소에서만 발급합니다'} onClick={() => (setSel(r.id), setCred(r.id))}>
+                                <button type="button" className="btn sm" disabled={!r.enabled} title={r.enabled ? undefined : '켜진 저장소에서만 발급합니다'} onClick={() => (setSel(r.id), setCred(r.id))}>
                                   자격 발급
                                 </button>
                               )}
@@ -264,11 +264,11 @@ function SettingsCard({ tenant, r, canDeploy, onDone }: { tenant: string; r: Reg
       </div>
       <div className="row" style={{ justifyContent: 'flex-end', gap: 8 }}>
         {dirty.length > 0 && (
-          <button className="btn" onClick={() => setF(o)}>
+          <button type="button" className="btn" onClick={() => setF(o)}>
             되돌리기
           </button>
         )}
-        <button className="btn primary" disabled={off || !dirty.length || portBad || numBad} title={!canDeploy ? NEED : undefined} onClick={() => setReview(true)}>
+        <button type="button" className="btn primary" disabled={off || !dirty.length || portBad || numBad} title={!canDeploy ? NEED : undefined} onClick={() => setReview(true)}>
           변경 검토
         </button>
       </div>
@@ -306,15 +306,15 @@ function SettingsReview({ tenant, r, lines, body, onClose, onDone }: { tenant: s
       onClose={onClose}
       footer={
         finished ? (
-          <button className="btn primary" onClick={onClose}>
+          <button type="button" className="btn primary" onClick={onClose}>
             닫기
           </button>
         ) : (
           <>
-            <button className="btn" onClick={onClose}>
+            <button type="button" className="btn" onClick={onClose}>
               취소
             </button>
-            <button className="btn primary" disabled={m.busy} onClick={() => void send()}>
+            <button type="button" className="btn primary" disabled={m.busy} onClick={() => void send()}>
               {m.busy ? '보내는 중…' : '적용'}
             </button>
           </>
@@ -356,15 +356,15 @@ function ActDialog({ tenant, r, act, apps, onClose, onDone }: { tenant: string; 
       onClose={onClose}
       footer={
         finished ? (
-          <button className="btn primary" onClick={onClose}>
+          <button type="button" className="btn primary" onClick={onClose}>
             닫기
           </button>
         ) : (
           <>
-            <button className="btn" onClick={onClose}>
+            <button type="button" className="btn" onClick={onClose}>
               취소
             </button>
-            <button className={act === 'start' ? 'btn primary' : 'btn danger solid'} disabled={m.busy || (!!need && typed !== need)} onClick={() => void send()}>
+            <button type="button" className={act === 'start' ? 'btn primary' : 'btn danger solid'} disabled={m.busy || (!!need && typed !== need)} onClick={() => void send()}>
               {m.busy ? '보내는 중…' : act === 'stop' ? '정지' : act === 'delete' ? '삭제' : '시작'}
             </button>
           </>
@@ -457,15 +457,15 @@ function CreateDialog({ tenant, taken: live, onClose, onDone }: { tenant: string
       onClose={onClose}
       footer={
         finished ? (
-          <button className="btn primary" onClick={onClose}>
+          <button type="button" className="btn primary" onClick={onClose}>
             닫기
           </button>
         ) : (
           <>
-            <button className="btn" onClick={onClose}>
+            <button type="button" className="btn" onClick={onClose}>
               취소
             </button>
-            <button className="btn primary" disabled={m.busy || !ok} onClick={() => void send()}>
+            <button type="button" className="btn primary" disabled={m.busy || !ok} onClick={() => void send()}>
               {m.busy ? '보내는 중…' : '만들기'}
             </button>
           </>
@@ -601,7 +601,7 @@ function CredentialCard({ tenant, r, focus }: { tenant: string; r: RegistryView;
             </select>
           </Field>
         </div>
-        <button className="btn primary" style={{ width: 'fit-content' }} disabled={busy || !okRepo || !r.enabled} title={r.enabled ? undefined : '켜진 저장소에서만 발급합니다'} onClick={() => void issue()}>
+        <button type="button" className="btn primary" style={{ width: 'fit-content' }} disabled={busy || !okRepo || !r.enabled} title={r.enabled ? undefined : '켜진 저장소에서만 발급합니다'} onClick={() => void issue()}>
           {busy ? '발급 중…' : '발급'}
         </button>
         {error !== undefined && (error instanceof ApiError && error.status === 403 ? <div className="note wa small">발급하지 못했습니다. 저장소가 멈췄거나 이 권한이 없습니다.</div> : <MutationError error={error} />)}
@@ -621,10 +621,10 @@ function CredentialCard({ tenant, r, focus }: { tenant: string; r: RegistryView;
                 이 카드를 닫으면 다시 볼 수 없습니다. 저장되지 않습니다.
               </span>
               <span className="row" style={{ gap: 6 }}>
-                <button className="btn sm" onClick={() => void navigator.clipboard?.writeText(cred.token).then(() => toast(`토큰을 복사했습니다. ${until(cred.expiresAt)} 만료됩니다.`))}>
+                <button type="button" className="btn sm" onClick={() => void navigator.clipboard?.writeText(cred.token).then(() => toast(`토큰을 복사했습니다. ${until(cred.expiresAt)} 만료됩니다.`))}>
                   복사
                 </button>
-                <button className="btn sm" onClick={() => setCred(undefined)}>
+                <button type="button" className="btn sm" onClick={() => setCred(undefined)}>
                   닫기
                 </button>
               </span>

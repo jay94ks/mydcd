@@ -402,9 +402,7 @@ type Conn interface {
 	// (4, Offset). Changes under control/ingress-management (RootFor):
 	// ingress-block {control.IngressBlockChange} Expected 0;
 	// ingress-unblock / ingress-block-extend {control.IngressBlockSelection}
-	// Expected = block Revision; set-ingress-host-policy
-	// {control.IngressHostPolicyChange} (system admin) Expected = policy
-	// Revision (0 = new).
+	// Expected = block Revision.
 	QueryIngresses(ctx context.Context, q control.IngressQuery) (control.IngressPage, error)
 
 	// --- standalone containers: REQ-29 (mock) ---
@@ -493,6 +491,16 @@ type Conn interface {
 	// kept; the server must be a voter. Sealing changes nothing, so a lost
 	// reply is asked again.
 	SealVPSCredential(ctx context.Context, in userauth.VPSCredentialInput) (vps.SealedCredential, error)
+	// QueryOwnedVPS: the owned VPS servers and only the Owned-vendor
+	// accounts (devel/design/vps-hostinger.md); QueryVPS shows only
+	// managed ones.
+	// With status, also the leader's vendor readings (unavailable when the
+	// leader cannot be reached).
+	QueryOwnedVPS(ctx context.Context, status bool) (userauth.OwnedVPSReply, error)
+	// QueryOwnedVPSInstances lists an Owned-vendor account's VMs as the
+	// leader reads them from the vendor now (attach picker); unavailable
+	// when the leader or the vendor cannot be read.
+	QueryOwnedVPSInstances(ctx context.Context, account string) ([]control.OwnedVPSInstance, error)
 
 	// --- durable changes ---
 

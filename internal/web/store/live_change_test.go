@@ -103,6 +103,9 @@ func TestStoreDNSAndACMEChanges(t *testing.T) {
 	if err := s.DeleteArchived(key); err != nil {
 		t.Fatal(err)
 	}
+	if err := s.AppendAudit(&AuditEntry{ID: "e1", Tenant: "a", At: time.Unix(6, 0)}); err != nil {
+		t.Fatal(err)
+	}
 	want := []Change{
 		{Kind: "dns-domain", ID: "shop.example", Tenants: []string{"a"}},
 		{Kind: "dns-domain", ID: "shop.example", Tenants: []string{"a", "b"}},
@@ -115,6 +118,7 @@ func TestStoreDNSAndACMEChanges(t *testing.T) {
 		{Kind: "trash", Tenant: "a", ID: "t1", Deleted: true},
 		{Kind: "archived-app", Tenant: "a", ID: "web"},
 		{Kind: "archived-app", Tenant: "a", ID: "web"},
+		{Kind: "audit", Tenant: "a", ID: "e1"},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("%+v", got)

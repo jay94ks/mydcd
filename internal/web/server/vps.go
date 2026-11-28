@@ -192,7 +192,8 @@ func (s *Server) handleVPSAccountAdd(w http.ResponseWriter, r *http.Request, ws 
 		if !vps.ValidAccountName(req.Name) {
 			return "", nil, 0, "", invalid("name: 1-32 lower-case letters, digits and hyphens")
 		}
-		if _, ok := vps.Lookup(req.Vendor); !ok {
+		// Owned-vendor accounts are added from the owned VPS screen.
+		if _, ok := vps.LookupManaged(req.Vendor); !ok {
 			return "", nil, 0, "", invalid("vendor: iwinv")
 		}
 		if req.TrafficPrice < 0 || req.TrafficPrice > control.MaxOverageKRWPerGB {

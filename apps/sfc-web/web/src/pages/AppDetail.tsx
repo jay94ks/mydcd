@@ -81,11 +81,11 @@ function DownDialog({ a, volumes, onClose }: { a: AppView; volumes: string[]; on
         onClose={onClose}
         footer={
           m.op.state === 'applied' ? (
-            <button className="btn primary" onClick={() => navigate('/deploy/archived')}>
+            <button type="button" className="btn primary" onClick={() => navigate('/deploy/archived')}>
               보관된 앱으로
             </button>
           ) : (
-            <button className="btn" onClick={onClose}>
+            <button type="button" className="btn" onClick={onClose}>
               닫기
             </button>
           )
@@ -393,7 +393,7 @@ function Edit({ a, current }: { a: AppView; current?: string }) {
         <div className="primary col" style={{ gap: 16 }}>
           <YamlEditor value={value} onChange={setText} />
           {value !== current && current !== undefined && (
-            <button className="btn sm" style={{ alignSelf: 'flex-start' }} onClick={() => setText(current)}>
+            <button type="button" className="btn sm" style={{ alignSelf: 'flex-start' }} onClick={() => setText(current)}>
               실행 중 원문으로 되돌리기
             </button>
           )}
@@ -441,7 +441,7 @@ function Revisions({ a }: { a: AppView }) {
                   header: '',
                   render: (r) =>
                     r.version !== a.revision && (
-                      <button
+                      <button type="button"
                         className="btn sm"
                         onClick={(e) => {
                           e.stopPropagation();

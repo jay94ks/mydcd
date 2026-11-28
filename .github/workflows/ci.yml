@@ -1,8 +1,12 @@
 name: CI
 
+# The full suite runs once per release (on the v* tag) or on demand
+# (Actions > CI > Run workflow), not on every sync to main. Pull requests
+# only get the DCO sign-off check.
 on:
   push:
-    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
   pull_request:
 
 permissions:
@@ -14,6 +18,7 @@ concurrency:
 
 jobs:
   lint:
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -26,6 +31,7 @@ jobs:
       - run: make lint
 
   go-test:
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
@@ -54,6 +60,7 @@ jobs:
           GOMODCACHE: /tmp/go-mod
 
   web:
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-24.04
     defaults:
       run:

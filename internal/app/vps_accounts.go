@@ -80,7 +80,7 @@ func (r *Runtime) readVPSOffer(ctx context.Context, session access.Session, q co
 	if !ok {
 		return control.VPSOffer{}, sfcp.ErrAdmission
 	}
-	vendor, ok := vps.Lookup(account.Vendor)
+	vendor, ok := vps.LookupManaged(account.Vendor)
 	if !ok {
 		return control.VPSOffer{}, sfcp.ErrAdmission
 	}
@@ -91,7 +91,7 @@ func (r *Runtime) readVPSOffer(ctx context.Context, session access.Session, q co
 	return readVPSOffer(ctx, vendor.New(cred, r.vpsEnv), q, time.Now())
 }
 
-func readVPSOffer(ctx context.Context, p vps.Provider, q control.VPSOfferQuery, now time.Time) (control.VPSOffer, error) {
+func readVPSOffer(ctx context.Context, p vps.ManagedProvider, q control.VPSOfferQuery, now time.Time) (control.VPSOffer, error) {
 	out := control.VPSOffer{Account: q.Account, At: now.Unix()}
 	var err error
 	if out.Zones, err = p.Zones(ctx); err != nil {

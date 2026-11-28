@@ -216,10 +216,10 @@ function ProviderBox({ row, d, sealReady, onChanged }: { row: AiProviderRow; d: 
       </div>
       <div className="row" style={{ gap: 6 }}>
         <input className="mono grow" type="password" readOnly value={row.last4 ? `${KEY_HINT[p]}••••••••••••${row.last4}` : ''} placeholder="API 키 붙여넣기" aria-label={`${PROVIDER_NAME[p]} API 키`} onFocus={() => !row.configured && sealReady && setDlg('key')} />
-        <button className="btn" disabled={!row.configured || test.busy} onClick={() => void runTest()}>
+        <button type="button" className="btn" disabled={!row.configured || test.busy} onClick={() => void runTest()}>
           {test.busy ? '시험 중…' : '연결 시험'}
         </button>
-        <button className="btn primary" disabled={!sealReady} title={sealReady ? undefined : '봉인 키가 없습니다'} onClick={() => setDlg('key')}>
+        <button type="button" className="btn primary" disabled={!sealReady} title={sealReady ? undefined : '봉인 키가 없습니다'} onClick={() => setDlg('key')}>
           {row.configured ? '교체' : '등록'}
         </button>
       </div>
@@ -241,7 +241,7 @@ function ProviderBox({ row, d, sealReady, onChanged }: { row: AiProviderRow; d: 
           <b>{row.modelsTotal && row.modelsTotal > row.models ? `${row.models}개 (전체 ${row.modelsTotal}개 중 대화용)` : `${row.models}개`}</b>
           {row.catalogAt && <span className="muted">{fmtTime(row.catalogAt)} 받음</span>}
           <span className="grow" />
-          <button className="linkish" onClick={() => void refresh()}>
+          <button type="button" className="linkish" onClick={() => void refresh()}>
             목록 새로고침
           </button>
         </div>
@@ -287,10 +287,10 @@ function KeyDialog({ p, replace, onClose, onDone }: { p: AiProvider; replace: bo
       onClose={onClose}
       footer={
         <>
-          <button className="btn" onClick={onClose}>
+          <button type="button" className="btn" onClick={onClose}>
             취소
           </button>
-          <button className="btn primary" disabled={busy || !key.trim()} onClick={() => void go()}>
+          <button type="button" className="btn primary" disabled={busy || !key.trim()} onClick={() => void go()}>
             {busy ? '시험하는 중…' : `시험하고 ${replace ? '교체' : '등록'}`}
           </button>
         </>
@@ -331,10 +331,10 @@ function DeleteKeyDialog({ p, roles, onClose, onDone }: { p: AiProvider; roles: 
       onClose={onClose}
       footer={
         <>
-          <button className="btn" onClick={onClose}>
+          <button type="button" className="btn" onClick={onClose}>
             취소
           </button>
-          <button className="btn danger solid" disabled={busy || typed !== name} onClick={() => void go()}>
+          <button type="button" className="btn danger solid" disabled={busy || typed !== name} onClick={() => void go()}>
             지우기
           </button>
         </>
@@ -379,10 +379,10 @@ function Editor({ d, onSaved }: { d: AiSettings; onSaved: () => void }) {
   const footer = (show: boolean) =>
     show && (
       <div className="row" style={{ justifyContent: 'flex-end', gap: 8 }}>
-        <button className="btn" disabled={busy} onClick={() => setDraft(init)}>
+        <button type="button" className="btn" disabled={busy} onClick={() => setDraft(init)}>
           되돌리기
         </button>
-        <button className="btn primary" disabled={busy} onClick={() => void save()}>
+        <button type="button" className="btn primary" disabled={busy} onClick={() => void save()}>
           {busy ? '저장 중…' : '변경 저장'}
         </button>
       </div>
@@ -620,7 +620,7 @@ function ModelList({ p, list, at, value, onPick }: { p: AiProvider; list: AiMode
         {hidden > 0 && (
           <>
             {' '}
-            <button className="linkish" onClick={() => setAll(!all)}>
+            <button type="button" className="linkish" onClick={() => setAll(!all)}>
               {all ? '대화용만 보기' : `모두 보기 (${list.length}개)`}
             </button>
           </>
@@ -726,7 +726,7 @@ function DataCard({ draft, setDraft }: { draft: Draft; setDraft: (d: Draft) => v
           {data ? (
             <>
               {data.excludeTenants.length ? data.excludeTenants.join(', ') : <span className="muted">없음</span>} ·{' '}
-              <button className="linkish" onClick={() => setDlg('tenants')}>
+              <button type="button" className="linkish" onClick={() => setDlg('tenants')}>
                 바꾸기…
               </button>
             </>
@@ -769,7 +769,7 @@ function DataCard({ draft, setDraft }: { draft: Draft; setDraft: (d: Draft) => v
         <dt>감사 기록</dt>
         <dd>
           승인·거절·모델·토큰 기록{audit.data?.total !== undefined ? ` ${num(audit.data.total)}건` : ''} ·{' '}
-          <button className="linkish" onClick={() => setDlg('audit')}>
+          <button type="button" className="linkish" onClick={() => setDlg('audit')}>
             기간 골라 지우기…
           </button>
         </dd>
@@ -790,10 +790,10 @@ function ExcludeDialog({ value, onClose, onSave }: { value: string[]; onClose: (
       onClose={onClose}
       footer={
         <>
-          <button className="btn" onClick={onClose}>
+          <button type="button" className="btn" onClick={onClose}>
             취소
           </button>
-          <button className="btn primary" onClick={() => onSave([...sel].sort())}>
+          <button type="button" className="btn primary" onClick={() => onSave([...sel].sort())}>
             저장
           </button>
         </>
@@ -850,10 +850,10 @@ function AuditDeleteDialog({ total, onClose, onDone }: { total?: number; onClose
       onClose={onClose}
       footer={
         <>
-          <button className="btn" onClick={onClose}>
+          <button type="button" className="btn" onClick={onClose}>
             취소
           </button>
-          <button className="btn danger solid" disabled={!date || busy} onClick={() => void go()}>
+          <button type="button" className="btn danger solid" disabled={!date || busy} onClick={() => void go()}>
             지우기
           </button>
         </>

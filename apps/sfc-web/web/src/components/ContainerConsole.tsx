@@ -64,7 +64,7 @@ export function StatusLine({ phase, target, endCode, onReconnect, extra }: { pha
       <span className="row">
         {extra}
         {(phase === 'failed' || phase === 'ended') && (
-          <button className="btn sm" onClick={onReconnect}>
+          <button type="button" className="btn sm" onClick={onReconnect}>
             다시 잇기
           </button>
         )}
@@ -143,7 +143,7 @@ function LogsPane({ task }: { task: TaskView }) {
         extra={
           <>
             <span className="muted">{lines.length}줄</span>
-            <button className="btn sm" onClick={() => setLines([])}>
+            <button type="button" className="btn sm" onClick={() => setLines([])}>
               화면 비우기
             </button>
           </>

@@ -44,6 +44,9 @@ type AppBegin struct {
 	Tenant, App, Deployment, Upload, Operation string
 	Prune                                      bool
 	DefaultNode                                string `json:",omitempty"`
+	// DisableCD confirms that deploying a file without x-sfc.cd turns the
+	// app's CD off (the person said yes, or gave --force).
+	DisableCD bool `json:",omitempty"`
 }
 type AppDown struct {
 	Tenant, App, Operation string
@@ -815,9 +818,34 @@ func (p Policy) reduceApps(s state.State, cmd state.Command) (map[string][]byte,
 			return nil, state.ConditionFailed
 		}
 		if entry.Delivery != nil {
-			// A local upload must not replace a registered Git selection or
-			// rewrite its original execution. CD has its own explicit sync.
-			return nil, state.ConditionFailed
+			// A local upload never replaces the execution Git selected. A
+			// file with x-sfc.cd changes only the policy (its services are
+			// not deployed); a file without it turns CD off, confirmed by
+			// DisableCD, and then deploys as an ordinary app.
+			if c.AuthorizeSession(op.Session, p.Cluster, p.Issuer(op.Session.Issuer), op.At, v.Tenant, access.ManageCD, "") != nil {
+				return nil, state.Forbidden
+			}
+			if policy, enabled := plan.DeliveryPolicy(); enabled {
+				d := *entry.Delivery
+				pctx := ctx
+				pctx.Actor = d.Principal()
+				configured, err := d.Configure(d.Revision(), d.PolicyRevision(), c, pctx, op.Session.User, policy)
+				if err != nil {
+					return nil, state.ConditionFailed
+				}
+				if configured.PolicyRevision() != d.PolicyRevision() {
+					a, entry = clearDeliveryInput(a, entry)
+				}
+				entry.Delivery = &configured
+				a.entries[key] = entry
+				a.uploads = slices.Delete(slices.Clone(a.uploads), index, index+1)
+				break
+			}
+			if !v.DisableCD || !entry.Delivery.Quiescent() {
+				return nil, state.ConditionFailed
+			}
+			a, entry = clearDeliveryInput(a, entry)
+			entry.Delivery, entry.CDDecision = nil, nil
 		}
 		begin := entry.Inventory.Begin
 		if change.Action == "begin-app" {

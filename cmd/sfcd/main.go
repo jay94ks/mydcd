@@ -55,7 +55,7 @@ func run(args []string, out, diagnostic io.Writer) int {
 	f.BoolVar(&version, "version", false, "print version")
 	f.BoolVar(&check, "check-config", false, "validate without opening node runtime resources")
 	f.Usage = func() {
-		fmt.Fprintln(diagnostic, "sfcd --config NODE.yaml run|check|engine-config [--output FILE|-]|init [options]|join [options]|recover [options]|restore [options]|set-listen|identity create|show DIR|diskfs serve SPEC|diskfs check CHUNK|adopt --plan FILE (offline source preparation)")
+		fmt.Fprintln(diagnostic, "sfcd --config NODE.yaml run|check|engine-config [--output FILE|-]|init [options]|join [options]|recover [options]|restore [options]|set-listen|upgrade-dry-run [--scratch DIR]|identity create|show DIR|diskfs serve SPEC|diskfs check CHUNK|adopt --plan FILE (offline source preparation)")
 		f.PrintDefaults()
 	}
 	if err := f.Parse(args); err != nil {
@@ -142,6 +142,12 @@ func run(args []string, out, diagnostic io.Writer) int {
 			return fail(diagnostic, errors.New("join cannot be combined with check-config"), 2)
 		}
 		return runJoin(args[1:], file.value, out, diagnostic)
+	}
+	if len(args) > 0 && args[0] == "upgrade-dry-run" {
+		if check {
+			return fail(diagnostic, errors.New("upgrade-dry-run cannot be combined with check-config"), 2)
+		}
+		return runUpgradeDryRun(args[1:], file.value, out, diagnostic)
 	}
 	if len(args) > 0 && args[0] == "engine-config" {
 		if check {

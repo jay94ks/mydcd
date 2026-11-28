@@ -118,10 +118,10 @@ export function CoordinatorPanel() {
         <b style={{ fontSize: 15 }}>✦ 코디네이터</b>
         <ModelBadge id={conv} />
         <span className="grow" />
-        <button className="btn sm" onClick={() => navigate('/coordinator')}>
+        <button type="button" className="btn sm" onClick={() => navigate('/coordinator')}>
           대화 목록 · 넓게
         </button>
-        <button className="btn sm" aria-label="코디네이터 닫기" onClick={() => setOpen(false)}>
+        <button type="button" className="btn sm" aria-label="코디네이터 닫기" onClick={() => setOpen(false)}>
           ✕
         </button>
       </div>
@@ -315,7 +315,7 @@ export function ChatView({
           {(conv?.chips ?? []).map((c, i) => (
             <span key={i} className="pillc">
               {chipLabel(c)}{' '}
-              <button className="textbtn plain" aria-label={`${chipLabel(c)} 맥락 빼기`} onClick={() => void dropChip(i)}>
+              <button type="button" className="textbtn plain" aria-label={`${chipLabel(c)} 맥락 빼기`} onClick={() => void dropChip(i)}>
                 ✕
               </button>
             </span>
@@ -371,7 +371,7 @@ function Message({ m, live, variant, props, onProp, setProp }: { m: AiMessage; l
   if (m.role === 'summary')
     return (
       <div className="tool">
-        <button className="linkish small" onClick={() => setOpenSum(!openSum)}>
+        <button type="button" className="linkish small" onClick={() => setOpenSum(!openSum)}>
           ⋯ 여기까지 요약해 이어 감 {openSum ? '▴' : '▾'}
         </button>
         {openSum && <div className="bub ai">{m.text}</div>}
@@ -399,7 +399,7 @@ function Message({ m, live, variant, props, onProp, setProp }: { m: AiMessage; l
             </button>
           </div>
         ) : (
-          <button className="tool linkish" onClick={() => setOpenTools(true)}>
+          <button type="button" className="tool linkish" onClick={() => setOpenTools(true)}>
             {[finds && `🔎 도구 찾음 ${finds}`, reads && `📖 읽음 ${reads}`].filter(Boolean).join(' · ')} (요약만 보관)
           </button>
         ))}
@@ -635,10 +635,10 @@ function ProposalCard({ p, after, onChanged, setProp }: { p: AiProposal; after?:
         <footer>
           {edit ? (
             <>
-              <button className="btn sm" onClick={() => setEdit(undefined)}>
+              <button type="button" className="btn sm" onClick={() => setEdit(undefined)}>
                 취소
               </button>
-              <button className="btn sm primary" disabled={!edit.size} onClick={() => void saveEdit()}>
+              <button type="button" className="btn sm primary" disabled={!edit.size} onClick={() => void saveEdit()}>
                 고친 내용으로 바꾸기
               </button>
             </>
@@ -654,15 +654,15 @@ function ProposalCard({ p, after, onChanged, setProp }: { p: AiProposal; after?:
                 }
               }} />
               {p.diff ? (
-                <button className="btn sm" onClick={() => setDiff(true)}>
+                <button type="button" className="btn sm" onClick={() => setDiff(true)}>
                   변경점 열기
                 </button>
               ) : p.items ? (
-                <button className="btn sm" onClick={() => setEdit(new Set(p.items!.map((x) => x.name)))}>
+                <button type="button" className="btn sm" onClick={() => setEdit(new Set(p.items!.map((x) => x.name)))}>
                   수정
                 </button>
               ) : null}
-              <button
+              <button type="button"
                 className="btn sm primary"
                 disabled={m.busy || waiting || (p.irreversible && confirm !== p.confirmName)}
                 onClick={() => {
@@ -976,10 +976,10 @@ function RejectButton({ onReject }: { onReject: (reason: string) => Promise<void
           </label>
           <span className="muted small">거절한 제안은 대화에 ‘거절됨’으로 남고 코디네이터는 다른 방법을 제안할 수 있습니다.</span>
           <div className="row" style={{ justifyContent: 'flex-end', gap: 6 }}>
-            <button className="btn sm" onClick={close}>
+            <button type="button" className="btn sm" onClick={close}>
               취소
             </button>
-            <button
+            <button type="button"
               className="btn sm primary"
               disabled={busy}
               onClick={async () => {
@@ -1067,11 +1067,11 @@ function Composer({ text, setText, busy, variant, ctxPath, onSend, onStop, onNew
           }}
         />
         {busy ? (
-          <button className="btn" onClick={onStop}>
+          <button type="button" className="btn" onClick={onStop}>
             멈춤
           </button>
         ) : (
-          <button className="btn primary" disabled={!text.trim()} onClick={() => onSend(text)}>
+          <button type="button" className="btn primary" disabled={!text.trim()} onClick={() => onSend(text)}>
             보내기
           </button>
         )}

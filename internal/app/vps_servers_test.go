@@ -14,7 +14,7 @@ import (
 )
 
 type fakeVPSProvider struct {
-	vps.Provider
+	vps.ManagedProvider
 	instances []vps.Instance
 	listErr   error
 	createErr error
@@ -232,7 +232,7 @@ func TestReadVPSOfferNarrowsByZone(t *testing.T) {
 }
 
 func TestVPSEnrollStepFirstKeyWins(t *testing.T) {
-	server := control.VPSServer{Name: "edge-1"}
+	server := managedTarget(control.VPSServer{Name: "edge-1"})
 	var d membership.Directory
 	if got := vpsEnrollStep(server, d, "aa"); got != vpsEnrollReport {
 		t.Fatal("new", got)

@@ -27,7 +27,7 @@ export function TunnelsDialog({ tenant, name, onClose }: { tenant: string; name:
   const q = usePoll((s) => networkTunnels(tenant, name, s), [tenant, name], 10_000, networkStateLive(tenant));
   const wait = !!q.error && noEndpoint(q.error);
   return (
-    <Dialog title={`${name} 터널 연결`} width={720} onClose={onClose} footer={<button className="btn" onClick={onClose}>닫기</button>}>
+    <Dialog title={`${name} 터널 연결`} width={720} onClose={onClose} footer={<button type="button" className="btn" onClick={onClose}>닫기</button>}>
       <div className="row between">
         <span className="small muted">이 망의 서버 쌍마다 터널 상태입니다. ‘다시 연결’은 끊긴 쌍에만 있고, 누르면 그 줄 아래에 진행이 나옵니다. 시스템 관리자만 할 수 있지만 미리 막지 않고 거절을 보여 줍니다. 계속 끊기면 서버 › 서버 간 연결에서 원인을 봅니다.</span>
         <Refresh q={q} poll={false} />
@@ -198,7 +198,7 @@ function TunnelRow({ tenant, name, l, onDone }: { tenant: string; name: string; 
         <td>{since(l.since)}</td>
         <td className="row" style={{ justifyContent: 'flex-end' }}>
           {down && (
-            <button className="btn sm" disabled={act.working} onClick={act.send}>
+            <button type="button" className="btn sm" disabled={act.working} onClick={act.send}>
               다시 연결
             </button>
           )}

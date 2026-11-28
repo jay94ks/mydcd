@@ -7,7 +7,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/jay94ks/seafield/internal/bootstrap"
 	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/lifecycle"
 	"github.com/jay94ks/seafield/internal/config"
 	"github.com/jay94ks/seafield/internal/engine"
 	"github.com/jay94ks/seafield/internal/eventbus"
@@ -160,6 +162,10 @@ func (r *Runtime) openModules(c config.Node, peers map[sfcp.Identity]sfcp.Peer) 
 		}
 
 		if err != nil {
+			return err
+		}
+		// sfev.sock directories share the inputs tmpfs mounted above.
+		if err = r.workload.AttachSecretSockets(filepath.Join(r.nativeRoot, filepath.FromSlash(bootstrap.InputMemoryDir), "sfev")); err != nil {
 			return err
 		}
 		if r.remoteMounts != nil {
@@ -533,4 +539,37 @@ func (w *passWatch) done() { close(w.stop) }
 
 func settled(r reconcile.Record) bool {
 	return r.State.Pending == nil && r.State.Applied == r.State.Desired.Resource && !r.State.Stopped
+}
+
+// waitedPeers lists the servers err waits for (sfcp.PeerUnreachableError,
+// valid names only, in order, without duplicates); only is true when every
+// failure in err is such a wait, so one stopped server does not show every
+// other server as failing.
+func waitedPeers(err error) (peers []string, only bool) {
+	only = err != nil
+	var walk func(error)
+	walk = func(err error) {
+		var unreachable *sfcp.PeerUnreachableError
+		switch e := err.(type) {
+		case nil:
+		case interface{ Unwrap() []error }:
+			for _, x := range e.Unwrap() {
+				walk(x)
+			}
+		default:
+			if errors.As(err, &unreachable) && lifecycle.ValidID(unreachable.Peer) {
+				if !slices.Contains(peers, unreachable.Peer) {
+					peers = append(peers, unreachable.Peer)
+				}
+				return
+			}
+			if u, ok := err.(interface{ Unwrap() error }); ok && u.Unwrap() != nil {
+				walk(u.Unwrap())
+				return
+			}
+			only = false
+		}
+	}
+	walk(err)
+	return peers, only && len(peers) > 0
 }

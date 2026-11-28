@@ -123,10 +123,10 @@ function DesktopDomainDetail() {
               {st.text}
               {z ? ` · ${ago(z.readAt)} 읽음` : ''}
             </Badge>
-            <button className="btn" disabled={d && !d.provider} onClick={reread}>
+            <button type="button" className="btn" disabled={d && !d.provider} onClick={reread}>
               다시 읽기
             </button>
-            <button className="btn" disabled={!z?.capabilities.propagation} title={z && !z.capabilities.propagation ? '이 공급자는 반영 확인을 지원하지 않습니다' : undefined} onClick={() => setCheck('pick')}>
+            <button type="button" className="btn" disabled={!z?.capabilities.propagation} title={z && !z.capabilities.propagation ? '이 공급자는 반영 확인을 지원하지 않습니다' : undefined} onClick={() => setCheck('pick')}>
               반영 확인
             </button>
           </>
@@ -318,15 +318,15 @@ function RecordsTab({
           <>
             {admin &&
               (unlocked ? (
-                <button className="btn" onClick={() => setUnlocked(false)}>
+                <button type="button" className="btn" onClick={() => setUnlocked(false)}>
                   🔓 클러스터 밖 레코드 다시 잠그기
                 </button>
               ) : (
-                <button className="btn" onClick={() => setDlg({ kind: 'unlock' })}>
+                <button type="button" className="btn" onClick={() => setDlg({ kind: 'unlock' })}>
                   클러스터 밖 레코드 잠금 풀기…
                 </button>
               ))}
-            <button className="btn primary" disabled={!admin && !domain.myNames?.length} title={!admin && !domain.myNames?.length ? '이 도메인에 바꿀 수 있는 이름 범위가 없습니다' : undefined} onClick={() => setDlg({ kind: 'add' })}>
+            <button type="button" className="btn primary" disabled={!admin && !domain.myNames?.length} title={!admin && !domain.myNames?.length ? '이 도메인에 바꿀 수 있는 이름 범위가 없습니다' : undefined} onClick={() => setDlg({ kind: 'add' })}>
               ＋ 레코드
             </button>
           </>
@@ -505,7 +505,7 @@ function RecordsTab({
             onApplied();
           }}
         />
-        <Card title="이 도메인의 설정" actions={admin && <button className="btn sm" onClick={() => setDlg({ kind: 'ttl' })}>설정 바꾸기</button>}>
+        <Card title="이 도메인의 설정" actions={admin && <button type="button" className="btn sm" onClick={() => setDlg({ kind: 'ttl' })}>설정 바꾸기</button>}>
           <KV
             items={[
               ['연결된 서버', <LinkedServersText key="s" domain={domain.domain} />],
@@ -542,10 +542,10 @@ function RecordsTab({
           onClose={() => setDlg(undefined)}
           footer={
             <>
-              <button className="btn" onClick={() => setDlg(undefined)}>
+              <button type="button" className="btn" onClick={() => setDlg(undefined)}>
                 취소
               </button>
-              <button className="btn danger solid" onClick={() => (setStaged({}), setDlg(undefined))}>
+              <button type="button" className="btn danger solid" onClick={() => (setStaged({}), setDlg(undefined))}>
                 모두 버리기
               </button>
             </>
@@ -562,10 +562,10 @@ function RecordsTab({
           onClose={() => setDlg(undefined)}
           footer={
             <>
-              <button className="btn" onClick={() => setDlg(undefined)}>
+              <button type="button" className="btn" onClick={() => setDlg(undefined)}>
                 취소
               </button>
-              <button className="btn danger solid" onClick={() => (stage(keyOf(dlg.r), null), setDlg(undefined))}>
+              <button type="button" className="btn danger solid" onClick={() => (stage(keyOf(dlg.r), null), setDlg(undefined))}>
                 바꿀 내용에 추가
               </button>
             </>
@@ -605,10 +605,10 @@ function InlineEdit({ r, minTtl, onCancel, onSave }: { r: RRSet; minTtl: number;
       </td>
       <td colSpan={3}>
         <span className="row" style={{ gap: 6, justifyContent: 'flex-end' }}>
-          <button className="btn sm" onClick={onCancel}>
+          <button type="button" className="btn sm" onClick={onCancel}>
             취소
           </button>
-          <button className="btn primary sm" disabled={!!bad || !!ttlBad || !parsed.length} onClick={() => onSave({ name: r.name, type: r.type, ttl: Number(ttl), records: parsed as RRSet['records'] })}>
+          <button type="button" className="btn primary sm" disabled={!!bad || !!ttlBad || !parsed.length} onClick={() => onSave({ name: r.name, type: r.type, ttl: Number(ttl), records: parsed as RRSet['records'] })}>
             담기
           </button>
         </span>
@@ -638,10 +638,10 @@ function RecordDialog({ domain, zone, admin, onClose, onAdd }: { domain: DnsDoma
       onClose={onClose}
       footer={
         <>
-          <button className="btn" onClick={onClose}>
+          <button type="button" className="btn" onClick={onClose}>
             취소
           </button>
-          <button className="btn primary" disabled={!!nameBad || !!valBad || !!ttlBad} onClick={() => onAdd({ name: n, type, ttl: Number(ttl), records: parsed as RRSet['records'] })}>
+          <button type="button" className="btn primary" disabled={!!nameBad || !!valBad || !!ttlBad} onClick={() => onAdd({ name: n, type, ttl: Number(ttl), records: parsed as RRSet['records'] })}>
             {exists ? '그 묶음 바꾸기로 담기' : '바꿀 내용에 추가'}
           </button>
         </>
@@ -780,7 +780,7 @@ function StagedCard({
   const lines = plan ? plan.changes.flatMap((c) => diffText(c, domain.domain)) : Object.entries(staged).flatMap(([k, v]) => diffText({ name: k.split('|')[0], type: k.split('|')[1], before: zone?.items.find((r) => keyOf(r) === k) ?? null, after: v }, domain.domain));
 
   return (
-    <Card title={`바꿀 내용 (${n})`} actions={n > 0 && <button className="btn sm" onClick={onDiscard}>모두 취소</button>}>
+    <Card title={`바꿀 내용 (${n})`} actions={n > 0 && <button type="button" className="btn sm" onClick={onDiscard}>모두 취소</button>}>
       {n === 0 ? (
         <span className="small muted">표에서 고치거나 ＋ 레코드로 담으면 여기에 모입니다. 공급자에는 적용을 눌러야 갑니다.</span>
       ) : (
@@ -796,7 +796,7 @@ function StagedCard({
             <div className="note wa">
               클러스터 밖 레코드({outsideKeys.map((k) => k.replace('|', ' ')).join(', ')})가 들어 있습니다. 배정받지 않은 이름이라 Seafield 레코드로 표시하지 않습니다. 적용하려면 잠금을 풀어야 합니다.{' '}
               {onUnlock && (
-                <button className="btn sm" onClick={onUnlock}>
+                <button type="button" className="btn sm" onClick={onUnlock}>
                   잠금 풀기…
                 </button>
               )}
@@ -822,7 +822,7 @@ function StagedCard({
           {plan?.changes.some((c) => c.outside) && <div className="note wa">클러스터 밖 레코드가 들어 있습니다. 적용해도 Seafield 레코드로 표시하지 않습니다.</div>}
           <span className="small muted">{zone?.capabilities.snapshots ? '적용 직전 상태는 공급자 되돌리기 지점으로 남습니다. ' : ''}바꾼 기록에서 하나씩 되돌릴 수도 있습니다.</span>
           <div className="row" style={{ justifyContent: 'flex-end' }}>
-            <button className="btn primary" disabled={needUnlock || !plan || plan.problems.length > 0 || applying?.phase === 'send'} onClick={() => void apply()}>
+            <button type="button" className="btn primary" disabled={needUnlock || !plan || plan.problems.length > 0 || applying?.phase === 'send'} onClick={() => void apply()}>
               적용 (레코드 묶음 {n}개)
             </button>
           </div>
@@ -879,10 +879,10 @@ function ApplyDialog({
         onClose={onClose}
         footer={
           <>
-            <button className="btn" onClick={onDiscard}>
+            <button type="button" className="btn" onClick={onDiscard}>
               바꿀 내용 버리기
             </button>
-            <button className="btn primary" onClick={onReplan}>
+            <button type="button" className="btn primary" onClick={onReplan}>
               지금 값으로 다시 계획
             </button>
           </>
@@ -907,10 +907,10 @@ function ApplyDialog({
           <span className="small muted">공급자에 보내는 중입니다…</span>
         ) : (
           <>
-            <button className="btn" onClick={onClose}>
+            <button type="button" className="btn" onClick={onClose}>
               닫기
             </button>
-            <button className="btn primary" onClick={onRetry}>
+            <button type="button" className="btn primary" onClick={onRetry}>
               {unknown ? '같은 작업으로 다시 보내기' : '다시 시도'}
             </button>
           </>
@@ -961,10 +961,10 @@ function SettingsDialog({ domain, onClose, onSaved }: { domain: DnsDomain; onClo
       onClose={onClose}
       footer={
         <>
-          <button className="btn" onClick={onClose}>
+          <button type="button" className="btn" onClick={onClose}>
             취소
           </button>
-          <button className="btn primary" disabled={!!bad || busy} onClick={() => void save()}>
+          <button type="button" className="btn primary" disabled={!!bad || busy} onClick={() => void save()}>
             저장
           </button>
         </>
@@ -1008,10 +1008,10 @@ function ServersTab({ domain, admin, onStaged }: { domain: DnsDomain; admin: boo
       title={q.data ? `연결된 서버 (${linked.length})` : '연결된 서버'}
       actions={
         <span className="row" style={{ gap: 8 }}>
-          <button className="btn" disabled={checking || !linked.length} onClick={() => void check()}>
+          <button type="button" className="btn" disabled={checking || !linked.length} onClick={() => void check()}>
             반영 확인
           </button>
-          <button className="btn primary" disabled={!admin || !q.data?.items.some((x) => !x.linked)} title={admin ? undefined : NEED_ADMIN} onClick={() => setDlg({ kind: 'link' })}>
+          <button type="button" className="btn primary" disabled={!admin || !q.data?.items.some((x) => !x.linked)} title={admin ? undefined : NEED_ADMIN} onClick={() => setDlg({ kind: 'link' })}>
             ＋ 서버 연결
           </button>
         </span>
@@ -1029,7 +1029,7 @@ function ServersTab({ domain, admin, onStaged }: { domain: DnsDomain; admin: boo
           {admin && !!d.staged && d.changes && (
             <div className="note wa row between">
               <span>Seafield 레코드 {d.staged}개가 연결된 서버 주소와 다릅니다(서버가 빠졌거나 주소가 바뀜).</span>
-              <button className="btn sm" onClick={() => onStaged(d.changes!)}>
+              <button type="button" className="btn sm" onClick={() => onStaged(d.changes!)}>
                 바꿀 내용에 담기
               </button>
             </div>
@@ -1066,7 +1066,7 @@ function ServersTab({ domain, admin, onStaged }: { domain: DnsDomain; admin: boo
                         ]}
                       />
                     ) : (
-                      <button className="btn sm" disabled={!admin} title={admin ? undefined : NEED_ADMIN} onClick={() => setDlg({ kind: 'link', node: x.node })}>
+                      <button type="button" className="btn sm" disabled={!admin} title={admin ? undefined : NEED_ADMIN} onClick={() => setDlg({ kind: 'link', node: x.node })}>
                         연결
                       </button>
                     )}
@@ -1131,7 +1131,7 @@ function LinkServerDialog({ domain, items, revision, edit, node, onClose, onDone
       onClose={onClose}
       footer={
         <>
-          <button
+          <button type="button"
             className="btn"
             disabled={!pick || bad}
             onClick={async () => {
@@ -1146,10 +1146,10 @@ function LinkServerDialog({ domain, items, revision, edit, node, onClose, onDone
             바깥에서 닿는지 시험
           </button>
           <span style={{ flex: 1 }} />
-          <button className="btn" onClick={onClose}>
+          <button type="button" className="btn" onClick={onClose}>
             취소
           </button>
-          <button className="btn primary" disabled={busy || !pick || bad} onClick={() => void save()}>
+          <button type="button" className="btn primary" disabled={busy || !pick || bad} onClick={() => void save()}>
             {edit ? '저장' : '연결'}
           </button>
         </>
@@ -1203,10 +1203,10 @@ function ConfirmUnlink({ domain, x, revision, onClose, onDone }: { domain: strin
       onClose={onClose}
       footer={
         <>
-          <button className="btn" onClick={onClose}>
+          <button type="button" className="btn" onClick={onClose}>
             취소
           </button>
-          <button
+          <button type="button"
             className="btn danger"
             disabled={busy}
             onClick={async () => {
@@ -1257,7 +1257,7 @@ function AssignTab({ domain, admin, onChanged, onShow }: { domain: DnsDomain; ad
   };
   return (
     <div className="grid-2">
-      <Card title="작업 공간 배정" actions={admin && <button className="btn primary sm" onClick={() => setDlg({ kind: 'edit' })}>＋ 배정</button>}>
+      <Card title="작업 공간 배정" actions={admin && <button type="button" className="btn primary sm" onClick={() => setDlg({ kind: 'edit' })}>＋ 배정</button>}>
         {error !== undefined && !dlg && <ErrorBand error={error} what="배정을 바꾸지 못했습니다" />}
         {as.length === 0 ? (
           <Empty title="배정이 없습니다">배정이 없으면 시스템 관리자만 이 도메인의 레코드를 다룹니다.</Empty>
@@ -1334,10 +1334,10 @@ function AssignDialog({ domain, current, busy, error, onClose, onSave }: { domai
       onClose={onClose}
       footer={
         <>
-          <button className="btn" onClick={onClose}>
+          <button type="button" className="btn" onClick={onClose}>
             취소
           </button>
-          <button className="btn primary" disabled={!tenant || !names.length || !!nameBad || overlap.length > 0 || busy} onClick={() => onSave({ tenant, names })}>
+          <button type="button" className="btn primary" disabled={!tenant || !names.length || !!nameBad || overlap.length > 0 || busy} onClick={() => onSave({ tenant, names })}>
             {current ? '저장' : '배정'}
           </button>
         </>
@@ -1415,7 +1415,7 @@ function SnapshotsTab({ domain, onRestored }: { domain: DnsDomain; onRestored: (
                         <td>공급자 스냅숏</td>
                         <td className="muted">{s.reason ?? '—'}</td>
                         <td>
-                          <button className="btn sm" onClick={() => setPick(s.id)}>
+                          <button type="button" className="btn sm" onClick={() => setPick(s.id)}>
                             되돌리기…
                           </button>
                         </td>
@@ -1495,11 +1495,11 @@ function HistoryTab({ domain, hq, admin, onRevert }: { domain: DnsDomain; hq: Re
                       <td onClick={(e) => e.stopPropagation()}>
                         <span className="row" style={{ gap: 6 }}>
                           {h.result !== 'failed' && (
-                            <button className="btn sm" disabled={!canRevert(h)} title={canRevert(h) ? undefined : '그 작업 공간의 관리자만 되돌립니다'} onClick={() => void revert(h)}>
+                            <button type="button" className="btn sm" disabled={!canRevert(h)} title={canRevert(h) ? undefined : '그 작업 공간의 관리자만 되돌립니다'} onClick={() => void revert(h)}>
                               되돌리기
                             </button>
                           )}
-                          <button className="btn sm" onClick={() => setOpen(h)}>
+                          <button type="button" className="btn sm" onClick={() => setOpen(h)}>
                             자세히
                           </button>
                           {admin && <Menu items={[{ label: '기록 지우기…', danger: true, onSelect: () => setDel(h) }]} />}
@@ -1551,10 +1551,10 @@ function DeleteHistoryDialog({ domain, h, onClose, onDone }: { domain: string; h
       onClose={onClose}
       footer={
         <>
-          <button className="btn" onClick={onClose}>
+          <button type="button" className="btn" onClick={onClose}>
             취소
           </button>
-          <button
+          <button type="button"
             className="btn danger solid"
             disabled={busy}
             onClick={() => {

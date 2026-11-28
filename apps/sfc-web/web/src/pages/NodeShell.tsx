@@ -38,6 +38,7 @@ import { ErrorBand, Load } from '../components/states';
 import { DEFAULT_POLL_MS, usePoll, type Loaded } from '../lib/usePoll';
 import { ago, fmtBytes } from '../lib/format';
 import { eulReul, eunNeun, iGa } from '../lib/josa';
+import { nodeShellSessionsLive } from '../lib/liveTopics';
 
 // ── 공통 ──
 
@@ -251,7 +252,7 @@ export function NodeShellTab({ node }: { node: string }) {
   const me = session.user.id;
   const admin = !!session.user.systemAdmin;
   const { q, forbidden } = useShellPolicy();
-  const sessions = usePoll((s) => nodeShellSessions(s), [], DEFAULT_POLL_MS);
+  const sessions = usePoll((s) => nodeShellSessions(s), [], DEFAULT_POLL_MS, nodeShellSessionsLive);
   const n = q.data?.nodes.find((x) => x.node === node);
   const [tabs, setTabs] = useState<Tab[]>([]);
   const [active, setActive] = useState<number>();
@@ -315,14 +316,14 @@ export function NodeShellTab({ node }: { node: string }) {
         <div className="row between" style={{ gap: 8 }}>
           <h2>SSH 세션</h2>
           <span className="row" style={{ gap: 8 }}>
-            <button className="btn" disabled={!!blocked} title={blocked} onClick={open}>
+            <button type="button" className="btn" disabled={!!blocked} title={blocked} onClick={open}>
               ＋ 새 세션
             </button>
             <Menu label="글꼴 크기" className="btn" button="글꼴 ▾" items={FONT_SIZES.map((s) => ({ label: `${s}px${s === font ? ' ✓' : ''}`, onSelect: () => setFont(s) }))} />
-            <button className="btn" disabled={!tabs.length} onClick={fullscreen}>
+            <button type="button" className="btn" disabled={!tabs.length} onClick={fullscreen}>
               ⛶ 전체 화면
             </button>
-            <button className="btn danger" disabled={cur?.phase !== 'open'} onClick={() => cur && disconnect(cur.key)}>
+            <button type="button" className="btn danger" disabled={cur?.phase !== 'open'} onClick={() => cur && disconnect(cur.key)}>
               연결 끊기
             </button>
           </span>
@@ -331,7 +332,7 @@ export function NodeShellTab({ node }: { node: string }) {
           <div className="shell-empty">
             <span>{blocked ? blocked + '.' : '열린 세션이 없습니다. ‘＋ 새 세션’을 누르면 이 서버의 전용 계정으로 로그인합니다.'}</span>
             {!blocked && (
-              <button className="btn primary" onClick={open}>
+              <button type="button" className="btn primary" onClick={open}>
                 ＋ 새 세션
               </button>
             )}
@@ -538,7 +539,7 @@ function NodeSettingsCard({ node, policy, onDone }: { node: NodeShellNode; polic
       <MutationError error={m.error} />
       {m.op && <OpPanel op={m.op} onChange={(o) => (m.setOp(o), o.state === 'applied' && onDone())} />}
       <div className="row" style={{ justifyContent: 'flex-end' }}>
-        <button className="btn primary" disabled={same || m.busy} onClick={() => (sudo && !node.sudo ? setConfirm(true) : send())}>
+        <button type="button" className="btn primary" disabled={same || m.busy} onClick={() => (sudo && !node.sudo ? setConfirm(true) : send())}>
           {m.busy ? '보내는 중…' : '저장'}
         </button>
       </div>
@@ -590,7 +591,7 @@ function OpenSessionsCard({ node, me, admin, q }: { node: string; me: string; ad
                       </td>
                       <td style={{ textAlign: 'right' }}>
                         {admin && s.user !== me && canCloseSession(s) && (
-                          <button className="btn danger sm" onClick={() => setClosing(s)}>
+                          <button type="button" className="btn danger sm" onClick={() => setClosing(s)}>
                             닫기…
                           </button>
                         )}
@@ -622,15 +623,15 @@ function CloseSessionDialog({ s, onClose }: { s: NodeShellSession; onClose: () =
       onClose={onClose}
       footer={
         done ? (
-          <button className="btn primary" onClick={onClose}>
+          <button type="button" className="btn primary" onClick={onClose}>
             닫기
           </button>
         ) : (
           <>
-            <button className="btn" onClick={onClose}>
+            <button type="button" className="btn" onClick={onClose}>
               취소
             </button>
-            <button className="btn danger solid" disabled={m.busy} onClick={() => void sendOp(m, nodeShellClosePath(s.sessionId), {})}>
+            <button type="button" className="btn danger solid" disabled={m.busy} onClick={() => void sendOp(m, nodeShellClosePath(s.sessionId), {})}>
               {m.busy ? '보내는 중…' : '닫기'}
             </button>
           </>
@@ -673,7 +674,7 @@ function ShellSettingsForm({ p, onClose }: { p: NodeShellPolicy; onClose: () => 
   const [max, setMax] = useState(String(p.maxSessions));
   const [idle, setIdle] = useState(p.idleSeconds);
   const [showAll, setShowAll] = useState(false);
-  const sessions = usePoll((s) => nodeShellSessions(s), [], 0);
+  const sessions = usePoll((s) => nodeShellSessions(s), [], 0, nodeShellSessionsLive);
   const m = useMutation();
   const maxN = Number(max);
   const bad = !Number.isInteger(maxN) || maxN < 1 || maxN > 16 ? '1에서 16 사이로 넣어 주세요' : undefined;
@@ -688,15 +689,15 @@ function ShellSettingsForm({ p, onClose }: { p: NodeShellPolicy; onClose: () => 
       onClose={onClose}
       footer={
         done ? (
-          <button className="btn primary" onClick={onClose}>
+          <button type="button" className="btn primary" onClick={onClose}>
             닫기
           </button>
         ) : (
           <>
-            <button className="btn" onClick={onClose}>
+            <button type="button" className="btn" onClick={onClose}>
               취소
             </button>
-            <button className="btn primary" disabled={same || !!bad || m.busy} onClick={() => void sendOp(m, NODE_SHELL_PATH, { enabled, maxSessions: maxN, idleSeconds: idle, expected: p.revision }, 'PUT')}>
+            <button type="button" className="btn primary" disabled={same || !!bad || m.busy} onClick={() => void sendOp(m, NODE_SHELL_PATH, { enabled, maxSessions: maxN, idleSeconds: idle, expected: p.revision }, 'PUT')}>
               {m.busy ? '보내는 중…' : '저장'}
             </button>
           </>
@@ -786,7 +787,7 @@ export function UserShellSection({ u }: { u: UserRecord }) {
       <hr className="sep" />
       <div className="row between">
         <b>서버 셸</b>
-        <button className="btn sm" disabled={!q.data} onClick={() => setEdit(true)}>
+        <button type="button" className="btn sm" disabled={!q.data} onClick={() => setEdit(true)}>
           바꾸기…
         </button>
       </div>
@@ -828,15 +829,15 @@ function GrantDialog({ u, p, cur, onClose }: { u: UserRecord; p: NodeShellPolicy
       onClose={onClose}
       footer={
         done ? (
-          <button className="btn primary" onClick={onClose}>
+          <button type="button" className="btn primary" onClick={onClose}>
             닫기
           </button>
         ) : (
           <>
-            <button className="btn" onClick={onClose}>
+            <button type="button" className="btn" onClick={onClose}>
               취소
             </button>
-            <button className="btn primary" disabled={same || m.busy} onClick={() => void sendOp(m, nodeShellGrantPath(u.id), { nodes: [...sel].sort(), expected: p.revision }, 'PUT')}>
+            <button type="button" className="btn primary" disabled={same || m.busy} onClick={() => void sendOp(m, nodeShellGrantPath(u.id), { nodes: [...sel].sort(), expected: p.revision }, 'PUT')}>
               {m.busy ? '보내는 중…' : '저장'}
             </button>
           </>
@@ -857,7 +858,7 @@ function GrantDialog({ u, p, cur, onClose }: { u: UserRecord; p: NodeShellPolicy
 export function NodeShellListPage() {
   const me = useSession().user.id;
   const { q, forbidden } = useShellPolicy();
-  const sessions = usePoll((s) => nodeShellSessions(s), [], DEFAULT_POLL_MS);
+  const sessions = usePoll((s) => nodeShellSessions(s), [], DEFAULT_POLL_MS, nodeShellSessionsLive);
   const navigate = useNavigate();
   return (
     <>
@@ -890,7 +891,7 @@ export function NodeShellListPage() {
                         <td>{n.sudo ? '허용' : '막기'}</td>
                         <td>{mine ? `${mine}개 열림` : '—'}</td>
                         <td style={{ textAlign: 'right' }}>
-                          <button className={`btn sm${blocked ? '' : ' primary'}`} disabled={!!blocked} title={blocked} onClick={() => navigate(`/servers/${encodeURIComponent(n.node)}/shell?new=1`)}>
+                          <button type="button" className={`btn sm${blocked ? '' : ' primary'}`} disabled={!!blocked} title={blocked} onClick={() => navigate(`/servers/${encodeURIComponent(n.node)}/shell?new=1`)}>
                             셸 열기
                           </button>
                         </td>

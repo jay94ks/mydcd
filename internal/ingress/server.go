@@ -589,6 +589,7 @@ func (i *instance) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			selection.Exclude[id] = true
 		}
 	}
+	i.manager.holdSelection(&selection)
 	if i.manager.management != nil {
 		for id := range selection.Backends {
 			candidate := target

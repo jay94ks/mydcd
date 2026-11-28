@@ -246,10 +246,10 @@ function DesktopVault() {
         actions={
           <span className="row">
             <Refresh q={q} poll={false} />
-            <button className="btn" disabled={!canDeploy || !scope || waiting || uninit} title={canDeploy ? undefined : NEED} onClick={() => setDlg({ kind: 'group' })}>
+            <button type="button" className="btn" disabled={!canDeploy || !scope || waiting || uninit} title={canDeploy ? undefined : NEED} onClick={() => setDlg({ kind: 'group' })}>
               묶음 만들기
             </button>
-            <button className="btn primary" disabled={!canDeploy || !scope || waiting || uninit} title={canDeploy ? undefined : NEED} onClick={() => setDlg({ kind: 'secret' })}>
+            <button type="button" className="btn primary" disabled={!canDeploy || !scope || waiting || uninit} title={canDeploy ? undefined : NEED} onClick={() => setDlg({ kind: 'secret' })}>
               비밀값 만들기
             </button>
           </span>
@@ -282,7 +282,7 @@ function DesktopVault() {
           <h2>클러스터 보관함 (아직 초기화 안 됨)</h2>
           <div className="note">클러스터 보관함이 아직 초기화되지 않았습니다. 초기화하면 클러스터 범위의 묶음·비밀값을 만들 수 있습니다.</div>
           <span>
-            <button className="btn primary" onClick={() => setDlg({ kind: 'init' })}>
+            <button type="button" className="btn primary" onClick={() => setDlg({ kind: 'init' })}>
               초기화…
             </button>
           </span>
@@ -448,7 +448,7 @@ function Detail({ scope, v, isRoot, canDeploy, open }: { scope: VaultScope; v: S
   const btn = (k: Act, label: string, danger = false) => {
     const off = (k === 'retire' && v.status === 'revoking' && live.length ? `아직 쓰는 앱이 ${live.length}개 있습니다` : undefined) ?? why(v, k, canDeploy, isRoot);
     return (
-      <button key={k} className={`btn${danger ? ' danger' : ''}`} disabled={!!off} title={off} onClick={() => open(k)}>
+      <button type="button" key={k} className={`btn${danger ? ' danger' : ''}`} disabled={!!off} title={off} onClick={() => open(k)}>
         {label}
       </button>
     );
@@ -551,17 +551,17 @@ function NewValueCard({ scope, v, canDeploy, onDone }: { scope: VaultScope; v: S
           {op.state !== 'applied' && !m.busy && (
             <div className="row">
               {op.errorCode === 'needs-input' && (
-                <button className="btn sm primary" disabled={!ready} onClick={() => void m.run(path, body(true)).then(after)}>
+                <button type="button" className="btn sm primary" disabled={!ready} onClick={() => void m.run(path, body(true)).then(after)}>
                   같은 작업으로 값 다시 보내기
                 </button>
               )}
               {op.errorCode === 'input-unknown' && (
-                <button className="btn sm primary" onClick={() => void m.run(path, body(false)).then(after)}>
+                <button type="button" className="btn sm primary" onClick={() => void m.run(path, body(false)).then(after)}>
                   결과 확인 (값은 다시 보내지 않음)
                 </button>
               )}
               {op.state === 'failed' && op.errorCode === 'write-not-applied' && (
-                <button className="btn sm primary" disabled={!ready} onClick={() => (m.reset(), void m.run(path, body(true)).then(after))}>
+                <button type="button" className="btn sm primary" disabled={!ready} onClick={() => (m.reset(), void m.run(path, body(true)).then(after))}>
                   새 작업으로 다시 넣기
                 </button>
               )}
@@ -571,7 +571,7 @@ function NewValueCard({ scope, v, canDeploy, onDone }: { scope: VaultScope; v: S
       )}
       <VaultErr e={m.error} />
       <div className="row" style={{ justifyContent: 'flex-end' }}>
-        <button className="btn primary" disabled={!!off || !ready || m.busy} title={off} onClick={() => void start()}>
+        <button type="button" className="btn primary" disabled={!!off || !ready || m.busy} title={off} onClick={() => void start()}>
           {m.busy ? '보내는 중…' : '쓰기 시작'}
         </button>
       </div>
@@ -600,15 +600,15 @@ function PolicyDialog({ title, action, danger, method = 'POST', path, body, vali
       onClose={onClose}
       footer={
         finished ? (
-          <button className="btn primary" onClick={onClose}>
+          <button type="button" className="btn primary" onClick={onClose}>
             닫기
           </button>
         ) : (
           <>
-            <button className="btn" onClick={onClose}>
+            <button type="button" className="btn" onClick={onClose}>
               취소
             </button>
-            <button className={danger ? 'btn danger solid' : 'btn primary'} disabled={m.busy || !valid || (!!confirmName && typed !== confirmName)} onClick={() => void send()}>
+            <button type="button" className={danger ? 'btn danger solid' : 'btn primary'} disabled={m.busy || !valid || (!!confirmName && typed !== confirmName)} onClick={() => void send()}>
               {m.busy ? '보내는 중…' : action}
             </button>
           </>
@@ -701,7 +701,7 @@ function AclDialog({ scope, v, onClose, onDone }: { scope: VaultScope; v: Secret
                   </select>
                 </td>
                 <td>
-                  <button className="btn sm" aria-label="이 줄 지우기" onClick={() => setRows((xs) => xs.filter((_, j) => j !== i))}>
+                  <button type="button" className="btn sm" aria-label="이 줄 지우기" onClick={() => setRows((xs) => xs.filter((_, j) => j !== i))}>
                     ✕
                   </button>
                 </td>
@@ -711,7 +711,7 @@ function AclDialog({ scope, v, onClose, onDone }: { scope: VaultScope; v: Secret
         </table>
       </div>
       <span>
-        <button className="btn" onClick={() => setRows((xs) => [...xs, { who: 'user', name: '', deny: false }])}>
+        <button type="button" className="btn" onClick={() => setRows((xs) => [...xs, { who: 'user', name: '', deny: false }])}>
           ＋ 추가
         </button>
       </span>
@@ -810,7 +810,7 @@ function UsagesDialog({ scope, v, onClose }: { scope: VaultScope; v: SecretView;
       width={720}
       onClose={onClose}
       footer={
-        <button className="btn primary" onClick={onClose}>
+        <button type="button" className="btn primary" onClick={onClose}>
           닫기
         </button>
       }
@@ -882,15 +882,15 @@ function InitDialog({ onClose, onDone }: { onClose: () => void; onDone: () => vo
       onClose={onClose}
       footer={
         finished ? (
-          <button className="btn primary" onClick={onClose}>
+          <button type="button" className="btn primary" onClick={onClose}>
             닫기
           </button>
         ) : (
           <>
-            <button className="btn" onClick={onClose}>
+            <button type="button" className="btn" onClick={onClose}>
               취소
             </button>
-            <button className="btn primary" disabled={m.busy} onClick={() => void send()}>
+            <button type="button" className="btn primary" disabled={m.busy} onClick={() => void send()}>
               {m.busy ? '보내는 중…' : '초기화'}
             </button>
           </>

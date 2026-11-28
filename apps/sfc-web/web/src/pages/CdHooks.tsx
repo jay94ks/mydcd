@@ -77,7 +77,7 @@ export function CdHooksCard({ a, cd, canManage, onChange }: { a: AppView; cd: DC
       actions={
         <span className="row" style={{ gap: 8 }}>
           <Menu label="전송 기록" className="btn" button="전송 기록" items={linked.length ? linked.map((w) => ({ label: w.name, hint: kindsOf(w.name), onSelect: () => setDrawer(w) })) : [{ label: '연결된 웹훅이 없습니다', disabledReason: '먼저 웹훅을 연결하세요' }]} />
-          <button className="btn primary" disabled={!canManage} title={canManage ? undefined : NEED} onClick={() => setAdd(true)}>
+          <button type="button" className="btn primary" disabled={!canManage} title={canManage ? undefined : NEED} onClick={() => setAdd(true)}>
             ＋ 웹훅 연결
           </button>
         </span>
@@ -348,15 +348,15 @@ function LinkDialog({ a, cd, hooks, links, link, onClose, onSaved }: { a: AppVie
       onClose={onClose}
       footer={
         <>
-          <button className="btn" onClick={onClose}>
+          <button type="button" className="btn" onClick={onClose}>
             취소
           </button>
           {!link && (
-            <button className="btn" disabled={!webhook} onClick={() => setTest(hooks.find((w) => w.name === webhook))}>
+            <button type="button" className="btn" disabled={!webhook} onClick={() => setTest(hooks.find((w) => w.name === webhook))}>
               시험 보내기
             </button>
           )}
-          <button className="btn primary" disabled={busy || blocked} title={kind === 'pre-sync' && !manual ? "동기화 모드를 '수동'으로 바꾼 뒤 연결하세요" : undefined} onClick={() => void save()}>
+          <button type="button" className="btn primary" disabled={busy || blocked} title={kind === 'pre-sync' && !manual ? "동기화 모드를 '수동'으로 바꾼 뒤 연결하세요" : undefined} onClick={() => void save()}>
             {link ? '저장' : '연결'}
           </button>
         </>
@@ -482,10 +482,10 @@ function UnlinkDialog({ l, onClose, onDone }: { l: WebhookLink; onClose: () => v
       onClose={onClose}
       footer={
         <>
-          <button className="btn" onClick={onClose}>
+          <button type="button" className="btn" onClick={onClose}>
             취소
           </button>
-          <button className="btn danger" disabled={busy} onClick={() => void go()}>
+          <button type="button" className="btn danger" disabled={busy} onClick={() => void go()}>
             연결 끊기
           </button>
         </>

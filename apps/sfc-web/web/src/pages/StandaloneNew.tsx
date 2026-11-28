@@ -454,7 +454,7 @@ export function StandaloneNewPage() {
                 ['yaml', 'YAML'],
               ]}
             />
-            <button className="btn" onClick={() => setDlg('import')}>
+            <button type="button" className="btn" onClick={() => setDlg('import')}>
               앱 서비스 설정 가져오기…
             </button>
           </>
@@ -465,7 +465,7 @@ export function StandaloneNewPage() {
       {draftNote && draft && (
         <div className="note un small row between">
           <span>이 브라우저에 남겨 둔 초안({fmtTime(draft.at)})을 불러왔습니다.</span>
-          <button
+          <button type="button"
             className="btn sm"
             onClick={() => {
               clearDraft(me, 'standalone', tenant);
@@ -486,10 +486,10 @@ export function StandaloneNewPage() {
         <div className="note wa small row between">
           <span>폼에 없는 칸({lostWarn.join(', ')})은 폼으로 바꾸면 빠집니다. YAML로만 고칠 수 있습니다.</span>
           <span className="row">
-            <button className="btn sm" onClick={() => setLostWarn(undefined)}>
+            <button type="button" className="btn sm" onClick={() => setLostWarn(undefined)}>
               YAML에 남기
             </button>
-            <button
+            <button type="button"
               className="btn sm"
               onClick={() => {
                 const r = standaloneFromYaml(text);
@@ -841,7 +841,7 @@ export function StandaloneNewPage() {
               )}
             </div>
             {planErr !== undefined && <ErrorBand error={planErr} what="정의를 검사하지 못했습니다" />}
-            <button className="btn primary" style={{ width: '100%' }} disabled={!canDeploy || !fresh || blocks.length > 0 || m.busy || (editing ? !plan?.changes.length : false) || (!!run && run.phase !== 'failed')} title={canDeploy ? undefined : '배포 권한 필요'} onClick={start}>
+            <button type="button" className="btn primary" style={{ width: '100%' }} disabled={!canDeploy || !fresh || blocks.length > 0 || m.busy || (editing ? !plan?.changes.length : false) || (!!run && run.phase !== 'failed')} title={canDeploy ? undefined : '배포 권한 필요'} onClick={start}>
               변경 검토 후 실행 (standalone-plan)
             </button>
             {run && (
@@ -860,11 +860,11 @@ export function StandaloneNewPage() {
                     </span>
                     <span className="row">
                       {run.s.mode === 'shell' && (
-                        <button className="btn sm" onClick={() => setConsole(run.s)}>
+                        <button type="button" className="btn sm" onClick={() => setConsole(run.s)}>
                           터미널 열기
                         </button>
                       )}
-                      <button className="btn sm" onClick={() => navigate('/standalone')}>
+                      <button type="button" className="btn sm" onClick={() => navigate('/standalone')}>
                         목록으로
                       </button>
                     </span>
@@ -916,10 +916,10 @@ export function StandaloneNewPage() {
           onClose={() => setDlg(undefined)}
           footer={
             <>
-              <button className="btn" onClick={() => setDlg(undefined)}>
+              <button type="button" className="btn" onClick={() => setDlg(undefined)}>
                 취소
               </button>
-              <button className="btn primary" onClick={() => (setDlg(undefined), void up())}>
+              <button type="button" className="btn primary" onClick={() => (setDlg(undefined), void up())}>
                 적용 (standalone-up)
               </button>
             </>

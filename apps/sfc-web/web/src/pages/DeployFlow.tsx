@@ -134,7 +134,7 @@ export function DeployFlow({
             </div>
           )}
           {acmeWarn}
-          <button className="btn primary" disabled={!check.ok || planning || tenantMismatch} onClick={() => void runPlan()}>
+          <button type="button" className="btn primary" disabled={!check.ok || planning || tenantMismatch} onClick={() => void runPlan()}>
             {planning ? '계산 중…' : '검사하고 변경 미리보기'}
           </button>
         </>
@@ -190,10 +190,10 @@ export function DeployFlow({
                 작업 ID <code>{m.opId}</code> · 같은 제출을 다시 누르면 같은 작업으로 이어 갑니다(새로 올리지 않음).
               </div>
               <div className="row between">
-                <button className="btn" onClick={() => (setPlan(undefined), setReviewed(false))}>
+                <button type="button" className="btn" onClick={() => (setPlan(undefined), setReviewed(false))}>
                   이전
                 </button>
-                <button
+                <button type="button"
                   className="btn primary"
                   disabled={!reviewed || !canDeploy || m.busy}
                   title={canDeploy ? undefined : '이 작업 공간의 배포 권한이 필요합니다'}
@@ -240,7 +240,7 @@ export function PlanChanges({ plan }: { plan: PlanReply }) {
           </Badge>
         ))}
         {keep > 0 && (
-          <button className="btn sm ghost" onClick={() => setShowKeep(!showKeep)}>
+          <button type="button" className="btn sm ghost" onClick={() => setShowKeep(!showKeep)}>
             {showKeep ? '그대로인 항목 숨기기' : `그대로인 항목 ${keep}개 보기`}
           </button>
         )}

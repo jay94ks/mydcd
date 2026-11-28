@@ -197,6 +197,7 @@ type Runtime struct {
 	vaultApprovalBudget       *credentials.Budget
 	inputLife                 sync.RWMutex
 	inputMu                   sync.Mutex
+	secretSockets             secretSockets // sfev.sock endpoints (app_secret_socket.go)
 	projections               *deployment.ProjectionStore
 	nativeVolumes             *volumes.NativeManager
 	fixedVolumes              *volumes.FixedManager
@@ -585,6 +586,8 @@ func Open(c config.Node) (*Runtime, error) {
 		service.VPSCredentialSealer = r.sealVPSCredential
 		service.VPSOfferReader = r.readVPSOffer
 		service.VPSStatusReader = r.readVPSStatus
+		service.OwnedVPSStatusReader = r.readOwnedVPSStatus
+		service.OwnedVPSInstancesReader = r.readOwnedVPSInstances
 		service.ClusterBackupMaster = r.certificateMaster
 		service.IngressObserver = r.readIngresses
 		service.ServiceCaller = r.callService

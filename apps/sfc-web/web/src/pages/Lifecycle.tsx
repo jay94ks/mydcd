@@ -11,6 +11,7 @@ import type { DLifecyclePolicy, DLifecycleUse } from '../api/dto';
 import type { DiffLine, LifecycleView, OpView } from '../api/types';
 import { useTenantRole } from '../auth/session';
 import { Badge, Card, Field, HelpBox, PageHeader } from '../components/ui';
+import { imageRefProblem } from '../components/ImageField';
 import { Refresh } from '../components/Refresh';
 import { Tabs } from '../components/Tabs';
 import { Dialog } from '../components/Dialog';
@@ -163,7 +164,7 @@ function DesktopLifecycle() {
           <>
             <Refresh q={q} poll={false} />
             {tenant && (
-              <button className="btn primary" disabled={!canDeploy || (pol && (!pol.configured || !pol.enabled))} title={!canDeploy ? NEED : pol && !pol.configured ? '상태 검사 정책이 아직 없습니다' : pol && !pol.enabled ? '상태 검사 정책이 꺼져 있습니다' : undefined} onClick={() => setCreate(true)}>
+              <button type="button" className="btn primary" disabled={!canDeploy || (pol && (!pol.configured || !pol.enabled))} title={!canDeploy ? NEED : pol && !pol.configured ? '상태 검사 정책이 아직 없습니다' : pol && !pol.enabled ? '상태 검사 정책이 꺼져 있습니다' : undefined} onClick={() => setCreate(true)}>
                 스크립트 만들기
               </button>
             )}
@@ -329,10 +330,10 @@ function ScriptCard({ tenant, script, canDeploy: canWrite, policyOn, onChanged }
               </option>
             ))}
           </select>
-          <button className="btn danger" disabled={!canDeploy || !ver?.active} title={!canDeploy ? NEED : !ver?.active ? '활성 버전만 폐기할 수 있습니다' : undefined} onClick={() => setDlg('retire')}>
+          <button type="button" className="btn danger" disabled={!canDeploy || !ver?.active} title={!canDeploy ? NEED : !ver?.active ? '활성 버전만 폐기할 수 있습니다' : undefined} onClick={() => setDlg('retire')}>
             폐기
           </button>
-          <button className="btn danger" disabled={!canDeploy || !ver || ver.active || ver.deleted} title={!canDeploy ? NEED : ver?.active ? '활성 버전은 먼저 폐기하세요' : undefined} onClick={() => setDlg('delete')}>
+          <button type="button" className="btn danger" disabled={!canDeploy || !ver || ver.active || ver.deleted} title={!canDeploy ? NEED : ver?.active ? '활성 버전은 먼저 폐기하세요' : undefined} onClick={() => setDlg('delete')}>
             삭제
           </button>
         </>
@@ -366,12 +367,12 @@ function ScriptCard({ tenant, script, canDeploy: canWrite, policyOn, onChanged }
       )}
       <div className="row between" style={{ flexWrap: 'wrap', gap: 8 }}>
         <span className="row small" style={{ gap: 8 }}>
-          <button className="btn" disabled={!canDeploy || old} onClick={() => setLockDlg({})}>
+          <button type="button" className="btn" disabled={!canDeploy || old} onClick={() => setLockDlg({})}>
             모듈 잠금…
           </button>
           <span className="muted">{curLock.length ? `모듈 ${curLock.length}개 잠금${zips.length ? ` · ZIP ${zips.length}개 첨부` : ''}` : '모듈 잠금 없음 · 표준 SDK만 사용'}</span>
         </span>
-        <button className="btn primary" disabled={!canDeploy || old || !dirty || m.busy || !policyOn} title={!policyOn ? '상태 검사 정책이 없거나 꺼져 있습니다' : undefined} onClick={save}>
+        <button type="button" className="btn primary" disabled={!canDeploy || old || !dirty || m.busy || !policyOn} title={!policyOn ? '상태 검사 정책이 없거나 꺼져 있습니다' : undefined} onClick={save}>
           새 리비전 저장 (버전 {sc.recordRevision + 1})
         </button>
       </div>
@@ -379,14 +380,14 @@ function ScriptCard({ tenant, script, canDeploy: canWrite, policyOn, onChanged }
       {missing.length > 0 ? (
         <div className="note er small">
           실행 서버에 <span className="mono">{missing.map(lockKey).join(', ')}</span> 모듈이 없어 저장하지 못했습니다. 이 모듈의 ZIP을 골라 다시 저장하세요.{' '}
-          <button className="linkish" onClick={() => setLockDlg(badRows)}>
+          <button type="button" className="linkish" onClick={() => setLockDlg(badRows)}>
             모듈 잠금 열기
           </button>
         </div>
       ) : wrongZip.length > 0 ? (
         <div className="note er small">
           <span className="mono">{wrongZip.map((x) => x.zip!.name).join(', ')}</span>의 내용이 잠근 버전(<span className="mono">{wrongZip.map(lockKey).join(', ')}</span>)과 다릅니다. 그 버전의 모듈 ZIP을 다시 고르세요.{' '}
-          <button className="linkish" onClick={() => setLockDlg(badRows)}>
+          <button type="button" className="linkish" onClick={() => setLockDlg(badRows)}>
             모듈 잠금 열기
           </button>
         </div>
@@ -430,15 +431,15 @@ function RetireDeleteDialog({ kind, tenant, name, revision, expected, uses, onCl
       onClose={onClose}
       footer={
         m.op ? (
-          <button className="btn primary" onClick={onClose}>
+          <button type="button" className="btn primary" onClick={onClose}>
             닫기
           </button>
         ) : (
           <>
-            <button className="btn" onClick={onClose}>
+            <button type="button" className="btn" onClick={onClose}>
               취소
             </button>
-            <button className="btn danger solid" disabled={m.busy || inUse || (del && (uses?.length ?? 0) > 0)} onClick={() => void m.run(del ? lifecyclePath(tenant, name) : `${lifecyclePath(tenant, name)}/retire`, body, del ? 'DELETE' : 'POST').then((o) => o?.state === 'applied' && onDone())}>
+            <button type="button" className="btn danger solid" disabled={m.busy || inUse || (del && (uses?.length ?? 0) > 0)} onClick={() => void m.run(del ? lifecyclePath(tenant, name) : `${lifecyclePath(tenant, name)}/retire`, body, del ? 'DELETE' : 'POST').then((o) => o?.state === 'applied' && onDone())}>
               {del ? '삭제' : '폐기'}
             </button>
           </>
@@ -496,10 +497,10 @@ function LockDialog({ tenant, chosen, bad, sourceBytes, onClose, onPick }: { ten
       onClose={onClose}
       footer={
         <>
-          <button className="btn" onClick={onClose}>
+          <button type="button" className="btn" onClick={onClose}>
             취소
           </button>
-          <button className="btn primary" disabled={!q.data || over} onClick={() => onPick(mods.filter((x) => sel.has(lockKey(x))).map(({ path, version }) => ({ path, version, zip: sel.get(lockKey({ path, version })) })))}>
+          <button type="button" className="btn primary" disabled={!q.data || over} onClick={() => onPick(mods.filter((x) => sel.has(lockKey(x))).map(({ path, version }) => ({ path, version, zip: sel.get(lockKey({ path, version })) })))}>
             고르기
           </button>
         </>
@@ -542,11 +543,11 @@ function LockDialog({ tenant, chosen, bad, sourceBytes, onClose, onPick }: { ten
                           <span className="mono">{z.name}</span>
                           <span className="small muted">
                             {fmtBytes(z.size)} ·{' '}
-                            <button className="linkish" onClick={() => pickZip(k)}>
+                            <button type="button" className="linkish" onClick={() => pickZip(k)}>
                               바꾸기
                             </button>{' '}
                             ·{' '}
-                            <button className="linkish" onClick={() => dropZip(k)}>
+                            <button type="button" className="linkish" onClick={() => dropZip(k)}>
                               빼기
                             </button>
                           </span>
@@ -554,7 +555,7 @@ function LockDialog({ tenant, chosen, bad, sourceBytes, onClose, onPick }: { ten
                         </span>
                       ) : (
                         <span className="col" style={{ gap: 2 }}>
-                          <button className="btn sm" style={why ? { borderColor: 'var(--er)' } : undefined} onClick={() => pickZip(k)}>
+                          <button type="button" className="btn sm" style={why ? { borderColor: 'var(--er)' } : undefined} onClick={() => pickZip(k)}>
                             ZIP 파일 고르기
                           </button>
                           {why === 'missing' && <span className="small" style={{ color: 'var(--er)' }}>서버에 없음 · ZIP 필요</span>}
@@ -601,15 +602,15 @@ function CreateScriptDialog({ tenant, taken, onClose, onDone }: { tenant: string
       onClose={onClose}
       footer={
         m.op ? (
-          <button className="btn primary" onClick={onClose}>
+          <button type="button" className="btn primary" onClick={onClose}>
             닫기
           </button>
         ) : (
           <>
-            <button className="btn" onClick={onClose}>
+            <button type="button" className="btn" onClick={onClose}>
               취소
             </button>
-            <button className="btn primary" disabled={(!name || !!err) && !sent} onClick={go}>
+            <button type="button" className="btn primary" disabled={(!name || !!err) && !sent} onClick={go}>
               만들기
             </button>
           </>
@@ -648,7 +649,7 @@ function PolicyCard({ tenant, canDeploy, onChanged }: { tenant: string; canDeplo
   const jobs = Number(v.jobs);
   const compiled = v.mode === 'compiled';
   const res = p ? buildRes(p.build) : BUILD_DEFAULTS;
-  const bad = !(cacheBytes >= 0) ? '컴파일 캐시 상한을 GiB로 넣으세요.' : compiled && cacheBytes < res.artifactBytes ? `컴파일하면 캐시 상한이 빌드 결과물 한도(${fmtBytes(res.artifactBytes)}) 이상이어야 합니다.` : compiled && !v.node ? '컴파일하려면 빌드 서버가 필요합니다.' : compiled && !(Number.isInteger(jobs) && jobs >= 1 && jobs <= 16) ? '동시 빌드 작업은 1~16입니다.' : compiled && !/@sha256:[0-9a-f]{64}$/.test(v.image.trim()) ? '빌드 이미지는 digest로 고정해야 합니다 (이름@sha256:…).' : compiled && !/^go1\.\d+(\.\d+)?$/.test(v.toolchain.trim()) ? '툴체인은 go1.24 같은 Go 버전입니다.' : undefined;
+  const bad = !(cacheBytes >= 0) ? '컴파일 캐시 상한을 GiB로 넣으세요.' : compiled && cacheBytes < res.artifactBytes ? `컴파일하면 캐시 상한이 빌드 결과물 한도(${fmtBytes(res.artifactBytes)}) 이상이어야 합니다.` : compiled && !v.node ? '컴파일하려면 빌드 서버가 필요합니다.' : compiled && !(Number.isInteger(jobs) && jobs >= 1 && jobs <= 16) ? '동시 빌드 작업은 1~16입니다.' : compiled && imageRefProblem(v.image.trim()) ? `빌드 이미지: ${imageRefProblem(v.image.trim())}` : compiled && !/^go1\.\d+(\.\d+)?$/.test(v.toolchain.trim()) ? '툴체인은 go1.24 같은 Go 버전입니다.' : undefined;
   return (
     <Card title={<h2>상태 검사 정책</h2>} actions={p && <span className="mono small muted">policy rev {p.revision}</span>}>
       {q.error !== undefined && <MutationError error={q.error} />}
@@ -678,8 +679,8 @@ function PolicyCard({ tenant, canDeploy, onChanged }: { tenant: string; canDeplo
         </Field>
         {compiled && (
           <>
-            <Field label="빌드 이미지">
-              <input className="mono" value={v.image} onChange={set('image')} disabled={!canDeploy} placeholder="registry/lifecycle-builder@sha256:…" />
+            <Field label="빌드 이미지" hint="태그 또는 @sha256:…. 배포마다 태그를 한 번 해석하고, 그 digest가 빌드 서버에 미리 받아져 있어야 합니다">
+              <input className="mono" value={v.image} onChange={set('image')} disabled={!canDeploy} placeholder="golang:1.24" />
             </Field>
             <Field label="툴체인">
               <input className="mono" value={v.toolchain} onChange={set('toolchain')} disabled={!canDeploy} placeholder="go1.24" />
@@ -697,7 +698,7 @@ function PolicyCard({ tenant, canDeploy, onChanged }: { tenant: string; canDeplo
       </label>
       {bad && <div className="note er small">{bad}</div>}
       <div className="row" style={{ justifyContent: 'flex-end' }}>
-        <button className="btn primary" disabled={!p || !canDeploy || !!bad} title={canDeploy ? undefined : NEED} onClick={() => setReview(true)}>
+        <button type="button" className="btn primary" disabled={!p || !canDeploy || !!bad} title={canDeploy ? undefined : NEED} onClick={() => setReview(true)}>
           정책 변경 검토
         </button>
       </div>
@@ -763,15 +764,15 @@ function PolicyDialog({ tenant, from, to, onClose, onDone }: { tenant: string; f
       onClose={onClose}
       footer={
         m.op ? (
-          <button className="btn primary" onClick={onClose}>
+          <button type="button" className="btn primary" onClick={onClose}>
             닫기
           </button>
         ) : (
           <>
-            <button className="btn" onClick={onClose}>
+            <button type="button" className="btn" onClick={onClose}>
               취소
             </button>
-            <button className="btn primary" disabled={m.busy} onClick={() => void m.run(`/t/${encodeURIComponent(tenant)}/lifecycle-policy`, body, 'PUT').then((o) => o?.state === 'applied' && onDone())}>
+            <button type="button" className="btn primary" disabled={m.busy} onClick={() => void m.run(`/t/${encodeURIComponent(tenant)}/lifecycle-policy`, body, 'PUT').then((o) => o?.state === 'applied' && onDone())}>
               저장
             </button>
           </>

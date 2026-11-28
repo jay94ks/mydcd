@@ -127,16 +127,16 @@ export function OpsTrashPage() {
                     return (
                       <span className="row" style={{ gap: 6, justifyContent: 'flex-end' }}>
                         {it.restore === 'here' ? (
-                          <button className="btn sm" onClick={() => setRestoring(it)}>
+                          <button type="button" className="btn sm" onClick={() => setRestoring(it)}>
                             되살리기…
                           </button>
                         ) : l ? (
-                          <button className="btn sm" onClick={() => navigate(l[0])}>
+                          <button type="button" className="btn sm" onClick={() => navigate(l[0])}>
                             {l[1]}
                           </button>
                         ) : null}
                         {it.restore === 'here' && (
-                          <button className="btn sm danger" onClick={() => setPurging(it)}>
+                          <button type="button" className="btn sm danger" onClick={() => setPurging(it)}>
                             비우기…
                           </button>
                         )}
@@ -210,15 +210,15 @@ function RestoreDialog({ item, onClose, onDone }: { item: TrashItem; onClose: ()
       onClose={onClose}
       footer={
         done ? (
-          <button className="btn primary" onClick={onClose}>
+          <button type="button" className="btn primary" onClick={onClose}>
             닫기
           </button>
         ) : (
           <>
-            <button className="btn" onClick={onClose}>
+            <button type="button" className="btn" onClick={onClose}>
               취소
             </button>
-            <button className="btn primary" disabled={working || (shownConflict !== undefined && choice === 'rename' && !name.trim()) || (!!m.op && m.op.state !== 'unknown')} onClick={next}>
+            <button type="button" className="btn primary" disabled={working || (shownConflict !== undefined && choice === 'rename' && !name.trim()) || (!!m.op && m.op.state !== 'unknown')} onClick={next}>
               {working ? '보내는 중…' : shownConflict !== undefined ? '계속' : isOp ? '되살리기 보내기' : '되살리기'}
             </button>
           </>

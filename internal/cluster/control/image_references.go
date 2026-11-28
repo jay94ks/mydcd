@@ -168,6 +168,13 @@ func (p Policy) ImageReferences(s state.State, tenant, node string) ([]ImageRefe
 				if err = addStep(scope, step, "app-execution", execution.ActiveOperation(), "", entry.LastVersion); err != nil {
 					return nil, err
 				}
+				// The digests this deploy resolved its tags to are in use
+				// while the deploy runs; the tag rows above hold none.
+				for _, digest := range execution.StepImageDigests(step) {
+					if err = add(ImageReference{Tenant: scope.Tenant, App: scope.App, Deployment: scope.Deployment, Node: step.Node, Task: step.Key, Image: digest, Kind: "app-execution", Operation: execution.ActiveOperation(), Version: entry.LastVersion}); err != nil {
+						return nil, err
+					}
+				}
 				if stage, ok := execution.Stage(step.Key); ok && stage.Held() {
 					old := stage.Previous
 					if err = addStep(scope, old.Step, "app-held", old.Operation, "", 0); err != nil {

@@ -12,7 +12,6 @@ import (
 
 	"github.com/jay94ks/seafield/internal/cluster/state"
 	"github.com/jay94ks/seafield/internal/deployment"
-	"github.com/jay94ks/seafield/internal/ingress"
 )
 
 // Extend the existing accepted Task/network fixture rather than validating
@@ -34,7 +33,6 @@ func TestIdentityActivationPreservesLiveAppResourcesAndOriginalVaultIssuer(t *te
 		limit.IngressBufferBytes = 128 << 10
 		f.apply("identity-ingress-budget-"+scope, "set-node-quota", expected, limit, state.Applied)
 	}
-	f.apply("identity-ingress-host", "set-ingress-host-policy", 0, IngressHostPolicyChange{Tenant: "tenant", Policy: ingress.HostPolicy{LocalHosts: []string{"identity.internal.example"}}}, state.Applied)
 	managedDNSTaskCoreBegin(t, f, "identity-app", "10.80.1.41", "identity-app", func(input *deployment.Compose, _ *deployment.PlanningContext) {
 		service := input.Services["web"]
 		service.Sfc.Node, service.Sfc.Nodes, service.Sfc.PerNode = "", []string{"node-a"}, 1

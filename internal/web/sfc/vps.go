@@ -22,3 +22,16 @@ const (
 	ActionDeleteVPSNode    = "delete-vps-node"
 	ActionSetVPSNodeCap    = "set-vps-node-cap"
 )
+
+// Owned VPS actions (devel/design/vps-hostinger.md). Expected is the owned
+// catalog RootRevision (QueryOwnedVPS); an owned vendor's account still
+// uses put/remove-vps-account with AccountRootRevision.
+//
+//   - attach-owned-vps: control.OwnedVPSAttach
+//   - detach-owned-vps: control.OwnedVPSSelection (forgets the record only)
+//   - set-owned-vps: control.OwnedVPSSet
+const (
+	ActionAttachOwnedVPS = "attach-owned-vps"
+	ActionDetachOwnedVPS = "detach-owned-vps"
+	ActionSetOwnedVPS    = "set-owned-vps"
+)

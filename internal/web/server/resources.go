@@ -184,6 +184,7 @@ func mockAction(action string) bool {
 		sfc.ActionSetNodeGateways, sfc.ActionSetIngressBalance, sfc.ActionDrainIngress, sfc.ActionUndrainIngress,
 		sfc.ActionRaftCompact,
 		sfc.ActionPutVPSAccount, sfc.ActionRemoveVPSAccount, sfc.ActionCreateVPSNode, sfc.ActionStopVPSNode, sfc.ActionStartVPSNode, sfc.ActionDeleteVPSNode, sfc.ActionSetVPSNodeCap,
+		sfc.ActionAttachOwnedVPS, sfc.ActionDetachOwnedVPS, sfc.ActionSetOwnedVPS,
 		sfc.ActionSetNodeShellPolicy, sfc.ActionSetNodeShellNode, sfc.ActionSetNodeShellGrant, sfc.ActionCloseNodeShell:
 		return true
 	}

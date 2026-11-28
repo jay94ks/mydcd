@@ -493,7 +493,7 @@ func allocationSource(n tenancy.Networks, cluster [32]byte, alloc network.Alloca
 	return Source{}, false
 }
 func (a Authority) BeginStaticRetirement(c access.Catalog, n tenancy.Networks, actor string, expected uint64, alloc network.Allocation, at int64) (Authority, error) {
-	current, ok := a.book.Allocation(alloc.Endpoint)
+	current, ok := a.book.AllocationOf(alloc.Endpoint, alloc.Generation)
 	s, known := allocationSource(n, a.cluster, alloc)
 	if !ok || current != alloc || !known || strings.HasPrefix(alloc.Endpoint, "dhcp/") || expected != a.revision || at < a.at || at <= 0 || at > 1<<62 || c.AuthorizeCleanup(actor, s.Tenant, access.ManageNetwork) != nil {
 		return a, ErrLease
@@ -519,7 +519,7 @@ func (a Authority) CompactReferences() (Authority, error) {
 		return a, e
 	}
 	for id, f := range q.references.Fences {
-		if alloc, held := q.book.Allocation(f.Target.Allocation.Endpoint); f.ReclaimedRevision != 0 && (!held || alloc != f.Target.Allocation) {
+		if alloc, held := q.book.AllocationOf(f.Target.Allocation.Endpoint, f.Target.Allocation.Generation); f.ReclaimedRevision != 0 && (!held || alloc != f.Target.Allocation) {
 			delete(q.references.Fences, id)
 		}
 	}

@@ -138,7 +138,7 @@ function LinkDrawer({ l, onClose, onDone }: { l: MeshLink; onClose: () => void; 
       {act.view}
       <div className="row" style={{ justifyContent: 'flex-end', alignItems: 'center' }}>
         <span className="small muted">시스템 관리자만 · 진행은 터널 연결 창과 같음</span>
-        <button className="btn" disabled={act.working} onClick={act.send}>
+        <button type="button" className="btn" disabled={act.working} onClick={act.send}>
           다시 연결
         </button>
       </div>
@@ -247,11 +247,11 @@ export function ServersPage() {
           <>
             <Refresh q={nodes} />
             {isAdmin && (
-              <button className="btn" onClick={() => setShellSettings(true)}>
+              <button type="button" className="btn" onClick={() => setShellSettings(true)}>
                 서버 셸 설정…
               </button>
             )}
-            <button className="btn primary" disabled={!isAdmin} title={isAdmin ? undefined : '시스템 관리자만 서버를 추가할 수 있습니다'} onClick={() => setAdding({})}>
+            <button type="button" className="btn primary" disabled={!isAdmin} title={isAdmin ? undefined : '시스템 관리자만 서버를 추가할 수 있습니다'} onClick={() => setAdding({})}>
               서버 추가
             </button>
           </>
@@ -567,7 +567,7 @@ export function ConsensusPage() {
                       ) : cBusy && cRun ? (
                         <CompactProgress key="c" run={cRun} />
                       ) : cRun ? (
-                        <button key="c" className="linkish" onClick={() => setLastOpen(true)}>
+                        <button type="button" key="c" className="linkish" onClick={() => setLastOpen(true)}>
                           {compactSummary(cRun)}
                         </button>
                       ) : (
@@ -588,7 +588,7 @@ export function ConsensusPage() {
                   <b>지금 압축 (compact)</b>은 고른 서버가 바로 스냅샷을 찍고 그 앞의 로그를 지웁니다. 결정 저장은 멈추지 않으며 서버마다 따로 합니다. 원장 교체는 확인 다이얼로그(이름 재입력)를 거칩니다. 둘 다 작업 기록에 남습니다.
                 </span>
                 <div className="row">
-                  <button
+                  <button type="button"
                     className="btn"
                     disabled={cMissing || !cq.data || cBusy}
                     title={cMissing ? '서버 기능 대기' : cBusy ? '이미 압축 중입니다. 끝난 뒤 다시 누를 수 있습니다.' : undefined}
@@ -596,7 +596,7 @@ export function ConsensusPage() {
                   >
                     지금 압축…
                   </button>
-                  <button
+                  <button type="button"
                     className="btn danger"
                     disabled={led.data?.epoch === undefined || !v.quorum}
                     title={led.data?.epoch === undefined ? '웹 서버가 원장 세대를 아직 알려 주지 않습니다' : !v.quorum ? '합의가 없어 지금은 바꿀 수 없습니다' : undefined}
@@ -723,15 +723,15 @@ function LedgerDialog({ epoch: now, quorum, onClose, onDone }: { epoch: number; 
       width={560}
       footer={
         m.op ? (
-          <button className="btn primary" onClick={onClose}>
+          <button type="button" className="btn primary" onClick={onClose}>
             닫기
           </button>
         ) : (
           <>
-            <button className="btn" onClick={onClose}>
+            <button type="button" className="btn" onClick={onClose}>
               취소
             </button>
-            <button className="btn danger solid" disabled={confirm.trim() !== want || m.busy} onClick={() => void m.run('/ledger/rotate', { expected: epoch }).then(done)}>
+            <button type="button" className="btn danger solid" disabled={confirm.trim() !== want || m.busy} onClick={() => void m.run('/ledger/rotate', { expected: epoch }).then(done)}>
               원장 교체
             </button>
           </>
@@ -866,15 +866,15 @@ function CompactDialog({ v, c, onClose, onDone }: { v: RaftView; c: RaftCompactV
       onClose={onClose}
       footer={
         m.op ? (
-          <button className="btn primary" onClick={onClose}>
+          <button type="button" className="btn primary" onClick={onClose}>
             닫기
           </button>
         ) : (
           <>
-            <button className="btn" onClick={onClose}>
+            <button type="button" className="btn" onClick={onClose}>
               취소
             </button>
-            <button className="btn primary" disabled={!pick.size || m.busy || !plan.data?.plan} onClick={() => void send()}>
+            <button type="button" className="btn primary" disabled={!pick.size || m.busy || !plan.data?.plan} onClick={() => void send()}>
               압축 시작
             </button>
           </>
@@ -947,7 +947,7 @@ function CompactDialog({ v, c, onClose, onDone }: { v: RaftView; c: RaftCompactV
       {changed && (
         <div className="note wa small row between">
           <span>읽는 사이 서버 구성이 바뀌었습니다. 미리보기를 새로 읽은 뒤 다시 시작하세요.</span>
-          <button className="btn sm" onClick={() => (m.reset(), plan.refresh())}>
+          <button type="button" className="btn sm" onClick={() => (m.reset(), plan.refresh())}>
             새로 읽기
           </button>
         </div>

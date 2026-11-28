@@ -28,7 +28,7 @@ BASE=https://$CLUSTER_HOST/.well-known/sfc/node
 umask 077
 mkdir -p /etc/sfc /var/lib/sfc /usr/local/bin
 until curl -fsS -o /usr/local/bin/sfcd.new -D /tmp/sfcd.h "$BASE/sfcd?name=$NAME"; do sleep 10; done
-want=$(sed -n 's/^[Xx]-[Mm]ydc-[Ss]ha256: *\([0-9a-f]*\).*/\1/p' /tmp/sfcd.h)
+want=$(sed -n 's/^[Xx]-[Ss]fc-[Ss]ha256: *\([0-9a-f]*\).*/\1/p' /tmp/sfcd.h)
 echo "$want  /usr/local/bin/sfcd.new" | sha256sum -c -
 chmod 755 /usr/local/bin/sfcd.new && mv /usr/local/bin/sfcd.new /usr/local/bin/sfcd
 KEY=$(sfcd identity create /etc/sfc/identity)
@@ -67,6 +67,18 @@ UNIT
 systemctl daemon-reload
 systemctl enable --now sfcd
 ```
+
+## 설치 명령 (보유 VPS, 직접 설치)
+
+[보유 VPS](../cli/vps.md#보유-vps-hostinger)를 직접 설치로 붙였으면(`sfcli vps owned attach NAME ...`, `--ssh`·`--existing` 없이) 리더가 그 VPS를 확인한 뒤(`installing`, 공인 IP가 기록됨) VPS에서 root로 다음 한 줄을 실행한다. `CLUSTER_HOST`는 클러스터 외부 주소다.
+
+```sh
+curl -fsS "https://CLUSTER_HOST/.well-known/sfc/node/install.sh?name=NAME" | sh
+```
+
+- `GET /.well-known/sfc/node/install.sh?name=NAME`은 위 사용자 스크립트와 같은 순서의 스크립트를 돌려준다. 서버 이름과 요청한 주소가 이미 채워져 있다. 다른 요청과 같이 연결 주소가 그 서버의 공인 IPv4일 때만 주고, 아니면 404다. 비밀은 담지 않는다.
+- 30분 안에 가입하지 않으면 `failed`·`TIMEOUT`이 된다. VPS는 그대로 남는다. `detach` 뒤 다시 붙이면 새로 시작한다.
+- 다시 실행해도 된다. 키가 이미 있으면 그 키를 쓰고, 다른 키가 먼저 가입했으면 409로 멈춘다.
 
 ## SSH로 설치 (`--script` 없이 만든 서버)
 

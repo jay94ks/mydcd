@@ -61,7 +61,7 @@ func ok(result any, extra ...any) map[string]any {
 	return m
 }
 
-func newFake(t *testing.T) (*fakeIwinv, Provider) {
+func newFake(t *testing.T) (*fakeIwinv, ManagedProvider) {
 	f := &fakeIwinv{t: t, secret: "SK", routes: map[string]func(*http.Request) (int, any){}}
 	srv := httptest.NewServer(f)
 	t.Cleanup(srv.Close)

@@ -61,18 +61,40 @@ type Unready struct {
 	Reason string
 	Steps  []string `json:",omitempty"`
 	Since  uint64
+	// Peers are the servers the failed steps wait for: no session to them
+	// could be opened (sfcp.PeerUnreachableError).
+	Peers []string `json:",omitempty"`
 }
 
 // UnreadyReasons: a reconciliation pass (or the event log it writes)
-// failed, or the host could not be read.
-var UnreadyReasons = []string{"MODULE_PASS_FAILED", "HOST_READ_FAILED"}
+// failed, or the host could not be read. PEER_WAIT: every failed step only
+// waits for another server (Peers) that cannot be reached.
+var UnreadyReasons = []string{"MODULE_PASS_FAILED", "HOST_READ_FAILED", "PEER_WAIT"}
 
 func (u Unready) valid() bool {
-	if !slices.Contains(UnreadyReasons, u.Reason) || len(u.Steps) > 32 {
+	if !slices.Contains(UnreadyReasons, u.Reason) || len(u.Steps) > 32 || len(u.Peers) > 32 || u.Reason == "PEER_WAIT" && len(u.Peers) == 0 {
 		return false
+	}
+	for _, peer := range u.Peers {
+		if !validPeer(peer) {
+			return false
+		}
 	}
 	for _, step := range u.Steps {
 		if !validStep(step) {
+			return false
+		}
+	}
+	return true
+}
+
+// validPeer: a server name (lifecycle.ValidID grammar).
+func validPeer(s string) bool {
+	if s == "" || len(s) > 63 || s[0] < 'a' || s[0] > 'z' {
+		return false
+	}
+	for _, c := range s {
+		if !(c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '-') {
 			return false
 		}
 	}

@@ -27,6 +27,9 @@ type Catalog struct {
 	Revision     uint64
 	Certificates []Entry  `json:",omitempty"`
 	Domains      []Domain `json:",omitempty"`
+	// Grants are the decisions on tenant route hosts under cluster-level
+	// domains (grants.go).
+	Grants []HostGrant `json:",omitempty"`
 	// ACMEResponder is the HTTP-01 responder ingress forwards to.
 	ACMEResponder *ACMEResponder `json:",omitempty"`
 }
@@ -55,7 +58,7 @@ type PublicEntry struct {
 
 func New(cluster [32]byte) Catalog { return Catalog{Schema: 2, Cluster: cluster} }
 func (c Catalog) Validate() error {
-	if c.Schema != 2 || c.Cluster == ([32]byte{}) || len(c.Certificates) > MaxEntries || c.validateDomains() != nil || !c.ACMEResponder.valid() {
+	if c.Schema != 2 || c.Cluster == ([32]byte{}) || len(c.Certificates) > MaxEntries || c.validateDomains() != nil || c.validateGrants() != nil || !c.ACMEResponder.valid() {
 		return ErrCertificate
 	}
 	var last ID

@@ -161,12 +161,12 @@ export function RoutesTable({ tenant, nets, canDeploy, q, proposing, onProposeCl
                     <td>
                       <span className="row" style={{ gap: 6, justifyContent: 'flex-end' }}>
                         {r.state === 'waiting-me' && (
-                          <button className="btn sm primary" disabled={!canDeploy} title={need} onClick={() => setAct({ kind: 'approve', r })}>
+                          <button type="button" className="btn sm primary" disabled={!canDeploy} title={need} onClick={() => setAct({ kind: 'approve', r })}>
                             승인
                           </button>
                         )}
                         {r.phase !== 'revoking' && (
-                          <button className="btn sm danger" disabled={!canDeploy} title={need} onClick={() => setAct({ kind: 'withdraw', r })}>
+                          <button type="button" className="btn sm danger" disabled={!canDeploy} title={need} onClick={() => setAct({ kind: 'withdraw', r })}>
                             철회…
                           </button>
                         )}
@@ -254,15 +254,15 @@ function ProposeDialog({ tenant, nets, networksRevision, onClose, onDone }: { te
       onClose={onClose}
       footer={
         m.op ? (
-          <button className="btn primary" onClick={onClose}>
+          <button type="button" className="btn primary" onClick={onClose}>
             닫기
           </button>
         ) : (
           <>
-            <button className="btn" onClick={onClose}>
+            <button type="button" className="btn" onClick={onClose}>
               취소
             </button>
-            <button className="btn primary" disabled={!ready || m.busy} onClick={go}>
+            <button type="button" className="btn primary" disabled={!ready || m.busy} onClick={go}>
               제안 보내기
             </button>
           </>
@@ -348,15 +348,15 @@ function RouteActionDialog({ kind, tenant, r, onClose, onDone }: { kind: 'approv
       onClose={onClose}
       footer={
         m.op ? (
-          <button className="btn primary" onClick={onClose}>
+          <button type="button" className="btn primary" onClick={onClose}>
             닫기
           </button>
         ) : (
           <>
-            <button className="btn" onClick={onClose}>
+            <button type="button" className="btn" onClick={onClose}>
               취소
             </button>
-            <button className={withdraw ? 'btn danger solid' : 'btn primary'} disabled={m.busy} onClick={() => void m.run(`${routePath(tenant, r)}/${kind}`, { expected }).then((o) => o?.state === 'applied' && onDone())}>
+            <button type="button" className={withdraw ? 'btn danger solid' : 'btn primary'} disabled={m.busy} onClick={() => void m.run(`${routePath(tenant, r)}/${kind}`, { expected }).then((o) => o?.state === 'applied' && onDone())}>
               {withdraw ? '철회' : '승인'}
             </button>
           </>

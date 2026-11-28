@@ -12,7 +12,6 @@ import (
 	"github.com/jay94ks/seafield/internal/cluster/state"
 	"github.com/jay94ks/seafield/internal/deployment"
 	"github.com/jay94ks/seafield/internal/desired"
-	"github.com/jay94ks/seafield/internal/ingress"
 	"github.com/jay94ks/seafield/internal/network"
 )
 
@@ -359,17 +358,10 @@ func admitMoveConsumers(p ResourceProjection) error {
 	return nil
 }
 
-func ingressHostAllowed(host string, allowed []string) bool {
-	for _, pattern := range allowed {
-		if pattern == "*" || host == pattern || strings.HasPrefix(pattern, "*.") && strings.HasSuffix(host, pattern[1:]) {
-			return true
-		}
-	}
-	return false
-}
-
-// Current host grants admit new effects; revoking one preserves already
-// accepted app references and does not invalidate the whole Raft state.
+// admitIngressDeclaration checks what an app ingress may claim beyond its
+// tenant's domains (admitTenantIngressHosts): cluster app route hosts stay
+// protected and only a system administrator routes "*". It is checked again
+// at native permit time, so a revoked admin keeps no "*" route.
 func (p Policy) admitIngressDeclaration(s state.State, tenant, actor string, d deployment.IngressDeclaration) error {
 	if err := p.admitClusterAppRouteClaims(s, d); err != nil {
 		return err
@@ -381,10 +373,6 @@ func (p Policy) admitIngressDeclaration(s state.State, tenant, actor string, d d
 	if !shared {
 		return nil
 	}
-	book, err := p.IngressManagement(s)
-	if err != nil {
-		return err
-	}
 	users, err := p.Catalog(s)
 	if err != nil {
 		return err
@@ -393,29 +381,9 @@ func (p Policy) admitIngressDeclaration(s state.State, tenant, actor string, d d
 	if !ok || !u.Enabled {
 		return access.ErrDenied
 	}
-	policy := book.HostPolicy(tenant)
 	for _, route := range deployment.IngressRoutes(d) {
 		if route.Host == "*" && !u.SystemAdmin {
 			return access.ErrDenied
-		}
-		gateway := route.Gateway
-		if gateway == "" {
-			gateway = "local"
-		}
-		for _, kind := range []string{"external", "local"} {
-			if gateway != "both" && gateway != kind {
-				continue
-			}
-			allowed := policy.LocalHosts
-			if kind == "external" {
-				if !policy.ExternalAllowed {
-					return access.ErrDenied
-				}
-				allowed = policy.ExternalHosts
-			}
-			if !ingressHostAllowed(route.Host, allowed) {
-				return access.ErrDenied
-			}
 		}
 	}
 	return nil
@@ -441,7 +409,7 @@ func (p Policy) admitIngressBlueprint(s state.State, b deployment.Blueprint) err
 			}
 			loaded = true
 		}
-		if err := p.admitForeignIngressHosts(s, b.Scope().Tenant, d, others); err != nil {
+		if err := p.admitTenantIngressHosts(s, b.Scope().Tenant, d, others); err != nil {
 			return err
 		}
 	}
@@ -492,43 +460,6 @@ func (p Policy) ingressRouteUses(s state.State) ([]ingressRouteUse, error) {
 		out = append(out, ingressRouteUsesOf(g.Goal.Tenant, g.Goal.App, g.Goal.Node, d)...)
 	}
 	return out, nil
-}
-
-// hostWithin: host is name or a name under it ("*." patterns count as
-// their base name). "*" is never within another tenant's host here; only a
-// system admin routes it.
-func hostWithin(host, name string) bool {
-	host, name = strings.TrimPrefix(host, "*."), strings.TrimPrefix(name, "*.")
-	if host == "*" || name == "*" {
-		return false
-	}
-	return host == name || strings.HasSuffix(host, "."+name)
-}
-
-// admitForeignIngressHosts refuses a host that another tenant's app routes,
-// or a name under it, on any server: `--force` does not lift it. The one
-// exception is a host a system admin granted this tenant (`ingress hosts set`).
-func (p Policy) admitForeignIngressHosts(s state.State, tenant string, d deployment.IngressDeclaration, others []ingressRouteUse) error {
-	book, err := p.IngressManagement(s)
-	if err != nil {
-		return err
-	}
-	policy, granted := book.HostPolicyRecord(tenant)
-	return foreignIngressHosts(tenant, d, others, policy, granted)
-}
-
-func foreignIngressHosts(tenant string, d deployment.IngressDeclaration, others []ingressRouteUse, policy ingress.HostPolicy, granted bool) error {
-	for _, mine := range ingressRouteUsesOf(tenant, "", d.Node, d) {
-		if granted && (mine.Gateway == "local" && ingressHostAllowed(mine.Host, policy.LocalHosts) || mine.Gateway == "external" && policy.ExternalAllowed && ingressHostAllowed(mine.Host, policy.ExternalHosts)) {
-			continue
-		}
-		for _, o := range others {
-			if o.Tenant != tenant && hostWithin(mine.Host, o.Host) {
-				return &deployment.InputError{Code: "INGRESS_HOST_OTHER_TENANT", Path: "x-sfc.ingress." + mine.Host}
-			}
-		}
-	}
-	return nil
 }
 
 // admitIngressRouteOverlap stops a plan whose new route uses a host+prefix

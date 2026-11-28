@@ -20,7 +20,7 @@ import "github.com/jay94ks/seafield/internal/cluster/control"
 // rootKeys: the command keys Whoami.Roots reports.
 var rootKeys = []string{control.CatalogKey, control.MembersKey, control.ResourcesKey, control.VolumesKey, control.VaultKey, control.AppsKey,
 	control.RegistryMaintenanceKey, control.ImageBuildKey, control.ImageCacheKey, control.TunnelReconnectKey, control.CompactKey, control.StorageKey,
-	control.NodeStorageKey, control.LifecycleKey, control.RegistriesKey, control.ExternalRegistriesKey, control.CertificatesKey, control.VPSKey,
+	control.NodeStorageKey, control.LifecycleKey, control.RegistriesKey, control.ExternalRegistriesKey, control.CertificatesKey, control.VPSKey, control.OwnedVPSKey,
 	control.IngressManagementKey, control.NodeShellKey, control.ClusterBackupKey}
 
 // StrictRoots(true), the default, makes submit check only the action's own

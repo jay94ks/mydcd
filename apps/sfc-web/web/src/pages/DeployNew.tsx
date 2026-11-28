@@ -18,7 +18,7 @@ import { GraphView } from '../components/graph/GraphView';
 const starter = () => `name: my-app
 services:
   web:
-    image: docker.io/library/nginx:1.27 # 다이제스트(@sha256:…)로 고정하기를 권합니다
+    image: docker.io/library/nginx:1.27
     x-sfc:
       node: node-a
 `;
@@ -55,7 +55,7 @@ function Uploads({ tenant }: { tenant: string }) {
                         {x.parts - x.missing.length}/{x.parts} 조각{x.missing.length ? ` · 누락 ${x.missing.join(', ')}` : ''}
                       </td>
                       <td>
-                        <button
+                        <button type="button"
                           className="btn sm danger"
                           disabled={m.busy}
                           onClick={() => {
@@ -167,7 +167,7 @@ export function DeployNewPage() {
               <AppFormEditor tenant={tenant} value={form} onChange={setForm} nodes={nodes} />
               <Card title="만들어질 app.yaml">
                 <CodeView text={formYaml} />
-                <button className="btn sm" style={{ alignSelf: 'flex-start' }} onClick={() => (setText(formYaml), setMode('yaml'))}>
+                <button type="button" className="btn sm" style={{ alignSelf: 'flex-start' }} onClick={() => (setText(formYaml), setMode('yaml'))}>
                   app.yaml로 이어 고치기
                 </button>
               </Card>

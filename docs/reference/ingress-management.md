@@ -7,9 +7,9 @@ Ingress의 앱 목표는 `app.yaml`과 기존 앱 작업이 소유한다. 조회
 명령과 옵션은 [sfcli ingress](../cli/ingress.md)에 있다.
 
 
-User Request는 typed method `Method:"ingresses", Params:{Node,Tenant,App,Key,Part,After,Offset}`이고, 응답은 `Data`에 IngressPage 하나다([typed method](unix-sockets/10-user.md#typed-method)). `Part`는 `mappings`(기본), `metrics`, `errors`, `blocks`, `policies`다. 시스템 관리자도 현재 credential의 범위를 넘지 않으며, 그 외 사용자는 현재 Read 권한이 있는 tenant/node의 행과 집계만 받는다.
+User Request는 typed method `Method:"ingresses", Params:{Node,Tenant,App,Key,Part,After,Offset}`이고, 응답은 `Data`에 IngressPage 하나다([typed method](unix-sockets/10-user.md#typed-method)). `Part`는 `mappings`(기본), `metrics`, `errors`, `blocks`다. 시스템 관리자도 현재 credential의 범위를 넘지 않으며, 그 외 사용자는 현재 Read 권한이 있는 tenant/node의 행과 집계만 받는다.
 
-Reply.Ingress는 `Schema:1,Index,Epoch,RootRevision,BlockRevision,Mappings,Nodes,Blocks,HostPolicies,Next`다. 매핑 목록은 정렬된 key 순서의 한 행씩 반환하고, 목록 `Next`를 `--after`로 전달한다. 한 매핑 안의 `Next`는 숫자 `--offset`이며 listener/route/backend/block 상세를 각각 최대4개씩 이어 읽는다. blocks는8행, policies는4행씩 숫자 offset으로 이어진다. 일반 User frame의 예산 안에서 처리하며 전체 응답의 JSON은112KiB 이하이다.
+Reply.Ingress는 `Schema:1,Index,Epoch,RootRevision,BlockRevision,Mappings,Nodes,Blocks,Next`다. 매핑 목록은 정렬된 key 순서의 한 행씩 반환하고, 목록 `Next`를 `--after`로 전달한다. 한 매핑 안의 `Next`는 숫자 `--offset`이며 listener/route/backend/block 상세를 각각 최대4개씩 이어 읽는다. blocks는8행씩 숫자 offset으로 이어진다. 일반 User frame의 예산 안에서 처리하며 전체 응답의 JSON은112KiB 이하이다.
 
 `Nodes[].Listeners`는 현재 읽기 권한으로 선택한 행들의 수신 주소 수다. 같은 노드의 같은 shared listener를 여러 앱이 참조해도 한 번만 센다. 서로 다른 노드와 직접 주소는 별개이며, 미선택 tenant의 주소를 합치지 않는다. Shared listener는 앱의 MaxIngressListeners 예산에서 제외하고, 직접 listener의 TCP/UDP 포트 예약과 현재 주소 수를 구분한다.
 
@@ -62,12 +62,9 @@ blocks 조회는 원 Revision/Removed/Active/TargetMissing을 보여 준다. `--
 
 ## Tenant host 권한
 
-CLI는 `sfcli ingress hosts set --tenant team [--external-allowed] [--external a,b] [--local c]`다.
+작업 공간이 쓸 수 있는 route host는 도메인 주인과 시스템 관리자의 승인으로 정해진다(작업 공간 단위 도메인, [sfcli domain](../cli/domain.md)). ingress 런타임은 작업 공간마다 그 작업 공간 도메인(이름과 그 아래 모든 이름)과 승인된 host 목록을 받고, 목록 밖 host의 route(승인 대기, 도메인을 잃은 route)는 열지 않는다. 같은 앱의 다른 route는 그대로 열린다. external·local 게이트웨이를 따로 허가하지 않는다. `*` route는 시스템 관리자만 쓴다. 예전 `sfcli ingress hosts`와 `set-ingress-host-policy`는 없어졌다.
 
-
-서버 메시지는 `{"Tenant":"team","Policy":{"ExternalAllowed":false,"ExternalHosts":[],"LocalHosts":["*.internal.example"]}}`다. 시스템 관리자만 `set-ingress-host-policy`로 tenant의 현재 host 권한을 변경한다. 패턴 목록 각각 최대256개, 정책 JSON 최대24KiB다. 정책을 정해 두지 않은 tenant는 제한이 없다(external 허용, 모든 host). 정책은 시스템 관리자가 tenant의 host를 좁힐 때만 쓴다. legacy 앱의 직접 address listener에는 이 shared host grant를 요구하지 않는다.
-
-정책 회수는 이미 수락된 앱·원 native 참조를 삭제하지 않는다. 새 blueprint 수락/current native 실행과 실제 gateway에서 현재 권한을 확인한다. 인증서의 보호 입력과 연결 규칙은 [인증서 보관함](certificate-store.md)을 따른다.
+배포 때 판정과 이미 수락된 앱의 관계: 도메인을 빼거나 승인을 거두어도 이미 수락된 앱·원 native 참조는 지우지 않는다. 다음 배포가 다시 판정하고, 실제 gateway는 현재 목록으로 그 route를 닫는다. 인증서의 보호 입력과 연결 규칙은 [인증서 보관함](certificate-store.md)을 따른다.
 
 ## 이벤트
 
@@ -119,4 +116,4 @@ Balance는 기존 분배 규격(round-robin/least-request/hash/random, key·weig
 
 drain은 신규 연결/요청과 대상 backend의 신규 선택을 막는다. 진행 요청은 deadline까지 유지하고 기한이 되면 실제 flow를 취소한다. 기본30초, 최대3600초이며 undrain은 DrainSeconds를0 또는 생략한다. 앱 전체와 node별 선언이 겹치면 마지막 관리 의도가 우선한다. 마지막 mapping을 drain해도 앱이나 native를 삭제하지 않으며 `LastMapping`, `DrainRevision`, `DrainStartedAt`, `DrainDeadline`으로 구분한다. undrain은 같은 native를 다시 사용한다. Runtime의 `ControlRevision`은 실제 설치한 관리 overlay revision이다.
 
-History 행은 `{At,Actor,Action,Request,Tenant,App,Node,Route,Gateway,Detail,Previous}`다. 시각은 원 사용자 서명의 Unix초이며 변경 전후의 공개 설정만 제공한다. Session·승인/노드 서명 원문·비밀값은 반환하지 않는다. gateway·balance·drain/undrain·host-policy·block/unblock/extend의 수락 이력을 최신순8개, 페이지 본문 약80KiB로 제한한다. checkpoint의 이력 한도는4096건이며 포화 시 새 변경을 거부한다. query의 tenant/app/node와 현재 권한으로 걸러내고 `Next`를 `After`로 이어 읽는다. cursor는 같은 사용자/권한 기준과 필터에서만 유효하다. 이력 수락은 원 요청 성공이며 실제 노드 적용 성공을 의미하지 않는다.
+History 행은 `{At,Actor,Action,Request,Tenant,App,Node,Route,Gateway,Detail,Previous}`다. 시각은 원 사용자 서명의 Unix초이며 변경 전후의 공개 설정만 제공한다. Session·승인/노드 서명 원문·비밀값은 반환하지 않는다. gateway·balance·drain/undrain·block/unblock/extend의 수락 이력을 최신순8개, 페이지 본문 약80KiB로 제한한다. checkpoint의 이력 한도는4096건이며 포화 시 새 변경을 거부한다. query의 tenant/app/node와 현재 권한으로 걸러내고 `Next`를 `After`로 이어 읽는다. cursor는 같은 사용자/권한 기준과 필터에서만 유효하다. 이력 수락은 원 요청 성공이며 실제 노드 적용 성공을 의미하지 않는다.

@@ -65,21 +65,21 @@ export function RevertDialog({ op, onClose, onDone }: { op: OpView; onClose: () 
   const all = fields.length > 0 && pick.size === fields.length && !moved.length;
   const link = plan?.revert === 'link' && plan.link ? revertLinkTo(plan.link) : undefined;
   const footer = done ? (
-    <button className="btn primary" onClick={onClose}>
+    <button type="button" className="btn primary" onClick={onClose}>
       닫기
     </button>
   ) : (
     <>
-      <button className="btn" onClick={onClose}>
+      <button type="button" className="btn" onClick={onClose}>
         취소
       </button>
       {link && (
-        <button className="btn primary" onClick={() => (onClose(), navigate(link[0]))}>
+        <button type="button" className="btn primary" onClick={() => (onClose(), navigate(link[0]))}>
           {link[1]}
         </button>
       )}
       {plan?.revert === 'here' && !plan.reason && fields.length > 0 && (
-        <button className="btn primary" disabled={!pick.size || m.busy || (!!m.op && m.op.state !== 'unknown')} onClick={() => void send()}>
+        <button type="button" className="btn primary" disabled={!pick.size || m.busy || (!!m.op && m.op.state !== 'unknown')} onClick={() => void send()}>
           {m.busy ? '보내는 중…' : all ? '되돌리기 보내기' : '고른 칸만 되돌리기'}
         </button>
       )}

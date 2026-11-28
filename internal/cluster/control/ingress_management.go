@@ -30,16 +30,6 @@ type IngressBlockRecord struct {
 	Removed      bool
 	Origin, Last UserOperation
 }
-type IngressHostPolicyRecord struct {
-	Tenant   string
-	Policy   ingress.HostPolicy
-	Revision uint64
-	Origin   UserOperation
-}
-type IngressHostPolicyChange struct {
-	Tenant string
-	Policy ingress.HostPolicy
-}
 type IngressManagement struct {
 	NodeGatewaysRecords []NodeGatewaysRecord   `json:",omitempty"`
 	Balances            []IngressBalanceRecord `json:",omitempty"`
@@ -49,8 +39,7 @@ type IngressManagement struct {
 	Cluster             [32]byte
 	Revision            uint64
 	Blocks              []IngressBlockRecord
-	HostPolicies        []IngressHostPolicyRecord `json:",omitempty"`
-	ClusterAppRoutes    []ClusterAppRouteRecord   `json:",omitempty"`
+	ClusterAppRoutes    []ClusterAppRouteRecord `json:",omitempty"`
 }
 
 func (p Policy) IngressManagement(s state.State) (IngressManagement, error) {
@@ -93,13 +82,6 @@ func (p Policy) IngressManagement(s state.State) (IngressManagement, error) {
 		}
 		seen[r.Block.ID] = true
 	}
-	for _, r := range out.HostPolicies {
-		var q IngressHostPolicyChange
-		if !validID(r.Tenant) || seen["host/"+r.Tenant] || !validIngressHostPolicy(r.Policy) || r.Revision == 0 || r.Origin.VerifyOriginal(p.Cluster) != nil || r.Origin.Change.Action != "set-ingress-host-policy" || r.Origin.Change.Expected+1 != r.Revision || canonical(r.Origin.Change.Payload, &q) != nil || q.Tenant != r.Tenant || !buildJSONEqual(q.Policy, r.Policy) {
-			return out, ErrCatalog
-		}
-		seen["host/"+r.Tenant] = true
-	}
 	return out, nil
 }
 func (b IngressManagement) ConfiguredBlocks() []ingress.Block {
@@ -112,40 +94,7 @@ func (b IngressManagement) ConfiguredBlocks() []ingress.Block {
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out
 }
-func validIngressHostPolicy(p ingress.HostPolicy) bool {
-	raw, err := json.Marshal(p)
-	if err != nil || len(raw) > 24<<10 || len(p.ExternalHosts) > 256 || len(p.LocalHosts) > 256 {
-		return false
-	}
-	for _, h := range append(slices.Clone(p.ExternalHosts), p.LocalHosts...) {
-		if _, err := ingress.NewTable([]ingress.Route{{ID: "host", Host: h, Prefix: "/", Service: "target"}}); err != nil {
-			return false
-		}
-	}
-	return true
-}
 
-// HostPolicy is the hosts a tenant's apps may route. Deploying an app is
-// itself the grant to map its hosts, so a tenant without a record (`ingress
-// hosts set` never run for it) is unrestricted; a system admin's record
-// narrows it. A host another app already routes and cluster app hosts are
-// refused elsewhere, and only a system admin may route "*".
-func (b IngressManagement) HostPolicy(tenant string) ingress.HostPolicy {
-	if p, ok := b.HostPolicyRecord(tenant); ok {
-		return p
-	}
-	return ingress.HostPolicy{ExternalAllowed: true, ExternalHosts: []string{"*"}, LocalHosts: []string{"*"}}
-}
-
-// HostPolicyRecord is the policy a system admin set for tenant, if any.
-func (b IngressManagement) HostPolicyRecord(tenant string) (ingress.HostPolicy, bool) {
-	for _, r := range b.HostPolicies {
-		if r.Tenant == tenant {
-			return r.Policy, true
-		}
-	}
-	return ingress.HostPolicy{}, false
-}
 func (b IngressManagement) ActiveBlocks(now uint64) []ingress.Block {
 	var out []ingress.Block
 	for _, r := range b.Blocks {
@@ -165,13 +114,6 @@ func (p Policy) ingressBlockAuthorized(s state.State, c access.Catalog, op UserO
 	}
 	if clusterAppRouteAction(op.Change.Action) {
 		return p.authorizeClusterAppRoute(c, op)
-	}
-	if op.Change.Action == "set-ingress-host-policy" {
-		var q IngressHostPolicyChange
-		if canonical(op.Change.Payload, &q) != nil || !validID(q.Tenant) || !validIngressHostPolicy(q.Policy) {
-			return access.ErrInvalid
-		}
-		return c.AuthorizeSession(op.Session, p.Cluster, p.Issuer(op.Session.Issuer), op.At, "", access.ManageCluster, "")
 	}
 	var b ingress.Block
 	if op.Change.Action == "ingress-block" {
@@ -331,7 +273,6 @@ func (p Policy) reduceIngressManagement(s state.State, cmd state.Command) (map[s
 	}
 	before := book
 	before.Blocks = slices.Clone(book.Blocks)
-	before.HostPolicies = slices.Clone(book.HostPolicies)
 	before.ClusterAppRoutes = slices.Clone(book.ClusterAppRoutes)
 	if extendedIngressAction(op.Change.Action) {
 		history, code := p.reduceIngressOperation(s, &book, op)
@@ -342,33 +283,6 @@ func (p Policy) reduceIngressManagement(s state.State, cmd state.Command) (map[s
 	} else if clusterAppRouteAction(op.Change.Action) {
 		if code := p.reduceClusterAppRoute(s, &book, op); code != state.Applied {
 			return nil, code
-		}
-	} else if op.Change.Action == "set-ingress-host-policy" {
-		var q IngressHostPolicyChange
-		if canonical(op.Change.Payload, &q) != nil {
-			return nil, state.Invalid
-		}
-		if _, ok := c.Tenant(q.Tenant); !ok {
-			return nil, state.ConditionFailed
-		}
-		found := false
-		for i := range book.HostPolicies {
-			r := &book.HostPolicies[i]
-			if r.Tenant == q.Tenant {
-				found = true
-				if r.Revision != op.Change.Expected || r.Revision == math.MaxUint64 {
-					return nil, state.ConditionFailed
-				}
-				r.Policy = q.Policy
-				r.Revision++
-				r.Origin = op
-			}
-		}
-		if !found {
-			if op.Change.Expected != 0 || len(book.HostPolicies) >= 4096 {
-				return nil, state.ConditionFailed
-			}
-			book.HostPolicies = append(book.HostPolicies, IngressHostPolicyRecord{Tenant: q.Tenant, Policy: q.Policy, Revision: 1, Origin: op})
 		}
 	} else if op.Change.Action == "ingress-block" {
 		var q IngressBlockChange
@@ -428,11 +342,6 @@ func (p Policy) reduceIngressManagement(s state.State, cmd state.Command) (map[s
 			if old, found := before.ClusterAppRoute(clusterAppRouteApp(op)); found {
 				h.Previous, _ = json.Marshal(old.Ingress)
 			}
-		} else if op.Change.Action == "set-ingress-host-policy" {
-			var q IngressHostPolicyChange
-			_ = json.Unmarshal(op.Change.Payload, &q)
-			h.Tenant = q.Tenant
-			h.Previous, _ = json.Marshal(before.HostPolicy(q.Tenant))
 		} else {
 			for _, r := range book.Blocks {
 				if r.Last.RequestID == op.RequestID {
@@ -482,7 +391,7 @@ type IngressQuery struct {
 }
 
 func (q IngressQuery) Valid() bool {
-	return (q.Part == "" || q.Part == "mappings" || q.Part == "metrics" || q.Part == "errors" || q.Part == "blocks" || q.Part == "policies" || q.Part == "gateways" || q.Part == "history" || q.Part == "cluster-app-routes") && validIngressGatewayCheck(q) && q.Offset <= 4096 && len(q.After) <= 512 && (q.Node == "" || validID(q.Node)) && (q.Tenant == "" || validID(q.Tenant)) && (q.App == "" || validID(q.App)) && len(q.Key) <= 512
+	return (q.Part == "" || q.Part == "mappings" || q.Part == "metrics" || q.Part == "errors" || q.Part == "blocks" || q.Part == "gateways" || q.Part == "history" || q.Part == "cluster-app-routes") && validIngressGatewayCheck(q) && q.Offset <= 4096 && len(q.After) <= 512 && (q.Node == "" || validID(q.Node)) && (q.Tenant == "" || validID(q.Tenant)) && (q.App == "" || validID(q.App)) && len(q.Key) <= 512
 }
 
 type IngressBlockView struct {
@@ -490,11 +399,6 @@ type IngressBlockView struct {
 	Revision                       uint64
 	Removed, Active, TargetMissing bool
 	Applications                   []ingress.BlockApplication `json:",omitempty"`
-}
-type IngressHostPolicyView struct {
-	Tenant   string
-	Policy   ingress.HostPolicy
-	Revision uint64
 }
 
 func ingressBlockView(r IngressBlockRecord, at int64) IngressBlockView {
@@ -536,14 +440,13 @@ type IngressSummaryRef struct {
 	Generation uint64
 }
 type IngressPage struct {
-	GatewayEvidence            *NodeGatewaysEvidence   `json:",omitempty"`
-	GatewayCheckError          string                  `json:",omitempty"`
-	NodeGateways               []NodeGatewaysView      `json:",omitempty"`
-	History                    []IngressHistoryView    `json:",omitempty"`
-	System                     bool                    `json:"-"`
-	SummaryRefs                []IngressSummaryRef     `json:"-"`
-	HostPolicies               []IngressHostPolicyView `json:",omitempty"`
-	ClusterAppRoutes           []ClusterAppRouteView   `json:",omitempty"`
+	GatewayEvidence            *NodeGatewaysEvidence `json:",omitempty"`
+	GatewayCheckError          string                `json:",omitempty"`
+	NodeGateways               []NodeGatewaysView    `json:",omitempty"`
+	History                    []IngressHistoryView  `json:",omitempty"`
+	System                     bool                  `json:"-"`
+	SummaryRefs                []IngressSummaryRef   `json:"-"`
+	ClusterAppRoutes           []ClusterAppRouteView `json:",omitempty"`
 	Schema                     uint8
 	Index, Epoch, RootRevision uint64
 	BlockRevision              uint64 // committed policy book target; compare with owner Runtime.BlockRevision
@@ -564,7 +467,7 @@ type IngressRead struct {
 // Native values may change while gathering observations; a later authorization
 // of a broad query must not authorize rows from a tenant that was just revoked.
 func (p IngressPage) SameSelection(current IngressPage) bool {
-	if p.System != current.System || p.Epoch != current.Epoch || p.RootRevision != current.RootRevision || p.BlockRevision != current.BlockRevision || p.Next != current.Next || !slices.Equal(p.SummaryRefs, current.SummaryRefs) || len(p.Mappings) != len(current.Mappings) || len(p.Nodes) != len(current.Nodes) || len(p.Blocks) != len(current.Blocks) || len(p.HostPolicies) != len(current.HostPolicies) {
+	if p.System != current.System || p.Epoch != current.Epoch || p.RootRevision != current.RootRevision || p.BlockRevision != current.BlockRevision || p.Next != current.Next || !slices.Equal(p.SummaryRefs, current.SummaryRefs) || len(p.Mappings) != len(current.Mappings) || len(p.Nodes) != len(current.Nodes) || len(p.Blocks) != len(current.Blocks) {
 		return false
 	}
 	for i, row := range p.Mappings {
@@ -581,11 +484,6 @@ func (p IngressPage) SameSelection(current IngressPage) bool {
 	for i, row := range p.Blocks {
 		next := current.Blocks[i]
 		if row.Block.ID != next.Block.ID || row.Revision != next.Revision || row.Active != next.Active || row.Removed != next.Removed {
-			return false
-		}
-	}
-	for i, row := range p.HostPolicies {
-		if row.Tenant != current.HostPolicies[i].Tenant || row.Revision != current.HostPolicies[i].Revision {
 			return false
 		}
 	}
@@ -676,11 +574,6 @@ func (p Policy) IngressPage(s state.State, session access.Session, at int64, q I
 			out.Blocks = append(out.Blocks, view)
 		}
 	}
-	for _, h := range book.HostPolicies {
-		if (q.Tenant == "" || q.Tenant == h.Tenant) && (system || allowed(h.Tenant, q.Node)) {
-			out.HostPolicies = append(out.HostPolicies, IngressHostPolicyView{h.Tenant, h.Policy, h.Revision})
-		}
-	}
 	keys := desired.Sorted(projection.Goals)
 	summaries := map[string]IngressNodeSummary{}
 	quotaSeen := map[string]bool{}
@@ -736,7 +629,7 @@ func (p Policy) IngressPage(s state.State, session access.Session, at int64, q I
 			delete(summaries, row.Node)
 		}
 	}
-	if q.Node != "" && len(out.Nodes) == 0 && q.Part != "blocks" && q.Part != "policies" {
+	if q.Node != "" && len(out.Nodes) == 0 && q.Part != "blocks" {
 		visible := system
 		var tenants []string
 		if q.Tenant != "" {
@@ -770,20 +663,6 @@ func (p Policy) IngressPage(s state.State, session access.Session, at int64, q I
 		}
 	}
 	slices.SortFunc(out.Nodes, func(a, b IngressNodeSummary) int { return strings.Compare(a.Node, b.Node) })
-	if q.Part == "policies" {
-		start := min(int(q.Offset), len(out.HostPolicies))
-		end := min(start+4, len(out.HostPolicies))
-		out.Next = ""
-		if end < len(out.HostPolicies) {
-			out.Next = fmt.Sprint(end)
-		}
-		out.HostPolicies = slices.Clone(out.HostPolicies[start:end])
-		out.Blocks = nil
-		out.Mappings = nil
-		out.Nodes = nil
-		return out, nil
-	}
-	out.HostPolicies = nil
 	if q.Part == "blocks" {
 		out.Next = ""
 		start := min(int(q.Offset), len(out.Blocks))

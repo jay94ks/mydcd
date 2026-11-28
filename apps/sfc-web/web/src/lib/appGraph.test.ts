@@ -128,4 +128,14 @@ describe('app.yaml ⇄ 그래프', () => {
     expect(p['service:web'].x).toBeLessThan(p['service:db'].x);
     expect(p['service:db'].x).toBeLessThan(p['network:backend'].x);
   });
+  it("그래프로 고쳐도 x-sfc.cd(A3')는 그대로 남는다", () => {
+    const src = SRC.replace('x-sfc:\n', 'x-sfc:\n  cd:\n    repository: https://git.example/shop.git\n    branch: main\n    path: app.yaml\n    sync: auto\n');
+    const g = yamlToGraph(src);
+    const web = g.nodes.find((n) => n.id === nodeId('service', 'web'))!;
+    web.service!.replicas = 3;
+    const doc = YAML.parse(graphToYaml(g, src));
+    expect(doc['x-sfc'].cd).toEqual({ repository: 'https://git.example/shop.git', branch: 'main', path: 'app.yaml', sync: 'auto' });
+    expect(doc.services.web.deploy.replicas).toBe(3);
+  });
 });
+

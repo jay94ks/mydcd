@@ -324,11 +324,11 @@ function DesktopIngress() {
               외부 도메인 ↗
             </Link>
             {view === 'route' && (
-              <button className="btn primary" onClick={() => setMapDlg({ kind: 'add' })}>
+              <button type="button" className="btn primary" onClick={() => setMapDlg({ kind: 'add' })}>
                 ＋ 매핑 추가
               </button>
             )}
-            <button className="btn estop" onClick={() => setBlock('new')}>
+            <button type="button" className="btn estop" onClick={() => setBlock('new')}>
               ⛔ 긴급 차단
             </button>
           </>
@@ -430,7 +430,7 @@ function BlockBand({ blocks, onList, view }: { blocks: IngressBlock[]; onList: (
         </span>
       ))}
       <span style={{ flex: 1 }} />
-      <button className="textbtn plain" style={{ fontWeight: 600 }} onClick={onList}>
+      <button type="button" className="textbtn plain" style={{ fontWeight: 600 }} onClick={onList}>
         차단 목록 →
       </button>
     </div>
@@ -714,17 +714,17 @@ function FlowCard({ v, gw, blocks, onBlock }: { v: IngressView; gw: GwFilter; bl
           <b>{selNode.title}</b>
           {selNode.info && <span className="muted">{selNode.info}</span>}
           {selNode.id.startsWith('b:') && (
-            <button className="btn sm" onClick={() => nav(`/deploy/apps/${selNode.id.slice(2).split('/')[0]}/${selNode.id.slice(2).split('/')[1]}`)}>
+            <button type="button" className="btn sm" onClick={() => nav(`/deploy/apps/${selNode.id.slice(2).split('/')[0]}/${selNode.id.slice(2).split('/')[1]}`)}>
               앱 열기
             </button>
           )}
           {selNode.id.startsWith('r:') && (
-            <button className="btn sm" onClick={() => nav(`/shared/ingress/${selNode.menu!.scope.tenant}/${selNode.menu!.scope.app}?node=${encodeURIComponent(selNode.menu!.scope.node ?? '')}`)}>
+            <button type="button" className="btn sm" onClick={() => nav(`/shared/ingress/${selNode.menu!.scope.tenant}/${selNode.menu!.scope.app}?node=${encodeURIComponent(selNode.menu!.scope.node ?? '')}`)}>
               경로 상세
             </button>
           )}
           {selNode.menu && (
-            <button className="btn sm danger" onClick={() => onBlock(selNode.menu!.scope)}>
+            <button type="button" className="btn sm danger" onClick={() => onBlock(selNode.menu!.scope)}>
               {selNode.menu.label}
             </button>
           )}
@@ -751,7 +751,7 @@ function MapTable({ v, gw, view, blocks, onBlock, onRelease }: { v: IngressView;
     if (f.r.blocked) {
       const b = blocks.find((x) => x.id === f.r.blocked);
       return (
-        <button className="btn sm" disabled={!b || !canNet(f.i.tenant)} title={canNet(f.i.tenant) ? undefined : NEED_NET} onClick={(e) => (e.stopPropagation(), b && setRelease(b))}>
+        <button type="button" className="btn sm" disabled={!b || !canNet(f.i.tenant)} title={canNet(f.i.tenant) ? undefined : NEED_NET} onClick={(e) => (e.stopPropagation(), b && setRelease(b))}>
           해제
         </button>
       );
@@ -1130,10 +1130,10 @@ export function GatewayDialog({ x, onClose, onDone }: { x: IngressNode; onClose:
       onClose={onClose}
       footer={
         <>
-          <button className="btn" onClick={onClose}>
+          <button type="button" className="btn" onClick={onClose}>
             취소
           </button>
-          <button className="btn primary" disabled={busy || bad} onClick={() => void save()}>
+          <button type="button" className="btn primary" disabled={busy || bad} onClick={() => void save()}>
             저장
           </button>
         </>
@@ -1222,7 +1222,7 @@ function GatewayHooks({ admin, nodes }: { admin: boolean; nodes: IngressNode[] }
     <Card
       title="장애 시 웹훅 · 게이트웨이별"
       actions={
-        <button className="btn" disabled={!admin} title={admin ? undefined : '게이트웨이 웹훅은 시스템 관리자만 연결합니다'} onClick={() => setAdd(true)}>
+        <button type="button" className="btn" disabled={!admin} title={admin ? undefined : '게이트웨이 웹훅은 시스템 관리자만 연결합니다'} onClick={() => setAdd(true)}>
           + 웹훅 연결
         </button>
       }
@@ -1296,10 +1296,10 @@ function IngressHookDialog({ nodes, hooks, onClose, onDone }: { nodes: IngressNo
       onClose={onClose}
       footer={
         <>
-          <button className="btn" onClick={onClose}>
+          <button type="button" className="btn" onClick={onClose}>
             취소
           </button>
-          <button className="btn primary" disabled={busy || !hook || !events.some((e) => e !== 'recovered')} onClick={() => void save()}>
+          <button type="button" className="btn primary" disabled={busy || !hook || !events.some((e) => e !== 'recovered')} onClick={() => void save()}>
             연결
           </button>
         </>
@@ -1357,10 +1357,10 @@ export function UnlinkDialog({ l, onClose, onDone }: { l: WebhookLink; onClose: 
       onClose={onClose}
       footer={
         <>
-          <button className="btn" onClick={onClose}>
+          <button type="button" className="btn" onClick={onClose}>
             취소
           </button>
-          <button
+          <button type="button"
             className="btn danger"
             disabled={busy}
             onClick={async () => {
@@ -1432,7 +1432,7 @@ function BlocksTab({ blocks, admin, v, onChange }: { blocks: IngressBlock[]; adm
                   {b.state !== 'lifting' && (
                     <>
                       {b.until && <ExtendPop b={b} disabled={!canNet(b)} onDone={onChange} />}
-                      <button className="btn sm" disabled={!canNet(b)} title={canNet(b) ? undefined : NEED_NET} onClick={() => setRelease(b)}>
+                      <button type="button" className="btn sm" disabled={!canNet(b)} title={canNet(b) ? undefined : NEED_NET} onClick={() => setRelease(b)}>
                         해제
                       </button>
                     </>
@@ -1506,10 +1506,10 @@ function ExtendPop({ b, disabled, onDone }: { b: IngressBlock; disabled: boolean
           </Field>
           {error !== undefined && <ErrorBand error={error} what="바꾸지 못했습니다" />}
           <div className="row" style={{ justifyContent: 'flex-end', gap: 6 }}>
-            <button className="btn sm" onClick={close}>
+            <button type="button" className="btn sm" onClick={close}>
               취소
             </button>
-            <button
+            <button type="button"
               className="btn sm primary"
               onClick={async () => {
                 try {
@@ -1545,10 +1545,10 @@ export function ReleaseDialog({ b, onClose, onDone }: { b: IngressBlock; onClose
       onClose={onClose}
       footer={
         <>
-          <button className="btn" onClick={onClose}>
+          <button type="button" className="btn" onClick={onClose}>
             취소
           </button>
-          <button
+          <button type="button"
             className="btn primary"
             disabled={busy}
             onClick={async () => {
@@ -1641,7 +1641,7 @@ function HistoryTab() {
       </Load>
       {next && (
         <div>
-          <button className="btn sm" disabled={busy} onClick={() => void loadMore()}>
+          <button type="button" className="btn sm" disabled={busy} onClick={() => void loadMore()}>
             {busy ? '읽는 중…' : '더 보기'}
           </button>
         </div>
@@ -1818,7 +1818,7 @@ export function BlockDialog({ v, preset, admin, onClose, onDone }: { v: IngressV
         onClose={onClose}
         footer={
           <>
-            <button
+            <button type="button"
               className="btn"
               onClick={async () => {
                 const ok = await removeBlock(done.id, newOpId()).then(() => true, () => false);
@@ -1829,7 +1829,7 @@ export function BlockDialog({ v, preset, admin, onClose, onDone }: { v: IngressV
             >
               해제
             </button>
-            <button className="btn primary" onClick={onClose}>
+            <button type="button" className="btn primary" onClick={onClose}>
               닫기
             </button>
           </>
@@ -1876,10 +1876,10 @@ export function BlockDialog({ v, preset, admin, onClose, onDone }: { v: IngressV
           <span className="small muted" style={{ marginRight: 'auto' }}>
             적용까지 보통 2초 · 서버별 적용 확인을 보여 줍니다
           </span>
-          <button className="btn" onClick={onClose}>
+          <button type="button" className="btn" onClick={onClose}>
             취소
           </button>
-          <button className="btn estop" disabled={blocked} onClick={() => void submit()}>
+          <button type="button" className="btn estop" disabled={blocked} onClick={() => void submit()}>
             {kind === 'task' ? '빼기' : adminOnly ? `${kind === 'node' ? (nodeGw === 'external' ? '외부망' : '서버') : kind === 'tenant' ? '작업 공간' : '게이트웨이'} 차단` : '지금 차단'}
           </button>
         </>

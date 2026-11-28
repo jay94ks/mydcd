@@ -359,7 +359,7 @@ func freshDNSProjection(c access.Catalog, n tenancy.Networks, a Authority, p dns
 	return true
 }
 func originAllowed(a Authority, p dnsProjection, origin network.Allocation, now Clock) bool {
-	current, ok := a.book.Allocation(origin.Endpoint)
+	current, ok := a.book.AllocationOf(origin.Endpoint, origin.Generation)
 	_, member := memberPool(p, origin.Pool)
 	if !ok || current != origin || !member {
 		return false

@@ -160,7 +160,7 @@ function NamesCard({ tenant, net }: { tenant: string; net: NetworkView }) {
       actions={
         <>
           <input placeholder="이름 찾기" value={find} onChange={(e) => setFind(e.target.value)} style={{ height: 32, width: 200, fontSize: 13 }} disabled={!rows.length && !recs.length} aria-label="이름 찾기" />
-          <button className="btn" disabled={!!why} title={why} onClick={() => (q.data && q.data.records.length >= MAX_RECORDS ? toast(`${net.name}에 직접 더한 값이 ${MAX_RECORDS}개라 더 더할 수 없습니다. 쓰지 않는 이름을 먼저 빼세요.`, 'er') : setDlg({ kind: 'edit' }))}>
+          <button type="button" className="btn" disabled={!!why} title={why} onClick={() => (q.data && q.data.records.length >= MAX_RECORDS ? toast(`${net.name}에 직접 더한 값이 ${MAX_RECORDS}개라 더 더할 수 없습니다. 쓰지 않는 이름을 먼저 빼세요.`, 'er') : setDlg({ kind: 'edit' }))}>
             ＋ 이름 더하기
           </button>
         </>
@@ -324,10 +324,10 @@ function DnsSettingsCard({ tenant, net, onDone }: { tenant: string; net: Network
           </div>
         ))}
       <div className="row" style={{ justifyContent: 'flex-end' }}>
-        <button className="btn" disabled={!draft.changed} onClick={() => draft.reset(net)}>
+        <button type="button" className="btn" disabled={!draft.changed} onClick={() => draft.reset(net)}>
           되돌리기
         </button>
-        <button className="btn primary" disabled={!!why || !draft.changed || draft.problems.length > 0} title={why} onClick={() => setReview(true)}>
+        <button type="button" className="btn primary" disabled={!!why || !draft.changed || draft.problems.length > 0} title={why} onClick={() => setReview(true)}>
           변경 검토
         </button>
       </div>
@@ -376,15 +376,15 @@ function RecordDialog({ tenant, net, data, group, remove, others, appNames, onCl
       onClose={onClose}
       footer={
         m.op ? (
-          <button className="btn primary" onClick={onClose}>
+          <button type="button" className="btn primary" onClick={onClose}>
             닫기
           </button>
         ) : (
           <>
-            <button className="btn" onClick={onClose}>
+            <button type="button" className="btn" onClick={onClose}>
               취소
             </button>
-            <button className={remove ? 'btn danger solid' : 'btn primary'} disabled={m.busy || (!remove && (!ok || !changed)) || tooMany} onClick={() => void go()}>
+            <button type="button" className={remove ? 'btn danger solid' : 'btn primary'} disabled={m.busy || (!remove && (!ok || !changed)) || tooMany} onClick={() => void go()}>
               {m.busy ? '보내는 중…' : remove ? '빼기' : group ? '고치기' : '더하기'}
             </button>
           </>

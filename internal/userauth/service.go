@@ -221,6 +221,11 @@ type Service struct {
 	VPSOfferReader func(context.Context, access.Session, control.VPSOfferQuery) (control.VPSOffer, error)
 	// VPSStatusReader reads the leader's live VPS cost watch.
 	VPSStatusReader func(context.Context) (control.VPSStatus, error)
+	// OwnedVPSStatusReader reads the leader's owned VPS readings.
+	OwnedVPSStatusReader func(context.Context) (control.OwnedVPSStatus, error)
+	// OwnedVPSInstancesReader asks the leader for an Owned-vendor account's
+	// VMs (attach picker).
+	OwnedVPSInstancesReader func(context.Context, string) ([]control.OwnedVPSInstance, error)
 	// ClusterBackupMaster returns this voter's cluster master key for a
 	// cluster backup; the caller clears it.
 	ClusterBackupMaster   func() ([]byte, error)

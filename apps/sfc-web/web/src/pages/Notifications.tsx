@@ -148,7 +148,7 @@ function DesktopNotifications() {
         actions={
           <>
             <Refresh q={q} />
-            <button className="btn" disabled={!q.data?.unread} onClick={() => void act(markAllNotificationsRead)}>
+            <button type="button" className="btn" disabled={!q.data?.unread} onClick={() => void act(markAllNotificationsRead)}>
               모두 읽음
             </button>
           </>
@@ -211,7 +211,7 @@ function DesktopNotifications() {
                           </td>
                           <td style={{ width: 80 }}>
                             {!n.read && (
-                              <button className="btn sm" onClick={() => void act(() => markNotificationRead(n.id))}>
+                              <button type="button" className="btn sm" onClick={() => void act(() => markNotificationRead(n.id))}>
                                 읽음
                               </button>
                             )}
@@ -277,7 +277,7 @@ export function PrefsCard() {
       actions={
         <>
           {saved && <span className="muted small">저장했습니다</span>}
-          <button className="btn primary" disabled={!draft || saving} onClick={() => void save()}>
+          <button type="button" className="btn primary" disabled={!draft || saving} onClick={() => void save()}>
             {saving ? '저장 중…' : '저장'}
           </button>
         </>

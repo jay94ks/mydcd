@@ -5,6 +5,7 @@ package app
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"log"
 	"slices"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/jay94ks/seafield/internal/reconcile"
+	"github.com/jay94ks/seafield/internal/sfcp"
 )
 
 func TestPassProblemLogsChangeRepeatAndRecovery(t *testing.T) {
@@ -58,6 +60,19 @@ func TestFailedStepsNamesOnlySteps(t *testing.T) {
 	}
 	if failedSteps(nil) != nil {
 		t.Fatal("nil error has steps")
+	}
+	// One stopped server: every failure only waits for it.
+	wait := func(peer string) error {
+		return fmt.Errorf("managed TUN sources: peer 225a0f07: %w", &sfcp.PeerUnreachableError{Peer: peer, Err: errors.New("timeout")})
+	}
+	if peers, only := waitedPeers(errors.Join(passStep("managed", wait("vps1")), passStep("system-network", wait("vps1")))); !only || !slices.Equal(peers, []string{"vps1"}) {
+		t.Fatal("peer wait", peers, only)
+	}
+	if peers, only := waitedPeers(errors.Join(passStep("managed", wait("vps1")), passStep("node-storage", errors.New("disk")))); only || !slices.Equal(peers, []string{"vps1"}) {
+		t.Fatal("own failure hidden behind a peer wait", peers, only)
+	}
+	if peers, only := waitedPeers(nil); only || peers != nil {
+		t.Fatal("nil error waits", peers, only)
 	}
 	var r Runtime
 	now := time.UnixMilli(5000)

@@ -34,7 +34,7 @@ and is never shown again. Only system administrators can use these commands.`,
 			Name:  "account",
 			Short: "Provider accounts",
 			Sub:   []*cli.Command{vpsAccountListCommand(g), vpsAccountAddCommand(g, false), vpsAccountAddCommand(g, true), vpsAccountSetCommand(g), vpsAccountSSHKeyCommand(g), vpsAccountRemoveCommand(g)},
-		}, vpsCatalogCommand(g), vpsListCommand(g), vpsCreateCommand(g), vpsStatusCommand(g), vpsSetCapCommand(g), vpsStopCommand(g), vpsStartCommand(g), vpsDeleteCommand(g)},
+		}, vpsCatalogCommand(g), vpsListCommand(g), vpsCreateCommand(g), vpsStatusCommand(g), vpsSetCapCommand(g), vpsStopCommand(g), vpsStartCommand(g), vpsDeleteCommand(g), vpsOwnedCommand(g)},
 	}
 }
 
@@ -142,7 +142,7 @@ func vpsAccountAddCommand(g *globals, rotate bool) *cli.Command {
 			if accessKey == "" || len(accessKey) > 256 {
 				return cli.Usagef("--access-key is required")
 			}
-			if _, ok := vps.Lookup(vendor); !rotate && !ok {
+			if _, ok := vps.LookupManaged(vendor); !rotate && !ok {
 				return cli.Usagef("unknown vendor %q", vendor)
 			}
 			if price < 0 || price > control.MaxOverageKRWPerGB {

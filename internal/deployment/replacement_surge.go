@@ -9,6 +9,8 @@ import (
 
 	"github.com/jay94ks/seafield/internal/cluster/state"
 	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/tenancy"
+	"github.com/jay94ks/seafield/internal/workload"
 )
 
 // FeatureTaskSurge is the PlanningContext feature saying that every server
@@ -232,4 +234,57 @@ func (a Inventory) SupersededGone(expected uint64, key string, signature []byte)
 	n.d.Claims[i].Removed = true
 	n.d.Claims[i].Removal = &RemovalProof{ID: n.d.Retirement.ID, Revision: n.d.Retirement.Revision, Gone: bytes.Clone(signature), Superseded: true}
 	return n, nil
+}
+
+// SupersededReservations are the reservations of the surged originals that
+// still run: an open Superseded Task target holds its original need under
+// workload.ParkedKey until its Gone closes it. Surge respects the quota
+// (Jay 2026-11-28), so both generations count while they run side by side.
+// The caller counts one only once the Task object holds a newer generation;
+// before that the object's own reservation is still the original's.
+func (a Inventory) SupersededReservations() []tenancy.Reservation {
+	if a.d.Retirement == nil {
+		return nil
+	}
+	var out []tenancy.Reservation
+	for _, t := range a.d.Retirement.Targets {
+		c := t.Original
+		if !t.Superseded || t.Closed || c.Step.Kind != "task" || c.Result.Generation == 0 {
+			continue
+		}
+		var g GoalCommand
+		if json.Unmarshal([]byte(c.Command.Value), &g) != nil {
+			continue
+		}
+		need, err := stepNeed(Step{Kind: "task", Goal: g.Config})
+		if err != nil || need.CPU == 0 || need.Memory == 0 {
+			continue
+		}
+		out = append(out, tenancy.Reservation{Key: workload.ParkedKey(c.Step.Key, c.Result.Generation), Tenant: g.Tenant, Node: g.Node, Owner: g.Owner, Generation: c.Result.Generation, Revision: max(c.Result.Revision, c.Result.Generation), Need: need})
+	}
+	return out
+}
+
+// surgeFreshAddresses lists the Tasks of b that a surge may replace on the
+// same server: a changed goal that is no in-place update, with no Volumes.
+// Their automatic addresses are chosen anew so the new generation can start
+// next to the original (surgeWave refuses a shared address).
+func surgeFreshAddresses(b Blueprint, ctx PlanningContext) map[string]bool {
+	out := map[string]bool{}
+	for _, step := range b.d.Steps {
+		current := ctx.Current[step.Key]
+		var g GoalCommand
+		var service ComposeService
+		if step.Kind != "task" || !current.Present || json.Unmarshal([]byte(current.Value), &g) != nil || g.Kind != "task" || g.Lifecycle != nil || g.Node != step.Node || g.Owner != step.Owner || bytes.Equal(g.Config, step.Goal) || json.Unmarshal(step.Goal, &service) != nil || len(service.Volumes) != 0 {
+			continue
+		}
+		if taskAliasOnly(g, step) || taskSocketOnly(g, step) {
+			continue
+		}
+		if c, ok := taskNetworkGoalChange(g, step); ok && !c.detaches {
+			continue
+		}
+		out[step.Key] = true
+	}
+	return out
 }

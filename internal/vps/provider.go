@@ -1,9 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// Package vps is sfcd's VPS provider layer (devel/design/vps-nodes.md).
-// sfcd creates, stops, starts and deletes VPS nodes, and reads their
-// traffic and price, through one Provider per vendor account. The rest of
-// sfcd knows only this interface; each vendor is one adapter.
+// Package vps is sfcd's VPS provider layer (devel/design/vps-nodes.md,
+// vps-hostinger.md). A vendor is either Managed (sfcd creates, stops,
+// starts and deletes VPS nodes and keeps them under a cost cap, through a
+// ManagedProvider) or Owned (the operator keeps the instances; sfcd only
+// attaches, powers and reads them, through an OwnedProvider). Both share
+// Base. The rest of sfcd knows only these interfaces; each vendor is one
+// adapter.
 //
 // Credentials are given to New by the caller and never kept in errors,
 // String or JSON output. Errors carry only a fixed Kind and the vendor's
@@ -223,6 +226,12 @@ type Instance struct {
 	TrafficPeriod string
 	IncludedMaxGB int64
 	Started       time.Time // zero until the service started
+	// Image is the installed OS image's name when the vendor reports it
+	// with the instance (Owned vendors; checked before attaching).
+	Image string
+	// SubscriptionID is the vendor's billing period behind an Owned
+	// instance ("" for Managed vendors).
+	SubscriptionID string
 }
 
 // Traffic is one month of an instance's traffic.
@@ -254,25 +263,72 @@ type Catalog interface {
 	Flavor(ctx context.Context, id string) (Flavor, error)
 }
 
-// Provider is one vendor account. Every call is one vendor request (lists
+// Ownership says who owns a vendor's instances, and so what the cluster may
+// do with them (Jay 2026-11-28 14:02–14:04 KST). The two kinds have
+// different purposes and are never listed, stored or shown together.
+type Ownership string
+
+const (
+	// Managed: the cluster creates, powers and deletes the instances, and
+	// stops them before the cost cap (iwinv). Interface Managed.
+	Managed Ownership = "managed"
+	// Owned: the operator buys and keeps the instances at the vendor; the
+	// cluster only attaches existing ones, powers them and reads their
+	// usage. It never buys, rebuilds or deletes them (Hostinger).
+	// Interface Owned.
+	Owned Ownership = "owned"
+)
+
+// Base is what every vendor account offers: the instances it already has,
+// their power and their traffic. Every call is one vendor request (lists
 // may page). Mutations that fail with KindTransport have an unknown effect:
 // the caller reads Instance (or Instances) to settle before retrying.
-type Provider interface {
+type Base interface {
 	Kind() string
 	Check(ctx context.Context) (Account, error)
+	Instances(ctx context.Context) ([]Instance, error)
+	Instance(ctx context.Context, id string) (Instance, error)
+	Shutdown(ctx context.Context, id string) error
+	Start(ctx context.Context, id string) error
+	MonthTraffic(ctx context.Context, id string, year, month int) (Traffic, error)
+}
+
+// ManagedProvider is one account of a Managed vendor: the cluster also
+// buys from its catalogue, deletes instances and reads the live bill.
+type ManagedProvider interface {
+	Base
 	Catalog
 	SSHKeys(ctx context.Context) ([]SSHKey, error)
 	Scripts(ctx context.Context) ([]Script, error)
 
 	Create(ctx context.Context, r CreateRequest) (Instance, error)
-	Instances(ctx context.Context) ([]Instance, error)
-	Instance(ctx context.Context, id string) (Instance, error)
-	Shutdown(ctx context.Context, id string) error
-	Start(ctx context.Context, id string) error
 	Delete(ctx context.Context, id string) error
 
-	MonthTraffic(ctx context.Context, id string, year, month int) (Traffic, error)
 	LiveBill(ctx context.Context) (Bill, error)
+}
+
+// OwnedProvider is one account of an Owned vendor. It has no Create or
+// Delete, and an adapter sends no request that buys, renews, rebuilds,
+// restores or deletes anything: the operator does that at the vendor.
+type OwnedProvider interface {
+	Base
+	// AttachSSHKey adds an OpenSSH public key to the instance's root
+	// login without touching its disk, for the SSH install path.
+	AttachSSHKey(ctx context.Context, id, publicKey string) error
+	// Subscription reads the billing period behind the instance.
+	Subscription(ctx context.Context, id string) (Subscription, error)
+}
+
+// Subscription is the prepaid period an owned instance runs on. Amounts
+// are in the currency's minor unit (cents for USD), as the vendor bills.
+type Subscription struct {
+	ID          string
+	Status      string // vendor status in lower case, for example "active", "not_renewing"
+	AutoRenew   bool
+	Currency    string // ISO 4217, for example "USD"
+	RenewalCost int64  // minor units
+	ExpiresAt   time.Time
+	NextBilling time.Time // zero unless AutoRenew
 }
 
 // Credential is a vendor API key pair, plus the account's SSH key (an
@@ -295,7 +351,9 @@ func (c Credential) Valid() bool {
 			return false
 		}
 	}
-	return c.AccessKey != "" && c.SecretKey != "" && len(c.AccessKey) <= 256 && len(c.SecretKey) <= 256
+	// SecretKey is empty for vendors that use one bearer token
+	// (Vendor.TokenOnly); the adapter of a signing vendor checks it.
+	return c.AccessKey != "" && len(c.AccessKey) <= 256 && len(c.SecretKey) <= 256
 }
 
 // SSHSigner is the account SSH key's private half; ok is false without one.
@@ -315,10 +373,16 @@ type Env struct {
 	Now       func() time.Time  // nil = time.Now
 }
 
-// Vendor describes one adapter.
+// Vendor describes one adapter. Exactly one of New and NewOwned is set,
+// matching Ownership.
 type Vendor struct {
-	ID, Name string
-	New      func(Credential, Env) Provider
+	ID, Name  string
+	Ownership Ownership
+	New       func(Credential, Env) ManagedProvider
+	NewOwned  func(Credential, Env) OwnedProvider
+	// TokenOnly: the credential is one API token in AccessKey and
+	// SecretKey stays empty.
+	TokenOnly bool
 	// TrafficCounting is what the vendor's traffic figures count:
 	// CountTX (outgoing only), CountRXTX (both ways) or "" (not known).
 	// Whether the allowance is daily or monthly comes with each instance.
@@ -335,10 +399,22 @@ const (
 	CountRXTX = "rx+tx"
 )
 
-// Vendors lists the adapters sfcd ships.
-func Vendors() []Vendor { return []Vendor{IwinvVendor()} }
+// Accepts reports whether c has the parts this vendor's adapter needs.
+func (v Vendor) Accepts(c Credential) bool {
+	if !c.Valid() {
+		return false
+	}
+	if v.TokenOnly {
+		return c.SecretKey == ""
+	}
+	return c.SecretKey != ""
+}
 
-// Lookup returns the vendor with id.
+// Vendors lists the adapters sfcd ships, of either ownership.
+func Vendors() []Vendor { return []Vendor{HostingerVendor(), IwinvVendor()} }
+
+// Lookup returns the vendor with id, of either ownership. Code that makes
+// a provider uses LookupManaged or LookupOwned so the two never mix.
 func Lookup(id string) (Vendor, bool) {
 	for _, v := range Vendors() {
 		if v.ID == id {
@@ -346,4 +422,22 @@ func Lookup(id string) (Vendor, bool) {
 		}
 	}
 	return Vendor{}, false
+}
+
+// LookupManaged returns the Managed vendor with id.
+func LookupManaged(id string) (Vendor, bool) {
+	v, ok := Lookup(id)
+	if !ok || v.Ownership != Managed || v.New == nil {
+		return Vendor{}, false
+	}
+	return v, true
+}
+
+// LookupOwned returns the Owned vendor with id.
+func LookupOwned(id string) (Vendor, bool) {
+	v, ok := Lookup(id)
+	if !ok || v.Ownership != Owned || v.NewOwned == nil {
+		return Vendor{}, false
+	}
+	return v, true
 }

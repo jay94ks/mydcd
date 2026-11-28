@@ -262,7 +262,7 @@ function ContextsView() {
           <span className="small muted">불러오는 중…</span>
         )}
         <span className="grow" />
-        <button className="btn sm" disabled={!canDeploy || !pol} title={canDeploy ? undefined : NEED} onClick={() => setPolicy('1')}>
+        <button type="button" className="btn sm" disabled={!canDeploy || !pol} title={canDeploy ? undefined : NEED} onClick={() => setPolicy('1')}>
           설정 바꾸기
         </button>
       </div>
@@ -289,7 +289,7 @@ function ContextsView() {
                 kind="filtered"
                 title={`${FILTER[filter]}에 맞는 컨텍스트가 없습니다`}
                 action={
-                  <button className="btn sm" onClick={() => setFilter('all')}>
+                  <button type="button" className="btn sm" onClick={() => setFilter('all')}>
                     전체 보기
                   </button>
                 }
@@ -324,11 +324,11 @@ function ContextsView() {
                         </td>
                         <td onClick={(e) => e.stopPropagation()} style={{ whiteSpace: 'nowrap', textAlign: 'right' }}>
                           {live(lb) ? (
-                            <button className="btn sm" disabled={!canDeploy || lb!.cancel} title={!canDeploy ? NEED : lb!.cancel ? '취소를 요청했습니다' : undefined} onClick={() => setCancel(lb)}>
+                            <button type="button" className="btn sm" disabled={!canDeploy || lb!.cancel} title={!canDeploy ? NEED : lb!.cancel ? '취소를 요청했습니다' : undefined} onClick={() => setCancel(lb)}>
                               취소
                             </button>
                           ) : (
-                            <button className="btn sm" disabled={!!blockReason || !c.version} title={blockReason ?? (c.version ? undefined : '아직 저장한 버전이 없습니다')} onClick={() => setRebuild(c)}>
+                            <button type="button" className="btn sm" disabled={!!blockReason || !c.version} title={blockReason ?? (c.version ? undefined : '아직 저장한 버전이 없습니다')} onClick={() => setRebuild(c)}>
                               ↻ 다시 빌드
                             </button>
                           )}{' '}
@@ -512,13 +512,13 @@ function ContextDetail({ c, blockReason, onRebuild, onClone }: { c: BuildContext
         }
       </Load>
       <div className="row" style={{ gap: 8, justifyContent: 'flex-end' }}>
-        <button className="btn" disabled={!canDeploy} title={canDeploy ? undefined : NEED} onClick={() => navigate(`/images/builds/${encodeURIComponent(c.id)}/edit`)}>
+        <button type="button" className="btn" disabled={!canDeploy} title={canDeploy ? undefined : NEED} onClick={() => navigate(`/images/builds/${encodeURIComponent(c.id)}/edit`)}>
           편집
         </button>
-        <button className="btn" disabled={!canDeploy} title={canDeploy ? undefined : NEED} onClick={onClone}>
+        <button type="button" className="btn" disabled={!canDeploy} title={canDeploy ? undefined : NEED} onClick={onClone}>
           복제
         </button>
-        <button
+        <button type="button"
           className="btn primary"
           disabled={!!blockReason || live(c.lastBuild) || !c.version}
           title={live(c.lastBuild) ? '이미 빌드 중입니다' : (blockReason ?? (c.version ? undefined : '아직 저장한 버전이 없습니다'))}
@@ -660,15 +660,15 @@ export function PolicyDialog({ tenant, p, focusCache, onClose, onDone }: { tenan
       onClose={onClose}
       footer={
         done ? (
-          <button className="btn primary" onClick={onClose}>
+          <button type="button" className="btn primary" onClick={onClose}>
             닫기
           </button>
         ) : (
           <>
-            <button className="btn" onClick={onClose}>
+            <button type="button" className="btn" onClick={onClose}>
               취소
             </button>
-            <button className="btn primary" disabled={m.busy || errs.length > 0} onClick={() => void save()}>
+            <button type="button" className="btn primary" disabled={m.busy || errs.length > 0} onClick={() => void save()}>
               {m.busy ? '저장하는 중…' : uncertain(m) && !POLICY_ERR[errCode] ? '같은 작업으로 다시 보내기' : '저장'}
             </button>
           </>
@@ -847,15 +847,15 @@ function RebuildDialog({ tenant, c, onClose, onDone }: { tenant: string; c: Buil
       onClose={onClose}
       footer={
         <>
-          <button className="btn" onClick={onClose}>
+          <button type="button" className="btn" onClick={onClose}>
             취소
           </button>
           {rejected ? (
-            <button className="btn primary" disabled={m.busy} onClick={() => void restart()}>
+            <button type="button" className="btn primary" disabled={m.busy} onClick={() => void restart()}>
               {m.busy ? '보내는 중…' : '↻ 새로 빌드'}
             </button>
           ) : (
-            <button className="btn primary" disabled={m.busy || noVersion || buildOff || waiting} title={waiting ? '아래에서 묶음 비밀번호로 승인하면 이어서 빌드합니다' : undefined} onClick={() => void start()}>
+            <button type="button" className="btn primary" disabled={m.busy || noVersion || buildOff || waiting} title={waiting ? '아래에서 묶음 비밀번호로 승인하면 이어서 빌드합니다' : undefined} onClick={() => void start()}>
               {m.busy ? '보내는 중…' : uncertain(m) && !noVersion && !buildOff && !waiting ? '같은 작업으로 다시 보내기' : '빌드'}
             </button>
           )}
@@ -902,10 +902,10 @@ function CancelDialog({ tenant, b, onClose, onDone }: { tenant: string; b: Build
       onClose={onClose}
       footer={
         <>
-          <button className="btn" onClick={onClose}>
+          <button type="button" className="btn" onClick={onClose}>
             취소
           </button>
-          <button className="btn danger" disabled={m.busy} onClick={() => void go()}>
+          <button type="button" className="btn danger" disabled={m.busy} onClick={() => void go()}>
             {m.busy ? '보내는 중…' : uncertain(m) ? '같은 작업으로 다시 보내기' : '빌드 취소'}
           </button>
         </>
@@ -946,10 +946,10 @@ function CloneDialog({ tenant, c, taken, onClose, onDone }: { tenant: string; c:
       onClose={onClose}
       footer={
         <>
-          <button className="btn" onClick={onClose}>
+          <button type="button" className="btn" onClick={onClose}>
             취소
           </button>
-          <button className="btn primary" disabled={m.busy || !!bad} onClick={() => void go()}>
+          <button type="button" className="btn primary" disabled={m.busy || !!bad} onClick={() => void go()}>
             {m.busy ? '보내는 중…' : uncertain(m) ? '같은 작업으로 다시 보내기' : '복제'}
           </button>
         </>
@@ -1033,10 +1033,10 @@ function DeleteFlow({ tenant, c, jobs, onClose, onChanged, onDone }: { tenant: s
       onClose={onClose}
       footer={
         <>
-          <button className="btn" onClick={onClose}>
+          <button type="button" className="btn" onClick={onClose}>
             닫기
           </button>
-          <button className="btn danger" disabled={c.versions.some((v) => blockers(v).some(live))} title={c.versions.some((v) => blockers(v).some(live)) ? '진행 중인 빌드가 끝나야 정리할 수 있습니다' : undefined} onClick={() => setMode('all')}>
+          <button type="button" className="btn danger" disabled={c.versions.some((v) => blockers(v).some(live))} title={c.versions.some((v) => blockers(v).some(live)) ? '진행 중인 빌드가 끝나야 정리할 수 있습니다' : undefined} onClick={() => setMode('all')}>
             기록·버전 모두 정리…
           </button>
         </>
@@ -1061,11 +1061,11 @@ function DeleteFlow({ tenant, c, jobs, onClose, onChanged, onDone }: { tenant: s
                 <td className="small">{bs.length ? `빌드 기록 ${bs.map((b) => b.label).join(' · ')} (${running ? '진행 중' : '끝남'})` : '없음'}</td>
                 <td style={{ textAlign: 'right' }}>
                   {bs.length ? (
-                    <button className="btn sm" disabled={running} title={running ? '진행 중인 빌드가 끝나야 정리할 수 있습니다' : undefined} onClick={() => setOne({ title: '빌드 기록', items: bs.map(jobItem) })}>
+                    <button type="button" className="btn sm" disabled={running} title={running ? '진행 중인 빌드가 끝나야 정리할 수 있습니다' : undefined} onClick={() => setOne({ title: '빌드 기록', items: bs.map(jobItem) })}>
                       기록 지우기…
                     </button>
                   ) : (
-                    <button className="btn sm" onClick={() => setOne({ title: '버전', items: [verItem(v)] })}>
+                    <button type="button" className="btn sm" onClick={() => setOne({ title: '버전', items: [verItem(v)] })}>
                       버전 지우기
                     </button>
                   )}
@@ -1149,15 +1149,15 @@ function CleanAllDialog({ tenant, c, groups: initial, partial, onClose, onChange
       onClose={onClose}
       footer={
         finished ? (
-          <button className="btn primary" onClick={onClose}>
+          <button type="button" className="btn primary" onClick={onClose}>
             닫기
           </button>
         ) : (
           <>
-            <button className="btn" onClick={onClose}>
+            <button type="button" className="btn" onClick={onClose}>
               취소
             </button>
-            <button className="btn danger" disabled={busy || (okItems && !partial && typed !== c.id)} onClick={() => void run()}>
+            <button type="button" className="btn danger" disabled={busy || (okItems && !partial && typed !== c.id)} onClick={() => void run()}>
               {busy ? '보내는 중…' : groups.some((g) => g.items.some((i) => i.op || i.error)) ? (okItems ? '컨텍스트 지우기' : '남은 것 다시 보내기') : partial ? '지우기' : '정리 시작'}
             </button>
           </>
@@ -1237,10 +1237,10 @@ function DeleteContextDialog({ tenant, c, onClose, onDone }: { tenant: string; c
       onClose={onClose}
       footer={
         <>
-          <button className="btn" onClick={onClose}>
+          <button type="button" className="btn" onClick={onClose}>
             취소
           </button>
-          <button className="btn danger" disabled={m.busy || typed !== snap.id || left} onClick={() => void go()}>
+          <button type="button" className="btn danger" disabled={m.busy || typed !== snap.id || left} onClick={() => void go()}>
             {m.busy ? '보내는 중…' : uncertain(m) && !left ? '같은 작업으로 다시 보내기' : '지우기'}
           </button>
         </>
@@ -1323,7 +1323,7 @@ function useBuildLog(tenant: string, id: string) {
     const my = ++gen.current;
     setS((x) => ({ ...x, reading: true, error: undefined }));
     try {
-      let pre = new Uint8Array();
+      let pre: Uint8Array = new Uint8Array();
       let after = '';
       for (let i = 0; i < 400 && pre.length < cur.start; i++) {
         const p = await buildLog(tenant, id, after || undefined);
@@ -1465,10 +1465,10 @@ function LogDrawer({
         <>
           <span>빌드 서버와 연결이 끊겨 이 빌드가 어떻게 끝났는지 확인하지 못했습니다. 서버가 원래 실행을 계속 확인하고, 확인되면 성공 · 실패 · 취소로 바뀝니다. 다시 시도하지 않습니다.</span>
           <div className="row" style={{ gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-            <button className="btn" onClick={() => setShowUnknownLog((x) => !x)}>
+            <button type="button" className="btn" onClick={() => setShowUnknownLog((x) => !x)}>
               로그 보기
             </button>
-            <button className="btn" disabled={!canDeploy || !c || !c.version} title={canDeploy ? undefined : NEED} onClick={() => c && onRebuild(c)}>
+            <button type="button" className="btn" disabled={!canDeploy || !c || !c.version} title={canDeploy ? undefined : NEED} onClick={() => c && onRebuild(c)}>
               ↻ 새로 빌드
             </button>
             <span className="small muted">'새로 빌드'는 새 번호로 시작하고 {b?.label} 기록은 그대로 둡니다.</span>
@@ -1504,7 +1504,7 @@ function LogDrawer({
             {sizeLine}
             <span className="grow" />
             {(from > 0 || lg.start > 0) && (
-              <button
+              <button type="button"
                 className="btn sm"
                 disabled={lg.reading}
                 onClick={() => (from > 0 ? setShown((x) => x + PAGE) : void lg.head().then(() => setShown((x) => x + PAGE), () => undefined))}
@@ -1512,11 +1512,11 @@ function LogDrawer({
                 ‹ 앞부분 더 읽기
               </button>
             )}
-            <button className="btn sm" disabled={lg.reading} onClick={() => lg.more()}>
+            <button type="button" className="btn sm" disabled={lg.reading} onClick={() => lg.more()}>
               ↻ 새로 읽기
             </button>
             {b && live(b) && (
-              <button className="btn sm danger" disabled={!canDeploy || b.cancel} title={!canDeploy ? NEED : b.cancel ? '취소를 요청했습니다' : undefined} onClick={() => onCancel(b)}>
+              <button type="button" className="btn sm danger" disabled={!canDeploy || b.cancel} title={!canDeploy ? NEED : b.cancel ? '취소를 요청했습니다' : undefined} onClick={() => onCancel(b)}>
                 빌드 취소
               </button>
             )}
@@ -1537,7 +1537,7 @@ function LogDrawer({
             <Link className="btn" to="/images">
               이미지 목록에서 보기
             </Link>
-            <button className="btn" onClick={() => navigate('/deploy/new', { state: { image: b.result!.image } })}>
+            <button type="button" className="btn" onClick={() => navigate('/deploy/new', { state: { image: b.result!.image } })}>
               이 이미지로 배포…
             </button>
           </div>

@@ -23,13 +23,13 @@ func ingressHistoryAuthorityFixture(t *testing.T) *nodeStorageFixture {
 	t.Helper()
 	f := newNodeStorageFixture(t)
 	f.apply("admin", "create-tenant", 0, TenantID{ID: "other"}, state.Applied)
-	f.apply("admin", "set-ingress-host-policy", 0, IngressHostPolicyChange{Tenant: "other", Policy: ingress.HostPolicy{LocalHosts: []string{"other.test"}}}, state.Applied)
+	f.apply("admin", "ingress-block", 0, IngressBlockChange{Block: ingress.Block{ID: "other-source", Scope: "tenant", Tenant: "other", Response: "503"}}, state.Applied)
 	f.apply("admin", "ingress-block", 0, IngressBlockChange{Block: ingress.Block{ID: "global-node", Scope: "node", Node: "node-a", Response: "503"}}, state.Applied)
 	for i := 0; i < 12; i++ {
 		f.apply("admin", "ingress-block", 0, IngressBlockChange{Block: ingress.Block{ID: fmt.Sprintf("original-node-%d", i), Scope: "source", Tenant: "tenant", Node: "node-a", Source: "198.51.100.0/24", Response: "503"}}, state.Applied)
 	}
 	for i := 0; i < 11; i++ {
-		f.apply("admin", "set-ingress-host-policy", uint64(i), IngressHostPolicyChange{Tenant: "tenant", Policy: ingress.HostPolicy{LocalHosts: []string{fmt.Sprintf("tenant-%d.test", i)}}}, state.Applied)
+		f.apply("admin", "ingress-block", 0, IngressBlockChange{Block: ingress.Block{ID: fmt.Sprintf("tenant-source-%d", i), Scope: "tenant", Tenant: "tenant", Response: "503"}}, state.Applied)
 	}
 	return f
 }
@@ -132,7 +132,7 @@ func TestIngressHistoryCursorBindsCurrentActorSessionCatalogAndScope(t *testing.
 	q.After = first.Next
 	// A new ingress record changes the Raft index/book but not current read
 	// authority. Its newer order must not invalidate or enter this continuation.
-	f.apply("admin", "set-ingress-host-policy", 11, IngressHostPolicyChange{Tenant: "tenant", Policy: ingress.HostPolicy{LocalHosts: []string{"later.test"}}}, state.Applied)
+	f.apply("admin", "ingress-block", 0, IngressBlockChange{Block: ingress.Block{ID: "later-source", Scope: "tenant", Tenant: "tenant", Response: "503"}}, state.Applied)
 	continued := append(append([]IngressHistoryView{}, first.History...), readIngressHistoryAuthorityPages(t, f, manager, q)...)
 	if !reflect.DeepEqual(original, continued) {
 		t.Fatal("same-authority continuation skipped/duplicated originals or included a newer row")

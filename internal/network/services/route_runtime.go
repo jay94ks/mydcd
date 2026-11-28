@@ -426,7 +426,7 @@ func (m RouteRuntime) blocked(a Authority, alloc network.Allocation) bool {
 	return false
 }
 func routeEndpoint(a Authority, s Source, alloc network.Allocation, now Clock) bool {
-	current, ok := a.book.Allocation(alloc.Endpoint)
+	current, ok := a.book.AllocationOf(alloc.Endpoint, alloc.Generation)
 	pool, held := a.referencePool(alloc.Pool)
 	if !ok || current != alloc || !held || pool.Draining || alloc.Owner != poolOwner(s) || alloc.Pool != fullPool(s) || !s.Prefix.Contains(alloc.Address) {
 		return false
@@ -575,7 +575,7 @@ func (m RouteRuntime) CompactReferenceFences(a Authority) (RouteRuntime, error) 
 		if _, held := a.references.Fences[id]; held {
 			continue
 		}
-		alloc, held := a.book.Allocation(f.Target.Allocation.Endpoint)
+		alloc, held := a.book.AllocationOf(f.Target.Allocation.Endpoint, f.Target.Allocation.Generation)
 		if a.revision > f.Epoch && (!held || alloc != f.Target.Allocation) {
 			delete(q.fences, id)
 		}

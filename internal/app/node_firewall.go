@@ -234,6 +234,11 @@ func (r *Runtime) nodeFirewallRequest(ctx context.Context, read control.NodeFire
 	if !ok || !peer.Member || peer.ID != read.Op.Node {
 		return control.NodeFirewallResult{}, sfcp.ErrAdmission
 	}
+	// Only over a session that is up now: dialing a stopped server would
+	// hold the request until the handshake times out.
+	if !r.Mesh.Connected(peer.Key) {
+		return control.NodeFirewallResult{}, fmt.Errorf("%w: %s", sfcp.ErrNotConnected, peer.ID)
+	}
 	raw, _ := json.Marshal(read)
 	reply, err := cluster.CallManagement(ctx, r.Mesh, r.Identity, r.controlPolicy.Cluster, peer, cluster.ManagementRequest{Method: "node-firewall-owner", Input: raw})
 	if err != nil {

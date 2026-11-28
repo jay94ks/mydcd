@@ -81,10 +81,10 @@ export function TagDialog({ tenant, reg, img, siblings, onClose, onDone }: { ten
       onClose={onClose}
       footer={
         <>
-          <button className="btn" onClick={onClose}>
+          <button type="button" className="btn" onClick={onClose}>
             취소
           </button>
-          <button className="btn primary" disabled={busy || !t || !!problem || already} onClick={() => void send()}>
+          <button type="button" className="btn primary" disabled={busy || !t || !!problem || already} onClick={() => void send()}>
             {busy ? '붙이는 중…' : '태그 붙이기'}
           </button>
         </>
@@ -271,7 +271,7 @@ export function LayersDialog({
             </div>
             <span className="mono muted" style={{ fontSize: 12 }}>
               {img.digest.slice(0, 13)}…{img.digest.slice(-6)}{' '}
-              <button className="linkish" style={{ fontFamily: 'Inter, sans-serif', fontSize: 12 }} onClick={copy}>
+              <button type="button" className="linkish" style={{ fontFamily: 'Inter, sans-serif', fontSize: 12 }} onClick={copy}>
                 복사
               </button>{' '}
               · {fmtBytes(img.bytes)}
@@ -286,7 +286,7 @@ export function LayersDialog({
                 ))}
               </select>
             )}
-            <button className="btn sm" aria-label="닫기" onClick={onClose}>
+            <button type="button" className="btn sm" aria-label="닫기" onClick={onClose}>
               ✕
             </button>
           </span>
@@ -300,7 +300,7 @@ export function LayersDialog({
               ['used', `쓰는 앱 (${nUse})`],
             ] as const
           ).map(([k, label]) => (
-            <button key={k} role="tab" aria-selected={tab === k} className={tab === k ? 'active' : ''} onClick={() => setTab(k)}>
+            <button type="button" key={k} role="tab" aria-selected={tab === k} className={tab === k ? 'active' : ''} onClick={() => setTab(k)}>
               {label}
             </button>
           ))}
@@ -443,13 +443,13 @@ export function LayersDialog({
             ↑↓ 레이어 이동 · Enter 파일 보기 · Esc 닫기
           </span>
           <span className="row" style={{ gap: 8 }}>
-            <button className="btn" onClick={copy}>
+            <button type="button" className="btn" onClick={copy}>
               다이제스트 복사
             </button>
-            <button className="btn" onClick={deploy}>
+            <button type="button" className="btn" onClick={deploy}>
               이 이미지로 배포…
             </button>
-            <button className="btn primary" onClick={onClose}>
+            <button type="button" className="btn primary" onClick={onClose}>
               닫기
             </button>
           </span>
@@ -792,7 +792,7 @@ export function ImageUploadPage() {
               </div>
               {up.inspect?.state === 'failed' && <div className="note er small">파일 안의 이미지를 읽지 못했습니다: {up.inspect.error}</div>}
               {phase === 'idle' && up.received < up.chunks && file && (
-                <button className="btn sm" style={{ width: 'fit-content' }} onClick={() => void sendChunks(up, file)}>
+                <button type="button" className="btn sm" style={{ width: 'fit-content' }} onClick={() => void sendChunks(up, file)}>
                   이어 올리기
                 </button>
               )}
@@ -814,13 +814,13 @@ export function ImageUploadPage() {
                       {u.inspect?.state === 'failed' ? ' · 읽지 못함' : u.push ? ` · ${u.push.repository}:${u.push.tag} ${PUSH_STATE[u.push.state] ?? u.push.state}` : ''}
                     </span>
                     <span className="row" style={{ gap: 6 }}>
-                      <button className="btn xs" disabled={whole} onClick={() => reopen(u)}>
+                      <button type="button" className="btn xs" disabled={whole} onClick={() => reopen(u)}>
                         이어 올리기
                       </button>
-                      <button className="btn xs" disabled={!whole || u.inspect?.state === 'failed'} onClick={() => reopen(u)}>
+                      <button type="button" className="btn xs" disabled={!whole || u.inspect?.state === 'failed'} onClick={() => reopen(u)}>
                         이어서 하기
                       </button>
-                      <button className="btn xs danger" onClick={() => void remove(u)}>
+                      <button type="button" className="btn xs danger" onClick={() => void remove(u)}>
                         지우기
                       </button>
                     </span>
@@ -903,15 +903,15 @@ export function ImageUploadPage() {
           <MutationError error={error} />
           <div className="row" style={{ gap: 8, justifyContent: 'flex-end' }}>
             {phase === 'finished' ? (
-              <button className="btn primary" onClick={() => navigate('/images')}>
+              <button type="button" className="btn primary" onClick={() => navigate('/images')}>
                 이미지 목록으로
               </button>
             ) : (
               <>
-                <button className="btn" onClick={() => void cancel()}>
+                <button type="button" className="btn" onClick={() => void cancel()}>
                   취소
                 </button>
-                <button className="btn primary" disabled={phase !== 'ready' || !toSend.length || blocking || !canDeploy} onClick={() => void pushAll()}>
+                <button type="button" className="btn primary" disabled={phase !== 'ready' || !toSend.length || blocking || !canDeploy} onClick={() => void pushAll()}>
                   {phase === 'pushing' ? '올리는 중…' : `${toSend.length}개 저장소에 올리기`}
                 </button>
               </>

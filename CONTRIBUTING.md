@@ -73,7 +73,7 @@ These keep Seafield Cluster predictable. Pull requests that break them will be a
    `python3 -I tools/check-spdx.py --fix` adds it where it is missing. Files under `3rd-party/` keep their
    upstream headers.
 6. Sign off every commit (Developer Certificate of Origin, see below): `git commit -s`.
-7. Fill in the pull request template. CI must be green before review.
+7. Fill in the pull request template. Pull requests run the DCO sign-off check; run `make lint test` locally before review. Maintainers run the full CI before each release.
 
 How changes land: Seafield Cluster is developed in a separate upstream repository and published here. A maintainer applies an
 accepted pull request upstream, and it appears here in the next sync with credit to you in the commit trailer and

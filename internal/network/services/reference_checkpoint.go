@@ -120,7 +120,7 @@ func (a Authority) referencesSnapshot() (*referenceSnapshot, error) {
 				return nil, ErrLease
 			}
 		}
-		alloc, held := a.book.Allocation(t.Allocation.Endpoint)
+		alloc, held := a.book.AllocationOf(t.Allocation.Endpoint, t.Allocation.Generation)
 		if f.ReclaimedRevision == 0 {
 			if !held || alloc != t.Allocation || f.OwnerClose != nil {
 				return nil, ErrLease

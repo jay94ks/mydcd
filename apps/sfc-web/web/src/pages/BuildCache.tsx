@@ -174,10 +174,10 @@ export function BuildCacheTab() {
                         items={nodes.map((n) => ({ label: n.node, hint: n.node === cur ? '고름' : `${n.scopes}곳`, onSelect: () => (setNode(n.node), setSel(undefined)) }))}
                         button={`서버: ${cur} ▾`}
                       />{' '}
-                      <button className="btn sm" disabled={!!no || !curScope} title={no ?? (curScope ? undefined : '관측된 캐시가 없습니다')} onClick={() => curScope && void askUnused(curScope)}>
+                      <button type="button" className="btn sm" disabled={!!no || !curScope} title={no ?? (curScope ? undefined : '관측된 캐시가 없습니다')} onClick={() => curScope && void askUnused(curScope)}>
                         {IDLE}일 넘게 안 쓴 것 비우기…
                       </button>{' '}
-                      <button className="btn sm danger" disabled={!!no || !okScopes.length} title={no} onClick={askAll}>
+                      <button type="button" className="btn sm danger" disabled={!!no || !okScopes.length} title={no} onClick={askAll}>
                         전체 비우기…
                       </button>
                     </>
@@ -260,7 +260,7 @@ export function BuildCacheTab() {
                             </td>
                             <td onClick={(e) => e.stopPropagation()} style={{ textAlign: 'right' }}>
                               {!cl && (
-                                <button className="btn sm" disabled={!!no} title={no} onClick={() => askScope(s)}>
+                                <button type="button" className="btn sm" disabled={!!no} title={no} onClick={() => askScope(s)}>
                                   비우기
                                 </button>
                               )}
@@ -296,7 +296,7 @@ export function BuildCacheTab() {
                     <span>
                       <span className="muted">언제</span> 빌드가 끝난 뒤, 그리고 빌드가 없는 동안 틈틈이(5분 넘게 쉰 캐시)
                     </span>
-                    <button className="btn sm" style={{ width: 'fit-content' }} disabled={!!no} title={no} onClick={() => navigate('/images/builds?policy=cache')}>
+                    <button type="button" className="btn sm" style={{ width: 'fit-content' }} disabled={!!no} title={no} onClick={() => navigate('/images/builds?policy=cache')}>
                       빌드 설정에서 바꾸기
                     </button>
                   </div>
@@ -411,7 +411,7 @@ function EntriesCard({ tenant, s, observed, no, onPrune, onBuilds }: { tenant: s
             <b>{sel.length}개 고름</b>
             <span className="small">보고된 크기 합 {fmtBytes(sel.reduce((n, e) => n + e.bytes, 0))}</span>
             <span className="grow" />
-            <button className="btn sm danger" disabled={!!no} title={no} onClick={() => onPrune(sel)}>
+            <button type="button" className="btn sm danger" disabled={!!no} title={no} onClick={() => onPrune(sel)}>
               고른 것 비우기…
             </button>
           </div>
@@ -471,12 +471,12 @@ function EntriesCard({ tenant, s, observed, no, onPrune, onBuilds }: { tenant: s
                 </span>
                 <span className="grow" />
                 {at > 0 && (
-                  <button className="btn sm" onClick={() => setAt(at - 1)}>
+                  <button type="button" className="btn sm" onClick={() => setAt(at - 1)}>
                     ‹ 앞
                   </button>
                 )}
                 {p.next && (
-                  <button
+                  <button type="button"
                     className="btn sm"
                     onClick={() => {
                       setCursors((c) => [...c.slice(0, at + 1), p.next!]);
@@ -535,15 +535,15 @@ function PruneDialog({ tenant, p, onClose, onDone }: { tenant: string; p: Prune;
       onClose={onClose}
       footer={
         finished ? (
-          <button className="btn primary" onClick={onClose}>
+          <button type="button" className="btn primary" onClick={onClose}>
             닫기
           </button>
         ) : (
           <>
-            <button className="btn" onClick={onClose}>
+            <button type="button" className="btn" onClick={onClose}>
               취소
             </button>
-            <button className="btn danger" disabled={busy || (!!p.typed && typed !== p.typed)} onClick={() => void go()}>
+            <button type="button" className="btn danger" disabled={busy || (!!p.typed && typed !== p.typed)} onClick={() => void go()}>
               {busy ? '보내는 중…' : sent ? '남은 것 다시 보내기' : (p.action ?? '비우기')}
             </button>
           </>

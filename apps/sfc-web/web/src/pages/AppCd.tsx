@@ -30,7 +30,7 @@ import { usePhone } from '../lib/viewport';
 import { useMobileTop } from '../mobile/top';
 import { Sheet } from '../mobile/Sheet';
 import { ApproveBar, ConfirmApproveSheet } from '../mobile/Approve';
-import { kindsLive } from '../lib/liveTopics';
+import { cdLive, cdStateLive, kindsLive } from '../lib/liveTopics';
 
 type Cd = Omit<DCdState, 'overridePaths'> & { overridePaths: string[][] };
 const NEED = '이 작업 공간의 배포 권한이 필요합니다';
@@ -73,7 +73,7 @@ export function CdTab({ a, current }: { a: AppView; current?: string }) {
   const { canDeploy } = useTenantRole();
   const phone = usePhone();
   // CD를 처음 켜면(a.cd가 생기면) 다시 읽는다
-  const q = usePoll((s) => (a.cd ? appCd(a.tenant, a.app, s) : Promise.resolve(undefined as never)), [a.tenant, a.app, !!a.cd], DEFAULT_POLL_MS);
+  const q = usePoll((s) => (a.cd ? appCd(a.tenant, a.app, s) : Promise.resolve(undefined as never)), [a.tenant, a.app, !!a.cd], DEFAULT_POLL_MS, cdStateLive(a.tenant, a.app));
   const [act, setAct] = useState<Act>();
   // 연 순간의 상태로 창을 띄운다(승인·반려 뒤 후보가 사라져도 결과를 보이게)
   const [approveCd, setApproveCd] = useState<Cd>();
@@ -95,7 +95,7 @@ export function CdTab({ a, current }: { a: AppView; current?: string }) {
         const busy = !!(cd.activeOperation || cd.transition);
         const off = (k: Act) => (!canDeploy ? NEED : k === 'sync' && !cd.candidate ? ERR['no-candidate'] : k === 'sync' && cd.paused ? '일시정지 중에는 동기화하지 않습니다' : k === 'abandon' && !busy ? '진행 중인 동기화가 없습니다' : undefined);
         const btn = (k: Act, label: string, cls = 'btn') => (
-          <button className={cls} disabled={!!off(k)} title={off(k)} onClick={() => setAct(k)}>
+          <button type="button" className={cls} disabled={!!off(k)} title={off(k)} onClick={() => setAct(k)}>
             {label}
           </button>
         );
@@ -137,7 +137,7 @@ export function CdTab({ a, current }: { a: AppView; current?: string }) {
                       <b>차단 사유</b> 후보 <code>{short(cd.candidate)}</code>: {BLOCKED[cd.blocked] ?? cd.blocked}
                     </span>
                     {cd.blocked === 'group-approval' && (
-                      <button className="btn sm" onClick={() => setApproveCd(cd)}>
+                      <button type="button" className="btn sm" onClick={() => setApproveCd(cd)}>
                         승인으로 이동
                       </button>
                     )}
@@ -309,7 +309,7 @@ function MCdCandidate({ a, cd, canDeploy, onDone }: { a: AppView; cd: Cd; canDep
 function MCdTab({ a, cd, canDeploy, onDone }: { a: AppView; cd: Cd; canDeploy: boolean; onDone: () => void }) {
   const toast = useToast();
   const navigate = useNavigate();
-  const h = usePoll((s) => cdHistory(a.tenant, a.app, s).catch(() => undefined), [a.tenant, a.app, cd.revision], DEFAULT_POLL_MS);
+  const h = usePoll((s) => cdHistory(a.tenant, a.app, s).catch(() => undefined), [a.tenant, a.app, cd.revision], 0, cdLive(a.tenant, a.app));
   const links = usePoll((s) => webhookLinks({ point: 'cd', tenant: a.tenant, app: a.app }, s).catch(() => undefined), [a.tenant, a.app], 0, kindsLive('webhook-link'));
   const [act, setAct] = useState<Act>();
   const [view, setView] = useState<'policy' | 'override' | 'hooks'>();
@@ -559,15 +559,15 @@ function ActDialog({ a, cd, act, onClose, onDone }: { a: AppView; cd: Cd; act: A
       onClose={onClose}
       footer={
         finished ? (
-          <button className="btn primary" onClick={onClose}>
+          <button type="button" className="btn primary" onClick={onClose}>
             닫기
           </button>
         ) : (
           <>
-            <button className="btn" onClick={onClose}>
+            <button type="button" className="btn" onClick={onClose}>
               취소
             </button>
-            <button className={d.danger ? 'btn danger solid' : 'btn primary'} disabled={m.busy || (!!need && typed !== need)} onClick={() => void send()}>
+            <button type="button" className={d.danger ? 'btn danger solid' : 'btn primary'} disabled={m.busy || (!!need && typed !== need)} onClick={() => void send()}>
               {m.busy ? '보내는 중…' : d.action}
             </button>
           </>
@@ -624,15 +624,15 @@ function CdApproveDialog({ a, cd, onClose, onDone }: { a: AppView; cd: Cd; onClo
       onClose={onClose}
       footer={
         finished || !decide ? (
-          <button className="btn" onClick={onClose}>
+          <button type="button" className="btn" onClick={onClose}>
             닫기
           </button>
         ) : (
           <>
-            <button className="btn danger" disabled={busy || tooLong || gone} onClick={() => void go('reject')}>
+            <button type="button" className="btn danger" disabled={busy || tooLong || gone} onClick={() => void go('reject')}>
               {mR.busy ? '보내는 중…' : '반려'}
             </button>
-            <button className="btn primary" disabled={busy || tooLong || gone || !q.data || left.length > 0} title={left.length ? '비밀값 묶음 승인을 먼저 받아야 합니다' : undefined} onClick={() => void go('approve')}>
+            <button type="button" className="btn primary" disabled={busy || tooLong || gone || !q.data || left.length > 0} title={left.length ? '비밀값 묶음 승인을 먼저 받아야 합니다' : undefined} onClick={() => void go('approve')}>
               {mA.busy ? '보내는 중…' : '승인'}
             </button>
           </>
@@ -725,7 +725,7 @@ function LocalCard({ a, cd, canDeploy, onDone }: { a: AppView; cd: Cd; canDeploy
         wait ? (
           <Badge tone="wa">서버 기능 대기</Badge>
         ) : (
-          <button className="btn sm primary" disabled={!canDeploy || !q.data || !!bad} title={!canDeploy ? NEED : undefined} onClick={() => setDlg({ kind: 'edit' })}>
+          <button type="button" className="btn sm primary" disabled={!canDeploy || !q.data || !!bad} title={!canDeploy ? NEED : undefined} onClick={() => setDlg({ kind: 'edit' })}>
             ＋ 서비스 추가
           </button>
         )
@@ -765,10 +765,10 @@ function LocalCard({ a, cd, canDeploy, onDone }: { a: AppView; cd: Cd; canDeploy
                         <td className="mono small break-any">{svcImage(v)}</td>
                         <td>{svcNode(v) || <span className="muted">자동</span>}</td>
                         <td className="row" style={{ gap: 6, justifyContent: 'flex-end' }}>
-                          <button className="btn sm" disabled={!canDeploy} title={!canDeploy ? NEED : undefined} onClick={() => setDlg({ kind: 'edit', name: n })}>
+                          <button type="button" className="btn sm" disabled={!canDeploy} title={!canDeploy ? NEED : undefined} onClick={() => setDlg({ kind: 'edit', name: n })}>
                             편집
                           </button>
-                          <button className="btn sm danger" disabled={!canDeploy} title={!canDeploy ? NEED : undefined} onClick={() => setDlg({ kind: 'remove', name: n })}>
+                          <button type="button" className="btn sm danger" disabled={!canDeploy} title={!canDeploy ? NEED : undefined} onClick={() => setDlg({ kind: 'remove', name: n })}>
                             제거…
                           </button>
                         </td>
@@ -786,7 +786,7 @@ function LocalCard({ a, cd, canDeploy, onDone }: { a: AppView; cd: Cd; canDeploy
               </div>
               <span className="small muted">
                 Git에 같은 이름의 서비스가 생기면 동기화를 멈추고 '이름 충돌'로 알립니다. 웹 추가분을 Git에 반영하려면{' '}
-                <button className="linkish" disabled={!Object.keys(svcs).length} onClick={download}>
+                <button type="button" className="linkish" disabled={!Object.keys(svcs).length} onClick={download}>
                   추가분 app.yaml 내려받기
                 </button>
                 로 받아 커밋하면 됩니다.
@@ -842,15 +842,15 @@ function LocalDialog({ a, local, svcs, kind, name, onClose, onDone }: { a: AppVi
       onClose={onClose}
       footer={
         finished ? (
-          <button className="btn primary" onClick={onClose}>
+          <button type="button" className="btn primary" onClick={onClose}>
             닫기
           </button>
         ) : (
           <>
-            <button className="btn" onClick={onClose}>
+            <button type="button" className="btn" onClick={onClose}>
               취소
             </button>
-            <button className={kind === 'remove' ? 'btn danger solid' : 'btn primary'} disabled={m.busy || !ready} onClick={() => void send()}>
+            <button type="button" className={kind === 'remove' ? 'btn danger solid' : 'btn primary'} disabled={m.busy || !ready} onClick={() => void send()}>
               {m.busy ? '보내는 중…' : kind === 'remove' ? '제거' : isNew ? '추가' : '저장'}
             </button>
           </>
@@ -916,7 +916,7 @@ function ApproversCard({ a, cd, canDeploy, onDone }: { a: AppView; cd: Cd; canDe
                 {us.map((u) => (
                   <span key={u} className="chip">
                     {u}
-                    <button className="linkish" aria-label={`${u} 빼기`} disabled={!canDeploy || m.busy} title={!canDeploy ? NEED : '승인 담당에서 빼기'} onClick={() => setDrop(u)}>
+                    <button type="button" className="linkish" aria-label={`${u} 빼기`} disabled={!canDeploy || m.busy} title={!canDeploy ? NEED : '승인 담당에서 빼기'} onClick={() => setDrop(u)}>
                       ✕
                     </button>
                   </span>
@@ -925,7 +925,7 @@ function ApproversCard({ a, cd, canDeploy, onDone }: { a: AppView; cd: Cd; canDe
               </div>
               <div className="row" style={{ gap: 8 }}>
                 <input className="mono" placeholder="사용자 이름 (이 작업 공간 구성원)" aria-label="사용자 이름" value={user} disabled={!canDeploy || m.busy} onChange={(e) => setUser(e.target.value.trim())} style={{ flex: 1 }} />
-                <button className="btn" disabled={!canDeploy || m.busy || !user || us.includes(user)} title={!canDeploy ? NEED : us.includes(user) ? '이미 승인 담당입니다' : undefined} onClick={() => void go(user, true)}>
+                <button type="button" className="btn" disabled={!canDeploy || m.busy || !user || us.includes(user)} title={!canDeploy ? NEED : us.includes(user) ? '이미 승인 담당입니다' : undefined} onClick={() => void go(user, true)}>
                   추가
                 </button>
               </div>
@@ -944,10 +944,10 @@ function ApproversCard({ a, cd, canDeploy, onDone }: { a: AppView; cd: Cd; canDe
           onClose={() => setDrop(undefined)}
           footer={
             <>
-              <button className="btn" onClick={() => setDrop(undefined)}>
+              <button type="button" className="btn" onClick={() => setDrop(undefined)}>
                 취소
               </button>
-              <button className="btn danger solid" onClick={() => (setDrop(undefined), void go(drop, false))}>
+              <button type="button" className="btn danger solid" onClick={() => (setDrop(undefined), void go(drop, false))}>
                 빼기
               </button>
             </>
@@ -1042,11 +1042,11 @@ function PolicyCard({ a, cd, canDeploy, onDone }: { a: AppView; cd: Cd; canDeplo
       <span className="small muted">Git 비밀번호나 키 자체는 여기서 입력받지 않습니다. 서버에 미리 설치된 Git 접속 정보의 이름만 고릅니다. 허용하는 Git 출처는 서버가 판단합니다.</span>
       <div className="row" style={{ justifyContent: 'flex-end', gap: 8 }}>
         {dirty && (
-          <button className="btn" onClick={() => setEdit(undefined)}>
+          <button type="button" className="btn" onClick={() => setEdit(undefined)}>
             되돌리기
           </button>
         )}
-        <button className="btn primary" disabled={!canDeploy || !dirty || pollBad} title={!canDeploy ? NEED : undefined} onClick={() => setReview(true)}>
+        <button type="button" className="btn primary" disabled={!canDeploy || !dirty || pollBad} title={!canDeploy ? NEED : undefined} onClick={() => setReview(true)}>
           정책 변경 검토
         </button>
       </div>
@@ -1072,15 +1072,15 @@ function PolicyReview({ a, cd, next, onClose, onDone }: { a: AppView; cd: Cd; ne
       onClose={onClose}
       footer={
         finished ? (
-          <button className="btn primary" onClick={onClose}>
+          <button type="button" className="btn primary" onClick={onClose}>
             닫기
           </button>
         ) : (
           <>
-            <button className="btn" onClick={onClose}>
+            <button type="button" className="btn" onClick={onClose}>
               취소
             </button>
-            <button className="btn primary" disabled={m.busy} onClick={() => void send()}>
+            <button type="button" className="btn primary" disabled={m.busy} onClick={() => void send()}>
               {m.busy ? '보내는 중…' : '저장'}
             </button>
           </>
@@ -1125,7 +1125,7 @@ function OverrideCard({ a, cd, canDeploy, onDone }: { a: AppView; cd: Cd; canDep
     <Card
       title="설정 임시 변경"
       actions={
-        <button className="btn sm" disabled={!canDeploy} title={canDeploy ? undefined : NEED} onClick={() => setSet('new')}>
+        <button type="button" className="btn sm" disabled={!canDeploy} title={canDeploy ? undefined : NEED} onClick={() => setSet('new')}>
           ＋ 임시 변경
         </button>
       }
@@ -1193,15 +1193,15 @@ function OverrideDialog({ a, path, onClose, onDone }: { a: AppView; path?: strin
       onClose={onClose}
       footer={
         finished ? (
-          <button className="btn primary" onClick={onClose}>
+          <button type="button" className="btn primary" onClick={onClose}>
             닫기
           </button>
         ) : (
           <>
-            <button className="btn" onClick={onClose}>
+            <button type="button" className="btn" onClick={onClose}>
               취소
             </button>
-            <button className="btn primary" disabled={m.busy || !ready} onClick={() => void send()}>
+            <button type="button" className="btn primary" disabled={m.busy || !ready} onClick={() => void send()}>
               {m.busy ? '보내는 중…' : '임시 변경'}
             </button>
           </>
@@ -1213,7 +1213,7 @@ function OverrideDialog({ a, path, onClose, onDone }: { a: AppView; path?: strin
           <span className="row" style={{ flexWrap: 'nowrap' }}>
             <input className="mono" style={{ flex: 1 }} value={text} disabled={!!path || finished} onChange={(e) => (setText(e.target.value), setChecked(undefined))} spellCheck={false} />
             {!path && (
-              <button className="btn" disabled={!p} onClick={() => void check()}>
+              <button type="button" className="btn" disabled={!p} onClick={() => void check()}>
                 확인
               </button>
             )}
@@ -1258,15 +1258,15 @@ function ReleaseDialog({ a, path, onClose, onDone }: { a: AppView; path: string[
       onClose={onClose}
       footer={
         finished ? (
-          <button className="btn primary" onClick={onClose}>
+          <button type="button" className="btn primary" onClick={onClose}>
             닫기
           </button>
         ) : (
           <>
-            <button className="btn" onClick={onClose}>
+            <button type="button" className="btn" onClick={onClose}>
               취소
             </button>
-            <button className="btn danger solid" disabled={m.busy} onClick={() => void send()}>
+            <button type="button" className="btn danger solid" disabled={m.busy} onClick={() => void send()}>
               {m.busy ? '보내는 중…' : '해제'}
             </button>
           </>
@@ -1285,7 +1285,7 @@ function ReleaseDialog({ a, path, onClose, onDone }: { a: AppView; path: string[
 }
 
 // ── 자동 배포 켜기 (CDIx '자동 배포 켜기 (꺼진 앱)') ──────────────────────────────
-// CD 정책은 앱 정의와 따로 PUT /cd/policy로 정한다(#862). app.yaml의 x-sfc.delivery는 없어진다(yaml-formats.md).
+// CD 정책은 PUT /cd/policy로도 정하고, app.yaml의 x-sfc.cd로도 정한다(#957). 나중에 보낸 쪽이 이긴다.
 // CD가 없는 앱에 처음 보내면 sfcd가 등록하고(configure-app-cd, PolicyRevision 0), expected는 앱 revision이다.
 
 export interface ConnectInput {
@@ -1325,7 +1325,7 @@ function ConnectTab({ a, canDeploy }: { a: AppView; current?: string; canDeploy:
       <Empty title="자동 배포가 꺼져 있습니다">
         Git 저장소를 연결하면 새 커밋을 계획하고, 정책대로 배포합니다.
         <div className="row" style={{ justifyContent: 'center', marginTop: 12 }}>
-          <button className="btn primary" disabled={!canDeploy} title={!canDeploy ? NEED : undefined} onClick={() => setOpen(true)}>
+          <button type="button" className="btn primary" disabled={!canDeploy} title={!canDeploy ? NEED : undefined} onClick={() => setOpen(true)}>
             자동 배포 켜기
           </button>
         </div>
@@ -1341,10 +1341,10 @@ function ConnectTab({ a, canDeploy }: { a: AppView; current?: string; canDeploy:
           {m.op && <OpPanel op={m.op} onChange={(o) => (m.setOp(o), o.state === 'applied' && refreshAll())} />}
           {!m.op && (
             <div className="row" style={{ justifyContent: 'flex-end' }}>
-              <button className="btn sm" onClick={() => setInput(undefined)}>
+              <button type="button" className="btn sm" onClick={() => setInput(undefined)}>
                 취소
               </button>
-              <button className="btn sm primary" disabled={m.busy || !canDeploy} onClick={() => void send()}>
+              <button type="button" className="btn sm primary" disabled={m.busy || !canDeploy} onClick={() => void send()}>
                 {m.busy ? '보내는 중…' : '자동 배포 켜기'}
               </button>
             </div>
@@ -1389,10 +1389,10 @@ function ConnectDialog({ a, onClose, onNext }: { a: AppView; onClose: () => void
       onClose={onClose}
       footer={
         <>
-          <button className="btn" onClick={onClose}>
+          <button type="button" className="btn" onClick={onClose}>
             취소
           </button>
-          <button className="btn primary" disabled={!ok} onClick={() => onNext(c)}>
+          <button type="button" className="btn primary" disabled={!ok} onClick={() => onNext(c)}>
             다음
           </button>
         </>
@@ -1470,7 +1470,7 @@ function checkBadges(c?: DCdHistory['checks']) {
 const unix = (sec?: number) => (sec ? fmtTime(new Date(sec * 1000).toISOString()) : '—');
 
 function HistoryCard({ a, cd, canDeploy, onRecover, onApprove }: { a: AppView; cd: Cd; canDeploy: boolean; onRecover: () => void; onApprove: () => void }) {
-  const h = usePoll((s) => cdHistory(a.tenant, a.app, s), [a.tenant, a.app, cd.revision], DEFAULT_POLL_MS);
+  const h = usePoll((s) => cdHistory(a.tenant, a.app, s), [a.tenant, a.app, cd.revision], 0, cdLive(a.tenant, a.app));
   const [changes, setChanges] = useState(false);
   if (h.error && noEndpoint(h.error)) return <HistoryFallback cd={cd} canDeploy={canDeploy} onRecover={onRecover} onApprove={onApprove} />;
   return (
@@ -1508,17 +1508,17 @@ function HistoryCard({ a, cd, canDeploy, onRecover, onApprove }: { a: AppView; c
                       <td className="mono small">{r.operation ?? '—'}</td>
                       <td className="row" style={{ gap: 6, justifyContent: 'flex-end' }}>
                         {isCand && (
-                          <button className="btn sm" onClick={() => setChanges(true)}>
+                          <button type="button" className="btn sm" onClick={() => setChanges(true)}>
                             변경점
                           </button>
                         )}
                         {isCand && (r.reason === 'group-approval' || (manualOf(cd) && !cd.paused)) && (
-                          <button className="btn sm" onClick={onApprove}>
+                          <button type="button" className="btn sm" onClick={onApprove}>
                             승인
                           </button>
                         )}
                         {live && (
-                          <button className="btn sm" disabled={!canDeploy || !cd.candidate} title={!canDeploy ? NEED : !cd.candidate ? ERR['no-candidate'] : '실패한 동기화를 후보로 다시 맞추고 고칩니다'} onClick={onRecover}>
+                          <button type="button" className="btn sm" disabled={!canDeploy || !cd.candidate} title={!canDeploy ? NEED : !cd.candidate ? ERR['no-candidate'] : '실패한 동기화를 후보로 다시 맞추고 고칩니다'} onClick={onRecover}>
                             복구
                           </button>
                         )}
@@ -1570,7 +1570,7 @@ function HistoryFallback({ cd, canDeploy, onRecover, onApprove }: { cd: Cd; canD
                 <td>{cd.blocked === 'group-approval' ? <Badge tone="wa">승인 대기</Badge> : cd.blocked ? <Badge tone="wa">막힘</Badge> : <Badge tone="pr">후보</Badge>}</td>
                 <td className="row" style={{ gap: 6, justifyContent: 'flex-end' }}>
                   {(cd.blocked === 'group-approval' || (manualOf(cd) && !cd.paused)) && (
-                    <button className="btn sm" onClick={() => setApprove(true)}>
+                    <button type="button" className="btn sm" onClick={() => setApprove(true)}>
                       승인
                     </button>
                   )}
@@ -1586,7 +1586,7 @@ function HistoryFallback({ cd, canDeploy, onRecover, onApprove }: { cd: Cd; canD
                 <Badge tone="ok">실행 중</Badge>
               </td>
               <td className="row" style={{ justifyContent: 'flex-end' }}>
-                <button className="btn sm" disabled={!canDeploy || !cd.candidate} title={!canDeploy ? NEED : !cd.candidate ? ERR['no-candidate'] : '실패한 동기화를 후보로 다시 맞추고 고칩니다'} onClick={() => setAct('recover')}>
+                <button type="button" className="btn sm" disabled={!canDeploy || !cd.candidate} title={!canDeploy ? NEED : !cd.candidate ? ERR['no-candidate'] : '실패한 동기화를 후보로 다시 맞추고 고칩니다'} onClick={() => setAct('recover')}>
                   복구
                 </button>
               </td>
@@ -1604,7 +1604,7 @@ const show = (v: unknown) => (v === undefined ? undefined : typeof v === 'string
 function ChangesDialog({ a, onClose }: { a: AppView; onClose: () => void }) {
   const q = usePoll((s) => cdChanges(a.tenant, a.app, s), [a.tenant, a.app]);
   return (
-    <Dialog title={q.data ? `${short(q.data.running)} → ${short(q.data.candidate)}` : '변경점'} onClose={onClose} footer={<button className="btn" onClick={onClose}>닫기</button>}>
+    <Dialog title={q.data ? `${short(q.data.running)} → ${short(q.data.candidate)}` : '변경점'} onClose={onClose} footer={<button type="button" className="btn" onClick={onClose}>닫기</button>}>
       <Load q={q} what="변경점을 읽지 못했습니다">
         {(c) => (
           <div className="col" style={{ gap: 12 }}>
@@ -1656,10 +1656,10 @@ function OverrideRow({ a, p, rev, canDeploy, onSet, onRelease }: { a: AppView; p
         <Badge tone="wa">임시 변경 중</Badge>
       </td>
       <td className="row" style={{ gap: 6, justifyContent: 'flex-end' }}>
-        <button className="btn sm" disabled={!canDeploy} onClick={onSet}>
+        <button type="button" className="btn sm" disabled={!canDeploy} onClick={onSet}>
           값 바꾸기
         </button>
-        <button className="btn sm danger" disabled={!canDeploy} onClick={onRelease}>
+        <button type="button" className="btn sm danger" disabled={!canDeploy} onClick={onRelease}>
           해제
         </button>
       </td>

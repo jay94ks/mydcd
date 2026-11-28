@@ -56,6 +56,7 @@ type BackendObservation struct {
 	Generation, Revision uint64
 }
 type Manager struct {
+	trafficHolds            atomic.Pointer[map[string]string]
 	controls                []RuntimeControl
 	controlRevision         uint64
 	controlsInitialized     bool

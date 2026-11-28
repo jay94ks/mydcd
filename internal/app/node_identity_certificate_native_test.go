@@ -72,6 +72,23 @@ func registerTestDomain(t *testing.T, ctx context.Context, user userauth.Client,
 	change("domain-"+name, "add-domain", page.Revision, control.DomainChange{Name: name})
 }
 
+// giveTestDomain registers name if needed and gives it to tenant, so the
+// tenant's routes under it open (devel/design/tenant-domains.md).
+func giveTestDomain(t *testing.T, ctx context.Context, user userauth.Client, peer sfcp.Peer, session access.Session, change func(string, string, uint64, any), name, tenant string) {
+	t.Helper()
+	registerTestDomain(t, ctx, user, peer, session, change, name)
+	page, err := user.QueryCertificates(ctx, peer, session, control.CertificateQuery{})
+	if err != nil {
+		t.Fatal("read domain list", err)
+	}
+	for _, d := range page.Domains {
+		if d.Name == name && d.Tenant == tenant {
+			return
+		}
+	}
+	change("domain-"+name+"-"+tenant, "assign-domain", page.Revision, control.DomainChange{Name: name, Tenant: tenant})
+}
+
 // storedByRequest finds the stored certificate an original request put.
 func storedByRequest(t *testing.T, catalog certstore.Catalog, request string) certstore.Certificate {
 	t.Helper()

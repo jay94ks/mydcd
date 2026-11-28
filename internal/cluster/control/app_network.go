@@ -408,7 +408,7 @@ func appDNSProjection(s state.State, e deployment.Execution, projection Resource
 		}
 		for family := 0; family < 2; family++ {
 			endpoint := step.Key + "/" + alias + "/" + strconv.Itoa(family)
-			alloc, held := projection.Addresses.Allocation(endpoint)
+			alloc, held := projection.Addresses.AllocationOf(endpoint, obj.Generation)
 			if !held || alloc.Generation != obj.Generation {
 				continue
 			}

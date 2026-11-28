@@ -160,6 +160,10 @@ func TestNodeSummaryUnreadyReason(t *testing.T) {
 	if n.State != "unready" || n.Ready || n.Reason != "MODULE_PASS_FAILED" || !slices.Equal(n.FailedSteps, []string{"node-storage", "event-log"}) || n.FailingSince != 4000 || !n.AdmitsWork {
 		t.Fatal("unready row", n)
 	}
+	page, _ = f.p.NodeSummary(f.s, f.session, 10, "", "", "", host(observability.Host{Unready: &observability.Unready{Reason: "PEER_WAIT", Steps: []string{"managed"}, Peers: []string{"vps1"}, Since: 4000}}), true)
+	if n := page.Nodes[0]; n.State != "unready" || n.Reason != "PEER_WAIT" || !slices.Equal(n.WaitingPeers, []string{"vps1"}) {
+		t.Fatal("peer wait row", n)
+	}
 	page, _ = f.p.NodeSummary(f.s, f.session, 10, "", "", "", host(observability.Host{}), true)
 	if n := page.Nodes[0]; n.State != "unready" || n.Reason != "UNKNOWN" {
 		t.Fatal("older daemon without a reason", n)
@@ -168,7 +172,7 @@ func TestNodeSummaryUnreadyReason(t *testing.T) {
 	if n := page.Nodes[0]; n.State != "ready" || n.Reason != "" || n.FailedSteps != nil {
 		t.Fatal("ready row", n)
 	}
-	for _, bad := range []observability.Unready{{Reason: "elsewhere"}, {Reason: "MODULE_PASS_FAILED", Steps: []string{"Bad Step"}}} {
+	for _, bad := range []observability.Unready{{Reason: "elsewhere"}, {Reason: "MODULE_PASS_FAILED", Steps: []string{"Bad Step"}}, {Reason: "PEER_WAIT"}, {Reason: "MODULE_PASS_FAILED", Peers: []string{"Bad Peer"}}} {
 		r := host(observability.Host{})[0]
 		r.Host.Unready = &bad
 		if r.Valid() {

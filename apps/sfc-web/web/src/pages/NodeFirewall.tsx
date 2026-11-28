@@ -211,7 +211,7 @@ function Managed({ node, fw, q, logKey, onChanged }: { node: string; fw: DFirewa
             </label>
           </div>
           <div className="row" style={{ justifyContent: 'flex-end' }}>
-            <button className="btn" disabled={policy === current || ch.busy} onClick={() => (policy === 'drop' && !allows ? setDlg({ kind: 'drop' }) : void applyPolicy())}>
+            <button type="button" className="btn" disabled={policy === current || ch.busy} onClick={() => (policy === 'drop' && !allows ? setDlg({ kind: 'drop' }) : void applyPolicy())}>
               정책 바꾸기…
             </button>
           </div>
@@ -240,7 +240,7 @@ function Managed({ node, fw, q, logKey, onChanged }: { node: string; fw: DFirewa
       <Card
         title="규칙"
         actions={
-          <button className="btn primary" disabled={fw.rules.length >= max} title={fw.rules.length >= max ? `규칙은 ${max}개까지` : undefined} onClick={() => setDlg({ kind: 'add' })}>
+          <button type="button" className="btn primary" disabled={fw.rules.length >= max} title={fw.rules.length >= max ? `규칙은 ${max}개까지` : undefined} onClick={() => setDlg({ kind: 'add' })}>
             규칙 추가
           </button>
         }
@@ -268,10 +268,10 @@ function Managed({ node, fw, q, logKey, onChanged }: { node: string; fw: DFirewa
                   <td className="wrap">{r.comment || '—'}</td>
                   <td>
                     <span className="row" style={{ gap: 6, justifyContent: 'flex-end', flexWrap: 'nowrap' }}>
-                      <button className="btn sm" onClick={() => setDlg({ kind: 'edit', rule: r })}>
+                      <button type="button" className="btn sm" onClick={() => setDlg({ kind: 'edit', rule: r })}>
                         수정
                       </button>
-                      <button className="btn sm danger" onClick={() => setDlg({ kind: 'delete', rule: r })}>
+                      <button type="button" className="btn sm danger" onClick={() => setDlg({ kind: 'delete', rule: r })}>
                         지우기
                       </button>
                     </span>
@@ -383,7 +383,7 @@ function FirewallLog({ node, reload }: { node: string; reload: number }) {
             </table>
             {hasMore && (
               <div className="row" style={{ justifyContent: 'center' }}>
-                <button className="btn sm" disabled={busy} onClick={() => void loadMore()}>
+                <button type="button" className="btn sm" disabled={busy} onClick={() => void loadMore()}>
                   {busy ? '읽는 중…' : '더 보기'}
                 </button>
               </div>
@@ -431,10 +431,10 @@ function RuleDialog({ node, fw, rule, onClose, onChanged }: { node: string; fw: 
       onClose={onClose}
       footer={
         <>
-          <button className="btn" onClick={onClose}>
+          <button type="button" className="btn" onClick={onClose}>
             취소
           </button>
-          <button className="btn primary" disabled={ch.busy || unchanged || !!dup || full || Object.keys(errs).length > 0 || !!typed.trim()} title={typed.trim() ? '적은 출처를 먼저 더하거나 지우세요' : undefined} onClick={() => void apply()}>
+          <button type="button" className="btn primary" disabled={ch.busy || unchanged || !!dup || full || Object.keys(errs).length > 0 || !!typed.trim()} title={typed.trim() ? '적은 출처를 먼저 더하거나 지우세요' : undefined} onClick={() => void apply()}>
             {ch.busy ? '적용하는 중…' : '적용'}
           </button>
         </>
@@ -544,10 +544,10 @@ function DeleteDialog({ node, fw, rule, onClose, onChanged }: { node: string; fw
       onClose={onClose}
       footer={
         <>
-          <button className="btn" onClick={onClose}>
+          <button type="button" className="btn" onClick={onClose}>
             취소
           </button>
-          <button
+          <button type="button"
             className="btn danger"
             disabled={ch.busy}
             onClick={() =>
@@ -587,10 +587,10 @@ function DropDialog({ node, fw, onClose, onChanged }: { node: string; fw: DFirew
       onClose={onClose}
       footer={
         <>
-          <button className="btn" onClick={onClose}>
+          <button type="button" className="btn" onClick={onClose}>
             취소
           </button>
-          <button
+          <button type="button"
             className="btn danger"
             disabled={ch.busy}
             onClick={() =>

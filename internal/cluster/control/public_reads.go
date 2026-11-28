@@ -360,7 +360,8 @@ func (p Policy) PublicRead(s state.State, session access.Session, at int64, meth
 			t, _ := catalog.Tenant(tenant)
 			page.Rules = slices.Clone(t.ImageSources)
 			for _, task := range tasks {
-				image, e := access.PinImage(task.Image)
+				// A tag Task shows its tag; trust matches the repository either way.
+				image, e := access.ParseImage(task.Image)
 				if e != nil {
 					return page, e
 				}

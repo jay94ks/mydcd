@@ -121,11 +121,15 @@ func (p Policy) appInputFetchPermit(s state.State, provider [32]byte, q AppInput
 		if err != nil {
 			return AppInputFetchPermit{}, access.ErrDenied
 		}
-		if permit.ReadSet == q.ReadSet {
+		switch {
+		case permit.ReadSet == q.ReadSet:
 			reads, err = p.AppInputReads(s, q.Consumer, q.Binding, permit)
-			if err != nil {
-				return AppInputFetchPermit{}, err
-			}
+		case permit.SocketReadSet != ([32]byte{}) && permit.SocketReadSet == q.ReadSet:
+			// sfev.sock: the same holder answers, for the socket grants only.
+			reads, err = p.AppSocketReads(s, q.Consumer, q.Binding, permit)
+		}
+		if err != nil {
+			return AppInputFetchPermit{}, err
 		}
 	}
 	for _, read := range reads {

@@ -30,7 +30,7 @@ func (m *Manager) logRedactionValues(ctx context.Context, target containerops.Ta
 	}
 	var values []containerops.RedactionValue
 	total := 0
-	for _, file := range lease.Files {
+	for _, file := range secretValueFiles(lease.Files) {
 		value, readErr := readInputValue(ctx, file, containerops.MaxRedactionBytes-total)
 		if readErr != nil {
 			destroyLogValues(values)

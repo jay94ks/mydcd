@@ -45,6 +45,11 @@ func clusterStatusCommand(g *globals) *cli.Command {
 		Long: `Shows the consensus state as last applied by the server you are connected
 to. It does not wait for a quorum read; check STALE before trusting a row.
 
+LAG is how many log entries the leader has not yet replicated to that
+server. APPLIED of another server comes from its last report; when that
+report is older than a few seconds, its age is shown next to it, so APPLIED
+can trail while LAG is already 0.
+
 With --writes, shows instead what the leader appended to the Raft log in its
 current term, by kind. An idle cluster should add nothing. Only the leader
 counts writes, so the command asks the leader when the context knows it.`,
@@ -132,7 +137,7 @@ counts writes, so the command asks the leader when the context knows it.`,
 					if n.Waiting {
 						role = "waiting"
 					}
-					t.Add(n.Node, role, v, n.Term, countText(n.AppliedIndex), countText(n.Lag), n.Stale)
+					t.Add(n.Node, role, v, n.Term, appliedText(n, status.ObservedAt), countText(n.Lag), n.Stale)
 				}
 				return t
 			})
@@ -553,4 +558,16 @@ user. 'allow' lifts that. Without an argument, shows the policy.`,
 				Expected: f.expect(policy.Revision), Payload: control.NodeCLIChange{DisableNodeCLIOperation: block}}, false)
 		},
 	}
+}
+
+// appliedText is a server's applied index. Another server's comes from its
+// last observation report, so an old one says how old it is: the lag column
+// is the leader's live replication lag and can already be 0 while that
+// report still shows an earlier applied index.
+func appliedText(n userauth.RaftNodeStatus, now uint64) string {
+	text := countText(n.AppliedIndex)
+	if text == "" || n.ObservedAt == 0 || n.ObservedAt >= now || now-n.ObservedAt < 5_000 {
+		return text
+	}
+	return fmt.Sprintf("%s (%ds ago)", text, (now-n.ObservedAt)/1000)
 }

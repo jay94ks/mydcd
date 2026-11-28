@@ -58,6 +58,8 @@ func (b Blueprint) taskRecipe(service string, m TaskMaterial, owner string) (Com
 		return s, workload.ContainerSpec{}, inputError("TASK_MATERIAL_MISMATCH", fmt.Sprintf("%s.projection (sources=%d, projection=%t)", service, len(want.ApprovalSources()), m.Projection != nil))
 	case m.Projection != nil && *m.Projection != projectionReference(bound):
 		return s, workload.ContainerSpec{}, inputError("TASK_MATERIAL_MISMATCH", service+".projection (reference differs from the binding)")
+	case (want.Socket != nil) != (len(s.Sfc.Socket) > 0):
+		return s, workload.ContainerSpec{}, inputError("TASK_MATERIAL_MISMATCH", service+".secrets.socket (binding differs from the service)")
 	case len(m.Volumes) != len(bound.d.Pins):
 		return s, workload.ContainerSpec{}, inputError("TASK_MATERIAL_MISMATCH", fmt.Sprintf("%s.volumes (ready=%d, pinned=%d)", service, len(m.Volumes), len(bound.d.Pins)))
 	}
@@ -77,6 +79,7 @@ func (b Blueprint) taskRecipe(service string, m TaskMaterial, owner string) (Com
 		return s, workload.ContainerSpec{}, workload.ErrProcess
 	}
 	result := workload.ContainerSpec{ResourceKeys: lifecycle.OwnIdentityTransitions(n.ResourceKeys), Writable: s.Standalone && s.ReadOnly != nil && !*s.ReadOnly, TTY: s.TTY, StdinOpen: s.StdinOpen, Schema: 1, Node: owner, Image: s.Image, Memory: int64(memory), NanoCPU: int64(cpu), Bridge: m.Network.Key, BridgeGeneration: m.Network.Generation}
+	result.SecretSocket = want.Socket != nil
 	result.Logging = s.Logging.Clone()
 	result.Ports = slices.Clone(s.Ports)
 	result.Stop, err = engine.ParseStopPolicy(s.StopGracePeriod, s.StopSignal)

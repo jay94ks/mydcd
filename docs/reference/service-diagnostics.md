@@ -68,10 +68,7 @@ Body는 Go `[]byte`의 JSON base64 문자열이다. 응답 body 최대64KiB, hea
 
 ## read-only Git 연결 검사
 
-```sh
-sfcli --tenant shop cd probe storefront --repository https://git.example/team/app.git \
-  --branch main --path app.yaml --credential git-read
-```
+CLI 명령은 없다(CD 설정은 app.yaml `x-sfc.cd`에만 있다). 웹과 SDK가 쓴다.
 
 `Client.ProbeCD(ctx, peer, session, tenant, deployment.GitProbeRequest)`는 typed User `cd-probe`를 보낸다.
 

@@ -43,7 +43,7 @@ const iwinvPageSize = 50
 // IwinvVendor is the iwinv adapter.
 func IwinvVendor() Vendor {
 	// iwinv counts outgoing traffic only (Jay 2026-11-27).
-	return Vendor{ID: "iwinv", Name: "iwinv", TrafficCounting: CountTX, OverageTiers: iwinvOverage, New: func(c Credential, env Env) Provider {
+	return Vendor{ID: "iwinv", Name: "iwinv", Ownership: Managed, TrafficCounting: CountTX, OverageTiers: iwinvOverage, New: func(c Credential, env Env) ManagedProvider {
 		base := strings.TrimRight(env.BaseURL, "/")
 		if base == "" {
 			base = IwinvBaseURL
@@ -84,7 +84,7 @@ func (p *iwinv) sign(uri string) (string, string) {
 // do sends one request. path starts with "/v1/"; query is encoded in key
 // order so the signed URI equals the sent one.
 func (p *iwinv) do(ctx context.Context, method, path string, query url.Values, body any) (envelope, error) {
-	if !p.cred.Valid() {
+	if !p.cred.Valid() || p.cred.SecretKey == "" {
 		return envelope{}, &Error{Kind: KindAuth}
 	}
 	uri := path

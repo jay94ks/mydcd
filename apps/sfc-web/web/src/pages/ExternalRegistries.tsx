@@ -437,11 +437,11 @@ export function ExternalTab() {
                             <td onClick={(e) => e.stopPropagation()} style={{ whiteSpace: 'nowrap' }}>
                               <span className="row" style={{ justifyContent: 'flex-end', gap: 6, flexWrap: 'nowrap' }}>
                                 {!r.deleted && !r.reader && r.enabled ? (
-                                  <button className="btn sm" disabled={!!bindOff(r)} title={bindOff(r)} onClick={() => setBind(r)}>
+                                  <button type="button" className="btn sm" disabled={!!bindOff(r)} title={bindOff(r)} onClick={() => setBind(r)}>
                                     서버 연결
                                   </button>
                                 ) : (
-                                  <button className="btn sm" disabled={!!testOff(r) || testing === r.id} title={testOff(r)} onClick={() => void test(r)}>
+                                  <button type="button" className="btn sm" disabled={!!testOff(r) || testing === r.id} title={testOff(r)} onClick={() => void test(r)}>
                                     {testing === r.id ? '시험 중…' : '시험'}
                                   </button>
                                 )}
@@ -501,7 +501,7 @@ export function ExternalRegisterButton() {
       외부 저장소 등록
     </Link>
   ) : (
-    <button className="btn sm primary" disabled title={NEED}>
+    <button type="button" className="btn sm primary" disabled title={NEED}>
       외부 저장소 등록
     </button>
   );
@@ -541,7 +541,7 @@ function EditCard({
       </fieldset>
       {dirty && r.reader && !r.reader.draining && <div className="note wa small">적용하면 이 저장소를 읽던 서버 {r.reader.node}가 멈춥니다. 적용한 뒤 서버를 다시 연결하세요.</div>}
       <div className="row" style={{ justifyContent: 'flex-end', gap: 8 }}>
-        <button className="btn primary" disabled={!canManage || (!dirty && !f.trust) || Object.keys(errors).length > 0} title={canManage ? undefined : NEED} onClick={() => setReview(true)}>
+        <button type="button" className="btn primary" disabled={!canManage || (!dirty && !f.trust) || Object.keys(errors).length > 0} title={canManage ? undefined : NEED} onClick={() => setReview(true)}>
           변경 검토
         </button>
       </div>
@@ -579,7 +579,7 @@ function TestCard({
       {!r.reader && !r.deleted && (
         <div className="note wa small col" style={{ gap: 6 }}>
           <span>이 저장소를 읽을 서버가 없어 받기와 로그인 시험을 할 수 없습니다.</span>
-          <button className="btn sm" style={{ width: 'fit-content' }} disabled={!!bindOff} title={bindOff} onClick={onBind}>
+          <button type="button" className="btn sm" style={{ width: 'fit-content' }} disabled={!!bindOff} title={bindOff} onClick={onBind}>
             서버 연결…
           </button>
         </div>
@@ -610,7 +610,7 @@ function TestCard({
       <Field label="시험할 이미지 (선택)">
         <input className="mono" value={image} onChange={(e) => setImage(e.target.value.trim())} placeholder="shop-team/web:latest" spellCheck={false} autoComplete="off" />
       </Field>
-      <button className="btn" style={{ width: 'fit-content' }} disabled={!!off || testing} title={off} onClick={() => onTest(image.endsWith('/') ? '' : image)}>
+      <button type="button" className="btn" style={{ width: 'fit-content' }} disabled={!!off || testing} title={off} onClick={() => onTest(image.endsWith('/') ? '' : image)}>
         {testing ? '시험 중…' : '로그인 시험'}
       </button>
       {r.pulls.length > 0 && (
@@ -715,7 +715,7 @@ function UsersCard({ tenant, r }: { tenant: string; r: ExternalRegistry }) {
         </div>
       )}
       {pages?.next && (
-        <button className="btn sm" style={{ width: 'fit-content' }} disabled={busy} onClick={() => void load(pages.next)}>
+        <button type="button" className="btn sm" style={{ width: 'fit-content' }} disabled={busy} onClick={() => void load(pages.next)}>
           {busy ? '불러오는 중…' : '더 보기'}
         </button>
       )}
@@ -741,10 +741,10 @@ function RegisterDialog({ tenant, secrets, builtin, taken, onClose, onDone, onSe
       onClose={onClose}
       footer={
         <>
-          <button className="btn" onClick={onClose}>
+          <button type="button" className="btn" onClick={onClose}>
             취소
           </button>
-          <button className="btn primary" disabled={Object.keys(errors).length > 0} onClick={() => setReview(true)}>
+          <button type="button" className="btn primary" disabled={Object.keys(errors).length > 0} onClick={() => setReview(true)}>
             변경 검토
           </button>
         </>
@@ -832,20 +832,20 @@ function ReviewDialog({
       onClose={onClose}
       footer={
         finished ? (
-          <button className="btn primary" onClick={onClose}>
+          <button type="button" className="btn primary" onClick={onClose}>
             닫기
           </button>
         ) : (
           <>
             {onBack && !m.op && (
-              <button className="btn" onClick={onBack}>
+              <button type="button" className="btn" onClick={onBack}>
                 뒤로
               </button>
             )}
-            <button className="btn" onClick={onClose}>
+            <button type="button" className="btn" onClick={onClose}>
               취소
             </button>
-            <button className="btn primary" disabled={m.busy || t.busy || !!putErr} onClick={() => void send()}>
+            <button type="button" className="btn primary" disabled={m.busy || t.busy || !!putErr} onClick={() => void send()}>
               {m.busy ? '보내는 중…' : uncertain(m) ? '같은 작업으로 다시 보내기' : before ? '적용' : '등록'}
             </button>
           </>
@@ -929,15 +929,15 @@ function UnregisterDialog({ tenant, r, onClose, onDone }: { tenant: string; r: E
       onClose={onClose}
       footer={
         finished ? (
-          <button className="btn primary" onClick={onClose}>
+          <button type="button" className="btn primary" onClick={onClose}>
             닫기
           </button>
         ) : (
           <>
-            <button className="btn" onClick={onClose}>
+            <button type="button" className="btn" onClick={onClose}>
               취소
             </button>
-            <button className="btn danger" disabled={m.busy || (!uncertain(m) && typed !== snap.authority)} onClick={() => void send()}>
+            <button type="button" className="btn danger" disabled={m.busy || (!uncertain(m) && typed !== snap.authority)} onClick={() => void send()}>
               {m.busy ? '보내는 중…' : uncertain(m) ? '같은 작업으로 다시 보내기' : '등록 해제'}
             </button>
           </>
@@ -1015,20 +1015,20 @@ function BindDialog({ tenant, r, onClose, onDone }: { tenant: string; r: Externa
       onClose={onClose}
       footer={
         applied ? (
-          <button className="btn primary" onClick={onClose}>
+          <button type="button" className="btn primary" onClick={onClose}>
             닫기
           </button>
         ) : (
           <>
-            <button className="btn" onClick={onClose} title={waiting ? '닫아도 비밀값 보관함의 승인 대기에 남습니다' : undefined}>
+            <button type="button" className="btn" onClick={onClose} title={waiting ? '닫아도 비밀값 보관함의 승인 대기에 남습니다' : undefined}>
               {waiting ? '나중에' : '취소'}
             </button>
             {rejected ? (
-              <button className="btn primary" disabled={m.busy} onClick={() => void again()}>
+              <button type="button" className="btn primary" disabled={m.busy} onClick={() => void again()}>
                 {m.busy ? '보내는 중…' : '↻ 새로 연결'}
               </button>
             ) : (
-              <button className="btn primary" disabled={m.busy || !node || waiting || notBindable || !!m.op} onClick={() => void go()}>
+              <button type="button" className="btn primary" disabled={m.busy || !node || waiting || notBindable || !!m.op} onClick={() => void go()}>
                 {m.busy ? '보내는 중…' : uncertain(m) ? '같은 작업으로 다시 보내기' : '연결'}
               </button>
             )}
@@ -1083,10 +1083,10 @@ function UnbindDialog({ tenant, r, onClose, onDone }: { tenant: string; r: Exter
       onClose={onClose}
       footer={
         <>
-          <button className="btn" onClick={onClose}>
+          <button type="button" className="btn" onClick={onClose}>
             취소
           </button>
-          <button className="btn danger" disabled={m.busy || notBound} onClick={() => void go()}>
+          <button type="button" className="btn danger" disabled={m.busy || notBound} onClick={() => void go()}>
             {m.busy ? '보내는 중…' : uncertain(m) ? '같은 작업으로 다시 보내기' : '연결 해제'}
           </button>
         </>

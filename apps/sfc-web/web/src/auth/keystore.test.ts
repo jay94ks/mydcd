@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { bufferSource } from '../lib/cryptoCompat';
 
 type KS = typeof import('./keystore');
 const real = globalThis.crypto;
@@ -16,7 +17,7 @@ async function load(mode: 'webcrypto' | 'plain-http'): Promise<KS> {
 
 const bytes = (h: string) => Uint8Array.from(h.match(/../g)!, (x) => parseInt(x, 16));
 const verifies = async (publicKeyHex: string, msg: Uint8Array, sigHex: string) =>
-  real.subtle.verify('Ed25519', await real.subtle.importKey('raw', bytes(publicKeyHex), 'Ed25519', false, ['verify']), bytes(sigHex), msg);
+  real.subtle.verify('Ed25519', await real.subtle.importKey('raw', bytes(publicKeyHex), 'Ed25519', false, ['verify']), bytes(sigHex), bufferSource(msg));
 const toPem = (der: ArrayBuffer) => `-----BEGIN PRIVATE KEY-----\n${btoa(String.fromCharCode(...new Uint8Array(der))).replace(/.{64}/g, '$&\n')}\n-----END PRIVATE KEY-----\n`;
 const hexOf = (b: ArrayBuffer) => Array.from(new Uint8Array(b), (x) => x.toString(16).padStart(2, '0')).join('');
 

@@ -4,46 +4,58 @@ package deployment
 
 import (
 	"crypto/ed25519"
+	"encoding/json"
 	"strings"
 	"testing"
 
 	"github.com/jay94ks/seafield/internal/schema"
+	"github.com/jay94ks/seafield/internal/workload"
 
 	"github.com/jay94ks/seafield/internal/cluster/state"
 )
 
-// surgeFixture plans the rolling deploy with FeatureTaskSurge. Fresh
-// addresses stand in for the planner step that gives a surged Task new ones:
-// the original addresses are held by another key.
-func surgeFixture(t *testing.T, fresh bool) *inventoryFixture {
+// surgeFixture plans the rolling deploy with FeatureTaskSurge: the planner
+// gives each surged Task new automatic addresses (surgeFreshAddresses).
+func surgeFixture(t *testing.T) *inventoryFixture {
 	t.Helper()
 	return runningReplacementFixtureFor(t, nil, func(ctx *PlanningContext) {
 		ctx.Features[FeatureTaskSurge] = true
-		if fresh {
-			for ip, ref := range ctx.Addresses {
-				if strings.Contains(ref.Key, "/web/") {
-					ref.Key += "-original"
-					ctx.Addresses[ip] = ref
-				}
-			}
-		}
 	})
 }
 
-func TestSurgeNeedsOwnAddresses(t *testing.T) {
-	x := surgeFixture(t, false)
-	for _, w := range x.e.d.Replacement.Plan.Waves {
-		if w.Surge {
-			t.Fatal("surge planned with the original's address")
+func TestSurgePlansFreshAddresses(t *testing.T) {
+	x := surgeFixture(t)
+	if x.e.d.Replacement == nil || x.e.d.Replacement.Phase != phaseSurging {
+		t.Fatal("surge not planned")
+	}
+	for _, c := range x.a.Claims() {
+		if c.Step.Kind != "task" || !strings.Contains(c.Step.Key, "/web/") {
+			continue
+		}
+		var before, after ComposeService
+		_ = json.Unmarshal(c.Step.Goal, &before)
+		for _, step := range x.b.Steps() {
+			if step.Key == c.Step.Key {
+				_ = json.Unmarshal(step.Goal, &after)
+			}
+		}
+		for alias, a := range before.Networks {
+			if a.IPv4 == "" || after.Networks[alias].IPv4 == "" || a.IPv4 == after.Networks[alias].IPv4 {
+				t.Fatal("surged Task kept the original's address", c.Step.Key, a.IPv4, after.Networks[alias].IPv4)
+			}
 		}
 	}
-	if x.e.d.Replacement.Phase != "retiring" {
-		t.Fatalf("phase %s", x.e.d.Replacement.Phase)
+	// Without the feature the address stays.
+	plain := runningReplacementFixtureFor(t, nil, nil)
+	for _, w := range plain.e.d.Replacement.Plan.Waves {
+		if w.Surge {
+			t.Fatal("surge planned without the feature")
+		}
 	}
 }
 
 func TestSurgeStartsNewBeforeStoppingOriginal(t *testing.T) {
-	x := surgeFixture(t, true)
+	x := surgeFixture(t)
 	r := x.e.d.Replacement
 	if r == nil || len(r.Plan.Waves) != 2 || !r.Plan.Waves[0].Surge || !r.Plan.Waves[1].Surge || r.Phase != phaseSurging {
 		t.Fatalf("plan %+v", r)
@@ -99,7 +111,14 @@ func TestSurgeStartsNewBeforeStoppingOriginal(t *testing.T) {
 	if _, ok := x.e.SurgeWindow(first); !ok {
 		t.Fatal("window closed before the original stopped")
 	}
+	held := x.a.SupersededReservations()
+	if len(held) != 1 || held[0].Key != workload.ParkedKey(first, previous.Generation) || held[0].Generation != previous.Generation || held[0].Node != "node-a" || held[0].Need.CPU == 0 || held[0].Need.Memory == 0 {
+		t.Fatalf("running original not held against the quota: %+v", held)
+	}
 	closeSurgeWave(t, x)
+	if held := x.a.SupersededReservations(); len(held) != 0 {
+		t.Fatalf("gone original still held: %+v", held)
+	}
 	stage, _ = x.e.Stage(first)
 	if !stage.Previous.Removed || stage.Observation == nil || !x.a.ReplacementReady(x.now) {
 		t.Fatal("closing the original lost the new generation's health")

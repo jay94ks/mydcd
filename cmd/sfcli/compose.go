@@ -35,6 +35,7 @@ type composeOptions struct {
 	passwordFDs                                     groupPasswordFDs
 	noInput                                         bool
 	force                                           bool
+	disableCD                                       bool
 }
 
 func parseComposeOptions(args []string, diagnostic io.Writer) (composeOptions, error) {
@@ -65,6 +66,7 @@ func parseComposeDefaults(args []string, diagnostic io.Writer, defaults cliprofi
 	f.Var(&o.passwordFDs, "group-password-fd", "explicit REALM/GROUP=FD (cluster: /GROUP), repeat per required group")
 	f.BoolVar(&o.noInput, "no-input", false, "use existing approvals/explicit FDs without a terminal prompt")
 	f.BoolVar(&o.force, "force", false, "let a route share a host+prefix another app of the tenant serves")
+	f.BoolVar(&o.disableCD, "disable-cd", false, "confirm that deploying a file without x-sfc.cd turns the app's CD off")
 	if err := f.Parse(args); err != nil {
 		return o, err
 	}
@@ -175,6 +177,9 @@ func parseComposeDefaults(args []string, diagnostic io.Writer, defaults cliprofi
 	}
 	if o.force && (o.method != "plan" && o.method != "diff" && o.method != "up" || o.plan.set) {
 		return o, errors.New("--force requires plan, diff or up from a file")
+	}
+	if o.disableCD && o.method != "up" {
+		return o, errors.New("--disable-cd requires up")
 	}
 	if o.retrySource.set && o.method != "resume" {
 		return o, errors.New("--retry-source requires compose resume")

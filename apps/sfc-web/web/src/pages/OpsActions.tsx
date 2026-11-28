@@ -359,10 +359,10 @@ export function ChangeBuilder({ actions, editing, onAdd }: { actions: OpAction[]
                   <input value={reason} maxLength={512} onChange={(e) => setReason(e.target.value)} />
                 </Field>
                 <div className="row" style={{ justifyContent: 'flex-end', gap: 8 }}>
-                  <button className="btn" disabled={!ready || now.busy} onClick={() => void sendNow()}>
+                  <button type="button" className="btn" disabled={!ready || now.busy} onClick={() => void sendNow()}>
                     지금 바로 보내기
                   </button>
-                  <button className="btn primary" disabled={Object.keys(payload).length === 0 || (manual && typed === undefined)} onClick={add}>
+                  <button type="button" className="btn primary" disabled={Object.keys(payload).length === 0 || (manual && typed === undefined)} onClick={add}>
                     {editing ? '묶음에 고쳐 넣기' : '묶음에 더하기'}
                   </button>
                 </div>
@@ -541,10 +541,10 @@ export function ChangeBatch({ items, setItems, actions, onEdit, onSent }: { item
       actions={
         <span className="row" style={{ gap: 8 }}>
           <input ref={fileRef} type="file" accept="application/json,.json" hidden onChange={(e) => (e.target.files?.[0] && void importFile(e.target.files[0]), (e.target.value = ''))} />
-          <button className="btn" disabled={sending} onClick={() => fileRef.current?.click()}>
+          <button type="button" className="btn" disabled={sending} onClick={() => fileRef.current?.click()}>
             파일 불러오기
           </button>
-          <button className="btn" disabled={!items.length} onClick={exportFile}>
+          <button type="button" className="btn" disabled={!items.length} onClick={exportFile}>
             파일로 내보내기
           </button>
         </span>
@@ -592,10 +592,10 @@ export function ChangeBatch({ items, setItems, actions, onEdit, onSent }: { item
                         {st ? <Badge tone={st[0]}>{st[1]}</Badge> : x.error !== undefined ? <Badge tone="er">보내지 못함</Badge> : null}
                         {editable(x) && (
                           <>
-                            <button className="btn sm" disabled={locked} onClick={() => (onEdit(x), setItems((xs) => xs.filter((y) => y.uid !== x.uid)))}>
+                            <button type="button" className="btn sm" disabled={locked} onClick={() => (onEdit(x), setItems((xs) => xs.filter((y) => y.uid !== x.uid)))}>
                               고치기
                             </button>
-                            <button className="btn sm" disabled={locked} aria-label={`${i + 1}번 빼기`} onClick={() => setItems((xs) => xs.filter((y) => y.uid !== x.uid))}>
+                            <button type="button" className="btn sm" disabled={locked} aria-label={`${i + 1}번 빼기`} onClick={() => setItems((xs) => xs.filter((y) => y.uid !== x.uid))}>
                               ✕
                             </button>
                           </>
@@ -615,10 +615,10 @@ export function ChangeBatch({ items, setItems, actions, onEdit, onSent }: { item
         줄을 끌어 순서를 바꿉니다. 위에서부터 하나씩 보내고, 거부되거나 결과를 모르는 변경이 나오면 그 뒤는 보내지 않습니다. 앞 변경에 기대는 기준 버전은 앞 변경이 확정된 뒤 채웁니다. 확정된 앞 변경은 되돌리지 않습니다.
       </span>
       <div className="row" style={{ justifyContent: 'flex-end', gap: 8 }}>
-        <button className="btn" disabled={!items.length || sending} onClick={() => (setItems(() => []), (batch.current = newOpId()))}>
+        <button type="button" className="btn" disabled={!items.length || sending} onClick={() => (setItems(() => []), (batch.current = newOpId()))}>
           비우기
         </button>
-        <button className="btn primary" disabled={!items.length || sending || items.every((x) => x.op?.state === 'applied')} onClick={() => void send()}>
+        <button type="button" className="btn primary" disabled={!items.length || sending || items.every((x) => x.op?.state === 'applied')} onClick={() => void send()}>
           {sending ? '보내는 중…' : `${items.filter((x) => x.op?.state !== 'applied').length}개 차례로 보내기`}
         </button>
       </div>

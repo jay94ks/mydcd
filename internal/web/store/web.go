@@ -86,9 +86,11 @@ func auditKey(at time.Time, id string) []byte {
 
 // AppendAudit adds an audit entry.
 func (s *Store) AppendAudit(e *AuditEntry) error {
-	return s.db.Update(func(tx *bolt.Tx) error {
+	err := s.db.Update(func(tx *bolt.Tx) error {
 		return putJSON(tx.Bucket(bucketAudit), auditKey(e.At, e.ID), e)
 	})
+	s.changed(err, Change{Kind: "audit", Tenant: e.Tenant, ID: e.ID})
+	return err
 }
 
 // ListAudit returns entries newest first, older than before (zero: now),

@@ -480,10 +480,18 @@ func (r *Runtime) retireNetworkAddresses(ctx context.Context, v cluster.View, ap
 		members, memberErr := r.controlPolicy.Members(v.State)
 		allocationOwner, ownerErr := identity.ParseKey(f.Target.Allocation.Owner)
 		nativeOwner, nativeLocal := r.nativeOwner(allocationOwner)
-		if task.Drain == nil || task.Drain.Result == nil || taskOwner == nil || !local || taskOwner.workload == nil || memberErr != nil || ownerErr != nil || !nativeLocal || !members.OwnsResource(r.commandIdentity().Public, task.Original.Step.Owner) || !members.OwnsResource(r.commandIdentity().Public, allocationOwner) {
+		if !task.Superseded && (task.Drain == nil || task.Drain.Result == nil) || taskOwner == nil || !local || taskOwner.workload == nil || memberErr != nil || ownerErr != nil || !nativeLocal || !members.OwnsResource(r.commandIdentity().Public, task.Original.Step.Owner) || !members.OwnsResource(r.commandIdentity().Public, allocationOwner) {
 			return false, deployment.ErrInputs
 		}
-		gone, e := taskOwner.workload.Gone(ctx, task.Original.Step.Key, task.Drain.Result.Revision, task.Original.Result.Generation)
+		var gone bool
+		var e error
+		if task.Superseded {
+			// A surged original ran from its parked record; its successor
+			// holds the main one (and its own addresses).
+			gone, e = taskOwner.supersededGone(ctx, task.Original.Step.Key, task.Original.Result.Generation)
+		} else {
+			gone, e = taskOwner.workload.Gone(ctx, task.Original.Step.Key, task.Drain.Result.Revision, task.Original.Result.Generation)
+		}
 		if e != nil || !gone {
 			return false, errors.Join(e, deployment.ErrInputs)
 		}

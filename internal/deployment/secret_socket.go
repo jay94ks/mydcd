@@ -12,6 +12,7 @@ import (
 
 	"github.com/jay94ks/seafield/internal/cluster/state"
 	"github.com/jay94ks/seafield/internal/secrets"
+	"github.com/jay94ks/seafield/internal/workload"
 )
 
 // sfev.sock: a service that lists `x-sfc.secrets.socket` reads those sources
@@ -22,11 +23,11 @@ import (
 const (
 	// SecretSocketDir is where sfcd binds the socket directory in the
 	// container. A service with a socket may mount nothing over it.
-	SecretSocketDir = "/run/sfc"
+	SecretSocketDir = workload.SecretSocketTarget
 	// SecretSocketPath is the socket in the container.
-	SecretSocketPath = SecretSocketDir + "/sfev.sock"
+	SecretSocketPath = workload.SecretSocketPath
 	// SecretSocketEnv names the socket in the container's environment.
-	SecretSocketEnv = "SFC_SECRET_SOCKET"
+	SecretSocketEnv = workload.SecretSocketEnv
 
 	maxSocketSources = 64
 )

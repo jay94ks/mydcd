@@ -53,9 +53,13 @@ type NodeSummaryView struct {
 	// observability.UnreadyReasons, or UNKNOWN when the server did not say.
 	// FailedSteps and FailingSince (Unix ms, 0 unknown) are cluster-admin
 	// only. Error text stays in that server's log.
-	Reason                        string   `json:",omitempty"`
-	FailedSteps                   []string `json:",omitempty"`
-	FailingSince                  uint64   `json:",omitempty"`
+	Reason       string   `json:",omitempty"`
+	FailedSteps  []string `json:",omitempty"`
+	FailingSince uint64   `json:",omitempty"`
+	// WaitingPeers are the servers this one's failed work waits for
+	// because they cannot be reached (Reason PEER_WAIT when that is all).
+	// Server names are not secret: anyone who sees the row sees them.
+	WaitingPeers                  []string `json:",omitempty"`
 	ObservedAt, ObservationMaxAge uint64
 	Usage                         *NodeUsageView `json:",omitempty"`
 	Admin                         *NodeAdminView `json:",omitempty"`
@@ -356,6 +360,7 @@ func (p Policy) NodeSummary(s state.State, session access.Session, at int64, ten
 					row.Reason = "UNKNOWN"
 					if u := host.Host.Unready; u != nil {
 						row.Reason = u.Reason
+						row.WaitingPeers = append([]string(nil), u.Peers...)
 						if a.admin {
 							row.FailedSteps, row.FailingSince = append([]string(nil), u.Steps...), u.Since
 						}

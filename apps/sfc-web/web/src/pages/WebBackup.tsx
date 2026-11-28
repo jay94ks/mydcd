@@ -145,7 +145,7 @@ export function WebDataCard({ info, onChanged }: { info: Info; onChanged: () => 
             {when(a.last!.at)} 자동 백업 실패 · {a.last!.error ? failText(a.last!.error) : '이유를 받지 못했습니다'}
             {a.next ? ` 다음 시도는 ${when(a.next)}입니다.` : ''}
           </span>
-          <button className="btn sm" disabled={running || sealOff} title={sealOff ? SEAL_OFF : undefined} onClick={() => void run()}>
+          <button type="button" className="btn sm" disabled={running || sealOff} title={sealOff ? SEAL_OFF : undefined} onClick={() => void run()}>
             지금 다시 시도
           </button>
         </div>
@@ -155,26 +155,26 @@ export function WebDataCard({ info, onChanged }: { info: Info; onChanged: () => 
           <span>
             <b>되살리기 대기</b> · 웹 서버를 다시 시작하면 고른 백업으로 바뀝니다. 지금 데이터는 web.db.before-restore-… 파일로 남습니다.
           </span>
-          <button className="btn sm" onClick={() => void cancel()}>
+          <button type="button" className="btn sm" onClick={() => void cancel()}>
             되살리기 취소
           </button>
         </div>
       )}
       <div className="row wrap" style={{ justifyContent: 'flex-end', gap: 8 }}>
-        <button className="btn" disabled={!!au.error && noEndpoint(au.error)} title={au.error && noEndpoint(au.error) ? '서버 기능 대기' : undefined} onClick={() => setDlg('automation')}>
+        <button type="button" className="btn" disabled={!!au.error && noEndpoint(au.error)} title={au.error && noEndpoint(au.error) ? '서버 기능 대기' : undefined} onClick={() => setDlg('automation')}>
           자동 작업 계정 켜기…
         </button>
-        <button className="btn" disabled={off} title={offWhy} onClick={() => setDlg('edit')}>
+        <button type="button" className="btn" disabled={off} title={offWhy} onClick={() => setDlg('edit')}>
           자동 백업 바꾸기…
         </button>
-        <button className="btn" disabled={off || !a?.volume} title={offWhy ?? (!a?.volume ? '자동 백업을 먼저 정하세요' : undefined)} onClick={() => setDlg('list')}>
+        <button type="button" className="btn" disabled={off || !a?.volume} title={offWhy ?? (!a?.volume ? '자동 백업을 먼저 정하세요' : undefined)} onClick={() => setDlg('list')}>
           백업 목록
         </button>
-        <button className="btn" disabled={off || !a?.volume || running || !!a?.running || sealOff} title={offWhy ?? (!a?.volume ? '데이터 저장소를 먼저 고르세요' : sealOff ? SEAL_OFF : undefined)} onClick={() => void run()}>
+        <button type="button" className="btn" disabled={off || !a?.volume || running || !!a?.running || sealOff} title={offWhy ?? (!a?.volume ? '데이터 저장소를 먼저 고르세요' : sealOff ? SEAL_OFF : undefined)} onClick={() => void run()}>
           {running || a?.running ? '백업 중…' : '지금 백업'}
         </button>
         {API_MODE === 'mock' ? (
-          <button className="btn" disabled title="목업에는 내려받을 파일이 없습니다">
+          <button type="button" className="btn" disabled title="목업에는 내려받을 파일이 없습니다">
             내려받기
           </button>
         ) : (
@@ -182,7 +182,7 @@ export function WebDataCard({ info, onChanged }: { info: Info; onChanged: () => 
             내려받기
           </a>
         )}
-        <button className="btn" disabled={info.restorePending} title={info.restorePending ? '되살리기 대기 중입니다' : undefined} onClick={() => (setRestoreFile(undefined), setDlg('restore'))}>
+        <button type="button" className="btn" disabled={info.restorePending} title={info.restorePending ? '되살리기 대기 중입니다' : undefined} onClick={() => (setRestoreFile(undefined), setDlg('restore'))}>
           백업에서 되살리기…
         </button>
       </div>
@@ -293,10 +293,10 @@ function AutoBackupDialog({ cur, onClose, onSaved }: { cur: DAutoBackup; onClose
         onClose={onClose}
         footer={
           <>
-            <button className="btn" onClick={onClose}>
+            <button type="button" className="btn" onClick={onClose}>
               취소
             </button>
-            <button className="btn primary" disabled={busy || m.busy} onClick={() => void save(false, { revoke })}>
+            <button type="button" className="btn primary" disabled={busy || m.busy} onClick={() => void save(false, { revoke })}>
               {busy ? '끄는 중…' : '끄기'}
             </button>
           </>
@@ -326,11 +326,11 @@ function AutoBackupDialog({ cur, onClose, onSaved }: { cur: DAutoBackup; onClose
       onClose={onClose}
       footer={
         <>
-          <button className="btn" onClick={onClose}>
+          <button type="button" className="btn" onClick={onClose}>
             {notManager ? '닫기' : '취소'}
           </button>
           {!notManager && (
-            <button className="btn primary" disabled={busy || m.busy || (on && !!problem)} title={on ? problem : undefined} onClick={submit}>
+            <button type="button" className="btn primary" disabled={busy || m.busy || (on && !!problem)} title={on ? problem : undefined} onClick={submit}>
               {busy ? '저장하는 중…' : needGrant ? '위임하고 저장' : '저장'}
             </button>
           )}
@@ -424,7 +424,7 @@ function BackupListDialog({ cfg, onClose, onRestore }: { cfg: DAutoBackup; onClo
         }
         onClose={onClose}
         footer={
-          <button className="btn primary" onClick={onClose}>
+          <button type="button" className="btn primary" onClick={onClose}>
             닫기
           </button>
         }
@@ -469,7 +469,7 @@ function BackupListDialog({ cfg, onClose, onRestore }: { cfg: DAutoBackup; onClo
                 {!more && files.length > shown.length && (
                   <tr>
                     <td colSpan={4}>
-                      <button className="linkish small" onClick={() => setMore(true)}>
+                      <button type="button" className="linkish small" onClick={() => setMore(true)}>
                         … {files.length - shown.length}개 더
                       </button>
                     </td>
@@ -510,15 +510,15 @@ function DeleteBackupDialog({ cfg, file, onClose, onDone }: { cfg: DAutoBackup; 
       onClose={onClose}
       footer={
         done || gone ? (
-          <button className="btn primary" onClick={onClose}>
+          <button type="button" className="btn primary" onClick={onClose}>
             닫기
           </button>
         ) : (
           <>
-            <button className="btn" onClick={onClose}>
+            <button type="button" className="btn" onClick={onClose}>
               취소
             </button>
-            <button className="btn danger solid" disabled={m.busy || m.op?.state === 'failed' || m.op?.state === 'rejected'} onClick={() => void send()}>
+            <button type="button" className="btn danger solid" disabled={m.busy || m.op?.state === 'failed' || m.op?.state === 'rejected'} onClick={() => void send()}>
               {m.busy ? '지우는 중…' : '지우기'}
             </button>
           </>
@@ -572,10 +572,10 @@ function RestoreDialog({ cfg, initial, schema, onClose, onDone }: { cfg?: DAutoB
       onClose={onClose}
       footer={
         <>
-          <button className="btn" onClick={onClose}>
+          <button type="button" className="btn" onClick={onClose}>
             취소
           </button>
-          <button className="btn danger solid" disabled={!ready || busy} onClick={() => void go()}>
+          <button type="button" className="btn danger solid" disabled={!ready || busy} onClick={() => void go()}>
             {busy ? (src === 'file' ? '올리는 중…' : '보내는 중…') : '되살리기'}
           </button>
         </>

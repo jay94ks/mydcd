@@ -54,8 +54,12 @@ type Selection struct {
 	Headers, Cookies, Query map[string]string
 	Backends                map[string]BackendSpec
 	Exclude                 map[string]bool
-	Entropy                 uint64
-	Group, Condition        string
+	// Avoid backends are left out unless nothing else can serve; Light
+	// backends get a small share next to the others (owned VPS traffic
+	// holds, devel/design/vps-hostinger.md §4).
+	Avoid, Light     map[string]bool
+	Entropy          uint64
+	Group, Condition string
 }
 
 func tokenName(v string) bool {
@@ -245,10 +249,10 @@ func (b *Balancer) AcquireWith(now uint64, p Balance, q Selection) (BackendLease
 	if p.SlowStartSeconds > 0 {
 		slowStart = p.SlowStartSeconds * 1000
 	}
-	selectIDs := func(filter bool) {
+	selectIDs := func(filter, avoid bool) {
 		for id, s := range b.backends {
 			v := s.spec
-			if !v.Healthy || v.Draining || v.ObservedAt > now || now-v.ObservedAt > b.maxAge || s.leases.Count() >= v.Capacity || q.Exclude[id] {
+			if !v.Healthy || v.Draining || v.ObservedAt > now || now-v.ObservedAt > b.maxAge || s.leases.Count() >= v.Capacity || q.Exclude[id] || avoid && q.Avoid[id] {
 				continue
 			}
 			if filter && !p.Groups[group].contains(q.Backends[id]) {
@@ -272,18 +276,34 @@ func (b *Balancer) AcquireWith(now uint64, p Balance, q Selection) (BackendLease
 			weights[id] = weight
 		}
 	}
-	selectIDs(group != "")
-	if len(ids) == 0 && group != "" && p.Fallback != "503" {
-		selectIDs(false)
+	pick := func(avoid bool) {
+		selectIDs(group != "", avoid)
+		if len(ids) == 0 && group != "" && p.Fallback != "503" {
+			selectIDs(false, avoid)
+		}
+	}
+	pick(true)
+	light := q.Light
+	if len(ids) == 0 && len(q.Avoid) != 0 {
+		// The last backends left stay in service, at a small share.
+		pick(false)
+		light = map[string]bool{}
+		for id := range q.Light {
+			light[id] = true
+		}
+		for id := range q.Avoid {
+			light[id] = true
+		}
 	}
 	if len(ids) == 0 {
 		return BackendLease{}, ErrRoute
 	}
 	sort.Strings(ids)
+	lightWeights(ids, weights, light)
 	if p.Locality == "same-node" && q.Node != "" {
 		local := []string{}
 		for _, id := range ids {
-			if q.Backends[id].Node == q.Node {
+			if q.Backends[id].Node == q.Node && !light[id] {
 				local = append(local, id)
 			}
 		}
@@ -341,4 +361,31 @@ func (b *Balancer) AcquireWith(now uint64, p Balance, q Selection) (BackendLease
 	b.ticket++
 	lease, err := b.backends[selected].leases.Acquire()
 	return BackendLease{Backend: selected, Lease: lease}, err
+}
+
+// lightScale is how many times a regular backend outweighs a light one.
+const lightScale = 16
+
+// lightWeights gives light backends weight 1 and scales the others up, so a
+// light backend takes about 1/lightScale of a regular one's share. With only
+// light (or only regular) backends left the weights stay as they are.
+func lightWeights(ids []string, weights map[string]int64, light map[string]bool) {
+	regular, held := false, false
+	for _, id := range ids {
+		if light[id] {
+			held = true
+		} else {
+			regular = true
+		}
+	}
+	if !regular || !held {
+		return
+	}
+	for _, id := range ids {
+		if light[id] {
+			weights[id] = 1
+		} else {
+			weights[id] *= lightScale
+		}
+	}
 }

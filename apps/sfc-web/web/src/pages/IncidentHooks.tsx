@@ -119,7 +119,7 @@ function DesktopHooks() {
         title="장애 대응"
         ids="UI-BB"
         actions={
-          <button className="btn primary" disabled={!canAdd} title={canAdd ? undefined : '작업 공간 관리자 이상 권한이 필요합니다'} onClick={() => setAdding(true)}>
+          <button type="button" className="btn primary" disabled={!canAdd} title={canAdd ? undefined : '작업 공간 관리자 이상 권한이 필요합니다'} onClick={() => setAdding(true)}>
             ＋ 웹훅 등록
           </button>
         }
@@ -243,7 +243,7 @@ function Body({ hooks, links, onChange }: { hooks: Webhook[]; links: WebhookLink
                 const ls = linksOf(x.name);
                 return (
                   <div key={x.name} className={`gr hooks ${x.name === w?.name ? 'on' : ''}`}>
-                    <button className="textbtn" style={{ fontWeight: 600, textAlign: 'left' }} onClick={() => setSel(x.name)}>
+                    <button type="button" className="textbtn" style={{ fontWeight: 600, textAlign: 'left' }} onClick={() => setSel(x.name)}>
                       {x.name}
                     </button>
                     <span className={`kind ${x.kind === 'internal' ? 'int' : 'ext'}`}>{x.kind === 'internal' ? '⌂ 클러스터 내부' : '↗ 외부 호출'}</span>
@@ -270,10 +270,10 @@ function Body({ hooks, links, onChange }: { hooks: Webhook[]; links: WebhookLink
                 {w.name} · {w.kind === 'internal' ? '클러스터 내부' : '외부 호출'} · {ROLE_NAME[w.role]}
               </h2>
               <span className="row" style={{ gap: 8 }}>
-                <button className="btn" disabled={w.enabled === false} title={w.enabled === false ? '꺼진 웹훅입니다' : undefined} onClick={() => setTest(w)}>
+                <button type="button" className="btn" disabled={w.enabled === false} title={w.enabled === false ? '꺼진 웹훅입니다' : undefined} onClick={() => setTest(w)}>
                   시험 보내기
                 </button>
-                <button className="btn" disabled={w.sign !== undefined ? w.sign !== 'hmac' : !w.secret.set} title={(w.sign ?? (w.secret.set ? 'hmac' : 'none')) !== 'hmac' ? 'HMAC 서명 웹훅만 비밀을 바꿉니다' : undefined} onClick={() => setRotate(w)}>
+                <button type="button" className="btn" disabled={w.sign !== undefined ? w.sign !== 'hmac' : !w.secret.set} title={(w.sign ?? (w.secret.set ? 'hmac' : 'none')) !== 'hmac' ? 'HMAC 서명 웹훅만 비밀을 바꿉니다' : undefined} onClick={() => setRotate(w)}>
                   비밀 바꾸기
                 </button>
                 <Menu
@@ -291,7 +291,7 @@ function Body({ hooks, links, onChange }: { hooks: Webhook[]; links: WebhookLink
             {w.disabledReason === 'failures' && (
               <div className="note wa small">
                 <b>{w.name}</b> · {w.kind === 'internal' && w.target ? `${w.tenant}/${w.target.app}/${w.target.service} 서비스에 상태 검사를 통과한 컨테이너가 없습니다. ` : ''}3번 실패 후 꺼졌습니다.{' '}
-                <button className="textbtn" onClick={() => toggle(w)}>
+                <button type="button" className="textbtn" onClick={() => toggle(w)}>
                   다시 켜기
                 </button>
               </div>
@@ -300,7 +300,7 @@ function Body({ hooks, links, onChange }: { hooks: Webhook[]; links: WebhookLink
             {w.lastDelivery?.retry && (
               <div className="note wa small">
                 {w.name} 전송이 {w.lastDelivery.retry.attempt}번 실패했습니다({w.lastDelivery.status}). 다시 시도하고, 계속 실패하면 꺼집니다.{' '}
-                <button className="textbtn" onClick={() => setDrawer(w)}>
+                <button type="button" className="textbtn" onClick={() => setDrawer(w)}>
                   전송 기록
                 </button>
               </div>
@@ -472,7 +472,7 @@ export function TestDialog({ w, onClose }: { w: Webhook; onClose: () => void }) 
       width={420}
       onClose={onClose}
       footer={
-        <button className="btn" onClick={onClose}>
+        <button type="button" className="btn" onClick={onClose}>
           닫기
         </button>
       }
@@ -504,7 +504,7 @@ export function SecretDialog({ name, value, onClose }: { name: string; value: st
       title="서명 비밀"
       onClose={() => close(false)}
       footer={
-        <button className="btn primary" onClick={() => close(true)}>
+        <button type="button" className="btn primary" onClick={() => close(true)}>
           복사하고 닫기
         </button>
       }
@@ -540,10 +540,10 @@ function RotateDialog({ w, onClose, onDone }: { w: Webhook; onClose: () => void;
       onClose={onClose}
       footer={
         <>
-          <button className="btn" onClick={onClose}>
+          <button type="button" className="btn" onClick={onClose}>
             취소
           </button>
-          <button className="btn danger" disabled={busy} onClick={go}>
+          <button type="button" className="btn danger" disabled={busy} onClick={go}>
             바꾸기
           </button>
         </>
@@ -680,7 +680,7 @@ function AddDialog({ onClose, onSaved }: { onClose: () => void; onSaved: () => v
           onClose={() => (secret ? undefined : done())}
           footer={
             !secret && (
-              <button className="btn primary" onClick={done}>
+              <button type="button" className="btn primary" onClick={done}>
                 닫기
               </button>
             )
@@ -701,19 +701,19 @@ function AddDialog({ onClose, onSaved }: { onClose: () => void; onSaved: () => v
       footer={
         step === 1 ? (
           <>
-            <button className="btn" onClick={onClose}>
+            <button type="button" className="btn" onClick={onClose}>
               취소
             </button>
-            <button className="btn primary" disabled={!step1Ok} onClick={() => setStep(2)}>
+            <button type="button" className="btn primary" disabled={!step1Ok} onClick={() => setStep(2)}>
               다음
             </button>
           </>
         ) : (
           <>
-            <button className="btn" onClick={() => setStep(1)}>
+            <button type="button" className="btn" onClick={() => setStep(1)}>
               뒤로
             </button>
-            <button className="btn primary" disabled={busy || !step2Ok} onClick={send}>
+            <button type="button" className="btn primary" disabled={busy || !step2Ok} onClick={send}>
               {busy ? '보내는 중…' : '시험 보내기'}
             </button>
           </>

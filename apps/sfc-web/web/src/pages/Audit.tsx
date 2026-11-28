@@ -10,8 +10,9 @@ import { Badge, Card, HelpBox, PageHeader } from '../components/ui';
 import { ErrorBand, Load } from '../components/states';
 import { Refresh } from '../components/Refresh';
 import { DataTable } from '../components/DataTable';
-import { usePoll, DEFAULT_POLL_MS } from '../lib/usePoll';
+import { usePoll } from '../lib/usePoll';
 import { fmtTime } from '../lib/format';
+import { auditLive } from '../lib/liveTopics';
 
 const AREA: Record<string, string> = {
   'web-settings': '웹 앱 설정',
@@ -37,7 +38,7 @@ export function auditChange(before: unknown, after: unknown): string[] {
 export function AuditPage() {
   const session = useSession();
   const [tenant, setTenant] = useState('');
-  const first = usePoll((s) => auditLog(tenant || undefined, undefined, s), [tenant], DEFAULT_POLL_MS);
+  const first = usePoll((s) => auditLog(tenant || undefined, undefined, s), [tenant], 0, auditLive(tenant || undefined));
   const [more, setMore] = useState<{ items: DAudit[]; next: string }>();
   const [moreError, setMoreError] = useState<unknown>();
   // 첫 쪽이 다시 읽히면 이어 받은 쪽은 버린다(같은 기준으로 다시 이어 받는다).

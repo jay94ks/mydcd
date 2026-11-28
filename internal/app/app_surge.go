@@ -80,9 +80,9 @@ func (r *Runtime) retireSuperseded(ctx context.Context, v cluster.View, apps con
 			if err = r.workload.RetireParked(ctx, key, v.State.Object(key).Revision, generation); err != nil {
 				return false, err
 			}
-			if gone, err := r.workload.ParkedGone(ctx, key, generation); err != nil || !gone {
-				return false, errors.Join(deployment.ErrInputs, err)
-			}
+		}
+		if gone, err := r.supersededGone(ctx, key, generation); err != nil || !gone {
+			return false, errors.Join(deployment.ErrInputs, err)
 		}
 		// Without a parked record this server never created the original
 		// (or never started it): nothing of that generation can run.
@@ -123,4 +123,15 @@ func (r *Runtime) retireSuperseded(ctx context.Context, v cluster.View, apps con
 	}
 	signature := ed25519.Sign(r.Identity.Private, schema.GoneBytes(r.controlPolicy.Cluster, key, generation, value))
 	return true, r.retirementProgress(ctx, v, app, retirement, "retire-gone", key, control.AppRetirementProgress{Gone: signature})
+}
+
+// supersededGone reports whether the surged original generation of key is
+// gone on this server: its parked record is stopped and absent, or there was
+// none because this server never ran it.
+func (r *Runtime) supersededGone(ctx context.Context, key string, generation uint64) (bool, error) {
+	parked, err := r.parkedOriginal(key, generation)
+	if err != nil || !parked {
+		return !parked && err == nil, err
+	}
+	return r.workload.ParkedGone(ctx, key, generation)
 }

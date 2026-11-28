@@ -9,6 +9,7 @@ import { ResultCodeName, type OpView } from '../api/types';
 import { useAuth } from '../auth/session';
 import { fmtTime } from '../lib/format';
 import { OpBadge } from './ui';
+import { ACTION_TITLE } from '../pages/opActionText';
 import { ErrorBand } from './states';
 
 /** POST /ops 한 건의 내용. payload 키는 sfcd Go 필드 이름(PascalCase). */
@@ -189,7 +190,7 @@ export function OpPanel({ op, onChange, onContinue }: { op: OpView; onChange?: (
       <div className="row between">
         <span className="row">
           <OpBadge state={op.state} />
-          <b>{op.action}</b>
+          <b title={op.action}>{ACTION_TITLE[op.action] ?? op.action}</b>
           <span className="muted">{op.target}</span>
         </span>
         <Link to={`/system/ops?focus=${encodeURIComponent(op.id)}`} className="small">

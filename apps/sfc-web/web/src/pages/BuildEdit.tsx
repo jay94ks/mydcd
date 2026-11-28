@@ -657,14 +657,14 @@ function Editor({ cur, taken, onSaved }: { cur?: BuildContext; taken: string[]; 
                 actions={
                   <div className="row" style={{ gap: 6, alignItems: 'center' }}>
                     {editingFile ? (
-                      <button className="btn sm" onClick={() => setEditing(undefined)}>
+                      <button type="button" className="btn sm" onClick={() => setEditing(undefined)}>
                         Dockerfile로 돌아가기
                       </button>
                     ) : (
                       <>
                         <span className="small muted">템플릿:</span>
                         {Object.entries(TEMPLATES).map(([k, [label]]) => (
-                          <button
+                          <button type="button"
                             key={k}
                             className="btn sm"
                             disabled={locked}
@@ -673,7 +673,7 @@ function Editor({ cur, taken, onSaved }: { cur?: BuildContext; taken: string[]; 
                             {label}
                           </button>
                         ))}
-                        <button className="btn sm" disabled={locked} onClick={() => loadInput.current?.click()}>
+                        <button type="button" className="btn sm" disabled={locked} onClick={() => loadInput.current?.click()}>
                           파일에서 불러오기
                         </button>
                         <input
@@ -723,16 +723,16 @@ function Editor({ cur, taken, onSaved }: { cur?: BuildContext; taken: string[]; 
                 title={`컨텍스트 파일 · 파일 ${(files?.length ?? 0) + 1}개 · ${fmtBytes(total)}${pol?.exists ? ` / 빌드 입력 예산 ${fmtBytes(pol.workspaceBytes)}` : ''}`}
                 actions={
                   <div className="row" style={{ gap: 6 }}>
-                    <button className="btn sm" disabled={locked} onClick={() => fileInput.current?.click()}>
+                    <button type="button" className="btn sm" disabled={locked} onClick={() => fileInput.current?.click()}>
                       ⇪ 파일 올리기
                     </button>
-                    <button className="btn sm" disabled={locked} onClick={() => dirInput.current?.click()}>
+                    <button type="button" className="btn sm" disabled={locked} onClick={() => dirInput.current?.click()}>
                       ⇪ 폴더 올리기
                     </button>
-                    <button className="btn sm" disabled={locked} title="브라우저에서 풀어 지금 폴더에 넣습니다" onClick={() => zipInput.current?.click()}>
+                    <button type="button" className="btn sm" disabled={locked} title="브라우저에서 풀어 지금 폴더에 넣습니다" onClick={() => zipInput.current?.click()}>
                       .zip 풀어 넣기
                     </button>
-                    <button className="btn sm" disabled={locked} onClick={() => setNewFile('')}>
+                    <button type="button" className="btn sm" disabled={locked} onClick={() => setNewFile('')}>
                       ＋ 새 파일
                     </button>
                     <input ref={replaceInput} type="file" hidden onChange={(e) => (e.target.files?.[0] && void addLocal([e.target.files[0]], '', replaceTo.current), (e.target.value = ''))} />
@@ -748,7 +748,7 @@ function Editor({ cur, taken, onSaved }: { cur?: BuildContext; taken: string[]; 
                       이 초안이 다른 곳에서 바뀌었습니다 (r{conflict.from}
                       {conflict.to ? ` → r${conflict.to}` : ''}). 방금 한 편집은 적용되지 않았습니다. 새로 읽기 뒤 다시 하세요.
                     </span>
-                    <button className="btn sm" onClick={() => (s.clear(), onSaved())}>
+                    <button type="button" className="btn sm" onClick={() => (s.clear(), onSaved())}>
                       새로 읽기
                     </button>
                   </div>
@@ -765,7 +765,7 @@ function Editor({ cur, taken, onSaved }: { cur?: BuildContext; taken: string[]; 
                       onChange={(e) => setNewFile(e.target.value)}
                       onKeyDown={(e) => e.key === 'Escape' && setNewFile(undefined)}
                     />
-                    <button
+                    <button type="button"
                       className="btn sm primary"
                       disabled={!okPath((folder ? folder.replace(/\/?$/, '/') : '') + newFile) || paths.includes((folder ? folder.replace(/\/?$/, '/') : '') + newFile)}
                       onClick={() => {
@@ -846,10 +846,10 @@ function Editor({ cur, taken, onSaved }: { cur?: BuildContext; taken: string[]; 
                   )}
                   <span className="small muted">4 MiB 조각으로 올립니다. 끊기거나 창을 닫아도 같은 파일을 다시 고르면 이어 올립니다. 다 올리면 서버가 풀어 파일 목록을 채웁니다.</span>
                   <div className="row" style={{ gap: 8, justifyContent: 'flex-end' }}>
-                    <button className="btn sm" disabled={prog.phase !== 'send'} onClick={() => (zipStop.current = true)}>
+                    <button type="button" className="btn sm" disabled={prog.phase !== 'send'} onClick={() => (zipStop.current = true)}>
                       멈춤
                     </button>
-                    <button className="btn sm danger" disabled={prog.phase === 'finish'} onClick={() => void cancelZip()}>
+                    <button type="button" className="btn sm danger" disabled={prog.phase === 'finish'} onClick={() => void cancelZip()}>
                       취소
                     </button>
                   </div>
@@ -866,7 +866,7 @@ function Editor({ cur, taken, onSaved }: { cur?: BuildContext; taken: string[]; 
                         파일 고르기
                         <input type="file" accept=".zip,application/zip" hidden disabled={locked} onChange={(e) => (pickZip(e.target.files?.[0]), (e.target.value = ''))} />
                       </label>
-                      <button className="btn sm" disabled={locked} onClick={() => void dropZip()}>
+                      <button type="button" className="btn sm" disabled={locked} onClick={() => void dropZip()}>
                         버리기
                       </button>
                     </span>
@@ -916,7 +916,7 @@ function Editor({ cur, taken, onSaved }: { cur?: BuildContext; taken: string[]; 
                 </label>
               </fieldset>
               <div className="row" style={{ gap: 8, alignItems: 'center' }}>
-                <button
+                <button type="button"
                   className="btn"
                   disabled={isNew || formDirty || verifying}
                   title={isNew || formDirty ? '저장한 설정으로 받아 봅니다. 먼저 저장하세요' : undefined}
@@ -1057,34 +1057,34 @@ function Editor({ cur, taken, onSaved }: { cur?: BuildContext; taken: string[]; 
           )}
           <div className="row" style={{ gap: 8, justifyContent: 'flex-end' }}>
             {conflict ? (
-              <button className="btn primary" onClick={() => (s.clear(), onSaved())}>
+              <button type="button" className="btn primary" onClick={() => (s.clear(), onSaved())}>
                 새로 읽기
               </button>
             ) : s.unsure ? (
               s.run?.error instanceof ZipPaused ? (
-                <button className="btn primary" disabled={s.run?.busy} onClick={s.retry}>
+                <button type="button" className="btn primary" disabled={s.run?.busy} onClick={s.retry}>
                   이어 올리기
                 </button>
               ) : (
-                <button className="btn primary" disabled={s.run?.busy} onClick={s.retry}>
+                <button type="button" className="btn primary" disabled={s.run?.busy} onClick={s.retry}>
                   같은 작업으로 다시 보내기
                 </button>
               )
             ) : s.failed ? (
               <>
-                <button className="btn" onClick={s.clear}>
+                <button type="button" className="btn" onClick={s.clear}>
                   고치기
                 </button>
-                <button className="btn primary" onClick={s.retry}>
+                <button type="button" className="btn primary" onClick={s.retry}>
                   이 단계부터 다시
                 </button>
               </>
             ) : (
               <>
-                <button className="btn" disabled={locked || problems.length > 0 || !dirty} onClick={() => save('stay')}>
+                <button type="button" className="btn" disabled={locked || problems.length > 0 || !dirty} onClick={() => save('stay')}>
                   저장
                 </button>
-                <button
+                <button type="button"
                   className="btn primary"
                   disabled={locked || problems.length > 0 || (!dirty && !cur?.version) || !pol?.nodes.length}
                   title={pol && !pol.nodes.length ? '빌드 설정에 빌드 서버가 없습니다' : undefined}
@@ -1104,10 +1104,10 @@ function Editor({ cur, taken, onSaved }: { cur?: BuildContext; taken: string[]; 
           onClose={() => setTpl(undefined)}
           footer={
             <>
-              <button className="btn" onClick={() => setTpl(undefined)}>
+              <button type="button" className="btn" onClick={() => setTpl(undefined)}>
                 취소
               </button>
-              <button className="btn primary" onClick={() => (setDocker(TEMPLATES[tpl][1]), setTpl(undefined))}>
+              <button type="button" className="btn primary" onClick={() => (setDocker(TEMPLATES[tpl][1]), setTpl(undefined))}>
                 바꾸기
               </button>
             </>
@@ -1123,10 +1123,10 @@ function Editor({ cur, taken, onSaved }: { cur?: BuildContext; taken: string[]; 
           onClose={() => setMissingDlg(false)}
           footer={
             <>
-              <button className="btn" onClick={() => (setMissingDlg(false), setAfterSave('stay'), s.start(steps(false)))}>
+              <button type="button" className="btn" onClick={() => (setMissingDlg(false), setAfterSave('stay'), s.start(steps(false)))}>
                 저장만
               </button>
-              <button className="btn primary" onClick={() => (setMissingDlg(false), fileInput.current?.click())}>
+              <button type="button" className="btn primary" onClick={() => (setMissingDlg(false), fileInput.current?.click())}>
                 파일 추가하러 가기
               </button>
             </>
@@ -1166,15 +1166,15 @@ function Editor({ cur, taken, onSaved }: { cur?: BuildContext; taken: string[]; 
           onClose={() => setLeave(false)}
           footer={
             <>
-              <button className="btn" onClick={() => setLeave(false)}>
+              <button type="button" className="btn" onClick={() => setLeave(false)}>
                 계속 편집
               </button>
               {f.kind === 'draft' && (
-                <button className="btn" disabled={problems.length > 0} title={problems[0]} onClick={() => (setLeave(false), save('leave', false))}>
+                <button type="button" className="btn" disabled={problems.length > 0} title={problems[0]} onClick={() => (setLeave(false), save('leave', false))}>
                   초안 두고 나가기
                 </button>
               )}
-              <button className="btn danger" onClick={() => navigate('/images/builds')}>
+              <button type="button" className="btn danger" onClick={() => navigate('/images/builds')}>
                 버리기
               </button>
             </>
@@ -1342,10 +1342,10 @@ function MoveDialog({ file, folders, copyLines, taken, onClose, onMove }: { file
       onClose={onClose}
       footer={
         <>
-          <button className="btn" onClick={onClose}>
+          <button type="button" className="btn" onClick={onClose}>
             취소
           </button>
-          <button className="btn primary" disabled={!!bad || to === file.path} onClick={() => onMove(to)}>
+          <button type="button" className="btn primary" disabled={!!bad || to === file.path} onClick={() => onMove(to)}>
             옮기기
           </button>
         </>

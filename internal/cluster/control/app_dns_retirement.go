@@ -173,7 +173,7 @@ func (a Apps) retirementNetworkAllocations(entry appEntry, c deployment.Claim) (
 					continue
 				}
 				endpoint := task.Step.Key + "/" + alias + "/" + strconv.Itoa(family)
-				allocation, held := a.network.Authority.AddressBook().Allocation(endpoint)
+				allocation, held := a.network.Authority.AddressBook().AllocationOf(endpoint, task.Result.Generation)
 				if !held {
 					continue
 				}

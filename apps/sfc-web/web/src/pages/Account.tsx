@@ -89,15 +89,15 @@ export function NewKeyDialog({ username, userId, accountRevision, onClose, onDon
       onClose={onClose}
       footer={
         step === 'done' ? (
-          <button className="btn primary" onClick={onClose}>
+          <button type="button" className="btn primary" onClick={onClose}>
             닫기
           </button>
         ) : (
           <>
-            <button className="btn" onClick={onClose} disabled={step === 'working'}>
+            <button type="button" className="btn" onClick={onClose} disabled={step === 'working'}>
               취소
             </button>
-            <button className="btn primary" disabled={!valid || step === 'working'} onClick={() => void run()}>
+            <button type="button" className="btn primary" disabled={!valid || step === 'working'} onClick={() => void run()}>
               {step === 'working' ? '만드는 중…' : '만들고 등록'}
             </button>
           </>
@@ -190,15 +190,15 @@ export function AccountPage() {
           onClose={() => setDisabling(undefined)}
           footer={
             dis.op ? (
-              <button className="btn primary" onClick={() => setDisabling(undefined)}>
+              <button type="button" className="btn primary" onClick={() => setDisabling(undefined)}>
                 닫기
               </button>
             ) : (
               <>
-                <button className="btn" onClick={() => setDisabling(undefined)}>
+                <button type="button" className="btn" onClick={() => setDisabling(undefined)}>
                   취소
                 </button>
-                <button
+                <button type="button"
                   className="btn danger solid"
                   disabled={dis.busy}
                   onClick={() =>

@@ -54,7 +54,7 @@ type InputProvider interface {
 
 func (d *DockerDriver) inputLease(ctx context.Context, s ContainerSpec, id engine.Identity, key string, generation uint64, mode string) (InputLease, error) {
 	if s.Inputs == nil {
-		return InputLease{}, nil
+		return d.secretSocketLease(InputLease{}, s, id.Name, mode)
 	}
 	if d.Inputs == nil {
 		return InputLease{}, ErrInputMount
@@ -85,7 +85,7 @@ func (d *DockerDriver) inputLease(ctx context.Context, s ContainerSpec, id engin
 			}
 		}
 	}
-	return l, nil
+	return d.secretSocketLease(l, s, id.Name, mode)
 }
 func inputMounts(files []InputFile) []mount.Mount {
 	var mounts []mount.Mount

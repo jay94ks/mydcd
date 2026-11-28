@@ -27,9 +27,10 @@ const (
 	NotifyWebhookOff       = "webhook-off"         // a webhook turned off after failures
 	NotifyMCPToolsChanged  = "mcp-tools-changed"   // an MCP server's tool catalog changed
 	NotifyVPSDNS           = "vps-dns"             // DNS taken out for a stopped VPS server, or not put back
+	NotifyVPSSubscription  = "vps-subscription"    // an owned VPS subscription ends soon
 )
 
-var notifyKinds = []string{NotifyOpFailed, NotifyOpUnknown, NotifyDeployDone, NotifyMoveStarted, NotifyCertificate, NotifyWebBackup, NotifyIncidentApproval, NotifyWebhookOff, NotifyMCPToolsChanged, NotifyVPSDNS}
+var notifyKinds = []string{NotifyOpFailed, NotifyOpUnknown, NotifyDeployDone, NotifyMoveStarted, NotifyCertificate, NotifyWebBackup, NotifyIncidentApproval, NotifyWebhookOff, NotifyMCPToolsChanged, NotifyVPSDNS, NotifyVPSSubscription}
 
 // notice is a notification's text as codes (texts.go): title, then the
 // body sentences in order.

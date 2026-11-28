@@ -4,6 +4,7 @@ import { useRef, useState } from 'react';
 import { Link, Route, Routes, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { api, ApiError, enc } from '../api/client';
 import { apps, limitPath, networks, nodesOverview, tenantLimits, tenantList, tenantMembers, tenantRetirement, users, volumes } from '../api/endpoints';
+import { eulReul } from '../lib/josa';
 import type { OpView, TenantMember, TenantRetirement } from '../api/types';
 import type { DOp } from '../api/dto';
 import { useAuth, useSession } from '../auth/session';
@@ -32,15 +33,15 @@ function CreateTenantDialog({ onClose, onDone }: { onClose: () => void; onDone: 
       onClose={onClose}
       footer={
         m.op ? (
-          <button className="btn primary" onClick={() => (onDone(), onClose())}>
+          <button type="button" className="btn primary" onClick={() => (onDone(), onClose())}>
             닫기
           </button>
         ) : (
           <>
-            <button className="btn" onClick={onClose}>
+            <button type="button" className="btn" onClick={onClose}>
               취소
             </button>
-            <button className="btn primary" disabled={!valid || m.busy} onClick={() => void m.submit({ action: 'create-tenant', payload: { ID: id }, tenant: id, target: id })}>
+            <button type="button" className="btn primary" disabled={!valid || m.busy} onClick={() => void m.submit({ action: 'create-tenant', payload: { ID: id }, tenant: id, target: id })}>
               만들기
             </button>
           </>
@@ -112,7 +113,7 @@ function DesktopTenants() {
         actions={
           <>
             <Refresh q={list} poll={false} />
-            <button className="btn primary" disabled={!admin} title={admin ? undefined : '시스템 관리자 권한이 필요합니다'} onClick={() => setCreating(true)}>
+            <button type="button" className="btn primary" disabled={!admin} title={admin ? undefined : '시스템 관리자 권한이 필요합니다'} onClick={() => setCreating(true)}>
               작업 공간 만들기
             </button>
           </>
@@ -145,7 +146,8 @@ function DesktopTenants() {
 interface TenantInfo {
   id: string;
   revision?: number;
-  nodes?: string[] | null;
+  /** 그 사람이 읽을 수 있는 허용 서버(select-tenant). 시스템 관리자는 전부 */
+  allowedNodes?: string[] | null;
 }
 
 export function TenantDetailPage() {
@@ -237,11 +239,19 @@ function DesktopTenantDetail() {
     },
     [id],
   );
-  const retire = usePoll((s) => (admin ? tenantRetirement(id, s) : Promise.resolve(undefined)), [id, admin], DEFAULT_POLL_MS, tenantRetireLive(id));
+  // 종료를 마친 작업 공간은 sfcd가 403·404로 답한다. 그때는 지워진 것으로 본다
+  const retire = usePoll((s) => (admin ? tenantRetirement(id, s).catch(goneRetirement) : Promise.resolve(undefined)), [id, admin], DEFAULT_POLL_MS, tenantRetireLive(id));
   const [dlg, setDlg] = useState<'begin' | 'finish'>();
+  // 이 화면에서 보낸 종료 시작·마치기가 적용됐는데 아직 종료 상태를 다시 읽지 못한 동안에도 맞게 보인다
+  const [sent, setSent] = useState<'begin' | 'finish'>();
   const r = retire.data;
-  const gone = r?.phase === 'deleted';
-  const done = () => (retire.refresh(), info.refresh());
+  const gone = r?.phase === 'deleted' || sent === 'finish';
+  const retiring = !gone && (r?.retiring || sent === 'begin');
+  const done = (kind: 'begin' | 'finish') => {
+    setSent(kind);
+    retire.refresh();
+    if (kind === 'begin') info.refresh();
+  };
   const base = `/system/tenants/${id}`;
   return (
     <>
@@ -256,23 +266,29 @@ function DesktopTenantDetail() {
         actions={
           <>
             <Refresh q={info} poll={false} />
-            {admin && !gone && (
-              <button className="btn danger" disabled={!r || r.retiring} title={r?.retiring ? '이미 종료하는 중입니다' : undefined} onClick={() => setDlg('begin')}>
+            {admin && !gone && !retiring && (
+              <button type="button" className="btn danger" disabled={!r} onClick={() => setDlg('begin')}>
                 작업 공간 종료…
               </button>
             )}
           </>
         }
       />
-      <Tabs
-        label="작업 공간 탭"
-        items={[
-          { to: base, label: '구성원 · 권한' },
-          { to: `${base}/nodes`, label: '허용 서버·사용 한도' },
-        ]}
-      />
-      {gone && <div className="note">종료한 작업 공간입니다. 앱 정의는 보관된 앱에 남아 있습니다.</div>}
-      {r?.retiring && (
+      {!gone && (
+        <Tabs
+          label="작업 공간 탭"
+          items={[
+            { to: base, label: '구성원 · 권한' },
+            { to: `${base}/nodes`, label: '허용 서버·사용 한도' },
+          ]}
+        />
+      )}
+      {gone && (
+        <div className="note">
+          <Badge tone="un">삭제됨</Badge> 종료를 마쳐 지운 작업 공간입니다. 구성원과 허용 서버도 함께 지워졌습니다. 앱 정의는 <Link to="/deploy/archived">보관된 앱</Link>에 남아 있습니다.
+        </div>
+      )}
+      {retiring && r?.retiring && (
         <Card title={`작업 공간 종료 진행 · ${id}`} actions={<Refresh q={retire} />}>
           <div className="table-wrap">
             <table className="tbl">
@@ -301,23 +317,31 @@ function DesktopTenantDetail() {
             </span>
           )}
           <div className="row" style={{ justifyContent: 'flex-end' }}>
-            <button className="btn danger sm" disabled={!r.ready} title={r.ready ? undefined : '모든 서버가 정리를 마치고 남은 것이 없어야 마칠 수 있습니다'} onClick={() => setDlg('finish')}>
+            <button type="button" className="btn danger sm" disabled={!r.ready} title={r.ready ? undefined : '모든 서버가 정리를 마치고 남은 것이 없어야 마칠 수 있습니다'} onClick={() => setDlg('finish')}>
               종료 마치기…
             </button>
           </div>
         </Card>
       )}
-      {dlg && r && <RetireDialog kind={dlg} tenant={id} status={r} fallbackRevision={info.data?.revision} onClose={() => setDlg(undefined)} onDone={done} />}
-      <Load q={info} what="작업 공간을 불러오지 못했습니다">
-        {(d) => (
-          <Routes>
-            <Route index element={<Members tenant={id} revision={d.revision} canManage={!gone && (admin || d.role === 'manager')} onDone={info.refresh} />} />
-            <Route path="nodes" element={<NodesTab tenant={id} revision={d.revision} allowed={d.nodes ?? undefined} readOnly={gone} onDone={info.refresh} />} />
-          </Routes>
-        )}
-      </Load>
+      {dlg && r && <RetireDialog kind={dlg} tenant={id} status={r} fallbackRevision={info.data?.revision} onClose={() => setDlg(undefined)} onDone={() => done(dlg)} />}
+      {!gone && (
+        <Load q={info} what="작업 공간을 불러오지 못했습니다">
+          {(d) => (
+            <Routes>
+              <Route index element={<Members tenant={id} revision={d.revision} canManage={admin || d.role === 'manager'} onDone={info.refresh} />} />
+              <Route path="nodes" element={<NodesTab tenant={id} revision={d.revision} allowed={d.allowedNodes ?? undefined} onDone={info.refresh} />} />
+            </Routes>
+          )}
+        </Load>
+      )}
     </>
   );
+}
+
+/** 종료 상태 읽기가 403·404면 작업 공간이 지워진 것이다 */
+function goneRetirement(e: unknown): TenantRetirement {
+  if (e instanceof ApiError && (e.status === 403 || e.status === 404)) return { retiring: false, targetCount: 0, ownerCount: 0, closedOwners: 0, remainingCount: 0, remaining: [], phase: 'deleted', ready: false };
+  throw e;
 }
 
 function RetireDialog({ kind, tenant, status, fallbackRevision, onClose, onDone }: { kind: 'begin' | 'finish'; tenant: string; status: TenantRetirement; fallbackRevision?: number; onClose: () => void; onDone: () => void }) {
@@ -347,21 +371,21 @@ function RetireDialog({ kind, tenant, status, fallbackRevision, onClose, onDone 
   };
   return (
     <Dialog
-      title={kind === 'begin' ? `${tenant}을 종료할까요?` : `${tenant} 종료를 마칠까요?`}
+      title={kind === 'begin' ? `${tenant}${eulReul(tenant)} 종료할까요?` : `${tenant} 종료를 마칠까요?`}
       danger
       onClose={onClose}
       width={560}
       footer={
         m.op ? (
-          <button className="btn primary" onClick={onClose}>
+          <button type="button" className="btn primary" onClick={onClose}>
             닫기
           </button>
         ) : (
           <>
-            <button className="btn" onClick={onClose}>
+            <button type="button" className="btn" onClick={onClose}>
               취소
             </button>
-            <button className="btn danger solid" disabled={confirm !== tenant || m.busy} onClick={() => void send().then((op) => op?.state === 'applied' && onDone())}>
+            <button type="button" className="btn danger solid" disabled={confirm !== tenant || m.busy} onClick={() => void send().then((op) => op?.state === 'applied' && onDone())}>
               {kind === 'begin' ? '종료 시작' : '종료 마치기'}
             </button>
           </>
@@ -420,7 +444,7 @@ function Members({ tenant, revision, canManage, onDone }: { tenant: string; revi
                   header: '',
                   render: (x) =>
                     canManage && (
-                      <button className="btn sm danger" onClick={() => (m.reset(), setRemoving(x))}>
+                      <button type="button" className="btn sm danger" onClick={() => (m.reset(), setRemoving(x))}>
                         빼기
                       </button>
                     ),
@@ -429,7 +453,7 @@ function Members({ tenant, revision, canManage, onDone }: { tenant: string; revi
             />
           )}
         </Load>
-        <span className="small muted">작업 공간 버전 {revision}을 기대값으로 보냅니다.</span>
+        <span className="small muted">작업 공간 버전 {revision}{eulReul(String(revision))} 기대값으로 보냅니다.</span>
       </Card>
       <Card className="aside" title="구성원 추가 · 바꾸기">
         {!canManage ? (
@@ -457,7 +481,7 @@ function Members({ tenant, revision, canManage, onDone }: { tenant: string; revi
                 <option value="manager">관리(읽기 · 배포)</option>
               </select>
             </Field>
-            <button className="btn primary" disabled={!user || m.busy || !!m.op} onClick={() => void send(user, all.data?.items.find((u) => u.id === user)?.username ?? user, true, role)}>
+            <button type="button" className="btn primary" disabled={!user || m.busy || !!m.op} onClick={() => void send(user, all.data?.items.find((u) => u.id === user)?.username ?? user, true, role)}>
               적용 (기대 버전 {revision})
             </button>
           </>
@@ -467,7 +491,7 @@ function Members({ tenant, revision, canManage, onDone }: { tenant: string; revi
         {m.op && !removing && (
           <>
             <OpPanel op={m.op} onChange={m.setOp} />
-            <button className="btn sm" onClick={() => (m.reset(), setUser(''))}>
+            <button type="button" className="btn sm" onClick={() => (m.reset(), setUser(''))}>
               다른 구성원
             </button>
           </>
@@ -480,15 +504,15 @@ function Members({ tenant, revision, canManage, onDone }: { tenant: string; revi
           onClose={() => (setRemoving(undefined), m.reset())}
           footer={
             m.op ? (
-              <button className="btn primary" onClick={() => (setRemoving(undefined), m.reset())}>
+              <button type="button" className="btn primary" onClick={() => (setRemoving(undefined), m.reset())}>
                 닫기
               </button>
             ) : (
               <>
-                <button className="btn" onClick={() => setRemoving(undefined)}>
+                <button type="button" className="btn" onClick={() => setRemoving(undefined)}>
                   취소
                 </button>
-                <button className="btn danger solid" disabled={m.busy} onClick={() => void send(removing.user, removing.username, false, removing.role)}>
+                <button type="button" className="btn danger solid" disabled={m.busy} onClick={() => void send(removing.user, removing.username, false, removing.role)}>
                   빼기
                 </button>
               </>
@@ -633,7 +657,7 @@ function NodesTab({ tenant, revision, allowed, readOnly, onDone }: { tenant: str
         {admin && (
           <div className="row" style={{ justifyContent: 'space-between' }}>
             <span className="small muted">허용을 끄면 새 배치만 막습니다. 정한 사용 한도는 그대로 남습니다.</span>
-            <button className="btn primary" disabled={bad || (!allowChanged && !limitChanges.length)} onClick={() => setReview(true)}>
+            <button type="button" className="btn primary" disabled={bad || (!allowChanged && !limitChanges.length)} onClick={() => setReview(true)}>
               변경 검토
             </button>
           </div>

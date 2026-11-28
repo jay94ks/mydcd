@@ -88,7 +88,7 @@ func (m DNSManager) SyncReferenceState(a Authority) (DNSManager, error) {
 		if _, exists := a.references.Fences[id]; exists {
 			continue
 		}
-		alloc, held := a.book.Allocation(f.Target.Allocation.Endpoint)
+		alloc, held := a.book.AllocationOf(f.Target.Allocation.Endpoint, f.Target.Allocation.Generation)
 		if (!held || alloc != f.Target.Allocation) && a.revision > f.Epoch {
 			delete(q.fenced, id)
 		}

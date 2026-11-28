@@ -414,6 +414,7 @@ func (s *Server) handleNodeDiagnostics(w http.ResponseWriter, r *http.Request, w
 	h.Set("X-SFC-Digest", hex.EncodeToString(d.Digest[:]))
 	if d.Truncated {
 		h.Set("X-SFC-Truncated", "true")
+		h.Set("X-SFC-Omitted", strings.Join(d.Omitted, ","))
 	}
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(d.Data)

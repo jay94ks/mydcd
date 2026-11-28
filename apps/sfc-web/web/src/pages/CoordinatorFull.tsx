@@ -81,7 +81,7 @@ function DesktopCoordinator() {
         ids="UI-B2"
         actions={
           <>
-            <button
+            <button type="button"
               className="btn"
               onClick={() => {
                 setOpen(true);
@@ -90,7 +90,7 @@ function DesktopCoordinator() {
             >
               패널로 돌아가기
             </button>
-            <button className="btn primary" onClick={() => void fresh()}>
+            <button type="button" className="btn primary" onClick={() => void fresh()}>
               새 대화
             </button>
           </>
@@ -133,7 +133,7 @@ function DesktopCoordinator() {
           </Load>
           <div className="row between muted small">
             <span>대화 {items.length}개</span>
-            <button className="btn sm danger" disabled={!items.length} onClick={() => setDlg({ kind: 'all', n: items.length })}>
+            <button type="button" className="btn sm danger" disabled={!items.length} onClick={() => setDlg({ kind: 'all', n: items.length })}>
               전체 지우기…
             </button>
           </div>
@@ -193,10 +193,10 @@ function DeleteDialog({ d, onClose, onDone }: { d: { kind: 'one'; c: AiConversat
       onClose={onClose}
       footer={
         <>
-          <button className="btn" onClick={onClose}>
+          <button type="button" className="btn" onClick={onClose}>
             취소
           </button>
-          <button className="btn danger solid" disabled={busy || (all && typed !== String(d.n))} onClick={() => void go()}>
+          <button type="button" className="btn danger solid" disabled={busy || (all && typed !== String(d.n))} onClick={() => void go()}>
             {all ? '전체 지우기' : '지우기'}
           </button>
         </>

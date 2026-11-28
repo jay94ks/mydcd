@@ -51,6 +51,10 @@ type CertificatePage struct {
 	Chain []byte `json:",omitempty"`
 	// Domains is the whole cluster domain list, on the first page only.
 	Domains []certstore.Domain `json:",omitempty"`
+	// DeletedOwners names the Domains owners whose tenant no longer exists
+	// or is deleted: those domains count as cluster-level (DomainTenant)
+	// until an administrator assigns them again. First page only.
+	DeletedOwners []string `json:",omitempty"`
 	// ACMEResponder is the HTTP-01 responder setting, on the first page only.
 	ACMEResponder *certstore.ACMEResponder `json:",omitempty"`
 }
@@ -158,6 +162,16 @@ func (p Policy) CertificatePage(s state.State, session access.Session, at int64,
 		after = tail
 	} else {
 		out.Domains, out.ACMEResponder = c.Domains, c.ACMEResponder
+		users, err := p.Catalog(s)
+		if err != nil {
+			return CertificatePage{}, err
+		}
+		for _, d := range c.Domains {
+			if d.Tenant != "" && DomainTenant(users, d) == "" && !slices.Contains(out.DeletedOwners, d.Tenant) {
+				out.DeletedOwners = append(out.DeletedOwners, d.Tenant)
+			}
+		}
+		slices.Sort(out.DeletedOwners)
 	}
 	for _, row := range c.Public(at) {
 		if row.Metadata.ID.String() <= after {
@@ -238,6 +252,13 @@ func (p Policy) reduceCertificates(s state.State, cmd state.Command) (map[string
 		if !domainOwnerUsable(users, q.Tenant) {
 			return nil, state.ConditionFailed
 		}
+		if op.Change.Action != "remove-domain" {
+			if taken, err := p.domainInUseElsewhere(s, c, q.Name, q.Tenant); err != nil {
+				return nil, state.Invalid
+			} else if taken {
+				return nil, state.ConditionFailed
+			}
+		}
 		switch op.Change.Action {
 		case "add-domain":
 			c, err = c.AddOwnedDomain(q.Name, q.Tenant, op.Session.User, op.Change.Expected, op.At)
@@ -245,6 +266,30 @@ func (p Policy) reduceCertificates(s state.State, cmd state.Command) (map[string
 			c, err = c.AssignDomain(q.Name, q.Tenant, op.Change.Expected)
 		default:
 			c, err = c.RemoveDomain(q.Name, op.Change.Expected)
+		}
+		if err != nil {
+			return nil, state.ConditionFailed
+		}
+	case "approve-ingress-host", "deny-ingress-host", "revoke-ingress-host":
+		var q HostDecision
+		if canonical(op.Change.Payload, &q) != nil || !validID(q.Tenant) {
+			return nil, state.Invalid
+		}
+		if n, ok := certstore.NormalizeRouteHost(q.Host); !ok || n != q.Host {
+			return nil, state.Invalid
+		}
+		if op.Change.Action == "revoke-ingress-host" {
+			c, err = c.RevokeHost(q.Tenant, q.Host, op.Change.Expected)
+		} else {
+			approve := op.Change.Action == "approve-ingress-host"
+			if !p.decideHostAllowed(s, c, users, q, approve) {
+				return nil, state.ConditionFailed
+			}
+			decision := certstore.GrantDenied
+			if approve {
+				decision = certstore.GrantApproved
+			}
+			c, err = c.DecideHost(q.Tenant, q.Host, decision, op.Session.User, op.Change.Expected, op.At)
 		}
 		if err != nil {
 			return nil, state.ConditionFailed

@@ -95,29 +95,29 @@ function CreateDialog({
     phase === 'sent' ? (
       <>
         {!busy && ops.some((o) => !o) && (
-          <button className="btn" onClick={() => setPhase(review ? 'review' : 'edit')}>
+          <button type="button" className="btn" onClick={() => setPhase(review ? 'review' : 'edit')}>
             뒤로
           </button>
         )}
-        <button className="btn" onClick={onClose} disabled={busy}>
+        <button type="button" className="btn" onClick={onClose} disabled={busy}>
           닫기
         </button>
       </>
     ) : phase === 'review' ? (
       <>
-        <button className="btn" onClick={() => setPhase('edit')}>
+        <button type="button" className="btn" onClick={() => setPhase('edit')}>
           뒤로
         </button>
-        <button className="btn primary" disabled={busy} onClick={() => void send()}>
+        <button type="button" className="btn primary" disabled={busy} onClick={() => void send()}>
           만들기
         </button>
       </>
     ) : (
       <>
-        <button className="btn" onClick={onClose}>
+        <button type="button" className="btn" onClick={onClose}>
           취소
         </button>
-        <button className="btn primary" disabled={!valid || busy} onClick={() => (review ? setPhase('review') : void send())}>
+        <button type="button" className="btn primary" disabled={!valid || busy} onClick={() => (review ? setPhase('review') : void send())}>
           {review ? '변경 검토' : ok}
         </button>
       </>
@@ -156,17 +156,17 @@ function CreateDialog({
                 {steps[i].again && op.state !== 'applied' && !busy && (
                   <div className="row">
                     {op.errorCode === 'needs-input' && (
-                      <button className="btn sm primary" onClick={() => void sendFrom(i, () => steps[i].again!(true))}>
+                      <button type="button" className="btn sm primary" onClick={() => void sendFrom(i, () => steps[i].again!(true))}>
                         같은 작업으로 값 다시 보내기
                       </button>
                     )}
                     {op.errorCode === 'input-unknown' && (
-                      <button className="btn sm primary" onClick={() => void sendFrom(i, () => steps[i].again!(false))}>
+                      <button type="button" className="btn sm primary" onClick={() => void sendFrom(i, () => steps[i].again!(false))}>
                         결과 확인 (값은 다시 보내지 않음)
                       </button>
                     )}
                     {op.state === 'failed' && op.errorCode === 'write-not-applied' && steps[i].fresh && (
-                      <button className="btn sm primary" onClick={() => void sendFrom(i, steps[i].fresh)}>
+                      <button type="button" className="btn sm primary" onClick={() => void sendFrom(i, steps[i].fresh)}>
                         새 작업으로 다시 넣기
                       </button>
                     )}

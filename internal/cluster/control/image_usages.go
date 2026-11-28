@@ -58,6 +58,9 @@ func (q ImageUsageQuery) Match(row ImageReference) string {
 		if candidate == "exact" || candidate == "digest" {
 			return candidate
 		}
+		if candidate == "" && row.sameRepositoryTag(ref) {
+			candidate = "repository-unknown"
+		}
 		if candidate != "" {
 			match = candidate
 		}
@@ -65,9 +68,30 @@ func (q ImageUsageQuery) Match(row ImageReference) string {
 	return match
 }
 
-// MatchImage is also the registry deletion predicate. Mutable legacy tags
-// cannot prove that a repository's digest is unused; that ambiguity is exposed
-// instead of inventing a digest from Docker cache absence or a newer tag.
+// sameRepositoryTag reports a tag and a digest (or another tag) of the same
+// repository: usage reads show it as "repository-unknown", but a tag holds no
+// digest, so it never protects one from deletion.
+func (row ImageReference) sameRepositoryTag(ref string) bool {
+	if row.Unknown || imagecache.ValidID(ref) {
+		return false
+	}
+	_, ar, ap, err := registryclient.Normalize(row.Image)
+	if err != nil {
+		return false
+	}
+	_, br, bp, err := registryclient.Normalize(ref)
+	if err != nil || ar != br || ap != bp {
+		return false
+	}
+	_, rowErr := access.PinImage(row.Image)
+	_, refErr := access.PinImage(ref)
+	return rowErr != nil || refErr != nil
+}
+
+// MatchImage is also the registry deletion predicate. A tag row matches only
+// the same tag: a tag is never pinned to a digest (devel/design/image-tags.md),
+// so the digests a deploy resolved are their own rows (ImageReferences), and
+// containers already made keep their image on their server.
 func (row ImageReference) MatchImage(ref string) string {
 	if row.Unknown {
 		return "unknown"
@@ -96,9 +120,8 @@ func (row ImageReference) MatchImage(ref string) string {
 		if aPin.Digest == bPin.Digest {
 			return "digest"
 		}
-		return ""
 	}
-	return "repository-unknown"
+	return ""
 }
 
 type ImageUsage struct {

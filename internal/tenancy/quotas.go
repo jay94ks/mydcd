@@ -175,7 +175,16 @@ func (q Quotas) Reservations() []Reservation {
 	return out
 }
 func validReservation(r Reservation) bool {
-	p := strings.Split(r.Key, "/")
+	key := r.Key
+	// A surged original keeps its need under its parked key while it runs
+	// next to its new generation (deployment.Inventory.SupersededReservations).
+	if task, generation, parked := workload.ParkedTask(key); parked {
+		if !strings.HasPrefix(task, "workload/task/") || generation != r.Generation {
+			return false
+		}
+		key = task
+	}
+	p := strings.Split(key, "/")
 	if len(p) != 5 && len(p) != 7 || p[0] != "workload" || p[1] != "task" && p[1] != "registry" && p[1] != "imagebuild" && p[1] != "imagebuild-cache-prune" {
 		return false
 	}

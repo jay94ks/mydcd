@@ -177,13 +177,13 @@ function DesktopCertsPage() {
         actions={
           <>
             <Badge tone="un">클러스터 전체 · 시스템 관리자</Badge>
-            <button className="btn" onClick={() => setDlg({ kind: 'account' })}>
+            <button type="button" className="btn" onClick={() => setDlg({ kind: 'account' })}>
               인증 기관 계정
             </button>
-            <button className="btn" disabled={!!waitPending} title={waitPending} onClick={() => setDlg({ kind: 'upload' })}>
+            <button type="button" className="btn" disabled={!!waitPending} title={waitPending} onClick={() => setDlg({ kind: 'upload' })}>
               ⇪ 인증서 올리기
             </button>
-            <button className="btn primary" onClick={() => setDlg({ kind: 'issue' })}>
+            <button type="button" className="btn primary" onClick={() => setDlg({ kind: 'issue' })}>
               ＋ 인증서 발급
             </button>
           </>
@@ -218,7 +218,7 @@ function DesktopCertsPage() {
         <Load q={q}>
           {() =>
             all.length === 0 ? (
-              <Empty title="인증서가 없습니다" action={<button className="btn primary" onClick={() => setDlg({ kind: 'issue' })}>＋ 인증서 발급</button>}>
+              <Empty title="인증서가 없습니다" action={<button type="button" className="btn primary" onClick={() => setDlg({ kind: 'issue' })}>＋ 인증서 발급</button>}>
                 등록된 도메인 아래 이름으로 인증서를 받거나, 직접 받은 인증서를 올리세요.
               </Empty>
             ) : rows.length === 0 ? (
@@ -325,7 +325,7 @@ function DesktopCertsPage() {
                 ⚠ <b>{c.name}</b> 갱신 실패 {c.failures}회{left !== undefined ? ` · ${left}일 남음` : ''}
                 {c.nextTry ? ` · 다음 시도 ${fmtTime(c.nextTry)}` : ''}. <Link to={`/system/domains/certs/${encodeURIComponent(c.fingerprint && all.some((r) => r.cert?.id === c.fingerprint) ? c.fingerprint : c.name)}`}>기록 보기</Link>
               </span>
-              <button className="btn sm" disabled={c.running} onClick={() => void renew(c)}>
+              <button type="button" className="btn sm" disabled={c.running} onClick={() => void renew(c)}>
                 지금 다시 시도
               </button>
             </div>
@@ -334,7 +334,7 @@ function DesktopCertsPage() {
       </Card>
       <div className="grid-2">
         <AutoIssueCard accounts={aq.data ?? []} cas={cq.data ?? []} domains={dq.data ?? []} onUpload={() => setDlg({ kind: 'upload' })} />
-        <Card title="인증 기관 계정" actions={<button className="btn sm" onClick={() => setDlg({ kind: 'account' })}>＋ 계정</button>}>
+        <Card title="인증 기관 계정" actions={<button type="button" className="btn sm" onClick={() => setDlg({ kind: 'account' })}>＋ 계정</button>}>
           <Load q={aq}>
             {(as) =>
               as.length === 0 ? (
@@ -466,10 +466,10 @@ function AccountDialog({ cas, onClose, onDone }: { cas: AcmeCA[]; onClose: () =>
       onClose={onClose}
       footer={
         <>
-          <button className="btn" onClick={onClose}>
+          <button type="button" className="btn" onClick={onClose}>
             취소
           </button>
-          <button className="btn primary" disabled={!sel?.ready || !agree || busy || (sel.needsEab && (!keyId || !hmac))} onClick={() => void save()}>
+          <button type="button" className="btn primary" disabled={!sel?.ready || !agree || busy || (sel.needsEab && (!keyId || !hmac))} onClick={() => void save()}>
             {busy ? '만드는 중…' : '계정 만들기'}
           </button>
         </>
@@ -633,22 +633,22 @@ function IssueDialog({ domains, accounts, cas, taken, onClose, onChanged, onAcco
                   상세 보기
                 </Link>
               )}
-              <button className="btn primary" onClick={onClose}>
+              <button type="button" className="btn primary" onClick={onClose}>
                 {order?.state === 'running' ? '닫기 (뒤에서 계속)' : '닫기'}
               </button>
             </span>
           </>
         ) : (
           <>
-            <button className="btn" disabled={step === 1 || busy} onClick={() => setStep(step - 1)}>
+            <button type="button" className="btn" disabled={step === 1 || busy} onClick={() => setStep(step - 1)}>
               이전
             </button>
             {step < 3 ? (
-              <button className="btn primary" disabled={!canNext} onClick={() => setStep(step + 1)}>
+              <button type="button" className="btn primary" disabled={!canNext} onClick={() => setStep(step + 1)}>
                 다음
               </button>
             ) : (
-              <button className="btn primary" disabled={!canNext || busy} onClick={() => void issue()}>
+              <button type="button" className="btn primary" disabled={!canNext || busy} onClick={() => void issue()}>
                 {busy ? '시작하는 중…' : ca?.staging ? '시험용으로 발급' : '발급'}
               </button>
             )}
@@ -715,7 +715,7 @@ function IssueDialog({ domains, accounts, cas, taken, onClose, onChanged, onAcco
           {accounts.length === 0 ? (
             <div className="note wa row between">
               <span>인증 기관 계정이 없습니다.</span>
-              <button className="btn sm" onClick={onAccount}>
+              <button type="button" className="btn sm" onClick={onAccount}>
                 ＋ 계정
               </button>
             </div>
@@ -830,7 +830,7 @@ function AutoIssueCard({ accounts, cas, domains, onUpload }: { accounts: AcmeAcc
       actions={
         <span className="row" style={{ gap: 8 }}>
           {a && <Badge tone={a.enabled ? 'ok' : 'un'}>{a.enabled ? '켜짐' : '꺼짐'}</Badge>}
-          <button className="btn sm" disabled={!a} onClick={() => setEdit(true)}>
+          <button type="button" className="btn sm" disabled={!a} onClick={() => setEdit(true)}>
             설정
           </button>
         </span>
@@ -889,10 +889,10 @@ function AutoIssueCard({ accounts, cas, domains, onUpload }: { accounts: AcmeAcc
                                 <Link className="btn sm" to="/system/domains">
                                   {w.reason === 'not-assigned' ? '작업 공간에 도메인 배정' : w.reason === 'no-domain' || w.reason === 'not-registered' ? '도메인 등록' : w.reason === 'wildcard-needs-provider' ? '공급자 붙이기' : '외부 도메인'}
                                 </Link>
-                                <button className="btn sm" onClick={() => (close(), onUpload())}>
+                                <button type="button" className="btn sm" onClick={() => (close(), onUpload())}>
                                   직접 받은 인증서 올리기
                                 </button>
-                                <button
+                                <button type="button"
                                   className="btn sm"
                                   onClick={async () => {
                                     try {
@@ -956,13 +956,13 @@ function KeyOrder({ value, onChange, allowed }: { value: string[]; onChange: (v:
           <span>{KEY_TYPE_LABEL[k] ?? k}</span>
           <span className="muted small">{isRsa(k) ? <Badge tone="wa">권장하지 않음</Badge> : KEY_NOTE[k] ?? ''}</span>
           <span className="row" style={{ gap: 4 }}>
-            <button className="btn sm" aria-label={`${KEY_TYPE_LABEL[k]} 위로`} disabled={i === 0} onClick={() => move(i, -1)}>
+            <button type="button" className="btn sm" aria-label={`${KEY_TYPE_LABEL[k]} 위로`} disabled={i === 0} onClick={() => move(i, -1)}>
               ↑
             </button>
-            <button className="btn sm" aria-label={`${KEY_TYPE_LABEL[k]} 아래로`} disabled={i === value.length - 1} onClick={() => move(i, 1)}>
+            <button type="button" className="btn sm" aria-label={`${KEY_TYPE_LABEL[k]} 아래로`} disabled={i === value.length - 1} onClick={() => move(i, 1)}>
               ↓
             </button>
-            <button className="btn sm" aria-label={`${KEY_TYPE_LABEL[k]} 빼기`} disabled={value.length === 1} onClick={() => onChange(value.filter((x) => x !== k))}>
+            <button type="button" className="btn sm" aria-label={`${KEY_TYPE_LABEL[k]} 빼기`} disabled={value.length === 1} onClick={() => onChange(value.filter((x) => x !== k))}>
               ×
             </button>
           </span>
@@ -972,7 +972,7 @@ function KeyOrder({ value, onChange, allowed }: { value: string[]; onChange: (v:
         <div key={k} className="gr" style={cols}>
           <span />
           <span>
-            <button className="btn sm" onClick={() => onChange([...value, k])}>
+            <button type="button" className="btn sm" onClick={() => onChange([...value, k])}>
               ＋ {KEY_TYPE_LABEL[k] ?? k}
             </button>
           </span>
@@ -985,7 +985,7 @@ function KeyOrder({ value, onChange, allowed }: { value: string[]; onChange: (v:
           <span />
           <span className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
             {off.filter(isRsa).map((k) => (
-              <button key={k} className="btn sm" onClick={() => onChange([...value, k])}>
+              <button type="button" key={k} className="btn sm" onClick={() => onChange([...value, k])}>
                 ＋ {KEY_TYPE_LABEL[k] ?? k}
               </button>
             ))}
@@ -1043,10 +1043,10 @@ function AutoSettingsDialog({ a, accounts, cas, regs, onClose, onDone }: { a: Ac
       onClose={onClose}
       footer={
         <>
-          <button className="btn" onClick={onClose}>
+          <button type="button" className="btn" onClick={onClose}>
             취소
           </button>
-          <button className="btn primary" disabled={busy || !keys.length || (enabled && !account)} title={enabled && !account ? '자동 발급을 켜려면 인증 기관 계정이 있어야 합니다' : undefined} onClick={() => void save()}>
+          <button type="button" className="btn primary" disabled={busy || !keys.length || (enabled && !account)} title={enabled && !account ? '자동 발급을 켜려면 인증 기관 계정이 있어야 합니다' : undefined} onClick={() => void save()}>
             저장
           </button>
         </>
@@ -1156,10 +1156,10 @@ function DomainKeysBody({ d, base, allowed, onSave }: { d: AcmeAutoDomain; base:
       {own && <KeyOrderWarn value={k} onChange={setK} allowed={allowed} />}
       <span className="small muted">기본 목록 대신 이 순서를 씁니다. 이미 받은 인증서는 다음 갱신 때 바뀝니다.</span>
       <div className="row" style={{ gap: 6, justifyContent: 'flex-end' }}>
-        <button className="btn sm" onClick={() => onSave(undefined)}>
+        <button type="button" className="btn sm" onClick={() => onSave(undefined)}>
           기본 목록으로
         </button>
-        <button className="btn sm primary" onClick={() => onSave(own ? k : undefined)}>
+        <button type="button" className="btn sm primary" onClick={() => onSave(own ? k : undefined)}>
           저장
         </button>
       </div>
