@@ -15,7 +15,6 @@ import (
 	"os"
 	"slices"
 
-	"github.com/jay94ks/seafield/internal/access"
 	"github.com/jay94ks/seafield/internal/reconcile"
 	"github.com/jay94ks/seafield/internal/schema"
 	"github.com/jay94ks/seafield/internal/storage"
@@ -95,13 +94,12 @@ func (m *SourceStore) collectionWitness(o CompilerOutput) error {
 	if err != nil || sha256.Sum256(raw) != o.Intent.Manifest || o.Batch.Schema != 1 || o.Batch.Job != o.Intent.ID || o.Batch.Tenant != o.Intent.Tenant || o.Batch.GOOS+"/"+o.Batch.GOARCH != o.Intent.Target || len(o.Batch.Items) != len(o.Intent.Inputs) {
 		return ErrSourceStore
 	}
-	image, err := access.PinImage(o.Policy.Build.Image)
-	if err != nil || o.Batch.Toolchain != o.Policy.Build.Toolchain || !slices.Contains(o.Policy.Build.Targets, o.Intent.Target) || o.Batch.WorkspaceBytes > o.Policy.Build.WorkspaceBytes || o.Batch.ArtifactBytes > o.Policy.Build.ArtifactBytes || o.Batch.OutputBytes > min(o.Policy.CompiledCacheBytes, o.Policy.Build.WorkspaceBytes) {
+	if !o.Policy.Build.AllowsCompiler(o.Intent.Image) || o.Batch.Toolchain != o.Policy.Build.Toolchain || !slices.Contains(o.Policy.Build.Targets, o.Intent.Target) || o.Batch.WorkspaceBytes > o.Policy.Build.WorkspaceBytes || o.Batch.ArtifactBytes > o.Policy.Build.ArtifactBytes || o.Batch.OutputBytes > min(o.Policy.CompiledCacheBytes, o.Policy.Build.WorkspaceBytes) {
 		return ErrSourceStore
 	}
 	inputs := make([]BuildInput, 0, len(o.Batch.Items))
 	for _, item := range o.Batch.Items {
-		if item.Recipe.Validate() != nil || item.Recipe.Tenant != o.Intent.Tenant || item.Recipe.Image != image.Reference || item.Recipe.Toolchain != o.Batch.Toolchain || item.Recipe.GOOS != o.Batch.GOOS || item.Recipe.GOARCH != o.Batch.GOARCH || item.Key != item.Recipe.Key() || item.Source.Validate() != nil || item.Source.ContentDigest() != item.Recipe.Source {
+		if item.Recipe.Validate() != nil || item.Recipe.Tenant != o.Intent.Tenant || item.Recipe.Image != o.Intent.Image || item.Recipe.Toolchain != o.Batch.Toolchain || item.Recipe.GOOS != o.Batch.GOOS || item.Recipe.GOARCH != o.Batch.GOARCH || item.Key != item.Recipe.Key() || item.Source.Validate() != nil || item.Source.ContentDigest() != item.Recipe.Source {
 			return ErrSourceStore
 		}
 		inputs = append(inputs, BuildInput{item.Recipe.Source, item.Key})

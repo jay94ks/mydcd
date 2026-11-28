@@ -26,12 +26,15 @@ const MaxCommandFeatures = 16
 // predates the block refuses the trailing bytes and halts its FSM instead of
 // applying an entry it does not understand.
 func EncodeCommand(c Command) ([]byte, error) {
-	if c.Kind > ModuleAppDown || c.Rights & ^allRights != 0 {
+	if c.Kind > ModuleAppDown || c.Rights & ^allRights != 0 || c.Renew && (c.Delete || c.Kind != Mutate) {
 		return nil, ErrCommand
 	}
 	b := []byte{1, byte(c.Kind), byte(c.Rights), 0}
 	if c.Delete {
 		b[3] = 1
+	}
+	if c.Renew {
+		b[3] = 2
 	}
 	b = binary.LittleEndian.AppendUint64(b, c.Epoch)
 	b = binary.LittleEndian.AppendUint64(b, c.Expected)
@@ -65,10 +68,10 @@ func EncodeCommand(c Command) ([]byte, error) {
 	return b, nil
 }
 func DecodeCommand(b []byte) (Command, error) {
-	if len(b) < 20 || len(b) > MaxCommand || b[0] != 1 || b[1] > byte(ModuleAppDown) || Rights(b[2]) & ^allRights != 0 || b[3] > 1 {
+	if len(b) < 20 || len(b) > MaxCommand || b[0] != 1 || b[1] > byte(ModuleAppDown) || Rights(b[2]) & ^allRights != 0 || b[3] > 2 || b[3] == 2 && CommandKind(b[1]) != Mutate {
 		return Command{}, ErrCommand
 	}
-	c := Command{Kind: CommandKind(b[1]), Rights: Rights(b[2]), Delete: b[3] == 1, Epoch: binary.LittleEndian.Uint64(b[4:]), Expected: binary.LittleEndian.Uint64(b[12:])}
+	c := Command{Kind: CommandKind(b[1]), Rights: Rights(b[2]), Delete: b[3] == 1, Renew: b[3] == 2, Epoch: binary.LittleEndian.Uint64(b[4:]), Expected: binary.LittleEndian.Uint64(b[12:])}
 	b = b[20:]
 	fields := []*string{&c.Actor, &c.RequestID, &c.Key, &c.Value, &c.Target}
 	for i, f := range fields {

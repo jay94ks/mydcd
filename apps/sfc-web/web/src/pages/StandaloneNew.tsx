@@ -139,10 +139,10 @@ function PortDialog({ onAdd, onClose }: { onAdd: (p: SaPort) => void; onClose: (
   );
 }
 
-function RouteDialog({ onAdd, onClose, temp }: { onAdd: (r: SaRoute) => void; onClose: () => void; temp: boolean }) {
-  const [r, setR] = useState<SaRoute>({ host: '', path: '/', port: '', gateway: 'local', cert: 'auto' });
+function RouteDialog({ onAdd, onClose, temp, nodes, node }: { onAdd: (r: SaRoute) => void; onClose: () => void; temp: boolean; nodes: string[]; node: string }) {
+  const [r, setR] = useState<SaRoute>({ node: node || nodes[0] || '', host: '', path: '/', port: '', gateway: 'external' });
   return (
-    <FormDialog title="외부 접속 경로 규칙" ok="추가" disabled={!r.host} onOk={() => onAdd(r)} onClose={onClose}>
+    <FormDialog title="외부 접속 경로 규칙" ok="추가" disabled={!r.host || !r.node} onOk={() => onAdd(r)} onClose={onClose}>
       <Field label="호스트 이름">
         <input value={r.host} onChange={(e) => setR({ ...r, host: e.target.value.trim() })} placeholder="report.shop.example" />
       </Field>
@@ -157,15 +157,18 @@ function RouteDialog({ onAdd, onClose, temp }: { onAdd: (r: SaRoute) => void; on
       <div className="row">
         <Field label="게이트웨이">
           <select value={r.gateway} onChange={(e) => setR({ ...r, gateway: e.target.value as SaRoute['gateway'] })}>
-            <option value="local">로컬망 (기본)</option>
-            <option value="external">외부망</option>
-            <option value="both">둘 다</option>
+            <option value="external">외부망 (기본)</option>
+            <option value="local">로컬망</option>
           </select>
         </Field>
-        <Field label="인증서">
-          <select value={r.cert} onChange={(e) => setR({ ...r, cert: e.target.value as SaRoute['cert'] })}>
-            <option value="auto">자동 발급</option>
-            <option value="none">쓰지 않음 (HTTP)</option>
+        <Field label="여는 서버" hint="이 경로를 받는 게이트웨이가 있는 서버">
+          <select value={r.node} onChange={(e) => setR({ ...r, node: e.target.value })}>
+            {!r.node && <option value="">고르세요</option>}
+            {nodes.map((n) => (
+              <option key={n} value={n}>
+                {n}
+              </option>
+            ))}
           </select>
         </Field>
       </div>
@@ -687,7 +690,7 @@ export function StandaloneNewPage() {
                     {form.routes.map((r, i) => (
                       <Chip key={i} onRemove={() => set({ routes: form.routes.filter((_, j) => j !== i) })}>
                         {r.host}
-                        {r.path} → :{r.port || '?'} · {r.gateway === 'local' ? '로컬망' : r.gateway === 'external' ? '외부망' : '둘 다'}
+                        {r.path} → :{r.port || '?'} · {r.gateway === 'local' ? '로컬망' : '외부망'}{r.node ? ` · ${r.node}` : ''}
                       </Chip>
                     ))}
                     {!form.routes.length && <span className="muted small">없음 ·</span>}
@@ -891,7 +894,7 @@ export function StandaloneNewPage() {
       </div>
 
       {dlg === 'port' && <PortDialog onAdd={(p) => set({ ports: [...form.ports, p] })} onClose={() => setDlg(undefined)} />}
-      {dlg === 'route' && <RouteDialog temp={form.lifetime === 'temp'} onAdd={(r) => set({ routes: [...form.routes, r] })} onClose={() => setDlg(undefined)} />}
+      {dlg === 'route' && <RouteDialog temp={form.lifetime === 'temp'} nodes={nodes.map((n) => n.id)} node={form.node} onAdd={(r) => set({ routes: [...form.routes, r] })} onClose={() => setDlg(undefined)} />}
       {dlg === 'volume' && <VolumeDialog choices={ch.volumes} onAdd={(v) => set({ volumes: [...form.volumes, v] })} onClose={() => setDlg(undefined)} />}
       {dlg === 'secret' && <SecretDialog choices={ch.secrets} onAdd={(s) => set({ secrets: [...form.secrets, s] })} onClose={() => setDlg(undefined)} />}
       {dlg === 'alias' && aliasOf !== undefined && form.networks[aliasOf] && <AliasDialog net={form.networks[aliasOf].name} value={form.networks[aliasOf].alias} fallback={effective.name} onSave={(alias) => set({ networks: form.networks.map((n, j) => (j === aliasOf ? { ...n, alias } : n)) })} onClose={() => setDlg(undefined)} />}

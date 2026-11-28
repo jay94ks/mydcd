@@ -38,7 +38,9 @@ export interface EdgeProps {
   /** 외부 접속 경로 */
   path?: string;
   port?: string;
-  gateway?: 'local' | 'external' | 'both';
+  /** route를 여는 서버 */
+  node?: string;
+  gateway?: 'local' | 'external';
 }
 export interface GEdge {
   id: string;
@@ -156,7 +158,8 @@ export function yamlToGraph(text: string): AppGraph {
       edges.push({ id: edgeId(), kind: 'depends', from, to: nodeId('service', d), props: {} });
     }
   }
-  const routes = asObj(asObj(doc['x-sfc']).ingress).routes;
+  // x-sfc.ingress는 route 목록(yaml-formats.md 3.1)
+  const routes = asObj(doc['x-sfc']).ingress;
   if (Array.isArray(routes)) {
     for (const r of routes) {
       const o = asObj(r);
@@ -171,7 +174,7 @@ export function yamlToGraph(text: string): AppGraph {
           kind: 'route',
           from: nodeId('ingress', host),
           to: nodeId('service', svc),
-          props: { path: str(o.prefix) || str(o.path) || '/', port: str(o.port), gateway: gw === 'external' || gw === 'both' ? gw : 'local' },
+          props: { path: str(o.prefix) || '/', port: str(o.port), node: str(o.node), gateway: gw === 'local' ? 'local' : 'external' },
           raw: r,
         });
       }
@@ -312,16 +315,16 @@ export function graphToYaml(g: AppGraph, original: string): string {
       const service = byId.get(e.to)!.name;
       const base = asObj(e.raw);
       const r: Record<string, unknown> = { ...base, host, prefix: e.props.path || '/', service };
-      delete r.path; // sfcd 칸 이름은 prefix(KnownFields라 path는 거절)
+      if (e.props.node) r.node = e.props.node;
+      else delete r.node;
       if (e.props.port) r.port = Number(e.props.port) || e.props.port;
       else delete r.port;
-      r.gateway = e.props.gateway ?? 'local';
+      r.gateway = e.props.gateway ?? 'external';
       return r;
     });
-  const oldRoutes = asObj(asObj(plain['x-sfc']).ingress).routes;
+  const oldRoutes = asObj(plain['x-sfc']).ingress;
   if (routes.length || Array.isArray(oldRoutes)) {
-    if (!sameJSON(routes, oldRoutes)) setOrDelete(doc, ['x-sfc', 'ingress', 'routes'], routes);
-    if (!routes.length && doc.hasIn(['x-sfc', 'ingress']) && Object.keys(asObj(asObj(doc.toJS())['x-sfc']).ingress ?? {}).length === 0) doc.deleteIn(['x-sfc', 'ingress']);
+    if (!sameJSON(routes, oldRoutes)) setOrDelete(doc, ['x-sfc', 'ingress'], routes.length ? routes : undefined);
   }
   return doc.toString({ lineWidth: 0 });
 }
@@ -339,6 +342,7 @@ export function checkGraph(g: AppGraph, choices?: { networks: string[]; volumes:
   const out: GraphIssue[] = [];
   const byId = new Map(g.nodes.map((n) => [n.id, n]));
   const names = new Set<string>();
+  const firstNode = g.edges.find((e) => e.kind === 'route' && e.props.node)?.props.node;
   for (const n of g.nodes) {
     if (n.kind === 'service') {
       if (!/^[a-z0-9][a-z0-9_.-]*$/.test(n.name)) out.push({ node: n.id, level: 'error', text: `서비스 이름 '${n.name}'은 소문자·숫자·-_.만 씁니다.` });
@@ -358,6 +362,9 @@ export function checkGraph(g: AppGraph, choices?: { networks: string[]; volumes:
     if (e.kind === 'volume' && !e.props.readOnly && (from.service?.replicas ?? 1) > 1) out.push({ edge: e.id, node: from.id, level: 'warning', text: `${from.name}: 복제본이 ${from.service?.replicas}개인데 ${to.name}을 쓰기로 붙였습니다. 단일 쓰기 저장소면 배치가 막힙니다.` });
     if (e.kind === 'secret' && e.props.mode === 'file+env' && !e.props.envName) out.push({ edge: e.id, node: from.id, level: 'error', text: `${from.name} → ${to.name}: 경로 변수 이름이 없습니다.` });
     if (e.kind === 'depends' && e.from === e.to) out.push({ edge: e.id, node: from.id, level: 'error', text: `${from.name}: 자기 자신을 기다릴 수 없습니다.` });
+    if (e.kind === 'route' && !e.props.node) out.push({ edge: e.id, node: from.id, level: 'error', text: `${from.name}${e.props.path ?? ''}: 이 경로를 열 서버를 고르세요.` });
+    // 한 앱의 route는 모두 같은 서버(#910 INGRESS_NODE_MIXED): 첫 route의 서버와 다르면 막는다
+    if (e.kind === 'route' && e.props.node && firstNode && e.props.node !== firstNode) out.push({ edge: e.id, node: from.id, level: 'error', text: `${from.name}${e.props.path ?? ''}: 한 앱의 경로는 모두 같은 서버에서 엽니다(다른 경로는 ${firstNode}).` });
     if (e.kind === 'route' && e.props.port && to.service && !to.service.ports.some((p) => p.split(':').pop()?.split('/')[0] === e.props.port)) {
       out.push({ edge: e.id, node: to.id, level: 'warning', text: `${from.name}${e.props.path ?? ''} → ${to.name}:${e.props.port}: 서비스가 이 포트를 열지 않았습니다.` });
     }

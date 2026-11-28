@@ -306,7 +306,7 @@ func TestRegistryRunOwnerReadsOnlyItsAuthorityCertificate(t *testing.T) {
 	spec.Authority = "shop.example:5443"
 	f.apply("manager", "put-registry", 0, RegistryPut{spec}, state.Applied)
 	registryReportFixture(t, f, RegistryReport{Tenant: spec.Tenant, ID: spec.ID, Action: "reserve", SpecRevision: 1, Generation: 1}, state.Applied)
-	f.apply("admin", "add-domain", 0, DomainChange{"shop.example"}, state.Applied)
+	f.apply("admin", "add-domain", 0, DomainChange{Name: "shop.example"}, state.Applied)
 	v := controlCertificate(t, f, 1, fmt.Sprintf("user-%d", f.next+1))
 	f.apply("admin", "put-certificate", 0, CertificatePut{v}, state.Applied)
 	owner := [32]byte(f.node.Public().(ed25519.PublicKey))

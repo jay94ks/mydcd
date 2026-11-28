@@ -1,12 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// 외부 접속 매핑(UI-5E)을 앱 정의(app.yaml)나 클러스터 앱 경로 파일의 `x-sfc.ingress.routes`에 더하고 빼고 고친다.
-// sfcd 형식(internal/deployment IngressRouteDeclaration): host, prefix, service, network, port, health_path, gateway, balance.
-// 주석·다른 칸은 그대로 두고 routes 목록만 바꾼다.
-import YAML, { isMap, type Document } from 'yaml';
+// 외부 접속 매핑(UI-5E)을 앱 정의(app.yaml)나 클러스터 앱 경로 파일의 `x-sfc.ingress` route 목록에 더하고 빼고 고친다.
+// 형식(devel/design/yaml-formats.md 3.1, Jay 2026-11-28 확정): x-sfc.ingress는 route 목록이고 항목마다
+// node, host, prefix, service, port, network, health, gateway(external | local, 기본 external), balance.
+// 클러스터 앱 경로 파일은 service·port·network·health가 없다. 주석·다른 칸은 그대로 두고 목록만 바꾼다.
+import YAML, { isMap, isSeq, type Document } from 'yaml';
 
-export type RouteGateway = 'external' | 'local' | 'both';
+export type RouteGateway = 'external' | 'local';
 export interface RouteSpec {
+  /** 이 route를 여는 서버 */
+  node: string;
   host: string;
   prefix: string;
   gateway: RouteGateway;
@@ -30,16 +33,15 @@ function open(text: string): Document {
   const doc = YAML.parseDocument(text);
   if (doc.errors.length) throw new RouteEditError(`앱 정의를 읽지 못했습니다: ${doc.errors[0].message}`);
   const ing = doc.getIn(['x-sfc', 'ingress']);
-  if (!isMap(ing)) throw new RouteEditError('이 앱 정의에는 외부 접속 설정(x-sfc.ingress)이 없습니다. 앱 정의에서 먼저 서버·수신 주소·한도를 정하세요.');
-  const j = plain(ing.toJSON());
-  if (typeof j.host === 'string' && j.host && !Array.isArray(j.routes)) throw new RouteEditError('이 앱 정의는 경로 목록(routes) 대신 단일 host 형식을 씁니다. 앱 정의에서 routes 형식으로 바꾼 뒤 더하세요.');
+  if (isMap(ing)) throw new RouteEditError('이 앱 정의는 예전 외부 접속 형식(x-sfc.ingress 객체)을 씁니다. x-sfc.ingress를 route 목록으로 바꾼 뒤 더하세요.');
+  if (ing !== undefined && ing !== null && !isSeq(ing)) throw new RouteEditError('x-sfc.ingress는 route 목록이어야 합니다.');
   return doc;
 }
 
 /** 지금 경로 목록(평범한 값) */
 export function readRoutes(text: string): Record<string, unknown>[] {
   try {
-    const r = plain(plain(plain(YAML.parse(text))['x-sfc']).ingress).routes;
+    const r = plain(plain(YAML.parse(text))['x-sfc']).ingress;
     return Array.isArray(r) ? r.map(plain) : [];
   } catch {
     return [];
@@ -47,8 +49,8 @@ export function readRoutes(text: string): Record<string, unknown>[] {
 }
 
 function entry(spec: RouteSpec, base: Record<string, unknown> = {}): Record<string, unknown> {
-  const r: Record<string, unknown> = { ...base, host: spec.host, prefix: spec.prefix };
-  delete r.path;
+  const r: Record<string, unknown> = { node: spec.node, ...base, host: spec.host, prefix: spec.prefix };
+  r.node = spec.node;
   if (spec.service !== undefined) r.service = spec.service;
   if (spec.port !== undefined) r.port = spec.port;
   r.gateway = spec.gateway;
@@ -56,8 +58,23 @@ function entry(spec: RouteSpec, base: Record<string, unknown> = {}): Record<stri
 }
 
 function write(doc: Document, routes: Record<string, unknown>[]) {
-  doc.setIn(['x-sfc', 'ingress', 'routes'], doc.createNode(routes));
+  if (routes.length) doc.setIn(['x-sfc', 'ingress'], doc.createNode(routes));
+  else {
+    doc.deleteIn(['x-sfc', 'ingress']);
+    const x = doc.getIn(['x-sfc']);
+    if (isMap(x) && x.items.length === 0) doc.deleteIn(['x-sfc']);
+  }
   return doc.toString({ lineWidth: 0, flowCollectionPadding: false });
+}
+
+/** 한 앱(또는 route 파일)의 route는 모두 같은 서버에서 연다(#910 INGRESS_NODE_MIXED) */
+export function routesNode(text: string): string | undefined {
+  const n = readRoutes(text).find((r) => r.node)?.node;
+  return typeof n === 'string' ? n : undefined;
+}
+function sameNode(others: Record<string, unknown>[], node: string) {
+  const o = others.find((r) => r.node && r.node !== node);
+  if (o) throw new RouteEditError(`이 앱의 다른 경로는 ${String(o.node)} 서버에서 엽니다. 한 앱의 경로는 모두 같은 서버에서 열어야 합니다.`);
 }
 
 /** 경로 하나를 더한다. 같은 호스트·접두사가 이미 있으면 막는다 */
@@ -65,27 +82,28 @@ export function addRoute(text: string, spec: RouteSpec): string {
   const doc = open(text);
   const routes = readRoutes(text);
   if (routes.some((r) => same(r, spec))) throw new RouteEditError(`이 앱 정의에 이미 ${spec.host}${spec.prefix} 경로가 있습니다.`);
+  sameNode(routes, spec.node);
   return write(doc, [...routes, entry(spec)]);
 }
 
-/** 경로 하나를 고친다(다른 칸 — network·health_path·balance·id — 는 그대로) */
+/** 경로 하나를 고친다(다른 칸 — network·health·balance·id — 는 그대로) */
 export function replaceRoute(text: string, ref: RouteRef, spec: RouteSpec): string {
   const doc = open(text);
   const routes = readRoutes(text);
   const i = routes.findIndex((r) => same(r, ref));
   if (i < 0) throw new RouteEditError(`앱 정의에서 ${ref.host}${ref.prefix} 경로를 찾지 못했습니다.`);
   if ((ref.host.toLowerCase() !== spec.host.toLowerCase() || ref.prefix !== spec.prefix) && routes.some((r, k) => k !== i && same(r, spec))) throw new RouteEditError(`이 앱 정의에 이미 ${spec.host}${spec.prefix} 경로가 있습니다.`);
+  sameNode(routes.filter((_, k) => k !== i), spec.node);
   routes[i] = entry(spec, routes[i]);
   return write(doc, routes);
 }
 
-/** 경로 하나를 뺀다. 마지막 경로는 뺄 수 없다(빈 routes는 sfcd가 거절) */
+/** 경로 하나를 뺀다. 마지막 경로를 빼면 x-sfc.ingress가 없어진다(외부 접속 없음) */
 export function removeRoute(text: string, ref: RouteRef): string {
   const doc = open(text);
   const routes = readRoutes(text);
   const rest = routes.filter((r) => !same(r, ref));
   if (rest.length === routes.length) throw new RouteEditError(`앱 정의에서 ${ref.host}${ref.prefix} 경로를 찾지 못했습니다.`);
-  if (!rest.length) throw new RouteEditError('앱의 마지막 경로는 여기서 뺄 수 없습니다. 외부 접속을 통째로 끄려면 앱 정의에서 x-sfc.ingress를 지우세요.');
   return write(doc, rest);
 }
 

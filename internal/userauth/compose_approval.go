@@ -81,7 +81,7 @@ func composeApproval(c Client, session access.Session, id string, origin control
 		if origin.Change.Action == "standalone-up" {
 			d := begin.Standalone
 			canonical, err := json.Marshal(begin)
-			if err != nil || !bytes.Equal(canonical, origin.Change.Payload) || d == nil || !lifecycle.ValidID(d.Name) || d.Mode != "" && d.Mode != "shell" && d.Mode != "entrypoint" || d.Lifetime != "" && d.Lifetime != "temp" && d.Lifetime != "fixed" || begin.Upload != id || target.Purpose != "" {
+			if err != nil || !bytes.Equal(canonical, origin.Change.Payload) || d == nil || !lifecycle.ValidID(d.Name) || d.Mode != "" && d.Mode != "shell" && d.Mode != "entrypoint" || d.Lifetime != "" && d.Lifetime != "temp" && d.Lifetime != "fixed" || begin.Upload != id || target.Purpose != "" && target.Purpose != secrets.PurposeSecretSocket {
 				return ComposeApprovalAttempt{}, ErrPrivateState
 			}
 			// A pin can rename the public name while retaining the original

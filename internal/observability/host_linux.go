@@ -12,20 +12,40 @@ import (
 	"strings"
 )
 
-type CPUCounter struct{ Total, Idle, Count uint64 }
+// CPUCounter sums the /proc/stat "cpu" line. Total covers user..steal,
+// Idle is idle+iowait, Steal is the time the hypervisor ran other guests
+// while this one had work (shared VPS).
+type CPUCounter struct{ Total, Idle, Steal, Count uint64 }
 
 // CPUUsage is a reusable pure delta calculation. First/reset/empty samples are
 // unknown, not zero host usage. There is no timer, sleep or OS read in the core.
+// Steal is not usage: the guest did not run then, so it is left out of used
+// and reported on its own; used + steal + idle is the whole capacity.
 func CPUUsage(previous, current CPUCounter) *uint64 {
-	if previous.Count == 0 || previous.Count != current.Count || current.Total <= previous.Total || current.Idle < previous.Idle {
-		return nil
+	used, _ := cpuDelta(previous, current)
+	return used
+}
+
+// CPUSteal is the stolen part of the same delta, in nanocores.
+func CPUSteal(previous, current CPUCounter) *uint64 {
+	_, steal := cpuDelta(previous, current)
+	return steal
+}
+
+func cpuDelta(previous, current CPUCounter) (*uint64, *uint64) {
+	if previous.Count == 0 || previous.Count != current.Count || current.Total <= previous.Total || current.Idle < previous.Idle || current.Steal < previous.Steal {
+		return nil, nil
 	}
-	total, idle := current.Total-previous.Total, current.Idle-previous.Idle
-	if idle > total {
-		return nil
+	total, idle, steal := current.Total-previous.Total, current.Idle-previous.Idle, current.Steal-previous.Steal
+	if idle > total || steal > total-idle {
+		return nil, nil
 	}
-	value := uint64(float64(total-idle) / float64(total) * float64(current.Count) * 1e9)
-	return &value
+	scale := float64(current.Count) * 1e9 / float64(total)
+	used, stolen := uint64(float64(total-idle-steal)*scale), uint64(float64(steal)*scale)
+	if capacity := current.Count * 1_000_000_000; used+stolen > capacity {
+		used = capacity - min(stolen, capacity)
+	}
+	return &used, &stolen
 }
 
 func ReadHost(previous CPUCounter) (Host, CPUCounter, error) {
@@ -39,7 +59,7 @@ func ReadHost(previous CPUCounter) (Host, CPUCounter, error) {
 	if err != nil {
 		return h, CPUCounter{}, err
 	}
-	h.CPUCapacity, h.CPUUsed = counter.Count*1_000_000_000, CPUUsage(previous, counter)
+	h.CPUCapacity, h.CPUUsed, h.CPUSteal = counter.Count*1_000_000_000, CPUUsage(previous, counter), CPUSteal(previous, counter)
 	memory, err := os.Open("/proc/meminfo")
 	if err != nil {
 		return h, counter, err
@@ -78,6 +98,9 @@ func parseCPU(r io.Reader) (CPUCounter, error) {
 				if i == 4 || i == 5 {
 					c.Idle += n
 				}
+				if i == 8 {
+					c.Steal = n
+				}
 			}
 		} else if strings.HasPrefix(f[0], "cpu") {
 			if _, err := strconv.ParseUint(strings.TrimPrefix(f[0], "cpu"), 10, 32); err == nil {
@@ -85,7 +108,7 @@ func parseCPU(r io.Reader) (CPUCounter, error) {
 			}
 		}
 	}
-	if s.Err() != nil || !found || c.Count == 0 || c.Count > 1<<16 || c.Total < c.Idle {
+	if s.Err() != nil || !found || c.Count == 0 || c.Count > 1<<16 || c.Total < c.Idle+c.Steal {
 		return c, errors.Join(ErrReport, s.Err())
 	}
 	return c, nil

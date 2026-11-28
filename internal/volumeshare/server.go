@@ -39,6 +39,7 @@ type Server struct {
 
 	mu       sync.Mutex
 	sessions map[uint64]*session
+	revoked  map[string]bool
 }
 
 type session struct {
@@ -48,6 +49,10 @@ type session struct {
 	files   map[FileID]bool
 	last    time.Time
 	checked time.Time
+	// busy is held shared by every operation in flight; Revoke takes it
+	// exclusively to wait for them (no operation waits on the home: a
+	// blocking lock is the client polling).
+	busy sync.RWMutex
 }
 
 // NewServer serves through auth.
@@ -61,7 +66,29 @@ func NewServer(auth Authorize, o ServerOptions) *Server {
 	if o.Now == nil {
 		o.Now = time.Now
 	}
-	return &Server{auth: auth, o: o, sessions: map[uint64]*session{}}
+	return &Server{auth: auth, o: o, sessions: map[uint64]*session{}, revoked: map[string]bool{}}
+}
+
+// Revoke ends every mount of volume for good and returns once none of its
+// operations is still running, so nothing a revoked mount sent is applied
+// after it. Later mounts of volume are refused by this server.
+func (s *Server) Revoke(volume string) {
+	var gone []*session
+	var ids []uint64
+	s.mu.Lock()
+	s.revoked[volume] = true
+	for id, x := range s.sessions {
+		if x.volume == volume {
+			gone, ids = append(gone, x), append(ids, id)
+			delete(s.sessions, id)
+		}
+	}
+	s.mu.Unlock()
+	for i, x := range gone {
+		x.busy.Lock()
+		x.ops.Release(ids[i])
+		x.busy.Unlock()
+	}
 }
 
 // Expire releases mounts idle past the lease. Run it about once a second.
@@ -127,6 +154,10 @@ func (s *Server) handle(ctx context.Context, peer [32]byte, q wireRequest, data 
 		id := binary.LittleEndian.Uint64(b[:]) | 1
 		now := s.o.Now()
 		s.mu.Lock()
+		if s.revoked[q.Volume] {
+			s.mu.Unlock()
+			return wireReply{Errno: uint32(syscall.EACCES)}, nil
+		}
 		s.sessions[id] = &session{peer: peer, volume: q.Volume, ops: ops, files: map[FileID]bool{}, last: now, checked: now}
 		s.mu.Unlock()
 		return wireReply{Session: id, Root: ops.Root()}, nil
@@ -134,6 +165,14 @@ func (s *Server) handle(ctx context.Context, peer [32]byte, q wireRequest, data 
 	x, err := s.session(ctx, peer, q.Session, mutating(q))
 	if err != nil {
 		return fail(err)
+	}
+	x.busy.RLock()
+	defer x.busy.RUnlock()
+	s.mu.Lock()
+	live := s.sessions[q.Session] == x
+	s.mu.Unlock()
+	if !live {
+		return fail(syscall.ESTALE)
 	}
 	ops := x.ops
 	owns := func(f FileID) error {

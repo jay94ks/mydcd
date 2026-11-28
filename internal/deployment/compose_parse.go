@@ -270,6 +270,12 @@ func (c *Compose) normalize() error {
 			}
 			s.Sfc.Sources[i] = r
 		}
+		for i, r := range s.Sfc.Socket {
+			if r.Scope == "" {
+				r.Scope = "tenant"
+			}
+			s.Sfc.Socket[i] = r
+		}
 		c.Services[name] = s
 	}
 	for name, v := range c.Volumes {
@@ -359,14 +365,11 @@ func (c Compose) validate() error {
 		return err
 	}
 	for name, s := range c.Services {
-		if s.LifecycleSources != nil || s.LifecycleProgram != nil || s.Sfc.Instance != nil {
+		if s.LifecycleSources != nil || s.LifecycleProgram != nil || s.Sfc.Instance != nil || s.SocketRevisions != "" {
 			return inputError("RESERVED_TASK_METADATA", name)
 		}
 		if err := validateServicePlacement(s); err != nil {
 			return err
-		}
-		if len(s.Sfc.Socket) != 0 {
-			return inputError("INVALID_FIELD", "services."+name+".x-sfc.secrets.socket") // sfev.sock is not served yet
 		}
 		p := "services." + name
 		if workload.ValidatePublishedPorts(s.Ports) != nil {
@@ -518,6 +521,13 @@ func (c Compose) validate() error {
 		if _, err := s.TmpfsMounts(int64(memory)); err != nil {
 			return inputError("INVALID_TMPFS", p)
 		}
+		if len(s.Sfc.Socket) != 0 {
+			// sfcd binds the socket directory here; nothing else may.
+			targets = append(targets, SecretSocketDir)
+			if _, exists := s.Environment[SecretSocketEnv]; exists || envNames[SecretSocketEnv] {
+				return inputError("SECRET_ENV_CONFLICT", p)
+			}
+		}
 		for i, a := range targets {
 			for _, b := range targets[:i] {
 				if a == b || strings.HasPrefix(a, b+"/") || strings.HasPrefix(b, a+"/") {
@@ -528,6 +538,14 @@ func (c Compose) validate() error {
 		for _, r := range s.Sfc.Sources {
 			if !validSelector(r) {
 				return inputError("INVALID_SECRET_SOURCE", p)
+			}
+		}
+		if len(s.Sfc.Socket) > maxSocketSources {
+			return inputError("INVALID_SECRET_SOURCE", p+".x-sfc.secrets.socket")
+		}
+		for i, r := range s.Sfc.Socket {
+			if !validSelector(r) || slices.Contains(s.Sfc.Socket[:i], r) {
+				return inputError("INVALID_SECRET_SOURCE", p+".x-sfc.secrets.socket")
 			}
 		}
 		if h := s.Healthcheck; h != nil {

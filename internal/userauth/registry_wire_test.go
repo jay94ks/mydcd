@@ -43,6 +43,12 @@ func TestRegistryQueriesActualWire(t *testing.T) {
 	if _, err = f.client.PlanRegistryMaintenance(f.ctx, f.peers[0], f.session, "tenant", control.RegistryMaintenanceQuery{Action: "gc-registry", ID: "private"}); !errors.As(err, &refused) || refused.Code != "denied" {
 		t.Fatal("maintenance plan with read only", err)
 	}
+	if d, err := f.client.QueryTenantDomains(f.ctx, f.peers[0], f.session, "tenant"); err != nil || len(d.Domains) != 0 {
+		t.Fatal("tenant domains", d, err)
+	}
+	if _, err = f.client.QueryTenantDomains(f.ctx, f.peers[0], f.session, "other"); !errors.As(err, &refused) || refused.Code != "denied" {
+		t.Fatal("another tenant's domains", err)
+	}
 	if page, err := f.client.ImageUsages(f.ctx, f.peers[0], f.session, "tenant", control.ImageUsageQuery{}, ""); err != nil || page.Tenant != "tenant" {
 		t.Fatal("image usages", err)
 	}

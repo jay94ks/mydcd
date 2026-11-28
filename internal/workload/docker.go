@@ -325,7 +325,7 @@ func (d *DockerDriver) matchContainer(ctx context.Context, got container.Inspect
 		return false
 	}
 	for i, a := range networks {
-		e := got.NetworkSettings.Networks[leases[i].NetworkName]
+		e := taskEndpoint(got.NetworkSettings, leases[i])
 		if e == nil || e.IPAMConfig == nil || e.NetworkID != "" && e.NetworkID != leases[i].NetworkID || got.State.Running && e.NetworkID != leases[i].NetworkID {
 			return false
 		}
@@ -977,7 +977,7 @@ func (m *Manager) statusRecord(ctx context.Context, key string, r reconcile.Reco
 	// whether every attachment currently has a native endpoint.
 	endpointPresent := true
 	for _, lease := range l {
-		endpoint := got.Container.NetworkSettings.Networks[lease.NetworkName]
+		endpoint := taskEndpoint(got.Container.NetworkSettings, lease)
 		endpointPresent = endpointPresent && endpoint != nil && endpoint.EndpointID != "" && endpoint.NetworkID == lease.NetworkID
 	}
 	fact.EndpointPresent = &endpointPresent

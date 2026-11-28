@@ -3,10 +3,12 @@
 package pack
 
 import (
+	"archive/tar"
 	"bytes"
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"crypto/sha256"
 	"errors"
 	"io"
 	"os"
@@ -254,5 +256,35 @@ func TestPackKeyOpensWhatItWrote(t *testing.T) {
 	}
 	if !bytes.Equal(key, dataKey(t, k.admin, out.Bytes(), m)) {
 		t.Fatal("returned key is not the sealed one")
+	}
+}
+
+// Extract hands out the exact tar stream of the receipt with the
+// administrator's key alone, and refuses a package changed by one byte.
+func TestExtractWritesTheReceiptTar(t *testing.T) {
+	k := newKeys(t)
+	root, o := fixture(t)
+	for _, c := range []volumearchive.Compression{volumearchive.Zstd, volumearchive.None} {
+		var out bytes.Buffer
+		m, err := Pack(context.Background(), root, &out, o, Params{ID: "a-ex", Scope: volumes.Scope{Cluster: [32]byte{7}, Tenant: "t", App: "a", ID: "d", Generation: 1}, Compression: c, Recipients: [][32]byte{k.cluster.Public(), k.admin.Public()}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		m.DataBytes, m.DataDigest = uint64(out.Len()), sha256.Sum256(out.Bytes())
+		var tarOut bytes.Buffer
+		if err := Extract(fileOpener(out.Bytes()), dataKey(t, k.admin, out.Bytes(), m), m, &tarOut); err != nil {
+			t.Fatal(c, err)
+		}
+		if sha256.Sum256(tarOut.Bytes()) != m.Tar.Digest || uint64(tarOut.Len()) != m.Tar.Bytes {
+			t.Fatal(c, "not the receipt's tar")
+		}
+		if _, err := tar.NewReader(bytes.NewReader(tarOut.Bytes())).Next(); err != nil {
+			t.Fatal(c, "not a tar", err)
+		}
+		bad := bytes.Clone(out.Bytes())
+		bad[len(bad)-1] ^= 1
+		if err := Extract(fileOpener(bad), dataKey(t, k.admin, out.Bytes(), m), m, io.Discard); err == nil {
+			t.Fatal(c, "a changed package was extracted")
+		}
 	}
 }

@@ -7,6 +7,7 @@ import (
 	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -131,5 +132,25 @@ func TestCheckerUploadFactIsOptionalSignedAndIndependentOfContentIdentity(t *tes
 	copy.Upload[0]++
 	if tracked.Verify() != nil || copy.Verify() == nil {
 		t.Fatal("clone aliased signed upload token")
+	}
+}
+
+// The compiler image may be a tag: one deploy resolves it to a digest of the
+// same repository. A digest policy allows only itself.
+func TestCompilerImageTag(t *testing.T) {
+	a := "docker.io/library/golang@sha256:" + strings.Repeat("a", 64)
+	b := "docker.io/library/golang@sha256:" + strings.Repeat("b", 64)
+	tag := BuildPolicy{Image: "golang:1.27"}
+	if tag.CompilerTag() != "docker.io/library/golang:1.27" || !tag.AllowsCompiler(a) || !tag.AllowsCompiler(b) {
+		t.Fatal("tag policy")
+	}
+	for _, bad := range []string{"golang:1.27", "docker.io/library/other@sha256:" + strings.Repeat("a", 64), "golang@sha256:" + strings.Repeat("a", 64)} {
+		if tag.AllowsCompiler(bad) {
+			t.Fatal("allowed", bad)
+		}
+	}
+	pinned := BuildPolicy{Image: a}
+	if pinned.CompilerTag() != "" || !pinned.AllowsCompiler(a) || pinned.AllowsCompiler(b) {
+		t.Fatal("digest policy")
 	}
 }

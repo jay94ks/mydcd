@@ -44,7 +44,7 @@ import { Tabs } from '../components/Tabs';
 import { useToast } from '../components/Toast';
 import { usePoll } from '../lib/usePoll';
 import { ago, fmtTime } from '../lib/format';
-import { certStoreLive, domainListLive, ingressLive } from '../lib/liveTopics';
+import { certStoreLive, dnsProvidersLive, domainListLive, ingressLive } from '../lib/liveTopics';
 
 export const DOMAIN_TABS = (domains?: number, certs?: number) => [
   { to: '/system/domains', label: domains === undefined ? '도메인' : `도메인 (${domains})` },
@@ -111,7 +111,7 @@ function MDomains() {
   const { session } = useAuth();
   const admin = !!session?.user.systemAdmin;
   const nav = useNavigate();
-  const pq = usePoll((s) => (admin ? dnsProviders(s) : Promise.resolve([] as DnsProvider[])), [admin]);
+  const pq = usePoll((s) => (admin ? dnsProviders(s) : Promise.resolve([] as DnsProvider[])), [admin], 0, dnsProvidersLive);
   const dq = usePoll((s) => dnsDomains(s), [], 0, domainListLive);
   const { zones } = useZones(dq.data);
   useReadOnlyTop('외부 도메인', admin ? '클러스터 전체 · 시스템 관리자' : '내게 배정된 이름', '공급자 연결·도메인 추가·레코드 바꾸기는 넓은 화면에서', [admin]);
@@ -178,7 +178,7 @@ function DesktopDomains() {
   const toast = useToast();
   const nav = useNavigate();
   const vq = usePoll((s) => dnsVendors(s), []);
-  const pq = usePoll((s) => (admin ? dnsProviders(s) : Promise.resolve([] as DnsProvider[])), [admin]);
+  const pq = usePoll((s) => (admin ? dnsProviders(s) : Promise.resolve([] as DnsProvider[])), [admin], 0, dnsProvidersLive);
   const lq = usePoll((s) => dnsDomainList(s), [], 0, domainListLive);
   const dq = { ...lq, data: lq.data?.items };
   // 데몬이 아직 클러스터 도메인 목록을 쓰지 않으면 등록·빼기·공급자 붙이기·떼기는 기다린다

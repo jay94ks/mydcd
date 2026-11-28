@@ -3,6 +3,7 @@
 package control
 
 import (
+	"cmp"
 	"encoding/json"
 	"github.com/jay94ks/seafield/internal/access"
 	"net/netip"
@@ -11,6 +12,7 @@ import (
 	"github.com/jay94ks/seafield/internal/cluster/state"
 	"github.com/jay94ks/seafield/internal/deployment"
 	"github.com/jay94ks/seafield/internal/desired"
+	"github.com/jay94ks/seafield/internal/ingress"
 	"github.com/jay94ks/seafield/internal/network"
 )
 
@@ -49,7 +51,8 @@ func (p Policy) projectIngress(s state.State, result *ResourceProjection, checke
 		}
 	}
 
-	sharedRoutes := map[string]string{}
+	type sharedRoute struct{ key, tenant string }
+	sharedRoutes := map[string]sharedRoute{}
 	used := map[string]usage{}
 	groups := map[string]servingDemand{}
 	ports := map[string][]listenerUse{}
@@ -75,10 +78,12 @@ func (p Policy) projectIngress(s state.State, result *ResourceProjection, checke
 							continue
 						}
 						pattern := node + "/" + l.Shared + "/" + kind + "/" + route.Host + "/" + route.Prefix
-						if prior, ok := sharedRoutes[pattern]; ok && prior != key {
+						// Apps of one tenant may serve a host+prefix together
+						// (`app deploy --force`); another tenant never.
+						if prior, ok := sharedRoutes[pattern]; ok && prior.key != key && prior.tenant != scope.Tenant {
 							return ErrCatalog
 						}
-						sharedRoutes[pattern] = key
+						sharedRoutes[pattern] = sharedRoute{key, scope.Tenant}
 					}
 				}
 				continue
@@ -416,6 +421,8 @@ func (p Policy) admitIngressDeclaration(s state.State, tenant, actor string, d d
 	return nil
 }
 func (p Policy) admitIngressBlueprint(s state.State, b deployment.Blueprint) error {
+	var others []ingressRouteUse
+	loaded := false
 	for _, step := range b.Steps() {
 		if step.Kind != "ingress" {
 			continue
@@ -426,6 +433,147 @@ func (p Policy) admitIngressBlueprint(s state.State, b deployment.Blueprint) err
 		}
 		if err := p.admitIngressDeclaration(s, b.Scope().Tenant, b.Scope().Actor, d); err != nil {
 			return err
+		}
+		if !loaded {
+			var err error
+			if others, err = p.ingressRouteUses(s); err != nil {
+				return err
+			}
+			loaded = true
+		}
+		if err := p.admitForeignIngressHosts(s, b.Scope().Tenant, d, others); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ingressRouteUse is one host+prefix an accepted app serves on a server's
+// shared listener and gateway.
+type ingressRouteUse struct {
+	Tenant, App                           string
+	Node, Listener, Gateway, Host, Prefix string
+}
+
+func ingressRouteUsesOf(tenant, app, node string, d deployment.IngressDeclaration) []ingressRouteUse {
+	var out []ingressRouteUse
+	for _, l := range d.Listeners {
+		if l.Shared == "" {
+			continue
+		}
+		for _, r := range deployment.IngressRoutes(d) {
+			gateway := cmp.Or(r.Gateway, "local")
+			for _, kind := range []string{"external", "local"} {
+				if gateway == "both" || gateway == kind {
+					out = append(out, ingressRouteUse{tenant, app, cmp.Or(d.Node, node), l.Shared, kind, strings.ToLower(r.Host), r.Prefix})
+				}
+			}
+		}
+	}
+	return out
+}
+
+// ingressRouteUses lists the routes of every accepted app ingress, draining
+// ones included (they still serve until gone).
+func (p Policy) ingressRouteUses(s state.State) ([]ingressRouteUse, error) {
+	projection, err := p.ProjectResources(s)
+	if err != nil {
+		return nil, err
+	}
+	var out []ingressRouteUse
+	for _, g := range projection.Goals {
+		if g.Goal.Kind != "ingress" {
+			continue
+		}
+		var d deployment.IngressDeclaration
+		if json.Unmarshal(g.Goal.Config, &d) != nil {
+			return nil, ErrCatalog
+		}
+		out = append(out, ingressRouteUsesOf(g.Goal.Tenant, g.Goal.App, g.Goal.Node, d)...)
+	}
+	return out, nil
+}
+
+// hostWithin: host is name or a name under it ("*." patterns count as
+// their base name). "*" is never within another tenant's host here; only a
+// system admin routes it.
+func hostWithin(host, name string) bool {
+	host, name = strings.TrimPrefix(host, "*."), strings.TrimPrefix(name, "*.")
+	if host == "*" || name == "*" {
+		return false
+	}
+	return host == name || strings.HasSuffix(host, "."+name)
+}
+
+// admitForeignIngressHosts refuses a host that another tenant's app routes,
+// or a name under it, on any server: `--force` does not lift it. The one
+// exception is a host a system admin granted this tenant (`ingress hosts set`).
+func (p Policy) admitForeignIngressHosts(s state.State, tenant string, d deployment.IngressDeclaration, others []ingressRouteUse) error {
+	book, err := p.IngressManagement(s)
+	if err != nil {
+		return err
+	}
+	policy, granted := book.HostPolicyRecord(tenant)
+	return foreignIngressHosts(tenant, d, others, policy, granted)
+}
+
+func foreignIngressHosts(tenant string, d deployment.IngressDeclaration, others []ingressRouteUse, policy ingress.HostPolicy, granted bool) error {
+	for _, mine := range ingressRouteUsesOf(tenant, "", d.Node, d) {
+		if granted && (mine.Gateway == "local" && ingressHostAllowed(mine.Host, policy.LocalHosts) || mine.Gateway == "external" && policy.ExternalAllowed && ingressHostAllowed(mine.Host, policy.ExternalHosts)) {
+			continue
+		}
+		for _, o := range others {
+			if o.Tenant != tenant && hostWithin(mine.Host, o.Host) {
+				return &deployment.InputError{Code: "INGRESS_HOST_OTHER_TENANT", Path: "x-sfc.ingress." + mine.Host}
+			}
+		}
+	}
+	return nil
+}
+
+// admitIngressRouteOverlap stops a plan whose new route uses a host+prefix
+// that another app of the same tenant serves on that server and gateway.
+// `app deploy --force` skips it, and both apps then serve the route (the
+// gateway rotates requests across them). Routes this app already serves are
+// not new, so a forced share survives the app's later deploys and CD syncs.
+func (p Policy) admitIngressRouteOverlap(s state.State, b deployment.Blueprint) error {
+	var mine []ingressRouteUse
+	for _, step := range b.Steps() {
+		if step.Kind != "ingress" {
+			continue
+		}
+		var d deployment.IngressDeclaration
+		if json.Unmarshal(step.Goal, &d) != nil {
+			return ErrCatalog
+		}
+		mine = append(mine, ingressRouteUsesOf(b.Scope().Tenant, b.Scope().App, step.Node, d)...)
+	}
+	if len(mine) == 0 {
+		return nil
+	}
+	others, err := p.ingressRouteUses(s)
+	if err != nil {
+		return err
+	}
+	return ingressRouteOverlap(b.Scope().Tenant, b.Scope().App, mine, others)
+}
+
+func ingressRouteOverlap(tenant, app string, mine, others []ingressRouteUse) error {
+	key := func(u ingressRouteUse) ingressRouteUse { u.Tenant, u.App = "", ""; return u }
+	held := map[ingressRouteUse]bool{}
+	for _, o := range others {
+		if o.Tenant == tenant && o.App == app {
+			held[key(o)] = true
+		}
+	}
+	for _, m := range mine {
+		if held[key(m)] {
+			continue
+		}
+		for _, o := range others {
+			if o.Tenant == m.Tenant && o.App != m.App && key(o) == key(m) {
+				return &deployment.InputError{Code: "INGRESS_ROUTE_TAKEN", Path: "x-sfc.ingress." + m.Host + m.Prefix + " (" + o.App + ")"}
+			}
 		}
 	}
 	return nil

@@ -112,17 +112,17 @@ func (s *Server) decisionNow(in *store.Incident) store.IncidentDecision {
 	return d
 }
 
-func (s *Server) incidentRowOf(in *store.Incident) incidentRow {
+func (s *Server) incidentRowOf(lang string, in *store.Incident) incidentRow {
 	d := s.decisionNow(in)
-	dv := incidentDecisionView{Kind: d.Kind, By: d.By, Note: d.Note, Reason: d.Reason}
+	dv := incidentDecisionView{Kind: d.Kind, By: text(lang, d.By, nil), Note: render(lang, notePhrase(d)), Reason: d.Reason}
 	if d.Kind == decisionPending {
 		dv.ExpiresAt = rfc3339(d.ExpiresAt)
 	}
 	mit := ""
 	if a := chosenAction(in); a != nil {
-		mit = a.Label
-	} else if a := incidentActionByID(in.Mitigation); a != nil {
-		mit = a.Label
+		mit = actionLabel(lang, a)
+	} else if incidentActionByID(in.Mitigation) != nil {
+		mit = text(lang, "incident-action."+in.Mitigation, nil)
 	}
 	impact := in.Impact
 	if impact == "" {
@@ -145,6 +145,7 @@ func (s *Server) handleListIncidents(w http.ResponseWriter, r *http.Request, ws 
 		return
 	}
 	q := r.URL.Query()
+	lang := s.requestLang(r, ws)
 	limit, _ := strconv.Atoi(q.Get("limit"))
 	if limit <= 0 {
 		limit = 50
@@ -159,7 +160,7 @@ func (s *Server) handleListIncidents(w http.ResponseWriter, r *http.Request, ws 
 		if !acc.can(in, false) {
 			continue
 		}
-		row := s.incidentRowOf(in)
+		row := s.incidentRowOf(lang, in)
 		if row.Decision.Kind == decisionPending {
 			pending++
 		}
@@ -249,30 +250,26 @@ func (s *Server) loadIncidentByID(w http.ResponseWriter, r *http.Request, ws *we
 	return in, true
 }
 
-func (s *Server) incidentDetail(in *store.Incident) map[string]any {
-	raw, _ := json.Marshal(s.incidentRowOf(in))
+func (s *Server) incidentDetail(lang string, in *store.Incident) map[string]any {
+	raw, _ := json.Marshal(s.incidentRowOf(lang, in))
 	var out map[string]any
 	_ = json.Unmarshal(raw, &out)
-	timeline := in.Timeline
-	if timeline == nil {
-		timeline = []store.IncidentEntry{}
-	}
-	out["title"], out["revision"], out["timeline"], out["guides"], out["rule"], out["target"] = in.Title, in.Revision, timeline, s.incidentGuideVersions(in), in.Rule, in.Target
+	out["title"], out["revision"], out["timeline"], out["guides"], out["rule"], out["target"] = render(lang, titlePhrase(in)), in.Revision, timelineIn(lang, in.Timeline), s.incidentGuideVersions(in), render(lang, rulePhrase(in)), in.Target
 	out["mcpCalls"] = in.MCPCalls
 	if in.MCPCalls == nil {
 		out["mcpCalls"] = map[string]int{}
 	}
 	cands := make([]map[string]any, 0, len(in.Candidates))
 	for _, c := range in.Candidates {
-		row := map[string]any{"action": c.ID, "label": c.Label}
-		if c.Note != "" {
-			row["note"] = c.Note
+		row := map[string]any{"action": c.ID, "label": actionLabel(lang, &c)}
+		if note := actionNote(lang, &c); note != "" {
+			row["note"] = note
 		}
 		cands = append(cands, row)
 	}
 	out["candidates"] = cands
 	if len(in.Assessment) > 0 {
-		out["assessment"] = in.Assessment
+		out["assessment"] = assessmentIn(lang, in.Assessment)
 	}
 	if in.Op != "" {
 		out["op"] = in.Op
@@ -282,7 +279,8 @@ func (s *Server) incidentDetail(in *store.Incident) map[string]any {
 		if a := chosenAction(in); a != nil {
 			act = a.ID
 		}
-		out["approval"] = map[string]any{"title": in.Approval.Title, "fields": in.Approval.Fields, "expiresAt": rfc3339(in.Decision.ExpiresAt),
+		title, fields := approvalCard(lang, in)
+		out["approval"] = map[string]any{"title": title, "fields": fields, "expiresAt": rfc3339(in.Decision.ExpiresAt),
 			"basisHash": in.Approval.BasisHash, "action": act, "target": in.Target}
 	}
 	return out
@@ -294,7 +292,7 @@ func (s *Server) handleGetIncident(w http.ResponseWriter, r *http.Request, ws *w
 	if !ok {
 		return
 	}
-	writeJSON(w, http.StatusOK, s.incidentDetail(in))
+	writeJSON(w, http.StatusOK, s.incidentDetail(s.requestLang(r, ws), in))
 }
 
 // chosenAction is the incident's chosen candidate.
@@ -379,7 +377,9 @@ func (s *Server) handleApproveIncident(w http.ResponseWriter, r *http.Request, w
 			}
 			x.Decision = store.IncidentDecision{Kind: decisionApproved, By: ws.user.Username, At: now}
 			x.Approval, x.Op, x.OpID, x.State, x.MitigatedAt, x.UpdatedAt = nil, op.ID, req.OpID, incidentMitigating, now, now
-			x.Timeline = append(x.Timeline, store.IncidentEntry{At: now, Kind: "approve", Text: a.Label + " 승인", Op: op.ID, Signer: ws.user.Username})
+			e := entry(now, "approve", with(ph("incident.approved"), "action", actionPhrase(a.ID, a.Label)))
+			e.Op, e.Signer = op.ID, ws.user.Username
+			x.Timeline = append(x.Timeline, e)
 			return nil
 		})
 		if err != nil {
@@ -399,7 +399,7 @@ func (s *Server) sendIncidentAction(ctx context.Context, ws *webSession, in *sto
 		if st, raw, _ := s.sendOneIncidentAction(ctx, ws, in, a.Also, alsoOpID(opID), reason); st >= 400 {
 			s.log.Warn("incident second step", "incident", in.ID, "action", a.Also.ID, "status", st, "body", string(raw))
 			_, _ = s.opt.Store.UpdateIncident(in.ID, func(x *store.Incident) error {
-				x.Timeline = append(x.Timeline, store.IncidentEntry{At: s.now(), Kind: "notify", Text: a.Also.Label + "을(를) 보내지 못했어요. 사람이 확인해 주세요."})
+				x.Timeline = append(x.Timeline, entry(s.now(), "notify", with(ph("incident.also-failed"), "action", actionPhrase(a.Also.ID, a.Also.Label))))
 				return nil
 			})
 		}
@@ -461,7 +461,9 @@ func (s *Server) handleRejectIncident(w http.ResponseWriter, r *http.Request, ws
 	_, err := s.opt.Store.UpdateIncident(in.ID, func(x *store.Incident) error {
 		x.Decision = store.IncidentDecision{Kind: decisionRejected, By: ws.user.Username, At: now, Reason: req.Reason, Note: note}
 		x.Approval, x.UpdatedAt = nil, now
-		x.Timeline = append(x.Timeline, store.IncidentEntry{At: now, Kind: "reject", Text: "거절: " + req.Reason, Signer: ws.user.Username})
+		e := entry(now, "reject", ph("incident.rejected", "reason", req.Reason))
+		e.Signer = ws.user.Username
+		x.Timeline = append(x.Timeline, e)
 		return nil
 	})
 	if err != nil {

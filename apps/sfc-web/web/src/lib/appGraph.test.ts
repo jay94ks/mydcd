@@ -8,13 +8,13 @@ const SRC = `# 상점
 name: php-shop
 x-sfc:
   ingress:
-    routes:
-      - host: shop.example.com
-        prefix: /
-        service: web
-        port: 80
-        gateway: external
-        certificate: auto
+    - node: node-a
+      host: shop.example.com
+      prefix: /
+      service: web
+      port: 80
+      gateway: external
+      health: /healthz
 services:
   web:
     image: php:8.3-apache
@@ -99,7 +99,7 @@ describe('app.yaml ⇄ 그래프', () => {
     const doc = YAML.parse(graphToYaml(g, SRC));
     expect(Object.keys(doc.services)).toEqual(['front', 'db']);
     expect(doc.services.front.image).toBe('php:8.3-apache');
-    expect(doc['x-sfc'].ingress.routes[0]).toMatchObject({ service: 'front', certificate: 'auto', port: 80 });
+    expect(doc['x-sfc'].ingress[0]).toMatchObject({ node: 'node-a', service: 'front', health: '/healthz', port: 80 });
   });
 
   it('빈 원문에서 새 앱을 만든다', () => {

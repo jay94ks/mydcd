@@ -146,14 +146,16 @@ type Conn interface {
 	// DNS answers (control.NetworkDNSNames). Read on the tenant.
 	NetworkDNSNames(ctx context.Context, tenant, network string) (NetworkDNSNames, error)
 	Volumes(ctx context.Context, tenant, after string) (Page[VolumeView], error)
-	VolumeBackups(ctx context.Context, tenant, after string) (Page[VolumeBackupView], error)
-	// VolumeRestores: `volume-restores`.
-	VolumeRestores(ctx context.Context, tenant, after string) (Page[VolumeRestoreView], error)
+	// VolumeBackups: `volume-backups` in sfcd's shape (control.VolumeBackupView
+	// rows). The screen rows are built by internal/web/server.
+	VolumeBackups(ctx context.Context, tenant, after string) (userauth.VolumeBackupsPage, error)
+	// VolumeRestores: `volume-restores` (control.VolumeRestoreView rows).
+	VolumeRestores(ctx context.Context, tenant, after string) (userauth.VolumeRestoresPage, error)
 	// VolumeArchives: `volume-archives` — archive rows and the public
 	// recipient keys new packages are sealed to (userauth.VolumeArchivesPage).
 	VolumeArchives(ctx context.Context, tenant, after string) (userauth.VolumeArchivesPage, error)
 	// VolumeBackupSource: `volume-backup-source` for an app volume (TM Volumes).
-	VolumeBackupSource(ctx context.Context, tenant string, q control.VolumeSelector) (VolumeSource, error)
+	VolumeBackupSource(ctx context.Context, tenant string, q control.VolumeSelector) (userauth.VolumeBackupSourceReply, error)
 	// Vault: one sfcd `vault` page (control.VaultView rows — an Object or a
 	// Write — in ID order; Revision = RootRevision, Collection =
 	// TreeRevision, ApprovalRevision). The screen rows (paths, the root's

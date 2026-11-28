@@ -16,7 +16,7 @@ import { DataTable } from '../components/DataTable';
 import { casFailed, MutationError, OpPanel, useMutation } from '../components/OpPanel';
 import { StepsDialog, type Step } from '../components/StepsDialog';
 import { DEFAULT_POLL_MS, usePoll } from '../lib/usePoll';
-import { tenantsLive } from '../lib/liveTopics';
+import { tenantRetireLive, tenantsLive } from '../lib/liveTopics';
 import { fmtBytes } from '../lib/format';
 import { usePhone } from '../lib/viewport';
 import { MCards, MDetail, MSec, MTiles, useReadOnlyTop } from '../mobile/ReadOnly';
@@ -158,7 +158,7 @@ function MTenantDetail() {
   const session = useSession();
   const admin = session.user.systemAdmin;
   const list = usePoll((s) => tenantList(s), [], 0, tenantsLive);
-  const retire = usePoll((s) => (admin ? tenantRetirement(id, s) : Promise.resolve(undefined)), [id, admin], DEFAULT_POLL_MS);
+  const retire = usePoll((s) => (admin ? tenantRetirement(id, s) : Promise.resolve(undefined)), [id, admin], DEFAULT_POLL_MS, tenantRetireLive(id));
   const members = usePoll((s) => tenantMembers(id, s), [id]);
   const limits = usePoll((s) => tenantLimits(id, s), [id]);
   const path = useLocation().pathname.replace(/\/$/, '');
@@ -237,7 +237,7 @@ function DesktopTenantDetail() {
     },
     [id],
   );
-  const retire = usePoll((s) => (admin ? tenantRetirement(id, s) : Promise.resolve(undefined)), [id, admin], DEFAULT_POLL_MS);
+  const retire = usePoll((s) => (admin ? tenantRetirement(id, s) : Promise.resolve(undefined)), [id, admin], DEFAULT_POLL_MS, tenantRetireLive(id));
   const [dlg, setDlg] = useState<'begin' | 'finish'>();
   const r = retire.data;
   const gone = r?.phase === 'deleted';

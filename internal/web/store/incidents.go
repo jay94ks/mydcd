@@ -76,6 +76,9 @@ type IncidentAction struct {
 	Path   string          `json:"path"`
 	Body   json.RawMessage `json:"body,omitempty"`
 	Note   string          `json:"note,omitempty"`
+	// NoteText, when set, is the note shown in the reader's language
+	// (Note keeps the values).
+	NoteText *Phrase `json:"noteText,omitempty"`
 	// Also is a second call sent right after this one succeeds (rolling
 	// back pauses CD in the same move).
 	Also *IncidentAction `json:"also,omitempty"`
@@ -114,6 +117,9 @@ type IncidentDecision struct {
 	ExpiresAt time.Time `json:"expiresAt,omitzero"`
 	Reason    string    `json:"reason,omitempty"`
 	Note      string    `json:"note,omitempty"`
+	// NoteText is Note in the reader's language (decisions stored before
+	// it keep their Korean Note).
+	NoteText *Phrase `json:"noteText,omitempty"`
 }
 
 // IncidentApproval is the approval card of a pending decision.
@@ -125,9 +131,13 @@ type IncidentApproval struct {
 
 // IncidentEntry is one timeline line.
 type IncidentEntry struct {
-	At           time.Time         `json:"at"`
-	Kind         string            `json:"kind"` // detect, diagnose, assess, auto, approve, reject, recover, propose, expire, notify
-	Text         string            `json:"text"`
+	At   time.Time `json:"at"`
+	Kind string    `json:"kind"` // detect, diagnose, assess, auto, approve, reject, recover, propose, expire, notify
+	Text string    `json:"text"`
+	// Phrase is the line in the reader's language; Text then is empty
+	// (lines stored before it keep their Korean Text; an AI hypothesis
+	// stays Text as written).
+	Phrase       *Phrase           `json:"phrase,omitempty"`
 	Op           string            `json:"op,omitempty"`
 	Signer       string            `json:"signer,omitempty"`
 	Model        string            `json:"model,omitempty"`
@@ -249,10 +259,13 @@ type IncidentPolicy struct {
 type IncidentApprovers struct {
 	// To: system-admins or system-and-tenant-admins (app incidents also
 	// ask that app's workspace managers). Label is made by the server.
-	To              string `json:"to"`
-	Label           string `json:"label"`
-	DeadlineMinutes int    `json:"deadlineMinutes"`
-	Banner          bool   `json:"banner"`
+	To    string `json:"to"`
+	Label string `json:"label"`
+	// Admins is the system administrator count Label was made with (nil:
+	// unknown); screens make the label again in the reader's language.
+	Admins          *int `json:"admins,omitempty"`
+	DeadlineMinutes int  `json:"deadlineMinutes"`
+	Banner          bool `json:"banner"`
 }
 
 // AppIncidentPolicy is one app's policy (workspace managers).

@@ -29,9 +29,25 @@ func TestCommandCanonicalBytesAndTruncation(t *testing.T) {
 	if _, err := DecodeCommand(append(b, 0)); err == nil {
 		t.Fatal("trailing data")
 	}
-	b[3] = 2
+	b[3] = 3
 	if _, err := DecodeCommand(b); err == nil {
-		t.Fatal("invalid bool")
+		t.Fatal("invalid delete byte")
+	}
+	// Renew is delete byte 2: a Mutate only, never with Delete, and part of
+	// the digest only when set.
+	b[3] = 2
+	renewed, err := DecodeCommand(b)
+	if err != nil || !renewed.Renew || renewed.Delete || Digest(renewed) == Digest(c) {
+		t.Fatal("renew byte", err)
+	}
+	if again, err := EncodeCommand(renewed); err != nil || !bytes.Equal(again, b) {
+		t.Fatal("renew encoding", err)
+	}
+	b[3] = 0
+	for _, bad := range []Command{{Kind: Mutate, Key: "k", Renew: true, Delete: true}, {Kind: SetRights, Target: "user/a", Renew: true}} {
+		if _, err := EncodeCommand(bad); err == nil {
+			t.Fatal("renew outside a plain Mutate")
+		}
 	}
 	c.Value += "x"
 	if _, err := EncodeCommand(c); err == nil {
@@ -104,5 +120,26 @@ func TestSnapshotPreservesBinaryValues(t *testing.T) {
 	c.RequestID = string([]byte{0xff})
 	if r := mustApply(t, &s, c); r.Code != Invalid {
 		t.Fatal("invalid identity bytes", r)
+	}
+}
+
+func TestRenewGivesPresentObjectNewGeneration(t *testing.T) {
+	s := initial()
+	s, r, err := Apply(s, s.Index()+1, Command{Actor: "admin", Epoch: 1, RequestID: "1", Key: "workload/k", Value: "v1"})
+	if err != nil || r.Code != Applied {
+		t.Fatal(err, r)
+	}
+	first := s.Object("workload/k")
+	s, r, err = Apply(s, s.Index()+1, Command{Actor: "admin", Epoch: 1, RequestID: "2", Key: "workload/k", Value: "v2", Expected: first.Revision})
+	if err != nil || r.Code != Applied || s.Object("workload/k").Generation != first.Generation {
+		t.Fatal("plain mutate changed the generation", err, r)
+	}
+	second := s.Object("workload/k")
+	s, r, err = Apply(s, s.Index()+1, Command{Actor: "admin", Epoch: 1, RequestID: "3", Key: "workload/k", Value: "v3", Expected: second.Revision, Renew: true})
+	if err != nil || r.Code != Applied || r.Generation <= second.Generation || s.Object("workload/k").Generation != r.Generation || !s.Object("workload/k").Present {
+		t.Fatal("renew kept the generation", err, r)
+	}
+	if _, r, _ = Apply(s, s.Index()+1, Command{Actor: "admin", Epoch: 1, RequestID: "4", Key: "workload/k", Expected: s.Object("workload/k").Revision, Renew: true, Delete: true}); r.Code == Applied {
+		t.Fatal("renewing delete applied")
 	}
 }

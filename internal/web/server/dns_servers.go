@@ -85,10 +85,10 @@ func externalNode(g control.IngressGatewaySummary) dnsNode {
 	return n
 }
 
-func reachView(r *store.DNSReach) map[string]any {
+func reachView(lang string, r *store.DNSReach) map[string]any {
 	v := map[string]any{"ok": r.OK, "at": rfc3339(r.At)}
 	if r.Error != "" {
-		v["error"] = r.Error
+		v["error"] = text(lang, r.Error, map[string]string{"addr": r.Addr, "port": r.Port})
 	}
 	return v
 }
@@ -104,7 +104,7 @@ func linkAddresses(row *store.DNSServerLink, n dnsNode) []string {
 // dnsServerItems: every server with an external gateway, then linked ones
 // sfcd no longer shows (admin), or only the linked ones (others, nodes
 // nil: node addresses and phases unknown).
-func dnsServerItems(l *store.DNSServerLinks, nodes map[string]dnsNode, admin bool) []map[string]any {
+func dnsServerItems(lang string, l *store.DNSServerLinks, nodes map[string]dnsNode, admin bool) []map[string]any {
 	names := []string{}
 	for n := range nodes {
 		if admin || l.Rows[n] != nil {
@@ -146,7 +146,7 @@ func dnsServerItems(l *store.DNSServerLinks, nodes map[string]dnsNode, admin boo
 				v["missing"] = true // sfcd no longer shows its external gateway
 			}
 			if row.Reach != nil {
-				v["reach"] = reachView(row.Reach)
+				v["reach"] = reachView(lang, row.Reach)
 			}
 		}
 		if v["addresses"] == nil {
@@ -238,7 +238,7 @@ func (s *Server) dnsServersView(w http.ResponseWriter, r *http.Request, ws *webS
 	if !a.admin {
 		// The gateways and server phases are the system administrator's
 		// in sfcd: others see the links as saved (partial).
-		out := map[string]any{"items": dnsServerItems(l, nil, false), "revision": l.Revision, "partial": true}
+		out := map[string]any{"items": dnsServerItems(s.requestLang(r, ws), l, nil, false), "revision": l.Revision, "partial": true}
 		return out, true
 	}
 	ctx, cancel := s.callCtx(r)
@@ -248,7 +248,7 @@ func (s *Server) dnsServersView(w http.ResponseWriter, r *http.Request, ws *webS
 		s.writeBackendError(w, ws, err)
 		return nil, false
 	}
-	items := dnsServerItems(l, nodes, true)
+	items := dnsServerItems(s.requestLang(r, ws), l, nodes, true)
 	out := map[string]any{"items": items, "revision": l.Revision}
 	if len(l.Rows) == 0 {
 		// Links not in use: the records stay as they are.
@@ -497,7 +497,7 @@ func (s *Server) handleCheckDNSServers(w http.ResponseWriter, r *http.Request, w
 	reach := map[string]*store.DNSReach{}
 	items := []map[string]any{}
 	for x := range res {
-		v := reachView(x.r)
+		v := reachView(s.requestLang(r, ws), x.r)
 		v["node"] = x.node
 		items = append(items, v)
 		if len(req.Addresses) == 0 {
@@ -517,13 +517,13 @@ func (s *Server) handleCheckDNSServers(w http.ResponseWriter, r *http.Request, w
 func (s *Server) reach(ctx context.Context, addrs []string) *store.DNSReach {
 	out := &store.DNSReach{OK: true, At: s.now()}
 	if len(addrs) == 0 {
-		out.OK, out.Error = false, "주소 없음"
+		out.OK, out.Error = false, "dns-reach.no-address"
 		return out
 	}
 	for _, a := range addrs {
 		ip, err := netip.ParseAddr(a)
 		if err != nil || !s.webhookAddrOK(ip) {
-			out.OK, out.Error = false, a+": 공개 주소가 아님"
+			out.OK, out.Error, out.Addr = false, "dns-reach.not-public", a
 			return out
 		}
 		port := s.hooks.reachPort
@@ -535,7 +535,7 @@ func (s *Server) reach(ctx context.Context, addrs []string) *store.DNSReach {
 		c, err := d.DialContext(cctx, "tcp", net.JoinHostPort(ip.String(), port))
 		cancel()
 		if err != nil {
-			out.OK, out.Error = false, a+": 연결 안 됨 (:"+port+")"
+			out.OK, out.Error, out.Addr, out.Port = false, "dns-reach.no-connect", a, port
 			return out
 		}
 		_ = c.Close()

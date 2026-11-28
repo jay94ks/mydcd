@@ -408,6 +408,19 @@ func (r *Runtime) appCommand(method, caller string, input []byte, v cluster.View
 		}
 		return cmd, nil
 	}
+	if method == "volume-remote-fence-report" {
+		cmd, err := r.controlPolicy.ResolveVolumeRemoteFenceReport(v.State, key, input)
+		if err != nil {
+			return cmd, err
+		}
+		if _, found := v.State.LookupResult(cmd); !found {
+			report, err := schema.Decode[control.VolumeRemoteFenceReport](input)
+			if err != nil || !access.Recent(report.At, time.Now().Unix(), 300) {
+				return cmd, sfcp.ErrAdmission
+			}
+		}
+		return cmd, nil
+	}
 	if method == "volume-archive-report" {
 		cmd, err := r.controlPolicy.ResolveVolumeArchiveReport(v.State, key, input)
 		if err != nil {

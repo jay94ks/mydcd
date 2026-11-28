@@ -457,11 +457,57 @@ func (s State) release(g Gone) (State, error) {
 	if i < 0 || !ok || g.Scope != s.d.Scope || !g.Stopped || !g.MountsGone || !verify(key, GoneBytes(g), g.Signature) {
 		return s, ErrVolume
 	}
+	return s.drop(i)
+}
+
+// RemoteFence is the home's proof that a remote consumer whose runner left the
+// cluster can no longer reach the Volume: the home refuses its mounts and
+// has ended every session of it, so nothing it sent is still applied. The
+// runner cannot sign Gone any more; the home, which every read and write of
+// a remote consumer goes through, signs this instead. Policy accepts it only
+// once the runner is removed or retired from the membership.
+type RemoteFence struct {
+	Schema    uint8
+	Scope     Scope
+	Consumer  Consumer
+	Signature []byte
+}
+
+func RemoteFenceBytes(f RemoteFence) []byte {
+	f.Signature = nil
+	return signedBytes("sfc-volume-remote-fence-1", f)
+}
+
+// Verify checks the fence's shape and its signature by owner.
+func (f RemoteFence) Verify(owner [32]byte) error {
+	if f.Schema != 1 || !f.Consumer.Remote() || !verify(owner, RemoteFenceBytes(f), f.Signature) {
+		return ErrVolume
+	}
+	return nil
+}
+
+// ReleaseFenced returns a remote consumer's lease on the home's RemoteFence,
+// signed by the Volume owner's key.
+func (s State) ReleaseFenced(f RemoteFence) (State, error) {
+	i := s.consumerIndex(f.Consumer)
+	if i < 0 || f.Scope != s.d.Scope || f.Verify(s.d.Owner.Key) != nil {
+		return s, ErrVolume
+	}
+	for _, move := range s.d.Moves {
+		if move.Binding.MatchesReader(f.Consumer) {
+			return s, ErrVolume
+		}
+	}
+	return s.drop(i)
+}
+
+// drop removes consumer i and returns its lease.
+func (s State) drop(i int) (State, error) {
 	p, e := reconcile.RestoreLeases(s.d.Pins)
 	if e != nil {
 		return s, e
 	}
-	if e = p.Release(g.Consumer.Lease); e != nil {
+	if e = p.Release(s.d.Consumers[i].Lease); e != nil {
 		return s, e
 	}
 	n, e := s.clone()

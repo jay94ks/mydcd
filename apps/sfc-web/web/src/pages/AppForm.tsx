@@ -32,7 +32,8 @@ export interface ServiceForm {
 export interface AppFormState {
   name: string;
   services: ServiceForm[];
-  routes: { host: string; path: string; service: string; port: string; gateway: 'local' | 'external' | 'both' }[];
+  /** x-sfc.ingress route 목록. node는 이 경로를 여는 서버 */
+  routes: { node: string; host: string; path: string; service: string; port: string; gateway: 'local' | 'external' }[];
 }
 
 export const emptyService = (i: number): ServiceForm => ({
@@ -144,10 +145,7 @@ export function formToYaml(f: AppFormState): string {
   for (const s of f.services) if (s.name) services[s.name] = serviceToObject(s, refs);
   const xm: Record<string, unknown> = {};
   const routes = f.routes.filter((r) => r.host && r.service);
-  if (routes.length)
-    xm.ingress = {
-      routes: routes.map((r) => ({ host: r.host, path: r.path || '/', service: r.service, port: Number(r.port) || undefined, gateway: r.gateway })),
-    };
+  if (routes.length) xm.ingress = routes.map((r) => ({ ...(r.node ? { node: r.node } : {}), host: r.host, prefix: r.path || '/', service: r.service, ...(Number(r.port) ? { port: Number(r.port) } : {}), gateway: r.gateway }));
   const doc: Record<string, unknown> = { name: f.name, ...(Object.keys(xm).length ? { 'x-sfc': xm } : {}), services };
   if (nets.size) doc.networks = Object.fromEntries([...nets].map((n) => [n, { external: true }]));
   if (vols.size) doc.volumes = Object.fromEntries([...vols].map((n) => [n, { external: true }]));
@@ -389,7 +387,7 @@ export function AppFormEditor({ tenant, value, onChange, nodes, lockName }: { te
       <Card title="3. 외부 접속 · 경로 규칙">
         <Rows
           rows={value.routes}
-          blank={{ host: '', path: '/', service: serviceNames[0] ?? '', port: '', gateway: 'local' as const }}
+          blank={{ node: nodes[0] ?? '', host: '', path: '/', service: serviceNames[0] ?? '', port: '', gateway: 'external' as const }}
           addLabel="경로 규칙"
           onChange={(routes) => set({ routes })}
           render={(r, setR) => (
@@ -402,15 +400,20 @@ export function AppFormEditor({ tenant, value, onChange, nodes, lockName }: { te
                 ))}
               </select>
               <input aria-label="포트" placeholder="포트" style={{ width: 80 }} value={r.port} onChange={(e) => setR({ ...r, port: e.target.value.trim() })} />
-              <select aria-label="게이트웨이" value={r.gateway} onChange={(e) => setR({ ...r, gateway: e.target.value as 'local' })}>
-                <option value="local">로컬망</option>
+              <select aria-label="게이트웨이" value={r.gateway} onChange={(e) => setR({ ...r, gateway: e.target.value as 'local' | 'external' })}>
                 <option value="external">외부망</option>
-                <option value="both">둘 다</option>
+                <option value="local">로컬망</option>
+              </select>
+              <select aria-label="여는 서버" value={r.node} onChange={(e) => setR({ ...r, node: e.target.value })}>
+                {!r.node && <option value="">여는 서버</option>}
+                {nodes.map((n) => (
+                  <option key={n}>{n}</option>
+                ))}
               </select>
             </>
           )}
         />
-        <span className="small muted">x-sfc.ingress.routes로 만듭니다. 작업 공간이 외부망을 허용하지 않으면 거부됩니다.</span>
+        <span className="small muted">x-sfc.ingress 경로 목록으로 만듭니다. 경로마다 그 경로를 받는 게이트웨이가 있는 서버를 고릅니다. 작업 공간이 외부망을 허용하지 않으면 거부됩니다.</span>
       </Card>
     </div>
   );

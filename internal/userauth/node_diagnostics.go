@@ -17,11 +17,25 @@ type NodeQuery struct{ Node string }
 
 func (q NodeQuery) Valid() bool { return lifecycle.ValidID(q.Node) }
 
-func (c Client) NodeDiagnostics(ctx context.Context, peer sfcp.Peer, session access.Session, node string) (control.NodeDiagnosticsBundle, error) {
-	if !lifecycle.ValidID(node) {
+// NodeDiagnosticsQuery names the server and, optionally, how many seconds of
+// CPU profile its owner records into the bundle.
+type NodeDiagnosticsQuery struct {
+	Node              string
+	CPUProfileSeconds uint8 `json:",omitempty"`
+}
+
+func (q NodeDiagnosticsQuery) Valid() bool {
+	return lifecycle.ValidID(q.Node) && q.CPUProfileSeconds <= control.NodeDiagnosticsMaxCPUProfileSeconds
+}
+
+// NodeDiagnostics reads a server's diagnostics bundle; cpuProfile > 0 also
+// records a CPU profile of that length (whole seconds) on the server.
+func (c Client) NodeDiagnostics(ctx context.Context, peer sfcp.Peer, session access.Session, node string, cpuProfile time.Duration) (control.NodeDiagnosticsBundle, error) {
+	seconds := (cpuProfile + time.Second - 1) / time.Second
+	if !lifecycle.ValidID(node) || cpuProfile < 0 || seconds > control.NodeDiagnosticsMaxCPUProfileSeconds {
 		return control.NodeDiagnosticsBundle{}, access.ErrInvalid
 	}
-	bundle, err := call(ctx, c, peer, session, NodeDiagnosticsMethod, NodeQuery{Node: node})
+	bundle, err := call(ctx, c, peer, session, NodeDiagnosticsMethod, NodeDiagnosticsQuery{Node: node, CPUProfileSeconds: uint8(seconds)})
 	if err != nil {
 		return control.NodeDiagnosticsBundle{}, err
 	}
@@ -31,7 +45,7 @@ func (c Client) NodeDiagnostics(ctx context.Context, peer sfcp.Peer, session acc
 	return bundle, nil
 }
 
-var NodeDiagnosticsMethod = define(Method[NodeQuery, control.NodeDiagnosticsBundle]{Name: "node-diagnostics"}, true, func(ctx context.Context, s Service, view cluster.View, session access.Session, q NodeQuery) (control.NodeDiagnosticsBundle, string) {
+var NodeDiagnosticsMethod = define(Method[NodeDiagnosticsQuery, control.NodeDiagnosticsBundle]{Name: "node-diagnostics"}, true, func(ctx context.Context, s Service, view cluster.View, session access.Session, q NodeDiagnosticsQuery) (control.NodeDiagnosticsBundle, string) {
 	if !s.manageCluster(view, session) {
 		return control.NodeDiagnosticsBundle{}, "denied"
 	}
@@ -39,6 +53,7 @@ var NodeDiagnosticsMethod = define(Method[NodeQuery, control.NodeDiagnosticsBund
 	if err != nil {
 		return control.NodeDiagnosticsBundle{}, "denied"
 	}
+	read.CPUProfileSeconds = q.CPUProfileSeconds
 	if s.NodeDiagnostics == nil {
 		return control.NodeDiagnosticsBundle{}, "unavailable"
 	}

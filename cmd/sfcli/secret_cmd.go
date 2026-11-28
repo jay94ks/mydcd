@@ -914,7 +914,7 @@ func memberKey(ctx context.Context, s *session, node string) ([32]byte, error) {
 		}
 		for _, m := range reply.Members {
 			if m.Peer.ID == node {
-				return identity.ParseKey(m.Peer.Key)
+				return identity.ParseKey(m.CurrentPeer().Key)
 			}
 		}
 		if reply.Next == "" || reply.Next <= after {

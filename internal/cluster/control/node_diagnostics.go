@@ -13,12 +13,20 @@ import (
 const NodeDiagnosticsMaxBytes = 64 << 10
 const NodeDiagnosticsExpandedBytes = 128 << 10
 
+// NodeDiagnosticsMaxCPUProfileSeconds bounds the optional CPU profile a
+// diagnostics read records; the whole read must answer inside the 30s SFCP
+// handler deadline (local socket and node-to-node relay alike).
+const NodeDiagnosticsMaxCPUProfileSeconds = 20
+
 type NodeDiagnosticsRead struct {
 	Session                   access.Session
 	Node                      string
 	Owner                     [32]byte
 	At                        int64
 	Index, MembersRoot, Epoch uint64
+	// CPUProfileSeconds asks the owner to record a CPU profile this long
+	// (0 = none, at most NodeDiagnosticsMaxCPUProfileSeconds).
+	CPUProfileSeconds uint8 `json:",omitempty"`
 }
 type NodeDiagnosticsBundle struct {
 	Schema                  uint8

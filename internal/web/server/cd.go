@@ -65,7 +65,7 @@ func (s *Server) handleCD(w http.ResponseWriter, r *http.Request, ws *webSession
 		}
 		out := map[string]any{"app": a.App, "deployment": a.Deployment, "health": a.Health, "operation": a.Operation, "cd": cd}
 		// webhook: the newest check (post-sync once it ran); checks: both.
-		checks := s.cdCheckView(r.PathValue("t"), r.PathValue("app"), hex.EncodeToString(cd.CandidateDigest[:]))
+		checks := s.cdCheckView(s.requestLang(r, ws), r.PathValue("t"), r.PathValue("app"), hex.EncodeToString(cd.CandidateDigest[:]))
 		var newest map[string]any
 		for _, k := range []string{"pre-sync", "post-sync"} {
 			if v, ok := checks[k].(map[string]any); ok {

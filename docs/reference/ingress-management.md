@@ -65,7 +65,7 @@ blocks 조회는 원 Revision/Removed/Active/TargetMissing을 보여 준다. `--
 CLI는 `sfcli ingress hosts set --tenant team [--external-allowed] [--external a,b] [--local c]`다.
 
 
-서버 메시지는 `{"Tenant":"team","Policy":{"ExternalAllowed":false,"ExternalHosts":[],"LocalHosts":["*.internal.example"]}}`다. 시스템 관리자만 `set-ingress-host-policy`로 tenant의 현재 host 권한을 변경한다. 패턴 목록 각각 최대256개, 정책 JSON 최대24KiB다. 새 shared 모드에서 미설정 정책은 external 비허용·local host 없음으로 시작한다. legacy 앱의 직접 address listener에는 이 shared host grant를 요구하지 않는다.
+서버 메시지는 `{"Tenant":"team","Policy":{"ExternalAllowed":false,"ExternalHosts":[],"LocalHosts":["*.internal.example"]}}`다. 시스템 관리자만 `set-ingress-host-policy`로 tenant의 현재 host 권한을 변경한다. 패턴 목록 각각 최대256개, 정책 JSON 최대24KiB다. 정책을 정해 두지 않은 tenant는 제한이 없다(external 허용, 모든 host). 정책은 시스템 관리자가 tenant의 host를 좁힐 때만 쓴다. legacy 앱의 직접 address listener에는 이 shared host grant를 요구하지 않는다.
 
 정책 회수는 이미 수락된 앱·원 native 참조를 삭제하지 않는다. 새 blueprint 수락/current native 실행과 실제 gateway에서 현재 권한을 확인한다. 인증서의 보호 입력과 연결 규칙은 [인증서 보관함](certificate-store.md)을 따른다.
 

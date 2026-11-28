@@ -34,6 +34,7 @@ type composeOptions struct {
 	logClearPreview                                 checkerRetryFlag
 	passwordFDs                                     groupPasswordFDs
 	noInput                                         bool
+	force                                           bool
 }
 
 func parseComposeOptions(args []string, diagnostic io.Writer) (composeOptions, error) {
@@ -63,6 +64,7 @@ func parseComposeDefaults(args []string, diagnostic io.Writer, defaults cliprofi
 	f.Var(&o.retrySource, "retry-source", "explicitly resend original source only after confirmed missing (resume)")
 	f.Var(&o.passwordFDs, "group-password-fd", "explicit REALM/GROUP=FD (cluster: /GROUP), repeat per required group")
 	f.BoolVar(&o.noInput, "no-input", false, "use existing approvals/explicit FDs without a terminal prompt")
+	f.BoolVar(&o.force, "force", false, "let a route share a host+prefix another app of the tenant serves")
 	if err := f.Parse(args); err != nil {
 		return o, err
 	}
@@ -170,6 +172,9 @@ func parseComposeDefaults(args []string, diagnostic io.Writer, defaults cliprofi
 	}
 	if o.sourceOperation.set && (o.method != "plan" && o.method != "diff" || o.sourceOperation.value == "" || o.file.set || o.project.set || o.deployment.set || o.node.set) {
 		return o, errors.New("--source-operation requires plan/diff without new file or placement options")
+	}
+	if o.force && (o.method != "plan" && o.method != "diff" && o.method != "up" || o.plan.set) {
+		return o, errors.New("--force requires plan, diff or up from a file")
 	}
 	if o.retrySource.set && o.method != "resume" {
 		return o, errors.New("--retry-source requires compose resume")

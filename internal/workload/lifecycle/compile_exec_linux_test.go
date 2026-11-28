@@ -28,7 +28,7 @@ func TestCheckerRealFiniteCompilerAndGeneratedCLIUseSameSDKAndProbeFD(t *testing
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 	input, policy := compilationFixture(t)
-	batch, err := NewCompileBatch(hashText("real-compile-job"), time.Now().Add(2*time.Minute).UnixMilli(), policy, []*Compilation{input})
+	batch, err := NewCompileBatch(hashText("real-compile-job"), time.Now().Add(2*time.Minute).UnixMilli(), policy, policy.Build.Image, []*Compilation{input})
 	if err != nil {
 		t.Fatal(err)
 	}

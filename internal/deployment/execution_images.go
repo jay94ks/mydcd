@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/jay94ks/seafield/internal/access"
+	checker "github.com/jay94ks/seafield/internal/workload/lifecycle"
 )
 
 // A deploy resolves each tag its tasks name once, before any of those tasks is
@@ -93,12 +94,28 @@ func stepImage(s Step) (string, bool) {
 	return TagReference(service.Image)
 }
 
-// TagImages lists the tags this deploy's tasks name, sorted, without
-// duplicates.
+// stepCompilerImage is the lifecycle compiler tag a task step's compile=true
+// scripts need; false for other steps and for a digest policy.
+func stepCompilerImage(s Step) (string, bool) {
+	if s.Kind != "task" {
+		return "", false
+	}
+	var service struct{ LifecycleProgram *checker.TaskProgram }
+	if json.Unmarshal(s.Goal, &service) != nil || service.LifecycleProgram == nil {
+		return "", false
+	}
+	return TagReference(service.LifecycleProgram.CompilerTag())
+}
+
+// TagImages lists the tags this deploy's tasks name, and the lifecycle
+// compiler tags their compile=true scripts need, sorted, without duplicates.
 func (e Execution) TagImages() []string {
 	var out []string
 	for _, s := range e.d.Plan.Steps {
 		if ref, ok := stepImage(s); ok && !slices.Contains(out, ref) {
+			out = append(out, ref)
+		}
+		if ref, ok := stepCompilerImage(s); ok && !slices.Contains(out, ref) {
 			out = append(out, ref)
 		}
 	}
@@ -146,12 +163,12 @@ func validImages(tags []string, images []ImageResolution) bool {
 	return true
 }
 
-// imagesReady holds back a task step until the deploy has resolved its tag.
+// imagesReady holds back a task step until the deploy has resolved its tag
+// and its compiler tag.
 func (e Execution) imagesReady(i int) bool {
-	if _, ok := stepImage(e.d.Plan.Steps[i]); !ok {
-		return true
-	}
-	return e.d.Images != nil
+	_, image := stepImage(e.d.Plan.Steps[i])
+	_, compiler := stepCompilerImage(e.d.Plan.Steps[i])
+	return !image && !compiler || e.d.Images != nil
 }
 
 // repository is a normalized tag or digest reference without its tag or

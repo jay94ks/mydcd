@@ -10,6 +10,7 @@ import (
 	"github.com/jay94ks/seafield/internal/cluster/control"
 	"github.com/jay94ks/seafield/internal/cluster/state"
 	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/secrets"
 )
 
 // CollectAppTaskClosure signs only an original, positively settled native
@@ -53,15 +54,27 @@ func (r *Runtime) CollectAppTaskClosure(ctx context.Context, request control.App
 	if stage.Observation != nil {
 		native = stage.Observation.Native
 	}
-	row, err := r.workload.View(request.Task.Key)
+	// A surged original runs from its parked record while the new
+	// generation holds the main one; it closes on that record alone.
+	parked, err := r.parkedOriginal(request.Task.Key, request.Task.Generation)
 	if err != nil {
 		return stopped, proof, err
 	}
-	if row.State.Desired.Revision <= request.Task.Revision {
-		return stopped, proof, deployment.ErrInputs
-	}
-	if gone, err := r.workload.Gone(ctx, request.Task.Key, row.State.Desired.Revision, request.Task.Generation); err != nil || !gone {
-		return stopped, proof, deployment.ErrInputs
+	if parked {
+		if gone, err := r.workload.ParkedGone(ctx, request.Task.Key, request.Task.Generation); err != nil || !gone {
+			return stopped, proof, deployment.ErrInputs
+		}
+	} else {
+		row, err := r.workload.View(request.Task.Key)
+		if err != nil {
+			return stopped, proof, err
+		}
+		if row.State.Desired.Revision <= request.Task.Revision {
+			return stopped, proof, deployment.ErrInputs
+		}
+		if gone, err := r.workload.Gone(ctx, request.Task.Key, row.State.Desired.Revision, request.Task.Generation); err != nil || !gone {
+			return stopped, proof, deployment.ErrInputs
+		}
 	}
 	if err = r.retireTaskCheckers(ctx, request.Task); err != nil {
 		return stopped, proof, err
@@ -83,6 +96,19 @@ func (r *Runtime) CollectAppTaskClosure(ctx context.Context, request control.App
 		proof, err = r.retireAppInputs(ctx, request, stopped)
 		if err != nil {
 			return deployment.Observation{}, deployment.Closure{}, err
+		}
+	}
+	if source.Inputs.Key == "" && len(b.SocketGrants()) != 0 {
+		// An sfev.sock-only task has no projection store scope: its socket
+		// grants close here, once the container is gone (checked above).
+		if b.Needs().Use.NodeKey != r.Identity.Public || len(b.Grants()) != len(b.SocketGrants()) {
+			return deployment.Observation{}, deployment.Closure{}, deployment.ErrInputs
+		}
+		for _, g := range b.SocketGrants() {
+			u := g.Use
+			gone := secrets.UseGone{Purpose: u.Purpose, Cluster: r.controlPolicy.Cluster, Realm: g.Realm, Tenant: u.Tenant, App: u.App, Deployment: u.Deployment, Consumer: g.Consumer, Generation: g.Generation, NodeKey: r.Identity.Public, Selection: g.Selection, Lifetime: g.Lifetime, Stopped: true, MountsGone: true}
+			gone.Signature = ed25519.Sign(r.Identity.Private, secrets.UseGoneBytes(gone))
+			proof.Secrets = append(proof.Secrets, gone)
 		}
 	}
 	for _, pin := range b.Pins() {

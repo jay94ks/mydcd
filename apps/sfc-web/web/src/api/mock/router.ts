@@ -3,7 +3,7 @@
 // 브라우저 안 목업 계층. docs/reference/web-api.md(/api/v1)와 같은 경로·DTO 모양·오류를 돌려준다.
 // 실제 성공 근거가 아니다. 화면 개발과 실패 상태 확인용이다.
 import opActionCatalog from './opActions.json';
-import { appYamlOldKeys } from './appYamlKeys';
+import { appYamlOldKeys, ingressListProblem } from './appYamlKeys';
 import YAML from 'yaml';
 import { cidrText, hostIn, inSystem, overlaps, parseCidr, type Cidr } from '../../lib/cidr';
 import type { RawResponse } from '../client';
@@ -197,7 +197,7 @@ const publicOp = (o: D.DOp): D.DOp => {
 // 변경 되돌리기 (UI-A4): 목업은 망 DNS 설정(configure-network-dns)만 보낼 때 대상 기록을 남긴다
 type DnsSnap = { Enabled: boolean; Zone: string; TTL: number; Upstreams: string[]; Records: { Name: string; Type: string; Value: string; TTL?: number }[] };
 const revertRecs = new Map<string, { t: string; n: string; before: DnsSnap; after: DnsSnap }>();
-const IRREVERSIBLE = new Set(['delete-volume', 'purge-archived', 'remove-node', 'revoke-session', 'disable-credential', 'vault-destroy', 'prune-images', 'clear-logs']);
+const IRREVERSIBLE = new Set(['delete-volume', 'discard-volume-archive', 'purge-archived', 'remove-node', 'revoke-session', 'disable-credential', 'vault-destroy', 'prune-images', 'clear-logs']);
 function revertKind(o: D.DOp): D.DOp['revert'] {
   if (o.state !== 'applied' || o.parent) return 'no';
   if (o.action === 'deploy' || o.action === 'down-app') return 'link';
@@ -566,12 +566,14 @@ on('GET', '/me/logins', (_m, _b, query) => {
 const webRoutes = {
   revision: 1,
   removed: false,
-  file: `name: cluster-app/web\nx-sfc:\n  ingress:\n    node: node-a\n    listeners:\n      - shared: public-https\n    routes:\n      - id: ui\n        host: sfc.example.com\n        prefix: /\n        gateway: both\n`,
+  // yaml-formats.md 3.1: x-sfc.ingress는 route 목록, 항목마다 node
+  file: `name: cluster-app/web\nx-sfc:\n  ingress:\n    - {node: node-a, host: sfc.example.com, prefix: /, gateway: local}\n`,
 };
 const webRoutesView = () => {
-  const d = YAML.parse(webRoutes.file) as { 'x-sfc': { ingress: { node?: string; listeners?: unknown[]; routes?: Record<string, unknown>[] } } };
-  const ing = d['x-sfc'].ingress;
-  return { app: 'web', revision: webRoutes.revision, removed: webRoutes.removed, node: ing.node, listeners: ing.listeners ?? [], routes: (ing.routes ?? []).map((r) => ({ id: r.id, host: r.host, prefix: r.prefix ?? '/', gateway: r.gateway ?? 'local' })), file: webRoutes.file };
+  const d = YAML.parse(webRoutes.file) as { 'x-sfc'?: { ingress?: Record<string, unknown>[] } };
+  const ing = d['x-sfc']?.ingress ?? [];
+  // #910: 모든 route가 같은 서버라 node는 위에 하나, 이름 없는 route는 route-N, listeners는 비어 있다
+  return { app: 'web', revision: webRoutes.revision, removed: webRoutes.removed, node: ing[0]?.node, listeners: [], routes: ing.map((r, i) => ({ id: r.id ?? `route-${i + 1}`, host: r.host, prefix: r.prefix ?? '/', gateway: r.gateway ?? 'external' })), file: webRoutes.file };
 };
 on('GET', '/cluster-apps/:a/routes', (m) => {
   requireAdmin(requireSession().user);
@@ -591,8 +593,12 @@ on('PUT', '/cluster-apps/:a/routes', (m, body) => {
   }
   if (d?.name !== 'cluster-app/web') return invalid('file: name은 cluster-app/web이어야 합니다');
   if (Object.keys(d).some((k) => k !== 'name' && k !== 'x-sfc')) return invalid('file: x-sfc.ingress만 받습니다');
-  const routes = ((d['x-sfc'] as Record<string, Record<string, unknown>>)?.ingress?.routes ?? []) as Record<string, unknown>[];
-  if (routes.some((r) => 'service' in r || 'port' in r || 'network' in r)) return invalid('file: 클러스터 앱 경로에는 backend를 적지 않습니다');
+  const ing = (d['x-sfc'] as Record<string, unknown> | undefined)?.ingress;
+  if (ing !== undefined && !Array.isArray(ing)) return invalid('file: x-sfc.ingress는 route 목록이어야 합니다');
+  const routes = (ing ?? []) as Record<string, unknown>[];
+  if (routes.some((r) => r && ('service' in r || 'port' in r || 'network' in r || 'health' in r))) return invalid('file: 클러스터 앱 경로에는 backend를 적지 않습니다');
+  const listMsg = ing === undefined ? '' : ingressListProblem(ing, 'file: x-sfc.ingress', ['id', 'node', 'host', 'prefix', 'gateway', 'balance']);
+  if (listMsg) return invalid(listMsg);
   const expected = Number(body.expected ?? webRoutes.revision);
   return submit(user, { ...body, target: 'cluster-app/web' }, 'put-cluster-app-route', () => {
     if (expected !== webRoutes.revision) return CAS;
@@ -1958,6 +1964,7 @@ on('GET', '/t/:t/storage', (m, _b, query) => {
       allowed: r.attested !== false && !r.closed,
       root: { cluster: 'sfc', node: r.node, key: `${r.node}-key`, id: r.id, generation: r.generation, path: r.path },
       volumes: r.volumes,
+      ...(r.archiveDefault ? { archiveDefault: true } : {}),
     }));
   const from = Number(query.get('after') || 0);
   const next = from + 8 < rows.length ? String(from + 8) : undefined;
@@ -2784,8 +2791,85 @@ const volGet = (m: string[]) => {
 on('GET', '/t/:t/volumes/:n', (m) => {
   const { t, v } = volGet(m);
   if (!v) return err(404, 'not-found', 'no such volume');
-  return ok({ volume: v, backups: fx.volumeBackups.filter((b) => b.tenant === t && b.volume === v.name), restores: fx.volumeRestores.filter((r) => r.tenant === t && r.volume === v.name) });
+  return ok({
+    volume: v,
+    backups: fx.volumeBackups.filter((b) => b.tenant === t && b.volume === v.name),
+    restores: fx.volumeRestores.filter((r) => r.tenant === t && r.volume === v.name),
+    archives: fx.volumeArchives.filter((a) => a.tenant === t && a.volume === v.name).map(({ tenant: _t, volume: _v, ...a }) => a),
+    archiveReady: fx.archiveKeys.cluster && fx.archiveKeys.admin,
+  });
 });
+// 내린 앱 저장소 보관(#920). 목업은 서버 일을 시간으로 흉내 낸다: 묶기 6초 → 비우기 3초 → 보관됨, 되살리기 6초
+const archiveOf = (t: string, v: D.DVolume) => (v.archiveID ? fx.volumeArchives.find((a) => a.tenant === t && a.volume === v.name && a.id === v.archiveID) : undefined);
+const archiveStep = (a: D.DVolumeArchive, v: D.DVolume, phase: string, extra: Partial<D.DVolumeArchive> = {}) => {
+  Object.assign(a, { phase, revision: a.revision + 1, ...extra });
+  v.revision++;
+  if (['Restored', 'Cancelled', 'Discarded', 'Failed'].includes(phase)) {
+    delete v.archiveID;
+    delete v.archivePhase;
+    delete v.phase;
+  } else v.archivePhase = phase;
+};
+on('POST', '/t/:t/volumes/:n/archive', (m, body) => {
+  const { user, t, v } = volGet(m);
+  if (!v) return err(404, 'not-found', 'no such volume');
+  if (v.kind === 'fixed' || !v.app) return err(409, 'no-app', 'only app volumes can be archived');
+  if (!fx.archiveKeys.cluster || !fx.archiveKeys.admin) return err(409, 'archive-keys', 'cluster key and admin key are both needed');
+  const id = String(body.id ?? `a-${String(body.opId)}`);
+  if (!/^[a-z][a-z0-9-]{0,60}$/.test(id)) return invalid('id: lowercase letter first, lowercase letters, digits and -, up to 61');
+  const store = String(body.store ?? '') || (fx.storageRoots.find((r) => r.node === v.node && r.archiveDefault)?.id ?? 'default');
+  if (!fx.storageRoots.some((r) => r.node === v.node && r.id === store)) return invalid('store: a storage root on the same server');
+  return submit(user, { ...body, tenant: t, target: `volume/${v.name}` }, 'archive-volume', () => {
+    if (!canWrite(user, t)) return FORBIDDEN;
+    if (v.archiveID || v.consumers > 0 || v.movePhase) return INVALID;
+    const used = v.usedBytes ?? 0;
+    const compress = body.compress !== false;
+    for (let i = fx.volumeArchives.length - 1; i >= 0; i--) if (fx.volumeArchives[i].tenant === t && fx.volumeArchives[i].volume === v.name) fx.volumeArchives.splice(i, 1);
+    const a = { tenant: t, volume: v.name, id, node: v.node ?? 'node-a', store, phase: 'Packing', compression: compress ? 'zstd' : 'none', maxBytes: Number(body.maxBytes ?? 64 * 1024 ** 3), revision: 1 };
+    fx.volumeArchives.push(a);
+    Object.assign(v, { archiveID: id, archivePhase: 'Packing', phase: 'Archived', revision: v.revision + 1 });
+    setTimeout(() => {
+      if (a.phase !== 'Packing') return;
+      archiveStep(a, v, 'Clearing', { tarBytes: used, dataBytes: compress ? Math.round(used / 3) : used });
+      setTimeout(() => {
+        archiveStep(a, v, 'Archived');
+        v.usedBytes = 0;
+      }, 3000);
+    }, 6000);
+    return { code: 0 };
+  });
+});
+on('POST', '/t/:t/volumes/:n/unarchive', (m, body) => {
+  const { user, t, v } = volGet(m);
+  if (!v) return err(404, 'not-found', 'no such volume');
+  const a = body.id ? fx.volumeArchives.find((x) => x.tenant === t && x.volume === v.name && x.id === body.id) : archiveOf(t, v);
+  if (!a) return err(404, 'not-found', 'no such archive');
+  return submit(user, { ...body, tenant: t, target: `volume/${v.name}` }, 'unarchive-volume', () => {
+    if (!canWrite(user, t)) return FORBIDDEN;
+    if (a.phase !== 'Archived') return INVALID;
+    archiveStep(a, v, 'Restoring');
+    setTimeout(() => {
+      v.usedBytes = a.tarBytes;
+      archiveStep(a, v, 'Restored', { failure: undefined });
+    }, 6000);
+    return { code: 0 };
+  });
+});
+const archiveVerb = (verb: 'POST' | 'DELETE', action: string, from: string, mid: string, to: string) =>
+  on(verb, verb === 'DELETE' ? '/t/:t/volumes/:n/archives/:id' : '/t/:t/volumes/:n/archives/:id/cancel', (m, body) => {
+    const { user, t, v } = volGet(m);
+    const a = fx.volumeArchives.find((x) => x.tenant === t && x.volume === m[1] && x.id === m[2]);
+    if (!v || !a) return err(404, 'not-found', 'no such archive');
+    return submit(user, { ...body, tenant: t, target: `volume/${v.name}` }, action, () => {
+      if (!canWrite(user, t)) return FORBIDDEN;
+      if (a.phase !== from) return INVALID;
+      archiveStep(a, v, mid);
+      setTimeout(() => archiveStep(a, v, to), 3000);
+      return { code: 0 };
+    });
+  });
+archiveVerb('POST', 'cancel-volume-archive', 'Packing', 'Cancelling', 'Cancelled');
+archiveVerb('DELETE', 'discard-volume-archive', 'Archived', 'Discarding', 'Discarded');
 on('POST', '/t/:t/volumes/:n/backups', (m, body) => {
   const { user, t, v } = volGet(m);
   if (!v) return err(404, 'not-found', 'no such volume');
@@ -2873,7 +2957,7 @@ on('DELETE', '/t/:t/volumes/:n', (m, body) => {
   if (!v) return err(404, 'not-found', 'no such volume');
   return submit(user, { ...body, tenant: t, target: `volume/${v.name}` }, v.kind === 'fixed' ? 'unregister-fixed-volume' : 'delete-volume', () => {
     if (!canWrite(user, t)) return FORBIDDEN;
-    if (v.consumers > 0) return INVALID;
+    if (v.consumers > 0 || v.archiveID) return INVALID;
     fx.volumes.splice(fx.volumes.indexOf(v), 1);
     return { code: 0 };
   });
@@ -3851,7 +3935,28 @@ on('POST', '/t/:t/apps/plan', async (m, body) => {
     ...prevSvc.filter((o) => !p.services.some((s) => s.name === o.name)).map((o) => ({ ...o, change: 'remove' as const })),
   ];
   const diff = body.diff ? `--- 실행 중\n+++ 새 원문\n${lineDiff(before, text).map((l) => l.op + l.text).join('\n')}\n` : undefined;
-  const plan: D.DAppPlan = { app: p.name, digest: await sha256hex(text), length: new TextEncoder().encode(text).length, services: changes, diff };
+  // 바뀐 항목(Z9): 목업은 서비스 하나를 Task 하나로 본다. 끊김 까닭은 서비스 모양(ports · 쓰기 Volume · 복제본 수)으로 정한다
+  const svcDoc = (name: string) => ((p.doc.services as Record<string, Record<string, unknown>>)[name] ?? {}) as { ports?: unknown[]; volumes?: unknown[]; deploy?: { replicas?: number } };
+  const why = (name: string) => {
+    const d = svcDoc(name);
+    if (d.ports?.length) return 'HOST_PORT';
+    if (d.volumes?.some((v) => typeof v === 'string' && !v.endsWith(':ro') && !v.startsWith('/'))) return 'VOLUME_WRITER';
+    if ((d.deploy?.replicas ?? 1) <= 1) return 'SINGLE_INSTANCE';
+    return undefined;
+  };
+  const ACTION = { add: 'Create', keep: 'Keep', remove: 'Remove', update: 'Replace' } as const;
+  const rows: D.DPlanChange[] | undefined = body.diff
+    ? changes.map((c) => {
+        const r: D.DPlanChange = { action: ACTION[c.change], key: `task/${c.name}/1` };
+        if (c.change === 'update') {
+          r.reason = 'original native closure and new generation required';
+          const i = why(c.name);
+          if (i) r.interruption = i;
+        }
+        return r;
+      })
+    : undefined;
+  const plan: D.DAppPlan = { app: p.name, digest: await sha256hex(text), length: new TextEncoder().encode(text).length, services: changes, diff, changes: rows };
   return ok(plan);
 });
 
@@ -4765,10 +4870,11 @@ on('POST', '/t/:t/standalone/plan', async (m, body) => {
     else if (ro !== 'ro' && vol.consumers > 0) impact.push({ kind: 'volume', name: n, level: 'block', text: `데이터 저장소 ${n}에는 이미 쓰는 쪽이 있습니다. 읽기 전용으로 붙이세요 (volume-writer-conflict).` });
     else impact.push({ kind: 'volume', name: n, level: 'info', text: `저장소 ${n} ${ro === 'ro' ? '읽는 쪽' : '쓰는 쪽'} 1` });
   }
-  const routes = ((xmOf(d).ingress ?? {}) as { routes?: { host?: string; path?: string }[] }).routes ?? [];
+  const ingList = xmOf(d).ingress;
+  const routes = (Array.isArray(ingList) ? ingList : []) as { host?: string; prefix?: string }[];
   for (const r of routes) {
-    const taken = byTenant(fx.resources, m[0]).find((e) => e.route && e.route.host === r.host && (e.route.path ?? '/') === (r.path ?? '/'));
-    impact.push(taken ? { kind: 'ingress', name: String(r.host), level: 'block', text: `호스트 ${r.host}${r.path ?? '/'}는 앱 ${taken.route!.app}이 이미 씁니다.` } : { kind: 'ingress', name: String(r.host), level: 'info', text: `외부 접속 ${r.host}${r.path ?? '/'} 추가` });
+    const taken = byTenant(fx.resources, m[0]).find((e) => e.route && e.route.host === r.host && (e.route.path ?? '/') === (r.prefix ?? '/'));
+    impact.push(taken ? { kind: 'ingress', name: String(r.host), level: 'block', text: `호스트 ${r.host}${r.prefix ?? '/'}는 앱 ${taken.route!.app}이 이미 씁니다.` } : { kind: 'ingress', name: String(r.host), level: 'info', text: `외부 접속 ${r.host}${r.prefix ?? '/'} 추가` });
   }
   if (cur && cur.lifetime === 'fixed' && p.lifetime === 'temp') impact.push({ kind: 'lifetime', name: p.name, level: 'block', text: '고정을 임시로 바꿀 수는 없습니다.' });
   if (cur && cur.lifetime === 'temp' && cur.owner !== user.id) impact.push({ kind: 'owner', name: cur.ownerName ?? cur.owner, level: canManage(user, m[0]) ? 'warn' : 'block', text: `${cur.ownerName}의 임시 컨테이너입니다.` });

@@ -10,11 +10,7 @@ import (
 const webRouteFile = `name: cluster-app/web
 x-sfc:
   ingress:
-    node: node-a
-    runtime: {max_requests: 8, max_connections: 32, max_header_bytes: 16384, max_body_bytes: 1048576, buffer_bytes: 524288, request_timeout_ms: 30000, dial_timeout_ms: 2000, response_header_timeout_ms: 5000, health_interval_ms: 1000}
-    listeners: [{shared: internal-https}]
-    routes:
-      - {id: ui, host: sfc.example.com, gateway: local}
+  - {node: node-a, host: sfc.example.com, gateway: local}
 `
 
 func TestClusterAppRoutesScreen(t *testing.T) {
@@ -28,7 +24,7 @@ func TestClusterAppRoutesScreen(t *testing.T) {
 	if code, _ := f.do("GET", "/api/v1/cluster-apps/other/routes", nil); code != 404 {
 		t.Fatalf("unknown app: %d", code)
 	}
-	if code, out := f.do("PUT", "/api/v1/cluster-apps/web/routes", map[string]any{"opId": op(), "file": strings.Replace(webRouteFile, "    node: node-a\n", "    node: node-a\n    backend: {port: 9000}\n", 1)}); code != 422 {
+	if code, out := f.do("PUT", "/api/v1/cluster-apps/web/routes", map[string]any{"opId": op(), "file": strings.Replace(webRouteFile, "gateway: local}", "gateway: local, port: 9000}", 1)}); code != 422 {
 		t.Fatalf("backend field: %d %v", code, out)
 	}
 	if code, out := f.do("PUT", "/api/v1/cluster-apps/web/routes", map[string]any{"opId": op(), "file": webRouteFile}); opState(t, code, out) != "applied" {

@@ -37,10 +37,15 @@ func TestAppSecretsBlockKeepsFlatModel(t *testing.T) {
 		"secret_env: [{source: db, name: DB_PASSWORD}]",
 		"secrets: {from: [defaults], unknown: 1}",
 		"secrets: {from: [../x]}",
-		"secrets: {socket: [api-token]}",
 	} {
 		if _, err := ParseApp([]byte(secretsBlockDocument(bad))); err == nil || !strings.Contains(err.Error(), "INVALID_FIELD") {
 			t.Fatal("accepted", bad, err)
 		}
+	}
+	// The socket list is accepted at parse; planning still requires sfcd to
+	// serve sfev.sock (feature secret-socket).
+	socket, err := ParseApp([]byte(secretsBlockDocument("secrets: {socket: [api-token]}")))
+	if err != nil || len(socket.Services["web"].Sfc.Socket) != 1 {
+		t.Fatal("socket block", err)
 	}
 }

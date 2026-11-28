@@ -49,6 +49,11 @@ type gatewayOwnedRoute struct {
 type gatewaySnapshot struct {
 	table  Table
 	owners map[string]gatewayOwnedRoute
+	// shared holds every owner of a host+prefix that apps of one tenant
+	// route together (`app deploy --force`), keyed by the table route that
+	// stands for them; requests rotate across them.
+	shared map[string][]gatewayOwnedRoute
+	next   atomic.Uint64
 }
 type sharedGateway struct {
 	inherited            *ownedHTTPListener
@@ -285,7 +290,15 @@ func (m *Manager) detachShared(key string) {
 func (g *sharedGateway) rebuildLocked() {
 	routes := []Route{}
 	owners := map[string]gatewayOwnedRoute{}
-	for key, b := range g.bindings {
+	shared := map[string][]gatewayOwnedRoute{}
+	first := map[string]string{} // host+prefix -> table route ID
+	keys := make([]string, 0, len(g.bindings))
+	for key := range g.bindings {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		b := g.bindings[key]
 		if b.instance != nil && b.instance.controlDraining.Load() {
 			continue
 		}
@@ -293,10 +306,20 @@ func (g *sharedGateway) rebuildLocked() {
 			if !g.manager.bindingAllowed(b.spec, r.Route, g.kind) {
 				continue
 			}
+			owned := gatewayOwnedRoute{b, r.Route}
+			pattern := r.Host + "\x00" + r.Prefix
+			if id, ok := first[pattern]; ok {
+				if len(shared[id]) == 0 {
+					shared[id] = []gatewayOwnedRoute{owners[id]}
+				}
+				shared[id] = append(shared[id], owned)
+				continue
+			}
 			route := r.Route
 			route.ID = key + "\x00" + r.ID
+			first[pattern] = route.ID
 			routes = append(routes, route)
-			owners[route.ID] = gatewayOwnedRoute{b, r.Route}
+			owners[route.ID] = owned
 		}
 	}
 	table, err := NewTable(routes)
@@ -304,7 +327,7 @@ func (g *sharedGateway) rebuildLocked() {
 		g.snapshot.Store(&gatewaySnapshot{owners: map[string]gatewayOwnedRoute{}})
 		return
 	}
-	g.snapshot.Store(&gatewaySnapshot{table: table, owners: owners})
+	g.snapshot.Store(&gatewaySnapshot{table: table, owners: owners, shared: shared})
 }
 func (g *sharedGateway) selected(name, path string) (gatewayBinding, Route, error) {
 	snapshot := g.snapshot.Load()
@@ -314,6 +337,10 @@ func (g *sharedGateway) selected(name, path string) (gatewayBinding, Route, erro
 	route, err := snapshot.table.Match(name, path)
 	if err != nil {
 		return gatewayBinding{}, Route{}, err
+	}
+	if all := snapshot.shared[route.ID]; len(all) > 0 {
+		owned := all[(snapshot.next.Add(1)-1)%uint64(len(all))]
+		return owned.binding, owned.route, nil
 	}
 	owned, ok := snapshot.owners[route.ID]
 	if !ok {

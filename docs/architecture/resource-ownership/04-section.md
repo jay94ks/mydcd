@@ -250,7 +250,7 @@ OCI session store의 metadata/이름 없는 layer 파일은 solve 동안만 유�
 builder의 host별 자격으로 합치지 않으며 다른 source의 승인/캐시로 대체하지 않는다.
 
 
-Ingress의 일시 block은 별도 cluster 관리 자원(`control/ingress-management`)이며 앱 목표/Task가 아니다. 시스템 또는 tenant Network 관리자가 명시 범위와 record CAS로 생성·해제·연장한다. 앱 종료·target 부재·만료로 원 ID/사용자 승인 기록을 자동 삭제하지 않는다. tenant host grant는 시스템 관리가 소유하며 앱은 이미 허가된 host/gateway만 참조한다. 최근 요청 계수/가린 오류/Applied·Runtime.BlockRevision 관측은 node-local 운영 자료이며 Raft 목표와 혼합하지 않는다. BlockRevision은 실제 설치 정책의 receipt이며 해제된 목표 ID의 부재를 적용 완료로 대체하지 않는다. [Ingress 운영](../../reference/ingress-management.md)을 따른다.
+Ingress의 일시 block은 별도 cluster 관리 자원(`control/ingress-management`)이며 앱 목표/Task가 아니다. 시스템 또는 tenant Network 관리자가 명시 범위와 record CAS로 생성·해제·연장한다. 앱 종료·target 부재·만료로 원 ID/사용자 승인 기록을 자동 삭제하지 않는다. 앱 배포가 곧 그 host의 맵핑 허가이며, 시스템 관리자의 tenant host 정책은 정해 둔 경우에만 host를 좁힌다. 최근 요청 계수/가린 오류/Applied·Runtime.BlockRevision 관측은 node-local 운영 자료이며 Raft 목표와 혼합하지 않는다. BlockRevision은 실제 설치 정책의 receipt이며 해제된 목표 ID의 부재를 적용 완료로 대체하지 않는다. [Ingress 운영](../../reference/ingress-management.md)을 따른다.
 
 공유 node gateway의 주소·listener 설정은 시스템 관리자가 `set-node-gateways`로 소유한다. 앱은 이름으로 빌리며 파일 초기값과 클러스터 목표/실제 적용 revision을 구분한다. 활성 TCP/HTTP3 UDP listener는 direct Compose ports와 같은 node host namespace를 예약하고, 앱 종료로 shared listener를 반환하지 않는다. 원 gateway claim은 신원 교체·단절로 자동 해제하지 않고 정확한 CAS 교체만 허용한다.
 

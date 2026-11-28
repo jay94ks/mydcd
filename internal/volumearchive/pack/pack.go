@@ -215,3 +215,31 @@ func Restore(ctx context.Context, root *os.Root, open OpenFile, dataKey []byte, 
 	}
 	return failed
 }
+
+// Extract writes the package's tar stream to w and checks it whole: the
+// sealed file's authentication, size and digest, and the tar receipt's size
+// and digest. It is the offline way out when the cluster is lost (sfcli
+// volume archive open). w has received unchecked bytes when it fails, so
+// the caller discards what it wrote then. m must already pass Check.
+func Extract(open OpenFile, dataKey []byte, m volumearchive.Manifest, w io.Writer) error {
+	var failed error
+	r, err := opener(open, dataKey, m, &failed)()
+	if err != nil {
+		return err
+	}
+	h := sha256.New()
+	n, err := io.Copy(io.MultiWriter(w, h), io.LimitReader(r, int64(m.Tar.Bytes)+1))
+	closeErr := r.Close()
+	if err != nil {
+		return err
+	}
+	if closeErr != nil || failed != nil {
+		return volumearchive.ErrPackage
+	}
+	var digest [32]byte
+	copy(digest[:], h.Sum(nil))
+	if uint64(n) != m.Tar.Bytes || digest != m.Tar.Digest {
+		return volumearchive.ErrPackage
+	}
+	return nil
+}

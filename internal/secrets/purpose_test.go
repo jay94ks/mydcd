@@ -131,3 +131,74 @@ func TestEmptyPurposePreservesExistingSignedJSON(t *testing.T) {
 		t.Fatal("legacy closure bytes changed")
 	}
 }
+
+// An sfev.sock approval is its own namespace: a file approval does not open
+// the socket, the socket's grant keeps its own consumer and generation, and
+// renewing it (release, then a new generation) leaves the file grant alone.
+func TestSecretSocketPurposeIsSeparateAndRenewable(t *testing.T) {
+	f := makeFixture(t)
+	app := web(f)
+	app.Sources = []string{"runtime"}
+	for _, target := range plan(t, f, app).Required {
+		f = commit(t, f, signed(f, target))
+	}
+	socket := app
+	socket.Purpose = PurposeSecretSocket
+	if _, _, err := f.a.Acquire(f.c, f.t, socket, "sfev-consumer", 1, f.a.Revision(), 110); err == nil {
+		t.Fatal("socket borrowed the file approval")
+	}
+	for _, target := range plan(t, f, socket).Required {
+		if target.Purpose != PurposeSecretSocket || target.Actions != ([2]string{"resolve", "socket"}) {
+			t.Fatalf("socket target = %+v", target)
+		}
+		a := signed(f, target)
+		a.Payload.Target.ApprovalID = "socket-" + target.Group
+		a.Signature = ed25519.Sign(f.issuer, ApprovalBytes(a))
+		f = commit(t, f, a)
+	}
+	f, appGrant := acquire(t, f, app, "app-consumer", 1)
+	f, first := acquire(t, f, socket, "sfev-consumer", 1)
+	proof := useGone(f, first)
+	proof.Purpose = PurposeSecretSocket
+	proof.Signature = ed25519.Sign(f.na, UseGoneBytes(proof))
+	var err error
+	if f.a, err = f.a.ReleaseUse(proof); err != nil {
+		t.Fatal(err)
+	}
+	f, second := acquire(t, f, socket, "sfev-consumer", 2)
+	if second.Generation != 2 {
+		t.Fatalf("renewed grant = %+v", second)
+	}
+	if _, ok := f.a.Usage(appGrant); !ok {
+		t.Fatal("socket renewal released the file grant")
+	}
+	if _, err := DecodeApprovals(encodedBook(t, f.a)); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// One batch may hold a service's file use and its sfev.sock use: the same
+// protected group is then two required targets, one per purpose.
+func TestPlanSplitsTargetsByPurpose(t *testing.T) {
+	f := makeFixture(t)
+	app := web(f)
+	app.Sources = []string{"runtime"}
+	socket := app
+	socket.Purpose = PurposeSecretSocket
+	p, err := f.t.Plan(f.c, []Use{app, socket})
+	if err != nil {
+		t.Fatal(err)
+	}
+	purposes := map[string]int{}
+	for _, target := range p.Required {
+		purposes[target.Purpose]++
+	}
+	if purposes[""] == 0 || purposes[""] != purposes[PurposeSecretSocket] || len(p.Uses) != 2 {
+		t.Fatalf("required by purpose = %v", purposes)
+	}
+	other := app
+	other.App = "other-app"
+	if _, err := f.t.Plan(f.c, []Use{app, other}); err == nil {
+		t.Fatal("different bases planned together")
+	}
+}

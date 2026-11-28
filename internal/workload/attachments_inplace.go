@@ -99,7 +99,7 @@ func (d *DockerDriver) syncAttachments(ctx context.Context, s ContainerSpec, id 
 	}
 	changed := false
 	for i, a := range s.Networks() {
-		if i == 0 || got.NetworkSettings.Networks[leases[i].NetworkName] != nil {
+		if i == 0 || taskEndpoint(got.NetworkSettings, leases[i]) != nil {
 			continue
 		}
 		for _, address := range []netip.Addr{a.IPv4, a.IPv6} {
@@ -140,7 +140,7 @@ func (d *DockerDriver) syncAttachments(ctx context.Context, s ContainerSpec, id 
 			errs = append(errs, inspectErr)
 			continue
 		}
-		if got.NetworkSettings.Networks[lease.NetworkName] != nil {
+		if taskEndpoint(got.NetworkSettings, lease) != nil {
 			if _, err = d.Engine.API.NetworkDisconnect(ctx, lease.NetworkID, client.NetworkDisconnectOptions{Container: got.ID}); err != nil {
 				errs = append(errs, err)
 				continue

@@ -47,7 +47,7 @@ func (f *compilerFiles) Sources() []engine.BindSource {
 }
 
 func compilerCachePath(b BuildIntent, p TenantPolicy) string {
-	hash := sha256.Sum256([]byte(p.Build.Image + "\x00" + p.Build.Toolchain + "\x00" + b.Target))
+	hash := sha256.Sum256([]byte(b.Image + "\x00" + p.Build.Toolchain + "\x00" + b.Target))
 	return "go-cache/" + b.Tenant + "/" + hex.EncodeToString(hash[:])
 }
 

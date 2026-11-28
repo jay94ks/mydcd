@@ -388,3 +388,14 @@ func listenEngine(r *app.Runtime, dir string) (string, bool) {
 	}
 	return socket, true
 }
+
+// PlanApp is sfcd's planned artifact for an app.yaml, as "admin", entering
+// through node i (what `sfcli app up` uploads).
+func (c *Cluster) PlanApp(i int, tenant string, q control.AppPlanRequest) []byte {
+	c.t.Helper()
+	artifact, err := c.client.StreamAppPlan(c.ctx, c.Peer(i), c.session, tenant, q)
+	if err != nil {
+		c.t.Fatal("plan app", err)
+	}
+	return artifact
+}

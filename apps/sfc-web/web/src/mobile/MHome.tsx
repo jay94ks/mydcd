@@ -15,6 +15,7 @@ import { usePoll, DEFAULT_POLL_MS } from '../lib/usePoll';
 import { useMobileTop } from './top';
 import { useOffline } from './MobileShell';
 import { ActionSheet } from './Sheet';
+import { dashboardMeasured, notificationsLive } from '../lib/liveTopics';
 
 function ServerCard({ n, admin }: { n: NodeView; admin: boolean }) {
   const bad = n.phase !== 'ready';
@@ -60,7 +61,7 @@ function AppCard({ a }: { a: AppView }) {
     <Link to={appPath(a.tenant, a.app)} className={`mc${bad ? ' xer' : ''}`}>
       <div className="hd">
         <b>{a.app}</b>
-        <HealthBadge health={a.health} />
+        <HealthBadge health={a.health} reason={a.reason} />
       </div>
       <div className="ln">
         버전 {a.revision}
@@ -78,7 +79,7 @@ export function MHome() {
   const offline = useOffline();
   const [sort, setSort] = useState<'problem' | 'name' | 'usage'>('problem');
   const [sortSheet, setSortSheet] = useState(false);
-  const d = usePoll((s) => dashboard(admin ? undefined : tenant || undefined, s), [admin ? '' : tenant], DEFAULT_POLL_MS);
+  const d = usePoll((s) => dashboard(admin ? undefined : tenant || undefined, s), [admin ? '' : tenant], DEFAULT_POLL_MS, dashboardMeasured);
   useMobileTop({ title: '홈', root: true }, []);
   return (
     <Load q={d} what="대시보드를 불러오지 못했습니다" rows={6}>
@@ -226,7 +227,7 @@ export function MNotifications() {
   const [kindSheet, setKindSheet] = useState(false);
   const [prefs, setPrefs] = useState(false);
   const [error, setError] = useState<unknown>();
-  const q = usePoll((s) => notifications(s, false, 200), [], DEFAULT_POLL_MS);
+  const q = usePoll((s) => notifications(s, false, 200), [], 0, notificationsLive);
   useMobileTop({ title: '알림', sub: q.data ? `읽지 않음 ${q.data.unread}` : undefined, root: true }, [q.data?.unread]);
   const act = async (f: () => Promise<unknown>) => {
     setError(undefined);

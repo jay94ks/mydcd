@@ -92,6 +92,7 @@ sfcli volume archive show shop/data [보관이름]
 sfcli volume unarchive shop/data [보관이름]
 sfcli volume archive cancel shop/data [보관이름]
 sfcli volume archive discard shop/data [보관이름]
+sfcli volume archive open 묶음디렉터리 --key-file archive.key --out data.tar   # 클러스터 없이
 ```
 
 내린 앱의 볼륨을 한 파일(묶음)로 묶어 같은 서버의 저장 경로에 두고, 볼륨 디렉터리를 비운다. 묶음은 tar를 zstd로 압축하고(`--no-compress`면 압축하지 않음) 클러스터 키와 관리자 키에 봉인한다. 내려도 저절로 보관하지 않는다. 이 명령이나 웹의 "보관"으로만 보관한다.
@@ -104,6 +105,7 @@ sfcli volume archive discard shop/data [보관이름]
 - `unarchive`는 같은 볼륨에 묶음을 풀고 파일을 묶음과 맞춰 본 뒤 묶음을 지운다. 그다음 `sfcli app deploy`로 앱을 다시 띄운다. 풀다가 실패하면 볼륨은 다시 비고 묶음은 남는다(`Archived`, 이유 표시).
 - `cancel`은 묶는 중(`Packing`)에만 된다. `discard`는 묶음을 지운다. 볼륨은 빈 채로 풀리고, 그다음 `volume delete`로 지울 수 있다.
 - `admin-key`는 새 묶음이 함께 봉인될 관리자 키를 정한다. 키 파일은 `sfcli cluster backup keygen --out 파일`로 만들고, 공개 반쪽만 보낸다. 키 파일은 클러스터 밖에 둔다. 옵션 없이 쓰면 클러스터 키와 관리자 키의 공개값을 보인다. 관리자 키가 없으면 보관을 받지 않는다.
+- `open`은 클러스터를 통째로 잃었을 때 쓴다. 로그인하지 않고 이 컴퓨터의 파일만 읽는다. 묶음 디렉터리는 서버 저장 경로의 `.sfc-archive/작업공간/앱/볼륨/보관이름`이고, 안의 `data.mdbk`와 `manifest`를 그대로 복사해 온다. 관리자 키 파일로 봉인을 풀고, 압축을 풀고, manifest와 통째로 맞춰 본 뒤 `--out`에 tar 파일로 쓴다(이미 있으면 쓰지 않는다). 맞지 않으면 쓴 것을 지우고 실패한다. 파일은 `tar -xpf 파일`로 푼다(소유자를 지키려면 root로). 묶음을 쓴 서버 키를 보여 주니 그 서버와 맞는지 확인한다.
 
 ## 파일 넣고 빼기
 

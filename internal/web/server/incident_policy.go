@@ -68,7 +68,7 @@ type incidentActionDef struct {
 	Action string
 	// Build makes the screen API call for one incident (nil: people
 	// choose, it is never built). See incident_builds.go.
-	Build func(s *Server, ctx context.Context, b incidentBuild) (*store.IncidentAction, string)
+	Build func(s *Server, ctx context.Context, b incidentBuild) (*store.IncidentAction, store.Phrase)
 }
 
 func (a incidentActionDef) floor() string { return webActions[a.Action].Impact }
@@ -136,7 +136,7 @@ func fillClusterPolicy(p *store.IncidentPolicy) *store.IncidentPolicy {
 		p.Approvers.To = approversSystemAndTenant
 	}
 	if p.Approvers.Label == "" {
-		p.Approvers.Label = approversLabel(p.Approvers.To, -1)
+		p.Approvers.Label = approversLabel(langKorean, p.Approvers.To, -1)
 	}
 	if p.Quiet == nil {
 		p.Quiet = []string{}
@@ -212,10 +212,10 @@ type policyActionView struct {
 	Auto  string `json:"auto"`
 }
 
-func actionViews(defs []incidentActionDef, cluster *store.IncidentPolicy) []policyActionView {
+func actionViews(lang string, defs []incidentActionDef, cluster *store.IncidentPolicy) []policyActionView {
 	out := make([]policyActionView, 0, len(defs))
 	for _, a := range defs {
-		out = append(out, policyActionView{ID: a.ID, Scope: a.Scope, Label: a.Label, Floor: a.floor(), Auto: cluster.Actions[a.ID]})
+		out = append(out, policyActionView{ID: a.ID, Scope: a.Scope, Label: text(lang, "incident-action."+a.ID, nil), Floor: a.floor(), Auto: cluster.Actions[a.ID]})
 	}
 	return out
 }
@@ -225,16 +225,26 @@ const (
 	approversSystemAndTenant = "system-and-tenant-admins"
 )
 
-// approversLabel names who is asked; admins < 0 when the count is unknown.
-func approversLabel(to string, admins int) string {
-	who := "시스템 관리자"
+// approversLabel names who is asked, in lang; admins < 0 when the count
+// is unknown.
+func approversLabel(lang, to string, admins int) string {
+	who := text(lang, "approvers.admins", nil)
 	if admins >= 0 {
-		who = fmt.Sprintf("시스템 관리자 %d명", admins)
+		who = text(lang, "approvers.admins-count", map[string]string{"count": fmt.Sprint(admins)})
 	}
 	if to == approversSystemAndTenant {
-		return who + " + 그 앱의 작업 공간 관리자"
+		return text(lang, "approvers.and-tenant", map[string]string{"who": who})
 	}
 	return who
+}
+
+// storedApproversLabel is the policy's approvers label in lang.
+func storedApproversLabel(lang string, a store.IncidentApprovers) string {
+	n := -1
+	if a.Admins != nil {
+		n = *a.Admins
+	}
+	return approversLabel(lang, a.To, n)
 }
 
 // systemAdminCount reads how many enabled system administrators sfcd has,
@@ -266,7 +276,7 @@ func (s *Server) systemAdminCount(ctx context.Context, ws *webSession) int {
 	return n
 }
 
-func (s *Server) clusterPolicyView(p *store.IncidentPolicy) (map[string]any, error) {
+func (s *Server) clusterPolicyView(lang string, p *store.IncidentPolicy) (map[string]any, error) {
 	apps, err := s.opt.Store.ListAppIncidentPolicies()
 	if err != nil {
 		return nil, err
@@ -285,7 +295,7 @@ func (s *Server) clusterPolicyView(p *store.IncidentPolicy) (map[string]any, err
 	}
 	out := map[string]any{
 		"level": p.Level, "stopped": p.Stopped, "ratePerHour": p.RatePerHour, "approvers": p.Approvers, "quiet": p.Quiet,
-		"newAppDefault": p.NewAppDefault, "actions": actionViews(incidentActions, p),
+		"newAppDefault": p.NewAppDefault, "actions": actionViews(lang, incidentActions, p),
 		"apps": rows, "revision": p.Revision, "automation": auto,
 	}
 	for k, v := range s.decideState("cluster", "", "") {
@@ -308,7 +318,8 @@ func (s *Server) handleGetIncidentPolicy(w http.ResponseWriter, r *http.Request,
 }
 
 func (s *Server) writeClusterPolicy(w http.ResponseWriter, r *http.Request, ws *webSession, p *store.IncidentPolicy) {
-	v, err := s.clusterPolicyView(p)
+	lang := s.requestLang(r, ws)
+	v, err := s.clusterPolicyView(lang, p)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal", err.Error())
 		return
@@ -317,11 +328,11 @@ func (s *Server) writeClusterPolicy(w http.ResponseWriter, r *http.Request, ws *
 	defer cancel()
 	n := s.systemAdminCount(ctx, ws)
 	ap := p.Approvers
-	ap.Label = approversLabel(ap.To, n)
+	ap.Label = approversLabel(lang, ap.To, n)
 	v["approvers"] = ap
 	opts := []map[string]string{}
 	for _, to := range []string{approversSystem, approversSystemAndTenant} {
-		opts = append(opts, map[string]string{"to": to, "label": approversLabel(to, n)})
+		opts = append(opts, map[string]string{"to": to, "label": approversLabel(lang, to, n)})
 	}
 	v["approverOptions"] = opts
 	writeJSON(w, http.StatusOK, v)
@@ -396,7 +407,11 @@ func (s *Server) handlePutIncidentPolicy(w http.ResponseWriter, r *http.Request,
 	}
 	{
 		ctx, cancel := s.callCtx(r)
-		req.Approvers.Label = approversLabel(req.Approvers.To, s.systemAdminCount(ctx, ws))
+		n := s.systemAdminCount(ctx, ws)
+		req.Approvers.Label, req.Approvers.Admins = approversLabel(langKorean, req.Approvers.To, n), nil
+		if n >= 0 {
+			req.Approvers.Admins = &n
+		}
 		cancel()
 	}
 	var before *store.IncidentPolicy
@@ -461,7 +476,7 @@ func (s *Server) handleIncidentStop(stop bool) func(http.ResponseWriter, *http.R
 	}
 }
 
-func (s *Server) appPolicyView(p *store.AppIncidentPolicy, cluster *store.IncidentPolicy) map[string]any {
+func (s *Server) appPolicyView(lang string, p *store.AppIncidentPolicy, cluster *store.IncidentPolicy) map[string]any {
 	avail := appActionsAvailable(cluster)
 	actions := map[string]bool{}
 	for _, a := range avail {
@@ -469,8 +484,8 @@ func (s *Server) appPolicyView(p *store.AppIncidentPolicy, cluster *store.Incide
 	}
 	out := map[string]any{
 		"level": p.Level, "ratePerHour": p.RatePerHour, "quiet": p.Quiet, "cdRollback": p.CDRollback, "actions": actions,
-		"revision": p.Revision, "approvers": cluster.Approvers.Label,
-		"available": actionViews(avail, cluster), "clusterLevel": effectiveClusterLevel(cluster),
+		"revision": p.Revision, "approvers": storedApproversLabel(lang, cluster.Approvers),
+		"available": actionViews(lang, avail, cluster), "clusterLevel": effectiveClusterLevel(cluster),
 	}
 	for k, v := range s.decideState("app", p.Tenant, p.App) {
 		out[k] = v
@@ -493,8 +508,8 @@ func (s *Server) handleGetAppIncident(w http.ResponseWriter, r *http.Request, ws
 				s.writeBackendError(w, ws, err)
 				return
 			}
-			v := s.appPolicyView(p, cluster)
-			v["guides"] = s.appGuideSummary(acc, tenant, app)
+			v := s.appPolicyView(s.requestLang(r, ws), p, cluster)
+			v["guides"] = s.appGuideSummary(s.requestLang(r, ws), acc, tenant, app)
 			writeJSON(w, http.StatusOK, v)
 			return
 		}
@@ -597,7 +612,7 @@ func (s *Server) handlePutAppIncident(w http.ResponseWriter, r *http.Request, ws
 		writeError(w, http.StatusInternalServerError, "internal", err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, s.appPolicyView(p, cluster))
+	writeJSON(w, http.StatusOK, s.appPolicyView(s.requestLang(r, ws), p, cluster))
 }
 
 type incidentVersionView struct {

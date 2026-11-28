@@ -7,7 +7,7 @@ import { Link } from 'react-router-dom';
 import { appPath, dashboard } from '../api/endpoints';
 import type { AttentionItem, NodeView } from '../api/types';
 import { useAuth, useSession } from '../auth/session';
-import { Badge, HealthBadge, HelpBox, PageHeader, PhaseBadge, Tile, UsageBar, type Tone } from '../components/ui';
+import { Badge, HealthBadge, HelpBox, PageHeader, PhaseBadge, Tile, UsageBar, type Tone , cpuStealText, CPU_STEAL_TIP} from '../components/ui';
 import { Load } from '../components/states';
 import { Refresh } from '../components/Refresh';
 import { usePoll, DEFAULT_POLL_MS } from '../lib/usePoll';
@@ -49,7 +49,7 @@ export function NodeCard({ n, admin }: { n: NodeView; admin: boolean }) {
       </div>
       {n.endpoint && <span className="small muted break-any">{n.endpoint}</span>}
       <div className="col" style={{ gap: 8 }}>
-        <UsageBar label="CPU" used={n.cpuPercent} total={n.cpuPercent === undefined ? undefined : 100} text={n.cpuPercent === undefined ? '—' : `${Math.round(n.cpuPercent)}%`} />
+        <UsageBar label="CPU" used={n.cpuPercent} total={n.cpuPercent === undefined ? undefined : 100} text={n.cpuPercent === undefined ? '—' : `${Math.round(n.cpuPercent)}%`} sub={cpuStealText(n.cpuStealPercent)} subTitle={CPU_STEAL_TIP} />
         <UsageBar label="메모리" used={n.memory?.used} total={n.memory?.total} text={n.memory ? `${fmtBytes(n.memory.used)} / ${fmtBytes(n.memory.total)}` : n.memUsed !== undefined ? `${fmtBytes(n.memUsed)} 사용` : '—'} />
         <UsageBar label="디스크" used={n.disk?.used} total={n.disk?.total} text={n.disk ? `${pct(n.disk.used, n.disk.total)}% · ${fmtBytes(n.disk.total - n.disk.used)} 남음` : '—'} />
       </div>
@@ -206,7 +206,7 @@ function DesktopDashboard() {
                               </td>
                               <td>{a.tenant}</td>
                               <td>
-                                <HealthBadge health={a.health} />
+                                <HealthBadge health={a.health} reason={a.reason} />
                               </td>
                               <td>{a.revision}</td>
                             </tr>

@@ -90,12 +90,12 @@ func (p Policy) tenantInventory(s state.State, tenant string, freeze bool) ([]ac
 	}
 	anchor := directory.Genesis
 	for _, entry := range directory.Entries {
-		key, parseErr := identity.ParseKey(entry.Peer.Key)
+		key, parseErr := identity.ParseKey(entry.CurrentPeer().Key)
 		if parseErr != nil {
 			return nil, parseErr
 		}
 		if directory.MemberKey(key) {
-			anchor = entry.Peer
+			anchor = entry.CurrentPeer()
 			break
 		}
 	}
@@ -119,12 +119,10 @@ func (p Policy) tenantInventory(s state.State, tenant string, freeze bool) ([]ac
 		targets = append(targets, access.RetirementTarget{Tenant: tenant, Kind: kind, ID: id, Node: node, Owner: owner, Generation: max(1, generation), Retain: retained, Key: key})
 	}
 	nodeFor := func(owner [32]byte) (string, error) {
+		// An owner key may be any key the node has had: its original
+		// one or one from a rotation (each identity owns its own resources).
 		for _, entry := range directory.Entries {
-			key, e := identity.ParseKey(entry.Peer.Key)
-			if e != nil {
-				return "", e
-			}
-			if key == owner {
+			if directory.ResourceKeyForNode(entry.Peer.ID, owner) {
 				return entry.Peer.ID, nil
 			}
 		}
@@ -148,7 +146,7 @@ func (p Policy) tenantInventory(s state.State, tenant string, freeze bool) ([]ac
 		add("owner", "", anchor.ID, anchorKey, 1, false)
 		for _, node := range selected.AllowedNodes {
 			entry, ok := directory.Entry(node)
-			key, e := identity.ParseKey(entry.Peer.Key)
+			key, e := identity.ParseKey(entry.CurrentPeer().Key)
 			if !ok || e != nil {
 				return nil, ErrCatalog
 			}

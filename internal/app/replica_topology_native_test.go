@@ -112,11 +112,7 @@ func testManagedReplicaTopology(t *testing.T, ctx context.Context, a *Runtime, r
 	document := fmt.Sprintf(`name: app
 x-sfc:
  ingress:
-  node: node-a
-  host: app.test
-  runtime: {max_requests: 4, max_connections: 16, max_header_bytes: 4096, max_body_bytes: 1048576, buffer_bytes: 262144, request_timeout_ms: 5000, dial_timeout_ms: 1000, response_header_timeout_ms: 2000, health_interval_ms: 100}
-  listeners: [{address: '192.0.2.1:18080'}]
-  backend: {service: web, network: lan, port: 8080, health_path: /readyz}
+  - {node: node-a, host: app.test, service: web, network: lan, port: 8080, health: /readyz}
 services:
  web:
   image: %s

@@ -34,7 +34,7 @@ func fetchComposePlanSources(ctx context.Context, c userauth.Client, target sfcp
 	if _, err := (cliprofile.Selection{Tenant: tenant}).CheckTenant("", document.Sfc.Tenant, true); err != nil {
 		return nil, err
 	}
-	request := control.AppPlanRequest{Standalone: o.standalone, Document: raw, Project: o.project.value, Deployment: o.deployment.value, Node: o.node.value, Diff: o.method == "diff"}
+	request := control.AppPlanRequest{Standalone: o.standalone, Document: raw, Project: o.project.value, Deployment: o.deployment.value, Node: o.node.value, Diff: o.method == "diff", Force: o.force}
 	request.CheckerSources = facts
 	artifact, err := c.StreamAppPlan(ctx, target, stored.Session, tenant, request)
 	if err != nil {

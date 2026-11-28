@@ -49,13 +49,10 @@ func (s *Server) emitIncident(in *store.Incident, event string) {
 		if err != nil || h.Role != "notify" || !h.Enabled {
 			continue
 		}
-		s.sendWebhookLater(h, webhookSend{Point: "incident", Link: l.ID, Event: "incident." + event, Summary: fmt.Sprintf("[%s] %s", incidentEventWord[event], in.Title),
+		s.sendWebhookLater(h, webhookSend{Point: "incident", Link: l.ID, Event: "incident." + event, Summary: with(with(ph("webhook.summary.incident"), "event", ph("incident-event."+event)), "title", titlePhrase(in)),
 			Payload: map[string]any{"incident": incidentPayload(in), "dedupKey": in.ID, "link": l.ID}})
 	}
 }
-
-var incidentEventWord = map[string]string{"opened": "장애", "approval-required": "승인 요청", "auto-run": "자동 조치", "approved": "승인됨",
-	"rejected": "거절됨", "expired": "승인 만료", "recovered": "회복", "closed": "닫힘"}
 
 // emitIncidentID reloads and emits (after a store update).
 func (s *Server) emitIncidentID(id, event string) {
@@ -154,8 +151,10 @@ func (s *Server) decideByWebhook(ctx context.Context, in *store.Incident) bool {
 	for _, c := range in.Candidates {
 		row := map[string]any{"action": c.ID, "label": c.Label}
 		row["impact"] = actionFloor(&c)
-		if c.Note != "" {
-			row["note"] = c.Note
+		// The payload's note stays Korean, as before phrases (its
+		// language is the webhook contract's, not a reader's).
+		if note := actionNote(langKorean, &c); note != "" {
+			row["note"] = note
 		}
 		cands = append(cands, row)
 		allowed = append(allowed, c.ID)
@@ -170,29 +169,33 @@ func (s *Server) decideByWebhook(ctx context.Context, in *store.Incident) bool {
 		Reason string `json:"reason"`
 	}
 	ok := d.OK() && json.Unmarshal(ans, &res) == nil && slices.Contains(allowed, res.Action)
+	// reason is what the webhook said, its error, or a reason code
+	// (text renders a code and leaves the rest as it is).
 	reason := oneLine(res.Reason, 200)
-	text := ""
+	var line store.Phrase
 	switch {
 	case !d.OK():
-		text = "판단 웹훅이 답하지 않아 규칙으로 판단해요 (" + d.Error + ")."
+		line = ph("incident.webhook.no-answer", "error", d.Error)
 		reason = d.Error
+	case !ok && res.Action != "":
+		reason = "webhook-reason.not-allowed"
+		line = ph("incident.webhook.not-allowed", "action", oneLine(res.Action, 60))
 	case !ok:
-		reason = "응답 형식이 맞지 않음"
-		if res.Action != "" {
-			reason = oneLine(res.Action, 60) + "은(는) allowed_actions에 없습니다"
-		}
-		text = "판단 응답을 버렸습니다 · " + reason
+		reason = "webhook-reason.bad-format"
+		line = with(ph("incident.webhook.dropped"), "reason", ph(reason))
 	case res.Action == "none":
-		text = "판단 웹훅: 맞는 조치가 없어요. 사람에게 넘겨요."
+		line = ph("incident.webhook.none")
 	default:
-		text = "판단 웹훅이 골랐어요: " + res.Action
+		line = ph("incident.webhook.chose", "action", res.Action)
 	}
 	if reason != "" && ok {
-		text += " (" + reason + ")"
+		line = with(ph("with-reason", "reason", reason), "text", line)
 	}
 	d.Decision, d.Accepted, d.Reason = res.Action, &ok, reason
 	s.recordDelivery(h, d)
-	in.Timeline = append(in.Timeline, store.IncidentEntry{At: s.now(), Kind: "webhook", Text: text, Webhook: h.Name, Status: d.Status, Accepted: &ok, Reason: reason})
+	e := entry(s.now(), "webhook", line)
+	e.Webhook, e.Status, e.Accepted, e.Reason = h.Name, d.Status, &ok, reason
+	in.Timeline = append(in.Timeline, e)
 	if !ok {
 		return false
 	}
@@ -254,7 +257,7 @@ func (s *Server) cdEvent(e webEvent) {
 					}
 				}
 			}
-			s.sendWebhookLater(h, webhookSend{Point: "cd", Link: l.ID, Event: "cd." + name, Payload: p, Summary: fmt.Sprintf("[자동 배포] %s/%s %s", e.Tenant, e.App, name)})
+			s.sendWebhookLater(h, webhookSend{Point: "cd", Link: l.ID, Event: "cd." + name, Payload: p, Summary: ph("webhook.summary.cd", "app", e.Tenant+"/"+e.App, "name", name)})
 		case l.Kind == "pre-sync" && e.Kind == sfc.EventCDApprovalRequired && e.CD != nil:
 			l, h, e := l, h, e
 			s.background(func(ctx context.Context) { s.preSync(ctx, l, h, e) })
@@ -341,7 +344,7 @@ func (s *Server) preSync(ctx context.Context, l *store.WebhookLink, h *store.Web
 	// Without ApproveCD the answer could not be carried out: the webhook
 	// is not called and a person approves.
 	if a := s.cdApproverState(ctx, ws, e.Tenant, e.App); a["state"] != "ok" {
-		chk.State, chk.Reason = "failed", fmt.Sprintf("배포 확인 계정에 승인 권한이 없어(%v) 웹훅을 부르지 않았어요. 사람이 승인해요", a["state"])
+		chk.State, chk.ReasonText = "failed", ptr(ph("cd-check.no-approver", "state", fmt.Sprint(a["state"])))
 		_ = s.opt.Store.PutCDCheck(chk)
 		return
 	}
@@ -353,7 +356,7 @@ func (s *Server) preSync(ctx context.Context, l *store.WebhookLink, h *store.Web
 	decision, reason := l.OnTimeout, ""
 	accepted := false
 	if d == nil {
-		chk.State, chk.Reason = "failed", "웹훅이 꺼져 있어 사람이 승인해요"
+		chk.State, chk.ReasonText = "failed", ptr(ph("cd-check.off-approve"))
 		_ = s.opt.Store.PutCDCheck(chk)
 		return
 	}
@@ -365,15 +368,16 @@ func (s *Server) preSync(ctx context.Context, l *store.WebhookLink, h *store.Web
 	if d.OK() && json.Unmarshal(ans, &res) == nil && slices.Contains([]string{"pass", "hold", "reject"}, res.Decision) && utf8.RuneCountInString(res.Reason) <= 512 {
 		decision, reason, accepted = res.Decision, oneLine(res.Reason, 512), true
 	} else if d.OK() {
-		reason = "응답 형식이 맞지 않음"
+		reason = "webhook-reason.bad-format"
 	} else {
 		reason = d.Error
 	}
 	d.Decision, d.Accepted, d.Reason = decision, &accepted, reason
 	s.recordDelivery(h, d)
+	// The reason signed into sfcd's op stays Korean, as before.
 	why := "웹훅 " + h.Name
 	if reason != "" {
-		why += ": " + reason
+		why += ": " + reasonText(langKorean, reason)
 	}
 	if !accepted {
 		why += " (시간 초과·오류 → " + decision + ")"
@@ -381,13 +385,13 @@ func (s *Server) preSync(ctx context.Context, l *store.WebhookLink, h *store.Web
 	switch decision {
 	case "pass":
 		if st, code := s.cdSend(ctx, e.Tenant, e.App, routeAppCDApprove, map[string]any{"candidate": e.CD.CandidateID, "reason": oneLine(why, 512)}); code != "" {
-			chk.State, chk.Reason, chk.Status = "failed", "승인을 보내지 못함: "+code, st
+			chk.State, chk.ReasonText, chk.Status = "failed", ptr(ph("cd-check.approve-failed", "code", code)), st
 		} else {
 			chk.State = "passed"
 		}
 	case "reject":
 		if st, code := s.cdSend(ctx, e.Tenant, e.App, routeAppCDReject, map[string]any{"candidate": e.CD.CandidateID, "reason": oneLine(why, 512)}); code != "" {
-			chk.State, chk.Reason, chk.Status = "failed", "반려를 보내지 못함: "+code, st
+			chk.State, chk.ReasonText, chk.Status = "failed", ptr(ph("cd-check.reject-failed", "code", code)), st
 		} else {
 			chk.State = "rejected"
 		}
@@ -397,7 +401,7 @@ func (s *Server) preSync(ctx context.Context, l *store.WebhookLink, h *store.Web
 	if !accepted && chk.State != "failed" {
 		chk.State = "timeout"
 	}
-	if chk.Reason == "" {
+	if chk.ReasonText == nil {
 		chk.Reason = reason
 	}
 	chk.At = s.now()
@@ -430,13 +434,14 @@ func (s *Server) postSync(ctx context.Context, l *store.WebhookLink, h *store.We
 		}
 	}
 	failed, reason := false, ""
+	var ownReason *store.Phrase
 	if l.When == "healthy" && health != "healthy" {
-		failed, reason = true, fmt.Sprintf("%d초 안에 정상이 되지 않음 (%s)", l.WaitSeconds, health)
+		failed, ownReason = true, ptr(ph("cd-check.not-healthy", "seconds", fmt.Sprint(l.WaitSeconds), "health", health))
 	} else {
 		d, ans := s.deliverWebhook(ctx, h, webhookSend{Point: "cd", Link: l.ID, Event: "post-sync", Decide: true,
 			Payload: map[string]any{"tenant": e.Tenant, "app": e.App, "candidate": cdCandidate(e), "health": health, "link": l.ID}})
 		if d == nil {
-			chk.State, chk.Reason = "failed", "웹훅이 꺼져 있음"
+			chk.State, chk.ReasonText = "failed", ptr(ph("cd-check.off"))
 			_ = s.opt.Store.PutCDCheck(chk)
 			return
 		}
@@ -450,7 +455,7 @@ func (s *Server) postSync(ctx context.Context, l *store.WebhookLink, h *store.We
 		case accepted:
 			failed, reason = res.Result == "fail", oneLine(res.Reason, 512)
 		case d.OK():
-			failed, reason = l.OnTimeout == "fail", "응답 형식이 맞지 않음"
+			failed, reason = l.OnTimeout == "fail", "webhook-reason.bad-format"
 		default:
 			failed, reason = l.OnTimeout == "fail", d.Error
 		}
@@ -460,7 +465,7 @@ func (s *Server) postSync(ctx context.Context, l *store.WebhookLink, h *store.We
 			chk.State = "timeout"
 		}
 	}
-	chk.Reason, chk.At = reason, s.now()
+	chk.Reason, chk.ReasonText, chk.At = reason, ownReason, s.now()
 	if !failed {
 		if chk.State == "checking" {
 			chk.State = "ok"
@@ -492,7 +497,7 @@ func (s *Server) postSync(ctx context.Context, l *store.WebhookLink, h *store.We
 		return
 	}
 	sig := store.IncidentSignal{At: s.now(), Kind: "cd-post-check-failed", Scope: "app", Tenant: e.Tenant, App: e.App, Target: e.Tenant + "/" + e.App,
-		Detail: oneLine("웹훅 "+h.Name+": "+reason, 300)}
+		Detail: oneLine("웹훅 "+h.Name+": "+renderPtr(langKorean, ownReason, reasonText(langKorean, reason)), 300)}
 	s.incidentSignal(ctx, ws, incidentRules[sig.Kind], sig, 1, cluster, []store.IncidentSignal{sig})
 	all, _ := s.opt.Store.ListIncidents()
 	for _, in := range all {
@@ -507,27 +512,27 @@ func (s *Server) postSync(ctx context.Context, l *store.WebhookLink, h *store.We
 }
 
 // cdCheckView is the app's latest checks for GET …/cd, by kind.
-func (s *Server) cdCheckView(tenant, app, candidate string) map[string]any {
+func (s *Server) cdCheckView(lang, tenant, app, candidate string) map[string]any {
 	out := map[string]any{}
 	for _, kind := range []string{"pre-sync", "post-sync"} {
 		c, err := s.opt.Store.GetCDCheck(kind, tenant, app)
 		if err != nil || c == nil || kind == "pre-sync" && candidate != "" && c.Candidate != candidate && c.State == "checking" {
 			continue
 		}
-		v := checkView(c)
+		v := checkView(lang, c)
 		v["atUnix"] = c.At.UnixNano()
 		out[kind] = v
 	}
 	return out
 }
 
-func checkView(c *store.CDCheck) map[string]any {
+func checkView(lang string, c *store.CDCheck) map[string]any {
 	v := map[string]any{"kind": c.Kind, "link": c.Link, "webhook": c.Webhook, "state": c.State, "at": rfc3339(c.At), "candidate": c.Candidate}
 	if len(c.Actions) > 0 {
 		v["actions"] = c.Actions
 	}
-	if c.Reason != "" {
-		v["reason"] = c.Reason
+	if r := renderPtr(lang, c.ReasonText, reasonText(lang, c.Reason)); r != "" {
+		v["reason"] = r
 	}
 	if c.Status != 0 {
 		v["status"] = c.Status

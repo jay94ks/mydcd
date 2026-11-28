@@ -77,9 +77,11 @@ type TrashClusterAppRouteData struct {
 
 // PutTrash stores an item; an item with the same ID is replaced.
 func (s *Store) PutTrash(it *TrashItem) error {
-	return s.db.Update(func(tx *bolt.Tx) error {
+	err := s.db.Update(func(tx *bolt.Tx) error {
 		return putJSON(tx.Bucket(bucketTrash), []byte(it.ID), it)
 	})
+	s.changed(err, Change{Kind: "trash", Tenant: it.Tenant, ID: it.ID})
+	return err
 }
 
 // GetTrash loads one item.
@@ -124,12 +126,14 @@ func (s *Store) TakeTrash(id string) (*TrashItem, error) {
 	if err != nil {
 		return nil, err
 	}
+	s.changed(nil, Change{Kind: "trash", Tenant: it.Tenant, ID: id, Deleted: true})
 	return &it, nil
 }
 
 // PruneTrash drops the items expired at now.
 func (s *Store) PruneTrash(now time.Time) (int, error) {
 	n := 0
+	var gone []TrashItem
 	err := s.db.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket(bucketTrash)
 		var dead [][]byte
@@ -137,6 +141,7 @@ func (s *Store) PruneTrash(now time.Time) (int, error) {
 			var it TrashItem
 			if jsonUnmarshal(v, &it) == nil && !it.ExpiresAt.After(now) {
 				dead = append(dead, append([]byte(nil), k...))
+				gone = append(gone, it)
 			}
 			return nil
 		}); err != nil {
@@ -150,6 +155,9 @@ func (s *Store) PruneTrash(now time.Time) (int, error) {
 		}
 		return nil
 	})
+	for _, it := range gone {
+		s.changed(err, Change{Kind: "trash", Tenant: it.Tenant, ID: it.ID, Deleted: true})
+	}
 	return n, err
 }
 

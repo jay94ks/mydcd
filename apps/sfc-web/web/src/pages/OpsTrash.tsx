@@ -16,7 +16,8 @@ import { ErrorBand, Load } from '../components/states';
 import { MutationError, OpPanel, sendOp, useMutation } from '../components/OpPanel';
 import { Refresh } from '../components/Refresh';
 import { useToast } from '../components/Toast';
-import { usePoll, DEFAULT_POLL_MS } from '../lib/usePoll';
+import { usePoll } from '../lib/usePoll';
+import { trashLive } from '../lib/liveTopics';
 import { fmtTime } from '../lib/format';
 import { OpsHeader } from './OpsTabs';
 import { SecretDialog } from './IncidentHooks';
@@ -78,7 +79,7 @@ function detailRows(it: TrashItem): [string, string][] {
 }
 
 export function OpsTrashPage() {
-  const list = usePoll((s) => trash(s), [], DEFAULT_POLL_MS);
+  const list = usePoll((s) => trash(s), [], 0, trashLive);
   const navigate = useNavigate();
   const [restoring, setRestoring] = useState<TrashItem>();
   const [purging, setPurging] = useState<TrashItem>();

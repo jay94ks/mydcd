@@ -68,6 +68,8 @@ const CODE_TEXT: Record<string, string> = {
   'digest-mismatch': '미리보기 뒤 app.yaml이 바뀌었습니다. 다시 미리보기 해 주세요',
   'upload-missing': '이어 올릴 업로드가 사라졌습니다. 새로 배포해 주세요',
   job: '배포 묶음에는 결과 조회·재개가 없습니다',
+  'archive-keys': '클러스터 키와 관리자 키가 둘 다 있어야 보관할 수 있습니다',
+  'no-app': '앱에 딸린 데이터 저장소만 할 수 있습니다',
 };
 
 export function errorText(e: unknown): { code: string; title: string; message: string } {

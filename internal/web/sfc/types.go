@@ -512,6 +512,9 @@ type AppPlanRequest struct {
 	Deployment string
 	Node       string
 	Diff       bool
+	// Force lets a route share a host+prefix another app of the tenant
+	// serves (`sfcli app deploy --force`); the web asks the person first.
+	Force bool `json:",omitempty"`
 	// Move: a volume move plan (`sfcli volume move-plan`). The reply's
 	// AppPlan.Move holds the decoded control.AppMovePlan; Data is then
 	// the whole move plan and Move.Artifact the app artifact to upload.
@@ -530,12 +533,25 @@ type AppPlan struct {
 	Data     []byte
 	App      string
 	Services []PlannedService
-	Diff     string               `json:",omitempty"`
-	Move     *control.AppMovePlan `json:",omitempty"`
+	Diff     string `json:",omitempty"`
+	// Changes: the diff as rows (AppPlanRequest.Diff), in sfcd's order.
+	Changes []PlanChange         `json:",omitempty"`
+	Move    *control.AppMovePlan `json:",omitempty"`
 	// Standalone: the standalone plan summary when the request had
 	// AppPlanRequest.Standalone (impact, limits, changes).
 	Standalone *StandalonePlan `json:",omitempty"`
 }
+
+// PlanChange is one row of a plan diff. Interruption, for a replaced
+// Task, is sfcd's code for why its service stops while it is replaced
+// (VOLUME_WRITER, HOST_PORT, STATIC_ADDRESS, SINGLE_INSTANCE, VOLUME_MOVE,
+// and later codes such as QUOTA); "" when other replicas serve.
+type PlanChange struct {
+	Action, Key  string
+	Reason       string `json:",omitempty"`
+	Interruption string `json:",omitempty"`
+}
+
 type PlannedService struct {
 	Name, Image, Node string
 	// Nodes: REQ-8 (mock) replica servers in update order (one per
@@ -574,31 +590,14 @@ type TaskFilter struct {
 // "node-fixed" or "", Retained sources of finished moves).
 type VolumeView = control.VolumeView
 
-// VolumeBackupView: `volume-backups` subset.
-type VolumeBackupView struct {
+// FixtureBackup: a fake seed backup (seconds). The fake builds the real
+// volume-backups row (control.VolumeBackupView) from it; it is not a Conn
+// type.
+type FixtureBackup struct {
 	Key, Tenant, Volume, ID, Node, Phase string
 	Revision, Bytes                      uint64
 	CreatedAt                            int64
-	Failure                              string `json:",omitempty"`
-	// Source is the sfcd row; restore payloads are built from it.
-	Source control.VolumeBackupView `json:"-"`
-}
-
-// VolumeRestoreView: `volume-restores` (control.VolumeRestoreView subset).
-type VolumeRestoreView struct {
-	Key, Tenant         string
-	Volume, Backup, ID  string // backup's volume, backup ID, restore ID
-	Node, Phase, Target string // Phase: Reserved / Cancelling / Restored / Cancelled
-	Revision, MaxBytes  uint64
-	CapacityBytes       uint64                    `json:",omitempty"`
-	Source              control.VolumeRestoreView `json:"-"`
-}
-
-// VolumeSource: `volume-backup-source` (Reply.VolumeSource with
-// VolumeRevision, the begin-volume-backup Expected).
-type VolumeSource struct {
-	Source         control.VolumeBackupSource
-	VolumeRevision uint64
+	Failure                              string
 }
 
 // VaultView: `vault` public metadata (no secret values).

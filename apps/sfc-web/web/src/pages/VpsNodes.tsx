@@ -54,6 +54,7 @@ import { usePoll } from '../lib/usePoll';
 import { drainRunning } from '../lib/drain';
 import { ago, dayTime, fmtTime, hhmm } from '../lib/format';
 import { SERVER_TABS } from './Servers';
+import { serversMeasured } from '../lib/liveTopics';
 
 const POLL_MS = 30_000;
 /** 단계 배지: 생성 1 · 설치 2 · 가입 3 · (투표 서버면) 승격 4 */
@@ -92,7 +93,7 @@ type Dlg =
 
 export function VpsNodesPage() {
   const q = usePoll((s) => vpsView(s), [], POLL_MS);
-  const nodes = usePoll((s) => nodesOverview(s), [], POLL_MS);
+  const nodes = usePoll((s) => nodesOverview(s), [], POLL_MS, serversMeasured);
   const [dlg, setDlg] = useState<Dlg>();
   const members = new Set((nodes.data?.nodes ?? []).map((n) => n.id));
   const close = () => (setDlg(undefined), q.refresh());

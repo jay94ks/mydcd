@@ -85,6 +85,7 @@ export function ConfirmDialog({
   onConfirm,
   onClose,
   busy,
+  blocked,
 }: {
   title: string;
   target: string;
@@ -93,6 +94,8 @@ export function ConfirmDialog({
   onConfirm: () => void;
   onClose: () => void;
   busy?: boolean;
+  /** 지금은 보낼 수 없다(이유는 본문에) */
+  blocked?: boolean;
 }) {
   const [typed, setTyped] = useState('');
   return (
@@ -105,7 +108,7 @@ export function ConfirmDialog({
           <button type="button" className="btn" onClick={onClose}>
             취소
           </button>
-          <button type="button" className="btn danger solid" disabled={typed !== target || busy} onClick={onConfirm}>
+          <button type="button" className="btn danger solid" disabled={typed !== target || busy || blocked} onClick={onConfirm}>
             {busy ? '보내는 중…' : actionLabel}
           </button>
         </>

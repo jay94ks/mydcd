@@ -113,15 +113,16 @@ func yamlDiff(a, b []byte) ([]string, error) {
 
 // heavyChange says why a diff is not light ("" when it is): data stores,
 // networks, domains, secret references, health scripts, added or removed
-// services.
-func heavyChange(paths []string, a, b []byte) string {
+// services. secret: the path is an environment change that touches a
+// secret reference.
+func heavyChange(paths []string, a, b []byte) (path string, secret bool) {
 	for _, p := range paths {
 		parts := strings.Split(p, ".")
 		if len(parts) < 3 || parts[0] != "services" {
-			return p
+			return p, false
 		}
 		if !lightServiceKeys[parts[2]] {
-			return p
+			return p, false
 		}
 	}
 	// Environment changes that touch secrets.
@@ -129,11 +130,11 @@ func heavyChange(paths []string, a, b []byte) string {
 	for _, p := range paths {
 		if strings.Contains(p, ".environment") || strings.Contains(p, ".env") {
 			if low(a) || low(b) {
-				return p + " (비밀값 참조)"
+				return p, true
 			}
 		}
 	}
-	return ""
+	return "", false
 }
 
 // versionAuto is why a version is kept from rolling back on its own
@@ -165,7 +166,8 @@ func rollbackAction(def *incidentActionDef, in *store.Incident, pair *appVersion
 	out := &store.IncidentAction{ID: def.ID, Label: def.Label, Method: method, Path: path, Body: body,
 		Note: fmt.Sprintf("v%d → v%d", pair.cur.Version, pair.prev.Version)}
 	if cdAuto {
-		out.Note += ", 자동 배포 멈춤"
+		note := ph("incident-note.rollback-pause", "versions", out.Note)
+		out.NoteText = &note
 		pause, _ := json.Marshal(map[string]any{})
 		method, path := routePath(routeAppCDPause, "t", in.Tenant, "app", in.App)
 		out.Also = &store.IncidentAction{ID: "pause-cd", Label: "자동 배포 일시 정지", Method: method, Path: path, Body: pause}
@@ -174,7 +176,7 @@ func rollbackAction(def *incidentActionDef, in *store.Incident, pair *appVersion
 }
 
 // buildRollback is the cd-rollback / rollback-previous candidate.
-func (s *Server) buildRollback(ctx context.Context, ws *webSession, def *incidentActionDef, in *store.Incident, app *store.AppIncidentPolicy, recent []store.IncidentSignal) (*store.IncidentAction, string) {
+func (s *Server) buildRollback(ctx context.Context, ws *webSession, def *incidentActionDef, in *store.Incident, app *store.AppIncidentPolicy, recent []store.IncidentSignal) (*store.IncidentAction, store.Phrase) {
 	var pair *appVersionPair
 	err := ws.do(ctx, func(ctx context.Context, c sfc.Conn) error {
 		var err error
@@ -182,48 +184,51 @@ func (s *Server) buildRollback(ctx context.Context, ws *webSession, def *inciden
 		return err
 	})
 	if err != nil {
-		return nil, "버전을 읽지 못함"
+		return nil, ph("incident-skip.versions-unread")
 	}
 	if len(pair.prev.Document) == 0 {
-		return nil, "직전 버전이 없음"
+		return nil, ph("incident-skip.no-previous")
 	}
 	if def.ID == "rollback-previous" {
-		return rollbackAction(def, in, pair, false), ""
+		return rollbackAction(def, in, pair, false), store.Phrase{}
 	}
 	// cd-rollback: every condition, checked by code.
 	now := s.now()
 	deployed := time.Unix(pair.cur.AcceptedAt, 0)
 	switch {
 	case app == nil || !app.CDRollback.Enabled:
-		return nil, "앱 정책에서 꺼짐"
+		return nil, ph("incident-skip.policy-off")
 	case app.CDRollback.AlwaysApprove:
-		return nil, "이 앱은 항상 승인"
+		return nil, ph("incident-skip.always-approve")
 	case pair.cur.Kind != "cd":
-		return nil, "지금 버전이 자동 배포로 올라온 것이 아님"
+		return nil, ph("incident-skip.not-cd")
 	case now.Sub(deployed) > time.Duration(app.CDRollback.WindowMinutes)*time.Minute:
-		return nil, "배포 뒤 허용 시간이 지남"
+		return nil, ph("incident-skip.window-passed")
 	case app.Migrations[pair.cur.Version] || app.Migrations[pair.prev.Version]:
-		return nil, "데이터 이전 있음 표시"
+		return nil, ph("incident-skip.migration")
 	}
 	paths, err := yamlDiff(pair.prev.Document, pair.cur.Document)
 	if err != nil {
-		return nil, "app.yaml을 비교하지 못함"
+		return nil, ph("incident-skip.yaml-diff")
 	}
-	if why := heavyChange(paths, pair.prev.Document, pair.cur.Document); why != "" {
-		return nil, "가벼운 변경이 아님: " + why
+	if path, secret := heavyChange(paths, pair.prev.Document, pair.cur.Document); path != "" {
+		if secret {
+			return nil, ph("incident-skip.heavy-change.secret", "path", path)
+		}
+		return nil, ph("incident-skip.heavy-change", "path", path)
 	}
 	if !s.watchedSince(in.Tenant, deployed.Add(-30*time.Minute)) {
-		return nil, "배포 전 신호를 다 보지 못함"
+		return nil, ph("incident-skip.unwatched")
 	}
 	for _, x := range recent {
 		if incidentKey(incidentRules[x.Kind], x) == in.Key && x.At.Before(deployed) && x.At.After(deployed.Add(-30*time.Minute)) {
-			return nil, "배포 전부터 있던 신호"
+			return nil, ph("incident-skip.before-deploy")
 		}
 	}
 	if s.recentCDRollback(in, now) {
-		return nil, "24시간 안에 이미 자동으로 되돌림"
+		return nil, ph("incident-skip.rolled-back")
 	}
-	return rollbackAction(def, in, pair, true), ""
+	return rollbackAction(def, in, pair, true), store.Phrase{}
 }
 
 // watchedSince: the watcher has read the tenant's events (or all of them)

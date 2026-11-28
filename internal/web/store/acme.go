@@ -97,7 +97,9 @@ func getRow(s *Store, b []byte, k []byte, v any) error {
 
 // PutACMEAccount stores an account.
 func (s *Store) PutACMEAccount(a *ACMEAccount) error {
-	return putRow(s, bucketACMEAcct, []byte(a.ID), a)
+	err := putRow(s, bucketACMEAcct, []byte(a.ID), a)
+	s.changed(err, Change{Kind: "acme-account", ID: a.ID})
+	return err
 }
 
 // GetACMEAccount loads an account.
@@ -128,7 +130,7 @@ func (s *Store) ListACMEAccounts() ([]*ACMEAccount, error) {
 // DeleteACMEAccount removes an account; ErrConflict while a certificate
 // uses it.
 func (s *Store) DeleteACMEAccount(id string) error {
-	return s.db.Update(func(tx *bolt.Tx) error {
+	err := s.db.Update(func(tx *bolt.Tx) error {
 		if tx.Bucket(bucketACMEAcct).Get([]byte(id)) == nil {
 			return ErrNotFound
 		}
@@ -145,6 +147,8 @@ func (s *Store) DeleteACMEAccount(id string) error {
 		}
 		return tx.Bucket(bucketACMEAcct).Delete([]byte(id))
 	})
+	s.changed(err, Change{Kind: "acme-account", ID: id, Deleted: true})
+	return err
 }
 
 type acmeCertRow struct {
@@ -154,18 +158,22 @@ type acmeCertRow struct {
 
 // CreateACMECert adds a definition; ErrConflict if the name exists.
 func (s *Store) CreateACMECert(c *ACMECert) error {
-	return s.db.Update(func(tx *bolt.Tx) error {
+	err := s.db.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket(bucketACMECerts)
 		if b.Get([]byte(c.Name)) != nil {
 			return ErrConflict
 		}
 		return putJSON(b, []byte(c.Name), acmeCertRow{*c, c.ChainPEM})
 	})
+	s.changed(err, Change{Kind: "acme-cert", ID: c.Name})
+	return err
 }
 
 // PutACMECert replaces a definition.
 func (s *Store) PutACMECert(c *ACMECert) error {
-	return putRow(s, bucketACMECerts, []byte(c.Name), acmeCertRow{*c, c.ChainPEM})
+	err := putRow(s, bucketACMECerts, []byte(c.Name), acmeCertRow{*c, c.ChainPEM})
+	s.changed(err, Change{Kind: "acme-cert", ID: c.Name})
+	return err
 }
 
 // GetACMECert loads a definition.
@@ -198,13 +206,15 @@ func (s *Store) ListACMECerts() ([]*ACMECert, error) {
 
 // DeleteACMECert removes a definition (its order history stays).
 func (s *Store) DeleteACMECert(name string) error {
-	return s.db.Update(func(tx *bolt.Tx) error {
+	err := s.db.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket(bucketACMECerts)
 		if b.Get([]byte(name)) == nil {
 			return ErrNotFound
 		}
 		return b.Delete([]byte(name))
 	})
+	s.changed(err, Change{Kind: "acme-cert", ID: name, Deleted: true})
+	return err
 }
 
 func acmeOrderKey(cert string, at time.Time, id string) []byte {
@@ -212,8 +222,11 @@ func acmeOrderKey(cert string, at time.Time, id string) []byte {
 }
 
 // PutACMEOrder creates or replaces an order.
+// An order belongs to its certificate: the change names the certificate.
 func (s *Store) PutACMEOrder(o *ACMEOrder) error {
-	return putRow(s, bucketACMEOrders, acmeOrderKey(o.Cert, o.At, o.ID), o)
+	err := putRow(s, bucketACMEOrders, acmeOrderKey(o.Cert, o.At, o.ID), o)
+	s.changed(err, Change{Kind: "acme-cert", ID: o.Cert})
+	return err
 }
 
 // ListACMEOrders lists a certificate's orders, newest first.

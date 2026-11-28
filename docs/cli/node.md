@@ -18,7 +18,7 @@
 | `node show NODE` | 한 서버의 전체 기록(가입 정보, 생명주기, 마지막 관측). `-o json`이면 모든 값. 서버가 켠 cluster app(sfc-web 등)은 `Summary.Admin.Host.ClusterApps`에 이름·고정 이미지 digest·상태·시스템 망 주소·제어 정책으로 보인다. `starting`에 머물면 `Reason`이 막힌 이유를 말한다: `not-work-server`, `no-server-address`, `no-server-quota`, `server-quota-owner`, `server-network-limit`, `no-free-system-pool`(시스템 망에 들어가지 못함). 같은 이유가 sfcd 로그에 `system network: node … cannot join the system network: …`로 한 번 남는다 |
 | `node disks [NODE] [--all]` | 디스크 크기·여유·용도 |
 | `node tenants NODE` | 작업 공간별 CPU·메모리 사용량과 할당 |
-| `node diagnostics NODE [--out FILE]` | 비밀이 없는 진단 묶음(tar.gz)을 새 파일로 저장 |
+| `node diagnostics NODE [--out FILE] [--cpu-profile 20s]` | 비밀이 없는 진단 묶음(tar.gz)을 새 파일로 저장. goroutine 프로파일(`profile-goroutine.pb.gz`)이 늘 들어가고, `--cpu-profile`을 주면 그 서버의 sfcd CPU 프로파일(`profile-cpu.pb.gz`, 20초까지, 요청 하나가 SFCP 30초 기한 안에 끝나야 해서)도 넣는다. 둘 다 Go pprof 형식이라 `go tool pprof`로 연다. 한도(압축 64KiB)를 넘으면 goroutine 프로파일부터 빠지고 `Truncated`가 켜진다 |
 | `node logs NODE NAME` | 그 서버의 클러스터 앱(예: `web`) 로그. `--container C`는 그 서버가 보관한 아무 컨테이너 로그. [`sfcli logs --node`](logs.md)의 별칭(시스템 관리자) |
 | `node images NODE` | 서버에 캐시된 컨테이너 이미지와 쓰는 곳 |
 

@@ -312,6 +312,12 @@ func (r Record) String() string {
 	return fmt.Sprintf("cluster=%x node=%s intent=%s operation=%s", r.Root.Cluster, r.Root.Self.ID, r.Root.Intent, r.Root.Operation)
 }
 
+// InputMemoryDir is where sfcd mounts the tmpfs for app secret values,
+// relative to the state root. The mount outlives sfcd (containers bind
+// files from it), so a wiped state root can still hold it, and its parent,
+// as empty directories: emptyRoot accepts exactly those.
+const InputMemoryDir = "workload/inputs-memory"
+
 func emptyRoot(c config.Node) error {
 	identityRoot, err := filepath.Abs(c.Node.IdentityDir)
 	if err != nil {
@@ -335,6 +341,9 @@ func emptyRoot(c config.Node) error {
 		ancestor := toIdentity == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && !filepath.IsAbs(rel)
 		if entry.IsDir() && ancestor {
 			return nil
+		}
+		if entry.IsDir() && (path == filepath.Join(stateRoot, "workload") || path == filepath.Join(stateRoot, filepath.FromSlash(InputMemoryDir))) {
+			return nil // left empty by a wipe; any file inside still refuses
 		}
 		if path == filepath.Join(identityRoot, "key.pem") || path == filepath.Join(identityRoot, "cert.pem") {
 			return nil

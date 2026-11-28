@@ -23,27 +23,11 @@ x-sfc:
       underlay: 192.0.2.12
       voter: true
   ingress:
-    runtime:
-      max_requests: 8
-      max_connections: 32
-      max_header_bytes: 16384
-      max_body_bytes: 1048576
-      buffer_bytes: 524288
-      request_timeout_ms: 30000
-      dial_timeout_ms: 2000
-      response_header_timeout_ms: 5000
-      health_interval_ms: 1000
-    node: node-b
+  - node: node-b
     host: php-mysql.test
-    listeners:
-    - address: 192.0.2.12:8080
-    - address: 192.0.2.12:8443
-      tls: true
-      http3: true
-    backend:
-      service: web
-      port: 8080
-      health_path: /readyz
+    service: web
+    port: 8080
+    health: /readyz
   delivery:
     enabled: true
     source:

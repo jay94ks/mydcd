@@ -47,8 +47,38 @@ func findVolume(ctx context.Context, c sfc.Conn, tenant, name, app string) (volu
 	return volumeView{}, &httpErr{http.StatusConflict, "ambiguous", "several apps have a data store of this name; give app"}
 }
 
-func volumeBackups(ctx context.Context, c sfc.Conn, v volumeView) ([]sfc.VolumeBackupView, error) {
-	var out []sfc.VolumeBackupView
+// backupView is a backup row as the screens show it (B in web-api 32).
+type backupView struct {
+	Key, Tenant, Volume, ID, Node, Phase string
+	Revision, Bytes                      uint64
+	CreatedAt                            int64
+	Failure                              string `json:",omitempty"`
+}
+
+func backupRow(b control.VolumeBackupView) backupView {
+	out := backupView{Key: b.Key, Tenant: b.Scope.Tenant, Volume: b.Scope.ID, ID: b.ID, Node: b.Node, Phase: b.Phase, Revision: b.Revision, CreatedAt: b.CreatedAt, Failure: b.Failure}
+	if b.Receipt != nil {
+		out.Bytes = b.Receipt.Bytes
+	}
+	return out
+}
+
+// restoreView is a restore row as the screens show it (R in web-api 32).
+type restoreView struct {
+	Key, Tenant         string
+	Volume, Backup, ID  string // backup's volume, backup ID, restore ID
+	Node, Phase, Target string // Phase: Reserved / Cancelling / Restored / Cancelled
+	Revision, MaxBytes  uint64
+	CapacityBytes       uint64 `json:",omitempty"`
+}
+
+func restoreRow(r control.VolumeRestoreView) restoreView {
+	return restoreView{Key: r.Key, Tenant: r.Target.Tenant, Volume: r.Backup.Scope.ID, Backup: r.Backup.ID, ID: r.ID, Node: r.Node, Phase: r.Phase,
+		Target: r.Target.ID, Revision: r.Revision, MaxBytes: r.MaxBytes, CapacityBytes: r.CapacityBytes}
+}
+
+func volumeBackups(ctx context.Context, c sfc.Conn, v volumeView) ([]control.VolumeBackupView, error) {
+	var out []control.VolumeBackupView
 	after := ""
 	for {
 		p, err := c.VolumeBackups(ctx, v.Tenant, after)
@@ -56,7 +86,7 @@ func volumeBackups(ctx context.Context, c sfc.Conn, v volumeView) ([]sfc.VolumeB
 			return nil, err
 		}
 		for _, b := range p.Items {
-			if b.Source.Scope == v.Scope {
+			if b.Scope == v.Scope {
 				out = append(out, b)
 			}
 		}
@@ -67,8 +97,8 @@ func volumeBackups(ctx context.Context, c sfc.Conn, v volumeView) ([]sfc.VolumeB
 	}
 }
 
-func volumeRestores(ctx context.Context, c sfc.Conn, v volumeView) ([]sfc.VolumeRestoreView, error) {
-	var out []sfc.VolumeRestoreView
+func volumeRestores(ctx context.Context, c sfc.Conn, v volumeView) ([]control.VolumeRestoreView, error) {
+	var out []control.VolumeRestoreView
 	after := ""
 	for {
 		p, err := c.VolumeRestores(ctx, v.Tenant, after)
@@ -76,7 +106,7 @@ func volumeRestores(ctx context.Context, c sfc.Conn, v volumeView) ([]sfc.Volume
 			return nil, err
 		}
 		for _, r := range p.Items {
-			if r.Source.Backup.Scope == v.Scope {
+			if r.Backup.Scope == v.Scope {
 				out = append(out, r)
 			}
 		}
@@ -87,24 +117,24 @@ func volumeRestores(ctx context.Context, c sfc.Conn, v volumeView) ([]sfc.Volume
 	}
 }
 
-func findBackup(ctx context.Context, c sfc.Conn, v volumeView, id string) (sfc.VolumeBackupView, error) {
+func findBackup(ctx context.Context, c sfc.Conn, v volumeView, id string) (control.VolumeBackupView, error) {
 	bs, err := volumeBackups(ctx, c, v)
 	if err != nil {
-		return sfc.VolumeBackupView{}, err
+		return control.VolumeBackupView{}, err
 	}
 	for _, b := range bs {
 		if b.ID == id {
 			return b, nil
 		}
 	}
-	return sfc.VolumeBackupView{}, &httpErr{http.StatusNotFound, "not-found", "no such backup"}
+	return control.VolumeBackupView{}, &httpErr{http.StatusNotFound, "not-found", "no such backup"}
 }
 
 type volumeDetail struct {
-	Volume   volumeView              `json:"volume"`
-	Backups  []sfc.VolumeBackupView  `json:"backups"`
-	Restores []sfc.VolumeRestoreView `json:"restores"`
-	Archives []archiveView           `json:"archives"`
+	Volume   volumeView    `json:"volume"`
+	Backups  []backupView  `json:"backups"`
+	Restores []restoreView `json:"restores"`
+	Archives []archiveView `json:"archives"`
 	// ArchiveReady: both recipient keys are set, so "보관" can be offered.
 	ArchiveReady bool `json:"archiveReady"`
 }
@@ -118,12 +148,20 @@ func (s *Server) handleVolumeDetail(w http.ResponseWriter, r *http.Request, ws *
 		}
 		rows := []volumeView{v}
 		fillWriters(ctx, c, rows)
-		d := volumeDetail{Volume: rows[0], Backups: []sfc.VolumeBackupView{}, Restores: []sfc.VolumeRestoreView{}, Archives: []archiveView{}}
-		if d.Backups, err = volumeBackups(ctx, c, v); err != nil {
+		d := volumeDetail{Volume: rows[0], Backups: []backupView{}, Restores: []restoreView{}, Archives: []archiveView{}}
+		bs, err := volumeBackups(ctx, c, v)
+		if err != nil {
 			return d, err
 		}
-		if d.Restores, err = volumeRestores(ctx, c, v); err != nil {
+		for _, b := range bs {
+			d.Backups = append(d.Backups, backupRow(b))
+		}
+		rs, err := volumeRestores(ctx, c, v)
+		if err != nil {
 			return d, err
+		}
+		for _, x := range rs {
+			d.Restores = append(d.Restores, restoreRow(x))
 		}
 		js, keys, err := volumeArchives(ctx, c, v)
 		if err != nil {
@@ -221,7 +259,7 @@ func (s *Server) handleVolumeBackupSelection(action string) func(http.ResponseWr
 			if err != nil {
 				return "", nil, 0, err
 			}
-			return action, control.VolumeBackupSelection{Scope: b.Source.Scope, ID: b.ID}, b.Revision, nil
+			return action, control.VolumeBackupSelection{Scope: b.Scope, ID: b.ID}, b.Revision, nil
 		})
 	}
 }
@@ -257,29 +295,29 @@ func (s *Server) handleVolumeRestore(w http.ResponseWriter, r *http.Request, ws 
 		if err != nil {
 			return "", nil, 0, err
 		}
-		if b.Source.Phase != "Ready" || b.Source.Receipt == nil {
+		if b.Phase != "Ready" || b.Receipt == nil {
 			return "", nil, 0, &httpErr{http.StatusConflict, "backup-not-ready", "only a finished backup can be restored"}
 		}
 		app := req.Target.App
 		if app == "" {
-			app = b.Source.Scope.App
+			app = b.Scope.App
 		}
 		id := "r-" + req.OpID[:8]
-		scope := volumes.Scope{Cluster: b.Source.Scope.Cluster, Tenant: v.Tenant, App: app, ID: req.Target.Name, Generation: 1}
-		spec := volumes.NativeSpec{Schema: 1, Scope: scope, Node: b.Source.Node, NodeKey: b.Source.Owner, Materialization: "r-" + id,
-			UID: b.Source.UID, GID: b.Source.GID, Mode: b.Source.Mode, Retain: true}
+		scope := volumes.Scope{Cluster: b.Scope.Cluster, Tenant: v.Tenant, App: app, ID: req.Target.Name, Generation: 1}
+		spec := volumes.NativeSpec{Schema: 1, Scope: scope, Node: b.Node, NodeKey: b.Owner, Materialization: "r-" + id,
+			UID: b.UID, GID: b.GID, Mode: b.Mode, Retain: true}
 		if spec.Validate() != nil {
 			return "", nil, 0, invalid("target: not a valid data store for this backup")
 		}
 		// sfcd's restoreNeed: the data plus 8 KiB for each archive entry
-		maxBytes := max(b.Source.Receipt.DataBytes+uint64(b.Source.Receipt.Entries)*8192, 1024)
+		maxBytes := max(b.Receipt.DataBytes+uint64(b.Receipt.Entries)*8192, 1024)
 		if maxBytes > 1<<40 {
 			return "", nil, 0, &httpErr{http.StatusUnprocessableEntity, "restore-too-large", "this backup needs more than 1 TiB to restore"}
 		}
 		if req.CapacityBytes != 0 && (req.CapacityBytes < maxBytes || req.CapacityBytes > 1<<40) {
 			return "", nil, 0, invalid("capacityBytes: from the backup's restore size up to 1 TiB")
 		}
-		q := control.VolumeRestoreBegin{Backup: control.VolumeBackupSelection{Scope: b.Source.Scope, ID: b.ID}, ID: id, Target: spec, MaxBytes: maxBytes, CapacityBytes: req.CapacityBytes}
+		q := control.VolumeRestoreBegin{Backup: control.VolumeBackupSelection{Scope: b.Scope, ID: b.ID}, ID: id, Target: spec, MaxBytes: maxBytes, CapacityBytes: req.CapacityBytes}
 		return sfc.ActionBeginVolumeRestore, q, b.Revision, nil
 	})
 }
@@ -301,7 +339,7 @@ func (s *Server) handleVolumeRestoreCancel(w http.ResponseWriter, r *http.Reques
 		}
 		for _, x := range rs {
 			if x.ID == id {
-				return sfc.ActionCancelVolumeRestore, control.VolumeRestoreSelection{Backup: x.Source.Backup, ID: x.ID}, x.Revision, nil
+				return sfc.ActionCancelVolumeRestore, control.VolumeRestoreSelection{Backup: x.Backup, ID: x.ID}, x.Revision, nil
 			}
 		}
 		return "", nil, 0, &httpErr{http.StatusNotFound, "not-found", "no such restore"}

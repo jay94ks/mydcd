@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/jay94ks/seafield/internal/cli"
 	"github.com/jay94ks/seafield/internal/cluster/control"
@@ -294,17 +295,22 @@ func nodeShowCommand(g *globals) *cli.Command {
 
 func nodeDiagnosticsCommand(g *globals) *cli.Command {
 	var file string
+	var cpuProfile time.Duration
 	return &cli.Command{
 		Name:  "diagnostics",
 		Args:  "NODE",
 		Short: "Save a diagnostics bundle (tar.gz, no secrets) of a server",
 		Flags: func(fs *flag.FlagSet) {
 			fs.StringVar(&file, "out", "", "write the bundle to this new `file` (default NODE-diagnostics.tar.gz)")
+			fs.DurationVar(&cpuProfile, "cpu-profile", 0, "also record a CPU profile of the server's sfcd for this `duration` (up to 20s; adds it to the request deadline)")
 		},
 		Run: func(c *cli.Context, args []string) error {
 			node, err := nodeArg(args, "diagnostics")
 			if err != nil {
 				return err
+			}
+			if cpuProfile < 0 || cpuProfile > control.NodeDiagnosticsMaxCPUProfileSeconds*time.Second {
+				return cli.Usagef("--cpu-profile must be between 0 and 20s")
 			}
 			if file == "" {
 				file = node + "-diagnostics.tar.gz"
@@ -314,9 +320,9 @@ func nodeDiagnosticsCommand(g *globals) *cli.Command {
 				return err
 			}
 			defer s.Close()
-			ctx, cancel := g.Deadline(c)
+			ctx, cancel := context.WithTimeout(c.Ctx, g.timeout+cpuProfile)
 			defer cancel()
-			bundle, err := s.Client.NodeDiagnostics(ctx, s.Target, s.Stored.Session, node)
+			bundle, err := s.Client.NodeDiagnostics(ctx, s.Target, s.Stored.Session, node, cpuProfile)
 			if err != nil {
 				return err
 			}

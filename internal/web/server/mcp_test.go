@@ -237,8 +237,8 @@ func TestMCPServers(t *testing.T) {
 	before := len(m.methods)
 	m.mu.Unlock()
 	code, res := f.do("POST", "/api/v1/system/mcp/grafana/tools/create_silence/test", map[string]any{"incident": "inc-test1"})
-	if s := fmt.Sprint(res["steps"]); code != 200 || !strings.Contains(s, "duration 최대 60m") || !strings.Contains(s, "matchers php-shop") ||
-		!strings.Contains(s, "comment Seafield Cluster 사건 inc-test1 자동 묵음") || res["result"] != "승인 요청을 만들었을 것 · 실제 호출 안 함" {
+	if s := fmt.Sprint(res["steps"]); code != 200 || !strings.Contains(s, "duration at most 60m") || !strings.Contains(s, "matchers php-shop") ||
+		!strings.Contains(s, "comment Seafield Cluster 사건 inc-test1 자동 묵음") || res["result"] != "Would have asked for approval · not called" {
 		t.Fatalf("test: %d %v", code, res)
 	}
 	m.mu.Lock()
@@ -252,7 +252,7 @@ func TestMCPServers(t *testing.T) {
 		t.Fatalf("guide: %d %v", code, out)
 	}
 	_, g := f.do("GET", "/api/v1/guides/app/shop/php-shop", nil)
-	if s := fmt.Sprint(g["choices"].(map[string]any)["mcpServers"]); !strings.Contains(s, "name:grafana") || !strings.Contains(s, "도구 3개 (읽기 1 · 바꾸기 2)") {
+	if s := fmt.Sprint(g["choices"].(map[string]any)["mcpServers"]); !strings.Contains(s, "name:grafana") || !strings.Contains(s, "3 tools (1 read · 2 change)") {
 		t.Fatalf("choices: %v", s)
 	}
 

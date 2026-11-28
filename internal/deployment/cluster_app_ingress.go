@@ -78,8 +78,11 @@ func ValidateClusterAppIngress(i IngressDeclaration) error {
 			return inputError("CLUSTER_APP_BACKEND_FIXED", r.ID)
 		}
 	}
-	if i.Runtime.validate() != nil || !identifier(i.Node) || len(i.Listeners) < 1 || len(i.Listeners) > 16 || len(i.Routes) > 256 || len(i.Routes) > 0 && i.Host != "" || len(i.Routes) == 0 && i.Host == "" {
+	if i.Runtime.validate() != nil || !identifier(i.Node) || len(i.Listeners) > 16 || len(i.Routes) > 256 || len(i.Routes) > 0 && i.Host != "" || len(i.Routes) == 0 && i.Host == "" {
 		return inputError("INVALID_INGRESS", "x-sfc.ingress")
+	}
+	if len(i.Listeners) == 0 {
+		i.Listeners = []ListenerDeclaration{{Shared: "validate"}} // filled from the node's gateways when served
 	}
 	_, err := ClusterAppIngressSpec("validate", "web", i, &ClusterAppBackend{Address: netip.MustParseAddr("192.0.2.1")}, 1)
 	if err != nil {

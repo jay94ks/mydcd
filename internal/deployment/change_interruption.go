@@ -2,7 +2,10 @@
 
 package deployment
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"strings"
+)
 
 // Interruption codes say, for the deploy preview only, why replacing a Task
 // stops its service for a while (devel/design/zero-downtime-apply.md). A
@@ -22,12 +25,14 @@ var InterruptionCodes = []string{InterruptSingleInstance, InterruptVolumeWriter,
 // it is replaced. The cause that can never be lifted is named first:
 // a writable Volume, then a server port, then a fixed address, and last a
 // service with no replica elsewhere (which a same-server surge will lift).
-func annotateInterruptions(steps []Step, out []Change) {
+// A fixed address is one the app declares (input); a planned Task always
+// carries the address it was given.
+func annotateInterruptions(steps []Step, input Compose, out []Change) {
 	byKey := map[string]Step{}
 	nodes := map[string]map[string]bool{} // service -> servers its Tasks run on
 	for _, s := range steps {
 		byKey[s.Key] = s
-		if service, ok := taskService(s); ok {
+		if service, ok := taskService(s, input); ok {
 			if nodes[service.name] == nil {
 				nodes[service.name] = map[string]bool{}
 			}
@@ -46,7 +51,7 @@ func annotateInterruptions(steps []Step, out []Change) {
 			continue
 		}
 		step, ok := byKey[out[i].Key]
-		service, isTask := taskService(step)
+		service, isTask := taskService(step, input)
 		if !ok || !isTask {
 			continue
 		}
@@ -68,7 +73,7 @@ type taskShape struct {
 	writer, hostPort, static bool
 }
 
-func taskService(s Step) (taskShape, bool) {
+func taskService(s Step, input Compose) (taskShape, bool) {
 	if s.Kind != "task" {
 		return taskShape{}, false
 	}
@@ -80,6 +85,7 @@ func taskService(s Step) (taskShape, bool) {
 	if service.Sfc.Instance != nil {
 		shape.name = service.Sfc.Instance.Service
 	}
+	declared, known := input.Services[taskServiceName(s.Key, service)]
 	for _, m := range service.Volumes {
 		if m.Type == "volume" && !m.ReadOnly {
 			shape.writer = true
@@ -90,10 +96,25 @@ func taskService(s Step) (taskShape, bool) {
 			shape.hostPort = true
 		}
 	}
-	for _, a := range service.Networks {
-		if a.IPv4 != "" || a.IPv6 != "" {
+	for _, a := range declared.Networks {
+		if known && (a.IPv4 != "" || a.IPv6 != "") {
 			shape.static = true
 		}
 	}
 	return shape, true
+}
+
+// taskServiceName is the app.yaml service a Task key comes from: a replica
+// names it, otherwise it is the first segment of the resource id
+// (workload/task/<tenant>/<app>/<id>).
+func taskServiceName(key string, service ComposeService) string {
+	if service.Sfc.Instance != nil {
+		return service.Sfc.Instance.Service
+	}
+	parts := strings.SplitN(key, "/", 5)
+	if len(parts) < 5 {
+		return ""
+	}
+	name, _, _ := strings.Cut(parts[4], "/")
+	return name
 }

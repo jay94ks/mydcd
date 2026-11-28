@@ -179,6 +179,19 @@ type NoticeText struct {
 	Title string            `json:"title"`
 	Body  []string          `json:"body,omitempty"`
 	Args  map[string]string `json:"args,omitempty"`
+	// Phrases fill {name} with text rendered in the same language.
+	Phrases map[string]Phrase `json:"phrases,omitempty"`
+}
+
+// Phrase is one web-made sentence kept as a message code and values, made
+// into text in the reader's language. Args fill {name} as they are;
+// Phrases fill {name} with a phrase rendered in the same language; Parts
+// fill {parts}, joined with "; ".
+type Phrase struct {
+	Code    string            `json:"code"`
+	Args    map[string]string `json:"args,omitempty"`
+	Phrases map[string]Phrase `json:"phrases,omitempty"`
+	Parts   []Phrase          `json:"parts,omitempty"`
 }
 
 func notifyKey(user string, at time.Time, id string) []byte {

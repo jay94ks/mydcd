@@ -46,7 +46,7 @@ func (e Execution) validate() error {
 		}
 		cmd := *s.Command
 		base, _ := e.preparationBase(i)
-		if cmd.Actor != d.Submitter || cmd.Epoch != d.Epoch || cmd.RequestID != requestID(d.Operation, s.Key) || cmd.Key != s.Key || cmd.Kind != state.Mutate || cmd.Delete || cmd.Target != "" || cmd.Rights != 0 || cmd.Expected != base.Revision {
+		if cmd.Actor != d.Submitter || cmd.Epoch != d.Epoch || cmd.RequestID != requestID(d.Operation, s.Key) || cmd.Key != s.Key || cmd.Kind != state.Mutate || cmd.Delete || cmd.Renew && !e.surgeTarget(i) || cmd.Target != "" || cmd.Rights != 0 || cmd.Expected != base.Revision {
 			return ErrInputs
 		}
 		value, err := e.commandValue(i)

@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/jay94ks/seafield/internal/bootstrap"
 	"github.com/jay94ks/seafield/internal/cluster/control"
 	"github.com/jay94ks/seafield/internal/deployment"
 	"github.com/jay94ks/seafield/internal/schema"
@@ -65,7 +66,7 @@ func (r *Runtime) appProjectionStore() (*deployment.ProjectionStore, error) {
 		return err
 	}
 	// Values live only on a tmpfs; the journal and scope receipts stay on disk.
-	memory := filepath.Join(r.nativeRoot, "workload", "inputs-memory")
+	memory := filepath.Join(r.nativeRoot, filepath.FromSlash(bootstrap.InputMemoryDir))
 	if err := mountInputMemory(memory); err != nil {
 		log.Printf("app inputs: %v", err)
 		return nil, deployment.ErrInputs

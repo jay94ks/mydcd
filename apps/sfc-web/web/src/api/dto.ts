@@ -206,6 +206,8 @@ export interface DNodeSummary {
   /** unreachable 기준 */
   observeLimitSeconds?: number;
   cpuPercent?: number;
+  /** 공유 VPS에서 다른 VM이 가져간 CPU 몫(0–100, #907). cpuPercent에는 없다 */
+  cpuStealPercent?: number;
   memUsed?: number;
   memTotal?: number;
   diskUsed?: number;
@@ -253,6 +255,8 @@ export interface DStorageRoot {
   capacityBytes?: number;
   /** 서버가 스스로 등록한 기본 저장 경로(id "default") */
   default?: boolean;
+  /** 그 서버의 기본 보관 위치(내린 앱 저장소 보관) */
+  archiveDefault?: boolean;
   closed?: boolean;
   attested?: boolean;
   volumes?: number;
@@ -268,6 +272,8 @@ export interface DTenantStorageRoot {
   allowed: boolean;
   root: { cluster: string; node: string; key: string; id: string; generation: number; path: string };
   volumes?: number;
+  /** 그 서버의 기본 보관 위치(#920 뒤). 참일 때만 붙는다 */
+  archiveDefault?: boolean;
 }
 
 export interface DNodeDisk {
@@ -600,6 +606,16 @@ export interface DOperationSummary {
   epoch?: number;
 }
 
+export interface DHealthReason {
+  code: string;
+  key?: string;
+  kind?: string;
+  name?: string;
+  node?: string;
+  exit?: number;
+  failure?: string;
+}
+
 export interface DAppView {
   tenant: string;
   app: string;
@@ -608,6 +624,8 @@ export interface DAppView {
   operation: DOperationSummary;
   claims: number;
   health?: 'healthy' | 'degraded' | 'unhealthy' | 'unknown' | '';
+  /** 건강하지 않을 때만: sfcd deployment.HealthReason이 찾은 첫 원인 */
+  healthReason?: DHealthReason;
   observedAt?: number;
   retiring?: boolean;
   cd?: { revision: number; repository: string; branch: string; mode: string; paused: boolean; running?: string; candidate?: string; candidateDigest?: string; sourceError?: string };
@@ -665,6 +683,15 @@ export interface DAppPlan {
   app: string;
   services: { name: string; image: string; node: string; change: 'add' | 'update' | 'remove' | 'keep' }[] | null;
   diff?: string;
+  /** diff:true면 바뀐 항목을 sfcd 순서로(Z9, #932). interruption은 교체 동안 서비스가 멈추는 까닭의 sfcd 코드 */
+  changes?: DPlanChange[] | null;
+}
+export interface DPlanChange {
+  /** Create · Keep · Replace · RuntimeUpdate · MoveRequired · Remove */
+  action: string;
+  key: string;
+  reason?: string;
+  interruption?: string;
 }
 
 export interface DArchived {
@@ -710,6 +737,9 @@ export interface DVolume {
   moveID?: string;
   targetNode?: string;
   movePhase?: string;
+  /** 보관이 잡고 있으면 그 보관 ID와 단계(#920). 그동안 phase는 Archived */
+  archiveID?: string;
+  archivePhase?: string;
   /** 끝난 옮기기가 원래 서버에 남긴 원본(REQ-43 mock. 실제 sfcd 행에는 아직 없다) */
   retained?: DVolumeRetained[] | null;
   /** 쓰기로 붙인 앱 서비스(app/service) */
@@ -766,10 +796,28 @@ export interface DVolumeMovePlan {
   cd: boolean;
   services: { name: string; image: string; node: string; change: string }[] | null;
 }
+/** 내린 앱 저장소의 압축 보관(#920). phase: Packing → Clearing → Archived → Restoring → Restored, Cancelling → Cancelled, Failed, Discarding → Discarded */
+export interface DVolumeArchive {
+  id: string;
+  node: string;
+  store: string;
+  phase: string;
+  compression: 'zstd' | 'none' | string;
+  maxBytes: number;
+  /** 파일을 묶은 크기(압축 전) */
+  tarBytes?: number;
+  /** 디스크의 보관본 크기 */
+  dataBytes?: number;
+  failure?: string;
+  revision: number;
+}
 export interface DVolumeDetail {
   volume: DVolume;
   backups: DVolumeBackup[] | null;
   restores: DVolumeRestore[] | null;
+  archives?: DVolumeArchive[] | null;
+  /** 클러스터 키와 관리자 키가 둘 다 있어 보관할 수 있다 */
+  archiveReady?: boolean;
 }
 
 /** 작업 공간 간 연결(tenancy.Route). docs/reference/web-api.md "작업 공간 간 연결 (UI-53)" */

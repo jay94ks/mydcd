@@ -49,16 +49,20 @@ func vpsDNSKey(server, domain string) []byte { return []byte(server + "\x00" + d
 
 // PutVPSDNSHold stores or replaces a hold.
 func (s *Store) PutVPSDNSHold(h *VPSDNSHold) error {
-	return s.db.Update(func(tx *bolt.Tx) error {
+	err := s.db.Update(func(tx *bolt.Tx) error {
 		return putJSON(tx.Bucket(bucketVPSDNS), vpsDNSKey(h.Server, h.Domain), h)
 	})
+	s.changed(err, Change{Kind: "vps-dns-hold", ID: h.Server})
+	return err
 }
 
 // DeleteVPSDNSHold removes a hold (no error when there is none).
 func (s *Store) DeleteVPSDNSHold(server, domain string) error {
-	return s.db.Update(func(tx *bolt.Tx) error {
+	err := s.db.Update(func(tx *bolt.Tx) error {
 		return tx.Bucket(bucketVPSDNS).Delete(vpsDNSKey(server, domain))
 	})
+	s.changed(err, Change{Kind: "vps-dns-hold", ID: server})
+	return err
 }
 
 // ListVPSDNSHolds returns every hold, by server then domain.

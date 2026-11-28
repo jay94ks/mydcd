@@ -406,6 +406,9 @@ func (p Policy) reduceVolumes(s state.State, cmd state.Command) (map[string][]by
 		if volumeDeleteReportValue([]byte(cmd.Value)) {
 			return p.reduceVolumeDeleteReport(s, cmd)
 		}
+		if volumeRemoteFenceReportValue([]byte(cmd.Value)) {
+			return p.reduceVolumeRemoteFenceReport(s, cmd)
+		}
 		if restoreReportValue([]byte(cmd.Value)) {
 			return p.reduceRestoreReport(s, cmd)
 		}

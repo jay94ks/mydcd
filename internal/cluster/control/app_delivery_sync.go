@@ -135,6 +135,10 @@ func (p Policy) authorizeCDSelection(s state.State, c access.Catalog, entry appE
 	if err := p.admitIngressBlueprint(s, b); err != nil {
 		return err
 	}
+	// A Git commit never forces a shared route; a person deploys with --force.
+	if err := p.admitIngressRouteOverlap(s, b); err != nil {
+		return err
+	}
 	if err := p.imageCacheBlueprintAvailable(s, b); err != nil {
 		return err
 	}

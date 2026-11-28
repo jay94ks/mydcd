@@ -257,7 +257,7 @@ func TestWebhooksInternalAndLinks(t *testing.T) {
 	}
 	code, out := f.do("POST", "/api/v1/webhooks/bot/test", nil)
 	if code != 200 || out["delivery"].(map[string]any)["status"] != float64(202) || got.Headers["X-SFC-Token"] != "s3cr3t-token-9876" || got.Path != "/decide" ||
-		!strings.Contains(fmt.Sprint(out["steps"]), "action·decision·result 중 하나가 있음") {
+		!strings.Contains(fmt.Sprint(out["steps"]), "A JSON object with action, decision or result") {
 		t.Fatalf("internal test: %d %v %+v", code, out, got)
 	}
 	fake.SetTaskReady("shop", "php-shop", "web", "1", false)

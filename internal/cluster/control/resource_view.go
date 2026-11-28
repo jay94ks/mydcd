@@ -14,6 +14,7 @@ import (
 	"github.com/jay94ks/seafield/internal/cluster/state"
 	"github.com/jay94ks/seafield/internal/deployment"
 	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/ingress"
 	"github.com/jay94ks/seafield/internal/network/services"
 	"github.com/jay94ks/seafield/internal/tenancy"
 	"github.com/jay94ks/seafield/internal/workload"
@@ -163,7 +164,14 @@ func (p Policy) planningResources(s state.State, actor, tenant string, projectio
 		return deployment.PlanningContext{}, err
 	}
 	r := projection.Resources
-	result := deployment.PlanningContext{Addresses: projection.AddressSources, Cluster: p.Cluster, Actor: actor, Tenant: tenant, Networks: r.Networks, Nodes: map[string]deployment.PlanningNode{}, Current: s.Objects(""), Reserved: map[string]workload.Resources{}}
+	result := deployment.PlanningContext{Addresses: projection.AddressSources, Cluster: p.Cluster, Actor: actor, Tenant: tenant, Networks: r.Networks, Nodes: map[string]deployment.PlanningNode{}, Current: s.Objects(""), Reserved: map[string]workload.Resources{}, Gateways: map[string]ingress.GatewayConfiguration{}, IngressLimits: map[string]deployment.IngressRuntime{}}
+	book, err := p.IngressManagement(s)
+	if err != nil {
+		return result, err
+	}
+	for _, record := range book.NodeGatewaysRecords {
+		result.Gateways[record.Node] = record.Configuration
+	}
 	result.Planned = projection.MoveHolds
 	result.HostPorts = projection.HostPorts
 	for _, e := range d.Entries {
@@ -208,6 +216,7 @@ func (p Policy) planningResources(s state.State, actor, tenant string, projectio
 		}
 		// Charge other tenants before publishing this tenant's feasible capacity.
 		capacity := workload.Resources{CPU: min(scoped.Capacity.CPU, global.Capacity.CPU-(all.CPU-own.CPU)), Memory: min(scoped.Capacity.Memory, global.Capacity.Memory-(all.Memory-own.Memory))}
+		result.IngressLimits[e.Peer.ID] = deployment.IngressRuntime{MaxRequests: min(scoped.MaxIngressRequests, global.MaxIngressRequests), MaxConnections: min(scoped.MaxIngressConnections, global.MaxIngressConnections), BufferBytes: min(scoped.IngressBufferBytes, global.IngressBufferBytes)}
 		result.Nodes[e.Peer.ID] = deployment.PlanningNode{ResourceKeys: lifecycle.OwnIdentityTransitions(e.Keys), Key: key, Generation: e.Revision, Revision: r.Revision, Underlay: host, Voter: e.Peer.Voter, Capacity: capacity, Used: own, Draining: !d.WorkKey(key) || d.Cordon(e.Peer.ID).Enabled}
 	}
 	for _, v := range r.Quotas.Reservations() {

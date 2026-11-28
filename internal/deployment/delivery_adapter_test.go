@@ -62,7 +62,7 @@ func TestDeliveryIntentRebasePreservesOnlyCASAndUsageDifferences(t *testing.T) {
 	for index := range rebased.d.Steps {
 		s := &rebased.d.Steps[index]
 		s.Base, s.BasePresent = ObjectRef{s.Key, 55, 12}, true
-		s.StableDNS = []ObjectRef{{"network/dns/current", 6, 3}}
+		s.Stable = []ObjectRef{{"network/dns/current", 6, 3}}
 	}
 	for id, n := range rebased.d.Nodes {
 		n.Used.CPU++

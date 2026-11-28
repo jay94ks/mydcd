@@ -56,17 +56,37 @@ func managedIngressFixture(t *testing.T, root, document string) (string, string)
 		return address
 	}
 	plain, secure := port(false), port(true)
-	document = strings.Replace(document, "ingress: {enabled: false}", "ingress: {enabled: true}", 1)
-	yaml := fmt.Sprintf(`x-sfc:
+	_, plainPort, _ := net.SplitHostPort(plain)
+	_, securePort, _ := net.SplitHostPort(secure)
+	// The route's listeners are node-a's external gateway listeners.
+	gateway := fmt.Sprintf("ingress: {enabled: true, gateways: {external: {enabled: true, addresses: [127.0.0.1], ports: [%s, %s], listeners: [{id: plain, address: %q}, {id: secure, address: %q, tls: true, http3: true}]}}}", plainPort, securePort, plain, secure)
+	document = strings.Replace(document, "ingress: {enabled: false}", gateway, 1)
+	yaml := `x-sfc:
  ingress:
-  node: node-a
-  host: app.test
-  runtime: {max_requests: 2, max_connections: 8, max_header_bytes: 4096, max_body_bytes: 1048576, buffer_bytes: 131072, request_timeout_ms: 5000, dial_timeout_ms: 1000, response_header_timeout_ms: 2000, health_interval_ms: 100}
-  listeners:
-   - {address: %q}
-   - {address: %q, tls: true, http3: true}
-  backend: {service: web, port: 8080, health_path: /readyz}`, plain, secure)
+  - {node: node-a, host: app.test, service: web, port: 8080, health: /readyz}`
 	return document, yaml
+}
+
+// gatewayListenerAddress is the address of a shared gateway listener of the
+// node, or the listener's own address.
+func gatewayListenerAddress(t *testing.T, cfg config.Node, l ingress.Listener) string {
+	t.Helper()
+	if l.Shared == "" {
+		return l.Address
+	}
+	var local config.IngressLocal
+	if err := cfg.Modules["ingress"].Decode(&local); err != nil {
+		t.Fatal(err)
+	}
+	for _, g := range []ingress.Gateway{local.Gateways.External, local.Gateways.Local} {
+		for _, gl := range g.Listeners {
+			if gl.ID == l.Shared {
+				return gl.Address
+			}
+		}
+	}
+	t.Fatal("no gateway listener", l.Shared)
+	return ""
 }
 
 func verifyManagedIngressServing(t *testing.T, ctx context.Context, r *Runtime, cfg config.Node, p control.Policy, read func() cluster.View, wait func(string, func() bool), trustedRoots ...[]byte) {
@@ -168,9 +188,9 @@ func verifyManagedIngressServing(t *testing.T, ctx context.Context, r *Runtime, 
 	h3 := &http3.Transport{TLSClientConfig: tlsCfg.Clone()}
 	defer h3.Close()
 	for n, transport := range []http.RoundTripper{h1, h2, h3} {
-		url := "http://" + spec.Listeners[0].Address + "/ping"
+		url := "http://" + gatewayListenerAddress(t, cfg, spec.Listeners[0]) + "/ping"
 		if n > 0 {
-			url = "https://" + spec.Listeners[1].Address + "/ping"
+			url = "https://" + gatewayListenerAddress(t, cfg, spec.Listeners[1]) + "/ping"
 		}
 		client := http.Client{Transport: transport, Timeout: 3 * time.Second}
 		request, e := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)

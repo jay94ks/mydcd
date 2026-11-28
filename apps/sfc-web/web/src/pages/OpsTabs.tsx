@@ -12,9 +12,10 @@ import { DataTable } from '../components/DataTable';
 import { ErrorBand, Load } from '../components/states';
 import { Refresh } from '../components/Refresh';
 import { Tabs } from '../components/Tabs';
-import { usePoll, DEFAULT_POLL_MS } from '../lib/usePoll';
+import { usePoll } from '../lib/usePoll';
 import { usePhone } from '../lib/viewport';
 import { fmtBytes } from '../lib/format';
+import { tenantAllLive } from '../lib/liveTopics';
 
 export function OpsTabs() {
   const phone = usePhone();
@@ -83,7 +84,7 @@ const kindOf = (e: DResourceEntry): [string, string, number | undefined, string]
 /** 공유 자원 전체 (UI-A2): 지금 작업 공간의 resources 목록을 쪽 단위로 */
 export function OpsResourcesPage() {
   const { tenant } = useAuth();
-  const first = usePoll((s) => (tenant ? resourcesPage(tenant, undefined, s) : Promise.resolve(undefined)), [tenant], DEFAULT_POLL_MS);
+  const first = usePoll((s) => (tenant ? resourcesPage(tenant, undefined, s) : Promise.resolve(undefined)), [tenant], 0, tenantAllLive(tenant));
   const [more, setMore] = useState<{ items: DResourceEntry[]; next: string; for?: Date }>();
   const [moreErr, setMoreErr] = useState<unknown>();
   const [kind, setKind] = useState('');

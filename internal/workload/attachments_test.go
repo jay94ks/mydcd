@@ -216,3 +216,14 @@ func TestRoutesLeaveThroughTheirOwnAttachment(t *testing.T) {
 		t.Fatal("route over another attachment's own pool accepted")
 	}
 }
+
+// A created, not yet started container keys its extra endpoints by the
+// network ID given at create; started ones by name (seen on sfed).
+func TestTaskEndpointFindsCreatedEndpointsByNetworkID(t *testing.T) {
+	l := network.BridgeLease{NetworkID: "id-b", NetworkName: "name-b"}
+	created := &container.NetworkSettings{Networks: map[string]*dockernet.EndpointSettings{"id-b": {}}}
+	started := &container.NetworkSettings{Networks: map[string]*dockernet.EndpointSettings{"name-b": {NetworkID: "id-b"}}}
+	if taskEndpoint(created, l) == nil || taskEndpoint(started, l) == nil || taskEndpoint(&container.NetworkSettings{}, l) != nil || taskEndpoint(nil, l) != nil {
+		t.Fatal("endpoint lookup by name or create ID")
+	}
+}

@@ -22,6 +22,9 @@ func TestHostCPUDeltaAndMemoryDoNotInventMissingUsage(t *testing.T) {
 	if used == nil || *used != 1e9 {
 		t.Fatal("two-CPU half utilization", used)
 	}
+	if steal := CPUSteal(previous, counter); steal == nil || *steal != 0 {
+		t.Fatal("no steal delta", steal)
+	}
 	total, available, err := parseMemory(strings.NewReader("MemTotal: 1024 kB\nMemAvailable: 256 kB\n"))
 	if err != nil || total != 1048576 || available != 262144 {
 		t.Fatal(total, available, err)
@@ -43,5 +46,28 @@ func TestSelectedMountUsesPathBoundaryAndFilesystemIdentityDeduplicates(t *testi
 	}
 	if FilesystemID("node-a", "same-device-and-fsid") != FilesystemID("node-a", "same-device-and-fsid") || FilesystemID("node-a", "same-device-and-fsid") == FilesystemID("node-b", "same-device-and-fsid") {
 		t.Fatal("filesystem identity lost node boundary")
+	}
+}
+
+// A shared VPS: the hypervisor ran other guests for part of the window.
+// Stolen time is neither this server's usage nor idle; it is reported apart.
+func TestHostCPUStealIsNotUsage(t *testing.T) {
+	previous, err := parseCPU(strings.NewReader("cpu  10 0 10 70 0 0 0 10 0 0\ncpu0 1 0 0 0\n"))
+	if err != nil || previous.Total != 100 || previous.Idle != 70 || previous.Steal != 10 || previous.Count != 1 {
+		t.Fatal(previous, err)
+	}
+	// 100 ticks later: 10 user, 50 idle, 40 steal.
+	current, err := parseCPU(strings.NewReader("cpu  20 0 10 120 0 0 0 50 0 0\ncpu0 1 0 0 0\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	used, steal := CPUUsage(previous, current), CPUSteal(previous, current)
+	if used == nil || *used != 1e8 || steal == nil || *steal != 4e8 {
+		t.Fatal("used/steal", used, steal)
+	}
+	backwards := current
+	backwards.Total, backwards.Steal = current.Total+10, previous.Steal-1
+	if CPUUsage(current, backwards) != nil || CPUSteal(current, backwards) != nil {
+		t.Fatal("steal counter going backwards became known usage")
 	}
 }

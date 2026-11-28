@@ -51,10 +51,11 @@ func renderNotice(lang string, n *store.Notification) {
 	if n.Text == nil {
 		return
 	}
-	n.Title = text(lang, n.Text.Title, n.Text.Args)
+	args := phraseArgs(lang, n.Text.Args, n.Text.Phrases, nil)
+	n.Title = text(lang, n.Text.Title, args)
 	parts := make([]string, 0, len(n.Text.Body))
 	for _, code := range n.Text.Body {
-		parts = append(parts, text(lang, code, n.Text.Args))
+		parts = append(parts, text(lang, code, args))
 	}
 	n.Body = strings.Join(parts, " ")
 }

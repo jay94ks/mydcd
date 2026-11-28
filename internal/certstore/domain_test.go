@@ -106,3 +106,44 @@ func TestNormalizeResponder(t *testing.T) {
 		}
 	}
 }
+
+func TestDomainOwnersNestOnlyUnderClusterLevel(t *testing.T) {
+	c := New([32]byte{1})
+	c, err := c.AddDomain("example.com", "admin", 0, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c, err = c.AddOwnedDomain("a.example.com", "alpha", "admin", 1, 6); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.AddOwnedDomain("x.a.example.com", "beta", "admin", 2, 7); err == nil {
+		t.Fatal("other tenant nested under a tenant domain")
+	}
+	if _, err := c.AddDomain("x.a.example.com", "admin", 2, 7); err == nil {
+		t.Fatal("cluster-level domain nested under a tenant domain")
+	}
+	if _, err := c.AssignDomain("example.com", "beta", 2); err == nil {
+		t.Fatal("outer domain given to another tenant over a tenant domain")
+	}
+	if _, err := c.AddOwnedDomain("b.example.com", "Bad", "admin", 2, 7); err == nil {
+		t.Fatal("invalid tenant id")
+	}
+	if c, err = c.AssignDomain("example.com", "alpha", 2); err != nil || c.Revision != 3 {
+		t.Fatal("same tenant may own the outer domain", err)
+	}
+	if d, ok := c.DomainOwner("*.www.a.example.com"); !ok || d.Name != "a.example.com" {
+		t.Fatal("longest match", d, ok)
+	}
+	if _, ok := c.DomainOwner("example.org"); ok {
+		t.Fatal("unregistered host owned")
+	}
+	if got := c.TenantDomains("alpha"); len(got) != 2 || len(c.TenantDomains("")) != 0 {
+		t.Fatal("tenant domains", got)
+	}
+	bad := c.Own()
+	bad.Domains[1].Tenant = "beta"
+	bad.Domains[0].Tenant = "alpha"
+	if bad.Validate() == nil {
+		t.Fatal("validate kept a cross-tenant nesting")
+	}
+}

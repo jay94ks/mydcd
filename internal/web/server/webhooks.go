@@ -617,14 +617,14 @@ type webhookSend struct {
 	Point, Event string
 	Link         string         // the link it is sent for ("" for tests)
 	Payload      map[string]any // the sfcli body; other formats are built from it
-	Summary      string         // one line for slack/teams/pagerduty
+	Summary      store.Phrase   // one line for slack/teams/pagerduty, in webhookLang
 	Decide       bool
 	Timeout      time.Duration // decide only (0: 10 s)
 	ws           *webSession   // internal sends: the session to call as (nil: the automation account)
 }
 
 // webhookBody renders the body in the webhook's format.
-func webhookBody(h *store.Webhook, m webhookSend, id string, at time.Time) ([]byte, error) {
+func webhookBody(h *store.Webhook, m webhookSend, lang, id string, at time.Time) ([]byte, error) {
 	p := map[string]any{}
 	for k, v := range m.Payload {
 		p[k] = v
@@ -634,7 +634,7 @@ func webhookBody(h *store.Webhook, m webhookSend, id string, at time.Time) ([]by
 		p["point"] = m.Point
 	}
 	var v any = p
-	text := m.Summary
+	text := render(lang, m.Summary)
 	if text == "" {
 		text = "Seafield Cluster " + m.Event
 	}
@@ -793,7 +793,7 @@ func (s *Server) deliverWebhook(ctx context.Context, h *store.Webhook, m webhook
 		}
 		d.Of = 1 + len(backoff)
 	}
-	body, err := webhookBody(h, m, d.ID, d.At)
+	body, err := webhookBody(h, m, s.webhookLang(h), d.ID, d.At)
 	var hd map[string]string
 	if err == nil {
 		hd, err = s.webhookHeaders(h, m.Event, d.ID, body)
@@ -887,7 +887,7 @@ func (s *Server) handleTestWebhook(w http.ResponseWriter, r *http.Request, ws *w
 	if !ok {
 		return
 	}
-	m := webhookSend{Point: "test", Event: "test", Summary: "Seafield Cluster 웹훅 시험: " + h.Name, ws: ws,
+	m := webhookSend{Point: "test", Event: "test", Summary: ph("webhook.summary.test", "name", h.Name), ws: ws,
 		Payload: map[string]any{"webhook": h.Name, "test": true, "role": h.Role}}
 	if h.Role == "decide" {
 		m.Payload["allowed"] = []string{"none"}
@@ -899,27 +899,29 @@ func (s *Server) handleTestWebhook(w http.ResponseWriter, r *http.Request, ws *w
 	if h.Target != nil {
 		where = fmt.Sprintf("%s/%s/%s :%d %s (%s)", h.Tenant, h.Target.App, h.Target.Service, h.Target.Port, h.Target.Path, h.Target.Scheme)
 	}
-	steps := []map[string]string{{"label": "주소 확인", "detail": where}}
+	lang := s.requestLang(r, ws)
+	t := func(code string, kv ...string) string { return render(lang, ph(code, kv...)) }
+	steps := []map[string]string{{"label": t("webhook-test.address"), "detail": where}}
 	if d.Error != "" && d.Status == 0 {
-		steps = append(steps, map[string]string{"label": "보냄", "detail": "실패 · " + d.Error})
+		steps = append(steps, map[string]string{"label": t("webhook-test.sent"), "detail": t("webhook-test.send-failed", "error", d.Error)})
 	} else {
-		steps = append(steps, map[string]string{"label": "보냄", "detail": "POST · 서명 " + h.Sign},
-			map[string]string{"label": "응답", "detail": fmt.Sprintf("%d · %.1f초", d.Status, float64(d.MS)/1000)})
+		steps = append(steps, map[string]string{"label": t("webhook-test.sent"), "detail": t("webhook-test.signed", "sign", h.Sign)},
+			map[string]string{"label": t("webhook-test.answer"), "detail": t("webhook-test.answer-detail", "status", fmt.Sprint(d.Status), "seconds", fmt.Sprintf("%.1f", float64(d.MS)/1000))})
 		if h.Role == "decide" {
 			var x map[string]any
 			ok := json.Unmarshal(ans, &x) == nil && (x["action"] != nil || x["decision"] != nil || x["result"] != nil)
-			detail := "JSON 객체에 action·decision·result 중 하나가 있음"
+			detail := t("webhook-test.format-ok")
 			if !ok {
-				detail = "형식이 맞지 않음: JSON 객체에 action·decision·result 중 하나가 있어야 합니다"
+				detail = t("webhook-test.format-bad")
 			}
-			steps = append(steps, map[string]string{"label": "판단 응답 형식", "detail": detail})
+			steps = append(steps, map[string]string{"label": t("webhook-test.format"), "detail": detail})
 		}
 	}
 	s.audit(ws, h.Tenant, "webhooks", "test", h.Name, nil, map[string]any{"status": d.Status, "error": d.Error})
-	writeJSON(w, http.StatusOK, map[string]any{"delivery": deliveryView(d), "steps": steps})
+	writeJSON(w, http.StatusOK, map[string]any{"delivery": deliveryView(lang, d), "steps": steps})
 }
 
-func deliveryView(d *store.WebhookDelivery) map[string]any {
+func deliveryView(lang string, d *store.WebhookDelivery) map[string]any {
 	v := map[string]any{"id": d.ID, "at": rfc3339(d.At), "point": d.Point, "event": d.Event, "ms": d.MS, "done": d.Done}
 	if d.Status != 0 {
 		v["status"] = d.Status
@@ -943,7 +945,7 @@ func deliveryView(d *store.WebhookDelivery) map[string]any {
 		v["accepted"] = *d.Accepted
 	}
 	if d.Reason != "" {
-		v["reason"] = d.Reason
+		v["reason"] = reasonText(lang, d.Reason) // a reason code, or what the webhook said
 	}
 	return v
 }
@@ -959,6 +961,7 @@ func (s *Server) handleWebhookDeliveries(w http.ResponseWriter, r *http.Request,
 		writeError(w, http.StatusInternalServerError, "internal", err.Error())
 		return
 	}
+	lang := s.requestLang(r, ws)
 	start := 0
 	if c := r.URL.Query().Get("cursor"); c != "" {
 		start = len(ds)
@@ -976,7 +979,7 @@ func (s *Server) handleWebhookDeliveries(w http.ResponseWriter, r *http.Request,
 			out["cursor"] = ds[i-1].ID
 			break
 		}
-		items = append(items, deliveryView(ds[i]))
+		items = append(items, deliveryView(lang, ds[i]))
 	}
 	out["items"] = items
 	writeJSON(w, http.StatusOK, out)

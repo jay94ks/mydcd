@@ -380,3 +380,71 @@ func TestWriteChecksAuthorizationEveryTime(t *testing.T) {
 		t.Fatal("mount kept after its writer pin went")
 	}
 }
+
+// blockingOps holds Write until release closes.
+type blockingOps struct {
+	volumeshare.Ops
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (b blockingOps) Write(ctx context.Context, f volumeshare.FileID, off uint64, data []byte) (uint32, error) {
+	b.entered <- struct{}{}
+	<-b.release
+	return b.Ops.Write(ctx, f, off, data)
+}
+
+// Revoke ends a volume's mounts, returns only after the operations they had
+// in flight are done, refuses the volume
+// from then on, and leaves other volumes alone.
+func TestRevokeWaitsOutOperationsInFlight(t *testing.T) {
+	root, _ := openRoot(t)
+	ops := blockingOps{Ops: root, entered: make(chan struct{}, 1), release: make(chan struct{})}
+	server := volumeshare.NewServer(func(context.Context, [32]byte, string) (volumeshare.Ops, error) { return ops, nil }, volumeshare.ServerOptions{})
+	ctx := context.Background()
+	dial := func(volume string) *volumeshare.Client {
+		c, err := volumeshare.Dial(ctx, func(ctx context.Context, h, d []byte) ([]byte, []byte, error) {
+			return server.Handle(ctx, [32]byte{1}, h, d)
+		}, volumeshare.ClientOptions{Volume: volume})
+		if err != nil {
+			t.Fatal(volume, err)
+		}
+		return c
+	}
+	gone, kept := dial("gone"), dial("kept")
+	_, f, err := gone.Create(ctx, 0, volumeshare.Caller{}, gone.Root(), "f", uint32(os.O_RDWR), 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wrote := make(chan error, 1)
+	go func() { _, err := gone.Write(ctx, f, 0, []byte("late")); wrote <- err }()
+	<-ops.entered
+	revoked := make(chan struct{})
+	go func() { server.Revoke("gone"); close(revoked) }()
+	select {
+	case <-revoked:
+		t.Fatal("revoke returned with a write in flight")
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(ops.release)
+	<-revoked
+	if err := <-wrote; err != nil {
+		t.Fatal("the write in flight was cut", err)
+	}
+	if _, err := gone.Lookup(ctx, gone.Root(), "f"); err == nil {
+		t.Fatal("revoked mount still answered")
+	}
+	if _, err := volumeshare.Dial(ctx, func(ctx context.Context, h, d []byte) ([]byte, []byte, error) {
+		return server.Handle(ctx, [32]byte{1}, h, d)
+	}, volumeshare.ClientOptions{Volume: "gone"}); err == nil {
+		t.Fatal("revoked volume mounted again")
+	}
+	if _, err := kept.Lookup(ctx, kept.Root(), "f"); err != nil {
+		t.Fatal("other volume lost", err)
+	}
+
+	server.Revoke("kept")
+	if server.Mounts() != 0 {
+		t.Fatal("mounts left", server.Mounts())
+	}
+}

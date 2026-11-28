@@ -39,29 +39,63 @@ func diagnosticLogs(items []eventlog.Item) []nodeDiagnosticLog {
 	}
 	return rows
 }
-func packNodeDiagnostics(node string, at time.Time, config, status any, logs []nodeDiagnosticLog, truncated bool) (control.NodeDiagnosticsBundle, error) {
+
+// diagnosticProfile is one Go runtime profile (pprof protobuf, already
+// gzip-compressed by the runtime). It holds code locations and sample counts
+// only: no arguments, memory contents, environment or labels.
+type diagnosticProfile struct {
+	name string
+	data []byte
+}
+
+// packNodeDiagnostics writes the JSON members and then as many profiles as
+// fit the bundle budgets, in order; a profile that does not fit is left out
+// and the bundle is marked truncated.
+func packNodeDiagnostics(node string, at time.Time, config, status any, logs []nodeDiagnosticLog, truncated bool, profiles ...diagnosticProfile) (control.NodeDiagnosticsBundle, error) {
+	result, err := packNodeDiagnosticFiles(node, at, config, status, logs, truncated, profiles)
+	for err == errDiagnosticsBudget && len(profiles) > 0 {
+		profiles = profiles[:len(profiles)-1]
+		result, err = packNodeDiagnosticFiles(node, at, config, status, logs, true, profiles)
+	}
+	return result, err
+}
+
+var errDiagnosticsBudget = errors.New("node diagnostics budget exceeded")
+
+func packNodeDiagnosticFiles(node string, at time.Time, config, status any, logs []nodeDiagnosticLog, truncated bool, profiles []diagnosticProfile) (control.NodeDiagnosticsBundle, error) {
 	result := control.NodeDiagnosticsBundle{Schema: 1, Node: node, Format: "tar+gzip", CreatedAt: at.UTC().Format(time.RFC3339), LimitBytes: control.NodeDiagnosticsMaxBytes, ExpandedLimitBytes: control.NodeDiagnosticsExpandedBytes, Truncated: truncated}
-	files := []struct {
+	type member struct {
+		name string
+		raw  []byte
+	}
+	files := []member{}
+	for _, file := range []struct {
 		name  string
 		value any
-	}{{"config-summary.json", config}, {"status.json", status}, {"sfcd-events.json", logs}}
+	}{{"config-summary.json", config}, {"status.json", status}, {"sfcd-events.json", logs}} {
+		raw, err := json.Marshal(file.value)
+		if err != nil {
+			return result, err
+		}
+		files = append(files, member{file.name, raw})
+	}
+	for _, p := range profiles {
+		files = append(files, member{p.name, p.data})
+	}
 	var output bytes.Buffer
 	zip := gzip.NewWriter(&output)
 	archive := tar.NewWriter(zip)
 	total := 0
 	for _, file := range files {
-		raw, err := json.Marshal(file.value)
-		if err != nil {
-			return result, err
-		}
+		raw := file.raw
 		total += len(raw)
 		if total > control.NodeDiagnosticsExpandedBytes {
-			return result, errors.New("node diagnostics expanded budget exceeded")
+			return result, errDiagnosticsBudget
 		}
-		if err = archive.WriteHeader(&tar.Header{Name: file.name, Mode: 0600, Size: int64(len(raw)), ModTime: at.UTC(), Typeflag: tar.TypeReg}); err != nil {
+		if err := archive.WriteHeader(&tar.Header{Name: file.name, Mode: 0600, Size: int64(len(raw)), ModTime: at.UTC(), Typeflag: tar.TypeReg}); err != nil {
 			return result, err
 		}
-		if _, err = archive.Write(raw); err != nil {
+		if _, err := archive.Write(raw); err != nil {
 			return result, err
 		}
 	}
@@ -72,7 +106,7 @@ func packNodeDiagnostics(node string, at time.Time, config, status any, logs []n
 		return result, err
 	}
 	if output.Len() > control.NodeDiagnosticsMaxBytes {
-		return result, errors.New("node diagnostics compressed budget exceeded")
+		return result, errDiagnosticsBudget
 	}
 	result.Data = output.Bytes()
 	result.Bytes = uint64(len(result.Data))
@@ -133,6 +167,12 @@ func (r *Runtime) nodeDiagnosticsLocal(ctx context.Context, read control.NodeDia
 	if err != nil {
 		return control.NodeDiagnosticsBundle{}, err
 	}
+	// Profiles are taken after the permit and before any runtime lock, so a
+	// long CPU profile never holds back shutdown or other reads.
+	profiles, profileErr := diagnosticProfiles(ctx, read.CPUProfileSeconds)
+	if profileErr != nil {
+		return control.NodeDiagnosticsBundle{}, profileErr
+	}
 	now := time.Now().UTC()
 	d, err := r.controlPolicy.Members(view.State)
 	if err != nil {
@@ -187,7 +227,7 @@ func (r *Runtime) nodeDiagnosticsLocal(ctx context.Context, read control.NodeDia
 		Node, Phase                               string
 		Voter, Cordoned, AdmitsWork, NativeClosed bool
 	}{1, current.Index, current.MembersRoot, nodeConfigurationIndex(d), read.Node, string(node.Node.Phase), node.Node.Member.Voter, node.Scheduling.Enabled, node.AdmitsWork, node.Node.Closure != nil && node.Node.Closure.Closed}
-	return packNodeDiagnostics(read.Node, now, config, status, logs, incomplete)
+	return packNodeDiagnostics(read.Node, now, config, status, logs, incomplete, profiles...)
 }
 
 func nodeConfigurationIndex(d membership.Directory) uint64 {

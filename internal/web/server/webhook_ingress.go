@@ -4,7 +4,6 @@ package server
 
 import (
 	"context"
-	"fmt"
 	"slices"
 	"strings"
 	"sync"
@@ -230,11 +229,6 @@ func (s *Server) ingressHooksActive() bool {
 	return slices.ContainsFunc(all, func(l *store.WebhookLink) bool { return l.Point == "ingress" })
 }
 
-var ingressEventWord = map[string]string{"down": "수신 주소 닫힘", "tls-rejects": "TLS 거부", "source-rejects": "허용 밖 출발지 거부 급증",
-	"error-rate": "5xx 비율 높음", "latency": "지연 높음", "no-backends": "받을 컨테이너 없음", "probe-failed": "상태 검사 실패",
-	"cert": "인증서 없음", "blocked": "긴급 차단", "balance-fallback": "분배 방식 대체", "certificate-expiring": "인증서 만료 임박",
-	"limit-90": "연결 한도 90% 넘음"}
-
 func (s *Server) sendIngress(l *store.WebhookLink, ev string, recovered bool, e webEvent) {
 	h, err := s.opt.Store.GetWebhook(l.Webhook)
 	if err != nil || h.Role != "notify" || !h.Enabled {
@@ -269,12 +263,12 @@ func (s *Server) sendIngress(l *store.WebhookLink, ev string, recovered bool, e 
 			in["value"], in["threshold"] = x.Value, x.Threshold
 		}
 	}
-	state, event, word := "firing", "ingress."+ev, ingressEventWord[ev]
+	state, event, word := "firing", "ingress."+ev, ph("ingress-event."+ev)
 	if recovered {
-		state, event, word = "recovered", event+".recovered", word+" 회복"
+		state, event, word = "recovered", event+".recovered", with(ph("ingress-event.recovered"), "word", word)
 	}
 	p := map[string]any{"ingress": in, "state": state, "observedAt": rfc3339(time.Unix(e.Time, 0)), "link": l.ID, "dedupKey": e.Target + "/" + ev}
-	if c := ingressCondition(l); c != "" {
+	if c := ingressCondition(s.webhookLang(h), l); c != "" {
 		p["condition"] = c
 	}
 	if e.Kind == webCertExpiring || e.Kind == webCertRenewed {
@@ -284,7 +278,7 @@ func (s *Server) sendIngress(l *store.WebhookLink, ev string, recovered bool, e 
 	if e.Ingress != nil && e.Ingress.Host != "" {
 		where += " " + e.Ingress.Host + e.Ingress.Prefix
 	}
-	s.sendWebhookLater(h, webhookSend{Point: "ingress", Link: l.ID, Event: event, Payload: p, Summary: fmt.Sprintf("[외부 접속] %s: %s", where, word)})
+	s.sendWebhookLater(h, webhookSend{Point: "ingress", Link: l.ID, Event: event, Payload: p, Summary: with(ph("webhook.summary.ingress", "where", where), "word", word)})
 }
 
 // What the web watches itself for gateway links (no sfcd event): the

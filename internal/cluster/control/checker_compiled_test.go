@@ -37,7 +37,7 @@ func checkerCompiledFixture(t *testing.T) (checker.Catalog, checker.TaskProgram,
 	}
 	recipe := checker.CompileRecipe{Schema: 1, Tenant: "tenant", Source: source.ContentDigest(), Image: p.Build.Image, Toolchain: p.Build.Toolchain, GOOS: "linux", GOARCH: "amd64", Flags: []string{"build", "-p=2", "-trimpath", "-buildvcs=false", "-ldflags=-buildid="}, SDK: [32]byte{1}, Wrapper: [32]byte{2}, Tree: [32]byte{3}}
 	id := sha256.Sum256([]byte("original-build-job"))
-	intent := checker.BuildIntent{Schema: 1, Cluster: book.Cluster(), Tenant: "tenant", ID: hex.EncodeToString(id[:]), AppUseID: parent.ID, AppUse: parent.Digest(), Node: "node-a", Owner: source.Owner, Selection: checker.Selection{PolicyRevision: p.Revision, Sources: []checker.SourceFact{source}}, Inputs: []checker.BuildInput{{Content: source.ContentDigest(), Recipe: recipe.Key()}}, Manifest: [32]byte{9}, Target: "linux/amd64", DeadlineUnixMilli: 100000}
+	intent := checker.BuildIntent{Schema: 1, Cluster: book.Cluster(), Tenant: "tenant", ID: hex.EncodeToString(id[:]), AppUseID: parent.ID, AppUse: parent.Digest(), Node: "node-a", Owner: source.Owner, Selection: checker.Selection{PolicyRevision: p.Revision, Sources: []checker.SourceFact{source}}, Inputs: []checker.BuildInput{{Content: source.ContentDigest(), Recipe: recipe.Key()}}, Manifest: [32]byte{9}, Target: "linux/amd64", DeadlineUnixMilli: 100000, Image: "docker.io/library/golang@sha256:" + strings.Repeat("a", 64)}
 	book, err = book.ReserveBuild(intent)
 	if err != nil {
 		t.Fatal(err)

@@ -306,9 +306,12 @@ type summaryView struct {
 	FailingSince int64    `json:"failingSince,omitempty"`
 	// admitsWork: false for a server that takes no work; it can still be
 	// ready.
-	AdmitsWork          bool                  `json:"admitsWork"`
-	Role                string                `json:"role,omitempty"`
-	CPUPercent          *float64              `json:"cpuPercent,omitempty"`
+	AdmitsWork bool     `json:"admitsWork"`
+	Role       string   `json:"role,omitempty"`
+	CPUPercent *float64 `json:"cpuPercent,omitempty"`
+	// CPUStealPercent is the share of the server's CPU a shared VPS host
+	// gave other guests; it is not part of cpuPercent.
+	CPUStealPercent     *float64              `json:"cpuStealPercent,omitempty"`
 	MemUsed             *uint64               `json:"memUsed,omitempty"`
 	MemTotal            *uint64               `json:"memTotal,omitempty"`
 	DiskUsed            *uint64               `json:"diskUsed,omitempty"`
@@ -389,6 +392,10 @@ func newSummaryView(n sfc.NodeSummaryView) summaryView {
 			if h.CPUUsed != nil && h.CPUCapacity > 0 {
 				p := float64(*h.CPUUsed) * 100 / float64(h.CPUCapacity)
 				v.CPUPercent = &p
+			}
+			if h.CPUSteal != nil && h.CPUCapacity > 0 {
+				p := float64(*h.CPUSteal) * 100 / float64(h.CPUCapacity)
+				v.CPUStealPercent = &p
 			}
 		}
 		for _, t := range a.Tenants {

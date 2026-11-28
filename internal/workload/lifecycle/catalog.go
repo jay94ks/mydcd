@@ -255,7 +255,7 @@ func (c Catalog) SetPolicy(users access.Catalog, actor string, expected uint64, 
 		if users.Authorize(actor, policy.Tenant, access.ManageServices, node) != nil {
 			return c, access.ErrDenied
 		}
-		if _, err := users.CheckImage(actor, policy.Tenant, node, policy.Build.Image); err != nil {
+		if _, err := users.CheckImageRef(actor, policy.Tenant, node, policy.Build.Image); err != nil {
 			return c, err
 		}
 	}

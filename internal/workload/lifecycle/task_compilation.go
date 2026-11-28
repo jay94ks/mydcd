@@ -6,8 +6,6 @@ import (
 	"bytes"
 	"context"
 	"slices"
-
-	"github.com/jay94ks/seafield/internal/access"
 )
 
 // A sealed plan must cover every compiled content in the exact Task, and no
@@ -25,13 +23,15 @@ func (p TaskCompilePlan) ValidateProgram(program TaskProgram) error {
 	if len(expected) == 0 || len(p.Recipes) != len(expected) {
 		return ErrPreparation
 	}
-	image, err := access.PinImage(program.Policy.Build.Image)
-	if err != nil {
+	// One compiler image for the whole Task: the program policy's reference
+	// as the deploy resolved it.
+	image := p.Recipes[0].Image
+	if !program.Policy.Build.AllowsCompiler(image) {
 		return ErrPreparation
 	}
 	seen := map[[32]byte]bool{}
 	for _, r := range p.Recipes {
-		if r.Validate() != nil || r.Tenant != program.Tenant || !expected[r.Source] || seen[r.Source] || r.Image != image.Reference || r.Toolchain != program.Policy.Build.Toolchain || !slices.Contains(program.Policy.Build.Targets, r.GOOS+"/"+r.GOARCH) {
+		if r.Validate() != nil || r.Tenant != program.Tenant || !expected[r.Source] || seen[r.Source] || r.Image != image || r.Toolchain != program.Policy.Build.Toolchain || !slices.Contains(program.Policy.Build.Targets, r.GOOS+"/"+r.GOARCH) {
 			return ErrPreparation
 		}
 		seen[r.Source] = true
@@ -40,8 +40,9 @@ func (p TaskCompilePlan) ValidateProgram(program TaskProgram) error {
 }
 
 // TaskCompilations uses the actual sealed source producer for each distinct
-// compile=true input. It does not build, allocate a job, or claim cache/Ready.
-func (m *SourceStore) TaskCompilations(ctx context.Context, p TaskProgram, current TenantPolicy, target ResolverTarget) ([]*Compilation, error) {
+// compile=true input, for the compiler image (repo@sha256:…) the deploy
+// resolved. It does not build, allocate a job, or claim cache/Ready.
+func (m *SourceStore) TaskCompilations(ctx context.Context, p TaskProgram, current TenantPolicy, target ResolverTarget, image string) ([]*Compilation, error) {
 	if p.Validate(m.identity.Cluster) != nil || current.Validate() != nil || current.Tenant != p.Tenant || !current.Enabled {
 		return nil, ErrSource
 	}
@@ -67,7 +68,7 @@ func (m *SourceStore) TaskCompilations(ctx context.Context, p TaskProgram, curre
 		if err != nil {
 			return nil, err
 		}
-		input, err := PrepareCompilation(source)
+		input, err := PrepareCompilation(source, image)
 		if err != nil {
 			return nil, err
 		}
@@ -151,8 +152,8 @@ func (p TaskProgram) CompileSelection(missing []BuildInput) (Selection, error) {
 
 // CachedTaskCompilePlan consumes only existing local source/compiled bytes.
 // It never allocates a compiler job or extends any preparation deadline.
-func (m *SourceStore) CachedTaskCompilePlan(ctx context.Context, p TaskProgram, current TenantPolicy, target ResolverTarget) (TaskCompilePlan, error) {
-	inputs, err := m.TaskCompilations(ctx, p, current, target)
+func (m *SourceStore) CachedTaskCompilePlan(ctx context.Context, p TaskProgram, current TenantPolicy, target ResolverTarget, image string) (TaskCompilePlan, error) {
+	inputs, err := m.TaskCompilations(ctx, p, current, target, image)
 	if err != nil {
 		return TaskCompilePlan{}, err
 	}

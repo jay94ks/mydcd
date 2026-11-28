@@ -11,7 +11,7 @@
  *   image: registry.local/shop/report:2.1
  *   command: [/app/report, --every, 1h]
  *   networks: [shop-back]
- *   x-sfc: { node: node-b, ingress: { routes: [...] } }
+ *   x-sfc: { node: node-b, ingress: [{ node, host, prefix, port, gateway }] }   # route 목록(yaml-formats.md 3.1)
  */
 import YAML from 'yaml';
 import { parsePort, portText } from './ports';
@@ -20,7 +20,7 @@ import { splitArgs } from '../components/TerminalPane';
 export type Lifetime = 'temp' | 'fixed';
 export type RestartPolicy = 'no' | 'on-failure' | 'always';
 export type RunMode = 'shell' | 'entrypoint';
-export type Gateway = 'local' | 'external' | 'both';
+export type Gateway = 'local' | 'external';
 
 export interface SaNet {
   name: string;
@@ -49,11 +49,12 @@ export interface SaSecret {
   mode: string;
 }
 export interface SaRoute {
+  /** 이 경로를 여는 서버 */
+  node: string;
   host: string;
   path: string;
   port: string;
   gateway: Gateway;
-  cert: 'auto' | 'none';
 }
 export interface StandaloneForm {
   name: string;
@@ -217,7 +218,7 @@ export function standaloneToObject(f: StandaloneForm): Record<string, unknown> {
   const xm: Record<string, unknown> = {};
   if (f.node) xm.node = f.node;
   const routes = f.routes.filter((r) => r.host);
-  if (routes.length) xm.ingress = { routes: routes.map((r) => ({ host: r.host, path: r.path || '/', port: Number(r.port) || undefined, gateway: r.gateway, ...(r.cert === 'auto' ? {} : { tls: false }) })) };
+  if (routes.length) xm.ingress = routes.map((r) => ({ ...(r.node ? { node: r.node } : {}), host: r.host, prefix: r.path || '/', ...(Number(r.port) ? { port: Number(r.port) } : {}), gateway: r.gateway }));
   if (Object.keys(xm).length) doc['x-sfc'] = xm;
   return doc;
 }
@@ -248,6 +249,8 @@ export function standaloneToYaml(f: StandaloneForm, original?: string): string {
   return doc.toString({ lineWidth: 0, flowCollectionPadding: false });
 }
 
+/** route 목록 항목 → 폼 행 (gateway 기본 external) */
+const routeOf = (r: Record<string, unknown>): SaRoute => ({ node: String(r.node ?? ''), host: String(r.host ?? ''), path: String(r.prefix ?? '/'), port: r.port ? String(r.port) : '', gateway: r.gateway === 'local' ? 'local' : 'external' });
 const FORM_KEYS = new Set(['name', 'lifetime', 'restart', 'ttl', 'grace', 'mode', 'image', 'command', 'environment', 'working_dir', 'user', 'networks', 'ports', 'secrets', 'volumes', 'healthcheck', 'logging', 'deploy', 'x-sfc', 'tty', 'stdin_open']);
 
 /** 원문 → 폼. 문법이 틀리면 error(줄 번호). 폼에 없는 칸 이름은 lost. */
@@ -309,13 +312,7 @@ export function standaloneFromYaml(text: string): { form: StandaloneForm; lost: 
   }
   f.cpus = String(d.deploy?.resources?.limits?.cpus ?? '');
   f.memory = d.deploy?.resources?.limits?.memory ? memFromCompose(String(d.deploy.resources.limits.memory)) : '';
-  f.routes = (Array.isArray(d['x-sfc']?.ingress?.routes) ? d['x-sfc'].ingress.routes : []).map((r: Record<string, unknown>) => ({
-    host: String(r.host ?? ''),
-    path: String(r.path ?? '/'),
-    port: r.port ? String(r.port) : '',
-    gateway: r.gateway === 'external' || r.gateway === 'both' ? r.gateway : 'local',
-    cert: r.tls === false ? 'none' : 'auto',
-  }));
+  f.routes = (Array.isArray(d['x-sfc']?.ingress) ? d['x-sfc'].ingress : []).map(routeOf);
   // 망 안에서만 쓰는 포트는 ports에 없으므로 외부 접속 경로가 가리키는 포트로 되살린다
   for (const r of f.routes) if (r.port && !f.ports.some((p) => p.port === r.port && p.proto === 'tcp')) f.ports.push({ port: r.port, proto: 'tcp', expose: false, host: '', publish: '' });
   const lost = Object.keys(d).filter((k) => !FORM_KEYS.has(k));
@@ -355,9 +352,7 @@ export function importAppService(base: StandaloneForm, appYaml: string, app: str
   if (parts.secrets) next.secrets = s.secrets;
   if (parts.ingress) {
     next.ports = s.ports;
-    next.routes = (Array.isArray(doc['x-sfc']?.ingress?.routes) ? doc['x-sfc'].ingress.routes : [])
-      .filter((r: Record<string, unknown>) => r.service === service)
-      .map((r: Record<string, unknown>) => ({ host: String(r.host ?? ''), path: String(r.path ?? '/'), port: r.port ? String(r.port) : '', gateway: (r.gateway as Gateway) ?? 'local', cert: 'auto' as const }));
+    next.routes = (Array.isArray(doc['x-sfc']?.ingress) ? doc['x-sfc'].ingress : []).filter((r: Record<string, unknown>) => r.service === service).map(routeOf);
   }
   Object.assign(next, { health: s.health, healthCmd: s.healthCmd, healthUrl: s.healthUrl, healthInterval: s.healthInterval, logDriver: s.logDriver, logMaxSize: s.logMaxSize, logMaxFile: s.logMaxFile, cpus: s.cpus, memory: s.memory });
   return next;

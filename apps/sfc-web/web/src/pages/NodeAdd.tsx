@@ -13,6 +13,7 @@ import { MutationError, OpPanel, useMutation } from '../components/OpPanel';
 import { useToast } from '../components/Toast';
 import { eulReul } from '../lib/josa';
 import { usePoll } from '../lib/usePoll';
+import { serversMeasured } from '../lib/liveTopics';
 
 const JOIN: Record<string, [string, 'pr' | 'wa' | 'ok' | 'un']> = {
   invited: ['초대함 · 새 서버 가입 대기', 'pr'],
@@ -72,7 +73,7 @@ function Step({ n, done, title, where, children }: { n: number; done: boolean; t
 export function AddServerWizard({ initial, onClose }: { initial?: string; onClose: () => void }) {
   const toast = useToast();
   const [node, setNode] = useState(initial);
-  const nodes = usePoll((s) => nodesOverview(s), [], 5000);
+  const nodes = usePoll((s) => nodesOverview(s), [], 5000, serversMeasured);
   const row = node ? nodes.data?.nodes.find((n) => n.id === node) : undefined;
   const join = row?.join;
   const sum = usePoll((s) => (node && (join === 'invited' || join === 'learner' || join === 'ready') ? invitationSummary(node, s) : Promise.resolve(undefined)), [node, join]);

@@ -13,6 +13,7 @@ import { Tabs } from '../components/Tabs';
 import { usePoll, DEFAULT_POLL_MS } from '../lib/usePoll';
 import { CLUSTER_APP_STATE, ClusterAppAddress, ClusterAppImage, clusterAppNote, refusedBy } from '../components/clusterApps';
 import { SERVER_TABS } from './Servers';
+import { serversMeasured } from '../lib/liveTopics';
 
 /** 앱 하나: 켠 서버마다의 행과, 실제로 도는 서버 */
 export interface ClusterAppRow {
@@ -40,7 +41,7 @@ export function groupClusterApps(nodes: Pick<NodeView, 'id' | 'stale' | 'cluster
 const stateOf = (x: { state: string; stale?: boolean }): [Tone, string] => (x.stale ? ['un', '확인 불가 (보고 늦음)'] : CLUSTER_APP_STATE[x.state] ?? ['un', x.state]);
 
 export function ClusterAppsPage() {
-  const q = usePoll((s) => nodesOverview(s), [], DEFAULT_POLL_MS);
+  const q = usePoll((s) => nodesOverview(s), [], DEFAULT_POLL_MS, serversMeasured);
   return (
     <>
       <PageHeader title="서버" ids="UI-12A" actions={<Refresh q={q} />} />

@@ -3,13 +3,16 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/jay94ks/seafield/internal/cli"
@@ -17,6 +20,8 @@ import (
 	"github.com/jay94ks/seafield/internal/clusterbackup"
 	"github.com/jay94ks/seafield/internal/sfcp"
 	"github.com/jay94ks/seafield/internal/volumearchive"
+	"github.com/jay94ks/seafield/internal/volumearchive/pack"
+	"github.com/jay94ks/seafield/internal/workload/volumes"
 )
 
 // Volume archives (devel/proposals/volume-archive-packages.md): a taken-down
@@ -174,7 +179,8 @@ its name, owner and reserved size; nothing can use it until
 
 The app must be down and its last writer must have stopped cleanly.
 Subcommands list, show, cancel and discard archives; admin-key sets the
-administrator's key every new package is also sealed to.`,
+administrator's key every new package is also sealed to; open unseals a
+package with that key when the cluster is lost.`,
 		Flags: func(fs *flag.FlagSet) {
 			f.register(fs, true, true)
 			a.register(fs)
@@ -186,6 +192,7 @@ administrator's key every new package is also sealed to.`,
 			archiveChange(g, &f, "cancel", "Stop an archive that is still packing", "cancel-volume-archive", "Cancel", "Packing"),
 			archiveChange(g, &f, "discard", "Delete an archived volume's package; the volume stays empty", "discard-volume-archive", "Discard", "Archived"),
 			volumeArchiveAdminKeyCommand(g, &f),
+			volumeArchiveOpenCommand(),
 		},
 		Run: func(c *cli.Context, args []string) error {
 			ref, err := volumeArg(args, 1, "archive needs one volume name APP/VOLUME", true)
@@ -603,6 +610,97 @@ each volume's own size is used. Bring them back with
 			if len(failed) != 0 {
 				return cli.ExitError{Code: 3, Err: fmt.Errorf("%d of %d volume(s) not archived: %v", len(failed), len(plan), failed)}
 			}
+			return nil
+		},
+	}
+}
+
+// volumeArchiveOpenCommand turns a package into a plain tar file without a
+// cluster, with the administrator's key: the way out when the whole cluster
+// is lost. It reads only local files and never logs in.
+func volumeArchiveOpenCommand() *cli.Command {
+	var keyFile, out string
+	return &cli.Command{
+		Name:  "open",
+		Args:  "PACKAGE-DIR",
+		Short: "Unseal a package into a tar file with the administrator's key (no cluster needed)",
+		Long: `PACKAGE-DIR is one archive's directory on the server's storage root,
+<root>/.sfc-archive/<tenant>/<app>/<volume>/<archive>, holding data.mdbk and
+manifest. Copy it off the server if the cluster is gone.
+
+The package is unsealed with --key-file (the same key file given to
+'volume archive admin-key'), decompressed and checked whole against its
+manifest, and written to --out as a tar file (which must not exist). Unpack
+it with 'tar -xpf FILE' (as root to keep the owners). A file that fails a
+check is removed. The manifest's server key is printed so it can be
+compared with the server that wrote it.`,
+		Flags: func(fs *flag.FlagSet) {
+			fs.StringVar(&keyFile, "key-file", "", "the administrator's key `file`")
+			fs.StringVar(&out, "out", "", "tar `file` to write (must not exist)")
+		},
+		Run: func(c *cli.Context, args []string) error {
+			if len(args) != 1 || keyFile == "" || out == "" {
+				return cli.Usagef("open needs a package directory, --key-file and --out")
+			}
+			dir := args[0]
+			raw, err := os.ReadFile(filepath.Join(dir, "manifest"))
+			if err != nil {
+				return err
+			}
+			var m volumearchive.Manifest
+			dec := json.NewDecoder(bytes.NewReader(raw))
+			dec.DisallowUnknownFields()
+			loose := volumes.ArchiveOptions{MaxBytes: 1 << 40, MaxEntries: 1_000_000, MaxDepth: 128, UID: 1, GID: 1, RootMode: 0o700}
+			if dec.Decode(&m) != nil || m.Check(loose) != nil {
+				return cli.ExitError{Code: 3, Err: fmt.Errorf("%s/manifest is not a valid, signed package manifest", dir)}
+			}
+			keyRaw, err := os.ReadFile(keyFile)
+			if err != nil {
+				return err
+			}
+			key, err := clusterbackup.KeyFromFile(keyRaw)
+			clear(keyRaw)
+			if err != nil {
+				return err
+			}
+			recipient, err := key.Recipient(volumearchive.AdminKeyLabel)
+			key.Clear()
+			if err != nil {
+				return err
+			}
+			data := filepath.Join(dir, "data.mdbk")
+			open := func() (io.ReadCloser, error) { return os.Open(data) }
+			f, err := open()
+			if err != nil {
+				return err
+			}
+			sealed, err := clusterbackup.SealedKeys(f)
+			f.Close()
+			if err != nil {
+				return cli.ExitError{Code: 3, Err: fmt.Errorf("%s is not a sealed package", data)}
+			}
+			dataKey, err := recipient.UnsealDataKey(clusterbackup.SealedTo{Cluster: m.Scope.Cluster, Context: volumearchive.Context(m.ID)}, sealed)
+			if err != nil {
+				return cli.ExitError{Code: 3, Err: errors.New("the key file does not open this package (another administrator key, or the package was changed)")}
+			}
+			defer clear(dataKey)
+			w, err := os.OpenFile(out, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+			if err != nil {
+				return err
+			}
+			err = pack.Extract(open, dataKey, m, w)
+			if err == nil {
+				err = w.Sync()
+			}
+			if closeErr := w.Close(); err == nil {
+				err = closeErr
+			}
+			if err != nil {
+				_ = os.Remove(out)
+				return cli.ExitError{Code: 3, Err: fmt.Errorf("the package failed its check and nothing was kept: %w", err)}
+			}
+			fmt.Fprintf(c.Err, "Wrote %s: volume %s of tenant %s (generation %d), %s in %d entries, archive %s.\n", out, volumeName(m.Scope), m.Scope.Tenant, m.Scope.Generation, cli.Size(m.Tar.DataBytes), m.Tar.Entries, m.ID)
+			fmt.Fprintf(c.Err, "Packed by server key %s at %s.\n", hex.EncodeToString(m.Node[:]), time.Unix(m.At, 0).Local().Format("2006-01-02 15:04:05"))
 			return nil
 		},
 	}

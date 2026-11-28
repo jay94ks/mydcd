@@ -31,7 +31,7 @@ sfcli ingress unblock maint
 | `sfcli ingress drain APP [--node NODE] [--grace 30s]` | 앱에 새 요청을 보내지 않는다. 진행 중인 요청은 grace 동안 끝내게 둔다(최대 1h) |
 | `sfcli ingress undrain APP [--node NODE]` | 다시 요청을 보낸다 |
 | `sfcli ingress hosts show` | 작업 공간이 쓸 수 있는 호스트 이름 |
-| `sfcli ingress hosts set [--external-allowed] [--external a,b] [--local c]` | 호스트 허가를 통째로 바꾼다(시스템 관리자). `*.`로 시작하는 패턴을 쓸 수 있다 |
+| `sfcli ingress hosts set [--external-allowed] [--external a,b] [--local c]` | 작업 공간이 쓸 수 있는 host를 좁힌다(시스템 관리자, 통째로 바꿈). 정해 두지 않으면 제한이 없다. `*.`로 시작하는 패턴을 쓸 수 있다 |
 | `sfcli ingress gateways show NODE` | 서버의 게이트웨이 설정과 적용 여부 |
 | `sfcli ingress gateways set NODE -f gateways.yaml` | 서버의 게이트웨이 설정을 바꾼다(시스템 관리자) |
 

@@ -218,8 +218,13 @@ func (s *Server) routes() {
 		}
 		return p, err
 	}))
-	tenantPage("volume-backups", pageOf(func(ctx context.Context, c sfc.Conn, t, after string) (sfc.Page[sfc.VolumeBackupView], error) {
-		return c.VolumeBackups(ctx, t, after)
+	tenantPage("volume-backups", pageOf(func(ctx context.Context, c sfc.Conn, t, after string) (sfc.Page[backupView], error) {
+		p, err := c.VolumeBackups(ctx, t, after)
+		out := sfc.Page[backupView]{Items: make([]backupView, 0, len(p.Items)), Next: p.Next, Revision: p.RootRevision}
+		for _, b := range p.Items {
+			out.Items = append(out.Items, backupRow(b))
+		}
+		return out, err
 	}))
 	tenantPage("vault", pageOf(func(ctx context.Context, c sfc.Conn, t, after string) (sfc.Page[sfc.VaultView], error) {
 		return screenVault(ctx, c, t, after)

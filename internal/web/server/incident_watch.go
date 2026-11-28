@@ -349,7 +349,7 @@ func (s *Server) incidentSignal(ctx context.Context, ws *webSession, rule incide
 		_, err := s.opt.Store.UpdateIncident(in.ID, func(x *store.Incident) error {
 			x.Signals++
 			x.LastSignal, x.UpdatedAt = sig.At, now
-			x.Timeline = append(x.Timeline, store.IncidentEntry{At: sig.At, Kind: "detect", Text: signalText(sig)})
+			x.Timeline = append(x.Timeline, entry(sig.At, "detect", lit(signalText(sig))))
 			return nil
 		})
 		if err != nil {
@@ -361,8 +361,8 @@ func (s *Server) incidentSignal(ctx context.Context, ws *webSession, rule incide
 		Key: key, Signal: sig.Kind, Target: sig.Target, Rule: rule.Words, Signals: n, LastSignal: sig.At, State: incidentOpen, At: now, UpdatedAt: now,
 		Decision: store.IncidentDecision{Kind: decisionNone}}
 	in.Title = rule.Title + ": " + incidentWhere(in)
-	in.Timeline = append(in.Timeline, store.IncidentEntry{At: sig.At, Kind: "detect", Text: fmt.Sprintf("%s (%s)", signalText(sig), rule.Words)})
-	var skipped []string
+	in.Timeline = append(in.Timeline, entry(sig.At, "detect", with(ph("incident.detected", "signal", signalText(sig)), "rule", ph("incident-rule."+rule.Kind+".words"))))
+	var skipped []store.Phrase
 	for _, id := range rule.Actions {
 		a := incidentActionByID(id)
 		if a == nil || !aiAllows(a.floor()) || cluster.Actions[id] == actionHuman || app != nil && !app.Actions[id] {
@@ -370,7 +370,7 @@ func (s *Server) incidentSignal(ctx context.Context, ws *webSession, rule incide
 		}
 		act, why := s.buildIncidentAction(ctx, ws, a, in, sig, app, recent)
 		if act == nil {
-			skipped = append(skipped, a.Label+": "+why)
+			skipped = append(skipped, skipPhrase(actionPhrase(a.ID, a.Label), why))
 			continue
 		}
 		in.Candidates = append(in.Candidates, *act)
@@ -380,18 +380,21 @@ func (s *Server) incidentSignal(ctx context.Context, ws *webSession, rule incide
 	in.Candidates, skipped = append(in.Candidates, mcpCands...), append(skipped, mcpSkipped...)
 	in.Built = slices.Clone(in.Candidates)
 	in.Guides = gd.versions
-	var dropped []string
+	var dropped []store.Phrase
 	in.Candidates, dropped = applyGuides(in.Candidates, gd)
 	skipped = append(skipped, dropped...)
 	opts := make([]store.IncidentOption, 0, len(in.Candidates))
 	for _, c := range in.Candidates {
 		opts = append(opts, store.IncidentOption{Action: c.ID, Note: c.Note})
 	}
-	text := "규칙으로 임시 조치 후보를 골랐어요."
+	chose := ph("incident.candidates")
 	if len(skipped) > 0 {
-		text += " 뺀 것: " + strings.Join(skipped, "; ")
+		chose = ph("incident.candidates-skipped")
+		chose.Parts = skipped
 	}
-	in.Timeline = append(in.Timeline, store.IncidentEntry{At: now, Kind: "diagnose", Text: text, Candidates: opts})
+	e := entry(now, "diagnose", chose)
+	e.Candidates = opts
+	in.Timeline = append(in.Timeline, e)
 	v := s.judgeIncident(ctx, ws, in, cluster, recent, gd)
 	if !v.used && len(in.Candidates) > 0 && s.decideByWebhook(ctx, in) {
 		v.failed = "" // the webhook stood in for AI
@@ -428,10 +431,10 @@ func signalText(sig store.IncidentSignal) string {
 
 // buildIncidentAction turns an action of the list into the screen API call
 // for this incident, or says why it does not fit (the action's own Build).
-func (s *Server) buildIncidentAction(ctx context.Context, ws *webSession, a *incidentActionDef, in *store.Incident, sig store.IncidentSignal, app *store.AppIncidentPolicy, recent []store.IncidentSignal) (*store.IncidentAction, string) {
+func (s *Server) buildIncidentAction(ctx context.Context, ws *webSession, a *incidentActionDef, in *store.Incident, sig store.IncidentSignal, app *store.AppIncidentPolicy, recent []store.IncidentSignal) (*store.IncidentAction, store.Phrase) {
 	if a.Build == nil {
 		// Moving a service needs a target server; people choose it.
-		return nil, "아직 자동으로 만들 수 없음"
+		return nil, ph("incident-skip.not-buildable")
 	}
 	return a.Build(s, ctx, incidentBuild{ws: ws, def: a, in: in, sig: sig, app: app, recent: recent})
 }
@@ -442,8 +445,9 @@ func (s *Server) buildIncidentAction(ctx context.Context, ws *webSession, a *inc
 // high → refused; otherwise ask a person.
 func (s *Server) decideIncident(ctx context.Context, ws *webSession, in *store.Incident, cluster *store.IncidentPolicy, app *store.AppIncidentPolicy, now time.Time, v incidentVerdict) {
 	if len(in.Candidates) == 0 {
-		in.Decision = store.IncidentDecision{Kind: decisionNone, At: now, Note: "쓸 수 있는 임시 조치가 없어 사람에게 넘깁니다."}
-		in.Timeline = append(in.Timeline, store.IncidentEntry{At: now, Kind: "notify", Text: in.Decision.Note})
+		note := ph("incident.no-candidates")
+		in.Decision = store.IncidentDecision{Kind: decisionNone, At: now, NoteText: &note}
+		in.Timeline = append(in.Timeline, entry(now, "notify", note))
 		s.putIncident(in)
 		return
 	}
@@ -451,41 +455,42 @@ func (s *Server) decideIncident(ctx context.Context, ws *webSession, in *store.I
 	floor := actionFloor(&a)
 	if !v.used {
 		in.Mitigation, in.Impact = a.ID, floor
-		in.Timeline = append(in.Timeline, store.IncidentEntry{At: now, Kind: "assess", Text: "규칙 하한: " + impactWord(floor)})
+		in.Timeline = append(in.Timeline, entry(now, "assess", with(ph("incident.rule-floor"), "impact", impactPhrase(floor))))
 	}
 	level := effectiveClusterLevel(cluster)
 	if app != nil && levelRank(app.Level) < levelRank(level) {
 		level = app.Level
 	}
-	why := ""
+	var why store.Phrase
 	switch {
 	case in.Impact == impactHigh:
-		by := "규칙"
+		by := "incident-by.rule"
 		if v.used {
-			by = "영향 평가"
+			by = "incident-by.assessment"
 		}
-		in.Decision = store.IncidentDecision{Kind: decisionRejected, By: by, At: now, Reason: "high-impact", Note: "영향이 높아 자동 대응이 하지 않습니다. 사람이 직접 처리하세요."}
-		in.Timeline = append(in.Timeline, store.IncidentEntry{At: now, Kind: "reject", Text: in.Decision.Note})
+		note := ph("incident.high-impact")
+		in.Decision = store.IncidentDecision{Kind: decisionRejected, By: by, At: now, Reason: "high-impact", NoteText: &note}
+		in.Timeline = append(in.Timeline, entry(now, "reject", note))
 		s.putIncident(in)
 		return
 	case v.failed != "":
-		why = "AI " + v.failed + "로 자동 실행하지 않아요."
+		why = with(ph("incident.why.ai-failed"), "step", ph(v.failed))
 	case in.Impact != impactLow:
-		why = "영향이 " + impactWord(in.Impact) + "이라 승인이 필요해요."
+		why = with(ph("incident.why.impact"), "impact", impactPhrase(in.Impact))
 	case a.MCP == nil && cluster.Actions[a.ID] != actionAllow:
-		why = "승인이 필요한 조치예요."
-	case a.MCP != nil && s.mcpAutoBlocked(in, &a, now) != "":
+		why = ph("incident.why.approval")
+	case a.MCP != nil && s.mcpAutoBlocked(in, &a, now).Code != "":
 		why = s.mcpAutoBlocked(in, &a, now)
 	case cluster.Stopped:
-		why = "자동 대응이 멈춰 있어요."
+		why = ph("incident.why.stopped")
 	case level != incidentAutoLow:
-		why = "정책이 '제안만'이에요."
+		why = ph("incident.why.suggest-only")
 	case inQuiet(now, cluster.Quiet) || app != nil && inQuiet(now, app.Quiet):
-		why = "자동 실행을 막는 시간이에요."
+		why = ph("incident.why.quiet")
 	case !s.underIncidentRate(in, cluster, app, now):
-		why = "시간당 자동 실행 한도에 닿았어요."
+		why = ph("incident.why.rate")
 	}
-	if why == "" {
+	if why.Code == "" {
 		s.putIncident(in)
 		s.autoRunIncident(ctx, ws, in, &a, now)
 		return
@@ -556,21 +561,20 @@ func (s *Server) notifyIncident(ctx context.Context, ws *webSession, in *store.I
 		if u == ws.user.ID {
 			continue
 		}
-		s.notify(&store.Notification{User: u, Kind: NotifyIncidentApproval, Severity: "warning", Tenant: in.Tenant, Text: notice("incident-approval", map[string]string{"title": in.Title, "note": in.Decision.Note}, bodyIf(in.Decision.Note != "", "incident-approval.note")...),
+		s.notify(&store.Notification{User: u, Kind: NotifyIncidentApproval, Severity: "warning", Tenant: in.Tenant, Text: approvalNotice(in),
 			Link: "/incidents/" + in.ID, Action: true})
 	}
-	in.Timeline = append(in.Timeline, store.IncidentEntry{At: s.now(), Kind: "notify", Text: fmt.Sprintf("승인할 수 있는 %d명에게 알렸어요.", len(users))})
+	in.Timeline = append(in.Timeline, entry(s.now(), "notify", ph("incident.notified", "count", fmt.Sprint(len(users)))))
 	s.putIncident(in)
 }
 
-func impactWord(l string) string {
+// impactPhrase is the impact level in words (unknown: high).
+func impactPhrase(l string) store.Phrase {
 	switch l {
-	case impactLow:
-		return "낮음"
-	case impactMedium:
-		return "보통"
+	case impactLow, impactMedium:
+		return ph("impact." + l)
 	}
-	return "높음"
+	return ph("impact." + impactHigh)
 }
 
 func (s *Server) putIncident(in *store.Incident) {
@@ -580,16 +584,13 @@ func (s *Server) putIncident(in *store.Incident) {
 }
 
 // askIncident makes the chosen action a request for approval.
-func (s *Server) askIncident(in *store.Incident, cluster *store.IncidentPolicy, why string, now time.Time) {
-	a := chosenAction(in)
-	in.Decision = store.IncidentDecision{Kind: decisionPending, At: now, ExpiresAt: now.Add(time.Duration(cluster.Approvers.DeadlineMinutes) * time.Minute), Note: why}
-	fields := []store.AIPreviewRow{{Label: "조치", Value: a.Label}, {Label: "대상", Value: incidentWhere(in)}, {Label: "영향", Value: impactWord(in.Impact)}, {Label: "감지", Value: in.Rule}}
-	if a.Note != "" {
-		fields = append(fields, store.AIPreviewRow{Label: "내용", Value: a.Note})
-	}
-	in.Approval = &store.IncidentApproval{Title: a.Label, Fields: fields}
+// The approval card's title and fields are made when it is read
+// (approvalCard), in the reader's language.
+func (s *Server) askIncident(in *store.Incident, cluster *store.IncidentPolicy, why store.Phrase, now time.Time) {
+	in.Decision = store.IncidentDecision{Kind: decisionPending, At: now, ExpiresAt: now.Add(time.Duration(cluster.Approvers.DeadlineMinutes) * time.Minute), NoteText: &why}
+	in.Approval = &store.IncidentApproval{}
 	in.Approval.BasisHash = incidentBasis(in)
-	in.Timeline = append(in.Timeline, store.IncidentEntry{At: now, Kind: "propose", Text: "승인을 기다려요. " + why})
+	in.Timeline = append(in.Timeline, entry(now, "propose", with(ph("incident.waiting"), "why", why)))
 }
 
 // autoRunIncident sends the action as the automation account. A refusal
@@ -606,7 +607,9 @@ func (s *Server) autoRunIncident(ctx context.Context, ws *webSession, in *store.
 		if op != nil {
 			x.Decision = store.IncidentDecision{Kind: decisionAuto, By: ws.user.Username, At: now}
 			x.Op, x.OpID, x.State, x.MitigatedAt, x.UpdatedAt = op.ID, opID, incidentMitigating, now, now
-			x.Timeline = append(x.Timeline, store.IncidentEntry{At: now, Kind: "auto", Text: a.Label + " 자동 실행", Op: op.ID, Signer: ws.user.Username})
+			e := entry(now, "auto", with(ph("incident.auto-ran"), "action", actionPhrase(a.ID, a.Label)))
+			e.Op, e.Signer = op.ID, ws.user.Username
+			x.Timeline = append(x.Timeline, e)
 			return nil
 		}
 		var res struct {
@@ -617,9 +620,11 @@ func (s *Server) autoRunIncident(ctx context.Context, ws *webSession, in *store.
 		if res.Error != nil {
 			code = res.Error.Code
 		}
-		x.Timeline = append(x.Timeline, store.IncidentEntry{At: now, Kind: "auto", Text: "자동 실행 실패: " + code, Signer: ws.user.Username})
+		e := entry(now, "auto", ph("incident.auto-failed", "code", code))
+		e.Signer = ws.user.Username
+		x.Timeline = append(x.Timeline, e)
 		if cluster != nil {
-			s.askIncident(x, cluster, "자동 실행이 거절됐어요("+code+").", now)
+			s.askIncident(x, cluster, ph("incident.why.refused", "code", code), now)
 		}
 		x.UpdatedAt = now
 		return nil
@@ -693,15 +698,15 @@ func (s *Server) settleIncidents(now time.Time) {
 			case x.Decision.Kind == decisionPending && !now.Before(x.Decision.ExpiresAt):
 				x.Decision.Kind, x.Approval = decisionExpired, nil
 				event = "expired"
-				x.Timeline = append(x.Timeline, store.IncidentEntry{At: now, Kind: "expire", Text: "승인 요청이 응답 없이 지났어요."})
+				x.Timeline = append(x.Timeline, entry(now, "expire", ph("incident.expired")))
 			case x.State == incidentMitigating && now.Sub(x.MitigatedAt) >= incidentRecoverAt:
 				if x.LastSignal.After(x.MitigatedAt) {
 					x.State = incidentOpen
-					x.Timeline = append(x.Timeline, store.IncidentEntry{At: now, Kind: "notify", Text: "조치 뒤에도 신호가 이어져 사람에게 넘겨요. 같은 조치는 다시 하지 않아요."})
+					x.Timeline = append(x.Timeline, entry(now, "notify", ph("incident.signals-continue")))
 				} else {
 					x.State = incidentRecovered
 					event = "recovered"
-					x.Timeline = append(x.Timeline, store.IncidentEntry{At: now, Kind: "recover", Text: fmt.Sprintf("조치 뒤 %d분 동안 신호가 없어 회복으로 봐요.", int(incidentRecoverAt/time.Minute))})
+					x.Timeline = append(x.Timeline, entry(now, "recover", ph("incident.recovered", "minutes", fmt.Sprint(int(incidentRecoverAt/time.Minute)))))
 				}
 			}
 			x.UpdatedAt = now

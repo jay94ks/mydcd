@@ -86,5 +86,6 @@ func (s *Store) UpdateACMEAuto(expected uint64, fn func(a *ACMEAuto) error) (*AC
 		out = a
 		return putJSON(b, acmeAutoKey, a)
 	})
+	s.changed(err, Change{Kind: "acme-auto", ID: "auto"})
 	return out, err
 }

@@ -2,21 +2,18 @@
 
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { appPath, apps as fetchApps, archived as fetchArchived, archivedSource, purgeArchived } from '../api/endpoints';
+import { appPath, apps as fetchApps, archived as fetchArchived } from '../api/endpoints';
 import type { AppView, ArchivedApp, Page } from '../api/types';
-import { useToast } from '../components/Toast';
 
 const emptyPage = <T,>(): Page<T> => ({ items: [], next: '', revision: 0, asOf: new Date().toISOString() });
 import { useTenantRole } from '../auth/session';
-import { Badge, Card, HealthBadge, HelpBox, KV, PageHeader, Segmented, Hash } from '../components/ui';
-import { Empty, ErrorBand, Load } from '../components/states';
+import { Badge, HealthBadge, HelpBox, PageHeader, Segmented } from '../components/ui';
+import { Empty, Load } from '../components/states';
 import { Refresh } from '../components/Refresh';
 import { Tabs } from '../components/Tabs';
-import { ConfirmDialog } from '../components/Dialog';
 import { DataTable } from '../components/DataTable';
-import { CodeView } from '../components/Code';
 import { usePoll, DEFAULT_POLL_MS } from '../lib/usePoll';
-import { ago, fmtTime } from '../lib/format';
+import { ago } from '../lib/format';
 import { usePhone } from '../lib/viewport';
 import { useMobileTop } from '../mobile/top';
 import { appsLive } from '../lib/liveTopics';
@@ -54,7 +51,7 @@ function AppCard({ a }: { a: AppView }) {
     <Link to={appPath(a.tenant, a.app)} className="card" style={{ textDecoration: 'none', color: 'inherit', padding: '16px 18px' }}>
       <div className="row between">
         <b style={{ fontSize: 16 }}>{a.app}</b>
-        <HealthBadge health={a.health} />
+        <HealthBadge health={a.health} reason={a.reason} />
       </div>
       <span className="small muted">
         배포 구성 {a.deployment} · 버전 {a.revision}
@@ -113,7 +110,7 @@ function MAppsList() {
                   <Link key={a.app} to={appPath(a.tenant, a.app)} className={`mc${bad ? ' xer' : ''}`}>
                     <div className="hd">
                       <b>{a.app}</b>
-                      <HealthBadge health={a.health} />
+                      <HealthBadge health={a.health} reason={a.reason} />
                     </div>
                     <div className="ln">
                       버전 {a.revision} · 배포 구성 {a.deployment}
@@ -203,7 +200,7 @@ function DesktopDeployedApps() {
                     columns={[
                       { key: 'app', header: '앱', value: (a) => a.app, render: (a) => <b>{a.app}</b> },
                       { key: 'dep', header: '배포 구성', value: (a) => a.deployment, render: (a) => a.deployment },
-                      { key: 'h', header: '상태', value: (a) => a.health, render: (a) => <HealthBadge health={a.health} /> },
+                      { key: 'h', header: '상태', value: (a) => a.health, render: (a) => <HealthBadge health={a.health} reason={a.reason} /> },
                       { key: 'rev', header: '버전', value: (a) => a.revision, render: (a) => a.revision },
                       { key: 'obs', header: '마지막 관측', value: (a) => a.observedAt ?? '', render: (a) => (a.observedAt ? ago(a.observedAt) : '—') },
                       { key: 'op', header: '최근 작업', render: (a) => <LastOp a={a} /> },
@@ -215,101 +212,6 @@ function DesktopDeployedApps() {
             )
           }
         </Load>
-      )}
-    </>
-  );
-}
-
-export function ArchivedAppsPage() {
-  const { tenant, canDeploy, isAdmin } = useTenantRole();
-  const navigate = useNavigate();
-  const list = usePoll((s) => (tenant ? fetchArchived(tenant, s) : Promise.resolve(emptyPage<ArchivedApp>())), [tenant]);
-  const [sel, setSel] = useState<string>();
-  const [purging, setPurging] = useState<ArchivedApp>();
-  const [purge, setPurge] = useState<{ busy: boolean; error?: unknown }>({ busy: false });
-  const toast = useToast();
-  const selected = list.data?.items.find((a) => a.key === sel) ?? list.data?.items[0];
-  const source = usePoll((s) => (selected ? archivedSource(tenant, selected.key, s) : Promise.resolve('')), [tenant, selected?.key]);
-  const doPurge = async (a: ArchivedApp) => {
-    setPurge({ busy: true });
-    try {
-      await purgeArchived(tenant, a.key, a.app);
-      setPurging(undefined);
-      setPurge({ busy: false });
-      toast(`보관된 앱 ${a.app}을(를) 완전히 지웠습니다.`);
-      list.refresh();
-    } catch (e) {
-      setPurge({ busy: false, error: e });
-    }
-  };
-  return (
-    <>
-      <PageHeader title="배포" ids="UI-36 · UI-37" actions={<Refresh q={list} poll={false} />} />
-      <DeployTabs archivedCount={list.data?.items.length} />
-      <HelpBox terms="보관된 앱 (웹 앱 bbolt archived) · 완전 삭제">
-        <b>이 탭은</b> 내린 앱의 app.yaml을 보관합니다. 앱을 내리기 직전 웹 앱이 원문을 저장했고, 그대로 다시 올리거나 완전 삭제할 수 있습니다. 보관은 웹 UI에만 있고 CLI에는 보이지 않습니다.
-      </HelpBox>
-      {!tenant ? (
-        <NoTenant />
-      ) : (
-        <Load q={list}>
-          {(p) =>
-            p.items.length === 0 ? (
-              <Empty title="보관된 앱이 없습니다">앱을 내리면 여기에 원문이 남습니다.</Empty>
-            ) : (
-              <div className="main-side">
-                <div className="primary">
-                  <DataTable
-                    rows={p.items}
-                    rowKey={(a) => a.key}
-                    selectedKey={selected?.key}
-                    onRowClick={(a) => setSel(a.key)}
-                    columns={[
-                      { key: 'app', header: '앱', value: (a) => a.app, render: (a) => <b>{a.app}</b> },
-                      { key: 'rev', header: '마지막 버전', value: (a) => a.version, render: (a) => a.version },
-                      { key: 'by', header: '내린 사람', value: (a) => a.downBy, render: (a) => a.downBy },
-                      { key: 'at', header: '내린 시각', value: (a) => a.downAt, render: (a) => fmtTime(a.downAt) },
-                      { key: 'vol', header: '남은 데이터 저장소', render: (a) => a.volumes.join(', ') || '—' },
-                    ]}
-                  />
-                </div>
-                {selected && (
-                  <Card className="aside" title={selected.app}>
-                    <KV
-                      items={[
-                        ['원문 digest', selected.digest ? <Hash value={selected.digest} /> : '—'],
-                        ['버전', selected.version],
-                        ['내린 작업', <code>{selected.downOp}</code>],
-                        ['내린 사람 · 시각', `${selected.downBy} · ${fmtTime(selected.downAt)}`],
-                      ]}
-                    />
-                    <Load q={source}>{(text) => <CodeView text={text} />}</Load>
-                    <div className="row">
-                      <button
-                        className="btn primary"
-                        disabled={!canDeploy || !source.data}
-                        title={canDeploy ? '검사 → 변경 미리보기 → 업로드 → up 경로를 그대로 탑니다' : '배포 권한이 필요합니다'}
-                        onClick={() => navigate('/deploy/new', { state: { yaml: source.data, from: `보관된 앱 ${selected.app} 버전 ${selected.version}` } })}
-                      >
-                        다시 올리기
-                      </button>
-                      <button className="btn danger" disabled={!isAdmin} title={isAdmin ? undefined : '시스템 관리자만 완전 삭제합니다'} onClick={() => (setPurge({ busy: false }), setPurging(selected))}>
-                        완전 삭제…
-                      </button>
-                    </div>
-                  </Card>
-                )}
-              </div>
-            )
-          }
-        </Load>
-      )}
-      {purging && (
-        <ConfirmDialog title="보관된 앱 완전 삭제" target={purging.app} actionLabel="완전 삭제" busy={purge.busy} onClose={() => setPurging(undefined)} onConfirm={() => void doPurge(purging)}>
-          <p>보관한 app.yaml 원문을 지웁니다. 되돌릴 수 없습니다.</p>
-          {purging.volumes.length > 0 && <div className="note wa small">남은 데이터 저장소({purging.volumes.join(', ')})는 지우지 않습니다. 필요하면 데이터 저장소 화면에서 따로 지우세요.</div>}
-          {purge.error ? <ErrorBand error={purge.error} what="지우지 못했습니다" /> : null}
-        </ConfirmDialog>
       )}
     </>
   );

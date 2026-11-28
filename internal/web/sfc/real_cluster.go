@@ -251,7 +251,7 @@ func (c *realConn) PlanNodeForceRemoval(ctx context.Context, q control.NodeForce
 
 func (c *realConn) ReadNodeDiagnostics(ctx context.Context, node string) (control.NodeDiagnosticsBundle, error) {
 	return realCall(ctx, c, "node-diagnostics", func(u userauth.Client, s access.Session) (control.NodeDiagnosticsBundle, error) {
-		return u.NodeDiagnostics(ctx, c.peer, s, node)
+		return u.NodeDiagnostics(ctx, c.peer, s, node, 0)
 	})
 }
 

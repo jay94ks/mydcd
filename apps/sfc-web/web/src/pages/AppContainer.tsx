@@ -30,7 +30,7 @@ import { matchRule } from '../lib/trust';
 import { fmtBytes, hhmmss } from '../lib/format';
 import type { RegistryView } from '../api/types';
 import type { RegistryImage } from '../api/endpoints';
-import { appLive, incidentsLive, opsLive, registriesLive } from '../lib/liveTopics';
+import { appLive, appMeasured, incidentsLive, opsLive, registriesLive } from '../lib/liveTopics';
 
 const LayersDialog = lazy(() => import('./ImageTools').then((m) => ({ default: m.LayersDialog })));
 
@@ -170,8 +170,8 @@ export function AppContainerPage() {
   const toast = useToast();
   const canDeploy = session.user.systemAdmin || session.tenants.some((x) => x.id === tenant && x.role === 'manager');
   const ref: TaskRef = useMemo(() => ({ tenant, app, service, instance }), [tenant, app, service, instance]);
-  const detail = usePoll((s) => taskDetail(ref, s), [ref], DEFAULT_POLL_MS);
-  const hist = usePoll((s) => taskHistory(ref, 50, s), [ref], DEFAULT_POLL_MS);
+  const detail = usePoll((s) => taskDetail(ref, s), [ref], DEFAULT_POLL_MS, appMeasured(tenant, app));
+  const hist = usePoll((s) => taskHistory(ref, 50, s), [ref], DEFAULT_POLL_MS, appMeasured(tenant, app));
   const tasks = usePoll((s) => appTasks(tenant, app, s), [tenant, app], DEFAULT_POLL_MS, appLive(tenant, app));
   const a = usePoll((s) => fetchApp(tenant, app, s), [tenant, app], 0, appLive(tenant, app));
   const [restarting, setRestarting] = useState(false);

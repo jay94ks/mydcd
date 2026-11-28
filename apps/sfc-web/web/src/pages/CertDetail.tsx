@@ -15,7 +15,7 @@ import { fmtDate, fmtTime } from '../lib/format';
 import { errText, nextText, OrderSteps, rowState, SimpleConfirm, useCaOf } from './Certs';
 import { ALG_LABEL, CERT_STATE, certChainUrl, certificate, certificates, checkCertChain, deletable, deleteCertificate, disableCertificate, issuerName, nextLink, putCertificate, sharesName, short, type CertCheck, type StoreCert } from '../api/certs';
 import { ApiError, noEndpoint } from '../api/client';
-import { certLive, certStoreLive } from '../lib/liveTopics';
+import { acmeCertLive, acmeLive, certLive, certStoreLive } from '../lib/liveTopics';
 
 export function CertDetailPage() {
   return usePhone() ? <MCertDetail /> : <DesktopCertDetailPage />;
@@ -105,10 +105,10 @@ function StoreCertDetail({ id }: { id: string }) {
   const nav = useNavigate();
   const sq = usePoll((s) => certificate(id, s), [id], 0, certLive(id));
   const lq = usePoll((s) => certificates({}, s), [], 0, certStoreLive);
-  const dq = usePoll((s) => acmeCerts(s), [], 5000);
+  const dq = usePoll((s) => acmeCerts(s), [], 0, acmeLive);
   const c = sq.data;
   const def = c ? dq.data?.items.find((d) => (c.definition ? d.name === c.definition : d.fingerprint === c.id)) : undefined;
-  const oq = usePoll((s) => (def ? acmeCert(def.name, s) : Promise.resolve(undefined)), [def?.name], 5000);
+  const oq = usePoll((s) => (def ? acmeCert(def.name, s) : Promise.resolve(undefined)), [def?.name], 0, acmeCertLive(def?.name));
   const { caOf } = useCaOf();
   const [dlg, setDlg] = useState<'disable' | 'revoke' | 'delete' | 'defDelete' | 'keys'>();
   const all = lq.data ?? [];
@@ -343,7 +343,7 @@ function StoreCertDetail({ id }: { id: string }) {
 
 /** 아직 보관함 인증서가 없는 발급 정의 (발급 중·실패·지금 데몬) */
 function DefinitionDetail({ name }: { name: string }) {
-  const q = usePoll((s) => acmeCert(name, s), [name], 3000);
+  const q = usePoll((s) => acmeCert(name, s), [name], 0, acmeCertLive(name));
   const { caOf } = useCaOf();
   const toast = useToast();
   const nav = useNavigate();

@@ -39,7 +39,7 @@ func (d Directory) SetCordon(id string, expected uint64, enabled bool, origin []
 		return d, ErrMember
 	}
 	entry, ok := d.Entry(id)
-	key, err := identity.ParseKey(entry.Peer.Key)
+	key, err := identity.ParseKey(entry.CurrentPeer().Key)
 	if !ok || err != nil || !d.MemberKey(key) {
 		return d, ErrMember
 	}

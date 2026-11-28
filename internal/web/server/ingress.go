@@ -507,6 +507,7 @@ func (s *Server) handleIngress(w http.ResponseWriter, r *http.Request, ws *webSe
 // GET /t/{t}/apps/{app}/ingress?node= → {instance, metrics, errors, balanceHistory}
 func (s *Server) handleAppIngress(w http.ResponseWriter, r *http.Request, ws *webSession) {
 	tenant, app, node := r.PathValue("t"), r.PathValue("app"), r.URL.Query().Get("node")
+	lang := s.requestLang(r, ws)
 	if node != "" && !safeParamRE.MatchString(node) {
 		writeError(w, http.StatusBadRequest, "bad-request", "node: a name")
 		return
@@ -528,7 +529,8 @@ func (s *Server) handleAppIngress(w http.ResponseWriter, r *http.Request, ws *we
 		if mt != nil {
 			x := mt.Instance
 			metrics["rps"] = round2(x.Rate)
-			metrics["codes"] = fmt.Sprintf("2xx %d · 3xx %d · 4xx %d · 5xx %d · 차단 %d", x.Responses[0], x.Responses[1], x.Responses[2], x.Responses[3], x.Blocked)
+			metrics["codes"] = text(lang, "ingress-metrics.codes", map[string]string{"2xx": fmt.Sprint(x.Responses[0]), "3xx": fmt.Sprint(x.Responses[1]),
+				"4xx": fmt.Sprint(x.Responses[2]), "5xx": fmt.Sprint(x.Responses[3]), "blocked": fmt.Sprint(x.Blocked)})
 			metrics["latency"] = fmt.Sprintf("p50 %dms · p95 %dms · p99 %dms", x.P50MS, x.P95MS, x.P99MS)
 			var pf []string
 			for _, k := range sortedNames(x.Failures) {
@@ -536,7 +538,7 @@ func (s *Server) handleAppIngress(w http.ResponseWriter, r *http.Request, ws *we
 			}
 			metrics["proxyFailures"] = strings.Join(pf, " · ")
 			if len(pf) == 0 {
-				metrics["proxyFailures"] = "없음"
+				metrics["proxyFailures"] = text(lang, "ingress-metrics.none", nil)
 			}
 			metrics["windowSeconds"] = mt.WindowSeconds
 		}
@@ -556,7 +558,7 @@ func (s *Server) handleAppIngress(w http.ResponseWriter, r *http.Request, ws *we
 			}
 		}
 		// The history is extra: without it the screen still shows the rest.
-		bh, err := balanceHistory(ctx, c, tenant, app)
+		bh, err := balanceHistory(ctx, lang, c, tenant, app)
 		if err != nil {
 			s.log.Warn("ingress balance history", "err", err, "tenant", tenant, "app", app)
 			bh = []map[string]any{}

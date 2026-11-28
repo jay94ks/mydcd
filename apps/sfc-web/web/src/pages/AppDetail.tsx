@@ -143,7 +143,7 @@ export function AppDetailPage() {
         }
         title={
           <span className="row">
-            {app} {a.data && <HealthBadge health={a.data.health} />}
+            {app} {a.data && <HealthBadge health={a.data.health} reason={a.data.reason} />}
           </span>
         }
         ids="UI-31 · UI-35 · UI-38"
@@ -291,7 +291,7 @@ function Overview({ a, shape, srcError }: { a: AppView; shape?: Shape; srcError?
         <Card title="상태">
           <KV
             items={[
-              ['상태', <HealthBadge health={a.health} />],
+              ['상태', <HealthBadge health={a.health} reason={a.reason} />],
               ['실행 중 버전', a.revision],
               ['배포 구성', a.deployment],
               ['최근 작업', a.lastOp ? `${a.lastOp.status} · ${a.lastOp.submitter ?? '—'}${a.lastOp.at ? ` · ${fmtTime(a.lastOp.at)}` : ''}` : '—'],

@@ -154,10 +154,22 @@ func (p Policy) checkerBuildContext(s state.State, b checker.BuildIntent, at int
 	if err != nil || users.Authorize(parent.Principal, b.Tenant, access.ManageServices, b.Node) != nil {
 		return parent, access.ErrDenied
 	}
-	if err := p.imageCacheAvailable(s, b.Node, policy.Build.Image); err != nil {
+	// The compiler image is the policy's reference as the parent deploy
+	// resolved it (or, when it could not, the owner's copy of the same
+	// repository); the frozen program and the current policy both allow it.
+	if !policy.Build.AllowsCompiler(b.Image) || !program.Policy.Build.AllowsCompiler(b.Image) {
+		return parent, access.ErrDenied
+	}
+	if tag := program.Policy.Build.CompilerTag(); tag != "" {
+		e, ok := apps.Execution(goal.Tenant, goal.App)
+		if !ok || !e.TagAllows(tag, b.Image) {
+			return parent, access.ErrDenied
+		}
+	}
+	if err := p.imageCacheAvailable(s, b.Node, b.Image); err != nil {
 		return parent, err
 	}
-	if _, err := users.CheckImage(parent.Principal, b.Tenant, b.Node, policy.Build.Image); err != nil {
+	if _, err := users.CheckImage(parent.Principal, b.Tenant, b.Node, b.Image); err != nil {
 		return parent, err
 	}
 	return parent, nil

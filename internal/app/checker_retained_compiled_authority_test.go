@@ -72,7 +72,7 @@ func retainedCompiledAuthorityFixture(t *testing.T) (checker.Catalog, checker.Us
 	if err != nil {
 		t.Fatal(err)
 	}
-	intent := checker.BuildIntent{Schema: 1, Cluster: source.Cluster, Tenant: source.Tenant, ID: fact.Build.ID, AppUseID: use.ID, AppUse: use.Digest(), Node: use.Node, Owner: source.Owner, Selection: checker.Selection{PolicyRevision: 1, Sources: []checker.SourceFact{source}}, Inputs: []checker.BuildInput{{Content: source.ContentDigest(), Recipe: fact.Build.Recipe.Key()}}, Manifest: [32]byte{5}, Target: "linux/amd64", DeadlineUnixMilli: 100000}
+	intent := checker.BuildIntent{Schema: 1, Cluster: source.Cluster, Tenant: source.Tenant, ID: fact.Build.ID, AppUseID: use.ID, AppUse: use.Digest(), Node: use.Node, Owner: source.Owner, Selection: checker.Selection{PolicyRevision: 1, Sources: []checker.SourceFact{source}}, Inputs: []checker.BuildInput{{Content: source.ContentDigest(), Recipe: fact.Build.Recipe.Key()}}, Manifest: [32]byte{5}, Target: "linux/amd64", DeadlineUnixMilli: 100000, Image: fact.Build.Recipe.Image}
 	book, err = book.ReserveBuild(intent)
 	if err != nil {
 		t.Fatal(err)

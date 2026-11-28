@@ -120,8 +120,8 @@ func (p Policy) PlanVaultWrite(s state.State, session access.Session, at int64, 
 	if plan.Write == nil && (!found || !members.WorkKey(profile.Key)) {
 		return plan, access.ErrDenied
 	}
-	if profile.Enabled && found && members.MemberKey(profile.Key) && entry.Peer.Key == hex.EncodeToString(profile.Key[:]) {
-		peer := entry.Peer
+	if profile.Enabled && found && members.MemberKey(profile.Key) && entry.CurrentPeer().Key == hex.EncodeToString(profile.Key[:]) {
+		peer := entry.CurrentPeer()
 		plan.Receiver = &peer
 	}
 	return plan, nil

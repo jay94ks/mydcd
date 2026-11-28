@@ -16,6 +16,7 @@ import { usePoll } from '../lib/usePoll';
 import { fmtTime } from '../lib/format';
 import { eulReul } from '../lib/josa';
 import { drainStateText } from '../lib/drain';
+import { drainLive } from '../lib/liveTopics';
 
 const VOTER_WHY: Record<string, string> = {
   NOT_VOTER: '투표 서버가 아닙니다.',
@@ -49,7 +50,7 @@ function Blockers({ code, blockers }: { code?: string; blockers: { code: string;
 
 /** 비우기 진행 (drain-status). 끝날 때까지 읽는다 */
 export function DrainProgress({ node, operation }: { node: string; operation: string }) {
-  const q = usePoll((s) => nodeDrainStatus(node, operation, s), [node, operation], 5_000);
+  const q = usePoll((s) => nodeDrainStatus(node, operation, s), [node, operation], 5_000, drainLive);
   const d = q.data;
   if (q.error) return <ErrorBand error={q.error} what="비우기 진행을 읽지 못했습니다" onRetry={q.refresh} />;
   if (!d) return <span className="muted small">진행을 읽는 중…</span>;

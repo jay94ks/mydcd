@@ -133,13 +133,7 @@ func testManagedTwoNodeSQL(t *testing.T, ctx context.Context, a *Runtime, root, 
 	document := fmt.Sprintf(`name: app
 x-sfc:
  ingress:
-  node: node-b
-  host: app.test
-  runtime: {max_requests: 2, max_connections: 8, max_header_bytes: 4096, max_body_bytes: 1048576, buffer_bytes: 131072, request_timeout_ms: 10000, dial_timeout_ms: 1000, response_header_timeout_ms: 3000, health_interval_ms: 200}
-  listeners:
-   - {address: '192.0.2.2:8080'}
-   - {address: '192.0.2.2:8443', tls: true, http3: true}
-  backend: {service: web, port: 8080, health_path: /readyz}
+  - {node: node-b, host: app.test, service: web, port: 8080, health: /readyz}
 services:
  web:
   image: %s

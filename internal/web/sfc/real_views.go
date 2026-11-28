@@ -240,6 +240,21 @@ func taskView(t control.TaskView) Task {
 	return v
 }
 
+// planChanges is a diff as rows and as text lines ("action key (reason)").
+func planChanges(changes []deployment.Change) ([]PlanChange, string) {
+	rows := make([]PlanChange, 0, len(changes))
+	var b strings.Builder
+	for _, ch := range changes {
+		rows = append(rows, PlanChange{Action: ch.Action, Key: ch.Key, Reason: ch.Reason, Interruption: ch.Interruption})
+		b.WriteString(ch.Action + " " + ch.Key)
+		if ch.Reason != "" {
+			b.WriteString(" (" + ch.Reason + ")")
+		}
+		b.WriteByte('\n')
+	}
+	return rows, b.String()
+}
+
 // AppPlan streams the document to sfcd's planner, as `sfcli compose up`
 // does. Data is the planned artifact to upload (the blueprint), the diff,
 // or the whole move plan; Services is a summary read from the blueprint's
@@ -248,7 +263,7 @@ func taskView(t control.TaskView) Task {
 // AppPlan.Standalone stays nil.
 func (c *realConn) AppPlan(ctx context.Context, req AppPlanRequest) (AppPlan, error) {
 	const m = "app-plan-stream"
-	q := control.AppPlanRequest{Document: req.Document, Project: req.Project, Deployment: req.Deployment, Node: req.Node, Diff: req.Diff, Move: req.Move, Standalone: req.Standalone}
+	q := control.AppPlanRequest{Document: req.Document, Project: req.Project, Deployment: req.Deployment, Node: req.Node, Diff: req.Diff, Force: req.Force, Move: req.Move, Standalone: req.Standalone}
 	raw, err := realCall(ctx, c, m, func(u userauth.Client, s access.Session) ([]byte, error) {
 		return u.StreamAppPlan(ctx, c.peer, s, req.Tenant, q)
 	})
@@ -269,15 +284,7 @@ func (c *realConn) AppPlan(ctx context.Context, req AppPlanRequest) (AppPlan, er
 			return AppPlan{}, fail(m, CodeUnknown, "malformed diff")
 		}
 		out.App = d.App
-		var b strings.Builder
-		for _, ch := range d.Changes {
-			b.WriteString(ch.Action + " " + ch.Key)
-			if ch.Reason != "" {
-				b.WriteString(" (" + ch.Reason + ")")
-			}
-			b.WriteByte('\n')
-		}
-		out.Diff = b.String()
+		out.Changes, out.Diff = planChanges(d.Changes)
 	default:
 		b, err := deployment.DecodeBlueprint(raw)
 		if err != nil || req.Standalone != nil && b.CheckStandaloneInput() != nil {

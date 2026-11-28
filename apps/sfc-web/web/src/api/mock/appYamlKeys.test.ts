@@ -18,9 +18,18 @@ describe('app.yaml A1 형식(#894)', () => {
     expect(check('services:\n  web:\n    x-sfc:\n      secrets: {socket: []}\n')).toBe('');
   });
   it('balance는 warmup, 클러스터 전용 키는 거절', () => {
-    expect(check('services: {}\nx-sfc:\n  ingress:\n    routes:\n      - host: a.example\n        balance: {slow_start: 30s}\n')).toMatch(/warmup/);
-    expect(check('services: {}\nx-sfc:\n  ingress:\n    routes:\n      - host: a.example\n        balance: {warmup: 30s}\n')).toBe('');
+    expect(check('services: {}\nx-sfc:\n  ingress:\n    - {node: n1, host: a.example, balance: {slow_start: 30s}}\n')).toMatch(/warmup/);
+    expect(check('services: {}\nx-sfc:\n  ingress:\n    - {node: n1, host: a.example, balance: {warmup: 30s}}\n')).toBe('');
     expect(check('services: {}\nx-sfc:\n  vault: {}\n')).toMatch(/x-sfc\.vault/);
     expect(check('services: {}\nnetworks:\n  n1: {driver: bridge}\n')).toMatch(/networks\.n1\.driver/);
+  });
+});
+
+describe('app.yaml A2 형식(#910)', () => {
+  it('ingress는 같은 서버의 route 목록', () => {
+    expect(check('services: {}\nx-sfc:\n  ingress:\n    routes: []\n')).toMatch(/route 목록/);
+    expect(check('services: {}\nx-sfc:\n  ingress:\n    - {node: n1, host: a.example}\n    - {node: n2, host: b.example}\n')).toMatch(/INGRESS_NODE_MIXED/);
+    expect(check('services: {}\nx-sfc:\n  ingress:\n    - {id: route-2, node: n1, host: a.example}\n    - {node: n1, host: b.example}\n')).toMatch(/겹칩니다/);
+    expect(check('services: {}\nx-sfc:\n  ingress:\n    - {node: n1, host: a.example, listeners: []}\n')).toMatch(/listeners/);
   });
 });

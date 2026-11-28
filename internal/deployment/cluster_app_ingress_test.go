@@ -12,23 +12,9 @@ import (
 const clusterAppRouteFile = `name: cluster-app/web
 x-sfc:
   ingress:
-    runtime:
-      max_requests: 8
-      max_connections: 32
-      max_header_bytes: 16384
-      max_body_bytes: 1048576
-      buffer_bytes: 524288
-      request_timeout_ms: 30000
-      dial_timeout_ms: 2000
-      response_header_timeout_ms: 5000
-      health_interval_ms: 1000
-    node: node-a
-    listeners:
-    - shared: internal-https
-    routes:
-    - id: ui
-      host: sfc.example.com
-      gateway: local
+  - node: node-a
+    host: sfc.example.com
+    gateway: local
 `
 
 func TestClusterAppRouteFileHoldsOnlyRoutes(t *testing.T) {
@@ -40,10 +26,11 @@ func TestClusterAppRouteFileHoldsOnlyRoutes(t *testing.T) {
 		"workspace app":  strings.Replace(clusterAppRouteFile, "cluster-app/web", "shop", 1),
 		"unknown app":    strings.Replace(clusterAppRouteFile, "cluster-app/web", "cluster-app/other", 1),
 		"services":       clusterAppRouteFile + "services:\n  web:\n    image: x\n",
-		"route backend":  strings.Replace(clusterAppRouteFile, "      gateway: local\n", "      gateway: local\n      port: 9000\n", 1),
-		"no routes":      strings.Replace(clusterAppRouteFile, "    routes:\n    - id: ui\n      host: sfc.example.com\n      gateway: local\n", "", 1),
-		"no listeners":   strings.Replace(clusterAppRouteFile, "    - shared: internal-https\n", "", 1),
-		"unknown option": strings.Replace(clusterAppRouteFile, "    node: node-a\n", "    node: node-a\n    nodes: [a]\n", 1),
+		"route backend":  strings.Replace(clusterAppRouteFile, "    gateway: local\n", "    gateway: local\n    port: 9000\n", 1),
+		"no routes":      strings.Replace(clusterAppRouteFile, "  - node: node-a\n    host: sfc.example.com\n    gateway: local\n", "  []\n", 1),
+		"mixed nodes":    clusterAppRouteFile + "  - {node: node-b, host: b.example.com, gateway: local}\n",
+		"unknown option": strings.Replace(clusterAppRouteFile, "    host: sfc.example.com\n", "    host: sfc.example.com\n    nodes: [a]\n", 1),
+		"old object":     strings.Replace(clusterAppRouteFile, "  - node: node-a\n    host: sfc.example.com\n    gateway: local\n", "    node: node-a\n", 1),
 	} {
 		if _, _, err := ParseClusterAppRoutes([]byte(bad)); err == nil {
 			t.Errorf("%s: accepted", name)
@@ -59,6 +46,7 @@ func TestClusterAppIngressSpecRoutesToTheEndpoint(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	d.Listeners = []ListenerDeclaration{{Shared: "internal-https"}}
 	addr := netip.MustParseAddr("10.254.0.2")
 	s, err := ClusterAppIngressSpec("owner", "web", d, &ClusterAppBackend{Node: "node-b", Address: addr}, 7)
 	if err != nil {

@@ -124,13 +124,27 @@ func validIngressHostPolicy(p ingress.HostPolicy) bool {
 	}
 	return true
 }
+
+// HostPolicy is the hosts a tenant's apps may route. Deploying an app is
+// itself the grant to map its hosts, so a tenant without a record (`ingress
+// hosts set` never run for it) is unrestricted; a system admin's record
+// narrows it. A host another app already routes and cluster app hosts are
+// refused elsewhere, and only a system admin may route "*".
 func (b IngressManagement) HostPolicy(tenant string) ingress.HostPolicy {
+	if p, ok := b.HostPolicyRecord(tenant); ok {
+		return p
+	}
+	return ingress.HostPolicy{ExternalAllowed: true, ExternalHosts: []string{"*"}, LocalHosts: []string{"*"}}
+}
+
+// HostPolicyRecord is the policy a system admin set for tenant, if any.
+func (b IngressManagement) HostPolicyRecord(tenant string) (ingress.HostPolicy, bool) {
 	for _, r := range b.HostPolicies {
 		if r.Tenant == tenant {
-			return r.Policy
+			return r.Policy, true
 		}
 	}
-	return ingress.HostPolicy{}
+	return ingress.HostPolicy{}, false
 }
 func (b IngressManagement) ActiveBlocks(now uint64) []ingress.Block {
 	var out []ingress.Block

@@ -30,6 +30,9 @@ type BuildIntent struct {
 	Manifest             [32]byte
 	Target               string
 	DeadlineUnixMilli    int64
+	// Image is the compiler image this job runs: the policy's reference
+	// resolved for the parent deploy (repo@sha256:…). Every recipe names it.
+	Image string
 }
 
 type BuildInput struct{ Content, Recipe [32]byte }
@@ -48,6 +51,9 @@ func (b BuildIntent) Validate() error {
 		return ErrContract
 	}
 	if b.Schema != 1 || b.Cluster == ([32]byte{}) || !name(b.Tenant) || !digest(b.ID) || !name(b.AppUseID) || b.AppUse == ([32]byte{}) || !name(b.Node) || b.Owner == ([32]byte{}) || b.Selection.Validate() != nil || b.Manifest == ([32]byte{}) || b.DeadlineUnixMilli <= 0 || b.Target != "linux/amd64" && b.Target != "linux/arm64" || len(b.Inputs) == 0 || len(b.Inputs) > MaxScripts {
+		return ErrContract
+	}
+	if image, err := access.PinImage(b.Image); err != nil || image.Reference != b.Image {
 		return ErrContract
 	}
 	for i, input := range b.Inputs {
@@ -88,12 +94,11 @@ func (b BuildIntent) ValidateCompilation(policy TenantPolicy, batch CompileBatch
 	if b.ValidateBatch(batch) != nil || policy.Validate() != nil || !policy.Enabled || policy.Tenant != b.Tenant || policy.Revision != b.Selection.PolicyRevision || !slices.Contains(policy.Build.Nodes, b.Node) || !slices.Contains(policy.Build.Targets, b.Target) || batch.Toolchain != policy.Build.Toolchain || batch.WorkspaceBytes > policy.Build.WorkspaceBytes || batch.ArtifactBytes > policy.Build.ArtifactBytes || batch.OutputBytes > min(policy.CompiledCacheBytes, policy.Build.WorkspaceBytes) {
 		return ErrReference
 	}
-	image, err := access.PinImage(policy.Build.Image)
-	if err != nil {
+	if !policy.Build.AllowsCompiler(b.Image) {
 		return ErrReference
 	}
 	for _, item := range batch.Items {
-		if item.Recipe.Image != image.Reference || !policy.AllowsDescriptor(item.Source) {
+		if item.Recipe.Image != b.Image || !policy.AllowsDescriptor(item.Source) {
 			return ErrReference
 		}
 	}
@@ -108,6 +113,9 @@ func (c Catalog) PlanBuild(parent Use, node string, owner [32]byte, selection Se
 		return BuildIntent{}, ErrContract
 	}
 	b := BuildIntent{Schema: 1, Cluster: c.Cluster(), Tenant: batch.Tenant, ID: batch.Job, AppUseID: parent.ID, AppUse: parent.Digest(), Node: node, Owner: owner, Selection: selection.Clone(), Manifest: sha256.Sum256(raw), Target: batch.GOOS + "/" + batch.GOARCH, DeadlineUnixMilli: batch.DeadlineUnixMilli}
+	if len(batch.Items) > 0 {
+		b.Image = batch.Items[0].Recipe.Image
+	}
 	for _, item := range batch.Items {
 		b.Inputs = append(b.Inputs, BuildInput{item.Source.ContentDigest(), item.Key})
 	}
@@ -230,8 +238,7 @@ func (c Catalog) CompiledOrigin(build CompiledBuild) error {
 		return ErrReference
 	}
 	policy, ok := c.Policy(j.Intent.Tenant, j.Intent.Selection.PolicyRevision)
-	image, imageErr := access.PinImage(policy.Build.Image)
-	if !ok || imageErr != nil || build.Recipe.Image != image.Reference || build.Recipe.Toolchain != policy.Build.Toolchain || build.Recipe.GOOS+"/"+build.Recipe.GOARCH != j.Intent.Target {
+	if !ok || !policy.Build.AllowsCompiler(j.Intent.Image) || build.Recipe.Image != j.Intent.Image || build.Recipe.Toolchain != policy.Build.Toolchain || build.Recipe.GOOS+"/"+build.Recipe.GOARCH != j.Intent.Target {
 		return ErrReference
 	}
 	key := build.Recipe.Key()

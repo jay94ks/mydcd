@@ -6,9 +6,9 @@
 
 ```json
 {"app":"web","revision":1,"removed":false,"node":"node-a",
- "listeners":[{"shared":"internal-https","tls":false,"http3":false}],
- "routes":[{"id":"ui","host":"sfc.example.com","prefix":"/","gateway":"local"}],
- "file":"name: cluster-app/web\nx-sfc:\n  ingress:\n    node: node-a\n..."}
+ "listeners":[],
+ "routes":[{"id":"route-1","host":"sfc.example.com","prefix":"/","gateway":"local"}],
+ "file":"name: cluster-app/web\nx-sfc:\n  ingress:\n    - node: node-a\n..."}
 ```
 
 | 칸 | 뜻 |
@@ -25,7 +25,7 @@
 {"opId":"…","expected":1,"file":"name: cluster-app/web\nx-sfc:\n  ingress: {...}"}
 ```
 
-`file`은 route 파일 원문이다(최대 64KiB). `name`은 `cluster-app/{app}`이어야 하고, `x-sfc.ingress`만 받는다. 서비스, Volume, Secret, 망, CD, backend(망·포트·health 경로)를 적으면 `422 invalid`다. `expected`를 빼면 지금 revision을 쓴다. 결과는 다른 변경과 같은 작업(op) 응답이다([작업](04-operation.md)). 같은 서버·수신 주소·게이트웨이에서 작업 공간 앱과 host가 같으면, prefix가 달라도 sfcd가 거절한다.
+`file`은 route 파일 원문이다(최대 64KiB). `x-sfc.ingress`는 앱과 같은 route 목록이다([공유 HTTP 게이트웨이](../ingress-gateways.md)). 수신 주소는 적지 않으므로 `listeners`는 비어 있고, route 서버의 gateways 설정에서 정해진다. `name`은 `cluster-app/{app}`이어야 하고, `x-sfc.ingress`만 받는다. 서비스, Volume, Secret, 망, CD, backend(망·포트·health 경로)를 적으면 `422 invalid`다. `expected`를 빼면 지금 revision을 쓴다. 결과는 다른 변경과 같은 작업(op) 응답이다([작업](04-operation.md)). 같은 서버·수신 주소·게이트웨이에서 작업 공간 앱과 host가 같으면, prefix가 달라도 sfcd가 거절한다.
 
 ## 지우기: `DELETE /cluster-apps/{app}/routes`
 

@@ -133,6 +133,7 @@ func (a Inventory) Changes(b Blueprint, prune bool) ([]Change, error) {
 		return nil, ErrInputs
 	}
 	next := map[string]Step{}
+	attached := map[string]taskNetworkChanges{}
 	var out []Change
 	for _, s := range b.d.Steps {
 		next[s.Key] = s
@@ -150,6 +151,19 @@ func (a Inventory) Changes(b Blueprint, prune bool) ([]Change, error) {
 						if IngressRuntimeUpdate(old, s) {
 							change.Action = "RuntimeUpdate"
 							change.Reason = "same listener and original ingress native identity"
+						}
+						if TaskAliasRuntimeUpdate(old, s) {
+							change.Action = "RuntimeUpdate"
+							change.Reason = "only network aliases changed: same container, managed DNS names follow"
+						}
+						if TaskSecretSocketRuntimeUpdate(old, s) {
+							change.Action = "RuntimeUpdate"
+							change.Reason = "only sfev.sock secret revisions changed: grant renewed on the running container"
+						}
+						if c, ok := taskNetworkChange(old, s); ok && !c.detaches {
+							change.Action = "RuntimeUpdate"
+							change.Reason = "only networks attached: same container, engine network connect"
+							attached[s.Key] = c
 						}
 						switch s.Kind {
 						case "dns", "namespace", "delivery", "volume":
@@ -171,7 +185,7 @@ func (a Inventory) Changes(b Blueprint, prune bool) ([]Change, error) {
 	for changed := true; changed; {
 		changed = false
 		for i := range out {
-			if out[i].Action != "Keep" && !(out[i].Action == "RuntimeUpdate" && next[out[i].Key].Kind == "ingress") {
+			if out[i].Action != "Keep" && !(out[i].Action == "RuntimeUpdate" && (next[out[i].Key].Kind == "ingress" || next[out[i].Key].Kind == "task")) {
 				continue
 			}
 			step := next[out[i].Key]
@@ -181,20 +195,22 @@ func (a Inventory) Changes(b Blueprint, prune bool) ([]Change, error) {
 			stale := false
 			for _, ref := range g.Dependencies {
 				if producer, ok := next[ref.Key]; !ok || producer.Base != ref || !producer.BasePresent {
-					if !ok || !stableDNSReference(step, producer, ref) {
+					if !ok || !stableReference(step, producer, ref) {
 						stale = true
 					}
 				}
 			}
 			for _, dep := range append(slices.Clone(step.Dependencies), step.Activation...) {
-				if ingressIdentity(step, dep.Key) {
+				// The steps of a network attached in place are new for this
+				// Task; the engine connects it to them.
+				if ingressIdentity(step, dep.Key) || out[i].Action == "RuntimeUpdate" && attached[step.Key].step(dep.Key) {
 					continue
 				}
 				for _, action := range out {
 					if action.Key == dep.Key && action.Action != "Keep" {
 						producer := next[dep.Key]
-						at := slices.IndexFunc(step.StableDNS, func(ref ObjectRef) bool { return ref.Key == dep.Key })
-						if action.Action != "RuntimeUpdate" || at < 0 || !stableDNSReference(step, producer, step.StableDNS[at]) {
+						at := slices.IndexFunc(step.Stable, func(ref ObjectRef) bool { return ref.Key == dep.Key })
+						if action.Action != "RuntimeUpdate" || at < 0 || !stableReference(step, producer, step.Stable[at]) {
 							stale = true
 						}
 					}
@@ -222,7 +238,7 @@ func (a Inventory) Changes(b Blueprint, prune bool) ([]Change, error) {
 		}
 		out = append(out, Change{Key: old.Step.Key, Action: action, Current: ObjectRef{old.Step.Key, old.Result.Revision, old.Result.Generation}, Retain: old.Step.Retain})
 	}
-	annotateInterruptions(b.d.Steps, out)
+	annotateInterruptions(b.d.Steps, b.d.Input, out)
 	slices.SortFunc(out, func(x, y Change) int { return strings.Compare(x.Key, y.Key) })
 	return out, nil
 }
@@ -265,7 +281,7 @@ func (a Inventory) begin(expected uint64, c access.Catalog, ctx PlanningContext,
 				return a, inputError("TRANSITION_REQUIRED", change.Key)
 			}
 		}
-		plan, err := a.replacementPlan(b, prune, edits)
+		plan, err := a.replacementPlan(b, prune, edits, ctx.Features[FeatureTaskSurge])
 		if err != nil {
 			return a, err
 		}
@@ -483,6 +499,11 @@ func (a Inventory) advance(expected uint64, next Execution, shared state.State, 
 			}
 			if claim.Result.Generation < prior.Result.Generation || claim.Result.Generation == prior.Result.Generation && claim.Result.Revision < prior.Result.Revision {
 				return a, inputError("ADVANCE_GENERATION_REGRESSED", "advance")
+			}
+			if claim.Result.Generation != prior.Result.Generation && !prior.Removed && next.surgeTask(i) {
+				// Surge: the original keeps its claim (and its stop set)
+				// until the wave stops it; the new generation is claimed then.
+				continue
 			}
 			if claim.Result.Generation != prior.Result.Generation && !prior.Removed {
 				return a, inputError("ORIGINAL_GENERATION_NOT_RELEASED", s.Key)

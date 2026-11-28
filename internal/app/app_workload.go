@@ -625,8 +625,17 @@ func (r *Runtime) reconcileAppWorkload(ctx context.Context, v cluster.View, apps
 		if reuse {
 			resource := record.State.Desired.Resource
 			spec, err = workload.DecodeContainer(resource.Spec)
-			if err != nil || !e.MatchesTaskRecipe(taskID, material, spec) {
+			if err != nil {
 				return false, deployment.ErrInputs
+			}
+			if !e.MatchesTaskRecipe(taskID, material, spec) {
+				// A same-generation update that attaches networks: the
+				// driver connects them to the same container in place.
+				attached, ok := e.TaskRecipeAttached(taskID, material, spec)
+				if !ok {
+					return false, deployment.ErrInputs
+				}
+				spec = attached
 			}
 		} else {
 			permit, err := r.appInputPermit(ctx, control.AppBindingRequest{Task: source, Digest: b.Digest()})
@@ -714,6 +723,9 @@ func (r *Runtime) reconcileAppWorkload(ctx context.Context, v cluster.View, apps
 			if _, err = r.appRegistryImagePermit(ctx, source, b.Digest(), spec.Image, spec.Process.ImageID); err != nil {
 				return false, err
 			}
+		}
+		if err = r.parkSurgedOriginal(stage); err != nil {
+			return false, err
 		}
 		if err = r.workload.Desired(step.Key, source.Revision, source.Generation, &spec, capacity); err != nil {
 			return false, err

@@ -11,7 +11,7 @@ sfc-web 데몬은 [`internal/web/sfc`](../../internal/web/sfc/client.go)의 `Cli
 - **확인 필요**: 짝이 될 서버 method를 아직 못 정했다.
 - **서버에 없음**: sfcd에 그 기능이 없다(가짜만 있음).
 
-개수: 실제 112, 실제 호출·웹 타입 27, 실제(웹 타입 같은 모양) 1 (모두 140). `IssueInitialCredential`은 웹 화면·server가 쓰지 않아 지웠다. `OperationReason`은 서명 원본에서 읽는 `sfc.SignedReason`으로 바꿨다(R15). `CDApprovers`와 `RelocationCheck`도 지웠다(승인자는 CD 기록, 이동 전 검사는 server가 AppPlan으로).
+개수: 실제 116, 실제 호출·웹 타입 24, 실제(웹 타입 같은 모양) 1 (모두 141). `IssueInitialCredential`은 웹 화면·server가 쓰지 않아 지웠다. `OperationReason`은 서명 원본에서 읽는 `sfc.SignedReason`으로 바꿨다(R15). `CDApprovers`와 `RelocationCheck`도 지웠다(승인자는 CD 기록, 이동 전 검사는 server가 AppPlan으로).
 
 묶음은 R04 2단계 담당이다. 계정·서버는 데몬 스레드, 리소스·앱은 가짜 어댑터 스레드가 맡는다. 한 method의 반환 타입을 바꾸면 가짜와 server를 한 PR에서 같이 고친다.
 
@@ -159,12 +159,12 @@ Ticket·KeyProof·Session·SessionApproval·Change·UserOperation·Result는 실
 | `Tasks` | `tasks` | 실제 호출·웹 타입 | `TasksPage` |  |
 | `Vault` | `vault` | 실제 | `QueryVault` | 한 페이지를 그대로 돌려준다. 경로는 server(vault_screen.go)가 만든다 |
 | `VolumeArchives` | `volume-archives` | 실제 | `VolumeArchivePage` | `userauth.VolumeArchivesPage`(보관 행 + 공개 수신자 키). 화면 행은 server `volume_archive.go`가 만듦 |
-| `VolumeBackupSource` | `volume-backup-source` | 실제 호출·웹 타입 | `VolumeBackupSource` |  |
-| `VolumeBackups` | `volume-backups` | 실제 호출·웹 타입 | `VolumeBackupPage` |  |
+| `VolumeBackupSource` | `volume-backup-source` | 실제 | `VolumeBackupSource` | `userauth.VolumeBackupSourceReply` |
+| `VolumeBackups` | `volume-backups` | 실제 | `VolumeBackupPage` | `userauth.VolumeBackupsPage`. 화면 행(B)은 server `volume_ops.go`가 만듦. CreatedAt은 begin-volume-backup 원본 서명 시각 |
 | `VolumeFile` | `volume-file` | 실제 | `VolumeFile` |  |
 | `VolumeFilePlan` | `volume-file-plan` | 실제 | `VolumeFilePlan` |  |
 | `VolumeFileStatus` | `volume-file-status` | 실제 | `VolumeFileStatus` |  |
-| `VolumeRestores` | `volume-restores` | 실제 호출·웹 타입 | `VolumeRestorePage` |  |
+| `VolumeRestores` | `volume-restores` | 실제 | `VolumeRestorePage` | `userauth.VolumeRestoresPage`. 화면 행(R)은 server `volume_ops.go`가 만듦 |
 | `Volumes` | `volumes` | 실제 | `VolumePage` | `control.VolumeView`. 화면 행(이름·앱·서버·fixed/shared, writer는 volume-users)은 server `volume_view.go`가 만듦. UsedBytes·UsageObservedAt은 소유 서버의 주기 측정(관측, Raft 밖), 없으면 모름 |
 | `WriteVault` | `secret-input` | 실제 | `WriteVault` | `userauth.Reply` 별칭 |
 
@@ -189,9 +189,6 @@ Ticket·KeyProof·Session·SessionApproval·Change·UserOperation·Result는 실
 | `Standalones` | `StandaloneView` | `control.StandaloneView` | Definition, Metadata, Tasks, Workload | Connections, CreatedAt, DisconnectedAt, Document, EndedAt, ExitCode, ExpiresAt, Generation 외 15 |  |
 | `TaskDetail` | `TaskDetail` | `containerops.Result` | Detail, DetailCode, DetailPart, Kind, LogCode, NextCursor, Processes, Schema 외 7 | CPUs, CapAdd, Command, Digest, Drift, Entrypoint, Env, Generation 외 16 | ObservedAt(int64≠time.Time) |
 | `Tasks` | `Task` | `control.TaskView` | Container, ContainerName, Deployment, EndpointPresent, ImageID, Kind, ObservationMaxAge, Resources 외 4 | Health, Instance, Restarts | ExitCode(int≠*int64), LastCheck(string≠*containerops.TaskCheck), ObservedAt(int64≠uint64), StartedAt(int64≠string) |
-| `VolumeBackupSource` | `VolumeSource` | `control.VolumeBackupSource` | Compatibility, Exit, Image, NativeBinding, Node, Owner, Schema, Scope 외 1 | Source, VolumeRevision |  |
-| `VolumeBackups` | `VolumeBackupView` | `control.VolumeBackupView` | Binding, Compatibility, GID, MaxBytes, MaxEntries, Mode, Owner, Receipt 외 2 | Bytes, CreatedAt, Source, Tenant, Volume |  |
-| `VolumeRestores` | `VolumeRestoreView` | `control.VolumeRestoreView` | BackupBinding, Binding, Compatibility | Source, Tenant, Volume | Backup(string≠control.VolumeBackupSelection), Target(string≠volumes.Scope) |
 | `Whoami` | `Whoami` | `userauth.UserView` | ID, Revision, SystemAdmin, Username | LedgerEpoch, LedgerRootRevision, RootRevision, Roots, Session, User |  |
 
 ## 서버에 없음·확인 필요

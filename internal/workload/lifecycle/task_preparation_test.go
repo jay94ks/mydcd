@@ -66,7 +66,7 @@ func TestCheckerTaskPreparationSealsOriginalJobAndRecoversWithoutDeadlineReset(t
 			}
 		})
 	}
-	batch, err = NewCompileBatch(p.ID(), p.DeadlineUnixMilli, policy, []*Compilation{input})
+	batch, err = NewCompileBatch(p.ID(), p.DeadlineUnixMilli, policy, policy.Build.Image, []*Compilation{input})
 	if err != nil {
 		t.Fatal(err)
 	}

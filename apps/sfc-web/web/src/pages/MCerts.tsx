@@ -13,7 +13,7 @@ import { fmtTime } from '../lib/format';
 import { MCards, MDetail, type MCardSpec, MSec, MTiles, useReadOnlyTop } from '../mobile/ReadOnly';
 import { certRows, linkText, nextText, rowHref, rowState, sourceText, useCaOf } from './Certs';
 import { DOMAIN_TABS } from './Domains';
-import { certLive, certStoreLive } from '../lib/liveTopics';
+import { acmeCertLive, acmeLive, certLive, certStoreLive } from '../lib/liveTopics';
 
 const left = (iso?: string) => {
   const d = daysLeft(iso);
@@ -26,7 +26,7 @@ export function MCerts() {
   const { session } = useAuth();
   const admin = !!session?.user.systemAdmin;
   const nav = useNavigate();
-  const q = usePoll((s) => (admin ? acmeCerts(s) : Promise.resolve(undefined)), [admin], 5000);
+  const q = usePoll((s) => (admin ? acmeCerts(s) : Promise.resolve(undefined)), [admin], 0, acmeLive);
   const vq = usePoll((s) => (admin ? certificates({}, s) : Promise.resolve(undefined)), [admin], 0, certStoreLive);
   const { caOf } = useCaOf();
   useReadOnlyTop('외부 도메인', '인증서 · 시스템 관리자', '발급·올리기·끊기·지우기는 넓은 화면에서', [admin]);
@@ -81,7 +81,7 @@ export function MCertDetail() {
 
 function MStoreCertDetail({ id }: { id: string }) {
   const q = usePoll((s) => certificate(id, s), [id], 0, certLive(id));
-  const dq = usePoll((s) => acmeCerts(s).catch(() => undefined), [], 5000);
+  const dq = usePoll((s) => acmeCerts(s).catch(() => undefined), [], 0, acmeLive);
   useReadOnlyTop(short(id), '인증서', '끊기·지우기·해지는 넓은 화면에서', [id]);
   const c = q.data;
   if (!c) return q.error !== undefined ? <Empty kind="scope" title="이 인증서가 없거나 볼 권한이 없습니다" /> : <Load q={q} what="인증서를 불러오지 못했습니다">{() => null}</Load>;
@@ -119,7 +119,7 @@ function MStoreCertDetail({ id }: { id: string }) {
 }
 
 function MDefinitionDetail({ name }: { name: string }) {
-  const q = usePoll((s) => acmeCert(name, s), [name], 3000);
+  const q = usePoll((s) => acmeCert(name, s), [name], 0, acmeCertLive(name));
   const { caOf } = useCaOf();
   useReadOnlyTop(name, '발급 정의', '발급·갱신·지우기는 넓은 화면에서', [name]);
   const c = q.data?.certificate;

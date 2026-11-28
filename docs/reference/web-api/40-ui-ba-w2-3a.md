@@ -13,6 +13,7 @@
   - `fields`: `{prefer:[actionId], avoid:{actions:[actionId], services:[name]}, mcpServers:[name], notify:[문구], critical:[문구]}`.
   - `choices`: `{actions:[{id, label, blockedBy?: cluster|tenant}], services:[name](앱 범위, 지금 app.yaml), mcpServers:[{name, summary, state: ok|error|unchecked|off}]}`(그 범위가 쓸 수 있는 MCP 서버: 클러스터는 전부, 작업 공간·앱은 서버의 `users.tenants`에 든 것). 작업 공간·앱 범위의 조치는 앱 조치만이다.
   - `warnings`: 목록 밖 조치(재부팅·ssh), 지우기, 비밀값 요구, 등급·자동 실행 조건을 바꾸려는 문장이다. 저장은 막지 않는다.
+  - `summary`("외 N줄", 영어 "and N more lines"), `warnings[].text`, `choices`의 `label`·`summary`는 읽는 사람의 언어로 만든다([알림](21-ui-c0.md)과 같은 순서). 지침 본문은 쓴 그대로다.
 - `PUT {scope} {revision, text, fields, deliver?:{diagnose, coordinator}}` → 같은 모양, `version+1`. 409 `stale`. 422 `invalid`: 4,000자 초과, 범위 밖 조치, 위 범위가 avoid로 막은 조치를 prefer, prefer 10개·avoid.services 32개·notify/critical 16개(한 줄 200자) 초과, `mcpServers` 8개 초과 또는 그 범위가 쓸 수 없는 서버.
 - `GET {scope}/versions` → `{items:[{version, updatedBy, updatedAt, summary, incidents, current}]}`(새 것부터). `incidents`는 그 버전을 쓴 사건 수.
 - `GET {scope}/versions/{v}` → 그 버전 전체(GET 모양).

@@ -283,18 +283,36 @@ func TestCertificateCommands(t *testing.T) {
 
 func TestDomainCommands(t *testing.T) {
 	n := newGroup9Node(t)
-	n.run(2, "domain", "add", "co.kr")
-	n.run(0, "domain", "add", "Shop.Example.com")
-	n.run(1, "domain", "add", "shop.example.com")
-	n.run(0, "domain", "add", "예시.한국")
-	out := n.run(0, "domain", "list")
+	n.run(2, "--tenant", "", "domain", "add", "co.kr")
+	n.run(0, "--tenant", "", "domain", "add", "Shop.Example.com")
+	n.run(1, "--tenant", "", "domain", "add", "shop.example.com")
+	n.run(0, "--tenant", "", "domain", "add", "예시.한국")
+	out := n.run(0, "--tenant", "", "domain", "list")
 	if !strings.Contains(out, "shop.example.com") || !strings.Contains(out, "예시.한국") || !strings.Contains(out, "xn--vv4b11d.xn--3e0b707e") {
 		t.Fatal("domain list:\n" + out)
 	}
-	n.run(0, "domain", "remove", "shop.example.com")
-	n.run(1, "domain", "remove", "shop.example.com")
-	if out = n.run(0, "domain", "list", "-o", "json"); strings.Contains(out, "shop.example.com") || !strings.Contains(out, `"added_by"`) {
+	n.run(0, "--tenant", "", "domain", "remove", "shop.example.com")
+	n.run(1, "--tenant", "", "domain", "remove", "shop.example.com")
+	if out = n.run(0, "--tenant", "", "domain", "list", "-o", "json"); strings.Contains(out, "shop.example.com") || !strings.Contains(out, `"added_by"`) {
 		t.Fatal("domain list after remove:\n" + out)
+	}
+	// Owners: an explicit --tenant names the owner on add and assign.
+	n.run(0, "domain", "add", "shop.example.org")
+	n.run(0, "--tenant", "", "domain", "add", "example.org")
+	n.run(1, "--tenant", "", "domain", "add", "api.shop.example.org")
+	n.run(2, "domain", "remove", "shop.example.org")
+	n.run(2, "domain", "assign", "example.org", "--cluster")
+	if out = n.run(0, "domain", "list"); !strings.Contains(out, "shop.example.org") || strings.Contains(out, "example.com") {
+		t.Fatal("tenant domain list:\n" + out)
+	}
+	if out = n.run(0, "--tenant", "", "domain", "list"); !strings.Contains(out, "(cluster)") || !strings.Contains(out, "shop ") {
+		t.Fatal("owner column:\n" + out)
+	}
+	n.run(0, "--tenant", "", "domain", "assign", "shop.example.org", "--cluster")
+	n.run(1, "--tenant", "", "domain", "assign", "shop.example.org", "--cluster")
+	n.run(0, "domain", "assign", "shop.example.org")
+	if out = n.run(0, "domain", "list", "-o", "json"); !strings.Contains(out, `"tenant": "shop"`) && !strings.Contains(out, `"tenant":"shop"`) {
+		t.Fatal("assigned owner:\n" + out)
 	}
 }
 

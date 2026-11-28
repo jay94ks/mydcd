@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jay94ks/seafield/internal/ingress"
 	"github.com/jay94ks/seafield/internal/secrets"
 	"github.com/jay94ks/seafield/internal/tenancy"
 	"github.com/jay94ks/seafield/internal/workload"
@@ -79,7 +80,8 @@ func contextFor(t *testing.T, f *fixture) PlanningContext {
 	return PlanningContext{Cluster: f.cluster, Actor: "alice", Tenant: "tenant", Project: "php-mysql", Deployment: "deploy", Nodes: map[string]PlanningNode{
 		"node-a": {Key: public(f.na), Generation: 3, Revision: 10, Underlay: "192.0.2.11", Voter: true, Capacity: workload.Resources{CPU: 4e9, Memory: 4 << 30}, DefaultCPU: 500000000, DefaultMemory: 128 << 20},
 		"node-b": {Key: public(f.nb), Generation: 7, Revision: 18, Underlay: "192.0.2.12", Voter: true, Capacity: workload.Resources{CPU: 4e9, Memory: 4 << 30}, DefaultCPU: 500000000, DefaultMemory: 128 << 20},
-	}, Networks: networks, Volumes: f.v, Features: map[string]bool{"core": true, "volumes": true, "inputs": true}}
+	}, Networks: networks, Volumes: f.v, Features: map[string]bool{"core": true, "volumes": true, "inputs": true},
+		Gateways: map[string]ingress.GatewayConfiguration{"node-b": {External: ingress.Gateway{Enabled: true, Listeners: []ingress.Listener{{ID: "external-http"}, {ID: "external-https", TLS: true}}}}}}
 }
 
 // frozenCompose is historical schema1 input, never a new app submission.

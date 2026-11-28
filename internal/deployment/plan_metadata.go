@@ -11,7 +11,7 @@ import (
 // validPlanTaskMetadata joins borrowed Volume and lifecycle metadata to the
 // same decoded Task goal, including plans without fixed Volume registrations.
 func validPlanTaskMetadata(d blueprintRecord) bool {
-	if !validRegistrySources(d) {
+	if !validRegistrySources(d) || !validSocketRevisions(d) {
 		return false
 	}
 	var envServices []string

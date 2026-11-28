@@ -31,10 +31,13 @@ type Host struct {
 	Version        string
 	// Features are the names of the build's features (buildinfo feature
 	// table of its major); empty for the major's baseline.
-	Features                []string `json:",omitempty"`
-	CPUCapacity             uint64   // nanocores, physical host logical processors
-	CPUUsed                 *uint64  `json:",omitempty"`
-	MemoryTotal, MemoryUsed *uint64  `json:",omitempty"`
+	Features    []string `json:",omitempty"`
+	CPUCapacity uint64   // nanocores, physical host logical processors
+	CPUUsed     *uint64  `json:",omitempty"`
+	// CPUSteal is CPU time the hypervisor gave other guests while this
+	// server had work (shared VPS), in nanocores. It is not in CPUUsed.
+	CPUSteal                *uint64 `json:",omitempty"`
+	MemoryTotal, MemoryUsed *uint64 `json:",omitempty"`
 	ModuleReady             bool
 	// Unready says why ModuleReady is false, in fixed codes only: the error
 	// text may hold secrets and stays in the daemon log.
@@ -320,7 +323,7 @@ func (r Report) Valid() bool {
 				return false
 			}
 		}
-		if h.Version == "" || len(h.Version) > 64 || strings.ContainsAny(h.Version, "\x00\r\n") || h.CPUUsed != nil && *h.CPUUsed > h.CPUCapacity || (h.MemoryTotal == nil) != (h.MemoryUsed == nil) || h.MemoryTotal != nil && (*h.MemoryTotal == 0 || *h.MemoryUsed > *h.MemoryTotal) {
+		if h.Version == "" || len(h.Version) > 64 || strings.ContainsAny(h.Version, "\x00\r\n") || h.CPUUsed != nil && *h.CPUUsed > h.CPUCapacity || h.CPUSteal != nil && (*h.CPUSteal > h.CPUCapacity || h.CPUUsed != nil && *h.CPUUsed > h.CPUCapacity-*h.CPUSteal) || (h.MemoryTotal == nil) != (h.MemoryUsed == nil) || h.MemoryTotal != nil && (*h.MemoryTotal == 0 || *h.MemoryUsed > *h.MemoryTotal) {
 			return false
 		}
 	}

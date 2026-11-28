@@ -340,13 +340,13 @@ func TestExpiredPreparationCanSealOnlyCompleteLocalCacheWithoutNewJob(t *testing
 		t.Fatal(err)
 	}
 	target := ResolverTarget{GOOS: batch.GOOS, GOARCH: batch.GOARCH, Toolchain: batch.Toolchain}
-	if _, err = store.CachedTaskCompilePlan(ctx, program, policy, target); err == nil {
+	if _, err = store.CachedTaskCompilePlan(ctx, program, policy, target, policy.Build.Image); err == nil {
 		t.Fatal("missing binary became a complete plan")
 	}
 	if _, err = store.StageCompiled(ctx, descriptor, policy, build, data); err != nil {
 		t.Fatal(err)
 	}
-	plan, err := store.CachedTaskCompilePlan(ctx, program, policy, target)
+	plan, err := store.CachedTaskCompilePlan(ctx, program, policy, target, policy.Build.Image)
 	if err != nil || plan.Build != nil || len(plan.Recipes) != 1 {
 		t.Fatal("cache hit needs a new build", err)
 	}

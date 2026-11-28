@@ -365,8 +365,9 @@ export interface ClusterAppRoutes {
   /** 다음 변경의 expected. 0 = 한 번도 정하지 않음 */
   revision: number;
   removed: boolean;
+  /** 모든 route를 여는 서버(#910: route 파일의 route는 모두 같은 node) */
   node?: string;
-  routes: { id?: string; host: string; prefix?: string; gateway: 'local' | 'external' | 'both' }[];
+  routes: { id?: string; host: string; prefix?: string; gateway: 'local' | 'external' }[];
   /** 고쳐서 다시 보낼 route 파일 원문. 한 번도 정하지 않았으면 없다 */
   file?: string;
 }

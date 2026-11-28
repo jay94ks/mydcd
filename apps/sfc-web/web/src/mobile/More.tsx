@@ -5,10 +5,11 @@ import { Link, Navigate, useNavigate, useParams } from 'react-router-dom';
 import { opsList } from '../api/endpoints';
 import { useAuth, useSession } from '../auth/session';
 import { until } from '../lib/format';
-import { usePoll, DEFAULT_POLL_MS } from '../lib/usePoll';
+import { usePoll } from '../lib/usePoll';
 import { usePhone } from '../lib/viewport';
 import { NAV } from '../layout/AppShell';
 import { useMobileTop } from './top';
+import { opsLive } from '../lib/liveTopics';
 
 export function MorePage() {
   const phone = usePhone();
@@ -16,7 +17,7 @@ export function MorePage() {
   const { logout } = useAuth();
   const navigate = useNavigate();
   const admin = session.user.systemAdmin;
-  const ops = usePoll((s) => (phone ? opsList('unknown', s).catch(() => []) : Promise.resolve([])), [phone], DEFAULT_POLL_MS);
+  const ops = usePoll((s) => (phone ? opsList('unknown', s).catch(() => []) : Promise.resolve([])), [phone], 0, opsLive);
   const unknown = ops.data?.length ?? 0;
   useMobileTop({ title: '더보기', root: true }, []);
   if (!phone) return <Navigate to="/" replace />;

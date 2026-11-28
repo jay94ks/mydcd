@@ -37,7 +37,7 @@ func compilationFixture(t *testing.T) (*Compilation, TenantPolicy) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	input, err := PrepareCompilation(source)
+	input, err := PrepareCompilation(source, policy.Build.Image)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,7 +60,7 @@ func TestCheckerCompilationSharesExactProductSDKAndSealedTree(t *testing.T) {
 	if !validCompileItem(input.Item()) {
 		t.Fatal("manifest aliases original compilation")
 	}
-	batch, err := NewCompileBatch(hashText("compile-job"), time.Now().Add(time.Minute).UnixMilli(), policy, []*Compilation{input, input})
+	batch, err := NewCompileBatch(hashText("compile-job"), time.Now().Add(time.Minute).UnixMilli(), policy, policy.Build.Image, []*Compilation{input, input})
 	if err != nil || len(batch.Items) != 1 {
 		t.Fatal("same recipe did not deduplicate", err)
 	}

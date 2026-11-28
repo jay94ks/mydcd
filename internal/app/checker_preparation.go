@@ -93,7 +93,7 @@ func (r *Runtime) checkerPreparationProviders(v cluster.View, u checker.Use, p c
 		if !ok || !membership.FullMember(entry) || users.Authorize(u.Principal, u.Tenant, access.ManageServices, node) != nil {
 			continue
 		}
-		if _, err := users.CheckImage(u.Principal, u.Tenant, node, p.Build.Image); err != nil {
+		if _, err := users.CheckImageRef(u.Principal, u.Tenant, node, p.Build.Image); err != nil {
 			continue
 		}
 		key, err := identity.ParseKey(entry.CurrentPeer().Key)
@@ -112,12 +112,12 @@ func (r *Runtime) checkerPreparationProviders(v cluster.View, u checker.Use, p c
 	return providers, nil
 }
 
-func (r *Runtime) planCheckerCompilation(ctx context.Context, v cluster.View, book checker.Catalog, u checker.Use, program checker.TaskProgram, p checker.TaskPreparation) (checker.TaskCompilePlan, error) {
+func (r *Runtime) planCheckerCompilation(ctx context.Context, v cluster.View, book checker.Catalog, u checker.Use, program checker.TaskProgram, p checker.TaskPreparation, image string) (checker.TaskCompilePlan, error) {
 	current, ok := book.Policy(u.Tenant, 0)
 	if !ok {
 		return checker.TaskCompilePlan{}, checker.ErrPreparation
 	}
-	inputs, err := r.checkerSources.TaskCompilations(ctx, program, current, checker.ResolverTarget{GOOS: runtime.GOOS, GOARCH: runtime.GOARCH, Toolchain: current.Build.Toolchain})
+	inputs, err := r.checkerSources.TaskCompilations(ctx, program, current, checker.ResolverTarget{GOOS: runtime.GOOS, GOARCH: runtime.GOARCH, Toolchain: current.Build.Toolchain}, image)
 	if err != nil {
 		return checker.TaskCompilePlan{}, err
 	}
@@ -194,7 +194,7 @@ func (r *Runtime) planCheckerCompilation(ctx context.Context, v cluster.View, bo
 	}
 	// One frozen deadline/ID/selection; no budget reset when the slot is busy
 	// or the original reserve reply is lost.
-	batch, err := checker.NewCompileBatch(p.ID(), p.DeadlineUnixMilli, current, missing)
+	batch, err := checker.NewCompileBatch(p.ID(), p.DeadlineUnixMilli, current, image, missing)
 	if err != nil {
 		return checker.TaskCompilePlan{}, err
 	}
@@ -368,6 +368,10 @@ func (r *Runtime) prepareAppCheckers(ctx context.Context, v cluster.View, b depl
 	if !ok || u.Owner != r.Identity.Public {
 		return checker.ErrPreparation
 	}
+	image, err := r.checkerCompilerImage(ctx, v, task, *program)
+	if err != nil {
+		return err
+	}
 	target := runtime.GOOS + "/" + runtime.GOARCH
 	id := checker.TaskCompileID(r.controlPolicy.Cluster, u.Digest())
 	p, err := r.checkerSources.TaskPreparation(ctx, u.Tenant, id, false)
@@ -414,7 +418,7 @@ func (r *Runtime) prepareAppCheckers(ctx context.Context, v cluster.View, b depl
 		if !ok {
 			return checker.ErrPreparation
 		}
-		cached, cacheErr := r.checkerSources.CachedTaskCompilePlan(ctx, *program, currentPolicy, checker.ResolverTarget{GOOS: runtime.GOOS, GOARCH: runtime.GOARCH, Toolchain: currentPolicy.Build.Toolchain})
+		cached, cacheErr := r.checkerSources.CachedTaskCompilePlan(ctx, *program, currentPolicy, checker.ResolverTarget{GOOS: runtime.GOOS, GOARCH: runtime.GOARCH, Toolchain: currentPolicy.Build.Toolchain}, image)
 		if cacheErr == nil {
 			p.Plan = &cached
 			p, err = r.checkerSources.SealTaskPreparation(ctx, p)
@@ -453,7 +457,7 @@ func (r *Runtime) prepareAppCheckers(ctx context.Context, v cluster.View, b depl
 		if err != nil {
 			return err
 		}
-		plan, err := r.planCheckerCompilation(prepare, v, book, u, *program, p)
+		plan, err := r.planCheckerCompilation(prepare, v, book, u, *program, p, image)
 		if err != nil {
 			return err
 		}

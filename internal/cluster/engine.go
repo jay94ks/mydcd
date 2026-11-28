@@ -30,18 +30,22 @@ var ErrUnknown = errors.New("management outcome unknown; query original request,
 type Options struct {
 	// IdentityTransitions is the retained dual-signed lineage of this node's
 	// current mesh key. It preserves the original DB identity, not TLS authority.
-	IdentityTransitions  []lifecycle.IdentityTransition
-	EventProjection      EventProjection
-	Prepared             func(*Engine)
-	ID, Root, Admin      string
-	Cluster              [32]byte
-	Mesh                 *sfcp.Transport
-	Resolve              PeerResolver
-	Servers              []raft.Server
-	Bootstrap            bool
-	TrackConfiguration   bool
-	Manifest             [32]byte
-	Validate             state.Validator
+	IdentityTransitions []lifecycle.IdentityTransition
+	EventProjection     EventProjection
+	Prepared            func(*Engine)
+	ID, Root, Admin     string
+	Cluster             [32]byte
+	Mesh                *sfcp.Transport
+	Resolve             PeerResolver
+	Servers             []raft.Server
+	Bootstrap           bool
+	TrackConfiguration  bool
+	Manifest            [32]byte
+	Validate            state.Validator
+	// ValidateStage names the check that refused a state (optional). It is
+	// used only to say, in the start error, which check refused the stored
+	// state; the apply path's Results never carry it.
+	ValidateStage        func(before, after state.State, c state.Command) (string, error)
 	Reduce               state.Reducer
 	AdmitModule          state.ModuleAuthorizer
 	AdmitMutation        state.MutationAuthorizer
@@ -162,6 +166,7 @@ func Open(o Options) (*Engine, error) {
 		return nil, err
 	}
 	e.fsm, err = newFSM(e.db, e.log, hex.EncodeToString(o.Cluster[:]), o.Admin, o.Validate)
+	err = o.startError(e.db, err)
 	if err != nil {
 		return nil, err
 	}
@@ -750,4 +755,33 @@ func (v View) MarshalView() ([]byte, error) {
 func (e *Engine) stopNative() error {
 	e.stopOnce.Do(func() { e.stopErr = e.raft.Shutdown().Error(); close(e.stopped) })
 	return e.stopErr
+}
+
+// startError adds the refusing check's stage to a stored state that the
+// validator refuses at start ("invalid committed control catalog (stage
+// apps)"), so an operator can tell which records an upgrade broke.
+func (o Options) startError(db *storage.DB, err error) error {
+	if err == nil || o.Validate == nil || o.ValidateStage == nil {
+		return err
+	}
+	b, e := db.Get("fsm")
+	if e != nil {
+		return err
+	}
+	var durable fsmRecord
+	if json.Unmarshal(b, &durable) != nil {
+		return err
+	}
+	rows, e := db.Scan(state.StoredPrefix)
+	if e != nil {
+		return err
+	}
+	stored, e := state.DecodeStored(durable.Head, rows)
+	if e != nil {
+		return err
+	}
+	if stage, _ := o.ValidateStage(stored, stored, state.Command{}); stage != "" {
+		return fmt.Errorf("%w (stage %s)", err, stage)
+	}
+	return err
 }

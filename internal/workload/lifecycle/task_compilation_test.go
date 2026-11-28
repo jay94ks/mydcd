@@ -40,7 +40,7 @@ func TestCheckerTaskCompilationsBuildOnlyCompiledAliasesWithExactSelection(t *te
 	if _, err := store.Stage(context.Background(), fact.Descriptor(), []byte(compileTestSource), policy); err != nil {
 		t.Fatal(err)
 	}
-	inputs, err := store.TaskCompilations(context.Background(), program, policy, ResolverTarget{GOOS: batch.GOOS, GOARCH: batch.GOARCH, Toolchain: batch.Toolchain})
+	inputs, err := store.TaskCompilations(context.Background(), program, policy, ResolverTarget{GOOS: batch.GOOS, GOARCH: batch.GOARCH, Toolchain: batch.Toolchain}, policy.Build.Image)
 	if err != nil || len(inputs) != 1 || inputs[0].Item().Key != batch.Items[0].Key {
 		t.Fatal("compiled-only actual recipe", err)
 	}

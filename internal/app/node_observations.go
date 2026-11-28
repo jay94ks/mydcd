@@ -227,9 +227,9 @@ func (r *Runtime) collectNodeObservations(ctx context.Context, v cluster.View) (
 	host, counter, hostErr := observability.ReadHost(r.observationCPU)
 	host.RuntimeEnabled = r.docker != nil
 	if keep := shortCPUWindow(hostErr, r.observationCPUAt, time.Now()); keep {
-		host.CPUUsed = r.observationCPUUsed
+		host.CPUUsed, host.CPUSteal = r.observationCPUUsed, r.observationCPUSteal
 	} else {
-		r.observationCPU, r.observationCPUAt, r.observationCPUUsed = counter, time.Now(), host.CPUUsed
+		r.observationCPU, r.observationCPUAt, r.observationCPUUsed, r.observationCPUSteal = counter, time.Now(), host.CPUUsed, host.CPUSteal
 	}
 	r.mu.RLock()
 	host.ModuleReady = r.moduleError == nil

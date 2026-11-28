@@ -9,6 +9,8 @@ import (
 
 	"github.com/jay94ks/seafield/internal/engine"
 	"github.com/jay94ks/seafield/internal/network"
+	"github.com/moby/moby/api/types/container"
+	dockernet "github.com/moby/moby/api/types/network"
 )
 
 // MaxTaskNetworks matches the compose limit of networks per service.
@@ -139,4 +141,17 @@ func allowedTaskAddress(address netip.Addr, spec network.BridgeSpec) bool {
 		}
 	}
 	return false
+}
+
+// taskEndpoint is the container's endpoint on a leased Bridge. The engine
+// keys a created, not yet started container's extra endpoints by the network
+// ID it was given at create, and every started endpoint by network name.
+func taskEndpoint(settings *container.NetworkSettings, l network.BridgeLease) *dockernet.EndpointSettings {
+	if settings == nil {
+		return nil
+	}
+	if e := settings.Networks[l.NetworkName]; e != nil {
+		return e
+	}
+	return settings.Networks[l.NetworkID]
 }

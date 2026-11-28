@@ -33,9 +33,13 @@ type DNSServerLink struct {
 
 // DNSReach is the last outside reach check.
 type DNSReach struct {
-	OK    bool      `json:"ok"`
-	At    time.Time `json:"at"`
-	Error string    `json:"error,omitempty"`
+	OK bool      `json:"ok"`
+	At time.Time `json:"at"`
+	// Error is a text code (dns-reach.*) with the address and port it
+	// names; checks stored before keep a Korean Error.
+	Error string `json:"error,omitempty"`
+	Addr  string `json:"addr,omitempty"`
+	Port  string `json:"port,omitempty"`
 }
 
 // GetDNSServerLinks returns a domain's links (empty when none).
@@ -57,7 +61,9 @@ func (s *Store) GetDNSServerLinks(domain string) (*DNSServerLinks, error) {
 // current revision (ErrConflict otherwise).
 func (s *Store) UpdateDNSServerLinks(domain string, expected uint64, fn func(l *DNSServerLinks) error) (*DNSServerLinks, error) {
 	var out *DNSServerLinks
+	var tenants []string
 	err := s.db.Update(func(tx *bolt.Tx) error {
+		tenants = domainTenants(tx, domain)
 		b := tx.Bucket(bucketDNSServers)
 		l := &DNSServerLinks{Domain: domain, Rows: map[string]*DNSServerLink{}}
 		if b.Get([]byte(domain)) != nil {
@@ -78,12 +84,16 @@ func (s *Store) UpdateDNSServerLinks(domain string, expected uint64, fn func(l *
 		out = l
 		return putJSON(b, []byte(domain), l)
 	})
+	s.domainChanged(err, domain, tenants, false)
 	return out, err
 }
 
 // SetDNSReach records reach checks without a revision change.
+// Live watches hear of it only when a result changed, not on every check.
 func (s *Store) SetDNSReach(domain string, reach map[string]*DNSReach) error {
-	return s.db.Update(func(tx *bolt.Tx) error {
+	var tenants []string
+	moved := false
+	err := s.db.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket(bucketDNSServers)
 		if b.Get([]byte(domain)) == nil {
 			return nil
@@ -94,9 +104,19 @@ func (s *Store) SetDNSReach(domain string, reach map[string]*DNSReach) error {
 		}
 		for n, r := range reach {
 			if row := l.Rows[n]; row != nil {
+				if old := row.Reach; old == nil || r == nil || old.OK != r.OK || old.Error != r.Error {
+					moved = true
+				}
 				row.Reach = r
 			}
 		}
+		if moved {
+			tenants = domainTenants(tx, domain)
+		}
 		return putJSON(b, []byte(domain), &l)
 	})
+	if moved {
+		s.domainChanged(err, domain, tenants, false)
+	}
+	return err
 }

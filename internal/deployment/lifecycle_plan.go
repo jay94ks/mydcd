@@ -61,6 +61,7 @@ func (b Blueprint) inlineCheckerSources() map[string]checker.SourceFact {
 
 func (b Blueprint) frozenTask(service string, s ComposeService) (ComposeService, error) {
 	s = frozenTaskService(s, b.d.FixedVolumes)
+	s.SocketRevisions = b.d.SocketRevisions[service]
 	if b.d.Checkers == nil {
 		return s, nil
 	}

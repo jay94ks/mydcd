@@ -52,7 +52,7 @@ import { CERT_STATE, certChainUrl, certificates, deletable, issuerName, short, t
 import { ingress, ingressMissing } from '../api/ingress';
 import { DeleteCertDialog, DisableCertDialog, RevokeDialog, RsaWarn, UploadCertDialog } from './CertDetail';
 import { randomUUID } from '../lib/cryptoCompat';
-import { certStoreLive, domainListLive, ingressLive } from '../lib/liveTopics';
+import { acmeLive, certStoreLive, domainListLive, ingressLive, kindsLive } from '../lib/liveTopics';
 
 export const errText = (e: unknown) => (e instanceof ApiError ? acmeErrorText(e.code) || e.message : String(e));
 
@@ -78,7 +78,7 @@ export function nextText(c: AcmeCert): string {
 }
 
 export function useCaOf() {
-  const aq = usePoll((s) => acmeAccounts(s), []);
+  const aq = usePoll((s) => acmeAccounts(s), [], 0, kindsLive('acme-account'));
   const cq = usePoll((s) => acmeCAs(s), []);
   const caOf = (account: string) => cq.data?.find((c) => c.id === aq.data?.find((a) => a.id === account)?.ca);
   return { aq, cq, caOf };
@@ -132,7 +132,7 @@ function DesktopCertsPage() {
   const { session } = useAuth();
   const nav = useNavigate();
   const toast = useToast();
-  const q = usePoll((s) => acmeCerts(s), [], 5000);
+  const q = usePoll((s) => acmeCerts(s), [], 0, acmeLive);
   const vq = usePoll((s) => certificates({}, s), [], 0, certStoreLive);
   const dq = usePoll((s) => dnsDomains(s), [], 0, domainListLive);
   const { aq, cq, caOf } = useCaOf();
@@ -819,7 +819,7 @@ export const httpOnly = (domain: string, ds: DnsDomain[]) => {
 
 function AutoIssueCard({ accounts, cas, domains, onUpload }: { accounts: AcmeAccount[]; cas: AcmeCA[]; domains: DnsDomain[]; onUpload: () => void }) {
   const toast = useToast();
-  const q = usePoll((s) => acmeAuto(s), [], 30000);
+  const q = usePoll((s) => acmeAuto(s), [], 0, kindsLive('acme-auto'));
   const [edit, setEdit] = useState(false);
   const missing = q.error !== undefined && q.error instanceof ApiError && (q.error.status === 404 || q.error.status === 405);
   const a = q.data;

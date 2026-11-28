@@ -2,7 +2,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { ApiError } from '../api/client';
-import { appLive, appsLive, certLive, certStoreLive, clusterAppRoutesLive, dashboardLive, domainListLive, incidentLive, ingressHistoryLive, ingressLive, networkDnsLive, networksLive, notificationsLive, opsLive, patchList, registriesLive, serverLive, serversLive, volumesLive } from './liveTopics';
+import { acmeCertLive, appLive, appsLive, certLive, certStoreLive, clusterAppRoutesLive, dashboardLive, domainListLive, domainLive, incidentLive, ingressHistoryLive, ingressLive, networkDnsLive, networksLive, notificationsLive, opsLive, patchList, registriesLive, serverLive, serversLive, volumesLive } from './liveTopics';
 
 type Row = { id: string; v: number };
 
@@ -120,6 +120,11 @@ describe('cluster book topics', () => {
     expect(certStoreLive.match({ kind: 'acme-responder', name: 'acme-responder' })).toBe(true);
     expect(certLive('id1').match({ kind: 'certificate', name: 'id1' })).toBe(true);
     expect(certLive('id1').match({ kind: 'certificate', name: 'id2' })).toBe(false);
-    expect(domainListLive.measured).toBe(true);
+    expect(domainListLive.measured).toBeUndefined();
+    expect(domainListLive.match({ kind: 'dns-domain', name: 'shop.example', tenant: '' })).toBe(true);
+    expect(domainLive('shop.example').match({ kind: 'dns-domain', name: 'shop.example' })).toBe(true);
+    expect(domainLive('shop.example').match({ kind: 'dns-domain', name: 'other.example' })).toBe(false);
+    expect(acmeCertLive('c1').match({ kind: 'acme-cert', name: 'c1' })).toBe(true);
+    expect(acmeCertLive('c1').match({ kind: 'acme-cert', name: 'c2' })).toBe(false);
   });
 });

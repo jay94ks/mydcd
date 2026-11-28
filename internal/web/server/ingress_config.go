@@ -449,10 +449,6 @@ func (s *Server) handleIngressDrain(w http.ResponseWriter, r *http.Request, ws *
 // page).
 const ingressHistoryPages = 64
 
-var ingressActionWord = map[string]string{sfc.ActionSetNodeGateways: "게이트웨이 설정", sfc.ActionSetIngressBalance: "분배 방식 변경",
-	sfc.ActionDrainIngress: "비우기", sfc.ActionUndrainIngress: "비우기 해제", sfc.ActionIngressBlock: "긴급 차단",
-	sfc.ActionIngressUnblock: "차단 해제", sfc.ActionIngressBlockExtend: "차단 연장", "set-ingress-host-policy": "호스트 정책 변경"}
-
 // historyValue: a history Detail / Previous as the screens show it.
 func historyValue(action string, raw []byte) any {
 	if len(raw) == 0 || string(raw) == "null" {
@@ -512,9 +508,9 @@ func camelValue(v any) any {
 	return v
 }
 
-func ingressHistoryView(e control.IngressHistoryView, names map[string]string) map[string]any {
-	what := ingressActionWord[e.Action]
-	if what == "" {
+func ingressHistoryView(lang string, e control.IngressHistoryView, names map[string]string) map[string]any {
+	what := text(lang, "ingress-action."+e.Action, nil)
+	if _, ok := texts["ingress-action."+e.Action]; !ok {
 		what = e.Action
 	}
 	by := e.Actor
@@ -536,7 +532,7 @@ func ingressHistoryView(e control.IngressHistoryView, names map[string]string) m
 	if e.Action == sfc.ActionSetIngressBalance {
 		var now, before ingress.Balance
 		if json.Unmarshal(e.Detail, &now) == nil {
-			from := "앱 선언"
+			from := text(lang, "ingress-history.app-declared", nil)
 			if len(e.Previous) > 0 && string(e.Previous) != "null" && json.Unmarshal(e.Previous, &before) == nil {
 				from = methodOr(before.Method)
 			}
@@ -558,6 +554,7 @@ func methodOr(m string) string {
 // administrator's whole history (sfcd decides).
 func (s *Server) handleIngressHistory(w http.ResponseWriter, r *http.Request, ws *webSession) {
 	qs := r.URL.Query()
+	lang := s.requestLang(r, ws)
 	tenant, app, node, after := qs.Get("tenant"), qs.Get("app"), qs.Get("node"), qs.Get("after")
 	if tenant != "" && !safeParamRE.MatchString(tenant) || app != "" && (tenant == "" || !safeParamRE.MatchString(app)) ||
 		node != "" && !safeParamRE.MatchString(node) || len(after) > 512 {
@@ -572,7 +569,7 @@ func (s *Server) handleIngressHistory(w http.ResponseWriter, r *http.Request, ws
 		names := usernames(ctx, c)
 		items := []map[string]any{}
 		for _, e := range p.History {
-			items = append(items, ingressHistoryView(e, names))
+			items = append(items, ingressHistoryView(lang, e, names))
 		}
 		return map[string]any{"items": items, "next": p.Next}, nil
 	})
@@ -580,7 +577,7 @@ func (s *Server) handleIngressHistory(w http.ResponseWriter, r *http.Request, ws
 
 // balanceHistory: the app's balance changes on the newest history pages,
 // newest first ({at, what, by, route}).
-func balanceHistory(ctx context.Context, c sfc.Conn, tenant, app string) ([]map[string]any, error) {
+func balanceHistory(ctx context.Context, lang string, c sfc.Conn, tenant, app string) ([]map[string]any, error) {
 	q := control.IngressQuery{Tenant: tenant, App: app, Part: "history"}
 	out := []map[string]any{}
 	names := usernames(ctx, c)
@@ -591,7 +588,7 @@ func balanceHistory(ctx context.Context, c sfc.Conn, tenant, app string) ([]map[
 		}
 		for _, e := range p.History {
 			if e.Action == sfc.ActionSetIngressBalance {
-				v := ingressHistoryView(e, names)
+				v := ingressHistoryView(lang, e, names)
 				out = append(out, map[string]any{"at": v["at"], "what": v["what"], "by": v["by"], "route": e.Route})
 			}
 		}

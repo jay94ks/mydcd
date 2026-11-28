@@ -37,7 +37,7 @@ func TestWatchRecordsCertificateBook(t *testing.T) {
 		t.Fatal("certificate refs", got)
 	}
 	c, _ := f.p.Certificates(f.s)
-	f.apply("admin", "add-domain", c.Revision, DomainChange{"shop.example"}, state.Applied)
+	f.apply("admin", "add-domain", c.Revision, DomainChange{Name: "shop.example"}, state.Applied)
 	two, _ := read()
 	got = WatchDiff(one, two)
 	// The new domain links the certificate, so both change.

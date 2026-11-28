@@ -47,7 +47,7 @@ Answer with one JSON object and nothing else:
 // incidentVerdict is what the AI step left for the decision.
 type incidentVerdict struct {
 	used   bool   // an assessment was made
-	failed string // the AI step was tried and failed (asks a person)
+	failed string // the AI step (its phrase code) was tried and failed (asks a person)
 }
 
 // incidentFact is one label/value fact given to the assessment.
@@ -63,7 +63,7 @@ func (s *Server) judgeIncident(ctx context.Context, ws *webSession, in *store.In
 	cfg := s.aiConfig()
 	ex := newAIExcluder(cfg.Data.ExcludeTenants)
 	if in.Tenant != "" && ex.has(in.Tenant) {
-		in.Timeline = append(in.Timeline, store.IncidentEntry{At: s.now(), Kind: "diagnose", Text: "이 작업 공간은 외부 AI로 보내지 않게 설정되어 규칙으로만 판단해요."})
+		in.Timeline = append(in.Timeline, entry(s.now(), "diagnose", ph("incident.ai-excluded")))
 		return incidentVerdict{}
 	}
 	cats := s.aiCatalogs()
@@ -76,15 +76,15 @@ func (s *Server) judgeIncident(ctx context.Context, ws *webSession, in *store.In
 	mcp, mcpUsed := s.incidentMCPReads(ctx, in, gd)
 	d, err := s.diagnoseIncident(ctx, aiCall{Role: roleDiagnosis, Username: ws.user.Username}, in, in.Candidates, recent, gd, mcp, ex)
 	if err != nil {
-		return s.incidentAIFailed(in, "진단", err)
+		return s.incidentAIFailed(in, "incident-step.diagnosis", err)
 	}
 	res := d.res
 	if res.Fallback {
 		in.Fallback = true
 	}
-	inputs := []string{"규칙", "최근 신호", "임시 조치 후보"}
+	inputs := []string{"incident-input.rules", "incident-input.signals", "incident-input.candidates"}
 	if gd.text != "" {
-		inputs = append(inputs, "행동 지침")
+		inputs = append(inputs, "incident-input.guides")
 	}
 	inputs = append(inputs, mcpUsed...)
 	in.Timeline = append(in.Timeline, store.IncidentEntry{At: s.now(), Kind: "diagnose", Text: d.hypothesis, Model: res.Model.Provider + "/" + res.Model.Model,
@@ -103,7 +103,7 @@ func (s *Server) judgeIncident(ctx context.Context, ws *webSession, in *store.In
 		{Label: "대상", Value: incidentWhere(in)}, {Label: "감지", Value: in.Rule}, {Label: "신호 수", Value: fmt.Sprint(in.Signals)},
 		{Label: "되돌릴 수 있음", Value: map[bool]string{true: "예", false: "아니오"}[actionReversible(&a)]}}
 	if a.Note != "" {
-		rows = append(rows, incidentFact{Label: "내용", Value: a.Note})
+		rows = append(rows, incidentFact{Label: "내용", Value: actionNote(langKorean, &a)})
 	}
 	if len(gd.critical) > 0 {
 		rows = append(rows, incidentFact{Label: "지침의 중요 사항", Value: oneLine(strings.Join(gd.critical, "; "), 600)})
@@ -118,7 +118,7 @@ func (s *Server) judgeIncident(ctx context.Context, ws *webSession, in *store.In
 	res, err = s.aiGenerate(ctx, aiCall{Role: roleImpact, Username: ws.user.Username}, ai.Request{System: incidentImpactSystem,
 		CacheKey: "sfc-impact-" + incidentPromptVersion, Messages: []ai.Message{{Role: "user", Text: string(body)}}})
 	if err != nil {
-		return s.incidentAIFailed(in, "영향 평가", err)
+		return s.incidentAIFailed(in, "incident-step.assessment", err)
 	}
 	var grade struct {
 		Level       string   `json:"level"`
@@ -129,7 +129,7 @@ func (s *Server) judgeIncident(ctx context.Context, ws *webSession, in *store.In
 		Reasons     []string `json:"reasons"`
 	}
 	if !decodeModelJSON(res.Text, &grade) || (grade.Level != impactLow && grade.Level != impactMedium && grade.Level != impactHigh) {
-		return s.incidentAIFailed(in, "영향 평가", errors.New("format"))
+		return s.incidentAIFailed(in, "incident-step.assessment", errors.New("format"))
 	}
 	if res.Fallback {
 		in.Fallback = true
@@ -153,21 +153,23 @@ func (s *Server) judgeIncident(ctx context.Context, ws *webSession, in *store.In
 			reasons = append(reasons, oneLine(r, 200))
 		}
 	}
-	floorWhy := "임시 조치 목록의 규칙 하한"
-	policy := "최종 등급 = 규칙 하한과 평가 중 높은 쪽"
+	// The floor reason and the policy are text codes, made into words when
+	// read (assessmentIn); facts keep the Korean the AI was given.
+	policy := []store.Phrase{ph("incident-assess.policy")}
 	if unsure {
-		policy += fmt.Sprintf(", 신뢰도 %.2f < %.1f라 한 단계 올림", grade.Confidence, threshold)
+		policy = append(policy, ph("incident-assess.unsure", "confidence", fmt.Sprintf("%.2f", grade.Confidence), "threshold", fmt.Sprintf("%.1f", threshold)))
 	}
 	if sameProvider {
-		policy += ", 진단과 같은 공급자로 평가"
+		policy = append(policy, ph("incident-assess.same-provider"))
 	}
 	assess := map[string]any{"provider": res.Model.Provider, "model": res.Model.Model, "facts": rows, "level": grade.Level, "reversible": grade.Reversible,
 		"blast": grade.BlastRadius, "dataRisk": grade.DataRisk, "confidence": grade.Confidence, "reasons": reasons,
-		"floor": map[string]string{"level": floor, "reason": floorWhy}, "final": final, "policy": policy, "fallback": res.Fallback, "sameProvider": sameProvider}
+		"floor": map[string]string{"level": floor, "reason": "incident-assess.floor"}, "final": final, "policyText": policy, "fallback": res.Fallback, "sameProvider": sameProvider}
 	in.Assessment, _ = json.Marshal(assess)
 	in.Mitigation, in.Impact = a.ID, final
-	in.Timeline = append(in.Timeline, store.IncidentEntry{At: s.now(), Kind: "assess", Text: fmt.Sprintf("평가 %s, 규칙 하한 %s → 최종 %s", impactWord(grade.Level), impactWord(floor), impactWord(final)),
-		Model: res.Model.Provider + "/" + res.Model.Model, Inputs: []string{"조치 정의", "수집한 사실"}})
+	e := entry(s.now(), "assess", with(with(with(ph("incident.assessed"), "level", impactPhrase(grade.Level)), "floor", impactPhrase(floor)), "final", impactPhrase(final)))
+	e.Model, e.Inputs = res.Model.Provider+"/"+res.Model.Model, []string{"incident-input.action", "incident-input.facts"}
+	in.Timeline = append(in.Timeline, e)
 	return incidentVerdict{used: true}
 }
 
@@ -186,7 +188,7 @@ func (s *Server) diagnoseIncident(ctx context.Context, call aiCall, in *store.In
 	cfg := s.aiConfig()
 	rows := make([]map[string]string, 0, len(cands))
 	for _, c := range cands {
-		rows = append(rows, map[string]string{"action": c.ID, "label": c.Label, "note": c.Note})
+		rows = append(rows, map[string]string{"action": c.ID, "label": c.Label, "note": actionNote(langKorean, &c)})
 	}
 	sigs := []map[string]string{}
 	for _, x := range recent {
@@ -237,8 +239,8 @@ func (s *Server) incidentAIFailed(in *store.Incident, step string, err error) in
 	if err.Error() == "format" {
 		code = "format"
 	}
-	in.Timeline = append(in.Timeline, store.IncidentEntry{At: s.now(), Kind: "notify", Text: step + "에 실패해 자동 실행하지 않고 승인을 요청해요 (" + code + ")."})
-	return incidentVerdict{failed: step + " 실패"}
+	in.Timeline = append(in.Timeline, entry(s.now(), "notify", with(ph("incident.ai-failed", "code", code), "step", ph(step))))
+	return incidentVerdict{failed: step}
 }
 
 // decodeModelJSON reads the first JSON object of a model's answer (it may

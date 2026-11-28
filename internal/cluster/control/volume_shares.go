@@ -164,7 +164,9 @@ func (p Policy) VolumeRemoteGrant(s state.State, home, peer [32]byte, scope volu
 		if g.Consumer.ID != id || !g.Consumer.Remote() {
 			continue
 		}
-		if !p.remoteRunner(s, peer, scope, g.Consumer) || e.State.CheckActivation(g.Consumer) != nil {
+		// A removed or retired runner keeps no access, even while its old
+		// key still resolves: the home fences it and releases the consumer.
+		if !p.remoteRunner(s, peer, scope, g.Consumer) || p.runnerGone(s, g.Consumer) || e.State.CheckActivation(g.Consumer) != nil {
 			return volumes.Consumer{}, volumes.NativeReady{}, access.ErrDenied
 		}
 		if err := p.canUseFixedVolume(s, c, g.Principal, e); err != nil {

@@ -111,7 +111,7 @@ const defaultProps = (kind: EdgeKind, to: GNode): GEdge['props'] => {
     case 'secret':
       return { mode: 'file', envName: '' };
     case 'route':
-      return { path: '/', port: to.service?.ports[0]?.split(':').pop()?.split('/')[0] ?? '', gateway: 'local' };
+      return { path: '/', port: to.service?.ports[0]?.split(':').pop()?.split('/')[0] ?? '', node: to.service?.node ?? '', gateway: 'external' };
     case 'network':
       return { alias: '' };
     default:
@@ -482,7 +482,7 @@ export default function GraphEditor({
           {selNode ? (
             <NodePanel key={selNode.id} n={selNode} graph={graph!} choices={choices} readOnly={readOnly} onChange={(p) => updateNode(selNode.id, p)} />
           ) : selEdge ? (
-            <EdgePanel key={selEdge.id} e={selEdge} graph={graph!} readOnly={readOnly} onChange={(p) => updateEdge(selEdge.id, p)} />
+            <EdgePanel key={selEdge.id} e={selEdge} graph={graph!} nodes={choices.nodes} readOnly={readOnly} onChange={(p) => updateEdge(selEdge.id, p)} />
           ) : (
             <div className="small muted">
               <p style={{ marginTop: 0 }}>블록이나 선을 누르면 속성을 고칩니다.</p>
@@ -599,7 +599,7 @@ function NodePanel({ n, graph, choices, readOnly, onChange }: { n: GNode; graph:
   );
 }
 
-function EdgePanel({ e, graph, readOnly, onChange }: { e: GEdge; graph: AppGraph; readOnly: boolean; onChange: (p: GEdge['props']) => void }) {
+function EdgePanel({ e, graph, nodes, readOnly, onChange }: { e: GEdge; graph: AppGraph; nodes: string[]; readOnly: boolean; onChange: (p: GEdge['props']) => void }) {
   const from = graph.nodes.find((n) => n.id === e.from)!;
   const to = graph.nodes.find((n) => n.id === e.to)!;
   const p = e.props;
@@ -655,11 +655,20 @@ function EdgePanel({ e, graph, readOnly, onChange }: { e: GEdge; graph: AppGraph
           <Field label="서비스 포트">
             <input value={p.port ?? ''} disabled={readOnly} onChange={(x) => onChange({ port: x.target.value })} style={{ width: 100 }} />
           </Field>
+          <Field label="여는 서버" hint="이 경로를 받는 게이트웨이가 있는 서버">
+            <select value={p.node ?? ''} disabled={readOnly} onChange={(x) => onChange({ node: x.target.value })}>
+              <option value="">고르세요</option>
+              {[...new Set([...nodes, ...(p.node ? [p.node] : [])])].map((x) => (
+                <option key={x} value={x}>
+                  {x}
+                </option>
+              ))}
+            </select>
+          </Field>
           <Field label="게이트웨이">
-            <select value={p.gateway ?? 'local'} disabled={readOnly} onChange={(x) => onChange({ gateway: x.target.value as 'local' | 'external' | 'both' })}>
-              <option value="local">로컬망</option>
+            <select value={p.gateway ?? 'external'} disabled={readOnly} onChange={(x) => onChange({ gateway: x.target.value as 'local' | 'external' })}>
               <option value="external">외부망</option>
-              <option value="both">둘 다</option>
+              <option value="local">로컬망</option>
             </select>
           </Field>
         </>

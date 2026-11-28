@@ -61,7 +61,9 @@ func ingressHasService(i IngressDeclaration, service string) bool {
 	return false
 }
 func validateIngressDeclaration(c Compose, i IngressDeclaration) error {
-	if i.Runtime.validate() != nil || !identifier(i.Node) || len(i.Listeners) < 1 || len(i.Listeners) > 16 || len(i.Routes) > 256 {
+	// No listeners: the route gateways' shared listeners on the node, filled
+	// when planning (GatewayListeners).
+	if i.Runtime.validate() != nil || !identifier(i.Node) || len(i.Listeners) > 16 || len(i.Routes) > 256 {
 		return inputError("INVALID_INGRESS", "x-sfc.ingress")
 	}
 	if len(i.Routes) > 0 && i.Host != "" {

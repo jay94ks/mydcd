@@ -20,6 +20,7 @@ import { fmtBytes } from '../lib/format';
 import { eulReul } from '../lib/josa';
 import { usePoll } from '../lib/usePoll';
 import { agoMs, NEED, sendAndWait } from './ImageBuilds';
+import { serverMeasured } from '../lib/liveTopics';
 
 /** BuildKit 기록 종류 → 화면 말 */
 const KIND: Record<string, string> = {
@@ -97,7 +98,7 @@ export function BuildCacheTab() {
   const runningOn = (s: BuildCacheScope) => jobs.find((b) => b.context === s.context && b.node === s.node && (b.phase === 'running' || b.phase === 'queued'));
   const cleaningOf = (s: BuildCacheScope) => (k?.cleaning ?? []).find((c) => c.cache === s.cache && c.node === s.node && active(c));
   const root = scopes[0]?.root;
-  const diskQ = usePoll((s) => (isAdmin && cur ? nodeDisks(cur, s) : Promise.resolve(undefined)), [cur, isAdmin], 60_000);
+  const diskQ = usePoll((s) => (isAdmin && cur ? nodeDisks(cur, s) : Promise.resolve(undefined)), [cur, isAdmin], 60_000, serverMeasured(cur));
   const disk = diskQ.data?.find((d) => d.roots.includes(root));
   const diskFree = disk ? (disk.free ?? (disk.total !== undefined && disk.used !== undefined ? disk.total - disk.used : undefined)) : undefined;
   const no = canDeploy ? undefined : NEED;

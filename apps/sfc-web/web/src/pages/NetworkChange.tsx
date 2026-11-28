@@ -25,6 +25,7 @@ import { usePhone } from '../lib/viewport';
 import { MDetail, MSec, useReadOnlyTop } from '../mobile/ReadOnly';
 import { ResourceUsersDialog } from './ResourceUsers';
 import { bridgeEnds } from './Bridges';
+import { networkStateLive } from '../lib/liveTopics';
 
 type Member = DNetworkChange['members'][number];
 type Tone = 'ok' | 'pr' | 'wa' | 'er' | 'un';
@@ -99,7 +100,7 @@ export function NetworkChangePage() {
 function MNetworkChange() {
   const { name = '' } = useParams();
   const { tenant } = useTenantRole();
-  const q = usePoll((s) => (tenant ? networkChange(tenant, name, s) : Promise.resolve(undefined)), [tenant, name], DEFAULT_POLL_MS);
+  const q = usePoll((s) => (tenant ? networkChange(tenant, name, s) : Promise.resolve(undefined)), [tenant, name], DEFAULT_POLL_MS, networkStateLive(tenant));
   useReadOnlyTop(`${name} 변경`, tenant ? `망 · 작업 공간 ${tenant}` : '망', '계획·비우기·사용 중지 확인·적용·취소는 넓은 화면에서', [name, tenant]);
   if (!tenant) return <NoTenant />;
   return (
@@ -146,7 +147,7 @@ function MNetworkChange() {
 function DesktopNetworkChange() {
   const { name = '' } = useParams();
   const { tenant, canDeploy } = useTenantRole();
-  const q = usePoll((s) => (tenant ? networkChange(tenant, name, s) : Promise.resolve(undefined)), [tenant, name], DEFAULT_POLL_MS);
+  const q = usePoll((s) => (tenant ? networkChange(tenant, name, s) : Promise.resolve(undefined)), [tenant, name], DEFAULT_POLL_MS, networkStateLive(tenant));
   const [targets, setTargets] = useState<Record<string, string>>({});
   const [dlg, setDlg] = useState<'plan' | 'drain' | 'cancel' | 'commit' | 'reconf'>();
   const [fence, setFence] = useState<string>();
@@ -571,7 +572,7 @@ export function DeleteNetworkDialog({ tenant, net, bridges = [], onClose, onDone
   const [error, setError] = useState<unknown>();
   const ids = useRef<Record<string, string>>({});
   const busy = useRef(false);
-  const q = usePoll((s) => networkChange(tenant, net.name, s), [tenant, net.name], DEFAULT_POLL_MS);
+  const q = usePoll((s) => networkChange(tenant, net.name, s), [tenant, net.name], DEFAULT_POLL_MS, networkStateLive(tenant));
   const base = networkPath(tenant, net.name);
   // 마지막 서버가 빠지면 망 행이 없어진다(404)
   const gone = q.error instanceof ApiError && q.error.status === 404;

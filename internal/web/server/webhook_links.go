@@ -202,28 +202,24 @@ func checkIngressLink(l *store.WebhookLink, h *store.Webhook) string {
 	return ""
 }
 
-// ingressCondition is the link's condition in words ("" without one).
-func ingressCondition(l *store.WebhookLink) string {
+// ingressCondition is the link's condition in words in lang ("" without
+// one).
+func ingressCondition(lang string, l *store.WebhookLink) string {
 	if l.Point != "ingress" || l.Threshold == 0 && l.Minutes == 0 {
 		return ""
 	}
-	what := "5xx"
+	what, unit := ph("ingress-cond.5xx"), "%"
 	if slices.Contains(l.Events, "latency") {
-		what = "지연 p95"
+		what, unit = ph("ingress-cond.latency"), "ms"
 	}
+	cond := with(ph("ingress-cond.threshold"), "what", what)
 	if l.Threshold != 0 {
-		unit := "%"
-		if what != "5xx" {
-			unit = "ms"
-		}
-		what += fmt.Sprintf(" %g%s 넘게", l.Threshold, unit)
-	} else {
-		what += " 기준 넘게"
+		cond = with(ph("ingress-cond.value", "value", fmt.Sprintf("%g", l.Threshold), "unit", unit), "what", what)
 	}
 	if l.Minutes != 0 {
-		what += fmt.Sprintf(" %d분", l.Minutes)
+		cond = with(ph("ingress-cond.minutes", "minutes", fmt.Sprint(l.Minutes)), "cond", cond)
 	}
-	return what
+	return render(lang, cond)
 }
 
 // lastLinkDelivery: the newest delivery sent for link id ({at, status?,
@@ -246,13 +242,13 @@ func (s *Server) lastLinkDelivery(webhook, id string) map[string]any {
 	return nil
 }
 
-func (s *Server) linkView(ctx context.Context, ws *webSession, l *store.WebhookLink, role string) map[string]any {
+func (s *Server) linkView(ctx context.Context, lang string, ws *webSession, l *store.WebhookLink, role string) map[string]any {
 	raw, _ := json.Marshal(l)
 	var v map[string]any
 	_ = json.Unmarshal(raw, &v)
 	delete(v, "createdBy")
 	v["createdBy"], v["role"] = l.CreatedBy, role
-	if c := ingressCondition(l); c != "" {
+	if c := ingressCondition(lang, l); c != "" {
 		v["condition"] = c
 	}
 	if last := s.lastLinkDelivery(l.Webhook, l.ID); last != nil {
@@ -305,6 +301,7 @@ func (s *Server) handleListWebhookLinks(w http.ResponseWriter, r *http.Request, 
 	ctx, cancel := s.callCtx(r)
 	defer cancel()
 	items := []map[string]any{}
+	lang := s.requestLang(r, ws)
 	for _, l := range all {
 		if !linkRead(acc, l.Scope) || q.Get("point") != "" && l.Point != q.Get("point") || q.Get("tenant") != "" && l.Scope.Tenant != q.Get("tenant") ||
 			q.Get("app") != "" && l.Scope.App != q.Get("app") {
@@ -314,7 +311,7 @@ func (s *Server) handleListWebhookLinks(w http.ResponseWriter, r *http.Request, 
 		if h, err := s.opt.Store.GetWebhook(l.Webhook); err == nil {
 			role = h.Role
 		}
-		items = append(items, s.linkView(ctx, ws, l, role))
+		items = append(items, s.linkView(ctx, lang, ws, l, role))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"items": items})
 }
@@ -384,8 +381,8 @@ func (s *Server) handlePutWebhookLink(w http.ResponseWriter, r *http.Request, ws
 	ctx, cancel := s.callCtx(r)
 	defer cancel()
 	if l.Kind == "pre-sync" {
-		if msg := s.preSyncReady(ctx, ws, l); msg != "" {
-			writeError(w, http.StatusUnprocessableEntity, "cd-mode", msg)
+		if code := s.preSyncReady(ctx, ws, l); code != "" {
+			writeError(w, http.StatusUnprocessableEntity, "cd-mode", text(s.requestLang(r, ws), code, nil))
 			return
 		}
 	}
@@ -411,7 +408,7 @@ func (s *Server) handlePutWebhookLink(w http.ResponseWriter, r *http.Request, ws
 	if cur == nil {
 		status = http.StatusCreated
 	}
-	writeJSON(w, status, s.linkView(ctx, ws, l, h.Role))
+	writeJSON(w, status, s.linkView(ctx, s.requestLang(r, ws), ws, l, h.Role))
 }
 
 func (s *Server) webhookRole(name string) string {
@@ -421,7 +418,8 @@ func (s *Server) webhookRole(name string) string {
 	return ""
 }
 
-// preSyncReady: the app's CD waits for approval ("" = fine).
+// preSyncReady: the app's CD waits for approval ("" = fine, else the
+// text code of what to change).
 func (s *Server) preSyncReady(ctx context.Context, ws *webSession, l *store.WebhookLink) string {
 	var cd *sfc.AppCD
 	err := ws.do(ctx, func(ctx context.Context, c sfc.Conn) error {
@@ -430,10 +428,10 @@ func (s *Server) preSyncReady(ctx context.Context, ws *webSession, l *store.Webh
 		return err
 	})
 	if err != nil {
-		return "자동 배포가 켜진 앱이어야 합니다"
+		return "cd-link.needs-cd"
 	}
 	if cd.Mode != "manual" {
-		return "자동 배포를 '승인 후 배포'로 바꿔야 합니다"
+		return "cd-link.needs-manual"
 	}
 	return ""
 }

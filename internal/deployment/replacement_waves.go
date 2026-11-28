@@ -15,6 +15,11 @@ type ReplacementWave struct {
 	Node    string
 	Tasks   []string
 	Targets []ObjectRef
+	// Surge starts the new generation of each Task next to the old one on
+	// the same server and stops the old one only after the new one is
+	// healthy and the listeners drained it (devel/design/zero-downtime-apply.md).
+	// Such a wave holds Tasks only.
+	Surge bool `json:",omitempty"`
 }
 
 type ReplacementPlan struct {
@@ -51,6 +56,9 @@ func (p ReplacementPlan) Valid(tenant, app string) bool {
 			return false
 		}
 		nodes[wave.Node] = true
+		if wave.Surge && len(wave.Tasks) == 0 {
+			return false
+		}
 		inWave := map[string]bool{}
 		for index, ref := range wave.Targets {
 			if ref.Generation == 0 || ref.Revision < ref.Generation || sources[ref.Key] || index > 0 && wave.Targets[index-1].Key >= ref.Key {
@@ -62,6 +70,11 @@ func (p ReplacementPlan) Valid(tenant, app string) bool {
 					scoped = true
 					break
 				}
+			}
+			if wave.Surge {
+				_, task := ResourceIDFromKey("task", tenant, app, ref.Key)
+				_, inputs := ResourceIDFromKey("inputs", tenant, app, ref.Key)
+				scoped = scoped && (task == nil || inputs == nil)
 			}
 			if !scoped || len(sources) >= 1024 {
 				return false
@@ -84,7 +97,7 @@ func (p ReplacementPlan) Valid(tenant, app string) bool {
 // and the target graph. It neither edits source nor fabricates an intermediate
 // all-new app, allocation, stopped writer, or successful Task observation.
 func (a Inventory) ReplacementPlan(b Blueprint, prune bool) (*ReplacementPlan, error) {
-	return a.replacementPlan(b, prune, false)
+	return a.replacementPlan(b, prune, false, false)
 }
 
 // DeployReplacementPlan is ReplacementPlan for an explicit app deploy: an
@@ -93,10 +106,16 @@ func (a Inventory) ReplacementPlan(b Blueprint, prune bool) (*ReplacementPlan, e
 // no stop set for it and refused every such edit as TRANSITION_REQUIRED.
 // CD and drain keep ReplacementPlan; their own transitions cover that case.
 func (a Inventory) DeployReplacementPlan(b Blueprint, prune bool) (*ReplacementPlan, error) {
-	return a.replacementPlan(b, prune, true)
+	return a.replacementPlan(b, prune, true, false)
 }
 
-func (a Inventory) replacementPlan(b Blueprint, prune, edits bool) (*ReplacementPlan, error) {
+// DeploySurgePlan is DeployReplacementPlan where every server supports
+// FeatureTaskSurge: waves whose Tasks may run twice are marked Surge.
+func (a Inventory) DeploySurgePlan(b Blueprint, prune bool) (*ReplacementPlan, error) {
+	return a.replacementPlan(b, prune, true, true)
+}
+
+func (a Inventory) replacementPlan(b Blueprint, prune, edits, surge bool) (*ReplacementPlan, error) {
 	changes, err := a.Changes(b, prune)
 	if err != nil {
 		return nil, err
@@ -296,6 +315,15 @@ func (a Inventory) replacementPlan(b Blueprint, prune, edits bool) (*Replacement
 				result.BlockedCode, result.Blocker, result.Waves = "ROLLING_DEPENDENCY_CONFLICT", producer.Key, nil
 				return result, nil
 			}
+		}
+	}
+	if surge {
+		byKey := map[string]Change{}
+		for _, change := range changes {
+			byKey[change.Key] = change
+		}
+		for i := range result.Waves {
+			result.Waves[i].Surge = a.surgeWave(result.Waves[i], steps, byKey)
 		}
 	}
 	return result, nil

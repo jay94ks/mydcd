@@ -20,7 +20,7 @@ describe('단독 컨테이너 정의', () => {
   });
 
   it('원문 → 폼 → 원문이 같다(폼에 있는 칸)', () => {
-    const f = { ...emptyStandalone(), name: 'adminer', restart: 'always' as const, image: 'adminer:4.8', ports: [{ port: '8080', proto: 'tcp' as const, expose: false, host: '', publish: '' }, { port: '53', proto: 'udp' as const, expose: true, host: '127.0.0.1', publish: '15353' }], routes: [{ host: 'adminer.shop.example', path: '/', port: '8080', gateway: 'local' as const, cert: 'auto' as const }], env: [{ key: 'A', value: '1' }], secrets: [{ name: 'db-password', target: '/run/secrets/db', mode: '0400' }], health: 'cmd' as const, healthCmd: 'wget -q localhost', healthInterval: '30s' };
+    const f = { ...emptyStandalone(), name: 'adminer', restart: 'always' as const, image: 'adminer:4.8', ports: [{ port: '8080', proto: 'tcp' as const, expose: false, host: '', publish: '' }, { port: '53', proto: 'udp' as const, expose: true, host: '127.0.0.1', publish: '15353' }], routes: [{ node: 'node-b', host: 'adminer.shop.example', path: '/', port: '8080', gateway: 'local' as const }], env: [{ key: 'A', value: '1' }], secrets: [{ name: 'db-password', target: '/run/secrets/db', mode: '0400' }], health: 'cmd' as const, healthCmd: 'wget -q localhost', healthInterval: '30s' };
     const y = standaloneToYaml(f);
     const back = standaloneFromYaml(y);
     if (!('form' in back)) throw new Error('parse');
@@ -52,11 +52,11 @@ describe('단독 컨테이너 정의', () => {
   });
 
   it('앱 서비스 가져오기: 저장소는 읽기 전용, 외부 접속은 고를 때만', () => {
-    const app = YAML.stringify({ name: 'php-shop', services: { web: { image: 'shop/web:v14', command: ['php-fpm'], depends_on: ['db'], networks: { 'shop-net': {} }, volumes: ['uploads:/srv/uploads'], ports: ['8080'], deploy: { replicas: 2 } } }, 'x-sfc': { ingress: { routes: [{ host: 'shop.example', service: 'web', port: 8080 }] } } });
+    const app = YAML.stringify({ name: 'php-shop', services: { web: { image: 'shop/web:v14', command: ['php-fpm'], depends_on: ['db'], networks: { 'shop-net': {} }, volumes: ['uploads:/srv/uploads'], ports: ['8080'], deploy: { replicas: 2 } } }, 'x-sfc': { ingress: [{ node: 'node-a', host: 'shop.example', service: 'web', port: 8080 }] } });
     const f = importAppService(emptyStandalone(), app, 'php-shop', 'web', { imageCmd: true, netEnv: true, volumes: true, secrets: true, ingress: false });
     expect(f).toMatchObject({ image: 'shop/web:v14', command: 'php-fpm', networks: [{ name: 'shop-net', alias: '' }], volumes: [{ name: 'uploads', target: '/srv/uploads', readOnly: true }], ports: [], routes: [], importedFrom: { app: 'php-shop', service: 'web', items: ['imageCmd', 'netEnv', 'volumes', 'secrets'] } });
     const g = importAppService(emptyStandalone(), app, 'php-shop', 'web', { imageCmd: true, netEnv: false, volumes: false, secrets: false, ingress: true });
-    expect(g.routes).toEqual([{ host: 'shop.example', path: '/', port: '8080', gateway: 'local', cert: 'auto' }]);
+    expect(g.routes).toEqual([{ node: 'node-a', host: 'shop.example', path: '/', port: '8080', gateway: 'external' }]);
     expect(standaloneToObject({ ...g, name: 'w' })).not.toHaveProperty('depends_on');
   });
 });

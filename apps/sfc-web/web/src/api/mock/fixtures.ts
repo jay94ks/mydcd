@@ -41,7 +41,7 @@ export const members: D.DMember[] = [
 export const summaries: D.DNodeSummary[] = [
   { node: 'node-a', build: { enabled: true }, status: 'ready', state: 'ready', ready: true, stale: false, role: 'leader', cpuPercent: 42, memUsed: 19.5 * GiB, memTotal: 32 * GiB, diskUsed: 830 * GiB, diskTotal: 1000 * GiB, containers: 11, observedAt: agoSec(4),
     clusterApps: [{ name: 'web', image: 'sfc/web', version: '0.9.0', ports: [{ name: 'web', port: 8080, protocol: 'tcp' }, { name: 'acme', port: 8081, protocol: 'tcp' }, { name: 'direct', port: 8082, protocol: 'tcp' }], digest: 'sha256:3b7e0c4d9a1f2e3d4c5b6a7980f1e2d3c4b5a6978877665544332211009988d1', state: 'running', address: '10.254.0.11', restarts: 0, control: 'node-config', actions: [] }] },
-  { node: 'node-b', build: { enabled: false, reason: 'ENGINE_BUILD_OFF' }, status: 'ready', state: 'ready', ready: true, stale: false, role: 'voter', cpuPercent: 18, memUsed: 23 * GiB, memTotal: 32 * GiB, diskUsed: 400 * GiB, diskTotal: 1000 * GiB, containers: 12, observedAt: agoSec(5),
+  { node: 'node-b', build: { enabled: false, reason: 'ENGINE_BUILD_OFF' }, status: 'ready', state: 'ready', ready: true, stale: false, role: 'voter', cpuPercent: 18, cpuStealPercent: 7.4, memUsed: 23 * GiB, memTotal: 32 * GiB, diskUsed: 400 * GiB, diskTotal: 1000 * GiB, containers: 12, observedAt: agoSec(5),
     clusterApps: [{ name: 'web', image: 'sfc/web', version: '0.9.0', ports: [], state: 'refused', reason: 'already-running', runningOn: 'node-a', address: '10.254.0.11', restarts: 0, control: 'node-config', actions: [] }] },
   // 데몬 #373: 서버 단계(pending)가 그대로 오고 관측 숫자는 없다
   { node: 'node-c', build: { enabled: false, reason: 'UNKNOWN' }, status: 'pending', state: 'pending', ready: false, stale: true, role: 'non-voter', containers: 0, observedAt: agoSec(40),
@@ -87,6 +87,8 @@ export const storageRoots: D.DStorageRoot[] = [
   { node: 'node-b', id: 'data1', path: '/srv/sfc/data1', tenants: ['shop', 'internal', 'lab'], generation: 1, revision: 3, draining: false },
   { node: 'node-b', id: 'backup', path: '/srv/sfc/backup', tenants: ['shop'], capacityBytes: 200 * 1024 ** 3, generation: 1, revision: 2, draining: false },
   { node: 'node-c', id: 'build-c', path: '/srv/sfc/build-c', tenants: ['shop'], generation: 1, revision: 1, draining: false },
+  // 느린 저장소, node-a의 기본 보관 위치(#920)
+  { node: 'node-a', id: 'slow1', path: '/mnt/pool1/archive', tenants: ['shop'], generation: 1, revision: 1, draining: false, archiveDefault: true },
 ];
 
 const disk = (node: string, mount: string, device: string, fsType: string, purpose: string, total: number, used: number, storageRootID?: string): D.DNodeDisk => ({
@@ -214,12 +216,12 @@ secrets:
 export const PHP_SHOP_V14 = PHP_SHOP_V13.replace('name: php-shop\n', `name: php-shop
 x-sfc:
   ingress:
-    routes:
-      - host: shop.example.com
-        prefix: /
-        service: web
-        port: 8080
-        gateway: external
+    - node: node-b
+      host: shop.example.com
+      prefix: /
+      service: web
+      port: 8080
+      gateway: external
 `).replace(
   'networks:\n  shop-net:\n    external: true',
   `  worker:
@@ -284,7 +286,7 @@ export const sources: Record<string, MockSource[]> = {
   ],
   'shop/mysql': [{ version: 3, yaml: MYSQL_V3, submitter: 'alice', operation: 'up-91c2', status: 'running', acceptedAt: agoSec(240) }],
   'shop/worker-batch': [{ version: 5, yaml: simpleApp('worker-batch', 'shop', 'worker', 2), submitter: 'cd', operation: 'cd-77aa', status: 'succeeded', acceptedAt: agoSec(86400) }],
-  'internal/grafana': [{ version: 2, yaml: simpleApp('grafana', 'internal', 'grafana', 1, 'node-a').replace('name: grafana\n', 'name: grafana\nx-sfc:\n  ingress:\n    routes:\n      - host: grafana.internal\n        prefix: /\n        service: grafana\n        port: 3000\n        gateway: local\n').replace('    deploy:', '    expose: ["3000"]\n    deploy:'), submitter: 'carol', operation: 'up-ff01', status: 'succeeded', acceptedAt: agoSec(86400 * 6) }],
+  'internal/grafana': [{ version: 2, yaml: simpleApp('grafana', 'internal', 'grafana', 1, 'node-a').replace('name: grafana\n', 'name: grafana\nx-sfc:\n  ingress:\n    - node: node-a\n      host: grafana.internal\n      prefix: /\n      service: grafana\n      port: 3000\n      gateway: local\n').replace('    deploy:', '    expose: ["3000"]\n    deploy:'), submitter: 'carol', operation: 'up-ff01', status: 'succeeded', acceptedAt: agoSec(86400 * 6) }],
   'lab/notebook': [{ version: 1, yaml: simpleApp('notebook', 'lab', 'jupyter', 1), submitter: 'alice', operation: 'up-0001', status: 'succeeded', acceptedAt: agoSec(86400 * 9) }],
   // 장애 기록·외부 접속 목업이 가리키는 앱(shop-api·billing·metrics)도 실제로 있게 둔다
   'shop/shop-api': [{ version: 16, yaml: simpleApp('shop-api', 'shop', 'api', 2, 'node-b'), submitter: 'cd', operation: 'cd-5b20', status: 'succeeded', acceptedAt: agoSec(150 * 60) }],
@@ -304,19 +306,25 @@ export const apps: D.DAppView[] = [
     operation: opsum('cd-77aa', 'succeeded', 86400, 'cd'),
     claims: 0,
     health: 'degraded',
+    healthReason: { code: 'TASK_EXITED', key: 'task/worker/1', kind: 'task', name: 'worker', node: 'node-b', exit: 1 },
     observedAt: agoSec(6),
     cd: { revision: 3, repository: 'https://git.shop.internal/ops/worker-batch.git', branch: 'main', mode: 'manual', paused: false, running: '4e1a9c2', candidate: 'b77d210', candidateDigest: 'b77d210'.padEnd(64, '0') },
   },
   { tenant: 'internal', app: 'grafana', deployment: 'main', revision: 2, operation: opsum('up-ff01', 'succeeded', 86400 * 6, 'carol'), claims: 1, health: 'healthy', observedAt: agoSec(7) },
   { tenant: 'lab', app: 'notebook', deployment: 'main', revision: 1, operation: opsum('up-0001', 'succeeded', 86400 * 9), claims: 0, health: 'healthy', observedAt: agoSec(8) },
-  { tenant: 'shop', app: 'shop-api', deployment: 'main', revision: 16, operation: opsum('cd-5b20', 'succeeded', 150 * 60, 'cd'), claims: 2, health: 'degraded', observedAt: agoSec(6) },
-  { tenant: 'shop', app: 'billing', deployment: 'main', revision: 9, operation: opsum('up-b909', 'succeeded', 27 * 3600, 'bob'), claims: 1, health: 'degraded', observedAt: agoSec(6) },
+  { tenant: 'shop', app: 'shop-api', deployment: 'main', revision: 16, operation: opsum('cd-5b20', 'succeeded', 150 * 60, 'cd'), claims: 2, health: 'degraded', healthReason: { code: 'REPLICAS_PARTIAL', kind: 'task', name: 'api', node: 'node-b' }, observedAt: agoSec(6) },
+  { tenant: 'shop', app: 'billing', deployment: 'main', revision: 9, operation: opsum('up-b909', 'succeeded', 27 * 3600, 'bob'), claims: 1, health: 'degraded', healthReason: { code: 'TASK_FAILED', kind: 'task', name: 'billing-api', node: 'node-a', failure: 'IMAGE_NOT_FOUND' }, observedAt: agoSec(6) },
   { tenant: 'internal', app: 'metrics', deployment: 'main', revision: 4, operation: opsum('up-m004', 'succeeded', 86400 * 5, 'carol'), claims: 1, health: 'healthy', observedAt: agoSec(7) },
 ];
 
 export const archived: D.DArchived[] = [
   { key: 'shop~analytics~1795000000', tenant: 'shop', app: 'analytics', digest: '5e0b7c1d9a2f4e6b8c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b', version: 6, volumes: ['analytics-data'], downBy: 'alice', downAt: agoIso(86400 * 3), downOp: 'down-a1', yaml: simpleApp('analytics', 'shop', 'metabase', 1) },
   { key: 'shop~old-blog~1794000000', tenant: 'shop', app: 'old-blog', digest: 'aa11bb22cc33dd44ee55ff66aa77bb88cc99dd00ee11ff22aa33bb44cc55dd66', version: 21, volumes: [], downBy: 'bob', downAt: agoIso(86400 * 11), downOp: 'down-b2', yaml: simpleApp('old-blog', 'shop', 'wordpress', 1) },
+  // 데이터 보관(#920): 원래 자리 · 보관됨 + 묶는 중 · 정상 종료 아님 · 저장소 없음
+  { key: 'shop~legacy-cron~1795100000', tenant: 'shop', app: 'legacy-cron', digest: '', version: 8, volumes: ['cron-cache', 'cron-logs', 'cron-state'], downBy: 'alice', downAt: agoIso(86400 * 9), downOp: 'down-c3', yaml: simpleApp('legacy-cron', 'shop', 'cron', 1) },
+  { key: 'shop~media-old~1794500000', tenant: 'shop', app: 'media-old', digest: '', version: 21, volumes: ['media-uploads', 'media-thumbs'], downBy: 'alice', downAt: agoIso(86400 * 16), downOp: 'down-m4', yaml: simpleApp('media-old', 'shop', 'media', 1, 'node-a') },
+  { key: 'shop~batch-etl~1794200000', tenant: 'shop', app: 'batch-etl', digest: '', version: 5, volumes: ['etl-db'], downBy: 'bob', downAt: agoIso(86400 * 19), downOp: 'down-e5', yaml: simpleApp('batch-etl', 'shop', 'etl', 1) },
+  { key: 'shop~old-report~1793600000', tenant: 'shop', app: 'old-report', digest: '', version: 3, volumes: [], downBy: 'bob', downAt: agoIso(86400 * 26), downOp: 'down-r6', yaml: simpleApp('old-report', 'shop', 'report', 1) },
 ];
 
 export const uploads: (D.DUpload & { tenant: string })[] = [{ tenant: 'shop', id: 'upl-55e1', app: 'analytics', deployment: 'main', revision: 4, length: 5 * (1 << 20) - 100, digest: '00'.repeat(32), missing: [3, 4] }];
@@ -364,10 +372,25 @@ export const volumeBackups: D.DVolumeBackup[] = [
   { key: 'shop/uploads/b-0919', tenant: 'shop', volume: 'uploads', id: 'b-0919', node: 'node-a', phase: 'Failed', revision: 5, bytes: 0, createdAt: Math.floor(Date.now() / 1000) - 3600 * 57, failure: 'staging limit exceeded' },
 ];
 export const volumeRestores: D.DVolumeRestore[] = [];
+/** 내린 앱 저장소 보관(#920). sfcd처럼 저장소마다 끝난 기록은 하나만 */
+export const volumeArchives: (D.DVolumeArchive & { tenant: string; volume: string })[] = [
+  { tenant: 'shop', volume: 'media-uploads', id: 'a-1113', node: 'node-a', store: 'slow1', phase: 'Archived', compression: 'zstd', maxBytes: 64 * GiB, tarBytes: 18.4 * GiB, dataBytes: 6.1 * GiB, revision: 4 },
+  { tenant: 'shop', volume: 'media-thumbs', id: 'a-1128', node: 'node-a', store: 'slow1', phase: 'Packing', compression: 'zstd', maxBytes: 64 * GiB, revision: 1 },
+  { tenant: 'shop', volume: 'etl-db', id: 'a-1120', node: 'node-b', store: 'default', phase: 'Failed', compression: 'zstd', maxBytes: 64 * GiB, failure: 'unclean-exit', revision: 2 },
+];
+/** 보관에 쓰는 두 키(클러스터 키 · 관리자 키). 하나라도 없으면 archiveReady false */
+export const archiveKeys = { cluster: true, admin: true };
 export const volumes: D.DVolume[] = [
   { key: 'vol/shop/uploads', tenant: 'shop', name: 'uploads', kind: 'shared', node: 'node-a', storage: 'data1', app: 'php-shop', revision: 5, consumers: 1, capacityBytes: 50 * GiB, usedBytes: 12 * GiB, usageObservedAt: Date.now() - 4 * 60_000, retain: true, writer: 'php-shop/web', retained: [{ moveID: 'mv-0915', node: 'node-b', state: 'retained' }] },
   { key: 'vol/shop/mysql-data', tenant: 'shop', name: 'mysql-data', kind: 'fixed', node: 'node-a', storage: 'data1', revision: 3, consumers: 1, usedBytes: 48 * GiB, usageObservedAt: Date.now() - 4 * 60_000, retain: true, writer: 'php-shop/db' },
-  { key: 'vol/shop/analytics-data', tenant: 'shop', name: 'analytics-data', kind: 'shared', node: 'node-b', storage: 'data1', revision: 2, consumers: 0, retain: true },
+  { key: 'vol/shop/analytics-data', tenant: 'shop', name: 'analytics-data', kind: 'shared', node: 'node-b', storage: 'data1', app: 'analytics', revision: 2, consumers: 0, retain: true },
+  // 내린 앱 저장소(데이터 보관 #920)
+  { key: 'vol/shop/cron-cache', tenant: 'shop', name: 'cron-cache', kind: 'shared', node: 'node-b', storage: 'data1', app: 'legacy-cron', revision: 3, consumers: 0, capacityBytes: 10 * GiB, usedBytes: 4.2 * GiB, usageObservedAt: Date.now() - 4 * 60_000, retain: true },
+  { key: 'vol/shop/cron-logs', tenant: 'shop', name: 'cron-logs', kind: 'shared', node: 'node-b', storage: 'data1', app: 'legacy-cron', revision: 2, consumers: 0, capacityBytes: 2 * GiB, usedBytes: 0.8 * GiB, usageObservedAt: Date.now() - 4 * 60_000, retain: true },
+  { key: 'vol/shop/cron-state', tenant: 'shop', name: 'cron-state', kind: 'shared', node: 'node-a', storage: 'data1', app: 'legacy-cron', revision: 2, consumers: 0, capacityBytes: GiB, usedBytes: 12 * 1024 ** 2, usageObservedAt: Date.now() - 4 * 60_000, retain: true },
+  { key: 'vol/shop/media-uploads', tenant: 'shop', name: 'media-uploads', kind: 'shared', node: 'node-a', storage: 'data1', app: 'media-old', revision: 6, consumers: 0, capacityBytes: 30 * GiB, usedBytes: 0, usageObservedAt: Date.now() - 4 * 60_000, retain: true, phase: 'Archived', archiveID: 'a-1113', archivePhase: 'Archived' },
+  { key: 'vol/shop/media-thumbs', tenant: 'shop', name: 'media-thumbs', kind: 'shared', node: 'node-a', storage: 'data1', app: 'media-old', revision: 4, consumers: 0, capacityBytes: 10 * GiB, usedBytes: 7.9 * GiB, usageObservedAt: Date.now() - 4 * 60_000, retain: true, phase: 'Archived', archiveID: 'a-1128', archivePhase: 'Packing' },
+  { key: 'vol/shop/etl-db', tenant: 'shop', name: 'etl-db', kind: 'shared', node: 'node-b', storage: 'data1', app: 'batch-etl', revision: 3, consumers: 0, capacityBytes: 20 * GiB, usedBytes: 6.5 * GiB, usageObservedAt: Date.now() - 4 * 60_000, retain: true },
   { key: 'vol/shop/registry-data', tenant: 'shop', name: 'registry-data', kind: 'fixed', node: 'node-a', storage: 'data1', revision: 2, consumers: 1, capacityBytes: 200 * GiB, usedBytes: 41 * GiB, usageObservedAt: Date.now() - 4 * 60_000, retain: true },
   { key: 'vol/shop/registry-stg-data', tenant: 'shop', name: 'registry-stg-data', kind: 'fixed', node: 'node-b', storage: 'data1', revision: 1, consumers: 0, capacityBytes: 12 * GiB, usedBytes: 2 * GiB, usageObservedAt: Date.now() - 4 * 60_000, retain: true },
   { key: 'vol/shop/sfc-web-backup', tenant: 'shop', name: 'sfc-web-backup', kind: 'fixed', node: 'node-a', storage: 'data1', revision: 1, consumers: 0, capacityBytes: 3 * GiB, usedBytes: 900 * 1024 * 1024, usageObservedAt: Date.now() - 4 * 60_000, retain: true },
@@ -554,7 +577,7 @@ export const standalone: MockStandalone[] = [
     ownerName: 'alice',
     revision: 2,
     createdAt: agoSec(20 * 86400),
-    yaml: `name: adminer\nlifetime: fixed\nrestart: always\nmode: entrypoint\nimage: docker.io/library/adminer:4.8\nnetworks: [shop-net]\nports: [8080/tcp]\nx-sfc:\n  node: node-a\n  ingress:\n    routes:\n      - {host: adminer.shop.example, path: /, port: 8080, gateway: local}\n`,
+    yaml: `name: adminer\nlifetime: fixed\nrestart: always\nmode: entrypoint\nimage: docker.io/library/adminer:4.8\nnetworks: [shop-net]\nports: [8080/tcp]\nx-sfc:\n  node: node-a\n  ingress:\n    - {node: node-a, host: adminer.shop.example, prefix: /, port: 8080, gateway: local}\n`,
   }),
   sa({
     name: 'temp-3e55',

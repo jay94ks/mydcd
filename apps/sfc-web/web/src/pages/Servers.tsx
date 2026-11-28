@@ -8,7 +8,7 @@ import { Drawer } from '../components/Drawer';
 import { useReconnectAction } from './Tunnels';
 import { ApiError } from '../api/client';
 import type { DiskView, MeshLink, NodeView, RaftView } from '../api/types';
-import { Badge, Card, Field, HelpBox, KV, PageHeader, PhaseBadge, Tile, UsageBar } from '../components/ui';
+import { Badge, Card, Field, HelpBox, KV, PageHeader, PhaseBadge, Tile, UsageBar , cpuStealText, CPU_STEAL_TIP} from '../components/ui';
 import { MutationError, OpPanel, uncertain, useMutation } from '../components/OpPanel';
 import type { OpView } from '../api/types';
 import { ErrorBand, Load } from '../components/states';
@@ -25,7 +25,7 @@ import { ContextMenu, type MenuItem } from '../components/Menu';
 import { ShellSettingsDialog, shellBlocked, useShellPolicy } from './NodeShell';
 import { ago, fmtBytes, fmtTime, pct } from '../lib/format';
 import { NODE_R, meshLayout } from '../lib/meshLayout';
-import { serverLive, serversLive } from '../lib/liveTopics';
+import { raftLive, serverLive, serversLive, serversMeasured } from '../lib/liveTopics';
 
 export const SERVER_TABS = [
   { to: '/servers', label: '서버 목록' },
@@ -210,7 +210,7 @@ export function ServersPage() {
   // 관리자가 아니면 작업 공간 보기로 읽는다(tenant 없이는 시스템 관리자만, 데몬 #373)
   const scope = isAdmin ? undefined : tenant || undefined;
   const nodes = usePoll((s) => nodesOverview(s, scope), [scope], DEFAULT_POLL_MS, serversLive);
-  const mesh = usePoll((s) => fetchMesh(s, scope), [scope], DEFAULT_POLL_MS);
+  const mesh = usePoll((s) => fetchMesh(s, scope), [scope], DEFAULT_POLL_MS, serversMeasured);
   const [filter, setFilter] = useState<'all' | 'ready' | 'problem' | 'joining'>('all');
   const [sel, setSel] = useState<string>();
   const [adding, setAdding] = useState<{ node?: string }>();
@@ -313,7 +313,7 @@ export function ServersPage() {
                           {n.phaseReason}
                         </span>
                       )}
-                      <UsageBar label="CPU" used={n.cpuPercent} total={n.cpuPercent === undefined ? undefined : 100} text={n.cpuPercent === undefined ? '—' : `${Math.round(n.cpuPercent)}%`} />
+                      <UsageBar label="CPU" used={n.cpuPercent} total={n.cpuPercent === undefined ? undefined : 100} text={n.cpuPercent === undefined ? '—' : `${Math.round(n.cpuPercent)}%`} sub={cpuStealText(n.cpuStealPercent)} subTitle={CPU_STEAL_TIP} />
                       <UsageBar label="메모리" used={n.memory?.used} total={n.memory?.total} text={n.memory ? `${fmtBytes(n.memory.used)}/${fmtBytes(n.memory.total)}` : n.memUsed !== undefined ? `${fmtBytes(n.memUsed)} 사용` : '—'} />
                       <UsageBar label="디스크" used={n.disk?.used} total={n.disk?.total} text={n.disk ? `${pct(n.disk.used, n.disk.total)}%` : '—'} />
                       <span className="row between">
@@ -446,9 +446,9 @@ export function ServersPage() {
 }
 
 export function ConsensusPage() {
-  const r = usePoll((s) => raft(s), [], DEFAULT_POLL_MS);
-  const led = usePoll((s) => ledger(s), [], DEFAULT_POLL_MS);
-  const cq = usePoll((s) => raftCompact(s), [], DEFAULT_POLL_MS);
+  const r = usePoll((s) => raft(s), [], DEFAULT_POLL_MS, raftLive);
+  const led = usePoll((s) => ledger(s), [], DEFAULT_POLL_MS, raftLive);
+  const cq = usePoll((s) => raftCompact(s), [], DEFAULT_POLL_MS, raftLive);
   const [rotating, setRotating] = useState(false);
   const [compacting, setCompacting] = useState(false);
   const [lastOpen, setLastOpen] = useState(false);
@@ -616,7 +616,7 @@ export function ConsensusPage() {
 
 /** 기능 집합 (canvas v268 'SFCP 기능'을 group › set › version으로 나눔): 집합마다 클러스터가 쓰는 버전, 서버마다 알린 기능 */
 function FeaturesCard() {
-  const q = usePoll((s) => clusterFeatures(s), [], DEFAULT_POLL_MS);
+  const q = usePoll((s) => clusterFeatures(s), [], 0, serversLive);
   const missing = q.error instanceof ApiError && (q.error.status === 404 || q.error.status === 405);
   if (missing) return null;
   const f = q.data;

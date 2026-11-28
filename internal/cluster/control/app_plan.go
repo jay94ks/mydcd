@@ -28,6 +28,9 @@ type AppPlanRequest struct {
 	External                  map[string]map[string]deployment.NetworkBinding `json:",omitempty"`
 	Diff                      bool                                            `json:",omitempty"`
 	CheckerSources            map[string]checker.SourceFact                   `json:",omitempty"`
+	// Force lets a new route share a host+prefix that another app of the
+	// tenant serves (`sfcli app deploy --force`); both apps then serve it.
+	Force bool `json:",omitempty"`
 }
 type AppPlanPart struct {
 	Digest [32]byte
@@ -186,6 +189,11 @@ func (p Policy) AppPlanArtifact(s state.State, session access.Session, at int64,
 	}
 	if err := p.admitIngressBlueprint(s, plan); err != nil {
 		return nil, err
+	}
+	if !r.Force {
+		if err := p.admitIngressRouteOverlap(s, plan); err != nil {
+			return nil, err
+		}
 	}
 	if r.Standalone != nil {
 		node := r.Node

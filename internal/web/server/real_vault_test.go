@@ -177,12 +177,9 @@ func TestRealServerVault(t *testing.T) {
 	if code, out := f.do("POST", base+"/password", map[string]any{"opId": op(), "path": "db", "password": "two\nlines"}); code != 400 {
 		t.Fatalf("bad password: %d %v", code, out)
 	}
-	// The first password names the verifier writer profile; sfcd refuses
-	// it without one.
-	if code, out := f.do("POST", base+"/password", map[string]any{"opId": op(), "path": "db", "password": groupPass}); code != 403 {
-		t.Fatalf("no profile: %d %v", code, out)
-	}
-	if out := step("POST", base+"/password", map[string]any{"opId": op(), "path": "db", "password": groupPass, "profile": "auth"}); out["op"].(map[string]any)["action"] != "vault-password" {
+	// Without a profile the verifier goes to the tree's one installed
+	// verifier profile (else builtin; secrets.Tree.DefaultProfile).
+	if out := step("POST", base+"/password", map[string]any{"opId": op(), "path": "db", "password": groupPass}); out["op"].(map[string]any)["action"] != "vault-password" {
 		t.Fatalf("password: %v", out)
 	}
 	if g := row(base, "db"); g["protected"] != true {

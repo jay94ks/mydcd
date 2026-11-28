@@ -30,23 +30,10 @@ func (c *realConn) ExternalRegistryPage(ctx context.Context, tenant, after strin
 	})
 }
 
-func (c *realConn) VolumeBackups(ctx context.Context, tenant, after string) (Page[VolumeBackupView], error) {
-	reply, err := realCall(ctx, c, "volume-backups", func(u userauth.Client, s access.Session) (userauth.VolumeBackupsPage, error) {
+func (c *realConn) VolumeBackups(ctx context.Context, tenant, after string) (userauth.VolumeBackupsPage, error) {
+	return realCall(ctx, c, "volume-backups", func(u userauth.Client, s access.Session) (userauth.VolumeBackupsPage, error) {
 		return u.VolumeBackupPage(ctx, c.peer, s, tenant, after)
 	})
-	if err != nil {
-		return Page[VolumeBackupView]{}, err
-	}
-	items := make([]VolumeBackupView, 0, len(reply.Items))
-	for _, b := range reply.Items {
-		v := VolumeBackupView{Key: b.Key, Tenant: b.Scope.Tenant, Volume: b.Scope.ID, ID: b.ID, Node: b.Node, Phase: b.Phase,
-			Revision: b.Revision, Failure: b.Failure, Source: b}
-		if b.Receipt != nil {
-			v.Bytes = b.Receipt.Bytes
-		}
-		items = append(items, v)
-	}
-	return Page[VolumeBackupView]{Items: items, Next: reply.Next, Revision: reply.RootRevision}, nil
 }
 
 func (c *realConn) VolumeArchives(ctx context.Context, tenant, after string) (userauth.VolumeArchivesPage, error) {
@@ -55,19 +42,10 @@ func (c *realConn) VolumeArchives(ctx context.Context, tenant, after string) (us
 	})
 }
 
-func (c *realConn) VolumeRestores(ctx context.Context, tenant, after string) (Page[VolumeRestoreView], error) {
-	reply, err := realCall(ctx, c, "volume-restores", func(u userauth.Client, s access.Session) (userauth.VolumeRestoresPage, error) {
+func (c *realConn) VolumeRestores(ctx context.Context, tenant, after string) (userauth.VolumeRestoresPage, error) {
+	return realCall(ctx, c, "volume-restores", func(u userauth.Client, s access.Session) (userauth.VolumeRestoresPage, error) {
 		return u.VolumeRestorePage(ctx, c.peer, s, tenant, after)
 	})
-	if err != nil {
-		return Page[VolumeRestoreView]{}, err
-	}
-	items := make([]VolumeRestoreView, 0, len(reply.Items))
-	for _, r := range reply.Items {
-		items = append(items, VolumeRestoreView{Key: r.Key, Tenant: r.Target.Tenant, Volume: r.Backup.Scope.ID, Backup: r.Backup.ID, ID: r.ID,
-			Node: r.Node, Phase: r.Phase, Target: r.Target.ID, Revision: r.Revision, MaxBytes: r.MaxBytes, CapacityBytes: r.CapacityBytes, Source: r})
-	}
-	return Page[VolumeRestoreView]{Items: items, Next: reply.Next, Revision: reply.RootRevision}, nil
 }
 
 // Vault joins the realm's pages under one root revision: an object's
@@ -84,14 +62,10 @@ func (c *realConn) Vault(ctx context.Context, realm, after string) (Page[control
 	return Page[control.VaultView]{Items: reply.Items, Next: reply.Next, Revision: reply.RootRevision, Collection: reply.TreeRevision, ApprovalRevision: reply.ApprovalRevision}, nil
 }
 
-func (c *realConn) VolumeBackupSource(ctx context.Context, tenant string, q control.VolumeSelector) (VolumeSource, error) {
-	reply, err := realCall(ctx, c, "volume-backup-source", func(u userauth.Client, s access.Session) (userauth.VolumeBackupSourceReply, error) {
+func (c *realConn) VolumeBackupSource(ctx context.Context, tenant string, q control.VolumeSelector) (userauth.VolumeBackupSourceReply, error) {
+	return realCall(ctx, c, "volume-backup-source", func(u userauth.Client, s access.Session) (userauth.VolumeBackupSourceReply, error) {
 		return u.VolumeBackupSource(ctx, c.peer, s, tenant, q)
 	})
-	if err != nil {
-		return VolumeSource{}, err
-	}
-	return VolumeSource{Source: reply.Source, VolumeRevision: reply.VolumeRevision}, nil
 }
 
 // RegistryCredential: the credential is secret and goes straight to the

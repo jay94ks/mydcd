@@ -58,7 +58,7 @@ func TestIncidentPolicy(t *testing.T) {
 	if code != 200 || out["level"] != "off" || out["revision"] != float64(0) || out["automation"].(map[string]any)["configured"] != false {
 		t.Fatalf("default policy: %d %v", code, out)
 	}
-	if ap := out["approvers"].(map[string]any); ap["to"] != "system-and-tenant-admins" || !strings.HasPrefix(ap["label"].(string), "시스템 관리자 ") ||
+	if ap := out["approvers"].(map[string]any); ap["to"] != "system-and-tenant-admins" || !strings.Contains(ap["label"].(string), "system administrators + ") ||
 		len(out["approverOptions"].([]any)) != 2 {
 		t.Fatalf("approvers: %v %v", ap, out["approverOptions"])
 	}
@@ -393,7 +393,7 @@ func TestIncidentCDRollback(t *testing.T) {
 	f, fake, clock := incidentFixture(t)
 	cdRollbackSetup(t, f, fake, clock, true, 0)
 	row := findIncident(t, f, "task-restarted")
-	if row == nil || decisionOf(row) != "auto" || row["mitigation"] != "자동 배포 직후 되돌리기" {
+	if row == nil || decisionOf(row) != "auto" || row["mitigation"] != "Roll back right after an automatic deploy" {
 		_, det := f.do("GET", "/api/v1/incidents/"+fmt.Sprint(row["id"]), nil)
 		t.Fatalf("cd rollback: %v", det)
 	}
@@ -418,7 +418,7 @@ func TestIncidentCDRollbackNeedsHistory(t *testing.T) {
 		watchFirst bool
 		preDeploy  int
 		why        string
-	}{{"no-history", false, 0, "배포 전 신호를 다 보지 못함"}, {"signal-before-deploy", true, 1, "배포 전부터 있던 신호"}} {
+	}{{"no-history", false, 0, "not every signal before the deploy was seen"}, {"signal-before-deploy", true, 1, "the signal was there before the deploy"}} {
 		t.Run(c.name, func(t *testing.T) {
 			f, fake, clock := incidentFixture(t)
 			cdRollbackSetup(t, f, fake, clock, c.watchFirst, c.preDeploy)
@@ -427,8 +427,8 @@ func TestIncidentCDRollbackNeedsHistory(t *testing.T) {
 				t.Fatal("no incident")
 			}
 			_, det := f.do("GET", "/api/v1/incidents/"+fmt.Sprint(row["id"]), nil)
-			if row["mitigation"] == "자동 배포 직후 되돌리기" || strings.Contains(fmt.Sprint(det["candidates"]), "cd-rollback") ||
-				!strings.Contains(fmt.Sprint(det["candidates"]), "rollback-previous") || !strings.Contains(fmt.Sprint(det["timeline"]), "자동 배포 직후 되돌리기: "+c.why) {
+			if row["mitigation"] == "Roll back right after an automatic deploy" || strings.Contains(fmt.Sprint(det["candidates"]), "cd-rollback") ||
+				!strings.Contains(fmt.Sprint(det["candidates"]), "rollback-previous") || !strings.Contains(fmt.Sprint(det["timeline"]), "Roll back right after an automatic deploy: "+c.why) {
 				t.Fatalf("%s: %v", c.name, det)
 			}
 		})
@@ -445,7 +445,7 @@ func TestRollbackDiff(t *testing.T) {
 		heavy bool
 	}{{light, false}, {heavy, true}, {added, true}} {
 		paths, err := yamlDiff(a, c.b)
-		if err != nil || (heavyChange(paths, a, c.b) != "") != c.heavy {
+		if p, _ := heavyChange(paths, a, c.b); err != nil || (p != "") != c.heavy {
 			t.Fatalf("%s: %v %v", c.b, paths, err)
 		}
 	}

@@ -225,6 +225,7 @@ func appCheckCommand(g *globals) *cli.Command {
 
 func appDiffCommand(g *globals) *cli.Command {
 	var file, save string
+	var force bool
 	return &cli.Command{
 		Name:  "diff",
 		Short: "Show what deploying app.yaml would change",
@@ -235,6 +236,7 @@ setting: diff compares it with the routes the cluster has now.`,
 		Flags: func(fs *flag.FlagSet) {
 			fs.StringVar(&file, "f", "", "app `FILE`")
 			fs.StringVar(&save, "save", "", "save the plan to `PLAN` for deploy --plan")
+			fs.BoolVar(&force, "force", false, forceRouteUsage)
 		},
 		Run: g.withSession(func(c *cli.Context, s *session, args []string) error {
 			if len(args) != 0 {
@@ -254,6 +256,9 @@ setting: diff compares it with the routes the cluster has now.`,
 			fileArgs := []string{}
 			if file != "" {
 				fileArgs = append(fileArgs, "-f", file)
+			}
+			if force {
+				fileArgs = append(fileArgs, "--force")
 			}
 			var d control.AppDiff
 			if err := g.composeJSON(ctx, c, s, &d, append([]string{"diff"}, fileArgs...)...); err != nil {
@@ -276,6 +281,8 @@ setting: diff compares it with the routes the cluster has now.`,
 		}),
 	}
 }
+
+const forceRouteUsage = "share a route's host and path with another app of the workspace (both serve it)"
 
 // appWait is --no-wait (follow.go) plus how long deploy and down wait.
 type appWait struct {
@@ -321,6 +328,7 @@ func appDeployCommand(g *globals) *cli.Command {
 	var id cli.IDFlag
 	var wait appWait
 	var passwords groupPasswordFDs
+	var force bool
 	return &cli.Command{
 		Name:  "deploy",
 		Short: "Deploy app.yaml (create or update the app) and wait until it is healthy",
@@ -329,6 +337,9 @@ waits until every service is healthy. --plan PLAN deploys a plan saved by
 'app diff --save'. Groups that must approve are asked for their password on
 the terminal, or read from --group-password-fd in scripts. If the command
 stops part way, 'sfcli op resume ID' continues the same deployment.
+A route whose host and path another app of the workspace already serves on
+that server and gateway stops the plan (INGRESS_ROUTE_TAKEN); --force deploys
+it and both apps then serve it. A saved plan takes --force on 'app diff'.
 A file named cluster-app/web sets the web UI's ingress routes (system
 administrators) and does not wait.`,
 		Flags: func(fs *flag.FlagSet) {
@@ -336,11 +347,15 @@ administrators) and does not wait.`,
 			fs.Var(&passwords, "group-password-fd", "for scripts: read the password of `REALM/GROUP=FD` (cluster: /GROUP) from that open file descriptor (repeat)")
 			fs.StringVar(&plan, "plan", "", "deploy this saved `PLAN` instead of a file")
 			fs.Var(&id, "id", "operation `ID` (default: a new one)")
+			fs.BoolVar(&force, "force", false, forceRouteUsage)
 			wait.register(fs)
 		},
 		Run: g.withSession(func(c *cli.Context, s *session, args []string) error {
 			if len(args) != 0 || file != "" && plan != "" {
 				return cli.Usagef("deploy takes -f FILE or --plan PLAN and no arguments")
+			}
+			if force && plan != "" {
+				return cli.Usagef("a saved plan is already made; give --force to 'app diff --save'")
 			}
 			if plan == "" {
 				if app, routes, ok, err := clusterAppRouteFile(file); ok || err != nil {
@@ -364,6 +379,9 @@ administrators) and does not wait.`,
 				flow = append(flow, "--plan", plan)
 			} else if file != "" {
 				flow = append(flow, "-f", file)
+			}
+			if force {
+				flow = append(flow, "--force")
 			}
 			for _, name := range slices.Sorted(maps.Keys(passwords.values)) {
 				flow = append(flow, "--group-password-fd", fmt.Sprintf("%s=%d", name, passwords.values[name]))

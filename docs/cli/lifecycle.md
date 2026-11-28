@@ -51,7 +51,7 @@ resolver:
 # build:
 #   nodes: [node-a]
 #   targets: [linux/amd64]
-#   image: golang@sha256:...
+#   image: golang:1.24   # 태그 또는 golang@sha256:...
 #   toolchain: go1.24.0
 #   max_jobs: 1
 #   cpu: 1
@@ -61,3 +61,5 @@ resolver:
 #   timeout: 1m
 # compiled_cache: 64MiB   # build를 쓰면 artifact 이상
 ```
+
+`build.image`는 컴파일러 컨테이너 이미지다. 태그(`golang:1.24`)를 적으면 정책에는 태그 그대로 남는다. 배포 한 번이 그 태그를 한 번 해석하고, 그 배포의 컴파일은 모두 같은 digest로 돈다. 저장소에 닿지 않거나 태그가 지워졌으면(`NOT_FOUND`) 그 서버가 그 태그로 마지막에 받은 사본을 쓰고, 사본도 없으면 컴파일하지 않는다. sfcd는 컴파일러 이미지를 직접 받지 않으므로, 해석된 digest가 build 서버에 이미 있어야 한다(이미지 캐시로 미리 받아 둔다). 컴파일 결과 캐시는 그 digest별로 따로 남는다.

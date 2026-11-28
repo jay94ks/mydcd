@@ -187,3 +187,22 @@ func validateResolvedChecks(scope string, checks []ResolvedCheck, services map[s
 	}
 	return nil
 }
+
+// Compiles reports whether the Task has a compile=true script.
+func (t TaskProgram) Compiles() bool {
+	for _, s := range t.Scripts {
+		if s.Compile {
+			return true
+		}
+	}
+	return false
+}
+
+// CompilerTag is the compiler image tag the Task's deploy must resolve: the
+// frozen policy's tag when the Task compiles, otherwise "".
+func (t TaskProgram) CompilerTag() string {
+	if !t.Compiles() {
+		return ""
+	}
+	return t.Policy.Build.CompilerTag()
+}

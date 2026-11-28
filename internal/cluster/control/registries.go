@@ -126,7 +126,7 @@ func (p Policy) Registries(s state.State) (Registries, error) {
 			return result, ErrCatalog
 		}
 		historical, exists := members.Entry(initial.Spec.Node)
-		if !exists || historical.Peer.Key != hex.EncodeToString(entry.DataOwner[:]) {
+		if !exists || !members.ResourceKeyForNode(historical.Peer.ID, entry.DataOwner) {
 			return result, ErrCatalog
 		}
 		if _, ok := users.Tenant(entry.Spec.Tenant); !ok {

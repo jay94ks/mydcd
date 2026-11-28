@@ -39,6 +39,7 @@ import (
 	"github.com/jay94ks/seafield/internal/sfcp"
 	"github.com/jay94ks/seafield/internal/storage"
 	"github.com/jay94ks/seafield/internal/userauth"
+	"github.com/jay94ks/seafield/internal/volumeshare"
 	"github.com/jay94ks/seafield/internal/volumeshare/remote"
 	"github.com/jay94ks/seafield/internal/vps"
 	"github.com/jay94ks/seafield/internal/workload"
@@ -88,6 +89,7 @@ type Runtime struct {
 	observationCPU            observability.CPUCounter
 	observationCPUAt          time.Time // when observationCPU was read
 	observationCPUUsed        *uint64   // the usage last reported from it
+	observationCPUSteal       *uint64   // and the steal reported with it
 	observationContainers     map[string]observedContainerCPU
 	Identity                  *identity.Identity
 	Mesh                      *sfcp.Transport
@@ -210,6 +212,7 @@ type Runtime struct {
 	remoteVolumes             remoteVolumeMounts // nil until shared volumes are served on this node
 	remoteMounts              *remote.Mounts     // the same, for the task start path
 	sharedHome                *remote.Home
+	sharedServer              *volumeshare.Server
 	remoteJournal             *storage.DB
 	volumeUsageMu             sync.Mutex
 	volumeSourceMu            sync.Mutex

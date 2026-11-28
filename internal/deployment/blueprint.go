@@ -17,6 +17,7 @@ import (
 	"github.com/jay94ks/seafield/internal/cluster/lifecycle"
 	"github.com/jay94ks/seafield/internal/cluster/state"
 	"github.com/jay94ks/seafield/internal/imagesource"
+	"github.com/jay94ks/seafield/internal/ingress"
 	"github.com/jay94ks/seafield/internal/tenancy"
 	"github.com/jay94ks/seafield/internal/workload"
 	checker "github.com/jay94ks/seafield/internal/workload/lifecycle"
@@ -38,7 +39,9 @@ type Dependency struct {
 	Condition Condition
 }
 type Step struct {
-	StableDNS       []ObjectRef  `json:",omitempty"`
+	// Stable keeps original producer references (annotateStable). Its JSON
+	// name predates Task producers and stays so records keep their digest.
+	Stable          []ObjectRef  `json:"StableDNS,omitempty"`
 	Identity        []string     `json:",omitempty"`
 	Activation      []Dependency `json:",omitempty"`
 	Base            ObjectRef
@@ -80,12 +83,14 @@ type PlanningContext struct {
 	FixedVolumes                                    map[string]volumes.NativeReady // current permitted signed registrations; never caller-supplied app paths
 	Shares                                          map[string]VolumeShare         // volume key -> committed volume-shares record
 	Checkers                                        checker.Catalog
-	CheckerPrograms                                 map[AppScope]checker.FrozenProgram // exact accepted app programs, not current authority
-	CheckerProviders                                map[[32]byte]bool                  // exact source owners served by current installed members in this committed view; never authentication
-	CheckerSources                                  map[string]checker.SourceFact      // actually staged inline facts supplied separately from app.yaml
-	Features                                        map[string]bool                    // verified adapter capability set, not YAML grants
-	Current                                         map[string]state.Object            // same committed view used by the plan
-	Reserved                                        map[string]workload.Resources      // per-resource desired reservation already counted in Nodes.Used
+	CheckerPrograms                                 map[AppScope]checker.FrozenProgram      // exact accepted app programs, not current authority
+	CheckerProviders                                map[[32]byte]bool                       // exact source owners served by current installed members in this committed view; never authentication
+	CheckerSources                                  map[string]checker.SourceFact           // actually staged inline facts supplied separately from app.yaml
+	Features                                        map[string]bool                         // verified adapter capability set, not YAML grants
+	Current                                         map[string]state.Object                 // same committed view used by the plan
+	Reserved                                        map[string]workload.Resources           // per-resource desired reservation already counted in Nodes.Used
+	Gateways                                        map[string]ingress.GatewayConfiguration // node -> committed gateway settings (shared listeners for file ingress)
+	IngressLimits                                   map[string]IngressRuntime               // node -> this tenant's ingress ceiling (requests, connections, buffer)
 	// SecretRevisions digests the current value references of the Vault
 	// objects a service's inputs read (hex). A service's inputs step carries
 	// it, so a secret updated since the last deploy makes the same app.yaml
@@ -93,11 +98,15 @@ type PlanningContext struct {
 	SecretRevisions func([]Source) string `json:"-"`
 }
 type blueprintRecord struct {
-	RegistrySources                  map[string][]Source `json:",omitempty"`
-	SecretEnvRequiresNewGeneration   []string            `json:",omitempty"`
-	Document                         *AppDocument        `json:",omitempty"`
-	InputKind                        string              `json:",omitempty"`
-	DefaultNode                      string              `json:",omitempty"`
+	RegistrySources map[string][]Source `json:",omitempty"`
+	// SocketRevisions is each sfev.sock service's socket source revision
+	// digest (PlanningContext.SecretRevisions over x-sfc.secrets.socket),
+	// copied into its Task goal. See TaskSecretSocketRuntimeUpdate.
+	SocketRevisions                  map[string]string `json:",omitempty"`
+	SecretEnvRequiresNewGeneration   []string          `json:",omitempty"`
+	Document                         *AppDocument      `json:",omitempty"`
+	InputKind                        string            `json:",omitempty"`
+	DefaultNode                      string            `json:",omitempty"`
 	Schema                           uint8
 	Cluster                          [32]byte
 	Actor, Tenant, App, Deployment   string
@@ -141,7 +150,7 @@ func (b Blueprint) Digest() [32]byte { raw, _ := b.Encode(); return sha256.Sum25
 func (b Blueprint) Steps() []Step {
 	out := slices.Clone(b.d.Steps)
 	for i := range out {
-		out[i].StableDNS = slices.Clone(out[i].StableDNS)
+		out[i].Stable = slices.Clone(out[i].Stable)
 		out[i].Goal = bytes.Clone(out[i].Goal)
 		out[i].Dependencies = slices.Clone(out[i].Dependencies)
 		out[i].Activation = slices.Clone(out[i].Activation)
@@ -216,6 +225,10 @@ func compile(c Compose, policy access.Catalog, ctx PlanningContext, move *Volume
 		// source/cache preparation consume the frozen Task program.
 		return Blueprint{}, inputError("FEATURE_UNAVAILABLE", "lifecycle")
 	}
+	if c.hasSecretSocket() && !ctx.Features["secret-socket"] {
+		// Advertised only once sfcd serves sfev.sock for the frozen Task.
+		return Blueprint{}, inputError("FEATURE_UNAVAILABLE", "secret-socket")
+	}
 	// Clone the caller's declaration before applying explicit CLI placement.
 	raw, _ := json.Marshal(c)
 	var input Compose
@@ -256,6 +269,7 @@ func compile(c Compose, policy access.Catalog, ctx PlanningContext, move *Volume
 	if err := b.freezeRegistrySources(c, ctx.ExternalRegistries); err != nil {
 		return Blueprint{}, err
 	}
+	b.freezeSocketRevisions(c, ctx)
 	if inputKind == "app" && c.Sfc.Delivery != nil && c.Sfc.Delivery.Enabled {
 		if ctx.DefaultNode != "" && !identifier(ctx.DefaultNode) {
 			return Blueprint{}, inputError("INVALID_DEFAULT_NODE", "context")
@@ -876,6 +890,15 @@ func compile(c Compose, policy access.Catalog, ctx PlanningContext, move *Volume
 		} else {
 			declaration.Backend.Network = resolvedRoutes[0].Network
 		}
+		// A file names no listeners or limits: use the node's gateway
+		// listeners and the tenant's ingress limit (ingress_yaml.go).
+		if len(declaration.Listeners) == 0 {
+			if declaration, e = GatewayListeners(declaration, ctx.Gateways[i.Node]); e != nil {
+				return Blueprint{}, e
+			}
+			limit := ctx.IngressLimits[i.Node]
+			declaration.Runtime = LowerIngressRuntime(declaration.Runtime, limit.MaxRequests, limit.MaxConnections, limit.BufferBytes)
+		}
 		if e = add(Step{Key: key("ingress", "http"), Kind: "ingress", Identity: identity, Node: i.Node, Owner: n.Key, Goal: goal(declaration), Dependencies: deps, Completion: Healthy}); e != nil {
 			return Blueprint{}, e
 		}
@@ -960,7 +983,7 @@ func compile(c Compose, policy access.Catalog, ctx PlanningContext, move *Volume
 	if e = b.checkPublishedPorts(ctx); e != nil {
 		return Blueprint{}, e
 	}
-	annotateDNSBindings(&b, ctx)
+	annotateStable(&b, ctx)
 	if e = validateLifetimes(steps); e != nil {
 		return Blueprint{}, e
 	}

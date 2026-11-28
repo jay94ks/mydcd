@@ -43,7 +43,7 @@ func incidentMCPArgs(t *store.MCPTool, in *store.Incident) (map[string]any, bool
 			}
 			continue
 		}
-		v := mcpFill(in, x)
+		v := mcpFill(langKorean, in, x)
 		if x.Kind == "max" {
 			v = x.Value
 		}

@@ -78,7 +78,7 @@ func (s *Server) providerLogReader(w http.ResponseWriter, r *http.Request) (toke
 	if h := r.Header.Get("Authorization"); h != "" {
 		tok, found := strings.CutPrefix(h, "Bearer ")
 		if !found || !l.Authorize(strings.TrimSpace(tok)) {
-			writeError(w, http.StatusUnauthorized, "token-expired", "the provider log token is wrong or expired; turn the log on again in 웹 앱 설정")
+			writeError(w, http.StatusUnauthorized, "token-expired", "the provider log token is wrong or expired; turn the log on again in the web app settings")
 			return false, false
 		}
 		return true, true

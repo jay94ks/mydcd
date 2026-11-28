@@ -60,6 +60,11 @@ func TestIdentityRotationRevokesCurrentKeyPreservesOriginalInstallationAndResour
 	if !d.Quiescent() {
 		t.Fatal("installed key replacement never settles")
 	}
+	// Node-level actions find the node by its current key, not by the
+	// original Peer.Key that stays in the entry forever.
+	if _, err := d.SetCordon("b", d.Cordon("b").Revision, true, json.RawMessage(`{"original":"cordon-rotated-b"}`)); err != nil {
+		t.Fatal("rotated node cannot be cordoned", err)
+	}
 	row, _ := d.IdentityRotation("b", "replace-b")
 	row.Proof.NewSignature[0] ^= 1
 	saved, _ := d.IdentityRotation("b", "replace-b")

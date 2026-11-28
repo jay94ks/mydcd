@@ -533,8 +533,9 @@ type world struct {
 	observeLimit int64
 	resources    []ResourceEntry
 	volumes      []volumeRow
-	backups      []VolumeBackupView
-	restores     []VolumeRestoreView
+	seedBackups  []FixtureBackup             // turned into backups by fillVolumeSources
+	backups      []control.VolumeBackupView  // volume-backups rows
+	restores     []control.VolumeRestoreView // volume-restores rows (restores run on real sfcd only)
 	vault        []VaultView
 	ledgerEpoch  uint64                     // ModuleEpoch (rotate-ledger)
 	retiring     map[string]string          // tenant → retirement operation
@@ -603,7 +604,7 @@ func newWorld(f Fixture) *world {
 		users: map[string]*fakeUser{}, tenants: map[string]map[string]Role{},
 		tenantRev: map[string]uint64{}, tenantNodes: map[string][]string{}, revoked: map[string]bool{},
 		members: f.Members, summaries: f.Summaries, disks: f.Disks, links: f.Links, raft: f.Raft,
-		nodeStorage: f.NodeStorage, observeLimit: DefaultObserveLimitSeconds, resources: f.Resources, volumes: f.Volumes, backups: f.Backups,
+		nodeStorage: f.NodeStorage, observeLimit: DefaultObserveLimitSeconds, resources: f.Resources, volumes: f.Volumes, seedBackups: f.Backups,
 		vault: slices.Clone(f.Vault), vaultRev: map[string]uint64{}, vaultWrites: map[string]*fakeVaultWrite{}, registries: f.Registries,
 		apps: map[string]*fakeApp{}, uploads: map[string]*upload{}, ledger: map[string]ledgerEntry{}, execs: map[string]*execRecord{},
 	}

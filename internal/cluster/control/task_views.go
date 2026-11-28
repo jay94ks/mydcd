@@ -156,7 +156,7 @@ func (p Policy) TaskPage(s state.State, session access.Session, at int64, q Task
 				continue
 			}
 			entry, ok := directory.Entry(report.Node)
-			if !ok || entry.Peer.Key != fmt.Sprintf("%x", report.Key) || !directory.MemberKey(report.Key) || !report.Valid() {
+			if !ok || entry.CurrentPeer().Key != fmt.Sprintf("%x", report.Key) || !directory.MemberKey(report.Key) || !report.Valid() {
 				continue
 			}
 			key := report.Node + "\x00" + task.Key

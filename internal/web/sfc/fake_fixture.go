@@ -32,7 +32,7 @@ type Fixture struct {
 
 	Resources []ResourceEntry
 	Volumes   []volumeRow
-	Backups   []VolumeBackupView
+	Backups   []FixtureBackup
 	Vault     []VaultView
 	// GroupPasswords: "realm/group" → password of a protected Secret Group
 	// (a deploy or standalone up that uses it waits for approval).
@@ -282,7 +282,7 @@ func DefaultFixture() Fixture {
 			{Key: "shop/sessions", Tenant: "shop", Name: "sessions", Kind: "shared", Node: "node-a", App: "php-shop", Revision: 34, CapacityBytes: 2 * gib, UsedBytes: 300 << 20},
 			{Key: "payments/ledger-data", Tenant: "payments", Name: "ledger-data", Kind: "fixed", Node: "node-c", Storage: "hdd", Revision: 27, CapacityBytes: 100 * gib, UsedBytes: 12 * gib, Retain: true},
 		},
-		Backups: []VolumeBackupView{
+		Backups: []FixtureBackup{
 			{Key: "shop/mysql-data/b-20261120", Tenant: "shop", Volume: "mysql-data", ID: "b-20261120", Node: "node-b", Phase: "Ready", Revision: 30, Bytes: 9 * gib, CreatedAt: t - 86400},
 		},
 		Vault: []VaultView{

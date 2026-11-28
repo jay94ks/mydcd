@@ -52,7 +52,7 @@ func TestGuides(t *testing.T) {
 	code, g = guidePut(f, "app/shop/php-shop", 0, text, map[string]any{"prefer": []string{"rollback-previous"}, "avoid": map[string]any{"services": []string{"web"}},
 		"critical": []string{"결제 서비스는 데이터가 중요"}})
 	if code != 200 || g["version"] != float64(1) || !strings.Contains(fmt.Sprint(g["warnings"]), "line:2") || g["lines"] != float64(3) ||
-		!strings.Contains(g["summary"].(string), "외 2줄") {
+		!strings.Contains(g["summary"].(string), "and 2 more lines") {
 		t.Fatalf("save: %d %v", code, g)
 	}
 	if code, _ := guidePut(f, "app/shop/php-shop", 0, "again", nil); code != 409 {
@@ -106,7 +106,7 @@ func TestGuides(t *testing.T) {
 	cs := fmt.Sprint(det["candidates"])
 	if strings.Contains(cs, "restart-task") || strings.Contains(cs, "pause-cd") || !strings.HasPrefix(cs, "[map[action:rollback-previous") ||
 		fmt.Sprint(det["guides"]) != "map[app:map[current:3 version:3] cluster:map[current:1 version:1]]" ||
-		!strings.Contains(fmt.Sprint(det["timeline"]), "cluster 지침이 막음") {
+		!strings.Contains(fmt.Sprint(det["timeline"]), "blocked by the cluster guidelines") {
 		t.Fatalf("incident: %v", det)
 	}
 	_, ai := f.do("GET", "/api/v1/t/shop/apps/php-shop/incident", nil)

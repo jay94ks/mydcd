@@ -50,6 +50,9 @@ SFCP는 Raft stream을 승인된 구성원·가입 키에만 연다. 그 위에�
 - **원 자원 연결만 남는다.** Task·Volume·route 같은 원 자원의 owner 필드는 바꾸지 않는다. 현재 키가 그 원 owner를 이었는지는 서명된 전환 기록(`Entry.Keys`)으로 확인한다(`OwnsResource`·`ResourceKeyForNode`). 과거 서명·snapshot 검증에는 역사 키를 쓴다.
 - **로컬 원 journal.** 서버는 옛 키의 native journal·봉인 저장소를 같은 데몬 안의 역사 owner로 연다. 그 원 자원의 정리 증명·보고 본문은 원 owner 키(옛 키)로 서명될 수 있다. 하지만 클러스터에 들어가는 길은 SFCP 하나이고, 받는 쪽은 인증된 상대가 현재 키이며 그 원 owner를 이었는지(`OwnsResource`)를 먼저 본다.
 
+- **`Entry.Peer.Key`는 원 키다.** 회전해도 이 값은 바뀌지 않고, 현재 키는 `Entry.CurrentPeer().Key`(`Entry.Keys` 마지막 전환의 새 키)다. 그래서 서버를 키로 찾거나(자기 자신 찾기, 보고자 확인, 비밀값 봉인 대상, 받는 서버, 격리) 현재 키와 비교하는 코드는 `CurrentPeer()`를 쓰고, 저장된 owner 키가 그 서버의 키였는지 보는 코드는 `ResourceKeyForNode`를 쓴다. `Peer.Key`를 그대로 쓰는 곳은 원 설치·가입 증명(합류 전 단계, 원 설치 기록 대조)과 키 유일성 검사뿐이다.
+- 회전 중 서버가 Activated 뒤 돌아오지 못하면 교체는 끝나지 않는다. 이때 `sfcli node remove --force`는 그 서버의 멈춘 교체를 무시하고 그 행을 Abandoned로 닫는다(#835).
+
 그래서 탈취된 옛 키만으로는 Activated 뒤 클러스터에 접속하거나 보고를 넣을 수 없다. 옛 키 서명은 현재 키가 들고 온 원 자원 정리 안에서만 의미가 있다. 서버 디스크 자체가 탈취됐다면 새 키도 함께 노출되므로, 그때는 `node remove`로 빼고 새로 가입시킨다.
 
 non-voter·격리 issuer의 기존 session은 현재 요청에 사용할 수 없으므로 활성 control에서 재로그인한다. 과거 시각을 제시하는 예외는 두지 않는다. 원 accepted grant와 새 요청을 구분하며 원 결과·앱/Volume owner를 초기화하지 않는다. 로컬 committed view가 아직 수신하지 못한 회수를 이미 집행했다고 주장하지 않으며 새 업무는 기존 최신 quorum permit을 따른다. 추가 Raft RPC 필터·설치 키 회전은 이 발급 제한의 보장이 아니다.

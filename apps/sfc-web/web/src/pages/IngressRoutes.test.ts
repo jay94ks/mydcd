@@ -18,21 +18,23 @@ const V: IngressView = {
 };
 
 describe('도메인·경로별 매핑', () => {
-  const all = buildMappings(V, { app: 'web', revision: 1, removed: false, node: 'node-a', routes: [{ host: 'sfc.example.com', gateway: 'both' }] });
+  const all = buildMappings(V, { app: 'web', revision: 1, removed: false, node: 'node-a', routes: [{ host: 'sfc.example.com', gateway: 'local' }] });
   it('서버·게이트웨이별 매핑을 앱 정의의 경로 하나로 모은다', () => {
     const root = all.find((m) => m.app === 'php-shop' && m.prefix === '/')!;
-    expect(gwOf(root.gateways)).toBe('both');
+    expect(gwOf(root.gateways)).toBe('external');
+    expect(root.gateways.sort()).toEqual(['external', 'local']);
     expect(root.nodes.sort()).toEqual(['node-a', 'node-b']);
     expect(root.flats).toHaveLength(3);
     expect(all.find((m) => m.redirect)?.prefix).toBe('/');
     const web = all.find((m) => m.cluster)!;
     expect(web.prefix).toBe('/');
-    expect(web.gateways).toEqual(['external', 'local']);
+    expect(web.gateways).toEqual(['local']);
+    expect(web.nodes).toEqual(['node-a']);
   });
   it('같은 호스트·접두사에 게이트웨이가 겹치면 막고, 자기 자신은 빼고 본다', () => {
     expect(clash(all, 'shop.example.com', '/admin', 'external')?.app).toBe('php-shop');
     expect(clash(all, 'shop.example.com', '/admin', 'local')).toBeUndefined();
-    expect(clash(all, 'SHOP.example.com', '/api/v2', 'both')?.app).toBe('shop-api');
+    expect(clash(all, 'SHOP.example.com', '/api/v2', 'external')?.app).toBe('shop-api');
     const self = all.find((m) => m.prefix === '/admin')!;
     expect(clash(all, 'shop.example.com', '/admin', 'external', self)).toBeUndefined();
   });
@@ -42,6 +44,6 @@ describe('도메인·경로별 매핑', () => {
     expect(fallbackOf(all, 'other.example.com', '/x', 'external')).toBeUndefined();
   });
   it('지운 클러스터 앱 경로는 표에 없다', () => {
-    expect(buildMappings(V, { app: 'web', revision: 2, removed: true, routes: [{ host: 'sfc.example.com', gateway: 'local' }] }).some((m) => m.cluster)).toBe(false);
+    expect(buildMappings(V, { app: 'web', revision: 2, removed: true, node: 'node-a', routes: [{ host: 'sfc.example.com', gateway: 'local' }] }).some((m) => m.cluster)).toBe(false);
   });
 });

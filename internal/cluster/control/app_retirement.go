@@ -252,12 +252,30 @@ func (p Policy) reduceAppRetirement(s state.State, r AppProgress, a Apps, entry 
 	case "retire-collect":
 		i, err = i.SettleRemoval(i.Revision(), r.Key, r.Retire.Phase, s)
 	case "retire-gone":
-		for _, b := range a.bindings.Live() {
-			if source, ok := a.BindingSource(b.Digest()); ok && (source.Task.Key == r.Key || source.Inputs.Key == r.Key) {
-				return nil, state.ConditionFailed
+		superseded := false
+		var generation uint64
+		for _, target := range retirement.Targets {
+			if target.Original.Step.Key == r.Key {
+				superseded, generation = target.Superseded, target.Original.Result.Generation
 			}
 		}
-		i, err = i.Gone(i.Revision(), r.Key, r.Retire.Gone)
+		for _, b := range a.bindings.Live() {
+			source, ok := a.BindingSource(b.Digest())
+			if !ok || source.Task.Key != r.Key && source.Inputs.Key != r.Key {
+				continue
+			}
+			// A surged original's successor keeps its own live binding;
+			// only bindings of the original's generation hold it open.
+			if superseded && (source.Task.Key == r.Key && source.Task.Generation != generation || source.Inputs.Key == r.Key && source.Inputs.Generation != generation) {
+				continue
+			}
+			return nil, state.ConditionFailed
+		}
+		if superseded {
+			i, err = i.SupersededGone(i.Revision(), r.Key, r.Retire.Gone)
+		} else {
+			i, err = i.Gone(i.Revision(), r.Key, r.Retire.Gone)
+		}
 		if err == nil {
 			a, err = p.closeAppNetwork(s, r, a, entry)
 		}

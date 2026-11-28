@@ -53,7 +53,7 @@ func (m *CompilerOwner) grant(ctx context.Context, r *compilerDisk, recover bool
 func compilerOptions(r compilerDisk, id engine.Identity, f *compilerFiles) client.ContainerCreateOptions {
 	pids := compilerPIDLimit
 	stop := 2
-	config := &container.Config{Image: r.Policy.Build.Image, User: "10001:10001", WorkingDir: "/work", Entrypoint: []string{"/usr/local/bin/lifecycle-compiler"}, Cmd: []string{}, Env: []string{"GOMAXPROCS=2"}, Labels: id.Labels, StopSignal: "SIGTERM", StopTimeout: &stop, Healthcheck: &container.HealthConfig{Test: []string{"NONE"}}}
+	config := &container.Config{Image: r.Intent.Image, User: "10001:10001", WorkingDir: "/work", Entrypoint: []string{"/usr/local/bin/lifecycle-compiler"}, Cmd: []string{}, Env: []string{"GOMAXPROCS=2"}, Labels: id.Labels, StopSignal: "SIGTERM", StopTimeout: &stop, Healthcheck: &container.HealthConfig{Test: []string{"NONE"}}}
 	host := &container.HostConfig{NetworkMode: "none", IpcMode: "none", ReadonlyRootfs: true, CapDrop: []string{"ALL"}, SecurityOpt: []string{"no-new-privileges"}, RestartPolicy: container.RestartPolicy{Name: "no"}, LogConfig: container.LogConfig{Type: "none"}, Resources: container.Resources{Memory: r.Policy.Build.MemoryBytes, MemorySwap: r.Policy.Build.MemoryBytes, NanoCPUs: r.Policy.Build.NanoCPU, PidsLimit: &pids}, Mounts: []mount.Mount{
 		{Type: mount.TypeBind, Source: f.inputPath, Target: "/input", ReadOnly: true, BindOptions: &mount.BindOptions{Propagation: mount.PropagationRPrivate}},
 		{Type: mount.TypeBind, Source: f.outputPath, Target: "/output", BindOptions: &mount.BindOptions{Propagation: mount.PropagationRPrivate}},
@@ -367,7 +367,8 @@ func (m *CompilerOwner) progressContainer(ctx context.Context, r *compilerDisk, 
 		if _, err := m.grant(ctx, r, false); err != nil {
 			return err
 		}
-		image, err := m.engine.Image(ctx, r.Policy.Build.Image, false)
+		// The job's resolved compiler digest must already be on this node.
+		image, err := m.engine.Image(ctx, r.Intent.Image, false)
 		if err != nil {
 			return err
 		}

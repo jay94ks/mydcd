@@ -14,7 +14,7 @@ CLI는 작업 ID·보호 입력을 받을 서버를 공개 intent로 먼저 저�
 
 ## 도메인 목록
 
-보관함은 클러스터에 등록한 도메인 목록(최대 128개)도 가진다. 이름은 소문자 A-label이며 와일드카드·한 단어·공개 접미사는 받지 않는다. IP 주소는 정규형으로 받아 그 주소 하나만 덮는다. 시스템 관리자가 [sfcli domain](../cli/domain.md)으로 `add-domain`/`remove-domain`을 보내며, 둘 다 보관함 전체 revision으로 CAS한다. 목록은 `certificates` 첫 페이지의 `Domains`로 읽는다. 같은 보관함에 ACME HTTP-01 응답기 주소(`ACMEResponder{Address, SetBy, SetAt}`, `set-acme-responder`, [sfcli domain acme-responder](../cli/domain.md#acme-http-01-응답기))도 두며 첫 페이지에 함께 온다. remove는 인증서 링크가 있어도 거절하지 않는다. 인증서는 이 목록 안의 호스트에만 연결된다(설계).
+보관함은 클러스터에 등록한 도메인 목록(최대 128개)도 가진다. 이름은 소문자 A-label이며 와일드카드·한 단어·공개 접미사는 받지 않는다. IP 주소는 정규형으로 받아 그 주소 하나만 덮는다. 도메인마다 주인 작업 공간 `Tenant`가 있거나(작업 공간 도메인) 비어 있다(클러스터 수준 도메인, 작업 공간 단위 도메인). 시스템 관리자가 [sfcli domain](../cli/domain.md)으로 `add-domain`/`assign-domain`/`remove-domain`을 보내며, 모두 보관함 전체 revision으로 CAS한다. 목록은 `certificates` 첫 페이지의 `Domains`로 읽고, 작업 공간 사용자는 `tenant-domains`(`{Tenant}` → `{Revision, Domains, RootRevision}`, 그 작업 공간의 read·deploy·routes 중 하나)로 자기 도메인만 읽는다. 같은 보관함에 ACME HTTP-01 응답기 주소(`ACMEResponder{Address, SetBy, SetAt}`, `set-acme-responder`, [sfcli domain acme-responder](../cli/domain.md#acme-http-01-응답기))도 두며 첫 페이지에 함께 온다. remove는 인증서 링크가 있어도 거절하지 않는다. 인증서는 이 목록 안의 호스트에만 연결된다(설계).
 
 ## 공개 정보
 

@@ -6,8 +6,10 @@ import (
 	"context"
 	"crypto/sha256"
 	"slices"
+	"strings"
 
 	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/userauth"
 	"github.com/jay94ks/seafield/internal/workload/volumes"
 )
 
@@ -36,56 +38,81 @@ func (w *world) fillVolumeSources() {
 			v.NativeBinding = fakeDigest("native", v.Key)
 		}
 	}
-	w.backups = slices.Clone(w.backups)
-	for i := range w.backups {
-		b := &w.backups[i]
-		if b.Source.ID != "" {
-			continue
-		}
+	w.backups = nil
+	for _, b := range w.seedBackups {
 		vi := slices.IndexFunc(w.volumes, func(v volumeRow) bool { return v.Tenant == b.Tenant && v.Name == b.Volume })
 		if vi < 0 {
 			continue
 		}
 		v := w.volumes[vi]
-		b.Source = control.VolumeBackupView{Key: b.Key, Scope: v.Scope, ID: b.ID, Node: b.Node, Phase: b.Phase, Revision: b.Revision,
+		row := control.VolumeBackupView{Key: b.Key, Scope: v.Scope, ID: b.ID, Node: b.Node, Phase: b.Phase, Revision: b.Revision,
 			MaxBytes: max(b.Bytes, 1<<30), MaxEntries: 100000, Binding: v.NativeBinding, Compatibility: fakeDigest("compat", v.Key),
-			Owner: fakeNodeKey(b.Node), UID: 999, GID: 999, Mode: 0o750}
-		if b.Phase == "Ready" {
-			b.Source.Receipt = &volumes.ArchiveReceipt{Schema: 1, Digest: fakeDigest("archive", b.Key), Bytes: b.Bytes, DataBytes: b.Bytes, Entries: 1}
+			Failure: b.Failure, Owner: fakeNodeKey(b.Node), UID: 999, GID: 999, Mode: 0o750, CreatedAt: b.CreatedAt}
+		if b.Phase == "Ready" || b.Phase == "Deleting" {
+			row.Receipt = &volumes.ArchiveReceipt{Schema: 1, Digest: fakeDigest("archive", b.Key), Bytes: b.Bytes, DataBytes: b.Bytes, Entries: 1}
 		}
+		w.backups = append(w.backups, row)
 	}
 }
 
-func (c *fakeConn) VolumeRestores(ctx context.Context, tenant, after string) (Page[VolumeRestoreView], error) {
-	if err := c.tenantRead(ctx, "volume-restores", tenant, after); err != nil {
-		return Page[VolumeRestoreView]{}, err
+// volumeRows: one sfcd page of the volumes book (8 a page, Key order).
+func volumeRows[T any](w *world, items []T, key func(T) string, tenant func(T) string, want, after string) userauth.VolumeRows[T] {
+	out := userauth.VolumeRows[T]{Items: []T{}, Revision: w.root, RootRevision: w.root, ModuleEpoch: max(w.ledgerEpoch, 1)}
+	sorted := slices.Clone(items)
+	slices.SortFunc(sorted, func(a, b T) int { return strings.Compare(key(a), key(b)) })
+	for _, it := range sorted {
+		if want != "" && tenant(it) != want || key(it) <= after {
+			continue
+		}
+		if len(out.Items) == 8 {
+			out.Next = key(out.Items[7])
+			break
+		}
+		out.Items = append(out.Items, it)
+	}
+	return out
+}
+
+func (c *fakeConn) VolumeBackups(ctx context.Context, tenant, after string) (userauth.VolumeBackupsPage, error) {
+	if err := c.tenantRead(ctx, "volume-backups", tenant, after); err != nil {
+		return userauth.VolumeBackupsPage{}, err
 	}
 	defer c.unlock()
-	items := filterTenant(c.f.w.restores, tenant, func(v VolumeRestoreView) string { return v.Tenant })
-	return paginate(items, func(v VolumeRestoreView) string { return v.Key }, after, c.f.pageSize, c.f.w.root), nil
+	return volumeRows(c.f.w, c.f.w.backups, func(b control.VolumeBackupView) string { return b.Key },
+		func(b control.VolumeBackupView) string { return b.Scope.Tenant }, tenant, after), nil
 }
 
-func (c *fakeConn) VolumeBackupSource(ctx context.Context, tenant string, q control.VolumeSelector) (VolumeSource, error) {
+func (c *fakeConn) VolumeRestores(ctx context.Context, tenant, after string) (userauth.VolumeRestoresPage, error) {
+	if err := c.tenantRead(ctx, "volume-restores", tenant, after); err != nil {
+		return userauth.VolumeRestoresPage{}, err
+	}
+	defer c.unlock()
+	return volumeRows(c.f.w, c.f.w.restores, func(r control.VolumeRestoreView) string { return r.Key },
+		func(r control.VolumeRestoreView) string { return r.Target.Tenant }, tenant, after), nil
+}
+
+func (c *fakeConn) VolumeBackupSource(ctx context.Context, tenant string, q control.VolumeSelector) (userauth.VolumeBackupSourceReply, error) {
 	const m = "volume-backup-source"
 	user, err := c.lockSession(ctx, m)
 	if err != nil {
-		return VolumeSource{}, err
+		return userauth.VolumeBackupSourceReply{}, err
 	}
 	defer c.unlock()
 	w := c.f.w
 	if !w.canManage(user, tenant) {
-		return VolumeSource{}, fail(m, CodeDenied, "")
+		return userauth.VolumeBackupSourceReply{}, fail(m, CodeDenied, "")
 	}
 	if !q.Valid() {
-		return VolumeSource{}, fail(m, CodeInvalid, "app and volume")
+		return userauth.VolumeBackupSourceReply{}, fail(m, CodeInvalid, "app and volume")
 	}
 	for _, v := range w.volumes {
 		if v.Tenant == tenant && v.App == q.App && v.Name == q.ID {
-			return VolumeSource{VolumeRevision: v.Revision, Source: control.VolumeBackupSource{Schema: 1, Scope: v.Scope, Node: v.Node,
-				Owner: fakeNodeKey(v.Node), NativeBinding: v.NativeBinding, Compatibility: fakeDigest("compat", v.Key)}}, nil
+			return userauth.VolumeBackupSourceReply{VolumeRevision: v.Revision, ModuleEpoch: max(w.ledgerEpoch, 1), RootRevision: w.root, Index: w.root,
+				Source: control.VolumeBackupSource{Schema: 1, Scope: v.Scope, Node: v.Node, Owner: fakeNodeKey(v.Node), NativeBinding: v.NativeBinding,
+					Compatibility: fakeDigest("compat", v.Key)}}, nil
 		}
 	}
-	return VolumeSource{}, fail(m, CodeMissing, "")
+	return userauth.VolumeBackupSourceReply{}, fail(m, CodeMissing, "")
 }
 
 func (w *world) volumeByScope(s volumes.Scope) int {

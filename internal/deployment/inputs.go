@@ -57,6 +57,9 @@ type Needs struct {
 	Files           []Projection
 	FixedVolumes    map[string]VolumeReference `json:",omitempty"`
 	Lifecycle       *checker.Selection         `json:",omitempty"`
+	// Socket is the sfev.sock read (x-sfc.secrets.socket): its own grant
+	// under purpose sfev, consumer and generation (socketInputNeeds).
+	Socket *SocketNeeds `json:",omitempty"`
 }
 type VolumePin struct {
 	Key      string
@@ -69,6 +72,7 @@ type bindingRecord struct {
 	Needs          Needs
 	Grants         []secrets.Grant
 	RegistryGrants []secrets.Grant `json:",omitempty"`
+	SocketGrants   []secrets.Grant `json:",omitempty"`
 	Pins           []VolumePin
 }
 
@@ -103,6 +107,11 @@ func ownNeeds(n Needs) Needs {
 		v := n.Lifecycle.Clone()
 		n.Lifecycle = &v
 	}
+	if n.Socket != nil {
+		socket := *n.Socket
+		socket.Sources = slices.Clone(socket.Sources)
+		n.Socket = &socket
+	}
 	n.Use.Sources = slices.Clone(n.Use.Sources)
 	n.Sources = slices.Clone(n.Sources)
 	n.RegistrySources = slices.Clone(n.RegistrySources)
@@ -132,16 +141,21 @@ func ownBinding(d bindingRecord) bindingRecord {
 	for i := range d.RegistryGrants {
 		d.RegistryGrants[i] = ownGrant(d.RegistryGrants[i])
 	}
+	d.SocketGrants = slices.Clone(d.SocketGrants)
+	for i := range d.SocketGrants {
+		d.SocketGrants[i] = ownGrant(d.SocketGrants[i])
+	}
 	d.Pins = slices.Clone(d.Pins)
 	return d
 }
 func (b Binding) Needs() Needs { return ownNeeds(b.d.Needs) }
 func (b Binding) Grants() []secrets.Grant {
 	d := ownBinding(b.d)
-	return append(d.Grants, d.RegistryGrants...)
+	return append(append(d.Grants, d.RegistryGrants...), d.SocketGrants...)
 }
 func (b Binding) ProjectionGrants() []secrets.Grant { return ownBinding(b.d).Grants }
 func (b Binding) RegistryGrants() []secrets.Grant   { return ownBinding(b.d).RegistryGrants }
+func (b Binding) SocketGrants() []secrets.Grant     { return ownBinding(b.d).SocketGrants }
 func (b Binding) Pins() []VolumePin                 { return slices.Clone(b.d.Pins) }
 func (b Binding) Digest() [32]byte                  { raw, _ := json.Marshal(b.d); return sha256.Sum256(raw) }
 func VolumeKey(s volumes.Scope) string              { return s.Key() }
@@ -202,7 +216,7 @@ func validInputMetadata(n Needs) bool {
 	if !identifier(u.Tenant) || !identifier(u.User) || !identifier(u.App) || !identifier(u.Deployment) || !identifier(u.Service) || !identifier(u.Node) || u.RequesterKey == ([32]byte{}) || u.NodeKey == ([32]byte{}) || len(u.Sources) != 0 || len(n.Sources) > maxInputs || len(n.Volumes) > maxInputs || len(n.Files) > maxInputs || len(n.Sources) == 0 && len(n.Files) != 0 {
 		return false
 	}
-	if len(n.RegistrySources) > 2 || len(n.Sources)+len(n.RegistrySources) > maxInputs {
+	if len(n.RegistrySources) > 2 || len(n.Sources)+len(n.RegistrySources) > maxInputs || n.Socket != nil && !validSocketNeeds(*n.Socket, u.Tenant) {
 		return false
 	}
 	for i, source := range n.RegistrySources {
@@ -355,6 +369,9 @@ func Required(cluster [32]byte, c access.Catalog, trees map[string]secrets.Tree,
 		for realm, u := range approvalRealmUses(n) {
 			uses[realm] = append(uses[realm], u)
 		}
+		for realm, u := range realmUses(socketInputNeeds(n)) {
+			uses[realm] = append(uses[realm], u)
+		}
 	}
 	var result []secrets.Target
 	for realm, us := range uses {
@@ -389,6 +406,9 @@ func Missing(cluster [32]byte, c access.Catalog, trees map[string]secrets.Tree, 
 	uses := map[string][]secrets.Use{}
 	for _, n := range needs {
 		for realm, u := range approvalRealmUses(n) {
+			uses[realm] = append(uses[realm], u)
+		}
+		for realm, u := range realmUses(socketInputNeeds(n)) {
 			uses[realm] = append(uses[realm], u)
 		}
 	}
@@ -428,7 +448,7 @@ func reserve(cluster [32]byte, c access.Catalog, trees map[string]secrets.Tree, 
 	q := Reservation{Approvals: a, Volumes: copyVolumes(v)}
 	for _, n := range needs {
 		b := Binding{bindingRecord{Schema: 1, Cluster: cluster, Needs: ownNeeds(n)}}
-		for purpose, group := range []Needs{n, registryInputNeeds(n)} {
+		for purpose, group := range []Needs{n, registryInputNeeds(n), socketInputNeeds(n)} {
 			uses := realmUses(group)
 			if purpose == 1 {
 				uses = registryRealmUses(n)
@@ -440,10 +460,13 @@ func reserve(cluster [32]byte, c access.Catalog, trees map[string]secrets.Tree, 
 				if err != nil {
 					return Reservation{}, err
 				}
-				if purpose == 0 {
+				switch purpose {
+				case 0:
 					b.d.Grants = append(b.d.Grants, grant)
-				} else {
+				case 1:
 					b.d.RegistryGrants = append(b.d.RegistryGrants, grant)
+				default:
+					b.d.SocketGrants = append(b.d.SocketGrants, grant)
 				}
 			}
 		}
@@ -505,7 +528,7 @@ func pinRunsHere(d bindingRecord, c volumes.Consumer) bool {
 
 func validBinding(b Binding) bool {
 	d := b.d
-	if d.Schema != 1 || d.Cluster == ([32]byte{}) || !d.Needs.resourceIdentity(d.Cluster, d.Needs.Use.NodeKey) || !validNeeds(d.Needs) || len(d.Grants) != len(realms(d.Needs)) || len(d.RegistryGrants) != len(realms(registryInputNeeds(d.Needs))) || len(d.Pins) != len(d.Needs.Volumes) {
+	if d.Schema != 1 || d.Cluster == ([32]byte{}) || !d.Needs.resourceIdentity(d.Cluster, d.Needs.Use.NodeKey) || !validNeeds(d.Needs) || len(d.Grants) != len(realms(d.Needs)) || len(d.RegistryGrants) != len(realms(registryInputNeeds(d.Needs))) || len(d.SocketGrants) != len(realms(socketInputNeeds(d.Needs))) || len(d.Pins) != len(d.Needs.Volumes) {
 		return false
 	}
 	us := realmUses(d.Needs)
@@ -520,6 +543,14 @@ func validBinding(b Binding) bool {
 	for i, realm := range realms(rn) {
 		g := d.RegistryGrants[i]
 		if g.Realm != realm || g.Consumer != rn.Consumer || g.Generation != rn.Generation || !useEqual(g.Use, ru[realm]) || g.Selection == ([32]byte{}) || g.Lifetime.Token == 0 || g.Lifetime.Generation != 1 || len(g.Pins) > 4096 {
+			return false
+		}
+	}
+	sn := socketInputNeeds(d.Needs)
+	su := realmUses(sn)
+	for i, realm := range realms(sn) {
+		g := d.SocketGrants[i]
+		if g.Realm != realm || g.Consumer != sn.Consumer || g.Generation != sn.Generation || !useEqual(g.Use, su[realm]) || g.Selection == ([32]byte{}) || g.Lifetime.Token == 0 || g.Lifetime.Generation != 1 || len(g.Pins) > 4096 {
 			return false
 		}
 	}

@@ -71,7 +71,7 @@ func TestCertificateManagementIsSystemAdminOnlyAndLinksFollowDomains(t *testing.
 	again.Request = fmt.Sprintf("user-%d", f.next+1)
 	again.Signature = ed25519.Sign(f.node, certstore.CertificateBytes(again))
 	f.apply("admin", "put-certificate", 0, CertificatePut{again}, state.ConditionFailed)
-	f.apply("admin", "add-domain", 1, DomainChange{"shop.example"}, state.Applied)
+	f.apply("admin", "add-domain", 1, DomainChange{Name: "shop.example"}, state.Applied)
 	newer := controlCertificate(t, f, 2, fmt.Sprintf("user-%d", f.next+1))
 	f.apply("admin", "put-certificate", 0, CertificatePut{newer}, state.Applied)
 	c, _ := f.p.Certificates(f.s)
@@ -157,17 +157,17 @@ func TestCertificateExpiryRequiresCurrentControlAndPurgesPayloadFromCurrentSnaps
 }
 func TestDomainListIsSystemAdminOnlyAndOnTheFirstCertificatePage(t *testing.T) {
 	f := newNodeStorageFixture(t)
-	f.apply("manager", "add-domain", 0, DomainChange{"shop.example"}, state.Forbidden)
-	f.apply("admin", "add-domain", 0, DomainChange{"Shop.example"}, state.Invalid)
-	f.apply("admin", "add-domain", 0, DomainChange{"co.kr"}, state.Invalid)
-	f.apply("admin", "add-domain", 0, DomainChange{"shop.example"}, state.Applied)
-	f.apply("admin", "add-domain", 1, DomainChange{"shop.example"}, state.ConditionFailed)
+	f.apply("manager", "add-domain", 0, DomainChange{Name: "shop.example"}, state.Forbidden)
+	f.apply("admin", "add-domain", 0, DomainChange{Name: "Shop.example"}, state.Invalid)
+	f.apply("admin", "add-domain", 0, DomainChange{Name: "co.kr"}, state.Invalid)
+	f.apply("admin", "add-domain", 0, DomainChange{Name: "shop.example"}, state.Applied)
+	f.apply("admin", "add-domain", 1, DomainChange{Name: "shop.example"}, state.ConditionFailed)
 	page, err := f.p.CertificatePage(f.s, f.sessions["admin"], 3, CertificateQuery{})
 	if err != nil || page.Revision != 1 || len(page.Domains) != 1 || page.Domains[0].Name != "shop.example" || page.Domains[0].AddedBy != "admin" {
 		t.Fatal("domain list missing", page, err)
 	}
-	f.apply("admin", "remove-domain", 0, DomainChange{"shop.example"}, state.ConditionFailed)
-	f.apply("admin", "remove-domain", 1, DomainChange{"shop.example"}, state.Applied)
+	f.apply("admin", "remove-domain", 0, DomainChange{Name: "shop.example"}, state.ConditionFailed)
+	f.apply("admin", "remove-domain", 1, DomainChange{Name: "shop.example"}, state.Applied)
 	if c, err := f.p.Certificates(f.s); err != nil || len(c.Domains) != 0 {
 		t.Fatal("domain not removed", err)
 	}
@@ -188,5 +188,40 @@ func TestACMEResponderIsSystemAdminOnlyAndOnTheFirstPage(t *testing.T) {
 	f.apply("admin", "set-acme-responder", 1, ACMEResponderChange{""}, state.Applied)
 	if c, err := f.p.Certificates(f.s); err != nil || c.ACMEResponder != nil || c.Revision != 2 {
 		t.Fatal("responder not cleared", err)
+	}
+}
+
+func TestDomainOwnerTenantAndNesting(t *testing.T) {
+	f := newNodeStorageFixture(t)
+	f.apply("admin", "add-domain", 0, DomainChange{Name: "shop.example", Tenant: "missing"}, state.ConditionFailed)
+	f.apply("admin", "add-domain", 0, DomainChange{Name: "shop.example", Tenant: "Tenant"}, state.ConditionFailed)
+	f.apply("admin", "add-domain", 0, DomainChange{Name: "example.com"}, state.Applied)
+	// A tenant domain may sit under a cluster-level one.
+	f.apply("admin", "add-domain", 1, DomainChange{Name: "shop.example.com", Tenant: "tenant"}, state.Applied)
+	// A cluster-level domain never sits under a tenant domain.
+	f.apply("admin", "add-domain", 2, DomainChange{Name: "api.shop.example.com"}, state.ConditionFailed)
+	f.apply("admin", "add-domain", 2, DomainChange{Name: "api.shop.example.com", Tenant: "tenant"}, state.Applied)
+	f.apply("manager", "assign-domain", 3, DomainChange{Name: "example.com", Tenant: "tenant"}, state.Forbidden)
+	f.apply("admin", "assign-domain", 3, DomainChange{Name: "example.com", Tenant: "tenant"}, state.Applied)
+	// Same owner again is a conflict, cluster level returns it.
+	f.apply("admin", "assign-domain", 4, DomainChange{Name: "example.com", Tenant: "tenant"}, state.ConditionFailed)
+	f.apply("admin", "assign-domain", 4, DomainChange{Name: "example.com"}, state.Applied)
+	f.apply("admin", "remove-domain", 5, DomainChange{Name: "example.com", Tenant: "tenant"}, state.Invalid)
+	c, err := f.p.Certificates(f.s)
+	if err != nil || c.Revision != 5 {
+		t.Fatal(c.Revision, err)
+	}
+	if d, ok := c.DomainOwner("www.api.shop.example.com"); !ok || d.Name != "api.shop.example.com" || d.Tenant != "tenant" {
+		t.Fatal("owner", d, ok)
+	}
+	if d, ok := c.DomainOwner("cdn.example.com"); !ok || d.Tenant != "" {
+		t.Fatal("cluster owner", d, ok)
+	}
+	users, _ := f.p.Catalog(f.s)
+	if d, _ := c.Domain("shop.example.com"); DomainTenant(users, d) != "tenant" {
+		t.Fatal("tenant owner lost")
+	}
+	if DomainTenant(users, certstore.Domain{Name: "x.example", Tenant: "gone"}) != "" {
+		t.Fatal("unknown tenant kept ownership")
 	}
 }

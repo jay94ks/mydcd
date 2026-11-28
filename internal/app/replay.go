@@ -23,6 +23,7 @@ func controlHooks(o *cluster.Options, catalog control.Policy) {
 	o.AllowMutationUpgrade = true
 	o.AllowPatchUpgrade = true
 	o.Validate = catalog.ValidateManaged
+	o.ValidateStage = catalog.ValidateManagedStage
 	o.TrackConfiguration = true
 }
 

@@ -107,5 +107,41 @@ export const networkDnsLive = (tenant: string | undefined, network: string | und
 export const certStoreLive: LiveTopic<never> = { match: (r) => r.kind === 'certificate' || r.kind === 'domain' || r.kind === 'acme-responder' };
 /** 인증서 하나 */
 export const certLive = (id: string | undefined): LiveTopic<never> => ({ match: (r) => (r.kind === 'certificate' && !!id && r.name === id) || r.kind === 'domain' });
-/** 도메인 목록: 클러스터 도메인 목록이 바뀌면 바로 다시 읽는다. 웹이 가진 연결 정보는 알림이 없어 주기를 남긴다 */
-export const domainListLive: LiveTopic<never> = { match: (r) => r.kind === 'domain', measured: true };
+/** 도메인 목록: 클러스터 도메인 목록(domain)과 웹이 가진 외부 DNS 연결(dns-domain), 연결된 인증서 */
+export const domainListLive: LiveTopic<never> = { match: (r) => r.kind === 'domain' || r.kind === 'dns-domain' || r.kind === 'certificate' };
+/** 도메인 하나: 그 행·관리 표시·변경 이력·서버 연결. 레코드 값은 DNS 업체가 가진 것이라 오지 않는다 */
+export const domainLive = (domain: string | undefined): LiveTopic<never> => ({ match: (r) => !!domain && r.name === domain && (r.kind === 'dns-domain' || r.kind === 'domain') });
+/** DNS 업체 연결 */
+export const dnsProvidersLive: LiveTopic<never> = { match: (r) => r.kind === 'dns-provider' };
+/** ACME 인증서(발급 정의·주문)와 계정. 발급 상태는 인증서 저장소 쪽도 본다 */
+export const acmeLive: LiveTopic<never> = { match: (r) => r.kind === 'acme-cert' || r.kind === 'acme-account' || r.kind === 'certificate' };
+/** ACME 인증서 하나 */
+export const acmeCertLive = (name: string | undefined): LiveTopic<never> => ({ match: (r) => (r.kind === 'acme-cert' && !!name && r.name === name) || r.kind === 'certificate' });
+
+// 잰 값이 섞인 조회: 관련 기록·보고가 바뀌면 바로 다시 읽고, 주기도 남긴다(measured).
+const measured = (t: LiveTopic<never>): LiveTopic<never> => ({ match: t.match, measured: true });
+
+/** 서버 Raft·로그 장부·압축 상태: 적용 번호 같은 값은 쓰기마다 움직여 주기를 남긴다 */
+export const raftLive = measured(serversLive);
+/** 서버 비우기 진행: 서버 기록, 옮겨지는 앱, 서버 보고 */
+export const drainLive: LiveTopic<never> = { match: (r) => SERVER_KINDS.has(r.kind) || r.kind === 'app', measured: true };
+/** 망 하나의 바뀜 적용 진행·터널 상태: 망 기록과 서버 기록. 서버별 적용·터널 상태는 잰 값이다 */
+export const networkStateLive = (tenant: string | undefined): LiveTopic<never> => ({ match: (r) => r.kind === 'node' || networksLive(tenant).match(r), measured: true });
+/** 데이터 저장소 하나의 상세(서버별 사용량은 잰 값) */
+export const volumeDetailLive = (tenant: string | undefined) => measured(volumesLive(tenant));
+/** 작업 공간 하나에 속한 모든 것 (자원 목록·퇴역 진행) */
+export const tenantAllLive = (tenant: string | undefined): LiveTopic<never> => ({ match: (r) => !!tenant && r.tenant === tenant });
+/** 작업 공간 퇴역 진행: 그 작업 공간의 기록이 줄어드는 것을 따라가고, 서버 쪽 정리는 잰 값이라 주기를 남긴다 */
+export const tenantRetireLive = (tenant: string | undefined) => measured(tenantAllLive(tenant));
+/** 내린 앱 보관 목록 (남겨 둔 데이터 저장소 포함) */
+export const archivedLive = (tenant: string | undefined): LiveTopic<never> => ({ match: (r) => !!tenant && r.tenant === tenant && (r.kind === 'archived-app' || r.kind === 'volume') });
+/** 휴지통: 웹이 지운 것과 내린 앱 */
+export const trashLive: LiveTopic<never> = { match: (r) => r.kind === 'trash' || r.kind === 'archived-app' };
+/**
+ * 서버가 말이 없어진 것(연결 끊김·보고 오래됨)은 읽을 때 관측 나이로 계산해 알림이 오지 않는다.
+ * 그런 값을 보이는 조회는 서버 보고에 맞춰 바로 다시 읽고 주기도 남긴다.
+ */
+export const serversMeasured = measured(serversLive);
+export const serverMeasured = (id: string | undefined) => measured(serverLive(id));
+export const dashboardMeasured = measured(dashboardLive);
+export const appMeasured = (tenant: string | undefined, app: string | undefined) => measured(appLive(tenant, app));

@@ -9,7 +9,6 @@ import (
 
 	"github.com/jay94ks/seafield/internal/cluster/control"
 	"github.com/jay94ks/seafield/internal/deployment"
-	"github.com/jay94ks/seafield/internal/ingress"
 	"github.com/jay94ks/seafield/internal/web/sfc"
 	"gopkg.in/yaml.v3"
 )
@@ -46,42 +45,13 @@ type clusterAppRouteRow struct {
 
 // clusterAppRouteFile is the route file a record reads back as.
 func clusterAppRouteFile(app string, d deployment.IngressDeclaration) string {
-	type listener struct {
-		Shared  string `yaml:"shared,omitempty"`
-		Address string `yaml:"address,omitempty"`
-		TLS     bool   `yaml:"tls,omitempty"`
-		HTTP3   bool   `yaml:"http3,omitempty"`
-	}
-	type route struct {
-		ID      string           `yaml:"id,omitempty"`
-		Host    string           `yaml:"host"`
-		Prefix  string           `yaml:"prefix,omitempty"`
-		Gateway string           `yaml:"gateway,omitempty"`
-		Balance *ingress.Balance `yaml:"balance,omitempty"`
-	}
-	type routes struct {
-		Node      string                    `yaml:"node"`
-		Runtime   deployment.IngressRuntime `yaml:"runtime"`
-		Host      string                    `yaml:"host,omitempty"`
-		Gateway   string                    `yaml:"gateway,omitempty"`
-		Balance   *ingress.Balance          `yaml:"balance,omitempty"`
-		Listeners []listener                `yaml:"listeners"`
-		Routes    []route                   `yaml:"routes,omitempty"`
-	}
 	f := struct {
 		Name string `yaml:"name"`
 		Sfc  struct {
-			Ingress routes `yaml:"ingress"`
+			Ingress deployment.IngressDeclaration `yaml:"ingress"`
 		} `yaml:"x-sfc"`
 	}{Name: deployment.ClusterAppPrefix + app}
-	in := &f.Sfc.Ingress
-	in.Node, in.Runtime, in.Host, in.Gateway, in.Balance = d.Node, d.Runtime, d.Host, d.Gateway, d.Balance
-	for _, l := range d.Listeners {
-		in.Listeners = append(in.Listeners, listener{l.Shared, l.Address, l.TLS, l.HTTP3})
-	}
-	for _, r := range d.Routes {
-		in.Routes = append(in.Routes, route{r.ID, r.Host, r.Prefix, r.Gateway, r.Balance})
-	}
+	f.Sfc.Ingress = d
 	raw, _ := yaml.Marshal(f)
 	return string(raw)
 }

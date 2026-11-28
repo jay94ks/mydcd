@@ -15,6 +15,7 @@ import { Dialog } from '../components/Dialog';
 import { MutationError, OpPanel, useMutation } from '../components/OpPanel';
 import { DEFAULT_POLL_MS, usePoll } from '../lib/usePoll';
 import { fmtBytes, fmtTime, middle } from '../lib/format';
+import { volumeDetailLive } from '../lib/liveTopics';
 
 export const NO_APP = '앱에 딸린 데이터 저장소만 백업할 수 있습니다.';
 
@@ -59,7 +60,7 @@ const phaseBadge = (map: Record<string, [string, Tone]>, p: string) => {
 
 /** 선택한 저장소의 백업·복원 행을 읽는다(진행 중이 있으면 기본 주기로 다시 읽음) */
 export function useVolumeDetail(tenant: string, v: VolumeView | undefined) {
-  return usePoll((s) => (v ? volumeDetail(tenant, v.name, v.app, s) : Promise.resolve(undefined)), [tenant, v?.name, v?.app], DEFAULT_POLL_MS);
+  return usePoll((s) => (v ? volumeDetail(tenant, v.name, v.app, s) : Promise.resolve(undefined)), [tenant, v?.name, v?.app], DEFAULT_POLL_MS, volumeDetailLive(tenant));
 }
 type Detail = ReturnType<typeof useVolumeDetail>;
 

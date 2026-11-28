@@ -787,11 +787,12 @@ func testManagedTwoNodeFixture(t *testing.T, sqlMode bool, options ...managedTwo
 		text = strings.Replace(text, "\nmodules:", "\n management_socket: "+fmt.Sprintf("%q", filepath.Join(root, id+".sock"))+"\nmodules:", 1)
 		if containerMode {
 			text = strings.Replace(text, "workload: {enabled: false}", "workload: {enabled: true}", 1)
+			// App routes use the node's external gateway listeners.
 			if option.replicaTopology && n == 0 {
-				text = strings.Replace(text, "ingress: {enabled: false}", "ingress: {enabled: true}", 1)
+				text = strings.Replace(text, "ingress: {enabled: false}", "ingress: {enabled: true, gateways: {external: {enabled: true, addresses: [192.0.2.1], ports: [18080], listeners: [{id: http, address: '192.0.2.1:18080'}]}}}", 1)
 			}
 			if sqlMode && n == 1 {
-				text = strings.Replace(text, "ingress: {enabled: false}", "ingress: {enabled: true}", 1)
+				text = strings.Replace(text, "ingress: {enabled: false}", "ingress: {enabled: true, gateways: {external: {enabled: true, addresses: [192.0.2.2], ports: [8080, 8443], listeners: [{id: http, address: '192.0.2.2:8080'}, {id: https, address: '192.0.2.2:8443', tls: true, http3: true}]}}}", 1)
 			}
 		}
 		if e = os.WriteFile(configs[n], []byte(text), 0600); e != nil {

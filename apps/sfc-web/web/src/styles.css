@@ -949,3 +949,11 @@ button.chip[disabled] { opacity: .5; cursor: not-allowed; }
 /* VPS 요금 현황판 막대 (UI-12B) */
 .vps-bar { display: grid; grid-template-columns: 140px minmax(120px, 1fr) minmax(220px, auto); align-items: center; gap: 10px; }
 @media (max-width: 720px) { .vps-bar { grid-template-columns: 1fr; gap: 4px; } }
+
+/* 보관된 앱(UI-36·37): 저장소 줄이 여러 줄이라 칸을 접는다 */
+.tbl.archived-apps td { white-space: normal; max-width: none; vertical-align: top; }
+.tbl.archived-apps td:first-child, .tbl.archived-apps td:nth-child(2), .tbl.archived-apps td:nth-child(3) { white-space: nowrap; }
+.health-reason { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; }
+.health-reason > .small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 400; }
+/* 배포 미리보기 바뀌는 항목(Z9): 이유 문장이 길어 둘째 칸을 접는다 */
+.tbl.plan-changes td:last-child { white-space: normal; max-width: none; }

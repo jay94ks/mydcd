@@ -149,6 +149,9 @@ func (f *fixture) approve(target secrets.Target) {
 		prefix = target.Realm
 	}
 	target.ApprovalID = prefix + "-" + target.Group
+	if target.Purpose != "" {
+		target.ApprovalID += "-" + target.Purpose
+	}
 	v := secrets.Approval{Schema: 1, Issuer: public(f.issuer), Payload: secrets.ApprovalPayload{ApprovedAt: 100, Fact: "secret-group-use-approved", Target: target}}
 	v.Signature = ed25519.Sign(f.issuer, secrets.ApprovalBytes(v))
 	var e error
@@ -229,7 +232,7 @@ func (f *fixture) closure(b Binding) Closure {
 	}
 	out := Closure{}
 	for _, g := range b.Grants() {
-		p := secrets.UseGone{Cluster: f.cluster, Realm: g.Realm, Tenant: g.Use.Tenant, App: g.Use.App, Deployment: g.Use.Deployment, Consumer: g.Consumer, Generation: g.Generation, NodeKey: g.Use.NodeKey, Selection: g.Selection, Lifetime: g.Lifetime, Stopped: true, MountsGone: true}
+		p := secrets.UseGone{Purpose: g.Use.Purpose, Cluster: f.cluster, Realm: g.Realm, Tenant: g.Use.Tenant, App: g.Use.App, Deployment: g.Use.Deployment, Consumer: g.Consumer, Generation: g.Generation, NodeKey: g.Use.NodeKey, Selection: g.Selection, Lifetime: g.Lifetime, Stopped: true, MountsGone: true}
 		p.Signature = ed25519.Sign(k, secrets.UseGoneBytes(p))
 		out.Secrets = append(out.Secrets, p)
 	}

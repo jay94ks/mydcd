@@ -54,7 +54,7 @@ func TestIncidentMCPCandidates(t *testing.T) {
 		t.Fatalf("calls: %v", c)
 	}
 	_, det := f.do("GET", "/api/v1/incidents/"+id, nil)
-	if fmt.Sprint(det["mcpCalls"]) != "map[grafana:1]" || !strings.Contains(fmt.Sprint(det["timeline"]), "자동 실행 (MCP mcp.grafana.create_silence)") || strings.Contains(fmt.Sprint(det), "metrics up") {
+	if fmt.Sprint(det["mcpCalls"]) != "map[grafana:1]" || !strings.Contains(fmt.Sprint(det["timeline"]), "ran automatically (MCP mcp.grafana.create_silence)") || strings.Contains(fmt.Sprint(det), "metrics up") {
 		t.Fatalf("detail: %v", det)
 	}
 
@@ -69,7 +69,7 @@ func TestIncidentMCPCandidates(t *testing.T) {
 			next = x
 		}
 	}
-	if next == nil || decisionOf(next) != "pending" || !strings.Contains(fmt.Sprint(next["decision"]), "하루 한도(1번)") {
+	if next == nil || decisionOf(next) != "pending" || !strings.Contains(fmt.Sprint(next["decision"]), "daily limit (1) was reached") {
 		t.Fatalf("limit: %v", next)
 	}
 	_, det = f.do("GET", "/api/v1/incidents/"+next["id"].(string), nil)

@@ -4,6 +4,8 @@ package compat
 
 import (
 	"context"
+	"crypto/sha256"
+	"fmt"
 	"net/netip"
 	"os"
 	"path/filepath"
@@ -13,10 +15,13 @@ import (
 
 	"github.com/jay94ks/seafield/internal/access"
 	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/deployment"
 	"github.com/jay94ks/seafield/internal/identity"
 	"github.com/jay94ks/seafield/internal/tenancy"
 	"github.com/jay94ks/seafield/internal/workload"
 	"github.com/jay94ks/seafield/tests/clusterfixture"
+
+	dockerspec "github.com/moby/docker-image-spec/specs-go/v1"
 )
 
 // scenario runs Raft-bound actions of several kinds on c: a node joining
@@ -47,6 +52,48 @@ func scenario(t *testing.T, c *clusterfixture.Cluster) {
 	}
 	lan := tenancy.TUNNode{Node: "node-0", Pools: []tenancy.Subnet{{ID: "pool", Prefix: netip.MustParsePrefix("10.199.1.0/24"), Gateway: netip.MustParseAddr("10.199.1.1"), MTU: 1280}}}
 	c.Change(0, "shop-lan", "create-tun-network", resources.Networks.Revision(), tenancy.TUNDefinition{Tenant: "shop", Name: "lan", Members: []tenancy.TUNNode{lan}})
+	deployApp(t, c, "shop", "prod", appDocument)
+}
+
+// appDocument is the app.yaml the scenario deploys. Raft keeps it as the
+// app's original, and a starting sfcd parses it again with its own app.yaml
+// rules (2026-11-28 lab: renamed keys stopped every server). Use the keys an
+// app may use; a later build must keep reading them.
+var appDocument = "name: web\n" +
+	"services:\n" +
+	"  web:\n" +
+	"    image: docker.io/library/nginx@sha256:" + strings.Repeat("a", 64) + "\n" +
+	"    command: [/web, --port, \"8080\"]\n" +
+	"    environment: {MODE: prod, PORT: \"8080\"}\n" +
+	"    labels: {team: shop}\n" +
+	"    cpus: 0.1\n" +
+	"    mem_limit: 16m\n" +
+	"    networks: {app: {ipv4_address: 10.199.1.10}}\n" +
+	"    x-sfc: {node: node-0}\n" +
+	"networks:\n" +
+	"  app: {external: true, name: lan}\n"
+
+// deployApp deploys doc as `sfcli app up` does: plan, upload the artifact,
+// accept it.
+func deployApp(t *testing.T, c *clusterfixture.Cluster, tenant, deploymentID, doc string) {
+	t.Helper()
+	image := "docker.io/library/nginx@sha256:" + strings.Repeat("a", 64)
+	var cfg dockerspec.DockerOCIImage
+	cfg.Config.User, cfg.Config.Cmd, cfg.Config.Env = "10001:10001", []string{"/web"}, []string{"PATH=/usr/bin"}
+	c.Nodes[0].Engine.Publish(cfg, image)
+	artifact := c.PlanApp(0, tenant, control.AppPlanRequest{Document: []byte(doc), Deployment: deploymentID})
+	plan, err := deployment.DecodeBlueprint(artifact)
+	if err != nil {
+		t.Fatal(err)
+	}
+	app, id := plan.Scope().App, "compat-"+plan.Scope().App
+	c.Change(0, id+"-upload", "begin-app-upload", 0, control.AppUploadBegin{Tenant: tenant, App: app, Deployment: deploymentID, ID: id, Length: len(artifact), Digest: sha256.Sum256(artifact)})
+	for i := 0; i*deployment.ArtifactPartBytes < len(artifact); i++ {
+		end := min(len(artifact), (i+1)*deployment.ArtifactPartBytes)
+		c.Change(0, fmt.Sprintf("%s-part-%03d", id, i), "put-app-part", uint64(i+1), control.AppUploadPart{Tenant: tenant, ID: id, Index: i, Data: artifact[i*deployment.ArtifactPartBytes : end]})
+	}
+	target := control.AppCreateTarget(c.ID, tenant, app, deploymentID)
+	c.Change(0, id+"-accept", "begin-app", 0, control.AppBegin{Target: &target, Tenant: tenant, App: app, Deployment: deploymentID, Upload: id, Operation: id})
 }
 
 // This build replays the scenario's whole Raft log to the state its own FSM
@@ -73,6 +120,11 @@ func TestReplayScenario(t *testing.T) {
 		t.Fatal(err)
 	} else if _, ok := catalog.Tenant("shop"); !ok {
 		t.Fatal("replayed state lacks the scenario")
+	}
+	if apps, err := c.Policy.Apps(s); err != nil {
+		t.Fatal(err)
+	} else if _, ok := apps.Inventory("shop", "web"); !ok {
+		t.Fatal("replayed state lacks the deployed app")
 	}
 	dir := filepath.Join(t.TempDir(), "bundle")
 	if name := os.Getenv("SFC_COMPAT_RECORD"); name != "" {

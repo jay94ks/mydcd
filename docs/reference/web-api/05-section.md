@@ -36,5 +36,5 @@
 | `GET /t/{t}/apps/{app}/source?version=` | `app-source` | `{tenant, app, version, yaml, digest, submitter, operation, acceptedAt}`. version 0 = 실행 중 버전 |
 | `GET /t/{t}/apps/{app}/revisions?after=` | `app-revisions` | |
 | `POST /t/{t}/apps/{app}/observe` | `container-observe` | `{service, instance?, kind:"logs"\|"top"\|"stats", tail?(≤10000), stdout?, stderr?, since?, until?}` (since·until은 Unix 초, until이 since보다 앞이면 400). 응답의 `truncated`는 sfcd 24 KiB 상한에 걸려 잘렸다는 뜻이다 |
-| `POST /t/{t}/apps/plan` | `app-plan-stream` | `{yaml, project?, deployment?, node?, diff}` → 계획. 아무것도 바꾸지 않음 |
+| `POST /t/{t}/apps/plan` | `app-plan-stream` | `{yaml, project?, deployment?, node?, diff}` → 계획. 아무것도 바꾸지 않음. `diff: true`면 `diff`(줄 글 `action key (reason)`)와 함께 `changes:[{action, key, reason?, interruption?}]`를 sfcd 순서로 준다. `interruption`은 교체되는 Task의 서비스가 교체 동안 멈추는 까닭의 sfcd 코드(`VOLUME_WRITER`, `HOST_PORT`, `STATIC_ADDRESS`, `SINGLE_INSTANCE`, `VOLUME_MOVE`, 뒤에 더해지는 코드)이고, 다른 복제본이 받으면 없다. 화면이 코드로 문장을 만든다 |
 

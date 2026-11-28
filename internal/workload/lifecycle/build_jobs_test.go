@@ -27,7 +27,7 @@ func buildJobFixture(t *testing.T) (Catalog, Use, BuildIntent, CompileBatch, ed2
 	if err != nil {
 		t.Fatal(err)
 	}
-	batch, err := NewCompileBatch(hashText("original-build"), time.Now().Add(time.Minute).UnixMilli(), policy, []*Compilation{input})
+	batch, err := NewCompileBatch(hashText("original-build"), time.Now().Add(time.Minute).UnixMilli(), policy, policy.Build.Image, []*Compilation{input})
 	if err != nil {
 		t.Fatal(err)
 	}

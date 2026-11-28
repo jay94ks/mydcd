@@ -10,6 +10,7 @@ import { usePoll } from '../lib/usePoll';
 import { ago, fmtTime } from '../lib/format';
 import { MCards, MDetail, MSec, useReadOnlyTop } from '../mobile/ReadOnly';
 import { dnsErrorText, zoneState } from './Domains';
+import { domainLive } from '../lib/liveTopics';
 
 const TABS: Record<string, string> = { records: '레코드', servers: '연결된 서버', assign: '작업 공간 배정', snapshots: '되돌리기 지점', history: '바꾼 기록' };
 
@@ -20,7 +21,7 @@ export function MDomainDetail() {
   const path = useLocation().pathname.replace(/\/$/, '');
   const last = path.split('/').pop() ?? '';
   const tab = TABS[last] ? last : 'records';
-  const dq = usePoll((s) => dnsDomains(s).then((ds) => ds.find((d) => d.domain === domain)), [domain]);
+  const dq = usePoll((s) => dnsDomains(s).then((ds) => ds.find((d) => d.domain === domain)), [domain], 0, domainLive(domain));
   const zq = usePoll((s) => dnsRecords(domain, s), [domain]);
   useReadOnlyTop(domain, TABS[tab], '레코드·서버 연결·배정 바꾸기와 되돌리기는 넓은 화면에서', [domain, tab]);
   const base = `/system/domains/${encodeURIComponent(domain)}`;
@@ -112,7 +113,7 @@ export function MDomainDetail() {
 }
 
 function MServers({ domain }: { domain: string }) {
-  const q = usePoll((s) => dnsServers(domain, s), [domain]);
+  const q = usePoll((s) => dnsServers(domain, s), [domain], 0, domainLive(domain));
   return (
     <Load q={q} what="연결된 서버를 읽지 못했습니다">
       {(v) => (
@@ -136,7 +137,7 @@ function MServers({ domain }: { domain: string }) {
 }
 
 function MSnapshots({ domain }: { domain: string }) {
-  const q = usePoll((s) => dnsSnapshots(domain, s), [domain]);
+  const q = usePoll((s) => dnsSnapshots(domain, s), [domain], 0, domainLive(domain));
   return (
     <Load q={q} what="되돌리기 지점을 읽지 못했습니다">
       {(items) => (
@@ -150,7 +151,7 @@ function MSnapshots({ domain }: { domain: string }) {
 }
 
 function MHistory({ domain }: { domain: string }) {
-  const q = usePoll((s) => dnsHistory(domain, s), [domain]);
+  const q = usePoll((s) => dnsHistory(domain, s), [domain], 0, domainLive(domain));
   return (
     <Load q={q} what="바꾼 기록을 읽지 못했습니다">
       {(items) => (

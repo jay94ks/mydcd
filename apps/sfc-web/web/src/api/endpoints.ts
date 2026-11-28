@@ -38,6 +38,7 @@ export function fromSummary(s: D.DNodeSummary): V.NodeView {
     leader: s.role === 'leader',
     roleUnknown: s.role ? undefined : true,
     cpuPercent: s.cpuPercent,
+    cpuStealPercent: s.cpuStealPercent,
     memory: s.memTotal ? { used: s.memUsed ?? 0, total: s.memTotal } : undefined,
     memUsed: s.memTotal ? undefined : s.memUsed,
     disk: s.diskTotal ? { used: s.diskUsed ?? 0, total: s.diskTotal } : undefined,
@@ -240,7 +241,7 @@ export const tenantStorage = async (t: string, signal?: AbortSignal) => {
   const p = await allPages<D.DTenantStorageRoot>(`/t/${enc(t)}/storage`, signal);
   return {
     ...p,
-    items: p.items.map((r): V.StorageRoot => ({ node: r.node, name: r.id, path: r.root?.path ?? '', tenants: [t], draining: r.draining, revision: r.revision, generation: r.generation, volumes: r.volumes, allowed: r.allowed, isDefault: r.id === 'default' || undefined })),
+    items: p.items.map((r): V.StorageRoot => ({ node: r.node, name: r.id, path: r.root?.path ?? '', tenants: [t], draining: r.draining, revision: r.revision, generation: r.generation, volumes: r.volumes, allowed: r.allowed, isDefault: r.id === 'default' || undefined, archiveDefault: r.archiveDefault || undefined })),
   };
 };
 /** 새로 고를 수 있는 경로: 허용됐고 꺼내는 중이 아님 */
@@ -380,6 +381,38 @@ export async function mesh(signal?: AbortSignal, tenant?: string): Promise<V.Mes
 }
 
 // ── 앱 ──
+const IMAGE_FAILURE: Record<string, string> = {
+  IMAGE_UNREACHABLE: '이미지 저장소에 닿지 못함',
+  IMAGE_NOT_FOUND: '이미지 없음',
+  IMAGE_UNTRUSTED: '신뢰 출처가 아닌 이미지',
+  IMAGE_DENIED: '이미지 받기 권한 없음',
+  IMAGE_SOURCE_REVOKED: '이미지 출처 신뢰가 풀림',
+  IMAGE_INVALID: '이미지 참조가 맞지 않음',
+};
+/** 앱 상태 사유 한 줄(화면 설계 표시 기준): '대상 사유 · 서버'. 모르는 코드는 원인 대상만 보인다 */
+export function healthReasonText(r?: D.DHealthReason): string | undefined {
+  if (!r?.code) return undefined;
+  const who = r.name ?? '';
+  const p = who ? `${who} ` : '';
+  const text: Record<string, string> = {
+    REPLICAS_PARTIAL: `${p}일부 복제본만 동작`,
+    INGRESS_NOT_READY: `외부 접속 ${who ? `${who} ` : ''}받을 컨테이너 일부 준비 안 됨`,
+    TASK_FAILED: `${p}시작 실패${r.failure ? ` · ${IMAGE_FAILURE[r.failure] ?? '시작할 수 없음'}` : ''}`,
+    TASK_EXITED: `${p}종료 코드 ${r.exit ?? '?'}`,
+    NOT_RUNNING: `${p}실행 안 됨`,
+    TASK_UNHEALTHY: `${p}상태 검사 실패`,
+    TASK_NOT_COMPLETED: `${p}아직 끝나지 않음`,
+    STEP_PENDING: `${p}적용 대기`,
+    STEP_REJECTED: `${p}적용 거절됨`,
+    NOT_OBSERVED: `${p}서버 보고 없음`,
+    APP_CHECK_FAILED: '앱 상태 검사 실패',
+    APP_CHECK_PENDING: '앱 상태 검사 대기',
+  };
+  const base = text[r.code] ?? (who || undefined);
+  if (!base) return undefined;
+  return r.node ? `${base} · ${r.node}` : base;
+}
+
 export function toApp(a: D.DAppView): V.AppView {
   const st = a.operation?.status ?? '';
   const running = st === 'pending' || st === 'running';
@@ -390,6 +423,7 @@ export function toApp(a: D.DAppView): V.AppView {
     deployment: a.deployment,
     revision: a.revision,
     health,
+    reason: health === 'degraded' || health === 'unhealthy' ? healthReasonText(a.healthReason) : undefined,
     retiring: !!a.retiring,
     claims: a.claims,
     lastOp: a.operation?.id ? { id: a.operation.id, status: st, failed: !!a.operation.failed, at: unix(a.operation.completedAt), submitter: a.operation.submitter } : undefined,
@@ -403,7 +437,7 @@ export async function dashboard(tenant: string | undefined, signal?: AbortSignal
   const nodes = arr(d.nodes).map(fromSummary);
   const apps = arr(d.apps).map(toApp).filter((a) => !a.retiring);
   const attention: V.AttentionItem[] = [
-    ...apps.filter((a) => a.health === 'degraded' || a.health === 'unhealthy').map((a) => ({ kind: 'problem' as const, text: `${a.tenant}/${a.app} · ${a.health === 'unhealthy' ? '오류' : '일부 오류'}`, at: a.observedAt ?? d.asOf, link: appPath(a.tenant, a.app) })),
+    ...apps.filter((a) => a.health === 'degraded' || a.health === 'unhealthy').map((a) => ({ kind: 'problem' as const, text: `${a.tenant}/${a.app} · ${a.health === 'unhealthy' ? '오류' : '일부 오류'}${a.reason ? ` · ${a.reason}` : ''}`, at: a.observedAt ?? d.asOf, link: appPath(a.tenant, a.app) })),
     ...nodes.filter((n) => n.disk && n.disk.used / n.disk.total >= 0.8).map((n) => ({ kind: 'disk' as const, text: `${n.id} 디스크 ${Math.round((n.disk!.used / n.disk!.total) * 100)}% 사용`, at: n.observedAt ?? d.asOf, link: `/servers/${n.id}` })),
     ...nodes.filter((n) => n.phase === 'unknown' || n.phase === 'problem').map((n) => ({ kind: 'problem' as const, text: `${n.id} ${n.phase === 'unknown' ? '연락 안 됨' : '오류'}`, at: n.observedAt ?? d.asOf, link: `/servers/${n.id}` })),
     ...unknownOps.map((o) => ({ kind: 'unknown-op' as const, text: `작업 ${o.id.slice(0, 8)} · ${o.action}${o.target ? ` · ${o.target}` : ''}`, at: o.submittedAt, link: `/system/ops?focus=${o.id}` })),
@@ -455,6 +489,7 @@ export async function plan(tenant: string, yaml: string, deployment?: string): P
       remove: services.filter((s) => s.change === 'remove').length,
     },
     diff: p.diff ? parseDiff(p.diff) : [],
+    changes: arr(p.changes).map((c) => ({ action: c.action, key: c.key, reason: c.reason || undefined, interruption: c.interruption || undefined })),
   };
 }
 
@@ -557,7 +592,7 @@ export const networkUsers = (t: string, name: string, signal?: AbortSignal) => u
 export const volumeUsers = (t: string, name: string, app: string | undefined, signal?: AbortSignal) => usersOf(`${volumePath(t, name)}/users${app ? `?app=${enc(app)}` : ''}`, signal);
 export const backupLimits = async (t: string, node: string, signal?: AbortSignal) => arr((await api.get<{ items: D.DBackupLimit[] }>(`/t/${enc(t)}/backup-limits?node=${enc(node)}`, signal)).items);
 export const backupLimitPath = (t: string, node: string) => `/t/${enc(t)}/backup-limits/${enc(node)}`;
-const toVolume = (v: D.DVolume): V.VolumeView => ({ key: v.key, name: v.name, kind: v.kind, node: v.node, storage: v.storage, app: v.app, consumers: v.consumers, capacityBytes: v.capacityBytes, usedBytes: v.usedBytes ?? undefined, usageObservedAt: v.usageObservedAt ? new Date(v.usageObservedAt).toISOString() : undefined, retain: v.retain, revision: v.revision, phase: v.phase, movePhase: v.movePhase, targetNode: v.targetNode, moveId: v.moveID, retained: arr(v.retained), writer: v.writer });
+const toVolume = (v: D.DVolume): V.VolumeView => ({ key: v.key, name: v.name, kind: v.kind, node: v.node, storage: v.storage, app: v.app, consumers: v.consumers, capacityBytes: v.capacityBytes, usedBytes: v.usedBytes ?? undefined, usageObservedAt: v.usageObservedAt ? new Date(v.usageObservedAt).toISOString() : undefined, retain: v.retain, revision: v.revision, phase: v.phase, movePhase: v.movePhase, targetNode: v.targetNode, moveId: v.moveID, retained: arr(v.retained), writer: v.writer, archiveId: v.archiveID, archivePhase: v.archivePhase });
 export const volumes = async (t: string, signal?: AbortSignal) => page(await api.get<D.ListPage<D.DVolume>>(`/t/${enc(t)}/volumes`, signal), toVolume);
 export const routes = async (t: string, signal?: AbortSignal) => {
   const r = await api.get<D.DRoutesPage>(`/t/${enc(t)}/routes`, signal);
@@ -572,8 +607,10 @@ export const volumePath = (t: string, name: string) => `/t/${enc(t)}/volumes/${e
 export const volumeDetail = async (t: string, name: string, app: string | undefined, signal?: AbortSignal) => {
   const d = await api.get<D.DVolumeDetail>(`${volumePath(t, name)}${app ? `?app=${enc(app)}` : ''}`, signal);
   const iso = (t: number | string) => (typeof t === 'number' ? new Date(t * 1000).toISOString() : t);
-  return { volume: toVolume(d.volume), backups: arr(d.backups).map((b) => ({ ...b, createdAt: iso(b.createdAt) })), restores: arr(d.restores) };
+  return { volume: toVolume(d.volume), backups: arr(d.backups).map((b) => ({ ...b, createdAt: iso(b.createdAt) })), restores: arr(d.restores), archives: arr(d.archives), archiveReady: d.archiveReady !== false };
 };
+/** 내린 앱 저장소 보관(#920). 보관 하나의 끝점 */
+export const volumeArchivePath = (t: string, name: string, id: string) => `${volumePath(t, name)}/archives/${enc(id)}`;
 /** 옮기기 계획(UI-64). node를 주면 데몬이 지금 앱 정의에 새 서버를 적는다 */
 export const volumeMovePlan = async (t: string, name: string, body: { app?: string; node: string }) => {
   const p = await api.post<D.DVolumeMovePlan>(`${volumePath(t, name)}/move-plan`, body);

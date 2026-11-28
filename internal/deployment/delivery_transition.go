@@ -150,7 +150,7 @@ func (d Delivery) BeginTransition(expected uint64, c access.Catalog, ctx Plannin
 			if at < 0 || a.d.Claims[at].Removed || deliveryDesiredMatches(step, Blueprint{candidate.Plan}, ctx) {
 				continue
 			}
-			if IngressRuntimeUpdate(a.d.Claims[at], step) {
+			if IngressRuntimeUpdate(a.d.Claims[at], step) || TaskAliasRuntimeUpdate(a.d.Claims[at], step) || TaskNetworkAttach(a.d.Claims[at], step) || TaskSecretSocketRuntimeUpdate(a.d.Claims[at], step) {
 				continue
 			}
 			switch step.Kind {
@@ -441,7 +441,7 @@ func (d Delivery) validateTransitions() error {
 				return ErrInputs
 			}
 			current := d.d.Inventory.Claims[at]
-			if current.Result != old.Result || current.Command != old.Command || old.Step.Retain && (!current.Retained || !bytes.Equal(goal(current.RetainProof), goal(target.Retained))) || !old.Step.Retain && (!current.Removed || !bytes.Equal(goal(current.Removal), goal(RemovalProof{t.Receipt.ID, t.Receipt.Revision, target.Drain, target.Proof, target.Delete, target.Gone}))) {
+			if current.Result != old.Result || current.Command != old.Command || old.Step.Retain && (!current.Retained || !bytes.Equal(goal(current.RetainProof), goal(target.Retained))) || !old.Step.Retain && (!current.Removed || !bytes.Equal(goal(current.Removal), goal(RemovalProof{t.Receipt.ID, t.Receipt.Revision, target.Drain, target.Proof, target.Delete, target.Gone, false}))) {
 				return ErrInputs
 			}
 			historical.d.Claims = append(historical.d.Claims, current)

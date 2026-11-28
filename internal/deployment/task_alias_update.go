@@ -24,8 +24,18 @@ func TaskAliasRuntimeUpdate(claim Claim, step Step) bool {
 		return false
 	}
 	var original GoalCommand
+	if json.Unmarshal([]byte(claim.Command.Value), &original) != nil {
+		return false
+	}
+	return taskAliasOnly(original, step)
+}
+
+// taskAliasOnly is TaskAliasRuntimeUpdate over the committed goal alone:
+// the planner uses it to keep consumers' references to a Task whose next
+// goal changes only aliases (annotateStable).
+func taskAliasOnly(original GoalCommand, step Step) bool {
 	var before, after ComposeService
-	if json.Unmarshal([]byte(claim.Command.Value), &original) != nil || original.Kind != "task" || original.Node != step.Node || original.Owner != step.Owner || original.Lifecycle != nil || json.Unmarshal(original.Config, &before) != nil || json.Unmarshal(step.Goal, &after) != nil {
+	if step.Kind != "task" || original.Kind != "task" || original.Node != step.Node || original.Owner != step.Owner || original.Lifecycle != nil || !bytes.Equal(goal(original.Activation), goal(step.Activation)) || json.Unmarshal(original.Config, &before) != nil || json.Unmarshal(step.Goal, &after) != nil {
 		return false
 	}
 	if bytes.Equal(goal(before), goal(after)) {

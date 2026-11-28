@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/jay94ks/seafield/internal/cluster/state"
@@ -18,7 +19,7 @@ func TestCheckerBuildMemberReportCannotCreateOrphanJob(t *testing.T) {
 	f.apply("manager", "set-lifecycle-policy", 0, checkerPolicy(), state.Applied)
 	id := sha256.Sum256([]byte("original-job"))
 	fact := checkerFact(f, f.node, "package checker\n")
-	b := checker.BuildIntent{Schema: 1, Cluster: f.p.Cluster, Tenant: "tenant", ID: hex.EncodeToString(id[:]), AppUseID: "missing-parent", AppUse: [32]byte{1}, Node: "node-a", Owner: fact.Owner, Selection: checker.Selection{PolicyRevision: 1, Sources: []checker.SourceFact{fact}}, Inputs: []checker.BuildInput{{Content: fact.ContentDigest(), Recipe: [32]byte{2}}}, Manifest: [32]byte{3}, Target: "linux/amd64", DeadlineUnixMilli: 10000}
+	b := checker.BuildIntent{Schema: 1, Cluster: f.p.Cluster, Tenant: "tenant", ID: hex.EncodeToString(id[:]), AppUseID: "missing-parent", AppUse: [32]byte{1}, Node: "node-a", Owner: fact.Owner, Selection: checker.Selection{PolicyRevision: 1, Sources: []checker.SourceFact{fact}}, Inputs: []checker.BuildInput{{Content: fact.ContentDigest(), Recipe: [32]byte{2}}}, Manifest: [32]byte{3}, Target: "linux/amd64", DeadlineUnixMilli: 10000, Image: "docker.io/library/golang@sha256:" + strings.Repeat("a", 64)}
 	r := CheckerBuildReport{Schema: 1, Cluster: f.p.Cluster, Reporter: fact.Owner, Tenant: b.Tenant, ID: b.ID, Action: "reserve", Epoch: f.s.ModuleEpoch(), RootRevision: f.s.Object(LifecycleKey).Revision, Index: f.s.Index(), At: 2, Intent: &b}
 	r.Signature = ed25519.Sign(f.node, CheckerBuildReportBytes(r))
 	raw, _ := json.Marshal(r)

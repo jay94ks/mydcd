@@ -143,7 +143,7 @@ func (r *Runtime) probeCD(ctx context.Context, read control.CDProbeRead) (out de
 			return sfcp.ErrAdmission
 		}
 		for _, entry := range members.Entries {
-			if entry.Peer.Key == hex.EncodeToString(r.Identity.Public[:]) {
+			if entry.CurrentPeer().Key == hex.EncodeToString(r.Identity.Public[:]) {
 				out.Node = entry.Peer.ID
 				break
 			}

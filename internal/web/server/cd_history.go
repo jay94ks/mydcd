@@ -34,7 +34,7 @@ func (s *Server) handleCDHistory(w http.ResponseWriter, r *http.Request, ws *web
 			if cs := kept[hex.EncodeToString(row.CandidateDigest[:])]; len(cs) > 0 {
 				it.Checks = map[string]any{}
 				for k, c := range cs {
-					it.Checks[k] = checkView(c)
+					it.Checks[k] = checkView(s.requestLang(r, ws), c)
 				}
 			}
 			items = append(items, it)

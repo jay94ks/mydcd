@@ -28,11 +28,17 @@ func TestReplacedTaskInterruption(t *testing.T) {
 		tStep(t, "ro", "a", "ro", ComposeService{Volumes: Mounts{{Type: "volume", Source: "data", Target: "/d", ReadOnly: true}}}),
 		tStep(t, "edge", "a", "edge", ComposeService{Ports: []workload.PublishedPort{{Target: 80, Published: "80"}}}),
 		tStep(t, "fixed", "a", "fixed", ComposeService{Networks: map[string]Attachment{"n": {IPv4: "10.0.0.5"}}}),
+		// A planned address the app did not declare is not a fixed one.
+		tStep(t, "auto", "a", "auto", ComposeService{Networks: map[string]Attachment{"n": {IPv4: "10.0.0.6"}}}),
 		{Key: "vol", Kind: "volume", Node: "b"},
 	}
-	out := []Change{{Key: "web-a", Action: "Replace"}, {Key: "api", Action: "Replace"}, {Key: "db", Action: "Replace"}, {Key: "ro", Action: "Replace"}, {Key: "edge", Action: "Replace"}, {Key: "fixed", Action: "Replace"}, {Key: "vol", Action: "MoveRequired"}, {Key: "web-b", Action: "Keep"}}
-	annotateInterruptions(steps, out)
-	want := map[string]string{"web-a": "", "api": InterruptSingleInstance, "db": InterruptVolumeWriter, "ro": InterruptSingleInstance, "edge": InterruptHostPort, "fixed": InterruptStaticAddress, "vol": InterruptVolumeMove, "web-b": ""}
+	input := Compose{Services: map[string]ComposeService{
+		"fixed": {Networks: map[string]Attachment{"n": {IPv4: "10.0.0.5"}}},
+		"auto":  {Networks: map[string]Attachment{"n": {}}},
+	}}
+	out := []Change{{Key: "web-a", Action: "Replace"}, {Key: "api", Action: "Replace"}, {Key: "db", Action: "Replace"}, {Key: "ro", Action: "Replace"}, {Key: "edge", Action: "Replace"}, {Key: "fixed", Action: "Replace"}, {Key: "auto", Action: "Replace"}, {Key: "vol", Action: "MoveRequired"}, {Key: "web-b", Action: "Keep"}}
+	annotateInterruptions(steps, input, out)
+	want := map[string]string{"web-a": "", "api": InterruptSingleInstance, "db": InterruptVolumeWriter, "ro": InterruptSingleInstance, "edge": InterruptHostPort, "fixed": InterruptStaticAddress, "auto": InterruptSingleInstance, "vol": InterruptVolumeMove, "web-b": ""}
 	for _, c := range out {
 		if c.Interruption != want[c.Key] {
 			t.Errorf("%s: interruption %q, want %q", c.Key, c.Interruption, want[c.Key])

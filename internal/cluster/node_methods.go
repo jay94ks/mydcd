@@ -62,6 +62,7 @@ var nodeMethods = map[string]nodeMethod{
 	"volume-archive-key-report":          report(ReportWork),
 	"volume-restore-report":              report(ReportWork),
 	"volume-delete-report":               report(ReportWork),
+	"volume-remote-fence-report":         report(ReportWork),
 	"volume-file-report":                 report(ReportWork),
 	"volume-create-report":               report(ReportWork),
 	"volume-move-report":                 report(ReportWork),

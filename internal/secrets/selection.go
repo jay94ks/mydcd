@@ -55,10 +55,18 @@ const namespaceScope = "selected-secrets-in-group-namespace"
 const PurposeRegistrySource = "registry-source"
 const PurposeImageBuild = "image-build"
 
+// PurposeSecretSocket is an app service reading its values over sfev.sock.
+// It is a separate signed namespace from file/env injection (purpose ""):
+// an approval for one never opens the other.
+const PurposeSecretSocket = "sfev"
+
 func validPurpose(p string) bool {
-	return p == "" || p == PurposeRegistrySource || p == PurposeImageBuild
+	return p == "" || p == PurposeRegistrySource || p == PurposeImageBuild || p == PurposeSecretSocket
 }
 func targetActions(p string) [2]string {
+	if p == PurposeSecretSocket {
+		return [2]string{"resolve", "socket"}
+	}
 	if p == PurposeImageBuild {
 		return [2]string{"resolve", "build"}
 	}
@@ -183,6 +191,8 @@ func sameBase(a, b Use) bool {
 // Plan expands metadata only. It validates every selected object/ancestor,
 // including overwritten sources, before returning any usable plan. Sources and
 // group Entries retain order; only the required password-group set is deduped.
+// Uses of one batch share a base but may differ in purpose (an app service
+// reading files and sfev.sock): each purpose is its own signed target.
 func (t Tree) Plan(c access.Catalog, uses []Use) (BatchPlan, error) {
 	if len(uses) < 1 || len(uses) > 256 {
 		return BatchPlan{}, ErrPolicy
@@ -191,7 +201,9 @@ func (t Tree) Plan(c access.Catalog, uses []Use) (BatchPlan, error) {
 	required := map[string]Target{}
 	for _, input := range uses {
 		u := ownUse(input)
-		if !sameBase(uses[0], u) || len(u.Sources) < 1 || len(u.Sources) > 256 {
+		first := uses[0]
+		first.Purpose = u.Purpose
+		if !sameBase(first, u) || len(u.Sources) < 1 || len(u.Sources) > 256 {
 			return BatchPlan{}, ErrPolicy
 		}
 		p := UsePlan{Use: u}
@@ -252,9 +264,10 @@ func (t Tree) Plan(c access.Catalog, uses []Use) (BatchPlan, error) {
 			if err != nil {
 				return BatchPlan{}, err
 			}
-			old, exists := required[id]
+			slot := u.Purpose + "\x00" + id
+			old, exists := required[slot]
 			if !exists {
-				required[id] = g
+				required[slot] = g
 			} else {
 				if !slices.Contains(old.Services, u.Service) {
 					old.Services = append(old.Services, u.Service)
@@ -263,7 +276,7 @@ func (t Tree) Plan(c access.Catalog, uses []Use) (BatchPlan, error) {
 				if !slices.Contains(old.Nodes, node) {
 					old.Nodes = append(old.Nodes, node)
 				}
-				required[id] = old
+				required[slot] = old
 			}
 		}
 		result.Uses = append(result.Uses, p)
@@ -273,7 +286,12 @@ func (t Tree) Plan(c access.Catalog, uses []Use) (BatchPlan, error) {
 		slices.SortFunc(v.Nodes, func(a, b NodeScope) int { return strings.Compare(nodeScopeKey(a), nodeScopeKey(b)) })
 		result.Required = append(result.Required, ownTarget(v))
 	}
-	slices.SortFunc(result.Required, func(a, b Target) int { return strings.Compare(a.Group, b.Group) })
+	slices.SortFunc(result.Required, func(a, b Target) int {
+		if a.Group != b.Group {
+			return strings.Compare(a.Group, b.Group)
+		}
+		return strings.Compare(a.Purpose, b.Purpose)
+	})
 	return result, nil
 }
 

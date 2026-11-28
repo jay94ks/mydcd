@@ -310,9 +310,15 @@ func (e Execution) commandValue(i int) (string, error) {
 		}
 		r := e.d.Stages[j].Result
 		ref := ObjectRef{d.Key, r.Revision, r.Generation}
-		for _, stable := range s.StableDNS {
+		for _, stable := range s.Stable {
 			if stable.Key == d.Key {
 				if stable.Generation != r.Generation {
+					// A Task producer the planner judged alias-only may
+					// still have been replaced (its claim was not
+					// current); the consumer then follows the new one.
+					if b.Steps[j].Kind == "task" {
+						continue
+					}
 					return "", ErrInputs
 				}
 				ref = stable
@@ -355,19 +361,22 @@ func (e Execution) Prepare(c access.Catalog, expected uint64, key string, base s
 	if err != nil {
 		return e, state.Command{}, err
 	}
-	if r := e.d.Replacement; r != nil && r.Phase == "retiring" && (!base.Present || base.Value != value) {
+	if r := e.d.Replacement; r != nil && (r.Phase == "retiring" || r.Phase == phaseSurging && !e.surgeTask(i)) && (!base.Present || base.Value != value) {
 		return e, state.Command{}, inputError("REPLACEMENT_WAVE_PENDING", key)
 	}
 	if e.replacementFutureNode(i) && (!base.Present || base.Value != value) {
 		return e, state.Command{}, inputError("REPLACEMENT_WAVE_PENDING", key)
 	}
 	cmd := state.Command{Actor: e.d.Submitter, Epoch: e.d.Epoch, RequestID: requestID(e.d.Operation, key), Key: key, Value: value, Expected: base.Revision}
+	// A surged target replaces a native that keeps running: its object gets
+	// a new generation in place.
+	cmd.Renew = present && e.surgeTarget(i)
 	n, err := e.clone()
 	if err != nil {
 		return e, state.Command{}, err
 	}
 	n.d.Stages[i].Command = &cmd
-	if base.Present && base.Value == value && base.Revision > 0 && base.Generation > 0 {
+	if !cmd.Renew && base.Present && base.Value == value && base.Revision > 0 && base.Generation > 0 {
 		n.d.Stages[i].Noop = true
 		n.d.Stages[i].Result = &state.Result{Code: state.Applied, Index: base.Revision, Revision: base.Revision, Generation: base.Generation}
 		return n, cmd, nil
@@ -1013,7 +1022,11 @@ func (e Execution) activationReady(i int) bool {
 				return false
 			}
 			result := e.d.Stages[i].Result
-			if !slices.Contains(g.Dependencies, ObjectRef{e.d.Stages[i].Key, result.Revision, result.Generation}) {
+			// The inputs were made for this generation; a same-generation
+			// update of the Task (aliases) keeps them (Step.Stable).
+			if !slices.ContainsFunc(g.Dependencies, func(ref ObjectRef) bool {
+				return ref.Key == e.d.Stages[i].Key && ref.Generation == result.Generation && ref.Revision <= result.Revision
+			}) {
 				return false
 			}
 		}

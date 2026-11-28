@@ -156,3 +156,27 @@ func TestCompiledTagWaitsForResolution(t *testing.T) {
 		t.Fatalf("task image %+v %s", image, failure)
 	}
 }
+
+// A Task whose compile=true scripts need a tag compiler image waits for the
+// deploy to resolve that tag too, even when its own image is a digest.
+func TestCompilerTagIsResolvedByTheDeploy(t *testing.T) {
+	e := imageExecution(t, webDigest)
+	program := map[string]any{
+		"Policy":  map[string]any{"Build": map[string]any{"Image": "golang:1.27"}},
+		"Scripts": map[string]any{"probe": map[string]any{"Compile": true}},
+	}
+	goal, _ := json.Marshal(map[string]any{"Image": webDigest, "LifecycleProgram": program})
+	e.d.Plan.Steps[0].Goal = goal
+	if got := e.TagImages(); !slices.Equal(got, []string{"docker.io/library/golang:1.27"}) {
+		t.Fatal("compiler tag", got)
+	}
+	if !e.ImagesPending() || e.imagesReady(0) {
+		t.Fatal("compiling task must wait for its compiler tag")
+	}
+	program["Scripts"] = map[string]any{"probe": map[string]any{"Compile": false}}
+	goal, _ = json.Marshal(map[string]any{"Image": webDigest, "LifecycleProgram": program})
+	e.d.Plan.Steps[0].Goal = goal
+	if len(e.TagImages()) != 0 || !e.imagesReady(0) {
+		t.Fatal("an interpreted-only program needs no compiler image")
+	}
+}

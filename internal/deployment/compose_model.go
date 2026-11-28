@@ -31,30 +31,35 @@ type ComposeService struct {
 	LifecycleProgram *checker.TaskProgram `yaml:"-" json:",omitempty"`
 	// Frozen Task goal metadata only. It cannot be supplied by app.yaml and
 	// remains absent from Input; the compiler derives it from registrations.
-	FixedVolumes    map[string]VolumeReference `yaml:"-" json:",omitempty"`
-	Image           string                     `yaml:"image"`
-	Command         *Arguments                 `yaml:"command,omitempty"`
-	Entrypoint      *Arguments                 `yaml:"entrypoint,omitempty"`
-	Environment     Environment                `yaml:"environment,omitempty"`
-	User            string                     `yaml:"user,omitempty"`
-	StopGracePeriod string                     `yaml:"stop_grace_period,omitempty" json:",omitempty"`
-	StopSignal      string                     `yaml:"stop_signal,omitempty" json:",omitempty"`
-	ReadOnly        *bool                      `yaml:"read_only,omitempty"`
-	CapDrop         []string                   `yaml:"cap_drop,omitempty"`
-	SecurityOpt     []string                   `yaml:"security_opt,omitempty"`
-	CPUs            string                     `yaml:"cpus,omitempty"`
-	Memory          string                     `yaml:"mem_limit,omitempty"`
-	Tmpfs           []string                   `yaml:"tmpfs,omitempty"`
-	DependsOn       Dependencies               `yaml:"depends_on,omitempty"`
-	Networks        map[string]Attachment      `yaml:"networks,omitempty"`
-	Volumes         Mounts                     `yaml:"volumes,omitempty"`
-	Secrets         SecretMounts               `yaml:"secrets,omitempty"`
-	Logging         *workload.LogPolicy        `yaml:"logging,omitempty" json:",omitempty"`
-	Healthcheck     *Healthcheck               `yaml:"healthcheck,omitempty"`
-	DNS             []string                   `yaml:"dns,omitempty"`
-	DNSSearch       []string                   `yaml:"dns_search,omitempty"`
-	Sfc             ServiceExtension           `yaml:"x-sfc,omitempty"`
-	Labels          map[string]string          `yaml:"labels,omitempty" json:",omitempty"`
+	FixedVolumes map[string]VolumeReference `yaml:"-" json:",omitempty"`
+	// SocketRevisions is frozen Task goal metadata too: the digest of the
+	// value references the service's sfev.sock sources had at planning.
+	// Only it changing is an approval renewal, not a new container
+	// (TaskSecretSocketRuntimeUpdate).
+	SocketRevisions string                `yaml:"-" json:",omitempty"`
+	Image           string                `yaml:"image"`
+	Command         *Arguments            `yaml:"command,omitempty"`
+	Entrypoint      *Arguments            `yaml:"entrypoint,omitempty"`
+	Environment     Environment           `yaml:"environment,omitempty"`
+	User            string                `yaml:"user,omitempty"`
+	StopGracePeriod string                `yaml:"stop_grace_period,omitempty" json:",omitempty"`
+	StopSignal      string                `yaml:"stop_signal,omitempty" json:",omitempty"`
+	ReadOnly        *bool                 `yaml:"read_only,omitempty"`
+	CapDrop         []string              `yaml:"cap_drop,omitempty"`
+	SecurityOpt     []string              `yaml:"security_opt,omitempty"`
+	CPUs            string                `yaml:"cpus,omitempty"`
+	Memory          string                `yaml:"mem_limit,omitempty"`
+	Tmpfs           []string              `yaml:"tmpfs,omitempty"`
+	DependsOn       Dependencies          `yaml:"depends_on,omitempty"`
+	Networks        map[string]Attachment `yaml:"networks,omitempty"`
+	Volumes         Mounts                `yaml:"volumes,omitempty"`
+	Secrets         SecretMounts          `yaml:"secrets,omitempty"`
+	Logging         *workload.LogPolicy   `yaml:"logging,omitempty" json:",omitempty"`
+	Healthcheck     *Healthcheck          `yaml:"healthcheck,omitempty"`
+	DNS             []string              `yaml:"dns,omitempty"`
+	DNSSearch       []string              `yaml:"dns_search,omitempty"`
+	Sfc             ServiceExtension      `yaml:"x-sfc,omitempty"`
+	Labels          map[string]string     `yaml:"labels,omitempty" json:",omitempty"`
 }
 type Arguments []string
 type Environment map[string]string

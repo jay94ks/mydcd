@@ -156,7 +156,7 @@ func (p Policy) validExternalRegistryReader(s state.State, reader ExternalRegist
 		return false
 	}
 	entry, ok := members.Entry(reader.Node)
-	if !ok || entry.Peer.Key != hex.EncodeToString(reader.Owner[:]) {
+	if !ok || !members.ResourceKeyForNode(entry.Peer.ID, reader.Owner) {
 		return false
 	}
 	uses := externalRegistryUses(reader.Spec, reader.Origin, reader.Node, reader.Owner)

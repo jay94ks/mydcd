@@ -57,7 +57,7 @@ type memberIdentity struct {
 }
 
 func newMemberView(e membership.Entry, v *membership.NodeView) memberView {
-	m := memberView{ID: e.Peer.ID, Key: e.Peer.Key, Endpoint: e.Peer.Endpoint, JoinID: e.JoinID, Revision: e.Revision, JoinRevision: e.Revision,
+	m := memberView{ID: e.Peer.ID, Key: e.CurrentPeer().Key, Endpoint: e.Peer.Endpoint, JoinID: e.JoinID, Revision: e.Revision, JoinRevision: e.Revision,
 		Phase: sfc.NodePhasePending, Voter: e.Peer.Voter, Join: string(e.Phase)}
 	if e.Address.IsValid() {
 		m.SystemAddress = e.Address.String()

@@ -76,7 +76,7 @@ func (b Blueprint) IntentDigest() [32]byte {
 	}
 	steps := slices.Clone(b.d.Steps)
 	for i := range steps {
-		steps[i].Base, steps[i].BasePresent, steps[i].StableDNS = ObjectRef{}, false, nil
+		steps[i].Base, steps[i].BasePresent, steps[i].Stable = ObjectRef{}, false, nil
 	}
 	nodes := make(map[string]PlanningNode, len(b.d.Nodes))
 	for id, n := range b.d.Nodes {

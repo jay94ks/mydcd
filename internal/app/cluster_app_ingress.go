@@ -47,6 +47,15 @@ func (r *Runtime) reconcileClusterAppIngress(ctx context.Context, v cluster.View
 	var failed error
 	for _, app := range deployment.ClusterAppRoutable {
 		rec, on := book.ClusterAppRoute(app)
+		if on && rec.Ingress.Node == self {
+			// A route file names no listeners: serve on the route
+			// gateways' shared listeners of that node.
+			gateways, _ := book.NodeGateways(rec.Ingress.Node)
+			if rec.Ingress, err = deployment.GatewayListeners(rec.Ingress, gateways.Configuration); err != nil {
+				failed = errors.Join(failed, err)
+				continue
+			}
+		}
 		var backend *deployment.ClusterAppBackend
 		if node, addr, found := networks.ClusterAppAddress(app, users); found {
 			backend = &deployment.ClusterAppBackend{Node: node, Address: addr}

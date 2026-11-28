@@ -5,6 +5,7 @@ package store
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"time"
 
 	bolt "go.etcd.io/bbolt"
@@ -85,7 +86,9 @@ type DNSHistory struct {
 
 // PutDNSProvider creates or replaces a provider row.
 func (s *Store) PutDNSProvider(p *DNSProvider) error {
-	return s.db.Update(func(tx *bolt.Tx) error { return putJSON(tx.Bucket(bucketDNSProv), []byte(p.ID), p) })
+	err := s.db.Update(func(tx *bolt.Tx) error { return putJSON(tx.Bucket(bucketDNSProv), []byte(p.ID), p) })
+	s.changed(err, Change{Kind: "dns-provider", ID: p.ID})
+	return err
 }
 
 // GetDNSProvider loads a provider row.
@@ -117,7 +120,7 @@ func (s *Store) ListDNSProviders() ([]*DNSProvider, error) {
 // DeleteDNSProvider removes a provider row. It fails with ErrConflict while a
 // domain uses it.
 func (s *Store) DeleteDNSProvider(id string) error {
-	return s.db.Update(func(tx *bolt.Tx) error {
+	err := s.db.Update(func(tx *bolt.Tx) error {
 		if tx.Bucket(bucketDNSProv).Get([]byte(id)) == nil {
 			return ErrNotFound
 		}
@@ -134,28 +137,69 @@ func (s *Store) DeleteDNSProvider(id string) error {
 		}
 		return tx.Bucket(bucketDNSProv).Delete([]byte(id))
 	})
+	s.changed(err, Change{Kind: "dns-provider", ID: id, Deleted: true})
+	return err
 }
 
 // CreateDNSDomain adds a domain; ErrConflict if it is already connected.
 func (s *Store) CreateDNSDomain(d *DNSDomain) error {
-	return s.db.Update(func(tx *bolt.Tx) error {
+	err := s.db.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket(bucketDNSDomains)
 		if b.Get([]byte(d.Domain)) != nil {
 			return ErrConflict
 		}
 		return putJSON(b, []byte(d.Domain), d)
 	})
+	s.domainChanged(err, d.Domain, d.tenants(), false)
+	return err
+}
+
+// tenants are the workspaces a domain gives names to.
+func (d *DNSDomain) tenants() []string {
+	var out []string
+	for _, a := range d.Assignments {
+		if a.Tenant != "" && !slices.Contains(out, a.Tenant) {
+			out = append(out, a.Tenant)
+		}
+	}
+	return out
+}
+
+// domainTenants reads the tenants of a stored domain inside tx.
+func domainTenants(tx *bolt.Tx, domain string) []string {
+	var d DNSDomain
+	if getJSON(tx.Bucket(bucketDNSDomains), []byte(domain), &d) != nil {
+		return nil
+	}
+	return d.tenants()
+}
+
+// domainChanged tells live watches that something of domain changed (its
+// row, managed marks, history, server links): system administrators and the
+// members of the workspaces it was or is assigned to.
+func (s *Store) domainChanged(err error, domain string, tenants []string, deleted bool) {
+	s.changed(err, Change{Kind: "dns-domain", ID: domain, Tenants: tenants, Deleted: deleted})
 }
 
 // PutDNSDomain replaces an existing domain row.
 func (s *Store) PutDNSDomain(d *DNSDomain) error {
-	return s.db.Update(func(tx *bolt.Tx) error {
+	var tenants []string
+	err := s.db.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket(bucketDNSDomains)
 		if b.Get([]byte(d.Domain)) == nil {
 			return ErrNotFound
 		}
+		// A workspace that loses its assignment learns it too.
+		tenants = domainTenants(tx, d.Domain)
+		for _, t := range d.tenants() {
+			if !slices.Contains(tenants, t) {
+				tenants = append(tenants, t)
+			}
+		}
 		return putJSON(b, []byte(d.Domain), d)
 	})
+	s.domainChanged(err, d.Domain, tenants, false)
+	return err
 }
 
 // GetDNSDomain loads a domain row.
@@ -187,10 +231,12 @@ func (s *Store) ListDNSDomains() ([]*DNSDomain, error) {
 // DeleteDNSDomain removes a domain row and its managed marks. History and
 // the provider's records stay.
 func (s *Store) DeleteDNSDomain(domain string) error {
-	return s.db.Update(func(tx *bolt.Tx) error {
+	var tenants []string
+	err := s.db.Update(func(tx *bolt.Tx) error {
 		if tx.Bucket(bucketDNSDomains).Get([]byte(domain)) == nil {
 			return ErrNotFound
 		}
+		tenants = domainTenants(tx, domain)
 		if err := tx.Bucket(bucketDNSDomains).Delete([]byte(domain)); err != nil {
 			return err
 		}
@@ -199,6 +245,8 @@ func (s *Store) DeleteDNSDomain(domain string) error {
 		}
 		return deletePrefix(tx.Bucket(bucketDNSManaged), prefix(domain))
 	})
+	s.domainChanged(err, domain, tenants, true)
+	return err
 }
 
 func deletePrefix(b *bolt.Bucket, p []byte) error {
@@ -235,7 +283,9 @@ func (s *Store) ListDNSManaged(domain string) (map[string]*DNSManaged, error) {
 
 // ApplyDNSManaged sets and removes managed marks in one transaction.
 func (s *Store) ApplyDNSManaged(domain string, set []*DNSManaged, remove [][2]string) error {
-	return s.db.Update(func(tx *bolt.Tx) error {
+	var tenants []string
+	err := s.db.Update(func(tx *bolt.Tx) error {
+		tenants = domainTenants(tx, domain)
 		b := tx.Bucket(bucketDNSManaged)
 		for _, r := range remove {
 			if err := b.Delete(key(domain, r[0], r[1])); err != nil {
@@ -249,6 +299,8 @@ func (s *Store) ApplyDNSManaged(domain string, set []*DNSManaged, remove [][2]st
 		}
 		return nil
 	})
+	s.domainChanged(err, domain, tenants, false)
+	return err
 }
 
 func dnsHistKey(domain string, at time.Time, id string) []byte {
@@ -257,9 +309,13 @@ func dnsHistKey(domain string, at time.Time, id string) []byte {
 
 // PutDNSHistory creates or replaces a history entry.
 func (s *Store) PutDNSHistory(h *DNSHistory) error {
-	return s.db.Update(func(tx *bolt.Tx) error {
+	var tenants []string
+	err := s.db.Update(func(tx *bolt.Tx) error {
+		tenants = domainTenants(tx, h.Domain)
 		return putJSON(tx.Bucket(bucketDNSHistory), dnsHistKey(h.Domain, h.At, h.ID), h)
 	})
+	s.domainChanged(err, h.Domain, tenants, false)
+	return err
 }
 
 // ListDNSHistory returns a domain's history, newest first.
@@ -312,7 +368,11 @@ func (s *Store) DeleteDNSHistory(domain, id string) error {
 	if err != nil {
 		return err
 	}
-	return s.db.Update(func(tx *bolt.Tx) error {
+	var tenants []string
+	err = s.db.Update(func(tx *bolt.Tx) error {
+		tenants = domainTenants(tx, domain)
 		return tx.Bucket(bucketDNSHistory).Delete(dnsHistKey(domain, h.At, h.ID))
 	})
+	s.domainChanged(err, domain, tenants, false)
+	return err
 }

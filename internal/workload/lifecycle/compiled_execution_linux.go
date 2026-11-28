@@ -51,7 +51,7 @@ func (m *SourceStore) RunCachedCompiled(ctx context.Context, descriptor SourceDe
 	if err != nil {
 		return unknown("source-unavailable"), err
 	}
-	input, err := PrepareCompilation(source)
+	input, err := PrepareCompilation(source, recipe.Image)
 	if err != nil || input.Key() != recipe.Key() || request.SourceDigest != hex.EncodeToString(recipe.Source[:]) {
 		return unknown("compiled-recipe-changed"), errors.Join(ErrCompiledExecution, err)
 	}

@@ -56,9 +56,37 @@ type CertificatePage struct {
 }
 type CertificatePut struct{ Certificate certstore.Certificate }
 
-// DomainChange is the payload of add-domain and remove-domain. Name is the
-// normalized A-label (certstore.NormalizeDomain).
-type DomainChange struct{ Name string }
+// DomainChange is the payload of add-domain, assign-domain and
+// remove-domain. Name is the normalized A-label (certstore.NormalizeDomain).
+// Tenant is the owner tenant on add-domain and assign-domain; empty is a
+// cluster-level domain. remove-domain carries no Tenant.
+type DomainChange struct {
+	Name   string
+	Tenant string `json:",omitempty"`
+}
+
+// DomainTenant is the tenant that owns d now: its Tenant while that tenant
+// exists and is not deleted, else empty (cluster-level). A retired tenant's
+// domains go back to cluster level without a write.
+func DomainTenant(users access.Catalog, d certstore.Domain) string {
+	if d.Tenant == "" {
+		return ""
+	}
+	if t, ok := users.Tenant(d.Tenant); !ok || t.Phase == access.TenantDeleted {
+		return ""
+	}
+	return d.Tenant
+}
+
+// domainOwnerUsable says whether a domain may be given to tenant now: an
+// existing, enabled, active tenant, or cluster level.
+func domainOwnerUsable(users access.Catalog, tenant string) bool {
+	if tenant == "" {
+		return true
+	}
+	t, ok := users.Tenant(tenant)
+	return ok && t.Enabled && t.Phase == access.TenantActive
+}
 
 // ACMEResponderChange is the payload of set-acme-responder: a canonical
 // IP:port (certstore.NormalizeResponder), or empty to clear it.
@@ -199,17 +227,23 @@ func (p Policy) reduceCertificates(s state.State, cmd state.Command) (map[string
 		if err != nil {
 			return nil, state.ConditionFailed
 		}
-	case "add-domain", "remove-domain":
+	case "add-domain", "assign-domain", "remove-domain":
 		var q DomainChange
 		if canonical(op.Change.Payload, &q) != nil {
 			return nil, state.Invalid
 		}
-		if n, ok := certstore.NormalizeDomain(q.Name); !ok || n != q.Name {
+		if n, ok := certstore.NormalizeDomain(q.Name); !ok || n != q.Name || op.Change.Action == "remove-domain" && q.Tenant != "" {
 			return nil, state.Invalid
 		}
-		if op.Change.Action == "add-domain" {
-			c, err = c.AddDomain(q.Name, op.Session.User, op.Change.Expected, op.At)
-		} else {
+		if !domainOwnerUsable(users, q.Tenant) {
+			return nil, state.ConditionFailed
+		}
+		switch op.Change.Action {
+		case "add-domain":
+			c, err = c.AddOwnedDomain(q.Name, q.Tenant, op.Session.User, op.Change.Expected, op.At)
+		case "assign-domain":
+			c, err = c.AssignDomain(q.Name, q.Tenant, op.Change.Expected)
+		default:
 			c, err = c.RemoveDomain(q.Name, op.Change.Expected)
 		}
 		if err != nil {

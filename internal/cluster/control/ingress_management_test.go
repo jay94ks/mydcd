@@ -150,7 +150,7 @@ func TestIngressHostPolicyIsSystemAdminOwned(t *testing.T) {
 	f.apply("manager", "set-ingress-host-policy", 0, q, state.Forbidden)
 	f.apply("admin", "set-ingress-host-policy", 0, q, state.Applied)
 	book, err := f.p.IngressManagement(f.s)
-	if err != nil || !reflect.DeepEqual(book.HostPolicy("tenant"), q.Policy) || book.HostPolicy("unknown").ExternalAllowed || len(book.HostPolicy("unknown").LocalHosts) != 0 {
+	if err != nil || !reflect.DeepEqual(book.HostPolicy("tenant"), q.Policy) || !book.HostPolicy("unknown").ExternalAllowed || !reflect.DeepEqual(book.HostPolicy("unknown").LocalHosts, []string{"*"}) {
 		t.Fatal("host default/ownership", err)
 	}
 }
@@ -158,8 +158,8 @@ func TestIngressHostPolicyIsSystemAdminOwned(t *testing.T) {
 func TestIngressHostPolicyRevocationPreservesStateAndDeniesNewEffects(t *testing.T) {
 	f, _ := imageBuildFixture(t)
 	d := deployment.IngressDeclaration{Listeners: []deployment.ListenerDeclaration{{Shared: "web"}}, Host: "shop.internal.example"}
-	if err := f.p.admitIngressDeclaration(f.s, "tenant", "admin", d); err == nil {
-		t.Fatal("missing host grant accepted")
+	if err := f.p.admitIngressDeclaration(f.s, "tenant", "admin", d); err != nil {
+		t.Fatal("a tenant without a host policy is unrestricted", err)
 	}
 	f.apply("admin", "set-ingress-host-policy", 0, IngressHostPolicyChange{Tenant: "tenant", Policy: ingress.HostPolicy{LocalHosts: []string{"*.internal.example"}}}, state.Applied)
 	if err := f.p.admitIngressDeclaration(f.s, "tenant", "admin", d); err != nil {

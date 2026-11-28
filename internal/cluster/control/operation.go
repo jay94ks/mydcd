@@ -274,6 +274,10 @@ func (p Policy) AdmitModule(s state.State, command state.Command) bool {
 			_, err := p.volumeDeleteReport(s, command)
 			return err == nil
 		}
+		if volumeRemoteFenceReportValue([]byte(command.Value)) {
+			_, err := p.volumeRemoteFenceReport(s, command)
+			return err == nil
+		}
 		if restoreReportValue([]byte(command.Value)) {
 			_, err := p.restoreReport(s, command)
 			return err == nil

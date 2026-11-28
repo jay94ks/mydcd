@@ -69,7 +69,7 @@ describe('parsePort', () => {
 
 describe('단독 컨테이너 망 안 포트', () => {
   it('공개하지 않는 포트는 ports에 쓰지 않고, 경로가 가리키면 다시 읽는다', () => {
-    const f = { ...emptyStandalone(), name: 'adm', lifetime: 'fixed' as const, image: 'adminer', ports: [{ port: '8080', proto: 'tcp' as const, expose: false, host: '', publish: '' }], routes: [{ host: 'a.example', path: '/', port: '8080', gateway: 'local' as const, cert: 'auto' as const }] };
+    const f = { ...emptyStandalone(), name: 'adm', lifetime: 'fixed' as const, image: 'adminer', ports: [{ port: '8080', proto: 'tcp' as const, expose: false, host: '', publish: '' }], routes: [{ node: 'node-a', host: 'a.example', path: '/', port: '8080', gateway: 'local' as const }] };
     const y = standaloneToYaml(f);
     expect(YAML.parse(y).ports).toBeUndefined();
     const r = standaloneFromYaml(y);

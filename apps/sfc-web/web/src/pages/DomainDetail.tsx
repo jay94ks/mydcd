@@ -56,6 +56,7 @@ import { eulReul } from '../lib/josa';
 import { usePhone } from '../lib/viewport';
 import { MDomainDetail } from './MDomainDetail';
 import { randomUUID } from '../lib/cryptoCompat';
+import { domainLive } from '../lib/liveTopics';
 
 /** 응답을 잃어 결과를 모르는 실패. 같은 작업 ID로 다시 보내야 한다. */
 const lostReply = (e: unknown) => e instanceof ApiError && (e.code === 'dns-unavailable' || e.code === 'transport' || e.status === 0 || e.status >= 500);
@@ -75,9 +76,9 @@ function DesktopDomainDetail() {
   const { domain = '' } = useParams();
   const { session } = useAuth();
   const admin = !!session?.user.systemAdmin;
-  const dq = usePoll((s) => dnsDomains(s).then((ds) => ds.find((d) => d.domain === domain)), [domain]);
+  const dq = usePoll((s) => dnsDomains(s).then((ds) => ds.find((d) => d.domain === domain)), [domain], 0, domainLive(domain));
   const zq = usePoll((s) => dnsRecords(domain, s), [domain]);
-  const hq = usePoll((s) => dnsHistory(domain, s), [domain]);
+  const hq = usePoll((s) => dnsHistory(domain, s), [domain], 0, domainLive(domain));
   const [staged, setStaged] = useState<Staged>({});
   // 기록에서 되돌리기로 담은 내용. 손대지 않고 적용하면 기록에 '되돌리기'로 남긴다.
   const [revert, setRevert] = useState<{ of: string; key: string }>();
@@ -983,7 +984,7 @@ function SettingsDialog({ domain, onClose, onSaved }: { domain: DnsDomain; onClo
 type DnsChanges = NonNullable<DnsServersView['changes']>;
 function ServersTab({ domain, admin, onStaged }: { domain: DnsDomain; admin: boolean; onStaged: (ch: DnsChanges) => void }) {
   const toast = useToast();
-  const q = usePoll((s) => dnsServers(domain.domain, s), [domain.domain]);
+  const q = usePoll((s) => dnsServers(domain.domain, s), [domain.domain], 0, domainLive(domain.domain));
   const [dlg, setDlg] = useState<{ kind: 'link'; node?: string } | { kind: 'edit'; x: DnsServerLink } | { kind: 'unlink'; x: DnsServerLink }>();
   const [checking, setChecking] = useState(false);
   const linked = (q.data?.items ?? []).filter((x) => x.linked);
@@ -1365,7 +1366,7 @@ function AssignDialog({ domain, current, busy, error, onClose, onSave }: { domai
 // ── 되돌리기 지점 탭 (시스템 관리자) ──
 
 function SnapshotsTab({ domain, onRestored }: { domain: DnsDomain; onRestored: () => void }) {
-  const q = usePoll((s) => dnsSnapshots(domain.domain, s), [domain.domain]);
+  const q = usePoll((s) => dnsSnapshots(domain.domain, s), [domain.domain], 0, domainLive(domain.domain));
   const [pick, setPick] = useState<string>();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>();
@@ -1641,7 +1642,7 @@ function PropagationDrawer({ domain, zone, initial, onClose }: { domain: string;
 
 // 설정 카드의 '연결된 서버' 한 줄: 연결된 서버 이름과 공개 주소를 줄여 보여 준다.
 function LinkedServersText({ domain }: { domain: string }) {
-  const sq = usePoll((signal) => dnsServers(domain, signal), [domain], 0);
+  const sq = usePoll((signal) => dnsServers(domain, signal), [domain], 0, domainLive(domain));
   if (sq.error !== undefined) return <span className="muted">{ingressMissing(sq.error) ? '웹 기능 준비 중' : '읽지 못함'}</span>;
   if (!sq.data) return <span className="muted">읽는 중…</span>;
   const on = sq.data.items.filter((s) => s.linked);

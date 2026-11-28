@@ -107,7 +107,8 @@ func (p TenantPolicy) Validate() error {
 	if !sortedNames(b.Nodes, 128) || len(b.Targets) == 0 || len(b.Targets) > 2 || !version.IsValid(b.Toolchain) || !strings.HasPrefix(b.Toolchain, "go1.") || b.MaxJobs < 1 || b.MaxJobs > 128 || b.NanoCPU < 1 || b.MemoryBytes < 32<<20 || b.WorkspaceBytes == 0 || b.WorkspaceBytes > math.MaxInt64 || b.ArtifactBytes == 0 || b.ArtifactBytes > b.WorkspaceBytes || b.TimeoutMS < 1 || p.CompiledCacheBytes < b.ArtifactBytes {
 		return ErrContract
 	}
-	if _, err := access.PinImage(b.Image); err != nil {
+	// A tag or a digest: a tag is resolved once per deploy, never pinned here.
+	if _, err := access.ParseImage(b.Image); err != nil {
 		return ErrContract
 	}
 	for i, target := range b.Targets {
@@ -116,6 +117,31 @@ func (p TenantPolicy) Validate() error {
 		}
 	}
 	return nil
+}
+
+// AllowsCompiler reports whether image (repo@sha256:…) may run this policy's
+// compilers: the policy's own reference, resolved for one deploy to a digest
+// of the same repository. A digest policy allows only itself.
+func (b BuildPolicy) AllowsCompiler(image string) bool {
+	policy, err := access.ParseImage(b.Image)
+	if err != nil {
+		return false
+	}
+	pinned, err := access.PinImage(image)
+	if err != nil || pinned.Reference != image || pinned.Registry != policy.Registry || pinned.Repository != policy.Repository {
+		return false
+	}
+	return !policy.Pinned() || pinned.Reference == policy.Reference
+}
+
+// CompilerTag is the policy's compiler image when it names a tag, normalized;
+// "" for a digest policy or no build policy.
+func (b BuildPolicy) CompilerTag() string {
+	policy, err := access.ParseImage(b.Image)
+	if err != nil || policy.Pinned() {
+		return ""
+	}
+	return policy.Reference
 }
 
 func (p TenantPolicy) Clone() TenantPolicy {

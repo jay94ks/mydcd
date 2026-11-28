@@ -60,6 +60,14 @@ func (b Blueprint) inputMetadata(service string, requester [32]byte) (Needs, err
 		n.Lifecycle = selection
 	}
 	n.Sources = selectorSources(b.d.Input, b.d.Tenant, s)
+	if len(s.Sfc.Socket) != 0 {
+		n.Socket = &SocketNeeds{Generation: 1}
+		for _, source := range resolveSelectors(b.d.Input, b.d.Tenant, s.Sfc.Socket) {
+			if !slices.Contains(n.Socket.Sources, source) {
+				n.Socket.Sources = append(n.Socket.Sources, source)
+			}
+		}
+	}
 	for _, mount := range s.Secrets {
 		def := b.d.Input.Secrets[mount.Source]
 		if len(s.Sfc.Sources) == 0 {
@@ -118,8 +126,12 @@ func (b Blueprint) inputMetadata(service string, requester [32]byte) (Needs, err
 // objects: tenant realm by default, the cluster realm for cluster/NAME, and
 // app-local Vault aliases to their object IDs.
 func selectorSources(c Compose, tenant string, s ComposeService) []Source {
+	return resolveSelectors(c, tenant, s.Sfc.Sources)
+}
+
+func resolveSelectors(c Compose, tenant string, selectors []Selector) []Source {
 	var out []Source
-	for _, selector := range s.Sfc.Sources {
+	for _, selector := range selectors {
 		realm := tenant
 		id := selector.Secret
 		if selector.Group != "" {
@@ -196,12 +208,24 @@ func (b Blueprint) ApprovalUses(requester [32]byte) (map[string][]secrets.Use, e
 		if err != nil {
 			return nil, err
 		}
-		for realm, use := range approvalRealmUses(n) {
+		add := func(realm string, use secrets.Use) {
 			// The password approval covers a logical service on a node, not
 			// a fabricated extra identity per ordinal. Every actual Binding
 			// still reserves its own consumer/generation and usage capacity.
 			if !slices.ContainsFunc(uses[realm], func(previous secrets.Use) bool { return useEqual(previous, use) }) {
 				uses[realm] = append(uses[realm], use)
+			}
+		}
+		for realm, use := range approvalRealmUses(n) {
+			add(realm, use)
+		}
+		socket, ok, err := b.socketMetadata(service, requester)
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			for realm, use := range realmUses(socket) {
+				add(realm, use)
 			}
 		}
 	}
@@ -270,7 +294,7 @@ func DecodeBlueprint(raw []byte) (Blueprint, error) {
 	if e = validateLifetimes(ordered); e != nil {
 		return Blueprint{}, e
 	}
-	if !validDNSBindings(ordered) {
+	if !validStableReferences(ordered) {
 		return Blueprint{}, ErrInputs
 	}
 	a, _ := json.Marshal(ordered)

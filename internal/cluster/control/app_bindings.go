@@ -420,6 +420,15 @@ func (p Policy) reduceAppBinding(s state.State, r AppProgress, a Apps, entry app
 		if err != nil || capacity < 1 {
 			return nil, state.Forbidden
 		}
+		if at := carriedBinding(a, source, n); at >= 0 {
+			// A same-generation update of the Task (aliases) keeps its
+			// container and so its binding: the binding follows the new
+			// object position instead of reserving a second one.
+			source.Digest = a.sources[at].Digest
+			a.sources = slices.Clone(a.sources)
+			a.sources[at] = source
+			return p.appsCheckpoint(s, a)
+		}
 		if _, exists := a.Binding(source.Task); !exists {
 			global, tenant := 0, 0
 			resources, _ := p.Resources(s)
@@ -537,6 +546,28 @@ func (p Policy) reduceAppBinding(s state.State, r AppProgress, a Apps, entry app
 		return nil, state.Invalid
 	}
 	return writes, state.Applied
+}
+
+// carriedBinding is the index of the source whose binding a same-generation
+// update of source's Task keeps: same Task generation at an older revision,
+// the same inputs, and exactly the needs n. -1 when there is none.
+func carriedBinding(a Apps, source AppBindingSource, n deployment.Needs) int {
+	at := slices.IndexFunc(a.sources, func(old AppBindingSource) bool {
+		return old.Task.Key == source.Task.Key && old.Task.Generation == source.Task.Generation && old.Task.Revision < source.Task.Revision && old.Inputs == source.Inputs
+	})
+	if at < 0 {
+		return -1
+	}
+	b, ok := a.binding(a.sources[at].Digest)
+	if !ok {
+		return -1
+	}
+	left, lerr := json.Marshal(b.Needs())
+	right, rerr := json.Marshal(n)
+	if lerr != nil || rerr != nil || !bytes.Equal(left, right) {
+		return -1
+	}
+	return at
 }
 
 func (p Policy) validBindingClosure(entry appEntry, source AppBindingSource, o deployment.Observation, at uint64) bool {

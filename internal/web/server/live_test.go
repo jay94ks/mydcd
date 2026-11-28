@@ -218,6 +218,27 @@ func TestLiveStoreChangeReachesItsUser(t *testing.T) {
 		t.Fatal("admin incident", f)
 	}
 	empty(alice)
+	// A DNS domain reaches the members of any workspace it names.
+	for ws, w := range s.live.watches {
+		if ws.user.ID == "alice" {
+			w.roles, w.rolesAt = map[string]sfc.Role{"b": sfc.RoleManager}, time.Now()
+		}
+	}
+	s.storeChanged(store.Change{Kind: "dns-domain", ID: "shop.example", Tenants: []string{"a", "b"}})
+	var f liveFrame
+	select {
+	case f = <-alice.out: // the role check runs apart from the writer
+	case <-time.After(5 * time.Second):
+		t.Fatal("alice heard nothing")
+	}
+	if f.Refs[0] != (liveRef{Kind: "dns-domain", Name: "shop.example"}) {
+		t.Fatal("alice domain", f)
+	}
+	nextFrame(t, admin)
+	s.storeChanged(store.Change{Kind: "dns-domain", ID: "other.example", Tenants: []string{"a"}})
+	nextFrame(t, admin)
+	time.Sleep(50 * time.Millisecond)
+	empty(alice)
 }
 
 // Report notices go out as refs of the same numbering; a loss, or a break

@@ -10,22 +10,8 @@ import (
 const webRoutes = `name: cluster-app/web
 x-sfc:
   ingress:
-    runtime:
-      max_requests: 8
-      max_connections: 32
-      max_header_bytes: 16384
-      max_body_bytes: 1048576
-      buffer_bytes: 524288
-      request_timeout_ms: 30000
-      dial_timeout_ms: 2000
-      response_header_timeout_ms: 5000
-      health_interval_ms: 1000
-    node: node-a
-    listeners:
-    - address: 127.0.0.1:18443
-    routes:
-    - id: ui
-      host: sfc.example.com
+  - node: node-a
+    host: sfc.example.com
 `
 
 // cluster-app/web goes through app diff/deploy/down as a cluster setting.
@@ -40,7 +26,7 @@ func TestAppCommandsTakeClusterAppRoutes(t *testing.T) {
 		t.Fatal("diff after deploy:\n" + out)
 	}
 	changed := n.file("web2.yaml", strings.Replace(webRoutes, "sfc.example.com", "ui.example.com", 1))
-	if out := n.run(0, "app", "diff", "-f", changed); !strings.Contains(out, "route ui") || !strings.Contains(out, "sfc.example.com/ -> ui.example.com/") {
+	if out := n.run(0, "app", "diff", "-f", changed); !strings.Contains(out, "route route-1") || !strings.Contains(out, "sfc.example.com/ -> ui.example.com/") {
 		t.Fatal("diff of a changed route:\n" + out)
 	}
 	n.run(0, "app", "deploy", "-f", changed)

@@ -34,6 +34,17 @@ jobs:
         with:
           go-version-file: go.mod
       - run: go build ./...
+      # Root test setup on the throwaway runner:
+      # - some internal/app tests re-run themselves as UID 65534 from the
+      #   checkout, so the checkout and its parents must be searchable;
+      # - the node shell test logs in over the local sshd.
+      - name: Prepare the root test environment
+        run: |
+          chmod o+x /home/runner /home/runner/work "$(dirname "$GITHUB_WORKSPACE")"
+          chmod -R o+rX "$GITHUB_WORKSPACE"
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq openssh-server
+          sudo systemctl start ssh
       # The real-node tests start sfcd, which needs root for netlink
       # (nftables, TUN), tmpfs mounts and network namespaces. Without root they
       # fail or skip, so run the suite as root on the throwaway runner.

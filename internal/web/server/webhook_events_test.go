@@ -57,7 +57,7 @@ func TestWebhookIncidentDecideAndNotify(t *testing.T) {
 	row := findIncident(t, f, "node-unreachable")
 	_, det := f.do("GET", "/api/v1/incidents/"+row["id"].(string), nil)
 	tl := fmt.Sprint(det["timeline"])
-	if !strings.Contains(tl, "accepted:false") || !strings.Contains(tl, "scale-app은(는) allowed_actions에 없습니다") || !strings.Contains(tl, "webhook:judge") {
+	if !strings.Contains(tl, "accepted:false") || !strings.Contains(tl, "scale-app is not in allowed_actions") || !strings.Contains(tl, "webhook:judge") {
 		t.Fatalf("dropped answer: %v", tl)
 	}
 	var events []string
@@ -112,6 +112,10 @@ func TestWebhookCDChecks(t *testing.T) {
 		if code, out := f.do("POST", "/api/v1/webhooks", h); code != 201 {
 			t.Fatalf("webhook: %d %v", code, out)
 		}
+	}
+	// The notice summary is in the webhook creator's language.
+	if code, _ := f.do("PUT", "/api/v1/prefs", map[string]any{"prefs": map[string]any{"language": "ko"}}); code != 204 {
+		t.Fatal("prefs")
 	}
 	scope := map[string]any{"tenant": "shop", "app": "php-shop"}
 	for _, l := range []map[string]any{
@@ -194,6 +198,9 @@ func TestWebhookCDChecks(t *testing.T) {
 	if s := strings.Join(notes, ","); !strings.Contains(s, "cd.approved") || !strings.Contains(s, "cd.paused") {
 		t.Fatalf("notices: %s", s)
 	}
+	if b := string(calls["/chat"][0].Body); !strings.Contains(b, `"text":"[자동 배포] shop/php-shop `) {
+		t.Fatalf("summary: %s", b)
+	}
 }
 
 // Pre-sync acts only on new events about the candidate still waiting, and
@@ -267,7 +274,7 @@ func TestWebhookCDOldEvents(t *testing.T) {
 	f.srv.watchOnce(ctx)
 	f.srv.hooks.wg.Wait()
 	_, cd = f.do("GET", "/api/v1/t/shop/apps/php-shop/cd", nil)
-	if w, _ := cd["webhook"].(map[string]any); calls() != 0 || w == nil || w["state"] != "failed" || !strings.Contains(fmt.Sprint(w["reason"]), "웹훅을 부르지 않았어요") {
+	if w, _ := cd["webhook"].(map[string]any); calls() != 0 || w == nil || w["state"] != "failed" || !strings.Contains(fmt.Sprint(w["reason"]), "the webhook was not called") {
 		t.Fatalf("denied: %d calls, %v", calls(), cd["webhook"])
 	}
 	approver("POST")

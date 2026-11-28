@@ -23,6 +23,10 @@ type retirementTarget struct {
 	Gone                 []byte
 	Retained             *RetainReceipt
 	Closed               bool
+	// Superseded: the original of a surged Task (or its inputs) whose object
+	// already holds the new generation. It closes on the owner's Gone
+	// signature alone (SupersededGone), without Drain/Proof/Delete.
+	Superseded bool `json:",omitempty"`
 }
 type retirementRecord struct {
 	KeepExecution        bool `json:",omitempty"`
@@ -49,6 +53,7 @@ type RetirementTarget struct {
 	Gone                 []byte
 	Retained             *RetainReceipt
 	Closed               bool
+	Superseded           bool `json:",omitempty"`
 }
 
 // Preserves separates an unselected running native from a wave's exact stop
@@ -127,6 +132,9 @@ func (a Inventory) canRetire(key string) bool {
 	}
 	if at := a.target(key); at >= 0 && a.d.Retirement.KeepExecution {
 		target := a.d.Retirement.Targets[at]
+		if target.Superseded && target.Original.Step.Kind == "task" && !target.Closed && !a.ingressDrainReady(target.Original) {
+			return false
+		}
 		// Once this immutable Drain has been durably dispatched its unknown
 		// result/proof/delete must remain collectible even as views advance.
 		if target.Original.Step.Kind == "task" && target.Drain != nil && target.Drain.Journal.Pending != nil && target.Drain.Journal.Pending.Phase == reconcile.Prepared && !a.ingressDrainReady(target.Original) {
@@ -186,6 +194,11 @@ func (a Inventory) syncRetirement() (Inventory, error) {
 			continue
 		}
 		t := retirementTarget{Original: c}
+		if a.supersededTarget(c) {
+			t.Superseded = true
+			r.Targets = append(r.Targets, t)
+			continue
+		}
 		if !c.Step.Retain {
 			var g GoalCommand
 			if json.Unmarshal([]byte(c.Command.Value), &g) != nil || g.Lifecycle != nil {
@@ -581,4 +594,5 @@ type RemovalProof struct {
 	Revision             uint64
 	Drain, Proof, Delete *Mutation
 	Gone                 []byte
+	Superseded           bool `json:",omitempty"`
 }

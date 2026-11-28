@@ -71,6 +71,9 @@ func testRealVaultManagedRuntime(t *testing.T, replacementWriter bool) {
 	cfg := config.Node{Version: 1, Common: config.Common{}, Modules: map[string]config.Module{"network": {}, "workload": {}, "ingress": {}}}
 	cfg.Node.ID, cfg.Node.Listen = "node-a", address
 	cfg.Node.StateDir, cfg.Node.IdentityDir = filepath.Join(root, "state"), filepath.Join(root, "node")
+	// sfcd leaves the app secret tmpfs mounted when it stops (running
+	// containers bind from it); the test unmounts it before TempDir cleanup.
+	t.Cleanup(func() { unmountInputMemory(cfg.Node.StateDir) })
 	initialized, err := app.Initialize(ctx, cfg, admin.Public, "init-vault")
 	if err != nil {
 		t.Fatal(err)

@@ -108,6 +108,13 @@ func (r *Runtime) reconcileAppRetirements(ctx context.Context, v cluster.View, a
 			if !metadata && c.Step.Owner != r.Identity.Public || !i.CanRetire(c.Step.Key) {
 				continue
 			}
+			if target.Superseded {
+				changed, err := r.retireSuperseded(ctx, v, apps, app, retirement, i, c)
+				if changed || err != nil {
+					return changed, err
+				}
+				continue
+			}
 			if c.Step.Retain {
 				if c.Step.Kind != "volume" || r.activations == nil {
 					continue

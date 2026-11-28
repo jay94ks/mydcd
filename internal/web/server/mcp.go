@@ -377,27 +377,27 @@ type mcpToolPatch struct {
 	Hint        *string         `json:"hint,omitempty"`
 }
 
-// autoMissing: what a propose-auto tool still lacks (the screen shows the
-// same list).
+// autoMissing: what a propose-auto tool still lacks, as text codes
+// (mcp-missing.*; the screen shows the same list).
 func autoMissing(t *store.MCPTool, a *store.MCPAuto) []string {
 	if a == nil {
-		return []string{"영향 등급 하한", "입력 제한", "한도", "되돌리기"}
+		return []string{"mcp-missing.floor", "mcp-missing.inputs", "mcp-missing.limits", "mcp-missing.revert"}
 	}
 	var out []string
 	if a.Floor == "" {
-		out = append(out, "영향 등급 하한")
+		out = append(out, "mcp-missing.floor")
 	}
 	if len(t.Args) == 0 || slices.ContainsFunc(t.Args, func(x store.MCPArg) bool { _, ok := a.Inputs[x.Name]; return !ok }) {
-		out = append(out, "입력 제한")
+		out = append(out, "mcp-missing.inputs")
 	}
 	if a.PerIncident < 1 || a.PerDay < 1 {
-		out = append(out, "한도")
+		out = append(out, "mcp-missing.limits")
 	}
 	if a.Revert.Tool == "" && !a.Revert.Irreversible {
-		out = append(out, "되돌리기")
+		out = append(out, "mcp-missing.revert")
 	}
 	if a.Revert.Irreversible && a.Floor == impactLow {
-		out = append(out, "되돌릴 수 없으면 하한 보통 이상")
+		out = append(out, "mcp-missing.irreversible-floor")
 	}
 	return out
 }
@@ -451,7 +451,7 @@ func checkAuto(m *store.MCPServer, t *store.MCPTool, a *store.MCPAuto) string {
 var mcpIncidentFields = []string{"id", "tenant", "app", "node", "target", "signal", "title"}
 
 // applyToolPatch changes t in place (code, message on failure).
-func applyToolPatch(m *store.MCPServer, t *store.MCPTool, p mcpToolPatch) (string, string, map[string]any) {
+func applyToolPatch(lang string, m *store.MCPServer, t *store.MCPTool, p mcpToolPatch) (string, string, map[string]any) {
 	if p.Kind != nil {
 		switch *p.Kind {
 		case "read", "change", "notify":
@@ -509,7 +509,11 @@ func applyToolPatch(m *store.MCPServer, t *store.MCPTool, p mcpToolPatch) (strin
 	}
 	if t.Incident == "propose-auto" {
 		if miss := autoMissing(t, t.Auto); len(miss) > 0 {
-			return "auto-incomplete", "빠진 것: " + strings.Join(miss, ", "), map[string]any{"missing": miss}
+			words := make([]string, len(miss))
+			for i, c := range miss {
+				words[i] = text(lang, c, nil)
+			}
+			return "auto-incomplete", text(lang, "mcp-missing", map[string]string{"list": strings.Join(words, ", ")}), map[string]any{"missing": words}
 		}
 	}
 	t.New = false
@@ -628,6 +632,7 @@ func (s *Server) handlePutMCP(w http.ResponseWriter, r *http.Request, ws *webSes
 	var code, msg string
 	var extra map[string]any
 	var added, removed []string
+	lang := s.requestLang(r, ws)
 	m, err := s.opt.Store.UpdateMCPServer(cur.Name, req.Revision, func(m *store.MCPServer) error {
 		if reconnect {
 			if req.URL != nil {
@@ -666,7 +671,7 @@ func (s *Server) handlePutMCP(w http.ResponseWriter, r *http.Request, ws *webSes
 				code, msg = "invalid", "tools: no such tool "+oneLine(n, 64)
 				return errMCPReject
 			}
-			if code, msg, extra = applyToolPatch(m, t, req.Tools[n]); code != "" {
+			if code, msg, extra = applyToolPatch(lang, m, t, req.Tools[n]); code != "" {
 				msg = n + ": " + msg
 				return errMCPReject
 			}
@@ -852,12 +857,12 @@ func mcpToolFor(m *store.MCPServer, t *store.MCPTool, tenant string) bool {
 }
 
 // mcpFill is what an input would get for an incident (dry run).
-func mcpFill(in *store.Incident, x store.MCPInput) string {
+func mcpFill(lang string, in *store.Incident, x store.MCPInput) string {
 	switch x.Kind {
 	case "fixed":
 		return x.Value
 	case "max":
-		return "최대 " + x.Value
+		return text(lang, "mcp-test.max", map[string]string{"value": x.Value})
 	case "incident":
 		return incidentField(in, x.Value)
 	}
@@ -888,8 +893,6 @@ func incidentField(in *store.Incident, f string) string {
 	return ""
 }
 
-var impactWords = map[string]string{impactLow: "낮음", impactMedium: "보통", impactHigh: "높음"}
-
 // POST /system/mcp/{name}/tools/{tool}/test {incident}: what incident
 // response would have done with the tool for a past incident. The tool is
 // not called.
@@ -919,35 +922,38 @@ func (s *Server) handleTestMCPTool(w http.ResponseWriter, r *http.Request, ws *w
 		return
 	}
 	name := "mcp." + m.Name + "." + t.Name
-	steps := []map[string]any{{"label": in.ID + " 불러옴", "detail": in.Title}}
+	lang := s.requestLang(r, ws)
+	tx := func(code string, kv ...string) string { return render(lang, ph(code, kv...)) }
+	step := func(label, detail string) map[string]any { return map[string]any{"label": label, "detail": detail} }
+	steps := []map[string]any{step(tx("mcp-test.loaded", "id", in.ID), render(lang, titlePhrase(in)))}
 	result := ""
 	switch {
 	case t.Incident == "off":
-		result = "이 도구는 장애 대응에 쓰지 않았을 것"
+		result = tx("mcp-test.off")
 	case !mcpToolFor(m, t, in.Tenant):
-		steps = append(steps, map[string]any{"label": "쓸 범위", "detail": "이 사건의 작업 공간에는 쓸 수 없음"})
-		result = "이 도구는 쓰지 않았을 것"
+		steps = append(steps, step(tx("mcp-test.scope"), tx("mcp-test.scope-no")))
+		result = tx("mcp-test.unused")
 	case t.Incident == "diagnose":
-		steps = append(steps, map[string]any{"label": "진단 A", "detail": name + "을(를) 읽어 진단에 씀"})
-		result = "진단에서 읽었을 것 · 실제 호출 안 함"
+		steps = append(steps, step(tx("mcp-test.diagnosis"), tx("mcp-test.diagnose", "tool", name)))
+		result = tx("mcp-test.diagnose-result")
 	case t.Incident == "notify":
-		steps = append(steps, map[string]any{"label": "알림", "detail": name + "(으)로 사건 요약을 보냄"})
-		result = "알림을 보냈을 것 · 실제 호출 안 함"
+		steps = append(steps, step(tx("mcp-test.notify"), tx("mcp-test.notify-detail", "tool", name)))
+		result = tx("mcp-test.notify-result")
 	default:
 		var args []string
 		if t.Auto != nil {
 			for _, a := range t.Args {
 				if x, ok := t.Auto.Inputs[a.Name]; ok {
-					args = append(args, a.Name+" "+mcpFill(in, x))
+					args = append(args, a.Name+" "+mcpFill(lang, in, x))
 				}
 			}
 		}
-		steps = append(steps, map[string]any{"label": "진단 A", "detail": strings.TrimSpace(name + " 제안 " + strings.Join(args, " · "))})
+		steps = append(steps, step(tx("mcp-test.diagnosis"), strings.TrimSpace(tx("mcp-test.propose", "tool", name, "args", strings.Join(args, " · ")))))
 		floor := impactMedium
 		if t.Auto != nil && t.Auto.Floor != "" {
 			floor = t.Auto.Floor
 		}
-		steps = append(steps, map[string]any{"label": "영향 평가 B", "detail": fmt.Sprintf("하한 %s (규칙·영향 평가가 더 높게 볼 수 있음)", impactWords[floor])})
+		steps = append(steps, step(tx("mcp-test.assessment"), render(lang, with(ph("mcp-test.floor"), "impact", impactPhrase(floor)))))
 		auto := t.Incident == "propose-auto" && floor == impactLow
 		if auto {
 			cluster, err := s.clusterPolicy()
@@ -961,21 +967,21 @@ func (s *Server) handleTestMCPTool(w http.ResponseWriter, r *http.Request, ws *w
 				}
 			}
 			if level != incidentAutoLow {
-				steps = append(steps, map[string]any{"label": "정책", "detail": "자동 실행 수준이 아님"})
+				steps = append(steps, step(tx("mcp-test.policy"), tx("mcp-test.policy-no-auto")))
 				auto = false
 			}
 		}
 		if auto {
-			result = "자동 실행했을 것 · 실제 호출 안 함"
+			result = tx("mcp-test.auto-result")
 		} else {
-			result = "승인 요청을 만들었을 것 · 실제 호출 안 함"
+			result = tx("mcp-test.approval-result")
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"steps": steps, "result": result})
 }
 
 // mcpChoices: the servers a guideline scope may name (tenant "" = cluster).
-func (s *Server) mcpChoices(tenant string) []map[string]any {
+func (s *Server) mcpChoices(lang, tenant string) []map[string]any {
 	out := []map[string]any{}
 	all, _ := s.opt.Store.ListMCPServers()
 	for _, m := range all {
@@ -994,7 +1000,7 @@ func (s *Server) mcpChoices(tenant string) []map[string]any {
 		if !m.Enabled {
 			state = "off"
 		}
-		out = append(out, map[string]any{"name": m.Name, "summary": fmt.Sprintf("도구 %d개 (읽기 %d · 바꾸기 %d)", len(m.Tools), read, change), "state": state})
+		out = append(out, map[string]any{"name": m.Name, "summary": text(lang, "mcp-choice.summary", map[string]string{"count": fmt.Sprint(len(m.Tools)), "read": fmt.Sprint(read), "change": fmt.Sprint(change)}), "state": state})
 	}
 	return out
 }

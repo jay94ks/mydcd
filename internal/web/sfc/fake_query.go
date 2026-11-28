@@ -881,15 +881,6 @@ func (c *fakeConn) Volumes(ctx context.Context, tenant, after string) (Page[Volu
 	return paginate(items, func(v VolumeView) string { return v.Key }, after, c.f.pageSize, c.f.w.root), nil
 }
 
-func (c *fakeConn) VolumeBackups(ctx context.Context, tenant, after string) (Page[VolumeBackupView], error) {
-	if err := c.tenantRead(ctx, "volume-backups", tenant, after); err != nil {
-		return Page[VolumeBackupView]{}, err
-	}
-	defer c.unlock()
-	items := filterTenant(c.f.w.backups, tenant, func(v VolumeBackupView) string { return v.Tenant })
-	return paginate(items, func(v VolumeBackupView) string { return v.Key }, after, c.f.pageSize, c.f.w.root), nil
-}
-
 func (c *fakeConn) Vault(ctx context.Context, tenant, after string) (Page[control.VaultView], error) {
 	const m = "vault"
 	if err := checkAfter(m, after); err != nil {

@@ -34,12 +34,10 @@ export function appYamlOldKeys(doc: Record<string, unknown>): string {
   if (clusterKey) return `x-sfc.${clusterKey}: 받지 않는 키입니다. 클러스터 설정은 클러스터 설정 파일로 정합니다.`;
   for (const [n, v] of Object.entries((doc.networks ?? {}) as Record<string, Record<string, unknown> | null>))
     for (const k of ['driver', 'x-sfc']) if (v && k in v) return `networks.${n}.${k}: 받지 않는 키입니다. 망은 작업 공간의 공유 자원을 이름으로 씁니다.`;
-  // warmup(예: 30s)이 slow_start·slow_start_ms를 대신한다
-  const ing = xs.ingress as Record<string, unknown> | undefined;
-  const rs = Array.isArray(ing) ? ing : Array.isArray(ing?.routes) ? (ing.routes as unknown[]) : [];
-  for (const r of rs) {
-    const bal = (r as Record<string, unknown> | null)?.balance as Record<string, unknown> | undefined;
-    if (bal && typeof bal === 'object') for (const k of ['slow_start', 'slow_start_ms']) if (k in bal) return `x-sfc.ingress 경로의 balance.${k}: 받지 않는 키입니다. warmup(예: 30s)을 쓰세요.`;
+  // A2(#910): x-sfc.ingress는 route 목록. 모든 route는 같은 서버(INGRESS_NODE_MIXED), id는 겹치지 않는다
+  if (xs.ingress !== undefined) {
+    const msg = ingressListProblem(xs.ingress, 'x-sfc.ingress', ['id', 'node', 'host', 'prefix', 'service', 'port', 'network', 'health', 'gateway', 'balance']);
+    if (msg) return msg;
   }
   const allow: [string, string[]][] = [['volumes', ['node', 'size', 'uid', 'gid', 'mode']], ['secrets', ['key']]];
   for (const [kind, keys] of allow)
@@ -47,5 +45,26 @@ export function appYamlOldKeys(doc: Record<string, unknown>): string {
       const bad = Object.keys((v?.['x-sfc'] ?? {}) as Record<string, unknown>).find((k) => !keys.includes(k));
       if (bad) return `${kind}.${n}.x-sfc.${bad}: 받지 않는 키입니다(${keys.join(', ')}만).${bad === 'capacity_bytes' ? ' 용량은 size(예: 2GiB)로 쓰세요.' : ''}`;
     }
+  return '';
+}
+
+/** x-sfc.ingress route 목록 검사(서버 deployment ingress_yaml.go와 같은 거절). 문제 없으면 '' */
+export function ingressListProblem(ing: unknown, at: string, keys: string[]): string {
+  if (!Array.isArray(ing) || ing.length === 0) return `${at}: route 목록이어야 합니다(- {node, host, prefix, …}).`;
+  const node = (ing[0] as Record<string, unknown> | null)?.node;
+  const ids = new Set<string>();
+  for (const [i, x] of ing.entries()) {
+    const r = (x ?? {}) as Record<string, unknown>;
+    const bad = Object.keys(r).find((k) => !keys.includes(k));
+    if (bad) return `${at}[${i}].${bad}: 받지 않는 키입니다.`;
+    if (!r.node) return `${at}[${i}].node: 이 route를 여는 서버를 적어야 합니다.`;
+    if (r.node !== node) return `${at}[${i}].node: 모든 route는 같은 서버에서 엽니다(INGRESS_NODE_MIXED).`;
+    const id = r.id === undefined ? `route-${i + 1}` : String(r.id);
+    if (ids.has(id)) return `${at}[${i}].id: ${id}가 겹칩니다.`;
+    ids.add(id);
+    if (r.gateway !== undefined && r.gateway !== 'external' && r.gateway !== 'local') return `${at}[${i}].gateway: external 또는 local입니다.`;
+    const bal = r.balance as Record<string, unknown> | undefined;
+    if (bal && typeof bal === 'object') for (const k of ['slow_start', 'slow_start_ms']) if (k in bal) return `${at}[${i}].balance.${k}: 받지 않는 키입니다. warmup(예: 30s)을 쓰세요.`;
+  }
   return '';
 }

@@ -39,7 +39,7 @@ func (m *SourceStore) PrepareBuild(ctx context.Context, b BuildIntent, p TenantP
 		if err != nil {
 			return CompileBatch{}, nil, err
 		}
-		compiled, err := PrepareCompilation(source)
+		compiled, err := PrepareCompilation(source, b.Image)
 		if err != nil {
 			return CompileBatch{}, nil, err
 		}
@@ -59,7 +59,7 @@ func (m *SourceStore) PrepareBuild(ctx context.Context, b BuildIntent, p TenantP
 		}
 		inputs = append(inputs, compiled)
 	}
-	batch, err := NewCompileBatch(b.ID, b.DeadlineUnixMilli, p, inputs)
+	batch, err := NewCompileBatch(b.ID, b.DeadlineUnixMilli, p, b.Image, inputs)
 	if err != nil {
 		return CompileBatch{}, nil, err
 	}

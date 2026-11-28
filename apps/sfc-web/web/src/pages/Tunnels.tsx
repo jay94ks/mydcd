@@ -14,6 +14,7 @@ import { MutationError, OpPanel, sendOp, useMutation } from '../components/OpPan
 import { Refresh } from '../components/Refresh';
 import { usePoll } from '../lib/usePoll';
 import { when } from './WebBackup';
+import { networkStateLive } from '../lib/liveTopics';
 
 const STATE: Record<string, [string, Tone]> = { up: ['연결됨', 'ok'], degraded: ['불안정', 'wa'], down: ['끊김', 'er'], pending: ['연결 준비 중', 'un'] };
 const stateBadge = (st: string) => {
@@ -23,7 +24,7 @@ const stateBadge = (st: string) => {
 const since = (sec: number) => (sec ? when(new Date(sec * 1000).toISOString()) : '—');
 
 export function TunnelsDialog({ tenant, name, onClose }: { tenant: string; name: string; onClose: () => void }) {
-  const q = usePoll((s) => networkTunnels(tenant, name, s), [tenant, name], 10_000);
+  const q = usePoll((s) => networkTunnels(tenant, name, s), [tenant, name], 10_000, networkStateLive(tenant));
   const wait = !!q.error && noEndpoint(q.error);
   return (
     <Dialog title={`${name} 터널 연결`} width={720} onClose={onClose} footer={<button className="btn" onClick={onClose}>닫기</button>}>

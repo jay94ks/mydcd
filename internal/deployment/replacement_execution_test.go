@@ -21,11 +21,37 @@ func runningReplacementFixture(t *testing.T) *inventoryFixture {
 }
 
 func runningReplacementFixtureWith(t *testing.T, configure func(*Compose)) *inventoryFixture {
+	return runningReplacementFixtureFor(t, configure, nil)
+}
+
+// runningReplacementFixtureFor also adjusts the context of the rolling
+// deploy (the original one is planned without it).
+func runningReplacementFixtureFor(t *testing.T, configure func(*Compose), rolling func(*PlanningContext)) *inventoryFixture {
+	t.Helper()
+	return redeployedFixture(t, configure, func(input *Compose) {
+		web := input.Services["web"]
+		web.Image = strings.ReplaceAll(web.Image, strings.Repeat("a", 64), strings.Repeat("b", 64))
+		input.Services["web"] = web
+	}, rolling)
+}
+
+// redeployedFixture deploys the replica fixture, runs it to Succeeded and
+// begins a second deploy of it after change.
+func redeployedFixture(t *testing.T, configure, change func(*Compose), rolling func(*PlanningContext)) *inventoryFixture {
+	t.Helper()
+	return redeployedFixtureIn(t, func(_ *fixture, input *Compose, _ *PlanningContext) {
+		if configure != nil {
+			configure(input)
+		}
+	}, change, rolling)
+}
+
+// redeployedFixtureIn is redeployedFixture whose setup also sees the
+// planning context of both deploys.
+func redeployedFixtureIn(t *testing.T, setup func(*fixture, *Compose, *PlanningContext), change func(*Compose), rolling func(*PlanningContext)) *inventoryFixture {
 	t.Helper()
 	f, input, ctx := replicaFixture(t)
-	if configure != nil {
-		configure(&input)
-	}
+	setup(f, &input, &ctx)
 	original, err := CompileApp(input, f.c, ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -86,9 +112,10 @@ func runningReplacementFixtureWith(t *testing.T, configure func(*Compose)) *inve
 			}
 		}
 	}
-	web := input.Services["web"]
-	web.Image = strings.ReplaceAll(web.Image, strings.Repeat("a", 64), strings.Repeat("b", 64))
-	input.Services["web"] = web
+	change(&input)
+	if rolling != nil {
+		rolling(&ctx)
+	}
 	target, err := CompileApp(input, f.c, ctx)
 	if err != nil {
 		t.Fatal(err)

@@ -446,7 +446,7 @@ func (d Delivery) Start(expected uint64, c access.Catalog, ctx PlanningContext, 
 	}
 	for _, step := range b.Steps() {
 		if index := a.claim(step.Key); replacement == nil && index >= 0 && !a.d.Claims[index].Removed && !deliveryDesiredMatches(step, b, ctx) {
-			if IngressRuntimeUpdate(a.d.Claims[index], step) {
+			if IngressRuntimeUpdate(a.d.Claims[index], step) || TaskAliasRuntimeUpdate(a.d.Claims[index], step) || TaskNetworkAttach(a.d.Claims[index], step) || TaskSecretSocketRuntimeUpdate(a.d.Claims[index], step) {
 				continue
 			}
 			switch step.Kind {

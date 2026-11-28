@@ -133,7 +133,7 @@ func deliveryDesiredMatches(step Step, b Blueprint, ctx PlanningContext) bool {
 	for i, dep := range step.Dependencies {
 		source := ctx.Current[dep.Key]
 		ref := ObjectRef{dep.Key, source.Revision, source.Generation}
-		for _, stable := range step.StableDNS {
+		for _, stable := range step.Stable {
 			if stable.Key == dep.Key && stable.Generation == source.Generation {
 				ref = stable
 			}

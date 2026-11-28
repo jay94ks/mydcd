@@ -82,3 +82,49 @@ func mustEncode(t *testing.T, s State) []byte {
 	}
 	return b
 }
+
+// A remote consumer whose runner is gone for good is released by the home's
+// fence, signed by the Volume owner; a local consumer never is, and the
+// freed writer slot takes a new writer.
+func TestRemoteFenceReleasesTheConsumer(t *testing.T) {
+	f := makeFixture(t)
+	runner := Owner{Node: "node-b", Key: public(f.b)}
+	home := Owner{Node: "node-a", Key: public(f.a)}
+	acquire := func(id string, at Owner) Consumer {
+		s, p, err := f.s.AcquireShared(f.c, "admin", f.s.Revision(), id, 1, true, ShareSingleWriter, at)
+		if err != nil {
+			t.Fatal(id, err)
+		}
+		f.s = s
+		return p
+	}
+	w := acquire("writer", runner)
+	fence := func(c Consumer, k ed25519.PrivateKey) RemoteFence {
+		x := RemoteFence{Schema: 1, Scope: f.s.Scope(), Consumer: c}
+		x.Signature = ed25519.Sign(k, RemoteFenceBytes(x))
+		return x
+	}
+	if _, err := f.s.ReleaseFenced(fence(w, f.b)); err == nil {
+		t.Fatal("runner-signed fence accepted")
+	}
+	bad := fence(w, f.a)
+	bad.Schema = 2
+	if _, err := f.s.ReleaseFenced(bad); err == nil {
+		t.Fatal("unknown schema accepted")
+	}
+	if _, _, err := f.s.AcquireShared(f.c, "admin", f.s.Revision(), "next", 1, true, ShareSingleWriter, home); err == nil {
+		t.Fatal("second writer before the fence")
+	}
+	s, err := f.s.ReleaseFenced(fence(w, f.a))
+	if err != nil || len(s.Consumers()) != 0 {
+		t.Fatal("owner fence refused", err)
+	}
+	if _, err := s.ReleaseFenced(fence(w, f.a)); err == nil {
+		t.Fatal("fenced twice")
+	}
+	f.s = s
+	local := acquire("next", home)
+	if _, err := f.s.ReleaseFenced(fence(local, f.a)); err == nil {
+		t.Fatal("fence released a local consumer")
+	}
+}

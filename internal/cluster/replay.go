@@ -41,6 +41,7 @@ func Replay(o Options) (state.State, error) {
 	}
 	defer logs.Close()
 	f, err := newFSM(db, logs, hex.EncodeToString(o.Cluster[:]), o.Admin, o.Validate)
+	err = o.startError(db, err)
 	if err != nil {
 		return state.State{}, err
 	}

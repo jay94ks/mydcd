@@ -295,20 +295,23 @@ func (s *Server) handleMCPOAuthCallback(w http.ResponseWriter, r *http.Request) 
 		delete(st.byState, l.state) // one use
 	}
 	st.mu.Unlock()
+	// A browser tab the provider sends back (no session): the page order
+	// picks the language.
+	lang := pageLang(r)
 	page := func(code int, msg string) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(code)
-		_, _ = fmt.Fprintf(w, "<!doctype html><meta charset=utf-8><title>Seafield Cluster</title><p>%s</p>", msg)
+		_, _ = fmt.Fprintf(w, "<!doctype html><html lang=\"%s\"><meta charset=utf-8><title>Seafield Cluster</title><p>%s</p>", lang, text(lang, msg, nil))
 	}
 	if l == nil || q.Get("state") == "" {
-		page(http.StatusBadRequest, "로그인 요청을 찾지 못했습니다. Sfc에서 다시 로그인해 주세요.")
+		page(http.StatusBadRequest, "mcp-oauth.no-request")
 		return
 	}
 	fail := func(status, msg string) {
 		st.mu.Lock()
 		l.status, l.err = status, msg
 		st.mu.Unlock()
-		page(http.StatusBadRequest, "로그인하지 못했습니다. Seafield Cluster 화면에서 이유를 볼 수 있습니다. 이 창은 닫아도 됩니다.")
+		page(http.StatusBadRequest, "mcp-oauth.failed")
 	}
 	if s.now().After(l.expiresAt) {
 		fail("expired", "the login took too long; start it again")
@@ -342,7 +345,7 @@ func (s *Server) handleMCPOAuthCallback(w http.ResponseWriter, r *http.Request) 
 	st.mu.Lock()
 	l.status, l.err = "connected", ""
 	st.mu.Unlock()
-	page(http.StatusOK, "로그인을 마쳤습니다. 이 창을 닫고 Sfc로 돌아가 주세요.")
+	page(http.StatusOK, "mcp-oauth.done")
 }
 
 // validBearer: a token that fits an Authorization header (at most 8 KiB).

@@ -14,14 +14,14 @@ import { CodeView } from '../components/Code';
 import { MutationError, OpPanel, casFailed, useMutation } from '../components/OpPanel';
 import { ContainerConsole } from '../components/ContainerConsole';
 import { ImageInput, rememberImage } from '../components/ImageField';
-import { usePoll, DEFAULT_POLL_MS } from '../lib/usePoll';
+import { usePoll } from '../lib/usePoll';
 import { fmtTime, hhmmss, middle } from '../lib/format';
 import { IMPORT_ITEM_LABEL, RESTART_LABEL, fmtDur, quickShell, standaloneFromYaml, standaloneToYaml, type ImportedFrom, type RestartPolicy } from '../lib/standalone';
 import { NoTenant } from './Deploy';
 import { usePhone } from '../lib/viewport';
 import { ApprovalPrompt } from './VaultApproval';
 import { MCards, MWideNote, useReadOnlyTop } from '../mobile/ReadOnly';
-import { networksLive } from '../lib/liveTopics';
+import { appsLive, networksLive } from '../lib/liveTopics';
 
 const NEED = '배포 권한 필요';
 type Filter = 'all' | 'temp' | 'fixed' | 'ended';
@@ -99,7 +99,7 @@ function MStandalone() {
   const [scope, setScope] = useState<'mine' | 'all'>('mine');
   const [filter, setFilter] = useState<Filter>('all');
   const [logs, setLogs] = useState<StandaloneView>();
-  const q = usePoll((sig) => (tenant ? standaloneList(tenant, scope === 'all', sig) : Promise.resolve(undefined)), [tenant, scope], DEFAULT_POLL_MS);
+  const q = usePoll((sig) => (tenant ? standaloneList(tenant, scope === 'all', sig) : Promise.resolve(undefined)), [tenant, scope], 0, appsLive(tenant));
   useTick(15_000);
   useReadOnlyTop('단독 컨테이너', tenant ? `작업 공간 ${tenant}` : undefined, '만들기·터미널·고정·끝내기는 넓은 화면에서', [tenant]);
   if (!tenant) return <NoTenant />;
@@ -170,7 +170,7 @@ function DesktopStandalone() {
   const [selName, setSelName] = useState<string>();
   const [dlg, setDlg] = useState<Dlg>();
   const [console_, setConsole] = useState<{ s: StandaloneView; tab: 'logs' | 'exec' }>();
-  const q = usePoll((sig) => (tenant ? standaloneList(tenant, scope === 'all', sig) : Promise.resolve(undefined)), [tenant, scope], DEFAULT_POLL_MS);
+  const q = usePoll((sig) => (tenant ? standaloneList(tenant, scope === 'all', sig) : Promise.resolve(undefined)), [tenant, scope], 0, appsLive(tenant));
   useTick(15_000);
 
   const all = q.data?.items ?? [];

@@ -71,10 +71,13 @@ type Store struct {
 // (internal/web/server/live.go): an op or notification of User, an
 // incident of Tenant ("" for a cluster incident).
 type Change struct {
-	Kind    string // "op", "notification", "incident"
-	User    string
-	Tenant  string
-	ID      string // "" when several records of User changed at once
+	Kind   string // "op", "notification", "incident", "acme-cert", "dns-domain", …
+	User   string
+	Tenant string
+	// Tenants also lets members of any of these tenants see the change (a
+	// DNS domain assigned to several workspaces).
+	Tenants []string `json:",omitempty"`
+	ID      string   // "" when several records of User changed at once
 	Deleted bool
 }
 

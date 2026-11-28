@@ -180,33 +180,33 @@ func (c *fakeConn) applyFenceNetworkChange(op UserOperation, actor string, next 
 
 // backupCharged: control backupCharged (a reserved backup holds its
 // MaxBytes, a ready one its archive size).
-func backupCharged(b VolumeBackupView) (uint64, bool) {
+func backupCharged(b control.VolumeBackupView) (uint64, bool) {
 	switch b.Phase {
 	case "Reserved", "Cancelling":
-		return b.Source.MaxBytes, true
+		return b.MaxBytes, true
 	case "Ready", "Deleting":
-		if r := b.Source.Receipt; r != nil {
+		if r := b.Receipt; r != nil {
 			return r.Bytes, true
 		}
-		return b.Bytes, true
+		return 0, true
 	}
 	return 0, false
 }
 
 // restoreCharged: a restore holds MaxBytes of staging until cancelled.
-func restoreCharged(r VolumeRestoreView) bool { return r.Phase != "Cancelled" }
+func restoreCharged(r control.VolumeRestoreView) bool { return r.Phase != "Cancelled" }
 
 // backupUsage: what the limit row (tenant "" = the whole server) is charged.
 func (w *world) backupUsage(tenant, node string) BackupUsage {
 	var u BackupUsage
 	for _, b := range w.backups {
-		if bytes, ok := backupCharged(b); ok && b.Node == node && (tenant == "" || b.Tenant == tenant) {
+		if bytes, ok := backupCharged(b); ok && b.Node == node && (tenant == "" || b.Scope.Tenant == tenant) {
 			u.Count++
 			u.Bytes += bytes
 		}
 	}
 	for _, r := range w.restores {
-		if restoreCharged(r) && r.Node == node && (tenant == "" || r.Tenant == tenant) {
+		if restoreCharged(r) && r.Node == node && (tenant == "" || r.Target.Tenant == tenant) {
 			u.StagingCount++
 			u.StagingBytes += r.MaxBytes
 		}

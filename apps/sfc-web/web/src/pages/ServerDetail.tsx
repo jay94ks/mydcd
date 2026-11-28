@@ -13,7 +13,7 @@ import { DemoteDialog, DrainDialog, ForceRemoveDialog, RotateIdentityDialog } fr
 import { eulReul, iGa } from '../lib/josa';
 import type { NodeView, OpView, StorageRoot, TaskView } from '../api/types';
 import { CLUSTER_APP_REASON, CLUSTER_APP_STATE, ClusterAppAddress, ClusterAppImage, clusterAppNote } from '../components/clusterApps';
-import { Badge, Card, Field, HelpBox, KV, PageHeader, PhaseBadge, Tile, UsageBar, Hash, type Tone } from '../components/ui';
+import { Badge, Card, Field, HelpBox, KV, PageHeader, PhaseBadge, Tile, UsageBar, Hash, type Tone , cpuStealText, CPU_STEAL_TIP} from '../components/ui';
 import { Load } from '../components/states';
 import { Refresh } from '../components/Refresh';
 import { Tabs } from '../components/Tabs';
@@ -36,7 +36,7 @@ import { ContainerConsole } from '../components/ContainerConsole';
 import { useSession, useTenantRole } from '../auth/session';
 import { Sheet } from '../mobile/Sheet';
 import { M_BADGE, opLine, opTitle } from './Operations';
-import { ingressLive, opsLive, serverLive } from '../lib/liveTopics';
+import { drainLive, ingressLive, opsLive, serverLive } from '../lib/liveTopics';
 
 export function TaskTable({ tasks, showNode = false, showApp = true }: { tasks: TaskView[]; showNode?: boolean; showApp?: boolean }) {
   const session = useSession();
@@ -119,7 +119,7 @@ function NodeActions({ node, onDone }: { node: NodeView; onDone: () => void }) {
   const openAct = (a: 'isolate' | 'restore') => (setActRev(node.revision), setAct(a));
   const [dlg, setDlg] = useState<'cordon' | 'uncordon' | 'prune' | 'remove' | 'drain' | 'demote' | 'rotate' | 'force'>();
   // 가장 최근 비우기: 서버 행의 drain이 없으면(REQ-70은 operation 없는 drain-status만) drain-status로 본다. 없으면 404
-  const ds = usePoll((s) => nodeDrainStatus(node.id, node.drain?.operation, s), [node.id, node.drain?.operation], 30_000);
+  const ds = usePoll((s) => nodeDrainStatus(node.id, node.drain?.operation, s), [node.id, node.drain?.operation], 30_000, drainLive);
   const drainState = ds.data?.state ?? node.drain?.state;
   const toast = useToast();
   const navigate = useNavigate();
@@ -496,6 +496,7 @@ function MServerOverview({ node }: { node: NodeView }) {
         <div className="mtile">
           <small>CPU</small>
           <b>{node.cpuPercent === undefined ? '—' : `${Math.round(node.cpuPercent)}%`}</b>
+          {cpuStealText(node.cpuStealPercent) && <small title={CPU_STEAL_TIP}>{cpuStealText(node.cpuStealPercent)}</small>}
         </div>
         <div className="mtile">
           <small>메모리</small>
@@ -673,7 +674,7 @@ const OBSERVE_LIMIT_SEC = 300;
 
 /** 이 서버의 가장 최근 비우기. 서버 행의 drain.operation(데몬 #341)으로, 없으면 operation 없이 drain-status를 읽는다. 없으면(404) 그리지 않는다 */
 function DrainTile({ node, operation }: { node: string; operation?: string }) {
-  const q = usePoll((s) => nodeDrainStatus(node, operation, s), [node, operation], 10_000);
+  const q = usePoll((s) => nodeDrainStatus(node, operation, s), [node, operation], 10_000, drainLive);
   const d = q.data;
   if (!d) return null;
   return <Tile label="비우기" value={`${drainStateText(d.state)} ${d.moved}/${d.total}`} sub={d.blocked ? `그대로 둠 ${d.blocked}` : undefined} />;
@@ -704,6 +705,7 @@ function ServerTiles({ node }: { node: NodeView }) {
       <Tile
         label="CPU / 메모리"
         value={`${node.cpuPercent === undefined ? '—' : `${Math.round(node.cpuPercent)}%`} · ${node.memory ? `${gib(node.memory.used)}/${gib(node.memory.total)} GiB` : '—'}`}
+        sub={cpuStealText(node.cpuStealPercent)}
       />
       <Tile
         label="마지막 보고"
@@ -754,7 +756,7 @@ function Overview({ node }: { node: NodeView }) {
           )}
         </Card>
         <Card title="자원 사용">
-          <UsageBar label="CPU" used={node.cpuPercent} total={node.cpuPercent === undefined ? undefined : 100} text={node.cpuPercent === undefined ? '—' : `${Math.round(node.cpuPercent)}%`} />
+          <UsageBar label="CPU" used={node.cpuPercent} total={node.cpuPercent === undefined ? undefined : 100} text={node.cpuPercent === undefined ? '—' : `${Math.round(node.cpuPercent)}%`} sub={cpuStealText(node.cpuStealPercent)} subTitle={CPU_STEAL_TIP} />
           <UsageBar label="메모리" used={node.memory?.used} total={node.memory?.total} text={node.memory ? `${fmtBytes(node.memory.used)} / ${fmtBytes(node.memory.total)}` : '—'} />
           <UsageBar label="디스크" used={node.disk?.used} total={node.disk?.total} text={node.disk ? `${pct(node.disk.used, node.disk.total)}%` : '—'} />
           {node.containers !== undefined && <span className="small">컨테이너 {node.containers}개</span>}

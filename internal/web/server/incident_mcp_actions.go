@@ -29,14 +29,14 @@ import (
 const incidentMCPCandidates = 4
 
 // mcpCandidates: the MCP candidates for in, and why tools were left out.
-func (s *Server) mcpCandidates(in *store.Incident, gd incidentGuides) ([]store.IncidentAction, []string) {
+func (s *Server) mcpCandidates(in *store.Incident, gd incidentGuides) ([]store.IncidentAction, []store.Phrase) {
 	all, err := s.opt.Store.ListMCPServers()
 	if err != nil || len(all) == 0 {
 		return nil, nil
 	}
 	sort.Slice(all, func(i, j int) bool { return all[i].Name < all[j].Name })
 	var out []store.IncidentAction
-	var skipped []string
+	var skipped []store.Phrase
 	for _, m := range all {
 		if len(gd.mcp) > 0 && !slices.Contains(gd.mcp, m.Name) {
 			continue
@@ -57,11 +57,11 @@ func (s *Server) mcpCandidates(in *store.Incident, gd incidentGuides) ([]store.I
 			}
 			args, ok := incidentMCPArgs(t, in)
 			if !ok {
-				skipped = append(skipped, label+": 도구 입력을 사건에서 채울 수 없음")
+				skipped = append(skipped, skipPhrase(lit(label), ph("incident-skip.mcp-args")))
 				continue
 			}
 			if len(out) >= incidentMCPCandidates {
-				skipped = append(skipped, label+": MCP 후보는 "+fmt.Sprint(incidentMCPCandidates)+"개까지")
+				skipped = append(skipped, skipPhrase(lit(label), ph("incident-skip.mcp-limit", "max", fmt.Sprint(incidentMCPCandidates))))
 				continue
 			}
 			x := &store.IncidentMCP{Server: m.Name, Tool: t.Name, Floor: impactMedium}
@@ -115,14 +115,14 @@ func actionReversible(a *store.IncidentAction) bool {
 
 // mcpAutoBlocked: why the MCP candidate may not run on its own now ("" =
 // it may).
-func (s *Server) mcpAutoBlocked(in *store.Incident, a *store.IncidentAction, now time.Time) string {
+func (s *Server) mcpAutoBlocked(in *store.Incident, a *store.IncidentAction, now time.Time) store.Phrase {
 	m, err := s.opt.Store.GetMCPServer(a.MCP.Server)
 	if err != nil {
-		return "MCP 서버가 없어졌어요."
+		return ph("incident.why.mcp-gone")
 	}
 	t := m.Tool(a.MCP.Tool)
 	if !a.MCP.Auto || t == nil || t.Incident != "propose-auto" || len(autoMissing(t, t.Auto)) > 0 {
-		return "승인이 필요한 MCP 조치예요."
+		return ph("incident.why.mcp-approval")
 	}
 	shown := mcpShown(m.Name, t.Name)
 	mine := 0
@@ -132,11 +132,11 @@ func (s *Server) mcpAutoBlocked(in *store.Incident, a *store.IncidentAction, now
 		}
 	}
 	if mine >= t.Auto.PerIncident {
-		return fmt.Sprintf("이 사건에서 MCP 도구 한도(%d번)에 닿았어요.", t.Auto.PerIncident)
+		return ph("incident.why.mcp-incident", "max", fmt.Sprint(t.Auto.PerIncident))
 	}
 	all, err := s.opt.Store.ListIncidents()
 	if err != nil {
-		return "MCP 도구 하루 한도를 셀 수 없어요."
+		return ph("incident.why.mcp-uncounted")
 	}
 	day := 0
 	for _, x := range all {
@@ -147,9 +147,9 @@ func (s *Server) mcpAutoBlocked(in *store.Incident, a *store.IncidentAction, now
 		}
 	}
 	if day >= t.Auto.PerDay {
-		return fmt.Sprintf("MCP 도구 하루 한도(%d번)에 닿았어요.", t.Auto.PerDay)
+		return ph("incident.why.mcp-day", "max", fmt.Sprint(t.Auto.PerDay))
 	}
-	return ""
+	return store.Phrase{}
 }
 
 // callIncidentMCP calls the candidate's tool once if it is still offered
@@ -196,11 +196,11 @@ func (s *Server) autoRunIncidentMCP(ctx context.Context, ws *webSession, in *sto
 	cluster, _ := s.clusterPolicy()
 	s.hooks.mcpAuto.Lock()
 	cur, err := s.opt.Store.GetIncident(in.ID)
-	why := ""
+	var why store.Phrase
 	if err == nil {
 		why = s.mcpAutoBlocked(cur, a, now)
 	}
-	if err != nil || why != "" {
+	if err != nil || why.Code != "" {
 		s.hooks.mcpAuto.Unlock()
 		if err != nil {
 			s.log.Error("incident", "err", err, "incident", in.ID)
@@ -224,12 +224,16 @@ func (s *Server) autoRunIncidentMCP(ctx context.Context, ws *webSession, in *sto
 		if run.Error == "" {
 			x.Decision = store.IncidentDecision{Kind: decisionAuto, By: ws.user.Username, At: now}
 			x.State, x.MitigatedAt = incidentMitigating, now
-			x.Timeline = append(x.Timeline, store.IncidentEntry{At: now, Kind: "auto", Text: a.Label + " 자동 실행 (MCP " + a.ID + ")", Signer: ws.user.Username})
+			e := entry(now, "auto", with(ph("incident.mcp-auto-ran", "id", a.ID), "action", lit(a.Label)))
+			e.Signer = ws.user.Username
+			x.Timeline = append(x.Timeline, e)
 			return nil
 		}
-		x.Timeline = append(x.Timeline, store.IncidentEntry{At: now, Kind: "auto", Text: "MCP 자동 실행 실패: " + run.Error, Signer: ws.user.Username})
+		e := entry(now, "auto", ph("incident.mcp-auto-failed", "error", run.Error))
+		e.Signer = ws.user.Username
+		x.Timeline = append(x.Timeline, e)
 		if cluster != nil {
-			s.askIncident(x, cluster, "MCP 도구가 실패했어요("+run.Error+").", now)
+			s.askIncident(x, cluster, ph("incident.why.mcp-failed", "error", run.Error), now)
 		}
 		return nil
 	})
@@ -290,7 +294,9 @@ func (s *Server) approveIncidentMCP(w http.ResponseWriter, r *http.Request, ws *
 		}
 		x.Decision = store.IncidentDecision{Kind: decisionApproved, By: ws.user.Username, At: now}
 		x.Approval, x.OpID, x.State, x.MitigatedAt, x.UpdatedAt = nil, opID, incidentMitigating, now, now
-		x.Timeline = append(x.Timeline, store.IncidentEntry{At: now, Kind: "approve", Text: a.Label + " 승인 (MCP " + a.ID + ")", Signer: ws.user.Username})
+		e := entry(now, "approve", with(ph("incident.mcp-approved", "id", a.ID), "action", lit(a.Label)))
+		e.Signer = ws.user.Username
+		x.Timeline = append(x.Timeline, e)
 		return nil
 	})
 	if errors.Is(err, store.ErrConflict) {
@@ -305,7 +311,7 @@ func (s *Server) approveIncidentMCP(w http.ResponseWriter, r *http.Request, ws *
 	_, err = s.opt.Store.UpdateIncident(in.ID, func(x *store.Incident) error {
 		addMCPRun(x, run, a.MCP.Server)
 		if run.Error != "" {
-			x.Timeline = append(x.Timeline, store.IncidentEntry{At: s.now(), Kind: "notify", Text: "MCP 도구 실행 실패: " + run.Error + ". 사람이 확인해 주세요."})
+			x.Timeline = append(x.Timeline, entry(s.now(), "notify", ph("incident.mcp-run-failed", "error", run.Error)))
 		}
 		return nil
 	})

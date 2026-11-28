@@ -13,6 +13,7 @@ import { MutationError, OpPanel, useMutation } from '../components/OpPanel';
 import { ApprovalPrompt } from './VaultApproval';
 import { acmePathHits, hitRows } from '../lib/acmePath';
 import { sha256Hex } from '../lib/cryptoCompat';
+import { APPLY_WAY, applySummary, applyWay, interruptionText } from '../lib/planChanges';
 
 export type FlowStep = 1 | 2 | 3 | 4;
 
@@ -177,7 +178,7 @@ export function DeployFlow({
               </table>
             </div>
           )}
-          {plan.diff.length > 0 ? <DiffView lines={plan.diff} /> : <span className="small muted">원문 차이를 받지 못했습니다.</span>}
+          {plan.changes.length > 0 ? <PlanChanges plan={plan} /> : plan.diff.length > 0 ? <DiffView lines={plan.diff} /> : <span className="small muted">원문 차이를 받지 못했습니다.</span>}
           {acmeWarn}
           {gitWarning && <div className="note wa small">자동 배포(Git) 앱입니다. 여기서 바꾸면 Git과 달라집니다.</div>}
           {!m.op ? (
@@ -219,5 +220,62 @@ export function DeployFlow({
       )}
       {planError ? <ErrorBand error={planError} what="검사하지 못했습니다" onRetry={() => void runPlan()} /> : null}
     </Card>
+  );
+}
+
+/** 바뀐 항목마다 적용 방식(Z9): 바로 적용 · 끊김 없는 교체 · 끊김 있음(이유). 그대로인 항목은 접는다 */
+export function PlanChanges({ plan }: { plan: PlanReply }) {
+  const [showKeep, setShowKeep] = useState(false);
+  const keep = plan.changes.filter((c) => c.action === 'Keep').length;
+  const rows = showKeep ? plan.changes : plan.changes.filter((c) => c.action !== 'Keep');
+  const summary = applySummary(plan.changes);
+  return (
+    <div className="col" style={{ gap: 8 }}>
+      <div className="row small" style={{ gap: 6, flexWrap: 'wrap' }}>
+        <b>바뀌는 항목</b>
+        {summary.length === 0 && <span className="muted">바뀌는 항목이 없습니다.</span>}
+        {summary.map((s) => (
+          <Badge key={s.way} tone={APPLY_WAY[s.way][0]}>
+            {APPLY_WAY[s.way][1]} {s.count}
+          </Badge>
+        ))}
+        {keep > 0 && (
+          <button className="btn sm ghost" onClick={() => setShowKeep(!showKeep)}>
+            {showKeep ? '그대로인 항목 숨기기' : `그대로인 항목 ${keep}개 보기`}
+          </button>
+        )}
+      </div>
+      {rows.length > 0 && (
+        <div className="table-wrap">
+          <table className="tbl plan-changes">
+            <thead>
+              <tr>
+                <th>항목</th>
+                <th>적용 방식</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((c, i) => {
+                const w = applyWay(c);
+                return (
+                  <tr key={`${c.key}-${i}`}>
+                    <td>
+                      <code title={c.reason}>{c.key}</code>
+                    </td>
+                    <td>
+                      <Badge tone={APPLY_WAY[w][0]} title={w === 'other' ? c.action : undefined}>
+                        {APPLY_WAY[w][1]}
+                      </Badge>
+                      {c.interruption && <span className="small"> {interruptionText(c.interruption)}</span>}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {plan.changes.some((c) => c.interruption) && <div className="note wa small">끊김 있음 항목은 교체하는 동안 그 서비스가 잠시 멈춥니다. 데이터를 지키는 쪽이 무중단보다 먼저입니다.</div>}
+    </div>
   );
 }

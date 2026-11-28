@@ -690,10 +690,8 @@ func rq7IngressDocument(t *testing.T, image, tenant, app, node, network, host st
 	document := fmt.Sprintf(`name: %s
 x-sfc:
  ingress:
-  node: %s
-  runtime: {max_requests: 2, max_connections: 8, max_header_bytes: 4096, max_body_bytes: 1048576, buffer_bytes: 131072, request_timeout_ms: 10000, dial_timeout_ms: 500, response_header_timeout_ms: 8000, health_interval_ms: 100}
-  listeners: [{shared: rq7-external}, {shared: rq7-local}]
-  routes: [{id: root, host: %s, prefix: /, service: web, port: 8080, health_path: /readyz, gateway: both}]
+  - {id: root, node: %[2]s, host: %[3]s, service: web, port: 8080, health: /readyz, gateway: external}
+  - {id: root-local, node: %[2]s, host: %[3]s, service: web, port: 8080, health: /readyz, gateway: local}
 services:
  web:
   image: %s

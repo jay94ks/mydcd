@@ -496,8 +496,9 @@ func (s *Server) storeChanged(c store.Change) {
 			}
 		case ws.user.SystemAdmin:
 			w.local([]liveRef{ref})
-		case c.Tenant != "":
-			// A tenant's record (incident, webhook, guide): its members too.
+		case c.Tenant != "" || len(c.Tenants) != 0:
+			// A tenant's record (incident, webhook, guide, an assigned DNS
+			// domain): its members too.
 			check = append(check, w)
 		}
 	}
@@ -510,7 +511,10 @@ func (s *Server) storeChanged(c store.Change) {
 				acc, err := s.incidentAccessCtx(ctx, w.ws)
 				return acc.roles, err
 			})
-			if err == nil && roles[c.Tenant] != "" {
+			if err != nil {
+				return
+			}
+			if c.Tenant != "" && roles[c.Tenant] != "" || slices.ContainsFunc(c.Tenants, func(t string) bool { return roles[t] != "" }) {
 				w.local([]liveRef{ref})
 			}
 		}()

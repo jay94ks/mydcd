@@ -57,7 +57,7 @@ func TestDNSServers(t *testing.T) {
 
 	// The reach check: documentation addresses are not public.
 	_, out = f.do("POST", base+"/check", map[string]any{"node": "node-b"})
-	if r := out["items"].([]any)[0].(map[string]any); r["ok"] != false || !strings.Contains(r["error"].(string), "공개 주소가 아님") {
+	if r := out["items"].([]any)[0].(map[string]any); r["ok"] != false || !strings.Contains(r["error"].(string), "not a public address") {
 		t.Fatalf("check: %v", out)
 	}
 

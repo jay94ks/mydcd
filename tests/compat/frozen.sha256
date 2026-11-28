@@ -1,0 +1,3 @@
+# sha256 of every testdata/frozen-* fixture (TestFrozenFixtures).
+# Changing or removing a line is a compatibility break: Jay approves it.
+489fcb8232a47dd6a31c2a1e0555a49f216c450e2f43aaf98daf48e635236809  internal/deployment/testdata/frozen-schema1-compose.yaml

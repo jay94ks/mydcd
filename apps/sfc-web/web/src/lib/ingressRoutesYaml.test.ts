@@ -9,14 +9,14 @@ const SRC = `# 상점
 name: shop
 x-sfc:
   ingress:
-    routes:
-      # 첫 경로
-      - host: shop.example.com
-        prefix: /
-        service: web
-        port: 80
-        gateway: external
-        health_path: /healthz
+    # 첫 경로
+    - node: node-a
+      host: shop.example.com
+      prefix: /
+      service: web
+      port: 80
+      gateway: external
+      health: /healthz
 services:
   web:
     image: nginx
@@ -28,39 +28,43 @@ services:
 
 describe('ingressRoutesYaml', () => {
   it('더하면 주석과 다른 칸은 그대로', () => {
-    const out = addRoute(SRC, { host: 'shop.example.com', prefix: '/api', gateway: 'both', service: 'api', port: 8080 });
+    const out = addRoute(SRC, { node: 'node-a', host: 'shop.example.com', prefix: '/api', gateway: 'local', service: 'api', port: 8080 });
     expect(out).toContain('# 상점');
     // 손대지 않은 흐름 목록 모양은 그대로(yaml 기본값은 [ a ]로 바꾼다)
     expect(out).toContain('expose: ["9000/tcp"]');
     const r = readRoutes(out);
     expect(r).toHaveLength(2);
-    expect(r[1]).toEqual({ host: 'shop.example.com', prefix: '/api', service: 'api', port: 8080, gateway: 'both' });
-    expect(r[0].health_path).toBe('/healthz');
+    expect(r[1]).toEqual({ node: 'node-a', host: 'shop.example.com', prefix: '/api', service: 'api', port: 8080, gateway: 'local' });
+    expect(r[0].health).toBe('/healthz');
+  });
+  it('한 앱의 경로는 모두 같은 서버(INGRESS_NODE_MIXED)', () => {
+    expect(() => addRoute(SRC, { node: 'node-b', host: 'x.example.com', prefix: '/', gateway: 'local', service: 'api', port: 8080 })).toThrow(/같은 서버/);
   });
   it('같은 호스트·접두사는 막는다(대소문자 무시)', () => {
-    expect(() => addRoute(SRC, { host: 'SHOP.example.com', prefix: '/', gateway: 'local', service: 'web', port: 80 })).toThrow(RouteEditError);
+    expect(() => addRoute(SRC, { node: 'node-a', host: 'SHOP.example.com', prefix: '/', gateway: 'local', service: 'web', port: 80 })).toThrow(RouteEditError);
   });
-  it('고치면 다른 칸을 지키고 path를 prefix로 바꾼다', () => {
-    const src = SRC.replace('prefix: /', 'path: /');
-    const out = replaceRoute(src, { host: 'shop.example.com', prefix: '/' }, { host: 'shop.example.com', prefix: '/v2', gateway: 'local', service: 'web', port: 80 });
+  it('고치면 다른 칸을 지키고 서버를 바꾼다', () => {
+    const out = replaceRoute(SRC, { host: 'shop.example.com', prefix: '/' }, { node: 'node-c', host: 'shop.example.com', prefix: '/v2', gateway: 'local', service: 'web', port: 80 });
     const r = readRoutes(out)[0];
     expect(r.prefix).toBe('/v2');
-    expect(r.path).toBeUndefined();
-    expect(r.health_path).toBe('/healthz');
+    expect(r.node).toBe('node-c');
+    expect(r.health).toBe('/healthz');
   });
-  it('마지막 경로는 뺄 수 없고, 둘이면 뺀다', () => {
-    expect(() => removeRoute(SRC, { host: 'shop.example.com', prefix: '/' })).toThrow(/마지막/);
-    const two = addRoute(SRC, { host: 'a.example.com', prefix: '/', gateway: 'local', service: 'api', port: 1 });
+  it('마지막 경로를 빼면 x-sfc.ingress가 없어진다', () => {
+    const two = addRoute(SRC, { node: 'node-a', host: 'a.example.com', prefix: '/', gateway: 'local', service: 'api', port: 1 });
     expect(readRoutes(removeRoute(two, { host: 'shop.example.com', prefix: '/' })).map((r) => r.host)).toEqual(['a.example.com']);
+    const none = YAML.parse(removeRoute(SRC, { host: 'shop.example.com', prefix: '/' })) as Record<string, unknown>;
+    expect(none['x-sfc']).toBeUndefined();
   });
-  it('외부 접속 설정이 없거나 단일 host 형식이면 거절', () => {
-    expect(() => addRoute('name: x\nservices: {}\n', { host: 'a.b', prefix: '/', gateway: 'local' })).toThrow(/x-sfc.ingress/);
-    expect(() => addRoute('name: x\nx-sfc:\n  ingress:\n    host: a.b\n', { host: 'c.d', prefix: '/', gateway: 'local' })).toThrow(/단일 host/);
+  it('외부 접속이 없으면 목록을 새로 만들고, 예전 객체 형식은 거절', () => {
+    const r = readRoutes(addRoute('name: x\nservices: {}\n', { node: 'node-a', host: 'a.b', prefix: '/', gateway: 'external' }));
+    expect(r).toEqual([{ node: 'node-a', host: 'a.b', prefix: '/', gateway: 'external' }]);
+    expect(() => addRoute('name: x\nx-sfc:\n  ingress:\n    routes: []\n', { node: 'n', host: 'c.d', prefix: '/', gateway: 'local' })).toThrow(/예전 외부 접속 형식/);
   });
   it('클러스터 앱 경로는 service·port 없이', () => {
-    const f = 'name: cluster-app/web\nx-sfc:\n  ingress:\n    routes:\n      - host: web.example.com\n        gateway: local\n';
-    const r = readRoutes(addRoute(f, { host: 'web.example.com', prefix: '/admin', gateway: 'external' }));
-    expect(r[1]).toEqual({ host: 'web.example.com', prefix: '/admin', gateway: 'external' });
+    const f = 'name: cluster-app/web\nx-sfc:\n  ingress:\n    - {node: node-a, host: web.example.com, prefix: /, gateway: local}\n';
+    const r = readRoutes(addRoute(f, { node: 'node-a', host: 'web.example.com', prefix: '/admin', gateway: 'external' }));
+    expect(r[1]).toEqual({ node: 'node-a', host: 'web.example.com', prefix: '/admin', gateway: 'external' });
   });
   it('서비스와 컨테이너 포트', () => {
     expect(servicePorts(SRC)).toEqual([
@@ -73,12 +77,13 @@ describe('ingressRoutesYaml', () => {
     expect(routeProblems({ host: '*.example.com', prefix: '/' })).toEqual([]);
     expect(routeProblems({ host: 'Bad Host', prefix: 'api' })).toHaveLength(2);
   });
-  it('그래프 편집기도 prefix를 읽고 쓴다(path는 읽기만)', () => {
-    const src = SRC.replace('prefix: /', 'path: /x');
-    const g = yamlToGraph(src);
-    expect(g.edges.find((e) => e.kind === 'route')?.props.path).toBe('/x');
-    const r = (YAML.parse(graphToYaml(g, src)) as { 'x-sfc': { ingress: { routes: Record<string, unknown>[] } } })['x-sfc'].ingress.routes[0];
-    expect(r.prefix).toBe('/x');
-    expect(r.path).toBeUndefined();
+  it('그래프 편집기도 같은 route 목록을 읽고 쓴다(node·health는 그대로)', () => {
+    const g = yamlToGraph(SRC);
+    const e = g.edges.find((x) => x.kind === 'route')!;
+    expect(e.props.path).toBe('/');
+    expect(e.props.node).toBe('node-a');
+    e.props.path = '/x';
+    const r = (YAML.parse(graphToYaml(g, SRC)) as { 'x-sfc': { ingress: Record<string, unknown>[] } })['x-sfc'].ingress[0];
+    expect(r).toMatchObject({ node: 'node-a', prefix: '/x', health: '/healthz', gateway: 'external' });
   });
 });

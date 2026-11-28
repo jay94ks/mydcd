@@ -26,6 +26,7 @@ import (
 	"github.com/jay94ks/seafield/internal/config"
 	"github.com/jay94ks/seafield/internal/deployment"
 	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/ingress"
 	"github.com/jay94ks/seafield/internal/sfcp"
 	"github.com/jay94ks/seafield/internal/tenancy"
 	"github.com/jay94ks/seafield/internal/userauth"
@@ -48,7 +49,7 @@ func verifyManagedTenantIsolation(t *testing.T, ctx context.Context, r *Runtime,
 	}
 	tenant, _ := catalog.Tenant("second")
 	change("second-nodes", "set-nodes", tenant.Revision, control.NodeChangeTo("second", tenant.AllowedNodes, []string{"node-a"}))
-	change("second-quota", "set-node-quota", 0, tenancy.NodeLimit{Tenant: "second", Node: "node-a", Capacity: workload.Resources{CPU: 100000000, Memory: 16 << 20}, Networks: 1, MaxConsumers: 8, MaxIngressInstances: 1, MaxIngressListeners: 1, MaxIngressRequests: 2, MaxIngressConnections: 8, IngressBufferBytes: 128 << 10})
+	change("second-quota", "set-node-quota", 0, tenancy.NodeLimit{Tenant: "second", Node: "node-a", Capacity: workload.Resources{CPU: 100000000, Memory: 16 << 20}, Networks: 1, MaxConsumers: 8, MaxIngressInstances: 1, MaxIngressListeners: 2, MaxIngressRequests: 2, MaxIngressConnections: 8, IngressBufferBytes: 128 << 10})
 	type manager struct {
 		user    userauth.Client
 		session access.Session
@@ -174,12 +175,6 @@ func verifyManagedTenantIsolation(t *testing.T, ctx context.Context, r *Runtime,
 		next = next.Next()
 	}
 	second := netip.PrefixFrom(next, 28)
-	listener, err := net.Listen("tcp4", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	address := listener.Addr().String()
-	_ = listener.Close()
 	// An app.yaml cannot declare its own network: the second tenant's app
 	// borrows a network the administrator gives that tenant.
 	resources, err := p.Resources(read().State)
@@ -187,14 +182,11 @@ func verifyManagedTenantIsolation(t *testing.T, ctx context.Context, r *Runtime,
 		t.Fatal(err)
 	}
 	change("second-network", "create-tun-network", resources.Networks.Revision(), tenancy.TUNDefinition{Tenant: "second", Name: "second-services", Members: []tenancy.TUNNode{{Node: "node-a", Pools: []tenancy.Subnet{{ID: "pool", Prefix: second, Gateway: second.Addr().Next(), MTU: 1280}}}}})
+	change("second-hosts", "set-ingress-host-policy", 0, control.IngressHostPolicyChange{Tenant: "second", Policy: ingress.HostPolicy{ExternalAllowed: true, ExternalHosts: []string{"second.test"}}})
 	document := []byte(fmt.Sprintf(`name: second
 x-sfc:
  ingress:
-  node: node-a
-  host: second.test
-  runtime: {max_requests: 2, max_connections: 8, max_header_bytes: 4096, max_body_bytes: 1048576, buffer_bytes: 131072, request_timeout_ms: 5000, dial_timeout_ms: 1000, response_header_timeout_ms: 2000, health_interval_ms: 100}
-  listeners: [{address: %q}]
-  backend: {service: web, port: 8080, health_path: /readyz}
+  - {node: node-a, host: second.test, service: web, port: 8080, health: /readyz}
 services:
  web:
   image: %s
@@ -207,7 +199,7 @@ services:
   x-sfc: {node: node-a, ready: {http: /readyz, port: 8080}}
 networks:
  app: {external: true, name: second-services}
-`, address, image, second.Addr().Next().Next()))
+`, image, second.Addr().Next().Next()))
 	// CIDR overlap is now checked when the administrator creates a network,
 	// not when an app is planned (the app names no CIDR).
 	for label, raw := range map[string][]byte{
@@ -417,15 +409,15 @@ networks:
 		}
 	}
 	for i, transport := range []http.RoundTripper{h1, h2, h3} {
-		url := "http://" + spec.Listeners[0].Address
+		url := "http://" + gatewayListenerAddress(t, cfg, spec.Listeners[0])
 		if i > 0 {
-			url = "https://" + spec.Listeners[1].Address
+			url = "https://" + gatewayListenerAddress(t, cfg, spec.Listeners[1])
 		}
 		checkHTTP(transport, url, "app.test", 200, i+1, "tenant")
-		checkHTTP(transport, url, "second.test", 404, i+1, "")
+		// The node gateway's shared listeners serve each tenant's own host only.
+		checkHTTP(transport, url, "foreign.test", 404, i+1, "")
 	}
-	checkHTTP(h1, "http://"+address, "second.test", 200, 1, "second")
-	checkHTTP(h1, "http://"+address, "app.test", 404, 1, "")
+	checkHTTP(h1, "http://"+gatewayListenerAddress(t, cfg, spec.Listeners[0]), "second.test", 200, 1, "second")
 	// Revoke one manager's current membership, without changing the admin's
 	// accepted original app or the other manager's authorization.
 	catalog, _ = p.Catalog(read().State)

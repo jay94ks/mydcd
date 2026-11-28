@@ -22,10 +22,15 @@ type Command struct {
 	Actor, RequestID, Key, Value string
 	Expected                     uint64
 	Delete                       bool
-	Epoch                        uint64
-	Kind                         CommandKind
-	Target                       string
-	Rights                       Rights
+	// Renew gives a present object a new generation (a Mutate only): the
+	// value replaces a native that keeps running while its successor starts
+	// (surge, devel/design/zero-downtime-apply.md). It encodes as delete
+	// byte 2, so a build without it refuses the entry.
+	Renew  bool `json:",omitempty"`
+	Epoch  uint64
+	Kind   CommandKind
+	Target string
+	Rights Rights
 	// Features are the mainline feature versions this entry uses
 	// (devel/design/upgrades.md 3-2). Reducers branch on Uses; a build
 	// that does not have one of them halts instead of applying the entry.
@@ -191,9 +196,12 @@ func commandDigest(c Command) [32]byte {
 	b = append(b, byte(c.Kind), byte(c.Rights))
 	b = binary.LittleEndian.AppendUint64(b, uint64(len(c.Target)))
 	b = append(b, c.Target...)
-	if c.Delete {
+	switch {
+	case c.Delete:
 		b = append(b, 1)
-	} else {
+	case c.Renew:
+		b = append(b, 2)
+	default:
 		b = append(b, 0)
 	}
 	// Features join the digest only when present, so every digest already
@@ -368,7 +376,7 @@ func applyTransactional(s State, index uint64, c Command, validate Validator, re
 		return n, Result{Code: LedgerFull, Index: index}, nil
 	}
 	result := Result{Code: Invalid, Index: index}
-	validMutation := c.Kind == Mutate && c.Target == "" && c.Rights == 0 && len(c.Key) <= 512 && utf8.ValidString(c.Key) && len(c.Value) <= 64*1024 && (!c.Delete || c.Value == "") && c.Key != FeaturesUsedKey
+	validMutation := c.Kind == Mutate && c.Target == "" && c.Rights == 0 && len(c.Key) <= 512 && utf8.ValidString(c.Key) && len(c.Value) <= 64*1024 && (!c.Delete || c.Value == "") && !(c.Delete && c.Renew) && c.Key != FeaturesUsedKey
 	required := namespaceRights(c.Key)
 	if c.Kind == Module || c.Kind == ModuleReport || c.Kind == ModuleUpload || c.Kind == ModuleAppDown {
 		n, result = applyModule(s, n, index, c, validate, reduce, admitPatch)
@@ -383,7 +391,7 @@ func applyTransactional(s State, index uint64, c Command, validate Validator, re
 		result.Code = ConditionFailed
 		if c.Expected == old.Revision && (!c.Delete || old.Present) {
 			object := Object{Revision: index, Generation: old.Generation, Value: c.Value, Present: !c.Delete}
-			if !c.Delete && !old.Present {
+			if !c.Delete && (!old.Present || c.Renew) {
 				object.Generation = index
 			}
 			n.putObject(c.Key, object)

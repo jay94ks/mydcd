@@ -176,8 +176,10 @@ func fileManifest(files map[string][]byte) ([]CompileFile, [32]byte) {
 	return list, sha256.Sum256(append([]byte("sfc-checker-compile-tree-1\x00"), raw...))
 }
 
-func PrepareCompilation(source *ResolvedSource) (*Compilation, error) {
-	if source == nil || source.files == nil || source.policy.Validate() != nil || !source.policy.Enabled || len(source.policy.Build.Nodes) == 0 || source.target.Toolchain != source.policy.Build.Toolchain || !slices.Contains(source.policy.Build.Targets, source.target.GOOS+"/"+source.target.GOARCH) || !source.policy.AllowsDescriptor(source.descriptor) {
+// PrepareCompilation builds source's compile item for the compiler image
+// (repo@sha256:…) the policy's reference resolved to for this deploy.
+func PrepareCompilation(source *ResolvedSource, image string) (*Compilation, error) {
+	if source == nil || !source.policy.Build.AllowsCompiler(image) || source.files == nil || source.policy.Validate() != nil || !source.policy.Enabled || len(source.policy.Build.Nodes) == 0 || source.target.Toolchain != source.policy.Build.Toolchain || !slices.Contains(source.policy.Build.Targets, source.target.GOOS+"/"+source.target.GOARCH) || !source.policy.AllowsDescriptor(source.descriptor) {
 		return nil, ErrSource
 	}
 	files := source.SourceFiles()
@@ -196,12 +198,8 @@ func PrepareCompilation(source *ResolvedSource) (*Compilation, error) {
 	}
 	files[compileMainPath] = wrapper
 	manifest, tree := fileManifest(files)
-	image, err := access.PinImage(source.policy.Build.Image)
-	if err != nil {
-		return nil, ErrSource
-	}
 	item := CompileItem{Recipe: CompileRecipe{Schema: 1, Tenant: source.descriptor.Tenant, Source: content,
-		Image: image.Reference, Toolchain: source.target.Toolchain, GOOS: source.target.GOOS, GOARCH: source.target.GOARCH,
+		Image: image, Toolchain: source.target.Toolchain, GOOS: source.target.GOOS, GOARCH: source.target.GOARCH,
 		SDK: sdk, Wrapper: sha256.Sum256(wrapper), Tree: tree}, Source: source.descriptor.Clone(), Files: manifest}
 	item.Recipe.Flags = slices.Clone(compileFlags)
 	item.Key = item.Recipe.Key()
@@ -253,19 +251,17 @@ func validCompileItem(item CompileItem) bool {
 	return r.Tree == sha256.Sum256(append([]byte("sfc-checker-compile-tree-1\x00"), raw...))
 }
 
-func NewCompileBatch(job string, deadline int64, policy TenantPolicy, inputs []*Compilation) (CompileBatch, error) {
-	if !digest(job) || deadline <= 0 || policy.Validate() != nil || !policy.Enabled || len(policy.Build.Nodes) == 0 || len(inputs) == 0 || len(inputs) > MaxScripts {
+// NewCompileBatch is one compiler run: every input names the same compiler
+// image, which the policy allows.
+func NewCompileBatch(job string, deadline int64, policy TenantPolicy, image string, inputs []*Compilation) (CompileBatch, error) {
+	if !digest(job) || !policy.Build.AllowsCompiler(image) || deadline <= 0 || policy.Validate() != nil || !policy.Enabled || len(policy.Build.Nodes) == 0 || len(inputs) == 0 || len(inputs) > MaxScripts {
 		return CompileBatch{}, ErrSource
 	}
 	b := CompileBatch{Schema: 1, Job: job, Tenant: policy.Tenant, DeadlineUnixMilli: deadline, Toolchain: policy.Build.Toolchain,
 		WorkspaceBytes: policy.Build.WorkspaceBytes, ArtifactBytes: min(policy.Build.ArtifactBytes, MaxCompiledArtifactBytes), OutputBytes: min(policy.CompiledCacheBytes, policy.Build.WorkspaceBytes)}
 	seen := map[[32]byte]bool{}
-	image, err := access.PinImage(policy.Build.Image)
-	if err != nil {
-		return CompileBatch{}, err
-	}
 	for _, input := range inputs {
-		if input == nil || !validCompileItem(input.item) || input.item.Recipe.Tenant != b.Tenant || input.item.Recipe.Image != image.Reference || input.item.Recipe.Toolchain != b.Toolchain || !policy.AllowsDescriptor(input.item.Source) {
+		if input == nil || !validCompileItem(input.item) || input.item.Recipe.Tenant != b.Tenant || input.item.Recipe.Image != image || input.item.Recipe.Toolchain != b.Toolchain || !policy.AllowsDescriptor(input.item.Source) {
 			return CompileBatch{}, ErrSource
 		}
 		r := input.item.Recipe

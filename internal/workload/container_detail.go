@@ -74,7 +74,8 @@ func (m *Manager) ObserveContainerDetail(ctx context.Context, target containerop
 		detail.Drift = append(detail.Drift, "network")
 	} else {
 		for i, a := range networks {
-			endpoint, exists := actual.NetworkSettings.Networks[leases[i].NetworkName]
+			endpoint := taskEndpoint(actual.NetworkSettings, leases[i])
+			exists := endpoint != nil
 			if !exists || endpoint == nil || endpoint.NetworkID != leases[i].NetworkID || a.IPv4.IsValid() && endpoint.IPAddress != a.IPv4 || a.IPv6.IsValid() && endpoint.GlobalIPv6Address != a.IPv6 {
 				detail.Drift = append(detail.Drift, "network")
 				break

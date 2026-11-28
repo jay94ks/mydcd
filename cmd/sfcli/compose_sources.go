@@ -152,7 +152,7 @@ func prepareComposeArtifact(ctx context.Context, o composeOptions, tenant, home 
 		// advertises lifecycle and verifies the CURRENT provider permissions.
 		provider := [32]byte(target.Key)
 		preflight, err := c.StreamAppPlan(ctx, target, stored.Session, tenant, control.AppPlanRequest{Standalone: o.standalone, Document: raw,
-			Project: o.project.value, Deployment: o.deployment.value, Node: o.node.value, PrepareSources: true, SourceProvider: &provider})
+			Project: o.project.value, Deployment: o.deployment.value, Node: o.node.value, PrepareSources: true, SourceProvider: &provider, Force: o.force})
 		if err != nil {
 			return nil, err
 		}

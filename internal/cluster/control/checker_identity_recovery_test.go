@@ -46,7 +46,7 @@ func TestCheckerOriginalRecoveryUsesReplacementSignerWithoutRewritingJob(t *test
 		t.Fatal(err)
 	}
 	id := sha256.Sum256([]byte("original-retained-job"))
-	intent := checker.BuildIntent{Schema: 1, Cluster: f.p.Cluster, Tenant: "tenant", ID: hex.EncodeToString(id[:]), AppUseID: parent.ID, AppUse: parent.Digest(), Node: "node-a", Owner: original, Selection: checker.Selection{PolicyRevision: 1, Sources: []checker.SourceFact{source}}, Inputs: []checker.BuildInput{{Content: source.ContentDigest(), Recipe: [32]byte{2}}}, Manifest: [32]byte{3}, Target: "linux/amd64", DeadlineUnixMilli: 100000}
+	intent := checker.BuildIntent{Schema: 1, Cluster: f.p.Cluster, Tenant: "tenant", ID: hex.EncodeToString(id[:]), AppUseID: parent.ID, AppUse: parent.Digest(), Node: "node-a", Owner: original, Selection: checker.Selection{PolicyRevision: 1, Sources: []checker.SourceFact{source}}, Inputs: []checker.BuildInput{{Content: source.ContentDigest(), Recipe: [32]byte{2}}}, Manifest: [32]byte{3}, Target: "linux/amd64", DeadlineUnixMilli: 100000, Image: "docker.io/library/golang@sha256:" + strings.Repeat("a", 64)}
 	book, err = book.ReserveBuild(intent)
 	if err != nil {
 		t.Fatal(err)

@@ -570,6 +570,7 @@ type VolumeBackupView struct {
 	Failure                string                  `json:",omitempty"`
 	Owner                  [32]byte
 	UID, GID, Mode         uint32
+	CreatedAt              int64 `json:",omitempty"` // Unix seconds the begin-volume-backup original was signed
 }
 
 func (v Volumes) BackupPage(c access.Catalog, actor, tenant, after string) ([]VolumeBackupView, string, error) {
@@ -590,7 +591,7 @@ func (v Volumes) BackupPage(c access.Catalog, actor, tenant, after string) ([]Vo
 		if len(page) == 8 {
 			return page, page[len(page)-1].Key, nil
 		}
-		row := VolumeBackupView{Key: key, Scope: b.Scope, ID: b.ID, Node: b.Source.Owner.Node, Phase: job.Phase, Revision: job.Revision, MaxBytes: b.MaxBytes, MaxEntries: b.MaxEntries, Binding: b.Digest(), Compatibility: b.Compatibility, Receipt: job.Receipt, Owner: b.Source.Owner.Key, UID: b.Source.Spec.UID, GID: b.Source.Spec.GID, Mode: b.Source.Spec.Mode}
+		row := VolumeBackupView{Key: key, Scope: b.Scope, ID: b.ID, Node: b.Source.Owner.Node, Phase: job.Phase, Revision: job.Revision, MaxBytes: b.MaxBytes, MaxEntries: b.MaxEntries, Binding: b.Digest(), Compatibility: b.Compatibility, Receipt: job.Receipt, Owner: b.Source.Owner.Key, UID: b.Source.Spec.UID, GID: b.Source.Spec.GID, Mode: b.Source.Spec.Mode, CreatedAt: b.Origin.At}
 		if job.Report != nil {
 			row.Failure = job.Report.Failure
 		}

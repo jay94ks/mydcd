@@ -18,7 +18,7 @@ import { ContextMenu, Menu } from '../components/Menu';
 import { MutationError, OpPanel, useMutation } from '../components/OpPanel';
 import { lineDiff } from '../lib/diff';
 import { usePoll } from '../lib/usePoll';
-import { addRoute, removeRoute, replaceRoute, routeProblems, RouteEditError, servicePorts, type RouteGateway, type RouteSpec } from '../lib/ingressRoutesYaml';
+import { addRoute, readRoutes, removeRoute, replaceRoute, routeProblems, RouteEditError, servicePorts, type RouteGateway, type RouteSpec } from '../lib/ingressRoutesYaml';
 import { yamlDigest } from './DeployFlow';
 import { routeStatus, flatten, type Flat } from './Ingress';
 import { clusterAppRoutesLive, domainListLive } from '../lib/liveTopics';
@@ -47,8 +47,9 @@ export interface Mapping {
   nodes: string[];
   flats: Flat[];
 }
-export const gwOf = (g: Gateway[]): RouteGateway => (g.includes('external') && g.includes('local') ? 'both' : g.includes('external') ? 'external' : 'local');
-const gwList = (g: RouteGateway): Gateway[] => (g === 'both' ? ['external', 'local'] : [g]);
+/** route 하나의 게이트웨이(external | local). 여러 서버에서 둘 다 보이면 외부망 */
+export const gwOf = (g: Gateway[]): RouteGateway => (g.includes('external') ? 'external' : 'local');
+const gwList = (g: RouteGateway): Gateway[] => [g];
 
 /** 서버·게이트웨이마다 따로 오는 매핑을 앱 정의의 경로 하나로 모으고, 클러스터 앱 경로를 붙인다 */
 export function buildMappings(v: IngressView, cluster?: ClusterAppRoutes): Mapping[] {
@@ -164,7 +165,7 @@ export function RoutesTab({ v, gw, find, blocks, cluster, onDialog, onBlock }: {
     );
   };
   const status = (m: Mapping) => {
-    if (m.cluster) return <span className="small muted">{cluster?.node ? `${cluster.node}에서 엶` : '—'}</span>;
+    if (m.cluster) return <span className="small muted">{m.nodes.length ? `${m.nodes.join(', ')}에서 엶` : '—'}</span>;
     const b = blockedOf(m);
     if (b) return routeStatus(b, blocks);
     const f = m.flats.find((x) => x.r.note) ?? m.flats.find((x) => (x.r.err5xx ?? 0) >= 2 || x.r.backends.some((y) => y.slow)) ?? m.flats[0];
@@ -331,7 +332,15 @@ export function MappingDialog({ d, v, cluster, onClose, onDone, onShow }: { d: E
 
   const [host, setHost] = useState(orig?.host ?? (d.kind === 'add' ? (d.host ?? '') : ''));
   const [prefix, setPrefix] = useState(orig?.prefix ?? '/');
-  const [gw, setGw] = useState<RouteGateway>(orig ? gwOf(orig.gateways) : 'local');
+  const [gw, setGw] = useState<RouteGateway>(orig ? gwOf(orig.gateways) : 'external');
+  // route를 여는 서버: 외부 접속 모듈이 켜져 있고 고른 게이트웨이가 있는 서버
+  const gwNodes = v.nodes.filter((x) => x.module && !!x[gw]).map((x) => x.node);
+  const [node, setNode] = useState(orig?.nodes[0] ?? '');
+  useEffect(() => {
+    if (!node || !gwNodes.includes(node)) {
+      if (gwNodes.length) setNode(gwNodes[0]);
+    }
+  }, [gw, v]);
   const [dest, setDest] = useState<'app' | 'cluster'>(orig?.cluster ? 'cluster' : 'app');
   const [appKey, setAppKey] = useState(orig && !orig.cluster ? `${orig.tenant}/${orig.app}` : '');
   const [service, setService] = useState(orig?.service ?? '');
@@ -351,6 +360,20 @@ export function MappingDialog({ d, v, cluster, onClose, onDone, onShow }: { d: E
   const moved = !!orig && (dest === 'cluster' ? !orig.cluster : orig.cluster || `${orig.tenant}/${orig.app}` !== appKey);
   const origSrc = useSource(moved ? origTarget : undefined);
   const svcs = useMemo(() => (src?.yaml && dest === 'app' ? servicePorts(src.yaml) : []), [src?.yaml, dest]);
+  // 한 앱의 경로는 모두 같은 서버: 고른 앱에 이미 경로가 있으면 그 서버로 맞춘다(고치는 경로 하나뿐이면 자유)
+  const fixedNode = useMemo(() => {
+    if (!src?.yaml) return undefined;
+    try {
+      const rs = readRoutes(src.yaml).filter((r) => !(orig && !moved && lc(String(r.host ?? '')) === lc(orig.host) && String(r.prefix ?? '/') === (orig.prefix || '/')));
+      const n = rs.find((r) => r.node)?.node;
+      return typeof n === 'string' ? n : undefined;
+    } catch {
+      return undefined;
+    }
+  }, [src?.yaml, moved]);
+  useEffect(() => {
+    if (fixedNode && fixedNode !== node) setNode(fixedNode);
+  }, [fixedNode]);
   // 고른 앱의 서비스·포트 칸을 그 앱 정의에 맞춘다
   useEffect(() => {
     if (dest !== 'app' || !svcs.length) return;
@@ -360,8 +383,8 @@ export function MappingDialog({ d, v, cluster, onClose, onDone, onShow }: { d: E
   }, [svcs]);
 
   const tenantExternal = dest === 'cluster' || !target || target === 'cluster' ? true : (v.tenants.find((t) => t.tenant === target.tenant)?.external ?? true);
-  const spec: RouteSpec = dest === 'cluster' ? { host: host.trim().toLowerCase(), prefix: prefix.trim(), gateway: gw } : { host: host.trim().toLowerCase(), prefix: prefix.trim(), gateway: gw, service, port: Number(port) || undefined };
-  const problems = [...(host.trim() ? routeProblems(spec) : []), ...(dest === 'app' && !service ? ['서비스를 고르세요.'] : []), ...(dest === 'app' && !spec.port ? ['포트를 고르거나 적으세요.'] : []), ...(spec.prefix.startsWith(ACME) ? [`${ACME} 경로는 인증서 자동화가 씁니다.`] : []), ...(!tenantExternal && gw !== 'local' ? ['이 작업 공간은 외부망 노출이 허용되지 않았습니다.'] : [])];
+  const spec: RouteSpec = dest === 'cluster' ? { node, host: host.trim().toLowerCase(), prefix: prefix.trim(), gateway: gw } : { node, host: host.trim().toLowerCase(), prefix: prefix.trim(), gateway: gw, service, port: Number(port) || undefined };
+  const problems = [...(!node ? ['이 경로를 열 서버를 고르세요.'] : []), ...(host.trim() ? routeProblems(spec) : []), ...(dest === 'app' && !service ? ['서비스를 고르세요.'] : []), ...(dest === 'app' && !spec.port ? ['포트를 고르거나 적으세요.'] : []), ...(spec.prefix.startsWith(ACME) ? [`${ACME} 경로는 인증서 자동화가 씁니다.`] : []), ...(!tenantExternal && gw !== 'local' ? ['이 작업 공간은 외부망 노출이 허용되지 않았습니다.'] : [])];
   const self = orig;
   const taken = host.trim() ? clash(all, spec.host, spec.prefix, gw, self) : undefined;
   const before = host.trim() && !taken ? fallbackOf(all, spec.host, spec.prefix, gw, self) : undefined;
@@ -384,7 +407,7 @@ export function MappingDialog({ d, v, cluster, onClose, onDone, onShow }: { d: E
     if (!moved) return [into(target, src, (y) => replaceRoute(y, ref!, spec))];
     if (!origSrc) return [];
     return [into(origTarget, origSrc, (y) => removeRoute(y, ref!)), into(target, src, (y) => addRoute(y, spec))];
-  }, [src, origSrc, host, prefix, gw, service, port, dest, appKey, list, problems.length, taken]);
+  }, [src, origSrc, host, prefix, gw, node, service, port, dest, appKey, list, problems.length, taken]);
   const ready = changes.length > 0 && changes.every((c) => c.after !== undefined) && changes.some((c) => c.before !== c.after);
 
   const m1 = useMutation();
@@ -439,9 +462,8 @@ export function MappingDialog({ d, v, cluster, onClose, onDone, onShow }: { d: E
         <div className="row" style={{ gap: 16, flexWrap: 'wrap' }}>
           {(
             [
-              ['external', '외부망', '인터넷 쪽 주소 :443'],
-              ['local', '로컬망', '사내망 주소만 · 기본'],
-              ['both', '둘 다', ''],
+              ['external', '외부망', '인터넷 쪽 주소 :443 · 기본'],
+              ['local', '로컬망', '사내망 주소만'],
             ] as [RouteGateway, string, string][]
           ).map(([k, l, h]) => (
             <label key={k} className="row" style={{ gap: 6 }} title={!tenantExternal && k !== 'local' ? '작업 공간에 외부망 허용이 없습니다' : undefined}>
@@ -452,6 +474,17 @@ export function MappingDialog({ d, v, cluster, onClose, onDone, onShow }: { d: E
             </label>
           ))}
         </div>
+      </Field>
+      <Field label="여는 서버" hint={fixedNode ? `한 앱의 경로는 모두 같은 서버에서 엽니다 · 이 앱은 ${fixedNode}` : gwNodes.length ? `이 서버의 ${GW_NAME[gw]} 게이트웨이가 받습니다` : `${GW_NAME[gw]} 게이트웨이가 있는 서버가 없습니다. 서버 › 게이트웨이에서 먼저 켜세요`}>
+        <select value={node} onChange={(e) => setNode(e.target.value)} disabled={sent || !!fixedNode} title={fixedNode ? `이 앱의 다른 경로가 ${fixedNode}에서 열려 같은 서버로 정해집니다` : undefined}>
+          {!node && <option value="">고르세요</option>}
+          {[...new Set([...gwNodes, ...(node ? [node] : [])])].map((x) => (
+            <option key={x} value={x}>
+              {x}
+              {gwNodes.includes(x) ? '' : ' (게이트웨이 없음)'}
+            </option>
+          ))}
+        </select>
       </Field>
       <Field label="보낼 곳" group>
         <div className="row" style={{ gap: 16, flexWrap: 'wrap' }}>
@@ -471,7 +504,7 @@ export function MappingDialog({ d, v, cluster, onClose, onDone, onShow }: { d: E
       </Field>
       {isCluster ? (
         <Field label="클러스터 앱" hint="sfc-web · 경로마다 서비스·포트는 sfcd가 정함">
-          <input value={`web${cluster?.node ? ` · ${cluster.node}` : ''}`} readOnly disabled />
+          <input value="web" readOnly disabled />
         </Field>
       ) : (
         <div className="fields2">

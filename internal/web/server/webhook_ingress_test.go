@@ -142,7 +142,7 @@ func TestWebhookIngress(t *testing.T) {
 			last = append(last, fmt.Sprint(x["status"]))
 		}
 	}
-	if !strings.Contains(strings.Join(cond, "|"), "5xx 2% 넘게 3분") || len(last) != 4 || last[0] != "200" {
+	if !strings.Contains(strings.Join(cond, "|"), "5xx over 2% for 3 min") || len(last) != 4 || last[0] != "200" {
 		t.Fatalf("links: %v %v", cond, last)
 	}
 

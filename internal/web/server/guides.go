@@ -106,10 +106,11 @@ func (s *Server) guideAccess(w http.ResponseWriter, r *http.Request, ws *webSess
 	return true
 }
 
-// guideSummary is the first non-empty line quoted, "외 N줄" for the rest.
-func guideSummary(text string) (string, int) {
+// guideSummary is the first non-empty line quoted, "외 N줄" for the rest
+// (in lang).
+func guideSummary(lang, body string) (string, int) {
 	var lines []string
-	for _, l := range strings.Split(text, "\n") {
+	for _, l := range strings.Split(body, "\n") {
 		if strings.TrimSpace(l) != "" {
 			lines = append(lines, strings.TrimSpace(l))
 		}
@@ -119,7 +120,7 @@ func guideSummary(text string) (string, int) {
 	}
 	out := fmt.Sprintf("“%s”", oneLine(strings.TrimLeft(lines[0], "#-* "), 80))
 	if len(lines) > 1 {
-		out += fmt.Sprintf(" 외 %d줄", len(lines)-1)
+		out = text(lang, "guide.summary-more", map[string]string{"first": out, "more": fmt.Sprint(len(lines) - 1)})
 	}
 	return out, len(lines)
 }
@@ -130,10 +131,10 @@ var guideWarnRE = []struct {
 	re  *regexp.Regexp
 	why string
 }{
-	{regexp.MustCompile(`(?i)재부팅|reboot|재시작해\s*서버|ssh`), "은(는) 임시 조치 목록에 없어 AI가 고를 수 없습니다. 지침에서 빼거나 사람이 할 일로 적으세요."},
-	{regexp.MustCompile(`(?i)삭제|지우|delete|drop\s+table|rm\s+-rf|prune`), "처럼 지우는 일은 장애 대응이 하지 않습니다. 사람이 할 일로 적으세요."},
-	{regexp.MustCompile(`(?i)비밀번호|비밀값|password|secret|token|토큰|api\s*key`), "처럼 비밀값을 요구하는 문장은 따르지 않습니다."},
-	{regexp.MustCompile(`(?i)(등급|영향).{0,8}(낮|low)|자동으로\s*(실행|승인)|승인\s*없이|without\s+approval`), "처럼 영향 등급·자동 실행 조건을 바꾸는 문장은 따르지 않습니다. 정책에서 정하세요."},
+	{regexp.MustCompile(`(?i)재부팅|reboot|재시작해\s*서버|ssh`), "guide-warn.not-listed"},
+	{regexp.MustCompile(`(?i)삭제|지우|delete|drop\s+table|rm\s+-rf|prune`), "guide-warn.delete"},
+	{regexp.MustCompile(`(?i)비밀번호|비밀값|password|secret|token|토큰|api\s*key`), "guide-warn.secret"},
+	{regexp.MustCompile(`(?i)(등급|영향).{0,8}(낮|low)|자동으로\s*(실행|승인)|승인\s*없이|without\s+approval`), "guide-warn.policy"},
 }
 
 type guideWarning struct {
@@ -141,12 +142,12 @@ type guideWarning struct {
 	Text string `json:"text"`
 }
 
-func guideWarnings(text string) []guideWarning {
+func guideWarnings(lang, body string) []guideWarning {
 	out := []guideWarning{}
-	for i, l := range strings.Split(text, "\n") {
+	for i, l := range strings.Split(body, "\n") {
 		for _, w := range guideWarnRE {
 			if m := w.re.FindString(l); m != "" {
-				out = append(out, guideWarning{Line: i + 1, Text: fmt.Sprintf("“%s”%s", oneLine(strings.TrimSpace(l), 60), w.why)})
+				out = append(out, guideWarning{Line: i + 1, Text: text(lang, w.why, map[string]string{"line": fmt.Sprintf("“%s”", oneLine(strings.TrimSpace(l), 60))})})
 				break
 			}
 		}
@@ -179,7 +180,7 @@ type guideActionChoice struct {
 
 // guideChoices: what the scope may pick (workspace managers cannot read
 // the cluster policy or MCP settings themselves).
-func (s *Server) guideChoices(ctx context.Context, ws *webSession, g guideScope) map[string]any {
+func (s *Server) guideChoices(ctx context.Context, lang string, ws *webSession, g guideScope) map[string]any {
 	blocked := s.upperAvoid(g)
 	actions := []guideActionChoice{}
 	for _, a := range incidentActions {
@@ -207,7 +208,7 @@ func (s *Server) guideChoices(ctx context.Context, ws *webSession, g guideScope)
 			}
 		}
 	}
-	return map[string]any{"actions": actions, "services": services, "mcpServers": s.mcpChoices(g.Tenant)}
+	return map[string]any{"actions": actions, "services": services, "mcpServers": s.mcpChoices(lang, g.Tenant)}
 }
 
 func emptyGuide(g guideScope) *store.Guide {
@@ -222,14 +223,14 @@ func normFields(f *store.GuideFields) {
 	}
 }
 
-func (s *Server) guideView(ctx context.Context, ws *webSession, g guideScope, cur *store.Guide) map[string]any {
+func (s *Server) guideView(ctx context.Context, lang string, ws *webSession, g guideScope, cur *store.Guide) map[string]any {
 	if cur == nil {
 		cur = emptyGuide(g)
 	}
 	normFields(&cur.Fields)
-	sum, lines := guideSummary(cur.Text)
+	sum, lines := guideSummary(lang, cur.Text)
 	v := map[string]any{"scope": g.Scope, "version": cur.Version, "revision": cur.Version, "text": cur.Text, "fields": cur.Fields, "deliver": cur.Deliver,
-		"warnings": guideWarnings(cur.Text), "summary": sum, "lines": lines, "chars": utf8.RuneCountInString(cur.Text), "choices": s.guideChoices(ctx, ws, g)}
+		"warnings": guideWarnings(lang, cur.Text), "summary": sum, "lines": lines, "chars": utf8.RuneCountInString(cur.Text), "choices": s.guideChoices(ctx, lang, ws, g)}
 	if g.Tenant != "" {
 		v["tenant"] = g.Tenant
 	}
@@ -255,11 +256,12 @@ func (s *Server) handleListGuides(w http.ResponseWriter, r *http.Request, ws *we
 		return
 	}
 	items := []map[string]any{}
+	lang := s.requestLang(r, ws)
 	for _, g := range all {
 		if !acc.canGuide(guideScope{g.Scope, g.Tenant, g.App}, false) {
 			continue
 		}
-		sum, lines := guideSummary(g.Text)
+		sum, lines := guideSummary(lang, g.Text)
 		row := map[string]any{"scope": g.Scope, "version": g.Version, "updatedBy": g.UpdatedBy, "updatedAt": rfc3339(g.UpdatedAt), "summary": sum, "lines": lines,
 			"chars": utf8.RuneCountInString(g.Text)}
 		if g.Tenant != "" {
@@ -286,7 +288,7 @@ func (s *Server) handleGetGuide(w http.ResponseWriter, r *http.Request, ws *webS
 	}
 	ctx, cancel := s.callCtx(r)
 	defer cancel()
-	writeJSON(w, http.StatusOK, s.guideView(ctx, ws, g, cur))
+	writeJSON(w, http.StatusOK, s.guideView(ctx, s.requestLang(r, ws), ws, g, cur))
 }
 
 func okItems(xs []string, n, size int) bool {
@@ -376,7 +378,7 @@ func (s *Server) saveGuide(w http.ResponseWriter, r *http.Request, ws *webSessio
 	s.audit(ws, g.Tenant, "guides", action, g.Scope, nil, map[string]any{"version": next.Version, "chars": utf8.RuneCountInString(next.Text)})
 	ctx, cancel := s.callCtx(r)
 	defer cancel()
-	writeJSON(w, http.StatusOK, s.guideView(ctx, ws, g, next))
+	writeJSON(w, http.StatusOK, s.guideView(ctx, s.requestLang(r, ws), ws, g, next))
 }
 
 // GET /guides/{scope}/versions
@@ -396,9 +398,10 @@ func (s *Server) handleGuideVersions(w http.ResponseWriter, r *http.Request, ws 
 				}
 			}
 			items := []map[string]any{}
+			lang := s.requestLang(r, ws)
 			for i := len(vs) - 1; i >= 0; i-- {
 				v := vs[i]
-				sum, _ := guideSummary(v.Text)
+				sum, _ := guideSummary(lang, v.Text)
 				items = append(items, map[string]any{"version": v.Version, "updatedBy": v.UpdatedBy, "updatedAt": rfc3339(v.UpdatedAt), "summary": sum,
 					"incidents": used[v.Version], "current": i == len(vs)-1})
 			}
@@ -427,7 +430,7 @@ func (s *Server) handleGuideVersion(w http.ResponseWriter, r *http.Request, ws *
 	}
 	ctx, cancel := s.callCtx(r)
 	defer cancel()
-	writeJSON(w, http.StatusOK, s.guideView(ctx, ws, g, old))
+	writeJSON(w, http.StatusOK, s.guideView(ctx, s.requestLang(r, ws), ws, g, old))
 }
 
 // POST /guides/{scope}/restore {revision, version}: the old text as a new
@@ -552,9 +555,9 @@ func guideEscape(text string) string {
 
 // applyGuides drops what the guidelines rule out and puts preferred
 // actions first.
-func applyGuides(cands []store.IncidentAction, gd incidentGuides) ([]store.IncidentAction, []string) {
+func applyGuides(cands []store.IncidentAction, gd incidentGuides) ([]store.IncidentAction, []store.Phrase) {
 	var keep []store.IncidentAction
-	var dropped []string
+	var dropped []store.Phrase
 	for _, c := range cands {
 		svc := ""
 		if c.ID == "restart-task" {
@@ -562,9 +565,9 @@ func applyGuides(cands []store.IncidentAction, gd incidentGuides) ([]store.Incid
 		}
 		switch {
 		case gd.avoid[c.ID] != "":
-			dropped = append(dropped, c.Label+": "+gd.avoid[c.ID]+" 지침이 막음")
+			dropped = append(dropped, skipPhrase(actionPhrase(c.ID, c.Label), with(ph("incident-skip.guide-avoid"), "scope", ph("guide-scope."+gd.avoid[c.ID]))))
 		case svc != "" && gd.services[svc]:
-			dropped = append(dropped, c.Label+": 지침이 서비스 "+svc+"를 막음")
+			dropped = append(dropped, skipPhrase(actionPhrase(c.ID, c.Label), ph("incident-skip.guide-service", "service", svc)))
 		default:
 			keep = append(keep, c)
 		}
@@ -599,7 +602,7 @@ func (s *Server) incidentGuideVersions(in *store.Incident) map[string]any {
 
 // appGuideSummary is the app tab's summary: the scopes above and of the
 // app that the caller may read.
-func (s *Server) appGuideSummary(acc incidentAccess, tenant, app string) map[string]any {
+func (s *Server) appGuideSummary(lang string, acc incidentAccess, tenant, app string) map[string]any {
 	out := map[string]any{}
 	for _, sc := range guideStack(&store.Incident{Scope: "app", Tenant: tenant, App: app}) {
 		if !acc.canGuide(sc, false) {
@@ -609,7 +612,7 @@ func (s *Server) appGuideSummary(acc incidentAccess, tenant, app string) map[str
 		if err != nil || g == nil {
 			continue
 		}
-		sum, _ := guideSummary(g.Text)
+		sum, _ := guideSummary(lang, g.Text)
 		out[sc.kind()] = map[string]any{"version": g.Version, "summary": sum}
 	}
 	return out

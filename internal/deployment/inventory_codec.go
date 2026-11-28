@@ -26,8 +26,11 @@ func (a Inventory) validClaim(c Claim) bool {
 	if json.Unmarshal([]byte(c.Command.Value), &g) != nil || g.Schema != 1 || g.Cluster != a.d.Cluster || g.Tenant != a.d.Tenant || g.App != a.d.App || g.Deployment != a.d.Deployment || g.Kind != c.Step.Kind || g.Node != c.Step.Node || g.Owner != c.Step.Owner || !bytes.Equal(g.Config, c.Step.Goal) || g.Lifecycle != nil {
 		return false
 	}
-	for _, ref := range c.Step.StableDNS {
-		if c.Step.Kind != "task" || !slices.Contains(g.Dependencies, ref) {
+	for _, ref := range c.Step.Stable {
+		// A kept reference is the one committed, unless its Task producer
+		// was replaced after all and the consumer followed the new one.
+		at := slices.IndexFunc(g.Dependencies, func(d ObjectRef) bool { return d.Key == ref.Key })
+		if c.Step.Kind != "task" && c.Step.Kind != "inputs" || at < 0 || g.Dependencies[at] != ref && (g.Dependencies[at].Generation == ref.Generation || !strings.HasPrefix(ref.Key, "workload/task/")) {
 			return false
 		}
 	}
@@ -55,6 +58,10 @@ func (a Inventory) validRetain(c Claim, o RetainReceipt, id string, revision uin
 	return o.Cluster == a.d.Cluster && o.Retirement == id && o.StopRevision == revision && revision > 0 && o.Key == c.Step.Key && o.Owner == c.Step.Owner && o.Command == state.Digest(c.Command) && o.Generation == c.Result.Generation && o.Revision == c.Result.Revision && o.Released && o.Stopped && o.Retained && !o.Gone && o.Fenced && o.Pins == 0 && (c.Native == "" || o.Native == c.Native) && ed25519.Verify(c.Step.Owner[:], RetainReceiptBytes(o), o.Signature)
 }
 func (a Inventory) validRemoval(c Claim, p RemovalProof) bool {
+	if p.Superseded {
+		return identifier(p.ID) && p.Revision > 0 && p.Drain == nil && p.Proof == nil && p.Delete == nil && c.Step.Owner != ([32]byte{}) && (c.Step.Kind == "task" || c.Step.Kind == "inputs") &&
+			schema.VerifyGone(c.Step.Owner, a.d.Cluster, c.Step.Key, c.Result.Generation, supersededDrain(a.d.Cluster, p.ID, p.Revision, c), p.Gone) == nil
+	}
 	if !identifier(p.ID) || p.Revision == 0 || p.Delete == nil || !p.Delete.valid() || p.Delete.Result == nil || p.Delete.Result.Code != state.Applied || !p.Delete.Command.Delete || p.Delete.Command.Key != c.Step.Key || p.Delete.Command.Value != "" || p.Delete.Result.Generation != c.Result.Generation {
 		return false
 	}
@@ -97,7 +104,7 @@ func (a Inventory) closedNoopClaim(c Claim) bool {
 	if c.Step.Retain {
 		return c.Retained && bytes.Equal(goal(c.RetainProof), goal(t.Retained))
 	}
-	return c.Removed && bytes.Equal(goal(c.Removal), goal(RemovalProof{r.ID, r.Revision, t.Drain, t.Proof, t.Delete, t.Gone}))
+	return c.Removed && bytes.Equal(goal(c.Removal), goal(RemovalProof{r.ID, r.Revision, t.Drain, t.Proof, t.Delete, t.Gone, t.Superseded}))
 }
 
 func (a Inventory) validate() error {
@@ -130,9 +137,14 @@ func (a Inventory) validate() error {
 		if e.validate() != nil || !a.scope(Blueprint{e.d.Plan}) || seen[e.d.Operation] || e.d.Epoch < d.MinEpoch[e.d.Submitter] {
 			return ErrInputs
 		}
-		for _, stage := range e.d.Stages {
+		for index, stage := range e.d.Stages {
 			if stage.Result != nil && stage.Result.Code == state.Applied {
 				i := a.claim(stage.Key)
+				if i >= 0 && stage.Previous != nil && stage.Command != nil && stage.Command.Renew && e.surgeTarget(index) && d.Claims[i].Result == stage.Previous.Result && d.Claims[i].Command == stage.Previous.Command {
+					// The original stays claimed (and, once stopped, removed)
+					// until the next Advance claims the new generation.
+					continue
+				}
 				if i < 0 || d.Claims[i].Result != *stage.Result {
 					return ErrInputs
 				}
@@ -170,6 +182,12 @@ func (a Inventory) validate() error {
 				if m != nil && (!m.valid() || m.Replay != nil && m.Replay.Revision > d.Revision || m.Command.Key != c.Step.Key || m.Command.Actor != r.Submitter || m.Command.Epoch != r.Epoch) {
 					return ErrInputs
 				}
+			}
+			if t.Superseded {
+				if c.Step.Retain || !r.KeepExecution || t.Drain != nil || t.Proof != nil || t.Delete != nil || t.Retained != nil || t.Closed && !a.validRemoval(c, RemovalProof{r.ID, r.Revision, nil, nil, nil, t.Gone, true}) || !t.Closed && len(t.Gone) != 0 {
+					return ErrInputs
+				}
+				continue
 			}
 			if c.Step.Retain {
 				if t.Drain != nil || t.Proof != nil || t.Delete != nil || t.Closed && c.Step.Owner != ([32]byte{}) && (t.Retained == nil || !a.validRetain(c, *t.Retained, r.ID, r.Revision)) {
@@ -211,7 +229,7 @@ func (a Inventory) validate() error {
 						return ErrInputs
 					}
 				}
-				if t.Closed && !a.validRemoval(c, RemovalProof{r.ID, r.Revision, t.Drain, t.Proof, t.Delete, t.Gone}) {
+				if t.Closed && !a.validRemoval(c, RemovalProof{r.ID, r.Revision, t.Drain, t.Proof, t.Delete, t.Gone, false}) {
 					return ErrInputs
 				}
 			}

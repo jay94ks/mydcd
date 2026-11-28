@@ -294,9 +294,9 @@ func checkerRecipeProgramAllowed(program *checker.TaskProgram, current checker.T
 		return access.ErrDenied
 	}
 	target := r.GOOS + "/" + r.GOARCH
-	currentImage, currentErr := access.PinImage(current.Build.Image)
-	originalImage, originalErr := access.PinImage(program.Policy.Build.Image)
-	if !current.Enabled || current.Tenant != program.Tenant || currentErr != nil || originalErr != nil || currentImage.Reference != r.Image || current.Build.Toolchain != r.Toolchain || !slices.Contains(current.Build.Targets, target) || originalImage.Reference != r.Image || program.Policy.Build.Toolchain != r.Toolchain || !slices.Contains(program.Policy.Build.Targets, target) {
+	// The recipe's compiler digest: the policy's reference resolved for the
+	// deploy that built it, allowed by both the frozen and current policy.
+	if !current.Enabled || current.Tenant != program.Tenant || !current.Build.AllowsCompiler(r.Image) || current.Build.Toolchain != r.Toolchain || !slices.Contains(current.Build.Targets, target) || !program.Policy.Build.AllowsCompiler(r.Image) || program.Policy.Build.Toolchain != r.Toolchain || !slices.Contains(program.Policy.Build.Targets, target) {
 		return access.ErrDenied
 	}
 	for alias, script := range program.Scripts {

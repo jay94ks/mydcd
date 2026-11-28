@@ -600,7 +600,7 @@ func (m *ProjectionStore) SecretClosure(ref workload.InputRef, key ed25519.Priva
 	proof := Closure{}
 	for _, g := range b.Grants() {
 		u := g.Use
-		p := secrets.UseGone{Cluster: m.cluster, Realm: g.Realm, Tenant: u.Tenant, App: u.App, Deployment: u.Deployment, Consumer: g.Consumer, Generation: g.Generation, NodeKey: m.node, Selection: g.Selection, Lifetime: g.Lifetime, Stopped: true, MountsGone: true}
+		p := secrets.UseGone{Purpose: u.Purpose, Cluster: m.cluster, Realm: g.Realm, Tenant: u.Tenant, App: u.App, Deployment: u.Deployment, Consumer: g.Consumer, Generation: g.Generation, NodeKey: m.node, Selection: g.Selection, Lifetime: g.Lifetime, Stopped: true, MountsGone: true}
 		p.Signature = ed25519.Sign(key, secrets.UseGoneBytes(p))
 		proof.Secrets = append(proof.Secrets, p)
 	}

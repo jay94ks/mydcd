@@ -184,6 +184,8 @@ export interface NodeView {
   /** 막기·풀기의 expected */
   schedulingRevision?: number;
   cpuPercent?: number;
+  /** 공유 VPS에서 다른 VM이 가져간 CPU 몫(0–100). 없거나 0이면 숨긴다 */
+  cpuStealPercent?: number;
   memory?: Usage;
   disk?: Usage;
   containers?: number;
@@ -244,6 +246,8 @@ export interface StorageRoot {
   volumes?: number;
   /** 작업 공간 행(GET /t/{t}/storage)만: 이 작업 공간이 새로 쓸 수 있는지 */
   allowed?: boolean;
+  /** 그 서버의 기본 보관 위치(내린 앱 저장소 보관의 store 기본값) */
+  archiveDefault?: boolean;
 }
 
 export interface DiskView {
@@ -360,6 +364,8 @@ export interface AppView {
   deployment: string;
   revision: number;
   health: Health;
+  /** 상태 배지 옆 사유 한 줄(예: worker 종료 코드 1 · node-b) */
+  reason?: string;
   retiring: boolean;
   lastOp?: { id: string; status: string; failed: boolean; at?: string; submitter?: string };
   cd?: { repository: string; branch: string; mode: string; paused: boolean; running?: string; sourceError?: string; candidate?: string; candidateDigest?: string };
@@ -393,6 +399,8 @@ export interface PlanReply {
   services: { name: string; image: string; node: string; change: 'add' | 'update' | 'remove' | 'keep' }[];
   counts: { add: number; change: number; keep: number; remove: number };
   diff: DiffLine[];
+  /** 바뀐 항목(Z9). 예전 데몬이면 빈 배열 */
+  changes: { action: string; key: string; reason?: string; interruption?: string }[];
 }
 export interface ArchivedApp {
   key: string;
@@ -462,6 +470,9 @@ export interface VolumeView {
   movePhase?: string;
   targetNode?: string;
   moveId?: string;
+  /** 보관이 잡고 있으면 그 보관 ID·단계(#920) */
+  archiveId?: string;
+  archivePhase?: string;
   retained: { moveID: string; node: string; state: 'retained' | 'deleting' | 'removed' }[];
   writer?: string;
 }

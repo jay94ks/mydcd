@@ -143,18 +143,21 @@ func (s *Store) PutArchived(a *ArchivedApp) (string, error) {
 	err := s.db.Update(func(tx *bolt.Tx) error {
 		return putJSON(tx.Bucket(bucketArchived), []byte(a.Key), a)
 	})
+	s.changed(err, Change{Kind: "archived-app", Tenant: a.Tenant, ID: a.App})
 	return a.Key, err
 }
 
 // UpdateArchived replaces an existing archived row.
 func (s *Store) UpdateArchived(a *ArchivedApp) error {
-	return s.db.Update(func(tx *bolt.Tx) error {
+	err := s.db.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket(bucketArchived)
 		if b.Get([]byte(a.Key)) == nil {
 			return ErrNotFound
 		}
 		return putJSON(b, []byte(a.Key), a)
 	})
+	s.changed(err, Change{Kind: "archived-app", Tenant: a.Tenant, ID: a.App})
+	return err
 }
 
 // ListArchived lists archived apps of a tenant, newest first.
@@ -189,19 +192,25 @@ func (s *Store) GetArchived(k string) (*ArchivedApp, error) {
 
 // DeleteArchived removes an archived app (explicit purge only).
 func (s *Store) DeleteArchived(k string) error {
-	return s.db.Update(func(tx *bolt.Tx) error {
+	var a ArchivedApp
+	err := s.db.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket(bucketArchived)
 		if b.Get([]byte(k)) == nil {
 			return ErrNotFound
 		}
+		_ = getJSON(b, []byte(k), &a)
 		return b.Delete([]byte(k))
 	})
+	// The app name stays: other archived versions of it may remain.
+	s.changed(err, Change{Kind: "archived-app", Tenant: a.Tenant, ID: a.App})
+	return err
 }
 
 // DeleteArchivedByOp removes the archive rows saved for the down-app web op
 // opID in tenant (used when that down turns out not to have applied).
 func (s *Store) DeleteArchivedByOp(tenant, opID string) error {
-	return s.db.Update(func(tx *bolt.Tx) error {
+	var gone []string
+	err := s.db.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket(bucketArchived)
 		c := b.Cursor()
 		p := prefix(tenant)
@@ -213,6 +222,7 @@ func (s *Store) DeleteArchivedByOp(tenant, opID string) error {
 			}
 			if a.DownOp == opID {
 				dead = append(dead, append([]byte(nil), k...))
+				gone = append(gone, a.App)
 			}
 		}
 		for _, k := range dead {
@@ -222,6 +232,10 @@ func (s *Store) DeleteArchivedByOp(tenant, opID string) error {
 		}
 		return nil
 	})
+	for _, app := range gone {
+		s.changed(err, Change{Kind: "archived-app", Tenant: tenant, ID: app})
+	}
+	return err
 }
 
 // GetLayout returns the stored graph-editor block positions (raw JSON).

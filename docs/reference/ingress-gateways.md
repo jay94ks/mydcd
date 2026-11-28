@@ -32,37 +32,48 @@ gateways:
 
 공유 수신 주소에는 `0.0.0.0`·`::`를 사용할 수 없으며 external/local 주소 목록은 겹칠 수 없다. `local.allowed_sources`를 생략하면 RFC1918, IPv6 ULA와 설정된 클러스터 노드 주소를 허용한다. 출발지 제한은 TCP accept와 UDP 수신에서 TLS·HTTP 처리 전에 적용한다. HTTP/3에도 같은 출발지 제한을 적용한다.
 
-앱의 예시는 다음과 같다. `services`의 일반 컨테이너 선언과 이름 기반 네트워크 참조는 기존 app.yaml 계약을 따른다.
+앱의 `x-sfc.ingress`는 route 목록이다. `services`의 일반 컨테이너 선언과 이름 기반 네트워크 참조는 기존 app.yaml 계약을 따른다.
 
 ```yaml
 x-sfc:
   ingress:
-    node: node-a
-    listeners:
-      - shared: public-https
-      - shared: internal-https
-    routes:
-      - id: web
-        host: shop.example.com
-        prefix: /
-        service: web
-        network: app
-        port: 8080
-        health_path: /ready
-        gateway: both
-      - id: admin
-        host: shop.example.com
-        prefix: /admin
-        service: admin
-        network: app
-        port: 8081
-        health_path: /ready
-        gateway: local
+    - node: node-a              # 이 route를 여는 서버. 한 앱의 route는 모두 같은 서버
+      host: shop.example.com
+      prefix: /                 # 기본 /
+      service: web
+      network: app              # 서비스 망이 하나면 생략
+      port: 8080
+      health: /ready            # 기본 /
+      gateway: external         # external | local, 기본 external
+    - node: node-a
+      host: shop.example.com
+      service: web
+      port: 8080
+      gateway: local            # 같은 host를 local에도 연다
+    - id: admin                 # 선택. 빼면 목록 순서로 route-1, route-2…
+      node: node-a
+      host: shop.example.com
+      prefix: /admin
+      service: admin
+      port: 8081
+      gateway: local
 ```
 
-위 예시는 `routes` 부분을 설명한다. 실제 배포에는 기존 `ingress.runtime`의 요청·연결·header/body/buffer·시간 예산을 함께 지정해야 한다. `host`와 `backend`의 기존 단일 규칙 형식도 유지한다. 명시 `routes`와 단일 `host` 형식을 혼합하면 오류다. 경로의 `gateway` 기본값은 local이다. port/network/health_path/balance는 ingress 기본값을 상속할 수 있다. 규칙에는 인증서 이름이 없다.
+- 수신 주소는 적지 않는다. route가 쓰는 게이트웨이(external·local)의 공유 수신 주소를 그 서버의 gateways 설정에서 모두 쓴다. 서버에 그 게이트웨이가 꺼져 있거나 수신 주소가 없으면 계획을 `INGRESS_GATEWAY_REQUIRED`로 거절한다.
+- 쓸 수신 주소는 계획 때 정해져 배포 기록에 남는다. 나중에 서버 gateways 설정에서 수신 주소를 지우거나 이름을 바꾸면, 이미 배포된 앱은 다시 배포할 때까지 옛 수신 주소를 가리킨다(그 주소로는 요청을 받지 못한다). gateways 설정을 바꾼 뒤에는 그 서버에 route를 둔 앱을 다시 배포한다.
+- 한 앱의 route가 서로 다른 서버를 적으면 `INGRESS_NODE_MIXED`로 거절한다.
+- `id`는 `sfcli ingress balance APP ROUTE` 등이 route를 가리키는 이름이다. route 순서를 바꾸거나 중간에 넣을 때 대상이 옮겨 가지 않게 하려면 `id`를 적는다. 한 앱 안에서 중복이면 거절한다.
+- 요청·연결 한도는 적지 않는다. 고정 기본값(동시 요청 64, 연결 256, header 16KiB, body 8MiB, buffer 4MiB, 요청 30s, 연결 2s, 응답 header 10s, health 1s)을 쓰고, 작업 공간의 서버별 ingress 한도(`MaxIngressRequests`, `MaxIngressConnections`, `IngressBufferBytes`)가 더 작으면 그 값으로 낮춘다. 요청 하나가 buffer 64KiB를 쓰므로 동시 요청은 buffer/64KiB를 넘지 않는다.
+- 규칙에는 인증서 이름이 없다.
 
-호스트 사용 권한은 시스템 관리자가 tenant별로 등록한다. external 노출은 기본 비허용이며 local 호스트도 명시 배정이 필요하다. [host 정책과 관리 명령](ingress-management.md)을 참고한다. 동일 노드·공유 수신 주소·게이트웨이의 같은 host+prefix를 두 앱에 배정할 수 없다. 공유 주소의 `*` 규칙은 시스템 관리자만 만든다. 앱 종료는 다른 앱의 규칙이나 공유 소켓을 제거하지 않는다.
+앱을 배포하는 것 자체가 그 앱의 host를 ingress에 맵핑하는 허가다. 따로 host 허가를 받지 않아도 된다. 배포 때 남는 검사는 넷이다.
+
+- 같은 서버·게이트웨이에서 같은 작업 공간의 다른 앱이 이미 쓰는 host+prefix면 계획을 `INGRESS_ROUTE_TAKEN`으로 멈춘다. `sfcli app deploy --force`(저장한 계획은 `sfcli app diff --save --force`)로 배포하면 두 앱이 그 route를 함께 받고, 게이트웨이가 요청을 두 앱에 돌아가며 나눠 보낸다. 기존 앱의 route는 그대로 둔다. 이미 함께 받는 route는 그 뒤 배포와 CD 동기화에서 다시 묻지 않는다. CD가 Git commit으로 새로 겹치는 route를 만들면 멈춘다.
+- 다른 작업 공간의 route가 쓰는 host와 그 아래 이름(`shop.example`을 쓰면 `api.shop.example`, `*.shop.example`도)은 어느 서버에서든 `INGRESS_HOST_OTHER_TENANT`로 거절한다. `--force`로도 풀리지 않는다. 예외는 시스템 관리자가 `sfcli ingress hosts set`으로 그 작업 공간에 허가한 host뿐이다(같은 서버·게이트웨이의 같은 host+prefix는 그래도 함께 쓸 수 없다).
+- 클러스터 앱(웹 등)이 쓰는 host는 다른 앱이 쓸 수 없다.
+- 시스템 관리자가 `sfcli ingress hosts set`으로 그 작업 공간의 host를 좁혀 두었으면 그 안의 host만 쓴다. 정해 두지 않은 작업 공간은 제한이 없다. [host 정책과 관리 명령](ingress-management.md)을 참고한다.
+
+공유 주소의 `*` 규칙은 시스템 관리자만 만든다. 앱 종료는 다른 앱의 규칙이나 공유 소켓을 제거하지 않는다.
 
 ## 경로·인증서 선택
 

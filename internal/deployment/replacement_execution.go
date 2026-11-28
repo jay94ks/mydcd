@@ -60,7 +60,7 @@ func (e Execution) ReplacementAllows(key string) bool {
 
 func (e Execution) validReplacement() bool {
 	r := e.d.Replacement
-	if r != nil && (!r.Plan.Valid(e.d.Plan.Tenant, e.d.Plan.App) || r.Plan.BlockedCode != "" || r.Wave < 0 || r.Wave >= len(r.Plan.Waves) || r.Phase != "retiring" && r.Phase != "applying" && r.Phase != "complete" || r.Phase == "complete" && r.Wave+1 != len(r.Plan.Waves)) {
+	if r != nil && (!r.Plan.Valid(e.d.Plan.Tenant, e.d.Plan.App) || r.Plan.BlockedCode != "" || r.Wave < 0 || r.Wave >= len(r.Plan.Waves) || r.Phase != "retiring" && r.Phase != "applying" && r.Phase != "complete" && r.Phase != phaseSurging || r.Phase == "complete" && r.Wave+1 != len(r.Plan.Waves) || r.Phase == phaseSurging && !r.Plan.Waves[r.Wave].Surge) {
 		return false
 	}
 	if r != nil && r.Previous != nil {
@@ -83,7 +83,7 @@ func (e Execution) validReplacement() bool {
 			return false
 		}
 		if !previous.Removed {
-			old, ok := e.heldExecution(stage.Key)
+			old, ok := e.originalExecution(stage.Key)
 			if !ok {
 				return false
 			}
@@ -102,7 +102,8 @@ func (e Execution) validReplacement() bool {
 				}
 			}
 		}
-		if found < 0 || found < r.Wave && !previous.Removed || found > r.Wave && previous.Removed || !previous.Removed && stage.Command != nil || stage.Result != nil && stage.Result.Code == state.Applied && stage.Result.Generation <= previous.Result.Generation || previous.Removed && (previous.Removal == nil || previous.Removal.ID != e.replacementRetirementIDAt(found) || previous.Removal.Delete.Command.Actor != e.d.Submitter || previous.Removal.Delete.Command.Epoch != e.d.Epoch) {
+		surging := found == r.Wave && r.Plan.Waves[found].Surge && (r.Phase == phaseSurging || r.Phase == "retiring")
+		if found < 0 || found < r.Wave && !previous.Removed || found > r.Wave && previous.Removed || !previous.Removed && stage.Command != nil && !surging || stage.Result != nil && stage.Result.Code == state.Applied && stage.Result.Generation <= previous.Result.Generation || previous.Removed && (previous.Removal == nil || previous.Removal.ID != e.replacementRetirementIDAt(found) || !previous.Removal.Superseded && (previous.Removal.Delete.Command.Actor != e.d.Submitter || previous.Removal.Delete.Command.Epoch != e.d.Epoch) || previous.Removal.Superseded && !r.Plan.Waves[found].Surge) {
 			return false
 		}
 	}
@@ -111,7 +112,7 @@ func (e Execution) validReplacement() bool {
 			for _, ref := range plan.Targets {
 				if index := e.index(ref.Key); index >= 0 {
 					previous := e.d.Stages[index].Previous
-					if previous == nil || (wave < r.Wave || wave == r.Wave && r.Phase != "retiring") && !previous.Removed {
+					if previous == nil || (wave < r.Wave || wave == r.Wave && r.Phase != "retiring" && r.Phase != phaseSurging) && !previous.Removed {
 						return false
 					}
 				}
@@ -119,6 +120,17 @@ func (e Execution) validReplacement() bool {
 		}
 	}
 	return true
+}
+
+// originalExecution is the original execution of a Task whose original
+// native still runs: held, or running next to its new generation (surge).
+func (e Execution) originalExecution(key string) (Execution, bool) {
+	i := e.index(key)
+	if i < 0 || e.d.Stages[i].Previous == nil || e.d.Stages[i].Previous.Removed || e.d.Replacement == nil || e.d.Replacement.Previous == nil {
+		return Execution{}, false
+	}
+	old := Execution{*e.d.Replacement.Previous}
+	return old, old.index(key) >= 0
 }
 
 func (e Execution) heldExecution(key string) (Execution, bool) {
@@ -175,7 +187,7 @@ func (a Inventory) validReplacementInventory() bool {
 	}
 	for wave, plan := range r.Plan.Waves {
 		for _, ref := range plan.Targets {
-			if e.index(ref.Key) >= 0 || wave > r.Wave || wave == r.Wave && r.Phase == "retiring" {
+			if e.index(ref.Key) >= 0 || wave > r.Wave || wave == r.Wave && (r.Phase == "retiring" || r.Phase == phaseSurging) {
 				continue
 			}
 			index := a.claim(ref.Key)
@@ -235,11 +247,15 @@ func (e Execution) replacementAllows(i int) bool {
 	if r == nil {
 		return true
 	}
+	step := e.d.Plan.Steps[i]
+	if r.Phase == phaseSurging && e.surgeTask(i) {
+		// The new generation starts next to the original.
+		return true
+	}
 	if e.d.Stages[i].Held() {
 		return false
 	}
-	step := e.d.Plan.Steps[i]
-	if r.Phase == "retiring" {
+	if r.Phase == "retiring" || r.Phase == phaseSurging {
 		// Publish the unchanged listener's drain acknowledgement before any
 		// Task stop. Its unchanged producers also need their original results.
 		// Prepare separately requires the exact existing noop value; selected
@@ -322,6 +338,10 @@ func (a Inventory) beginReplacement(c access.Catalog, ctx PlanningContext, b Blu
 		n.d.History = append(n.d.History, summarize(old, old.Status()))
 	}
 	n.d.Active = &e.d
+	if plan.Waves[0].Surge {
+		e.d.Replacement.Phase = phaseSurging
+		return n, nil
+	}
 	return n.startReplacementRetirement(c)
 }
 
@@ -367,11 +387,17 @@ func (a Inventory) finishReplacementRetirement(e Execution) (Execution, error) {
 		if index := n.index(target.Original.Step.Key); index >= 0 {
 			stage := &n.d.Stages[index]
 			at := a.claim(stage.Key)
-			if stage.Command != nil || stage.Previous == nil || !bytes.Equal(goal(stage.Previous), goal(target.Original)) || at < 0 || !a.d.Claims[at].Removed {
+			surged := n.surgeTask(index) && stage.Command != nil
+			if stage.Command != nil && !surged || stage.Previous == nil || !bytes.Equal(goal(stage.Previous), goal(target.Original)) || at < 0 || !a.d.Claims[at].Removed {
 				return e, ErrInputs
 			}
 			closed := a.d.Claims[at]
-			stage.Previous, stage.Observation = &closed, nil
+			stage.Previous = &closed
+			if !surged {
+				// A held stage's observation was the original's; a surged
+				// one already observes the new generation.
+				stage.Observation = nil
+			}
 		}
 	}
 	n.d.Replacement.Phase = "applying"
@@ -380,6 +406,17 @@ func (a Inventory) finishReplacementRetirement(e Execution) (Execution, error) {
 
 func (a Inventory) ReplacementReady(now uint64) bool {
 	e, ok := a.Execution()
+	if ok && e.d.Replacement != nil && e.d.Replacement.Phase == phaseSurging {
+		if a.d.Retirement != nil || e.d.Paused || e.d.Stopping || e.d.CompletedAt != 0 || a.pendingSubmission() || now == 0 {
+			return false
+		}
+		for _, stage := range e.d.Stages {
+			if stage.Result != nil && stage.Result.Code != state.Applied {
+				return false
+			}
+		}
+		return a.surgeReady(e, now)
+	}
 	if !ok || e.d.Replacement == nil || e.d.Replacement.Phase != "applying" || a.d.Retirement != nil || e.d.Paused || e.d.Stopping || e.d.CompletedAt != 0 || a.pendingSubmission() || now == 0 {
 		return false
 	}
@@ -479,6 +516,9 @@ func (e Execution) validIngressBackends(index int, o Observation) bool {
 		if stage.Held() {
 			stage, _ = stage.HeldSource()
 		}
+		if previous := stage.Previous; e.surgeTask(task) && ref.Generation == previous.Result.Generation && ref.Revision == previous.Result.Revision {
+			continue // the original still serves next to its new generation
+		}
 		if stage.Result == nil || stage.Result.Code != state.Applied || ref.Generation != stage.Result.Generation || ref.Revision != stage.Result.Revision {
 			return false
 		}
@@ -525,6 +565,12 @@ func (a Inventory) AdvanceReplacement(expected uint64, c access.Catalog, now uin
 	if err != nil {
 		return a, err
 	}
+	if updated.d.Replacement.Phase == phaseSurging {
+		// Every new Task serves: stop the originals of this wave.
+		updated.d.Replacement.Phase = "retiring"
+		n.d.Active = &updated.d
+		return n.startReplacementRetirement(c)
+	}
 	if updated.d.Replacement.Wave+1 == len(updated.d.Replacement.Plan.Waves) {
 		updated.d.Replacement.Phase = "complete"
 		updated.d.Replacement.Previous = nil // all held originals positively closed
@@ -532,6 +578,11 @@ func (a Inventory) AdvanceReplacement(expected uint64, c access.Catalog, now uin
 		return n, nil
 	}
 	updated.d.Replacement.Wave++
+	if updated.d.Replacement.Plan.Waves[updated.d.Replacement.Wave].Surge {
+		updated.d.Replacement.Phase = phaseSurging
+		n.d.Active = &updated.d
+		return n, nil
+	}
 	updated.d.Replacement.Phase = "retiring"
 	n.d.Active = &updated.d
 	return n.startReplacementRetirement(c)

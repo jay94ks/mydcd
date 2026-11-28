@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -187,7 +188,7 @@ func verifyManagedNodeDiagnostics(t *testing.T, ctx context.Context, root, node 
 	}
 	// The original system admin/session was not edited and remains usable for
 	// the enclosing fixture's ordinary remove-plan/down and rollback path.
-	if _, err = admin.NodeDiagnostics(ctx, peer, session, node); err != nil {
+	if _, err = admin.NodeDiagnostics(ctx, peer, session, node, 0); err != nil {
 		t.Fatal("separate account refusal affected original admin", err)
 	}
 }
@@ -224,6 +225,8 @@ func checkNodeDiagnosticArchive(t *testing.T, path, node string, metadata *contr
 		"config-summary.json": {"Schema", "Node", "Endpoint", "Managed", "Network", "Workload", "Ingress"},
 		"status.json":         {"Schema", "Index", "MembersRoot", "ConfigurationIndex", "Node", "Phase", "Voter", "Cordoned", "AdmitsWork", "NativeClosed"},
 		"sfcd-events.json":    {"At", "Kind", "Scope", "Node", "Tenant", "App", "Service", "Code", "State"},
+		// Go runtime pprof (code locations and counts only).
+		"profile-goroutine.pb.gz": nil,
 	}
 	seen := map[string]bool{}
 	total := int64(0)
@@ -247,6 +250,12 @@ func checkNodeDiagnosticArchive(t *testing.T, path, node string, metadata *contr
 		total += header.Size
 		seen[header.Name] = true
 		var rows []map[string]json.RawMessage
+		if strings.HasSuffix(header.Name, ".pb.gz") {
+			if len(body) < 2 || body[0] != 0x1f || body[1] != 0x8b {
+				t.Fatal("diagnostic profile is not gzip pprof", header.Name)
+			}
+			continue
+		}
 		if header.Name == "sfcd-events.json" {
 			if json.Unmarshal(body, &rows) != nil || len(rows) > 100 {
 				t.Fatal("unbounded/invalid diagnostic events")

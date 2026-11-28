@@ -238,11 +238,8 @@ func (p Policy) ImageReferences(s state.State, tenant, node string) ([]ImageRefe
 		if job.Closure != nil || tenant != "" && job.Intent.Tenant != tenant || node != "" && job.Intent.Node != node {
 			continue
 		}
-		policy, ok := checkers.AdmissionPolicy(job.Intent.Tenant, job.Intent.Selection.PolicyRevision)
-		if !ok {
-			return nil, ErrCatalog
-		}
-		if err = add(ImageReference{Tenant: job.Intent.Tenant, Node: job.Intent.Node, Task: "compiler/" + job.Intent.Tenant + "/" + job.Intent.ID, Kind: "lifecycle-build", Operation: job.Intent.ID, Image: policy.Build.Image}); err != nil {
+		// The job's own resolved compiler digest, not the policy's tag.
+		if err = add(ImageReference{Tenant: job.Intent.Tenant, Node: job.Intent.Node, Task: "compiler/" + job.Intent.Tenant + "/" + job.Intent.ID, Kind: "lifecycle-build", Operation: job.Intent.ID, Image: job.Intent.Image}); err != nil {
 			return nil, err
 		}
 	}

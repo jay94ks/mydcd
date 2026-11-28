@@ -364,9 +364,13 @@ type CDCheck struct {
 	Webhook   string    `json:"webhook"`
 	State     string    `json:"state"` // checking, held, passed, rejected, timeout, failed (pre); checking, ok, failed, timeout (post)
 	At        time.Time `json:"at"`
-	Reason    string    `json:"reason,omitempty"`
-	Status    int       `json:"status,omitempty"`
-	Delivery  string    `json:"delivery,omitempty"`
+	// Reason is what the webhook said, its error, or a reason code;
+	// ReasonText, when set, is the web's own reason (read in the reader's
+	// language). Checks stored before it keep a Korean Reason.
+	Reason     string  `json:"reason,omitempty"`
+	ReasonText *Phrase `json:"reasonText,omitempty"`
+	Status     int     `json:"status,omitempty"`
+	Delivery   string  `json:"delivery,omitempty"`
 	// post-sync: what followed a failure.
 	Actions []CDCheckAction `json:"actions,omitempty"`
 }

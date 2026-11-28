@@ -24,9 +24,17 @@ export const HEALTH: Record<Health, [Tone, string]> = {
   unhealthy: ['er', '오류'],
   unknown: ['un', '확인 불가'],
 };
-export function HealthBadge({ health }: { health: Health }) {
+export function HealthBadge({ health, reason }: { health: Health; reason?: string }) {
   const [tone, label] = HEALTH[health] ?? HEALTH.unknown;
-  return <Badge tone={tone}>{label}</Badge>;
+  if (!reason) return <Badge tone={tone}>{label}</Badge>;
+  return (
+    <span className="health-reason">
+      <Badge tone={tone}>{label}</Badge>
+      <span className="small muted" title={reason}>
+        {reason}
+      </span>
+    </span>
+  );
 }
 
 const OPSTATE: Record<OpState, [Tone, string]> = {
@@ -135,7 +143,13 @@ export function Tile({ label, value, sub, tone }: { label: string; value: ReactN
   );
 }
 
-export function UsageBar({ used, total, label, text }: { used?: number; total?: number; label: string; text: string }) {
+/** 다른 VM이 가져간 CPU 몫(cpu steal) 보조 표시. 없거나 반올림해 0이면 없음 */
+export function cpuStealText(steal: number | undefined): string | undefined {
+  return steal !== undefined && Math.round(steal) > 0 ? `다른 VM 사용 ${Math.round(steal)}%` : undefined;
+}
+export const CPU_STEAL_TIP = '공유 VPS에서 같은 호스트의 다른 VM이 가져간 CPU 몫입니다. 위 CPU 사용률에는 들어 있지 않습니다.';
+
+export function UsageBar({ used, total, label, text, sub, subTitle }: { used?: number; total?: number; label: string; text: string; sub?: string; subTitle?: string }) {
   const p = pct(used, total);
   const cls = p >= 90 ? 'crit' : p >= 80 ? 'hi' : '';
   return (
@@ -144,7 +158,15 @@ export function UsageBar({ used, total, label, text }: { used?: number; total?: 
       <span className="bar" role="meter" aria-label={label} aria-valuenow={p} aria-valuemin={0} aria-valuemax={100}>
         <i className={cls} style={{ width: `${p}%` }} />
       </span>
-      <span>{text}</span>
+      <span>
+        {text}
+        {sub && (
+          <span className="small muted" title={subTitle}>
+            {' · '}
+            {sub}
+          </span>
+        )}
+      </span>
     </div>
   );
 }

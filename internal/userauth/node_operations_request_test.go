@@ -64,7 +64,7 @@ func TestNodeOperationTypedClientsReachTransportAdmission(t *testing.T) {
 			_, err := client.NodeDrainStatus(ctx, peer, session, control.NodeDrainQuery{Node: "node-a", Operation: "drain-a"})
 			return err
 		},
-		func() error { _, err := client.NodeDiagnostics(ctx, peer, session, "node-a"); return err },
+		func() error { _, err := client.NodeDiagnostics(ctx, peer, session, "node-a", 0); return err },
 		func() error {
 			_, err := client.NodeLogs(ctx, peer, session, control.NodeLogsQuery{Node: "node-a", App: "web", Stdout: true, Stderr: true})
 			return err

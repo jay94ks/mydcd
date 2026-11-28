@@ -391,6 +391,10 @@ func (p Policy) NodeSummary(s state.State, session access.Session, at int64, ten
 					n := *copy.CPUUsed
 					copy.CPUUsed = &n
 				}
+				if copy.CPUSteal != nil {
+					n := *copy.CPUSteal
+					copy.CPUSteal = &n
+				}
 				if copy.MemoryUsed != nil {
 					n := *copy.MemoryUsed
 					copy.MemoryUsed = &n

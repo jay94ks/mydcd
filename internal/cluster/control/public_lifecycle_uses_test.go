@@ -69,7 +69,7 @@ func TestPublicLifecycleUsesJoinOriginalBuildParentAndReturnOnlyClosedJob(t *tes
 		t.Fatal("catalog pin is not the actual accepted app parent")
 	}
 	id := sha256.Sum256([]byte("public-original-build"))
-	intent := checker.BuildIntent{Schema: 1, Cluster: f.p.Cluster, Tenant: "tenant", ID: hex.EncodeToString(id[:]), AppUseID: parent.ID, AppUse: parent.Digest(), Node: "node-a", Owner: owner, Selection: parent.Selection(), Inputs: []checker.BuildInput{{Content: fact.ContentDigest(), Recipe: [32]byte{2}}}, Manifest: [32]byte{3}, Target: "linux/amd64", DeadlineUnixMilli: 19000}
+	intent := checker.BuildIntent{Schema: 1, Cluster: f.p.Cluster, Tenant: "tenant", ID: hex.EncodeToString(id[:]), AppUseID: parent.ID, AppUse: parent.Digest(), Node: "node-a", Owner: owner, Selection: parent.Selection(), Inputs: []checker.BuildInput{{Content: fact.ContentDigest(), Recipe: [32]byte{2}}}, Manifest: [32]byte{3}, Target: "linux/amd64", DeadlineUnixMilli: 19000, Image: "docker.io/library/golang@sha256:" + strings.Repeat("a", 64)}
 	report := func(action string, expected uint64, closure *checker.BuildClosure) {
 		t.Helper()
 		r := CheckerBuildReport{Schema: 1, Cluster: f.p.Cluster, Reporter: owner, Tenant: "tenant", ID: intent.ID, Action: action, Expected: expected, Epoch: f.s.ModuleEpoch(), RootRevision: f.s.Object(LifecycleKey).Revision, Index: f.s.Index(), At: 10, Closure: closure}

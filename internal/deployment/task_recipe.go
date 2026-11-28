@@ -403,3 +403,24 @@ func (e Execution) MatchesTaskRecipe(service string, material TaskMaterial, spec
 	right, _ := json.Marshal(actual)
 	return bytes.Equal(left, right)
 }
+
+// TaskRecipeAttached is spec, a running same-generation Task's recipe, with
+// the extra network attachments this deploy plans for it, when that is its
+// only difference from the plan's recipe (TaskNetworkAttach). The image and
+// everything else stay those of spec, so the driver connects the new
+// networks to the same container (workload DockerDriver.InPlace).
+func (e Execution) TaskRecipeAttached(service string, material TaskMaterial, spec workload.ContainerSpec) (workload.ContainerSpec, bool) {
+	if _, held := e.heldExecution(ResourceKey("task", e.d.Plan.Tenant, e.d.Plan.App, service)); held {
+		return spec, false
+	}
+	_, expected, err := (Blueprint{e.d.Plan}).taskRecipe(service, material, spec.Node)
+	if err != nil || spec.Process == nil {
+		return spec, false
+	}
+	next := spec
+	next.Attachments = slices.Clone(expected.Attachments)
+	if e.MatchesTaskRecipe(service, material, next) {
+		return next, true
+	}
+	return spec, false
+}

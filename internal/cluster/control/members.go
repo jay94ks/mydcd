@@ -70,7 +70,7 @@ func CommandKey(action string) string {
 		return b.Key
 	}
 	switch action {
-	case "put-certificate", "delete-certificate", "disable-certificate", "add-domain", "remove-domain", "set-acme-responder":
+	case "put-certificate", "delete-certificate", "disable-certificate", "add-domain", "assign-domain", "remove-domain", "set-acme-responder":
 		return CertificatesKey
 	case "set-node-gateways", "set-ingress-balance", "drain-ingress", "undrain-ingress", "set-ingress-host-policy", "ingress-block", "ingress-unblock", "ingress-block-extend", "put-cluster-app-route", "remove-cluster-app-route":
 		return IngressManagementKey
