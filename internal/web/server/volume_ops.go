@@ -104,6 +104,9 @@ type volumeDetail struct {
 	Volume   volumeView              `json:"volume"`
 	Backups  []sfc.VolumeBackupView  `json:"backups"`
 	Restores []sfc.VolumeRestoreView `json:"restores"`
+	Archives []archiveView           `json:"archives"`
+	// ArchiveReady: both recipient keys are set, so "보관" can be offered.
+	ArchiveReady bool `json:"archiveReady"`
 }
 
 // GET /t/{t}/volumes/{name}?app=
@@ -115,13 +118,21 @@ func (s *Server) handleVolumeDetail(w http.ResponseWriter, r *http.Request, ws *
 		}
 		rows := []volumeView{v}
 		fillWriters(ctx, c, rows)
-		d := volumeDetail{Volume: rows[0], Backups: []sfc.VolumeBackupView{}, Restores: []sfc.VolumeRestoreView{}}
+		d := volumeDetail{Volume: rows[0], Backups: []sfc.VolumeBackupView{}, Restores: []sfc.VolumeRestoreView{}, Archives: []archiveView{}}
 		if d.Backups, err = volumeBackups(ctx, c, v); err != nil {
 			return d, err
 		}
 		if d.Restores, err = volumeRestores(ctx, c, v); err != nil {
 			return d, err
 		}
+		js, keys, err := volumeArchives(ctx, c, v)
+		if err != nil {
+			return d, err
+		}
+		for _, j := range js {
+			d.Archives = append(d.Archives, archiveRow(j))
+		}
+		d.ArchiveReady = keys.Cluster != [32]byte{} && keys.Admin != [32]byte{}
 		return d, nil
 	})
 }

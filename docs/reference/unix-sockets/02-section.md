@@ -1,6 +1,6 @@
 ## 설정과 접속
 
-외부 registry의 공개 참조 조회는 기존 User의 `external-registries` 메시지다. 요청은 `{Schema:1,Method:"external-registries",Tenant,After?,Nonce}`이며 Node와 다른 selector는 허용하지 않는다. 현재 tenant Read 또는 ManageRegistry 권한을 검사한다. Reply는 `ExternalRegistriesRootRevision`, `ExternalRegistriesNext`, `ExternalRegistries:[{Spec,Revision,Deleted,Reader?}]`를 반환한다. 최대8행이며 Spec의 authority/repository/auth/Vault·CA 참조 필드는 [전체 형식](../external-registries.md)을 따른다. 값·원 operation/session은 반환하지 않는다.
+외부 registry의 공개 참조 조회는 User typed method `external-registries`다. 요청 `Params`는 `{Tenant,After?}`이며 다른 필드는 허용하지 않는다. 현재 tenant Read 또는 ManageRegistry 권한을 검사한다. 응답 `Data`는 `{RootRevision,Next,Items:[{Spec,Revision,Deleted,Reader?}]}`다. 최대8행이며 Spec의 authority/repository/auth/Vault·CA 참조 필드는 [전체 형식](../external-registries.md)을 따른다. 값·원 operation/session은 반환하지 않는다.
 
 등록·삭제는 새 socket을 만들지 않고 기존 사용자 서명 operation의 `put-external-registry`(`{Spec}`), `delete-external-registry`(`{Tenant,ID}`)로 실행한다. record/root CAS·원 결과/재개와 finite EOF 규칙을 유지한다. Unix 및 네트워크 SFCP는 같은 사용자 인증을 사용한다. 이 목록 메시지는 자격을 반환하지 않는다. source 승인과 로그인 시험은 아래 별도 User method를 사용한다.
 

@@ -242,3 +242,59 @@ func TestRealBoundaryTunnelHostRoutes(t *testing.T) {
 		t.Fatalf("namespace not restored\nbefore=%s\nafter=%s", before, after)
 	}
 }
+
+// A journal recorded before LocalHostRoutes holds the committed layout at the
+// same revision. Relayout moves it; a different overlay is a real change and
+// is left to Desired, which refuses it.
+func TestTunnelManagerRelayoutOnlyMovesTheLayout(t *testing.T) {
+	m, err := OpenTunnelManager(filepath.Join(t.TempDir(), "tunnel.db"), "cluster/a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = m.Close() })
+	committed := hostRouteSpec()
+	committed.Routes = []netip.Prefix{netip.MustParsePrefix("10.254.240.5/32"), netip.MustParsePrefix("198.19.91.16/28")}
+	committed.HostRoutes, committed.HostSources = nil, nil
+	if err = m.Desired("tun/a", 74, 74, &committed, 2); err != nil {
+		t.Fatal(err)
+	}
+	local := LocalHostRoutes(committed, []netip.Prefix{netip.MustParsePrefix("198.19.91.0/28")})
+	if err = m.Desired("tun/a", 74, 74, &local, 2); err == nil {
+		t.Fatal("same revision accepted a new spec without relayout")
+	}
+	other := local
+	other.HostRoutes = []netip.Prefix{netip.MustParsePrefix("10.254.240.6/32")}
+	if changed, err := m.Relayout("tun/a", 74, 74, other); err != nil || changed {
+		t.Fatal("relayout accepted a changed overlay", changed, err)
+	}
+	if changed, err := m.Relayout("tun/a", 74, 74, local); err != nil || !changed {
+		t.Fatal("relayout", changed, err)
+	}
+	if err = m.Desired("tun/a", 74, 74, &local, 2); err != nil {
+		t.Fatal("same revision refused after relayout", err)
+	}
+}
+
+// A native permit hashes the committed source; the journal holds the local
+// layout. CommittedLayout must give back the committed bytes exactly, or
+// every packet-plane borrow on a tenant TUN is refused.
+func TestCommittedLayoutUndoesLocalHostRoutesByteForByte(t *testing.T) {
+	committed := hostRouteSpec()
+	committed.Routes = []netip.Prefix{netip.MustParsePrefix("10.254.240.1/32"), netip.MustParsePrefix("10.254.240.5/32"), netip.MustParsePrefix("198.19.91.16/28"), netip.MustParsePrefix("198.19.91.32/28")}
+	committed.HostRoutes, committed.HostSources = nil, nil
+	local := LocalHostRoutes(committed, []netip.Prefix{netip.MustParsePrefix("198.19.91.0/28")})
+	if len(local.HostRoutes) != 2 {
+		t.Fatal("split", local)
+	}
+	if got, want := encodeTunnel(t, local.CommittedLayout()), encodeTunnel(t, committed); got != want {
+		t.Fatalf("committed layout\n got %s\nwant %s", got, want)
+	}
+	only := committed
+	only.Routes = []netip.Prefix{netip.MustParsePrefix("10.254.240.5/32")}
+	if got, want := encodeTunnel(t, LocalHostRoutes(only, []netip.Prefix{netip.MustParsePrefix("198.19.91.0/28")}).CommittedLayout()), encodeTunnel(t, only); got != want {
+		t.Fatalf("only server routes\n got %s\nwant %s", got, want)
+	}
+	if got, want := encodeTunnel(t, committed.CommittedLayout()), encodeTunnel(t, committed); got != want {
+		t.Fatal("a committed spec changed", got)
+	}
+}

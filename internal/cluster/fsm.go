@@ -207,6 +207,9 @@ func (f *fsm) Apply(log *raft.Log) any {
 	if err != nil {
 		return application{Err: f.fail(err)}
 	}
+	if err = haveFeatures(log.Index, command); err != nil {
+		return application{Err: f.fail(err)}
+	}
 	// Core Index is the management-command ordinal, independent of Raft config,
 	// no-op/barrier positions. Expose the real RaftIndex separately to callers.
 	reduce, admit := f.reduce, f.admitModule

@@ -1224,6 +1224,14 @@ func (r *Raft) LastContact() time.Time {
 	r.lastContactLock.RLock()
 	last := r.lastContact
 	r.lastContactLock.RUnlock()
+	// With Config.PeerContact any packet from the known leader counts.
+	if pc := r.config().PeerContact; pc != nil {
+		if _, id := r.LeaderWithID(); id != "" && id != r.localID {
+			if t := pc(id); t.After(last) {
+				return t
+			}
+		}
+	}
 	return last
 }
 

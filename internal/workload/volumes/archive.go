@@ -345,17 +345,34 @@ func sameArchiveEntry(a, b archiveEntry) bool {
 
 // readArchive enforces exact EOF/footer and hashes every raw archive byte. An
 // expected receipt is checked before any restore write and again during restore.
-func readArchive(ctx context.Context, in io.ReadSeeker, expected ArchiveReceipt, o ArchiveOptions, consume func(*tar.Reader, archiveEntry) error) ([]archiveEntry, error) {
-	if !expected.valid(o) {
+// ArchiveOpener opens one fresh pass over a tar stream, for archives kept in a
+// form that cannot seek (compressed or sealed). Restore reads twice: a full
+// verification pass before it writes anything, then the copying pass. The
+// stream's own end checks (authenticated EOF) are the opener's job.
+type ArchiveOpener func() (io.ReadCloser, error)
+
+func seekerOpener(in io.ReadSeeker, expected ArchiveReceipt) ArchiveOpener {
+	return func() (io.ReadCloser, error) {
+		length, err := in.Seek(0, io.SeekEnd)
+		if err != nil || length < 0 || uint64(length) != expected.Bytes {
+			return nil, ErrArchive
+		}
+		if _, err = in.Seek(0, io.SeekStart); err != nil {
+			return nil, ErrArchive
+		}
+		return io.NopCloser(in), nil
+	}
+}
+
+func readArchive(ctx context.Context, open ArchiveOpener, expected ArchiveReceipt, o ArchiveOptions, consume func(*tar.Reader, archiveEntry) error) ([]archiveEntry, error) {
+	if !expected.valid(o) || open == nil {
 		return nil, ErrArchive
 	}
-	length, err := in.Seek(0, io.SeekEnd)
-	if err != nil || length < 0 || uint64(length) != expected.Bytes {
-		return nil, ErrArchive
+	in, err := open()
+	if err != nil {
+		return nil, archiveError(err)
 	}
-	if _, err = in.Seek(0, io.SeekStart); err != nil {
-		return nil, ErrArchive
-	}
+	defer in.Close()
 	stream := &archiveIO{ctx: ctx, reader: in, digest: sha256.New(), limit: expected.Bytes + 1}
 	reader := tar.NewReader(stream)
 	var entries []archiveEntry
@@ -424,16 +441,27 @@ func (w archiveOutputFile) Write(p []byte) (int, error) { return w.write(w.file,
 // fail before writes; later I/O failure leaves unpublished staging for explicit
 // cleanup/recovery. It never empties or overwrites an existing data directory.
 func RestoreArchive(ctx context.Context, root *os.Root, in io.ReadSeeker, expected ArchiveReceipt, o ArchiveOptions) error {
-	return restoreArchive(ctx, root, in, expected, o, systemArchiveFiles())
+	return restoreArchive(ctx, root, seekerOpener(in, expected), expected, o, systemArchiveFiles())
+}
+
+// RestoreArchiveFrom is RestoreArchive over a stream that is opened twice.
+func RestoreArchiveFrom(ctx context.Context, root *os.Root, open ArchiveOpener, expected ArchiveReceipt, o ArchiveOptions) error {
+	return restoreArchive(ctx, root, open, expected, o, systemArchiveFiles())
+}
+
+// VerifyArchiveFrom is VerifyArchive over one pass of a stream.
+func VerifyArchiveFrom(ctx context.Context, open ArchiveOpener, expected ArchiveReceipt, o ArchiveOptions) error {
+	_, err := readArchive(ctx, open, expected, o, nil)
+	return err
 }
 
 // VerifyArchive uses the same strict profile/parser/digest as RestoreArchive
 // without writing a target or accepting a readable prefix as completion.
 func VerifyArchive(ctx context.Context, in io.ReadSeeker, expected ArchiveReceipt, o ArchiveOptions) error {
-	_, err := readArchive(ctx, in, expected, o, nil)
+	_, err := readArchive(ctx, seekerOpener(in, expected), expected, o, nil)
 	return err
 }
-func restoreArchive(ctx context.Context, root *os.Root, in io.ReadSeeker, expected ArchiveReceipt, o ArchiveOptions, files archiveFiles) error {
+func restoreArchive(ctx context.Context, root *os.Root, in ArchiveOpener, expected ArchiveReceipt, o ArchiveOptions, files archiveFiles) error {
 	if root == nil || files.write == nil || files.sync == nil {
 		return ErrArchive
 	}

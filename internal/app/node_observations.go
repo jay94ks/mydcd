@@ -12,9 +12,9 @@ import (
 	"io"
 	"log"
 	"math"
+	"math/rand"
 	"slices"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/jay94ks/seafield/internal/cluster"
@@ -109,8 +109,34 @@ func (r *Runtime) storeValidatedNodeObservation(report observability.Report, raw
 	if err := r.reports.Write(map[string][]byte{id: raw}); err != nil {
 		return err
 	}
-	r.publishNodeObservation(report)
+	due := r.observationEventDue(id, report, time.Now())
+	if due {
+		r.publishNodeObservation(report)
+	}
+	if o := r.obsTopics; o != nil && report.Node == o.self {
+		o.published(report, raw, due)
+	}
 	return nil
+}
+
+// observationEventDue reports whether storing report under id should tell event
+// subscribers (the web's live view): when the report's content changed, or
+// when the last event for it is observationResend old, so a reader still
+// sees a fresh observedAt before the report would turn stale. A report that
+// only carries a new time, index and signature is otherwise stored silently:
+// every node re-sends every report each round, and an event per report made
+// a burst of events each round. Caller holds reportMu.
+func (r *Runtime) observationEventDue(id string, report observability.Report, now time.Time) bool {
+	digest := observationContent(report)
+	if r.observationPublished == nil {
+		r.observationPublished = map[string]observationSentAt{}
+	}
+	last, seen := r.observationPublished[id]
+	if seen && last.digest == digest && now.Sub(last.at) < observationResend {
+		return false
+	}
+	r.observationPublished[id] = observationSentAt{digest: digest, at: now}
+	return true
 }
 
 // publishNodeObservation tells event subscribers which observation changed.
@@ -128,10 +154,17 @@ func (r *Runtime) publishNodeObservation(report observability.Report) {
 	r.bus.Publish(e)
 }
 
-func (r *Runtime) nodeObservations(ctx context.Context, v cluster.View) ([]observability.Report, error) {
+func (r *Runtime) nodeObservations(ctx context.Context, v cluster.View) ([]observability.Report, []string, error) {
 	if err := ctx.Err(); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
+	waiting := r.awaitObservations(ctx)
+	reports, err := r.storedNodeObservations(ctx, v)
+	return reports, waiting, err
+}
+
+// storedNodeObservations reads the stored reports of current members.
+func (r *Runtime) storedNodeObservations(ctx context.Context, v cluster.View) ([]observability.Report, error) {
 	d, err := r.controlPolicy.Members(v.State)
 	if err != nil {
 		return nil, err
@@ -193,9 +226,19 @@ func (r *Runtime) collectNodeObservations(ctx context.Context, v cluster.View) (
 	}
 	host, counter, hostErr := observability.ReadHost(r.observationCPU)
 	host.RuntimeEnabled = r.docker != nil
-	r.observationCPU = counter
+	if keep := shortCPUWindow(hostErr, r.observationCPUAt, time.Now()); keep {
+		host.CPUUsed = r.observationCPUUsed
+	} else {
+		r.observationCPU, r.observationCPUAt, r.observationCPUUsed = counter, time.Now(), host.CPUUsed
+	}
 	r.mu.RLock()
 	host.ModuleReady = r.moduleError == nil
+	if !host.ModuleReady {
+		host.Unready = &observability.Unready{Reason: "MODULE_PASS_FAILED", Steps: failedSteps(r.moduleError), Since: uint64(r.moduleErrorSince.UnixMilli())}
+		if len(host.Unready.Steps) > 32 {
+			host.Unready.Steps = host.Unready.Steps[:32]
+		}
+	}
 	r.mu.RUnlock()
 	if r.tunnel != nil {
 		host.TunnelWaits = r.tunnel.Waits()
@@ -206,6 +249,9 @@ func (r *Runtime) collectNodeObservations(ctx context.Context, v cluster.View) (
 	}
 	if hostErr != nil && host.CPUCapacity == 0 {
 		host.ModuleReady = false
+		if host.Unready == nil {
+			host.Unready = &observability.Unready{Reason: "HOST_READ_FAILED"}
+		}
 	}
 	h := base
 	h.Host = &host
@@ -238,6 +284,9 @@ func (r *Runtime) collectNodeObservations(ctx context.Context, v cluster.View) (
 		log.Printf("node observation dropped: node=%s source=devices reason=unavailable error=%v", base.Node, e)
 	} else {
 		devices.Recorded = r.recordedMounts(devices)
+		if r.nodeDisks != nil {
+			devices.Bundles = r.nodeDisks.bundleStates(ctx, devices)
+		}
 		sample := base
 		sample.Devices = &devices
 		if err := appendReport(sample); err != nil {
@@ -319,7 +368,7 @@ func (r *Runtime) collectNodeObservations(ctx context.Context, v cluster.View) (
 	}
 	// Reuse the exact most recent owner inspection, without converting its
 	// process state into lifecycle permission or synthesizing a fresh timestamp.
-	stored, err := r.nodeObservations(ctx, v)
+	stored, err := r.storedNodeObservations(ctx, v)
 	if err != nil {
 		return out, err
 	}
@@ -377,8 +426,8 @@ func (r *Runtime) publishTaskMeasurement(v cluster.View, app control.AppView, st
 	return publisher.storeNodeObservation(sfcp.Identity(signer.Public), raw)
 }
 
-// observationResend is how long an unchanged report waits before it is sent
-// to a peer again. Receivers treat reports older than observability.MaxAge
+// observationResend is how long an unchanged report waits before it is
+// published again. Receivers treat reports older than observability.MaxAge
 // (120s) as stale, so an unchanged one must still arrive within that.
 const observationResend = 60 * time.Second
 
@@ -394,14 +443,14 @@ func observationDigest(raw []byte) (string, [32]byte, bool) {
 	if err != nil {
 		return "", [32]byte{}, false
 	}
-	report.At, report.Index, report.Signature = 0, 0, nil
-	return report.Source(), sha256.Sum256(observability.SigningBytes(report)), true
+	return report.Source(), observationContent(report), true
 }
 
-// observationDue reports whether peer needs report b: its content changed,
-// it was last sent observationResend ago, or the link to peer broke since.
-func observationDue(last observationSentAt, known bool, digest [32]byte, linkedSince time.Time, linked bool, now time.Time) bool {
-	return !known || last.digest != digest || now.Sub(last.at) >= observationResend || !linked || linkedSince.After(last.at)
+// observationContent is a report's digest apart from when it was taken,
+// the index it was taken at and its signature.
+func observationContent(report observability.Report) [32]byte {
+	report.At, report.Index, report.Signature = 0, 0, nil
+	return sha256.Sum256(observability.SigningBytes(report))
 }
 
 // errObservationsNotReady: this node's committed view does not list it as a
@@ -409,12 +458,37 @@ func observationDue(last observationSentAt, known bool, digest [32]byte, linkedS
 // nothing it may report. The loop says so once, not every round.
 var errObservationsNotReady = errors.New("this node is not a member in its committed view yet")
 
+// minCPUWindow is the shortest stretch a host CPU sample averages over.
+const minCPUWindow = 10 * time.Second
+
+// shortCPUWindow reports whether this round's CPU sample would cover less
+// than minCPUWindow since the kept one. A round run soon after the last (a
+// reader asked for fresh values) would then average mostly this round's own
+// work, so the round reports the kept value and keeps its counter.
+func shortCPUWindow(readErr error, kept, now time.Time) bool {
+	return readErr == nil && !kept.IsZero() && now.Sub(kept) < minCPUWindow
+}
+
 // observationInterval is how often a node collects and sends its reports.
 var observationInterval = 30 * time.Second
 
+// observationWait is the wait before the next round: observationInterval
+// give or take a tenth, so servers started together drift apart instead of
+// all sending their reports to each other at the same moment.
+func observationWait(interval time.Duration, random func(int64) int64) time.Duration {
+	spread := int64(interval / 5)
+	if spread <= 0 {
+		return interval
+	}
+	return interval - interval/10 + time.Duration(random(spread))
+}
+
 func (r *Runtime) managedObservationLoop() {
-	tick := time.NewTicker(observationInterval)
-	defer tick.Stop()
+	// The first round runs at once; the random waits after it spread the
+	// servers' rounds apart.
+	wait := time.NewTimer(0)
+	defer wait.Stop()
+	<-wait.C
 	waiting := false
 	for {
 		ctx, cancel := context.WithTimeout(r.ctx, 30*time.Second)
@@ -433,8 +507,7 @@ func (r *Runtime) managedObservationLoop() {
 		}
 
 		// One report that cannot be stored is dropped alone, with a log
-		// line; the reports after it are still stored and sent.
-		allStored := make([][]byte, 0, len(raw))
+		// line; the reports after it are still stored and published.
 		for _, b := range raw {
 			if writeErr := r.storeNodeObservation(sfcp.Identity(r.Identity.Public), b); writeErr != nil {
 				source, _, _ := observationDigest(b)
@@ -442,115 +515,8 @@ func (r *Runtime) managedObservationLoop() {
 				err = errors.Join(err, writeErr)
 				continue
 			}
-			allStored = append(allStored, b)
 		}
-		if len(allStored) != 0 {
-			d, directoryErr := r.controlPolicy.Members(v.State)
-			if directoryErr == nil {
-				if r.observationSent == nil {
-					r.observationSent = map[[32]byte]map[string]observationSentAt{}
-				}
-				now := time.Now()
-				type delivery struct {
-					sources []string
-					digests [][32]byte
-					sent    []bool
-				}
-				deliveries := map[[32]byte]*delivery{}
-				var deliveriesMu sync.Mutex
-				var workers sync.WaitGroup
-				slots := make(chan struct{}, 4)
-				for _, entry := range d.Entries {
-					key, keyErr := identity.ParseKey(entry.CurrentPeer().Key)
-					if keyErr != nil || key == r.Identity.Public || !membership.FullMember(entry) {
-						continue
-					}
-					peer, known := r.Mesh.Peer(sfcp.Identity(key))
-					if !known {
-						continue
-					}
-					sent := r.observationSent[key]
-					linkedSince, linked := r.Mesh.ConnectedSince(sfcp.Identity(key))
-					due := &delivery{}
-					var stored [][]byte
-					for _, b := range allStored {
-						source, digest, ok := observationDigest(b)
-						last, seen := sent[source]
-						if ok && !observationDue(last, seen, digest, linkedSince, linked, now) {
-							continue
-						}
-						stored = append(stored, b)
-						due.sources, due.digests = append(due.sources, source), append(due.digests, digest)
-						if !ok {
-							due.digests[len(due.digests)-1] = [32]byte{}
-						}
-					}
-					if len(stored) == 0 {
-						continue
-					}
-					deliveries[key] = due
-					workers.Add(1)
-					go func() {
-						defer workers.Done()
-						select {
-						case slots <- struct{}{}:
-						case <-ctx.Done():
-							return
-						}
-						defer func() { <-slots }()
-						call, stop := context.WithTimeout(ctx, 2*time.Second)
-						session, sendErr := r.Mesh.Dial(call, peer)
-						stop()
-						sent := make([]bool, len(stored))
-						if sendErr != nil {
-							log.Printf("node observations not sent: peer=%s reports=%d error=%v", peer.ID, len(stored), sendErr)
-						} else {
-							// One frame carries as many reports as fit. A
-							// report the peer refuses is dropped alone.
-							call, stop := context.WithTimeout(ctx, 2*time.Second)
-							accepted, e := session.ReportBatch(call, sfcp.KindNodeObservation, stored)
-							stop()
-							copy(sent, accepted)
-							if e != nil {
-								sendErr = e
-								log.Printf("node observations not sent: peer=%s reports=%d error=%v", peer.ID, len(stored), e)
-							}
-							for i, ok := range accepted {
-								if !ok && e == nil {
-									sendErr = sfcp.ErrReportRefused
-									log.Printf("node observation dropped: peer=%s source=%s reason=refused", peer.ID, due.sources[i])
-								}
-							}
-						}
-						r.mu.Lock()
-						if sendErr == nil {
-							delete(r.deliveryErrors, peer.ID)
-						} else {
-							r.deliveryErrors[peer.ID] = sendErr.Error()
-						}
-						r.mu.Unlock()
-						deliveriesMu.Lock()
-						due.sent = sent
-						deliveriesMu.Unlock()
-					}()
-				}
-				workers.Wait()
-				for key, due := range deliveries {
-					if r.observationSent[key] == nil {
-						r.observationSent[key] = map[string]observationSentAt{}
-					}
-					for i, source := range due.sources {
-						if i < len(due.sent) && due.sent[i] && due.digests[i] != ([32]byte{}) {
-							r.observationSent[key][source] = observationSentAt{digest: due.digests[i], at: now}
-						} else {
-							delete(r.observationSent[key], source)
-						}
-					}
-				}
-			} else {
-				err = errors.Join(err, directoryErr)
-			}
-		}
+		r.refreshObservationPeers(ctx)
 		if err != nil && !waiting {
 			log.Printf("node observation round incomplete: %v", err)
 		}
@@ -558,10 +524,24 @@ func (r *Runtime) managedObservationLoop() {
 		r.reportError = err
 		r.mu.Unlock()
 		cancel()
+		var kick <-chan struct{}
+		interval := observationInterval
+		if o := r.obsTopics; o != nil {
+			o.finishRound()
+			kick = o.kick
+			if !o.wanted() {
+				interval = observationIdleInterval
+			}
+		}
+		wait.Reset(observationWait(interval, rand.Int63n))
 		select {
 		case <-r.ctx.Done():
 			return
-		case <-tick.C:
+		case <-wait.C:
+		case <-kick:
+			if !wait.Stop() {
+				<-wait.C
+			}
 		}
 	}
 }

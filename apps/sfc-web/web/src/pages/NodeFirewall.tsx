@@ -133,7 +133,7 @@ export function FirewallTab({ node }: { node: string }) {
   };
   return (
     <div className="col" style={{ gap: 16 }}>
-      <HelpBox terms="방화벽 (iptables · ip6tables) · 잠금 규칙 (자동, 지울 수 없음) · 기본 정책 · 서버에 원래 있던 규칙 (운영자 규칙)">
+      <HelpBox terms="방화벽 (iptables · ip6tables, 서버 안에서는 nftables 규칙으로 읽음) · 잠금 규칙 (자동, 지울 수 없음) · 기본 정책 · 서버에 원래 있던 규칙 (운영자 규칙)">
         <b>이 화면은</b> 이 서버로 들어오는 연결 규칙입니다. 서버에 원래 있던 규칙은 그대로 두고, 그 앞에서 먼저 판정하는 규칙을 더합니다. 규칙은 이 서버에만 바로 적용되고, 누가 무엇을 바꿨는지만 클러스터에 기록됩니다. 서버의 node.yaml에서 방화벽 제어를 켠 서버만 바꿀 수 있습니다.
       </HelpBox>
       <Load q={q} what="방화벽 설정을 읽지 못했습니다">
@@ -149,7 +149,6 @@ function NotManaged() {
       <div className="bn info">
         <b>이 서버는 방화벽을 제어하지 않습니다.</b> 서버의 node.yaml에 <span className="mono">firewall: {'{managed: true}'}</span>를 넣고 sfcd를 다시 시작하면 여기서 바꿀 수 있습니다. 운영자 접속 포트는 <span className="mono">keep_open</span>(기본 tcp/22)으로 항상 열립니다.
       </div>
-      <span className="small muted">끄면 sfcd가 넣은 한 줄과 자기 규칙만 지웁니다. 서버에 원래 있던 규칙은 건드리지 않습니다.</span>
     </div>
   );
 }
@@ -292,12 +291,12 @@ function Managed({ node, fw, q, logKey, onChanged }: { node: string; fw: DFirewa
         <span className="small muted">막기 규칙을 허용 규칙보다 먼저 판정하므로 순서는 없습니다. 출처를 비우면 모든 곳입니다. IPv4와 IPv6 주소를 섞어 쓸 수 있습니다.</span>
       </Card>
       <div className="grid-2">
-        <Card title="서버에 원래 있던 규칙" actions={<Badge tone="un">읽기 전용</Badge>}>
-          <pre className="code dark" aria-label="서버에 원래 있던 INPUT 규칙">
+        <Card title="서버에 원래 있던 규칙" actions={<Badge tone="un">nft 표현식(읽기만)</Badge>}>
+          <pre className="code dark" aria-label="서버에 원래 있던 규칙(nft 표현식)">
             {operatorLines(fw)}
           </pre>
-          {fw.operatorTruncated && <span className="small wa-text">줄이 많아 IPv4·IPv6 각각 200줄까지만 보입니다.</span>}
-          <span className="small muted">서버에서 직접 넣은 INPUT 규칙입니다. 여기서 바꾸지 않습니다. 여기 규칙에 맞지 않는 연결은 이 규칙으로 판정합니다. 기본 정책을 ‘막기’로 바꾸면 쓰이지 않습니다.</span>
+          {fw.operatorTruncated && <span className="small wa-text">줄이 많아 400줄까지만 보입니다.</span>}
+          <span className="small muted">서버에서 직접 넣은 들어오는 연결 규칙을 nft 표현식으로 보여 줍니다(iptables 문법이 아닙니다). 여기서 바꾸지 않습니다. 여기 규칙에 맞지 않는 연결은 이 규칙으로 판정합니다. 기본 정책을 ‘막기’로 바꾸면 쓰이지 않습니다.</span>
         </Card>
         <FirewallLog node={node} reload={logKey} />
       </div>
@@ -311,22 +310,16 @@ function Managed({ node, fw, q, logKey, onChanged }: { node: string; fw: DFirewa
 /** 막기 먼저(판정 순서), 그다음 ID 순 */
 const sortRules = (rules: DFirewallRule[]) => [...rules].sort((a, b) => (a.action === b.action ? Number((a.id ?? 'r0').slice(1)) - Number((b.id ?? 'r0').slice(1)) : a.action === 'deny' ? -1 : 1));
 
-/** 운영자 규칙 상자: # IPv4 / # IPv6 머리와 sfcd가 넣은 한 줄 표시 */
+/** 운영자 규칙 상자: nft 표현식 그대로, 체인 머리줄은 흐리게 */
 function operatorLines(fw: DFirewall) {
-  const block = (title: string, lines: string[]) => [
-    <span key={`${title}-h`} className="muted">
-      # {title}
+  const lines = fw.operator ?? [];
+  if (!lines.length) return [<span key="none">(규칙 없음){'\n'}</span>];
+  return lines.map((l, i) => (
+    <span key={i} className={l.startsWith(' ') ? undefined : 'muted'}>
+      {l}
       {'\n'}
-    </span>,
-    ...(lines.length ? lines : ['(규칙 없음)']).map((l, i) => (
-      <span key={`${title}-${i}`}>
-        {l}
-        {/-j SFC-INPUT\b/.test(l) && <span className="muted">{'        # sfcd가 맨 위에 넣은 한 줄'}</span>}
-        {'\n'}
-      </span>
-    )),
-  ];
-  return [...block('IPv4', fw.operator4), ...block('IPv6', fw.operator6)];
+    </span>
+  ));
 }
 
 function FirewallLog({ node, reload }: { node: string; reload: number }) {

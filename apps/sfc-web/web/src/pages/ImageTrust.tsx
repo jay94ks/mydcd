@@ -271,7 +271,7 @@ function RuleDialog({ tenant, v, edit, onClose, onDone }: { tenant: string; v: I
         </Field>
         <Field label="받기 방식">
           <select disabled value="anonymous">
-            <option value="anonymous">익명 받기 (로그인이 필요하면 외부 저장소로 등록 · REQ-17)</option>
+            <option value="anonymous">익명 받기 (로그인이 필요하면 외부 저장소로 등록)</option>
           </select>
         </Field>
         {ok && (

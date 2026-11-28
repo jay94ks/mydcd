@@ -68,6 +68,17 @@ func (p Policy) RegistryImagePermit(s state.State, caller [32]byte, q RegistryIm
 	}
 	original, imageErr := access.PinImage(service.Image)
 	requested, requestErr := access.PinImage(q.Image)
+	if imageErr != nil && requestErr == nil {
+		// A tag: the deploy's resolution (or the server's own copy when the
+		// deploy could not resolve it) names the digest.
+		apps, err := p.readOnlyApps(s)
+		if err != nil {
+			return RegistryImagePermit{}, err
+		}
+		if e, ok := apps.Execution(goal.Tenant, goal.App); ok && e.TagAllows(service.Image, requested.Reference) {
+			original, imageErr = requested, nil
+		}
+	}
 	if imageErr != nil || requestErr != nil || original != requested {
 		return RegistryImagePermit{}, access.ErrDenied
 	}

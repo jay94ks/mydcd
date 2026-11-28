@@ -15,42 +15,47 @@ import (
 	"github.com/jay94ks/seafield/internal/storage"
 )
 
-// recordingHost answers like an empty filter table and remembers the last
-// chain written per family; fail makes restores fail.
+// recordingHost keeps SFC-INPUT per family as iptables lines and its
+// marker; fail makes writes fail without changing anything.
 type recordingHost struct {
-	chain map[int][]string
-	fail  bool
+	chain  map[int][]string
+	marker map[int]string
+	fail   bool
 }
 
-func (h *recordingHost) List(_ context.Context, family int, chain string) ([]string, bool, error) {
-	if chain == "INPUT" {
-		if h.chain[family] != nil {
-			return []string{"-P INPUT ACCEPT", "-A INPUT -j " + firewall.Chain}, false, nil
-		}
-		return []string{"-P INPUT ACCEPT"}, false, nil
+func (h *recordingHost) State(_ context.Context, family int) (firewall.ChainState, error) {
+	lines, ok := h.chain[family]
+	if !ok {
+		return firewall.ChainState{}, nil
 	}
-	if h.chain[family] == nil {
-		return nil, true, nil
-	}
-	return append([]string{"-N " + firewall.Chain}, h.chain[family]...), false, nil
+	return firewall.ChainState{Exists: true, Marker: h.marker[family], Count: len(lines), Jumps: 1, First: true}, nil
 }
 
-func (h *recordingHost) Restore(_ context.Context, family int, input []byte) error {
+func (h *recordingHost) Write(_ context.Context, plan map[int][]firewall.Line) error {
 	if h.fail {
-		return errors.New("iptables-restore: boom")
-	}
-	lines := []string{}
-	for _, l := range strings.Split(string(input), "\n") {
-		if strings.HasPrefix(l, "-A "+firewall.Chain+" ") {
-			lines = append(lines, l)
-		}
+		return errors.New("nftables: boom")
 	}
 	if h.chain == nil {
-		h.chain = map[int][]string{}
+		h.chain, h.marker = map[int][]string{}, map[int]string{}
 	}
-	h.chain[family] = lines
+	for family, lines := range plan {
+		if lines == nil {
+			delete(h.chain, family)
+			continue
+		}
+		out := []string{}
+		for _, l := range lines {
+			out = append(out, l.String())
+		}
+		h.chain[family] = out
+		if len(lines) > 0 {
+			h.marker[family] = lines[0].Comment
+		}
+	}
 	return nil
 }
+
+func (h *recordingHost) Operator(context.Context) ([]string, bool, error) { return nil, false, nil }
 
 func TestNodeFirewallServe(t *testing.T) {
 	db, err := storage.Open(filepath.Join(t.TempDir(), "firewall.db"))

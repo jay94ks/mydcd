@@ -79,11 +79,15 @@ type Runtime struct {
 	imageCacheJob             nodeJob
 	tunnelJob                 nodeJob
 	compactJob                nodeJob
+	deployImageJob            nodeJob // deploy_images.go
+	imageTags                 *imageTagCopies
 	engineEvents              *engineevents.Consumer
 	engineFollowMu            sync.Mutex
 	logPages                  containerops.ReadPages
 	observationMu             sync.Mutex
 	observationCPU            observability.CPUCounter
+	observationCPUAt          time.Time // when observationCPU was read
+	observationCPUUsed        *uint64   // the usage last reported from it
 	observationContainers     map[string]observedContainerCPU
 	Identity                  *identity.Identity
 	Mesh                      *sfcp.Transport
@@ -157,15 +161,22 @@ type Runtime struct {
 	reportWake                chan struct{}
 	moduleWake                chan struct{}
 	moduleError               error
+	moduleErrorSince          time.Time // start of the current failing stretch
 	appWaitMu                 sync.Mutex
 	appWaits                  map[string]string // app step -> last logged wait reason
 	renewMu                   sync.Mutex
 	inputPermitMu             sync.Mutex
-	inputPermits              map[string]appInputPermitEntry            // PrepareAppInputs gate permits by binding
-	observationSent           map[[32]byte]map[string]observationSentAt // managedObservationLoop only: peer -> source -> last delivery
-	renewSent                 map[string]observationRenewal             // owner: stage key -> last renewal sent
-	renewSeen                 map[string]observationRenewal             // leader: tenant/app/stage -> last renewal admitted
-	leaderSince               uint64                                    // leader: when this node last became leader
+	inputPermits              map[string]appInputPermitEntry // PrepareAppInputs gate permits by binding
+	staleInputs               map[string][32]byte            // inputs step → binding already logged as stale after a secret update
+	topics                    *sfcp.Topics                   // Topic channel (purpose 26), see Topics
+	obsTopics                 *observationTopics             // obs family on the Topic channel; nil without a mesh
+	almTopics                 *alarmTopics                   // alm family on the Topic channel; nil without a mesh
+	obsPeersMu                sync.Mutex
+	obsPeers                  map[string][32]byte           // full members other than this server, by ID
+	observationPublished      map[string]observationSentAt  // reportMu: stored report id -> last event's content digest and time
+	renewSent                 map[string]observationRenewal // owner: stage key -> last renewal sent
+	renewSeen                 map[string]observationRenewal // leader: tenant/app/stage -> last renewal admitted
+	leaderSince               uint64                        // leader: when this node last became leader
 	reportError               error
 	deliveryErrors            map[string]string
 	gitFetcher                *deployment.GitFetcher
@@ -177,6 +188,8 @@ type Runtime struct {
 	vaultBackends             map[string]*vaultBackend
 	builtinValues             *secrets.BuiltinStore
 	builtinUpkeepAt           time.Time
+	builtinUpkeepCounts       string // last logged value/holding counts
+	builtinUpkeepWhy          string // last reason upkeep stopped early, "" when it ran through
 	vaultApprovalLife         sync.RWMutex
 	vaultApprovals            *reconcile.Journal
 	vaultApprovalBudget       *credentials.Budget
@@ -213,6 +226,8 @@ type Runtime struct {
 	clusterAppStateDir        string
 	// logs is the central container log store (engine log queue → here).
 	logs *logstore.Store
+	// logsPolicy is node.yaml logs (limit, keep) for the log store.
+	logsPolicy config.Logs
 	// defaultStorage is where this node keeps its default storage root
 	// (state_dir + "-storage"), and defaultStorageNext when it may next try
 	// to register it.
@@ -224,6 +239,7 @@ type Runtime struct {
 	clusterAppProblems clusterAppProblems                      // last reconcile problem per cluster app, for the host report
 	webPort            clusterAppPort                          // node.yaml cluster_apps.web.port
 	clusterAppNAT      func([]network.ClusterAppForward) error // network.SetClusterApps on a real server
+	networkLeaves      networkLeaveProblem                     // last refused workspace network leave, logged once
 	systemNetwork      systemNetworkProblem                    // why this server is not on the system network yet, for the log and host report
 	// joinSeeds are the current members a joining node learned from its
 	// pinned source before its own state replicated (see addJoinSeeds).
@@ -271,7 +287,7 @@ func Open(c config.Node) (*Runtime, error) {
 	if own, ok := peers[key]; !ok || own.ID != c.Node.ID {
 		return nil, errors.New("local identity does not match approved node ID")
 	}
-	r := &Runtime{bus: eventbus.New(), Identity: self, controlIdentity: self, identityRestart: make(chan struct{}), networkEnabled: c.Modules["network"].Enabled, vpsWatcher: newVPSWatch(), vpsTX: newVPSTXRecorder(c.Node.StateDir), engineImages: engineimage.New()}
+	r := &Runtime{bus: eventbus.New(), Identity: self, controlIdentity: self, identityRestart: make(chan struct{}), networkEnabled: c.Modules["network"].Enabled, vpsWatcher: newVPSWatch(), vpsTX: newVPSTXRecorder(c.Node.StateDir), imageTags: newImageTagCopies(c.Node.StateDir), engineImages: engineimage.New()}
 
 	r.installation = &managedInstallation{config: original, record: installation}
 
@@ -384,6 +400,15 @@ func Open(c config.Node) (*Runtime, error) {
 	}
 	// Until the installation is proven, peers' requests can arrive before
 	// membership is loaded; their refusals are summarized, not logged each.
+	if err = r.startTopics(); err != nil {
+		return nil, err
+	}
+	if err = r.startObservationTopics(c.Node.ID); err != nil {
+		return nil, err
+	}
+	if err = r.startAlarmTopics(c.Node.ID); err != nil {
+		return nil, err
+	}
 	r.Mesh.SetStarting(true)
 	r.Mesh.SetInboundOnly(c.Node.InboundOnly)
 	if err = r.Mesh.EnableDiscovery(c.Node.ID); err != nil {
@@ -447,6 +472,7 @@ func Open(c config.Node) (*Runtime, error) {
 	if r.logs, err = logstore.Open(filepath.Join(c.Node.StateDir, "logs")); err != nil {
 		return nil, err
 	}
+	r.logsPolicy = c.Logs
 
 	catalog := managedCatalog
 	for key, peer := range peers {
@@ -454,14 +480,8 @@ func Open(c config.Node) (*Runtime, error) {
 			catalog.Issuers = append(catalog.Issuers, [32]byte(key))
 		}
 	}
-	options.ModuleID, options.Reduce = catalog.ID(), catalog.Reduce
-	options.AdmitModule = catalog.AdmitModule
-	options.AdmitMutation = catalog.AdmitAppMutation
-	options.AdmitModulePatch = catalog.AdmitAppPatch
-	options.AllowMutationUpgrade = true
-	options.AllowPatchUpgrade = true
+	controlHooks(&options, catalog)
 	options.CommandModule = r.appCommand
-	options.Validate = catalog.ValidateManaged
 	r.controlPolicy = catalog
 
 	options.EventProjection = catalog.ProjectEvents
@@ -505,6 +525,7 @@ func Open(c config.Node) (*Runtime, error) {
 	if err = r.openHistoricalOwners(c, original, installation, peers); err != nil {
 		return nil, err
 	}
+	r.warnForeignBridges()
 	if err = r.openNodeShell(c.Node.ID, original.Node.StateDir, c.NodeShell); err != nil {
 		return nil, err
 	}
@@ -550,6 +571,7 @@ func Open(c config.Node) (*Runtime, error) {
 		service.NodeDrainPlanner = r.nodeDrainPlan
 		service.NodeForceProbe = r.nodeForceProbe
 		service.NodeDiagnostics = r.nodeDiagnostics
+		service.NodeLogs = r.nodeLogs
 		service.NodeDiskChanger = r.nodeDiskChange
 		service.LogsClearer = r.clearLogs
 		service.StoredLogsReader = r.storedLogs
@@ -594,6 +616,9 @@ func Open(c config.Node) (*Runtime, error) {
 		service.VolumeMoveObserver = r.volumeMoveRecipe
 		service.NodeStorageObserver = r.nodeStorageSpace
 		service.NodeObservations = r.nodeObservations
+		if r.obsTopics != nil {
+			service.WantObservations = func() func() { return r.obsTopics.want(true) }
+		}
 		service.NetworkObserver = r.networkClosureRead
 		service.DNSObserver = r.networkDNSRead
 		service.LifecycleSourceReader = r.readLifecycleSource
@@ -623,6 +648,8 @@ func Open(c config.Node) (*Runtime, error) {
 	go r.vpsLoop()
 	r.wg.Add(1)
 	go r.vpsTrafficLoop()
+	r.wg.Add(1)
+	go r.logPruneLoop()
 
 	ok = true
 	return r, nil

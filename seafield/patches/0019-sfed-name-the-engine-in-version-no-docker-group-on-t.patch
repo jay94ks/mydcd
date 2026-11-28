@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: seafield <seafield@invalid>
 Date: Fri, 27 Nov 2026 20:39:34 +0000
-Subject: [PATCH 19/20] sfed: name the engine in --version; no docker group on
+Subject: [PATCH 19/21] sfed: name the engine in --version; no docker group on
  the socket
 
 

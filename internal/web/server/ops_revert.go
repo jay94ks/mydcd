@@ -292,7 +292,7 @@ var irreversible = []string{
 	"rotate-ledger", "rotate-app-history", "raft-compact",
 	"vault-revoke", "vault-retire", "revoke-session", "disable-credential",
 	"delete-registry-image", "gc-registry", "prune-registry-images", "prune-node-images", "prune-build-cache",
-	"delete-build-version", "delete-image-build-job", "clear-app-logs", "standalone-clear-logs",
+	"delete-build-version", "delete-image-build-job",
 	"force-remove-node", "remove-node", "remove-node-storage", "finish-tenant-retirement",
 }
 

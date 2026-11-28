@@ -11,6 +11,7 @@ import (
 
 	"github.com/jay94ks/seafield/internal/access"
 	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/deployment"
 )
 
 // Typed node and cluster queries over the fixture's real loopback SFCP and
@@ -48,8 +49,54 @@ func TestTypedNodeQueriesActualWire(t *testing.T) {
 	if _, err := f.client.CompactStatus(f.ctx, f.peers[0], f.session, CompactStatusQuery{Operation: "missing-original"}); !errors.As(err, &refused) || refused.Code == "ok" {
 		t.Fatal("missing compaction original", err)
 	}
-	if _, err := f.client.NodeDrainStatus(f.ctx, f.peers[0], f.session, control.NodeDrainQuery{Node: node}); !errors.As(err, &refused) || refused.Code != "denied" {
-		t.Fatal("drain status without an original", err)
+	if _, err := f.client.NodeDrainStatus(f.ctx, f.peers[0], f.session, control.NodeDrainQuery{Node: node}); !errors.As(err, &refused) || refused.Code != "missing" {
+		t.Fatal("drain status without a drain", err)
+	}
+}
+
+// R09 2b over the real wire: members, node-invitation and the server shell
+// reads take Params and return Data, and whoami reports the members and
+// node-shell roots an operation on those books starts from.
+func TestTypedMemberAndShellQueriesActualWire(t *testing.T) {
+	f := newVolumeFileWireFixture(t)
+	f.session.Scopes = fullUserScopes()
+	f.session.Signature = ed25519.Sign(f.nodes[0].Private, access.SessionBytes(f.session))
+	if err := f.service.Serve(); err != nil {
+		t.Fatal(err)
+	}
+	for !f.engines[0].IsLeader() {
+		_ = f.engines[1].TransferLeadership(f.ctx, f.peers[0].ID, f.peers[0].Endpoint)
+		if f.ctx.Err() != nil {
+			t.Fatal(f.ctx.Err())
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	page, err := f.client.MemberPage(f.ctx, f.peers[0], f.session, "")
+	if err != nil || len(page.Members) == 0 || page.Members[0].Peer.ID != f.peers[0].ID {
+		t.Fatal("members", page, err)
+	}
+	who, err := f.client.Whoami(f.ctx, f.peers[0], f.session)
+	if err != nil || who.Root(control.MembersKey) != page.RootRevision {
+		t.Fatal("whoami members root", who.Roots, err)
+	}
+	if _, ok := who.Roots[control.NodeShellKey]; !ok {
+		t.Fatal("whoami has no node-shell root", who.Roots)
+	}
+	if _, err := f.client.NodeShellPolicy(f.ctx, f.peers[0], f.session); err != nil {
+		t.Fatal("node-shell-policy", err)
+	}
+	if sessions, err := f.client.NodeShellSessions(f.ctx, f.peers[0], f.session, ""); err != nil || sessions.Schema != 1 {
+		t.Fatal("node-shell-sessions", err)
+	}
+	var refused *Error
+	if _, err := f.client.NodeInvitation(f.ctx, f.peers[0], f.session, "never-added"); !errors.As(err, &refused) || refused.Code != "denied" {
+		t.Fatal("invitation of an unregistered server", err)
+	}
+	reader := f.session
+	reader.Scopes = []access.Scope{{Tenant: "*", Actions: []access.Action{access.Read}}}
+	reader.Signature = ed25519.Sign(f.nodes[0].Private, access.SessionBytes(reader))
+	if _, err := f.client.MemberPage(f.ctx, f.peers[0], reader, ""); !errors.As(err, &refused) || refused.Code != "denied" {
+		t.Fatal("members without cluster management", err)
 	}
 }
 
@@ -153,5 +200,40 @@ func TestTypedLifecycleQueriesActualWire(t *testing.T) {
 	}
 	if _, err := f.client.LifecycleSource(f.ctx, f.peers[0], f.session, "other", "ready", 1); !errors.As(err, &refused) || refused.Code != "denied" {
 		t.Fatal("other tenant's lifecycle source", err)
+	}
+}
+
+// cd-probe over the actual wire: the typed Params reach this server's prober
+// with the Deploy permission checked first; another tenant never reaches it.
+func TestTypedCDProbeActualWire(t *testing.T) {
+	f := newVolumeFileWireFixture(t)
+	f.session.Scopes = []access.Scope{{Tenant: "tenant", Actions: []access.Action{access.Deploy}}}
+	f.session.Signature = ed25519.Sign(f.nodes[0].Private, access.SessionBytes(f.session))
+	probe := deployment.GitProbeRequest{App: "shop", Repository: "https://git.example/repo.git", Branch: "main", Path: "app.yaml", Credential: "installed"}
+	var calls int
+	f.service.CDProber = func(_ context.Context, read control.CDProbeRead) (deployment.GitProbeResult, error) {
+		calls++
+		if read.Tenant != "tenant" || read.Query != probe || read.Session.User != f.session.User {
+			t.Error("probe read", read)
+		}
+		return deployment.GitProbeResult{Node: f.peers[0].ID, Commit: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Size: 42}, nil
+	}
+	if err := f.service.Serve(); err != nil {
+		t.Fatal(err)
+	}
+	for !f.engines[0].IsLeader() {
+		_ = f.engines[1].TransferLeadership(f.ctx, f.peers[0].ID, f.peers[0].Endpoint)
+		if f.ctx.Err() != nil {
+			t.Fatal(f.ctx.Err())
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	got, err := f.client.ProbeCD(f.ctx, f.peers[0], f.session, "tenant", probe)
+	if err != nil || got.Size != 42 || got.Node != f.peers[0].ID || calls != 1 {
+		t.Fatal("probe", got, err, calls)
+	}
+	var refused *Error
+	if _, err := f.client.ProbeCD(f.ctx, f.peers[0], f.session, "other", probe); !errors.As(err, &refused) || refused.Code != "denied" || calls != 1 {
+		t.Fatal("other tenant's probe", err, calls)
 	}
 }

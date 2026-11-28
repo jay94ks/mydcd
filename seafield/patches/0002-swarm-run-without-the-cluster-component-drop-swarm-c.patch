@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: seafield <seafield@invalid>
 Date: Fri, 27 Nov 2026 07:59:47 +0000
-Subject: [PATCH 02/20] swarm: run without the cluster component; drop swarm,
+Subject: [PATCH 02/21] swarm: run without the cluster component; drop swarm,
  checkpoint and plugin routes
 
 

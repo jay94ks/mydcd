@@ -25,6 +25,38 @@ func (i ServiceCallInput) Valid() bool {
 	return i.Length >= 0 && i.Length <= servicecall.MaxBody && i.Digest != ([32]byte{})
 }
 
+// ServiceCallQuery is the header of one service call: the call without its
+// body, and the body's length and digest. The body follows as input frames
+// after "continue"; the reply's Data is the servicecall.Result.
+type ServiceCallQuery struct {
+	Tenant string
+	Call   servicecall.Request
+	Input  ServiceCallInput
+}
+
+func (q ServiceCallQuery) Valid() bool {
+	return q.Tenant != "" && q.Call.Valid() && q.Call.Body == nil && q.Input.Valid()
+}
+
+var ServiceCallMethod = defineRoute(Method[ServiceCallQuery, servicecall.Result]{Name: "service-call"}, false)
+
+// serviceCall is the request's decoded header when it is a typed service-call.
+func (r Request) serviceCall() (ServiceCallQuery, bool) {
+	rule, typed, ok := r.typedMethod()
+	if !typed || !ok || r.Method != ServiceCallMethod.Name {
+		return ServiceCallQuery{}, false
+	}
+	p, _ := rule.decode(r.Params)
+	q, is := p.(ServiceCallQuery)
+	return q, is
+}
+
+// callResult decodes a service-call reply's Data.
+func callResult(reply Reply) (servicecall.Result, bool) {
+	var r servicecall.Result
+	return r, len(reply.Data) != 0 && lenient(reply.Data, &r) == nil && r.Valid()
+}
+
 type ServiceCallRelay struct {
 	Target servicecall.Target
 	Epoch  uint64
@@ -39,7 +71,11 @@ func (c Client) CallService(ctx context.Context, peer sfcp.Peer, session access.
 	}
 	body := q.Body
 	q.Body = nil
-	raw, err := requestBody(Request{Method: "service-call", Tenant: tenant, ServiceCall: &q, ServiceInput: &ServiceCallInput{len(body), sha256.Sum256(body)}})
+	params, err := json.Marshal(ServiceCallQuery{Tenant: tenant, Call: q, Input: ServiceCallInput{len(body), sha256.Sum256(body)}})
+	if err != nil {
+		return servicecall.Result{}, err
+	}
+	raw, err := requestBody(Request{Method: ServiceCallMethod.Name, Params: params})
 	if err != nil {
 		return servicecall.Result{}, err
 	}
@@ -49,20 +85,23 @@ func (c Client) CallService(ctx context.Context, peer sfcp.Peer, session access.
 	if err != nil {
 		return servicecall.Result{}, err
 	}
-	if reply.ServiceCall == nil || !reply.ServiceCall.Valid() {
+	result, ok := callResult(reply)
+	if !ok {
 		return servicecall.Result{}, sfcp.ErrFrame
 	}
-	return *reply.ServiceCall, nil
+	return result, nil
 }
 
 func (c Client) serviceCallExchange(ctx context.Context, peer sfcp.Peer, body []byte, kind uint8, makeEnvelope func(*sfcp.Session) (Envelope, error)) (reply Reply, err error) {
 	if c.Mesh == nil || c.Self == nil || c.Mesh.LocalKey() != sfcp.Identity(c.Self.Public) || len(body) > servicecall.MaxBody {
 		return reply, sfcp.ErrAdmission
 	}
-	conn, err := c.Mesh.Dial(ctx, peer)
+	conn, stream, err := c.openUser(ctx, peer)
 	if err != nil {
 		return reply, err
 	}
+	defer stream.CancelRead(0)
+	defer stream.Close()
 	envelope, err := makeEnvelope(conn)
 	if err != nil {
 		return reply, err
@@ -72,12 +111,6 @@ func (c Client) serviceCallExchange(ctx context.Context, peer sfcp.Peer, body []
 		return reply, err
 	}
 	digest := sha256.Sum256(header)
-	stream, err := conn.OpenManagement(ctx)
-	if err != nil {
-		return reply, err
-	}
-	defer stream.CancelRead(0)
-	defer stream.Close()
 	stop := context.AfterFunc(ctx, func() { stream.CancelRead(1); stream.CancelWrite(1) })
 	defer stop()
 	id := c.Mesh.NextRequest()
@@ -91,7 +124,7 @@ func (c Client) serviceCallExchange(ctx context.Context, peer sfcp.Peer, body []
 		if err != nil {
 			return result, err
 		}
-		if f.Purpose != sfcp.User || f.Kind != 2 || f.Request != id || conn.Admit(f, sfcp.User, false) != nil || !bytes.Equal(f.Fields[1].Value, digest[:]) || strict(f.Fields[0].Value, &result) != nil || result.Schema != 1 {
+		if f.Purpose != sfcp.User || f.Kind != 2 || f.Request != id || conn.Admit(f, sfcp.User, false) != nil || !bytes.Equal(f.Fields[1].Value, digest[:]) || lenient(f.Fields[0].Value, &result) != nil || result.Schema != 1 {
 			return result, sfcp.ErrFrame
 		}
 		return result, nil
@@ -105,7 +138,7 @@ func (c Client) serviceCallExchange(ctx context.Context, peer sfcp.Peer, body []
 		if streamEOF(stream) != nil {
 			return ready, sfcp.ErrFrame
 		}
-		if ready.Code == "ok" && ready.ServiceCall != nil && ready.ServiceCall.Valid() {
+		if _, ok := callResult(ready); ready.Code == "ok" && ok {
 			return ready, nil
 		}
 		return ready, &Error{Code: ready.Code, Phase: sfcp.Completed}
@@ -145,17 +178,18 @@ func (s Service) forwardServiceCall(ctx context.Context, peer sfcp.Peer, body []
 }
 
 func (s Service) streamServiceCall(ctx context.Context, conn *sfcp.Session, stream sfcp.Stream, frame sfcp.Frame, digest [32]byte, envelope Envelope, request Request, binding userBinding) error {
-	if envelope.Session == nil || request.ServiceCall == nil || request.ServiceInput == nil || !request.ServiceInput.Valid() || request.ServiceCall.Body != nil {
+	call, ok := request.serviceCall()
+	if envelope.Session == nil || !ok {
 		return s.respond(stream, frame, digest, Reply{Schema: 1, Code: "invalid"})
 	}
 	var target *ServiceCallRelay
 	if envelope.Relay != nil {
 		target = envelope.Relay.ServiceCall
 	}
-	if target != nil && (!target.Target.Valid() || target.Target.Container.Owner != s.Self.Public || target.Target.Container.Tenant != request.Tenant || target.Target.Container.App != request.ServiceCall.App || target.Target.Container.Service != request.ServiceCall.Service || int(target.Target.Port) != request.ServiceCall.Port || target.Epoch == 0) {
+	if target != nil && (!target.Target.Valid() || target.Target.Container.Owner != s.Self.Public || target.Target.Container.Tenant != call.Tenant || target.Target.Container.App != call.Call.App || target.Target.Container.Service != call.Call.Service || int(target.Target.Port) != call.Call.Port || target.Epoch == 0) {
 		return s.respond(stream, frame, digest, Reply{Schema: 1, Code: "denied"})
 	}
-	ctx, cancel := context.WithTimeout(ctx, request.ServiceCall.Duration()+10*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, call.Call.Duration()+10*time.Second)
 	defer cancel()
 	current, view, allowed := s.planStreamView(ctx, binding, request, envelope, s.Engine.IsLeader())
 	if allowed.Code != "ok" {
@@ -165,9 +199,9 @@ func (s Service) streamServiceCall(ctx context.Context, conn *sfcp.Session, stre
 		if s.ServiceCallLimiter == nil {
 			return s.respond(stream, frame, digest, Reply{Schema: 1, Code: "unavailable"})
 		}
-		release, ok := s.ServiceCallLimiter.Acquire(request.Tenant, time.Now().Unix())
+		release, ok := s.ServiceCallLimiter.Acquire(call.Tenant, time.Now().Unix())
 		if !ok {
-			return s.respond(stream, frame, digest, Reply{Schema: 1, Code: "ok", ServiceCall: &servicecall.Result{Code: servicecall.RateLimited}})
+			return s.respond(stream, frame, digest, dataReply("ok", servicecall.Result{Code: servicecall.RateLimited}))
 		}
 		defer release()
 	}
@@ -176,12 +210,12 @@ func (s Service) streamServiceCall(ctx context.Context, conn *sfcp.Session, stre
 	}
 	var body []byte
 	var err error
-	if request.ServiceInput.Length == 0 {
-		if request.ServiceInput.Digest != sha256.Sum256(nil) || streamEOF(stream) != nil {
+	if call.Input.Length == 0 {
+		if call.Input.Digest != sha256.Sum256(nil) || streamEOF(stream) != nil {
 			return sfcp.ErrFrame
 		}
 	} else {
-		body, err = readUserInput(conn, stream, frame.Request, digest, request.ServiceInput.Length, request.ServiceInput.Digest, servicecall.MaxBody)
+		body, err = readUserInput(conn, stream, frame.Request, digest, call.Input.Length, call.Input.Digest, servicecall.MaxBody)
 		if err != nil {
 			return err
 		}
@@ -199,12 +233,12 @@ func (s Service) streamServiceCall(ctx context.Context, conn *sfcp.Session, stre
 		return s.respond(stream, frame, digest, allowed)
 	}
 	if target == nil {
-		selected, err := current.Policy.ServiceCallTarget(view.State, *envelope.Session, time.Now().Unix(), request.Tenant, *request.ServiceCall, s.Self.Public)
+		selected, err := current.Policy.ServiceCallTarget(view.State, *envelope.Session, time.Now().Unix(), call.Tenant, call.Call, s.Self.Public)
 		if err != nil {
 			return s.respond(stream, frame, digest, imageBuildError(err))
 		}
 		if !selected.Valid() {
-			return s.respond(stream, frame, digest, Reply{Schema: 1, Code: "ok", ServiceCall: &servicecall.Result{Code: servicecall.NoReadyTask}})
+			return s.respond(stream, frame, digest, dataReply("ok", servicecall.Result{Code: servicecall.NoReadyTask}))
 		}
 		target = &ServiceCallRelay{Target: selected, Epoch: view.State.ModuleEpoch()}
 		if selected.Container.Owner != s.Self.Public {
@@ -218,14 +252,14 @@ func (s Service) streamServiceCall(ctx context.Context, conn *sfcp.Session, stre
 	if current.ServiceCaller == nil {
 		return s.respond(stream, frame, digest, Reply{Schema: 1, Code: "unavailable"})
 	}
-	q := *request.ServiceCall
+	q := call.Call
 	q.Body = body
-	out, err := current.ServiceCaller(ctx, control.ServiceCallRead{Session: *envelope.Session, Tenant: request.Tenant, Request: q, Target: target.Target, Epoch: target.Epoch})
+	out, err := current.ServiceCaller(ctx, control.ServiceCallRead{Session: *envelope.Session, Tenant: call.Tenant, Request: q, Target: target.Target, Epoch: target.Epoch})
 	if err != nil {
 		return s.respond(stream, frame, digest, imageBuildError(err))
 	}
 	if !out.Valid() {
 		return sfcp.ErrFrame
 	}
-	return s.respond(stream, frame, digest, Reply{Schema: 1, Code: "ok", ServiceCall: &out})
+	return s.respond(stream, frame, digest, dataReply("ok", out))
 }

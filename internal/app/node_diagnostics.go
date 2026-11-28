@@ -98,32 +98,42 @@ func (r *Runtime) nodeDiagnostics(ctx context.Context, read control.NodeDiagnost
 	}
 	return bundle, nil
 }
-func (r *Runtime) nodeDiagnosticsLocal(ctx context.Context, read control.NodeDiagnosticsRead) (control.NodeDiagnosticsBundle, error) {
+
+// currentNodeRead rechecks a diagnostics-class read (diagnostics, node
+// logs) on this owner: the current user at a quorum barrier, including a
+// relayed call. A formerly approved read is not a lasting grant.
+func (r *Runtime) currentNodeRead(ctx context.Context, read control.NodeDiagnosticsRead) (control.NodeDiagnosticsRead, cluster.View, error) {
 	if r.installation == nil || read.Owner != r.Identity.Public || read.Node != r.installation.record.Root.Self.ID {
-		return control.NodeDiagnosticsBundle{}, sfcp.ErrAdmission
+		return control.NodeDiagnosticsRead{}, cluster.View{}, sfcp.ErrAdmission
 	}
-	// Recheck the current user at a quorum barrier on the owner, including a
-	// relayed call. A formerly approved read is not a lasting diagnostic grant.
 	raw, _ := json.Marshal(read)
 	permit, err := r.appCall(ctx, "node-diagnostics-permit", raw)
 	if err != nil {
-		return control.NodeDiagnosticsBundle{}, err
+		return control.NodeDiagnosticsRead{}, cluster.View{}, err
 	}
 	current, err := schema.Decode[control.NodeDiagnosticsRead](permit.Data)
 	if err != nil || current.Node != read.Node || current.Owner != r.Identity.Public || !bytes.Equal(access.SessionBytes(current.Session), access.SessionBytes(read.Session)) || !bytes.Equal(current.Session.Signature, read.Session.Signature) {
-		return control.NodeDiagnosticsBundle{}, sfcp.ErrAdmission
+		return control.NodeDiagnosticsRead{}, cluster.View{}, sfcp.ErrAdmission
 	}
 	view, err := r.Engine().ReadAtLeast(ctx, current.Index)
 	if err != nil {
-		return control.NodeDiagnosticsBundle{}, err
+		return control.NodeDiagnosticsRead{}, cluster.View{}, err
 	}
 	// ReadAtLeast legitimately returns a local durable prefix. Its barrier,
 	// epoch and the current authorization/owner are the required checks.
-	now := time.Now().UTC()
-	live, err := r.controlPolicy.ReadNodeDiagnostics(view.State, current.Session, now.Unix(), current.Node)
+	live, err := r.controlPolicy.ReadNodeDiagnostics(view.State, current.Session, time.Now().Unix(), current.Node)
 	if err != nil || view.State.Index() < current.Index || view.State.ModuleEpoch() != current.Epoch || live.Owner != current.Owner || live.MembersRoot != current.MembersRoot {
-		return control.NodeDiagnosticsBundle{}, sfcp.ErrAdmission
+		return control.NodeDiagnosticsRead{}, cluster.View{}, sfcp.ErrAdmission
 	}
+	return current, view, nil
+}
+
+func (r *Runtime) nodeDiagnosticsLocal(ctx context.Context, read control.NodeDiagnosticsRead) (control.NodeDiagnosticsBundle, error) {
+	current, view, err := r.currentNodeRead(ctx, read)
+	if err != nil {
+		return control.NodeDiagnosticsBundle{}, err
+	}
+	now := time.Now().UTC()
 	d, err := r.controlPolicy.Members(view.State)
 	if err != nil {
 		return control.NodeDiagnosticsBundle{}, err

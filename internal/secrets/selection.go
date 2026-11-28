@@ -17,6 +17,9 @@ type Use struct {
 	Tenant, User, App, Deployment, Service, Node string
 	RequesterKey, NodeKey                        [32]byte
 	Sources                                      []string
+	// RegistrySources names the Sources read only to pull images. Only they
+	// may select a RegistryShared object; an app input selecting one fails.
+	RegistrySources []string `json:",omitempty"`
 }
 type PolicyRef struct {
 	ID                                     string
@@ -89,7 +92,28 @@ type BatchPlan struct {
 	Required []Target
 }
 
-func ownUse(u Use) Use { u.Sources = slices.Clone(u.Sources); return u }
+func ownUse(u Use) Use {
+	u.Sources = slices.Clone(u.Sources)
+	u.RegistrySources = slices.Clone(u.RegistrySources)
+	return u
+}
+
+// ClusterConsumer reports a cluster-owned registry source reader's use: no
+// workspace, registry-source purpose, authorized by system administration.
+func (u Use) ClusterConsumer() bool { return u.Tenant == "" && u.Purpose == PurposeRegistrySource }
+
+// registryShared reports whether a path crosses a RegistryShared Group.
+func (t Tree) registryShared(path []Object) bool {
+	if t.tenant != "" {
+		return false
+	}
+	for _, o := range path {
+		if o.ACL.RegistryShared {
+			return true
+		}
+	}
+	return false
+}
 func ownTarget(t Target) Target {
 	t.Path = slices.Clone(t.Path)
 	t.Services = slices.Clone(t.Services)
@@ -102,10 +126,19 @@ func (t Tree) allowed(c access.Catalog, u Use, path []Object) bool {
 	if !validPurpose(u.Purpose) {
 		return false
 	}
-	if !identifier(u.Tenant) || !identifier(u.User) || !identifier(u.App) || !identifier(u.Deployment) || !identifier(u.Service) || !identifier(u.Node) || u.RequesterKey == ([32]byte{}) || u.NodeKey == ([32]byte{}) || c.Authorize(u.User, u.Tenant, access.Deploy, u.Node) != nil {
+	if !identifier(u.User) || !identifier(u.App) || !identifier(u.Deployment) || !identifier(u.Service) || !identifier(u.Node) || u.RequesterKey == ([32]byte{}) || u.NodeKey == ([32]byte{}) {
 		return false
 	}
-	if t.tenant != "" && t.tenant != u.Tenant || t.tenant == "" && !slices.Contains(t.objects[t.root].ACL.TenantGrants, u.Tenant) {
+	shared := t.registryShared(path)
+	if u.ClusterConsumer() {
+		// A cluster source reader belongs to no workspace: only a system
+		// administrator binds it, and only RegistryShared secrets serve it.
+		if t.tenant != "" || !shared || !c.SystemAllowed(u.User) {
+			return false
+		}
+	} else if !identifier(u.Tenant) || c.Authorize(u.User, u.Tenant, access.Deploy, u.Node) != nil {
+		return false
+	} else if t.tenant != "" && t.tenant != u.Tenant || t.tenant == "" && !shared && !slices.Contains(t.objects[t.root].ACL.TenantGrants, u.Tenant) {
 		return false
 	}
 	for _, o := range path {
@@ -165,8 +198,8 @@ func (t Tree) Plan(c access.Catalog, uses []Use) (BatchPlan, error) {
 		gates := map[string]bool{}
 		dependencies := map[string]Dependency{}
 		visits := 0
-		var visit func(string, int) error
-		visit = func(id string, position int) error {
+		var visit func(string, int, bool) error
+		visit = func(id string, position int, registry bool) error {
 			visits++
 			if visits > 16384 {
 				return ErrPolicy
@@ -175,7 +208,7 @@ func (t Tree) Plan(c access.Catalog, uses []Use) (BatchPlan, error) {
 			if err != nil {
 				return err
 			}
-			if !t.allowed(c, u, path) {
+			if !t.allowed(c, u, path) || t.registryShared(path) && !registry {
 				return access.ErrDenied
 			}
 			for _, o := range path {
@@ -187,7 +220,7 @@ func (t Tree) Plan(c access.Catalog, uses []Use) (BatchPlan, error) {
 			o := path[len(path)-1]
 			if o.Kind == Group {
 				for _, child := range o.Entries {
-					if err = visit(child, position); err != nil {
+					if err = visit(child, position, registry); err != nil {
 						return err
 					}
 				}
@@ -196,8 +229,13 @@ func (t Tree) Plan(c access.Catalog, uses []Use) (BatchPlan, error) {
 			}
 			return nil
 		}
+		for _, id := range u.RegistrySources {
+			if !slices.Contains(u.Sources, id) {
+				return BatchPlan{}, ErrPolicy
+			}
+		}
 		for i, id := range u.Sources {
-			if err := visit(id, i); err != nil {
+			if err := visit(id, i, slices.Contains(u.RegistrySources, id)); err != nil {
 				return BatchPlan{}, err
 			}
 		}

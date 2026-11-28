@@ -44,7 +44,7 @@ var (
 		if s.NodeObservations == nil {
 			return control.TunnelPlan{}, "unavailable"
 		}
-		reports, err := s.NodeObservations(ctx, view)
+		reports, _, err := s.NodeObservations(ctx, view)
 		if err != nil {
 			return control.TunnelPlan{}, "unavailable"
 		}

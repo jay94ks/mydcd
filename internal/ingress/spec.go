@@ -88,7 +88,9 @@ func DecodeSpec(value string) (Spec, error) {
 	}
 	services := map[string]bool{}
 	backendIDs := map[string]bool{}
+	backends := 0
 	for _, v := range s.Services {
+		generations := map[string][]BackendSpec{}
 		if v.ID == "" || services[v.ID] || len(v.Backends) == 0 && !s.DynamicBackends || len(v.Backends) > 128 {
 			return s, ErrRoute
 		}
@@ -108,13 +110,15 @@ func DecodeSpec(value string) (Spec, error) {
 			if s.DynamicBackends && b.Revision < b.Generation || !s.DynamicBackends && (b.Revision != 0 || b.Draining || b.Suspended) {
 				return s, ErrRoute
 			}
-			if b.ID == "" || len(b.ID) > 128 || backendIDs[b.ID] || b.Task == "" || b.Network == "" || b.Generation == 0 || !b.Address.IsValid() || b.Address.Is4In6() || b.Address.Zone() != "" || b.Address.IsUnspecified() || b.Address.IsMulticast() || b.Port == 0 || b.Weight < 1 || b.Weight > 1024 || b.Capacity < 1 || b.Capacity > s.MaxRequests || !validPath(b.HealthPath) {
+			if b.ID == "" || len(b.ID) > 128 || backendIDs[b.ID] && !successor(s, generations[b.ID], b) || b.Task == "" || b.Network == "" || b.Generation == 0 || !b.Address.IsValid() || b.Address.Is4In6() || b.Address.Zone() != "" || b.Address.IsUnspecified() || b.Address.IsMulticast() || b.Port == 0 || b.Weight < 1 || b.Weight > 1024 || b.Capacity < 1 || b.Capacity > s.MaxRequests || !validPath(b.HealthPath) {
 				return s, ErrRoute
 			}
 			backendIDs[b.ID] = true
+			generations[b.ID] = append(generations[b.ID], b)
+			backends++
 		}
 	}
-	if len(backendIDs) > 1024 {
+	if backends > 1024 {
 		return s, ErrRoute
 	}
 	for _, r := range s.Routes {
@@ -136,4 +140,16 @@ func ValidateLimits(s Spec) error {
 		return ErrRoute
 	}
 	return nil
+}
+
+// successor says whether b may share its ID with the one generation already
+// listed in the same service: a same-node surge keeps the older generation of
+// the same Task draining beside its successor until its requests settle.
+func successor(s Spec, listed []BackendSpec, b BackendSpec) bool {
+	if !s.DynamicBackends || len(listed) != 1 {
+		return false
+	}
+	other := listed[0]
+	older := min(other.Generation, b.Generation)
+	return other.Task == b.Task && other.Generation != b.Generation && (other.Generation == older && other.Draining || b.Generation == older && b.Draining)
 }

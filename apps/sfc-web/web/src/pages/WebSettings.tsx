@@ -34,7 +34,7 @@ const KIND_NAME: Record<string, string> = {
   webhook: '웹훅 서명 비밀 · 헤더 토큰',
   dns: 'DNS 공급자 토큰 · ACME 계정 키',
   acme: 'ACME 계정 키',
-  'deploy-check': '배포 확인 계정 키 (UI-44)',
+  'deploy-check': '배포 확인 계정 키',
 };
 
 export function WebSettingsPage() {

@@ -11,10 +11,11 @@ import { useToast } from '../components/Toast';
 import { usePoll } from '../lib/usePoll';
 import { usePhone } from '../lib/viewport';
 import { MCertDetail } from './MCerts';
-import { fmtTime } from '../lib/format';
+import { fmtDate, fmtTime } from '../lib/format';
 import { errText, nextText, OrderSteps, rowState, SimpleConfirm, useCaOf } from './Certs';
 import { ALG_LABEL, CERT_STATE, certChainUrl, certificate, certificates, checkCertChain, deletable, deleteCertificate, disableCertificate, issuerName, nextLink, putCertificate, sharesName, short, type CertCheck, type StoreCert } from '../api/certs';
 import { ApiError, noEndpoint } from '../api/client';
+import { certLive, certStoreLive } from '../lib/liveTopics';
 
 export function CertDetailPage() {
   return usePhone() ? <MCertDetail /> : <DesktopCertDetailPage />;
@@ -93,12 +94,17 @@ function OrdersCard({ orders }: { orders: AcmeOrder[] | null | undefined }) {
   );
 }
 
+/** 인증서 상세 제목: 포함한 이름 첫 번째, 이름이 없으면 발급 정의 이름 */
+export function certTitle(c: { names: string[] } | undefined, defName?: string): string | undefined {
+  return c?.names[0] || defName || undefined;
+}
+
 /** UI-59: 보관함 인증서 하나 (ID 기준) */
 function StoreCertDetail({ id }: { id: string }) {
   const toast = useToast();
   const nav = useNavigate();
-  const sq = usePoll((s) => certificate(id, s), [id], 5000);
-  const lq = usePoll((s) => certificates({}, s), [], 15000);
+  const sq = usePoll((s) => certificate(id, s), [id], 0, certLive(id));
+  const lq = usePoll((s) => certificates({}, s), [], 0, certStoreLive);
   const dq = usePoll((s) => acmeCerts(s), [], 5000);
   const c = sq.data;
   const def = c ? dq.data?.items.find((d) => (c.definition ? d.name === c.definition : d.fingerprint === c.id)) : undefined;
@@ -124,8 +130,18 @@ function StoreCertDetail({ id }: { id: string }) {
   return (
     <>
       <PageHeader
-        crumbs={<Crumbs last={short(id)} />}
-        title={<span className="mono" style={{ fontSize: 'inherit' }}>{short(id)}</span>}
+        crumbs={<Crumbs last={certTitle(c, def?.name) ?? short(id)} />}
+        title={
+          certTitle(c, def?.name) ? (
+            <>
+              {certTitle(c, def?.name)}
+              {c && c.names.length > 1 && <span className="muted small" style={{ fontWeight: 400, marginLeft: 8 }}>외 {c.names.length - 1}개 이름</span>}
+            </>
+          ) : (
+            <span className="mono" style={{ fontSize: 'inherit' }}>{short(id)}</span>
+          )
+        }
+        sub={certTitle(c, def?.name) ? <span className="mono muted" style={{ fontSize: 11 }}>지문 {short(id)}</span> : undefined}
         ids="UI-59"
         actions={
           c && (
@@ -189,7 +205,7 @@ function StoreCertDetail({ id }: { id: string }) {
                       </span>,
                     ],
                     ['발급자', `${cc.issuer} · 일련번호 ${cc.serial}`],
-                    ['유효 기간', `${fmtTime(cc.notBefore)} ~ ${fmtTime(cc.notAfter)}`],
+                    ['유효 기간', `${fmtDate(cc.notBefore)} ~ ${fmtDate(cc.notAfter)}`],
                     ['올린 곳', `${def && cc.uploadedBy && cc.uploadedBy !== def.createdBy ? `자동 갱신 (${cc.uploadedBy})` : (cc.uploadedBy ?? '—')} · ${fmtTime(cc.uploadedAt)}`],
                     ...(def ? ([['다음 갱신', `${nextText(def)} · ${caOf(def.account)?.name ?? def.account}`]] as [string, ReactNode][]) : []),
                     ...(cc.chain?.length ? ([['체인', <span key="ch" className="mono small">{cc.chain.join(' → ')}</span>]] as [string, ReactNode][]) : []),
@@ -657,7 +673,7 @@ export function UploadCertDialog({ onClose, onDone }: { onClose: () => void; onD
       {ok && invalid && <div className="note er small">✗ {INVALID[invalid] ?? invalid}. 보관함이 이 인증서를 받지 않습니다.</div>}
       {ok && !invalid && (
         <div className="note ok small">
-          ✓ 체인 확인 · {ok.names.join(', ')} · {keyLabel(ok.keyType)} · {fmtTime(ok.notAfter).slice(0, 10)}까지 · 발급자 {issuerName(ok.issuer)}
+          ✓ 체인 확인 · {ok.names.join(', ')} · {keyLabel(ok.keyType)} · {fmtDate(ok.notAfter)}까지 · 발급자 {issuerName(ok.issuer)}
           <br />
           {ok.links.length ? (
             <>

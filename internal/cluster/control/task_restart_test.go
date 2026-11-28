@@ -18,7 +18,7 @@ import (
 
 func restartCoreFixture(t *testing.T) (*backupCoreFixture, deployment.Observation, containerops.Selection) {
 	t.Helper()
-	f, o, selection := logClearPlanFixture(t, "local")
+	f, o, selection := observedTaskFixture(t, "local")
 	boot := sha256.Sum256([]byte("restart-owner-boot"))
 	o.OwnerBoot = hex.EncodeToString(boot[:])
 	o.Sequence++

@@ -40,7 +40,7 @@ func buildBoundSourceFixture(t *testing.T) (*nodeStorageFixture, ImageBuildJobPl
 	f.apply("manager", "begin-image-build", 0, plan.Change, state.Applied)
 	q := buildBaseQuery(plan, "ghcr.io/team/base:latest")
 	inputs := []imagebuild.FrozenSource{{Source: q.Source, Image: "ghcr.io/team/base@sha256:" + strings.Repeat("a", 64)}}
-	sources, err := f.p.ImageBuildBeginSources(f.s, plan.Spec.Scope.Root.Key, ImageBuildJobWorkQuery{Tenant: "tenant", ID: plan.Spec.ID, At: 3}, inputs)
+	sources, err := f.p.ImageBuildBeginSources(f.s, plan.Spec.Scope.Root.Key, ImageBuildJobWorkQuery{Tenant: "tenant", ID: plan.Spec.ID, At: 3}, inputs, testBuilder(plan.Spec), "")
 	if err != nil || len(sources) != 1 || sources[0].External == nil || sources[0].ReadSet == ([32]byte{}) {
 		t.Fatal(sources, err)
 	}
@@ -178,7 +178,7 @@ func TestManagedBuildInputRetainsItsOwnRegistryAndPullCannotBroadenFrozenInputs(
 	f.apply("manager", "begin-image-build", 0, plan.Change, state.Applied)
 	source := buildBaseQuery(plan, base.Authority+"/team/base:latest").Source
 	inputs := []imagebuild.FrozenSource{{Source: source, Image: base.Authority + "/team/base@sha256:" + strings.Repeat("a", 64)}}
-	sources, err := f.p.ImageBuildBeginSources(f.s, plan.Spec.Scope.Root.Key, ImageBuildJobWorkQuery{Tenant: "tenant", ID: plan.Spec.ID, At: 3}, inputs)
+	sources, err := f.p.ImageBuildBeginSources(f.s, plan.Spec.Scope.Root.Key, ImageBuildJobWorkQuery{Tenant: "tenant", ID: plan.Spec.ID, At: 3}, inputs, testBuilder(plan.Spec), "")
 	if err != nil || len(sources) != 1 || sources[0].Managed == nil || sources[0].Managed.ID != base.ID {
 		t.Fatal(sources, err)
 	}

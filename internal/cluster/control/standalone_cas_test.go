@@ -490,7 +490,7 @@ func TestStandaloneLegacyControlKeepsHistoricalPlanHashAndReceipt(t *testing.T) 
 }
 
 func TestStandaloneTargetTracksAcceptedControlsAndNotTheirProgress(t *testing.T) {
-	for _, kind := range []string{"restart", "clear"} {
+	for _, kind := range []string{"restart"} {
 		t.Run(kind, func(t *testing.T) {
 			f, scope, _ := standaloneNativeCASFixture(t)
 			apps, _ := f.p.Apps(f.s)
@@ -505,14 +505,6 @@ func TestStandaloneTargetTracksAcceptedControlsAndNotTheirProgress(t *testing.T)
 				}
 				q := TaskRestartChange{Standalone: "debug", Tenant: "tenant", Operation: "accepted-restart", Target: plan.Target, ManagementTarget: plan.ManagementTarget}
 				_, command := signedStandaloneCAS(t, f, "standalone-restart", "accepted-restart", plan.StandaloneRevision, f.s.Object(AppsKey).Revision, q, true)
-				applyDownCAS(t, f, command, state.Applied)
-			} else {
-				plan, err := f.p.PlanAppLogClear(f.s, f.session, 11, "tenant", selection)
-				if err != nil {
-					t.Fatal(err)
-				}
-				q := AppLogClear{Standalone: "debug", Tenant: "tenant", App: scope, Operation: "accepted-clear", Target: plan.Target, Recreate: true}
-				_, command := signedStandaloneCAS(t, f, "standalone-clear-logs", "accepted-clear", plan.InventoryRevision, f.s.Object(AppsKey).Revision, q, false)
 				applyDownCAS(t, f, command, state.Applied)
 			}
 			apps, _ = f.p.Apps(f.s)
@@ -534,17 +526,6 @@ func TestStandaloneTargetTracksAcceptedControlsAndNotTheirProgress(t *testing.T)
 				}
 				row.Control = &control
 				entry.TaskRestarts = []TaskRestartRecord{row}
-			} else {
-				pending := *entry.PendingSync
-				recreation := *pending.Recreate
-				recreation.Closure[0] ^= 1
-				pending.Recreate = &recreation
-				entry.PendingSync = &pending
-				if entry.standaloneTarget() != accepted {
-					t.Fatal("clear closure progress changed accepted management intent")
-				}
-				entry.PendingSync, entry.Sync = nil, &pending
-				entry.LogClears = []AppLogClearRecord{{Origin: entry.Origin, Source: pending, Status: "succeeded", Replacements: []AppLogClearImpact{{NativeID: "reported-replacement"}}}}
 			}
 			if entry.standaloneTarget() != accepted {
 				t.Fatal("native progress or pending-to-history movement changed target")

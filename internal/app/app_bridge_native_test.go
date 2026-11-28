@@ -154,7 +154,7 @@ func runManagedAppOwnerWithVolumeFileRead(t *testing.T, withWorkload, withVolume
 	remoteCheckers := scenario == managedAppRemoteCompiledChecker
 	ingressManagement := scenario == managedAppIngressManagement
 	compiledCheckers := scenario == managedAppCompiledChecker || remoteCheckers || identityCompiled
-	// An app.yaml can no longer declare its own network (CLUSTER_SETTING_IN_APP):
+	// An app.yaml can no longer declare its own network (INVALID_FIELD):
 	// every scenario borrows the managed shared-services network.
 	managedNetwork := true
 	withCheckers := scenario == managedAppChecker || compiledCheckers || scenario == managedAppNodeCLIPolicy
@@ -850,7 +850,7 @@ func runManagedAppOwnerWithVolumeFileRead(t *testing.T, withWorkload, withVolume
 		compose = []byte(strings.Replace(string(compose), "  volumes: [data:/data]", "  volumes: [data:/data]\n  secrets: [{source: password, target: /run/secrets/db-password, uid: '10001', gid: '10001', mode: '0400'}]", 1))
 		compose = []byte(strings.Replace(string(compose), "SFC_VOLUME_FIXTURE: \"1\",", "SFC_VOLUME_FIXTURE: \"1\", SFC_PROJECTION_FILE: /run/secrets/db-password,", 1))
 		compose = []byte(strings.Replace(string(compose), "--volume-probe", "--projection-probe", 1))
-		compose = []byte(strings.Replace(string(compose), "{node: node-a, ready:", "{node: node-a, secrets_from: [data], ready:", 1))
+		compose = []byte(strings.Replace(string(compose), "{node: node-a, ready:", "{node: node-a, secrets: {from: [data]}, ready:", 1))
 		compose = append(compose, []byte("secrets:\n password:\n  x-sfc: {key: DB_PASSWORD}\n")...)
 	}
 	if withIngress && identityCase {

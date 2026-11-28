@@ -58,8 +58,10 @@ func TestDraftResultActualUnixAndQUICKeepsOriginalProofAndRejectsRetargetedReply
 							return err
 						}
 						request, err := schema.Decode[Request](envelope.Body)
-						q := request.ImageBuildDraft
-						if err != nil || !request.validMethodFields() || !request.validQuerySelectors() || request.Method != "build-draft" || q == nil || q.Mutation() || q.Scope == nil || *q.Scope != scope || q.Authorize(scope, session, time.Now().Unix()) != nil {
+						var params BuildDraftQuery
+						typed := err == nil && typedParams(request, BuildDraftMethod.Name, &params) && params.Tenant == scope.Tenant
+						q := &params.Request
+						if !typed || q.Mutation() || q.Scope == nil || *q.Scope != scope || q.Authorize(scope, session, time.Now().Unix()) != nil {
 							return sfcp.ErrFrame
 						}
 						if readFreeze {
@@ -99,7 +101,7 @@ func TestDraftResultActualUnixAndQUICKeepsOriginalProofAndRejectsRetargetedReply
 								out.Edit.Edit = [32]byte{99}
 							}
 						}
-						return binding.respond(stream, frame, sha256.Sum256(frame.Fields[0].Value), Reply{Schema: 1, Code: "ok", ImageBuildDraft: &out})
+						return binding.respond(stream, frame, sha256.Sum256(frame.Fields[0].Value), okReply(out))
 					}()
 					done <- serve
 					return serve

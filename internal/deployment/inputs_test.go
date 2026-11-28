@@ -127,7 +127,7 @@ func makeFixtureCluster(t *testing.T, cluster [32]byte) *fixture {
 	return f
 }
 func (f *fixture) web() Needs {
-	return Needs{Consumer: "web-task", Generation: 4, Use: secrets.Use{Tenant: "tenant", User: "alice", App: "php-mysql", Deployment: "deploy", Service: "web", Node: "node-a", RequesterKey: public(private(30)), NodeKey: public(f.na)}, Sources: []Source{{"tenant", "defaults"}, {"tenant", "common"}, {"tenant", "overrides"}}, Files: []Projection{{Key: "DB_PASSWORD", Target: "/run/secrets/db-password", UID: 10001, GID: 10001, Mode: 0400}, {Key: "DB_HOST", Target: "/run/secrets/db-host", UID: 10001, GID: 10001, Mode: 0400}}}
+	return Needs{Consumer: "web-task", Generation: 4, Use: secrets.Use{Tenant: "tenant", User: "alice", App: "php-mysql", Deployment: "deploy", Service: "web", Node: "node-a", RequesterKey: public(private(30)), NodeKey: public(f.na)}, Sources: []Source{{Realm: "tenant", Object: "defaults"}, {Realm: "tenant", Object: "common"}, {Realm: "tenant", Object: "overrides"}}, Files: []Projection{{Key: "DB_PASSWORD", Target: "/run/secrets/db-password", UID: 10001, GID: 10001, Mode: 0400}, {Key: "DB_HOST", Target: "/run/secrets/db-host", UID: 10001, GID: 10001, Mode: 0400}}}
 }
 func (f *fixture) db() Needs {
 	n := f.web()
@@ -135,7 +135,7 @@ func (f *fixture) db() Needs {
 	n.Use.Service = "db"
 	n.Use.Node = "node-b"
 	n.Use.NodeKey = public(f.nb)
-	n.Sources = []Source{{"tenant", "defaults"}, {"tenant", "common"}, {"tenant", "db-admin"}}
+	n.Sources = []Source{{Realm: "tenant", Object: "defaults"}, {Realm: "tenant", Object: "common"}, {Realm: "tenant", Object: "db-admin"}}
 	n.Volumes = []VolumeNeed{{"tenant/php-mysql/mysql-data", true}}
 	n.Files = []Projection{{Key: "DB_PASSWORD", Target: "/run/secrets/db-password", UID: 10001, GID: 10001, Mode: 0400}, {Key: "MYSQL_ROOT_PASSWORD", Target: "/run/secrets/db-root-password", UID: 10001, GID: 10001, Mode: 0400}}
 	return n
@@ -310,7 +310,7 @@ func TestAppInputsPromptOnceAndReserveWholePHPMySQLBatch(t *testing.T) {
 func TestAppInputsRealmOrderAndSameObjectNamesRemainDistinct(t *testing.T) {
 	f := makeFixture(t)
 	n := f.web()
-	n.Sources = []Source{{"tenant", "overrides"}, {"", "overrides"}, {"tenant", "defaults"}}
+	n.Sources = []Source{{Realm: "tenant", Object: "overrides"}, {Realm: "", Object: "overrides"}, {Realm: "tenant", Object: "defaults"}}
 	n.Files = []Projection{{Key: "DB_HOST", Target: "/run/secrets/host", UID: 10001, GID: 10001, Mode: 0400}}
 	if targets, e := Required(f.cluster, f.c, f.trees, []Needs{n}); e != nil || len(targets) != 0 {
 		t.Fatal(e)
@@ -335,7 +335,7 @@ func TestAppInputsRealmOrderAndSameObjectNamesRemainDistinct(t *testing.T) {
 	f.v = released.Volumes
 	f.bindings = released.Inventory
 	n.Generation++
-	n.Sources = []Source{{"tenant", "overrides"}, {"tenant", "defaults"}, {"", "overrides"}}
+	n.Sources = []Source{{Realm: "tenant", Object: "overrides"}, {Realm: "tenant", Object: "defaults"}, {Realm: "", Object: "overrides"}}
 	r = f.reserve(n)
 	stage, e = r.Bindings[0].Materialize(f.bindings, f.c, f.trees, f.a, f.v, 100, f.values(n), 4096)
 	if e != nil || string(stage.Files()[0].Data) != "-overrides-DB_HOST" {
@@ -370,7 +370,7 @@ func TestAppInputsRejectForeignClusterEvenForUnprotectedSources(t *testing.T) {
 	_, e = a.ReadSet(f.c, other, g, 100)
 	deny(t, e)
 	n := f.web()
-	n.Sources = []Source{{"tenant", "defaults"}}
+	n.Sources = []Source{{Realm: "tenant", Object: "defaults"}}
 	n.Files = n.Files[1:]
 	f.trees["tenant"] = other
 	_, e = f.bindings.Reserve(f.bindings.Revision(), f.c, f.trees, f.a, f.v, []Needs{n}, 100, nil)

@@ -22,10 +22,13 @@ type Record struct {
 	Serial, WWN     string `json:",omitempty"`
 	Operation, User string
 	At              int64
+	// Bundle: the filesystem is on this disk bundle's device, which sfcd
+	// turns on before it mounts.
+	Bundle string `json:",omitempty"`
 }
 
 func (r Record) Valid() bool {
-	return r.Schema == 1 && r.UUID != "" && len(r.UUID) <= 64 && control.ValidDiskMountPath(r.Path) && r.Disk != "" && strings.HasPrefix(r.Part, r.Disk) && len(r.Part) <= 64 && len(r.Serial) <= 128 && len(r.WWN) <= 128 && r.Operation != "" && r.At > 0
+	return r.Schema == 1 && r.UUID != "" && len(r.UUID) <= 64 && control.ValidDiskMountPath(r.Path) && r.Disk != "" && strings.HasPrefix(r.Part, r.Disk) && len(r.Part) <= 64 && len(r.Serial) <= 128 && len(r.WWN) <= 128 && r.Operation != "" && r.At > 0 && (r.Bundle == "" || observability.ValidBundleName(r.Bundle))
 }
 
 // Refusal is a fixed reason (control.NodeDiskCodes) with a short detail.
@@ -46,8 +49,11 @@ type Plan struct {
 	Path string
 	// Record is the existing mount record (mount again, unmount).
 	Record *Record
-	// Mounted: unmount of a recorded filesystem that is still mounted.
+	// Mounted: unmount of a recorded filesystem that is still mounted; for
+	// prepare-storage, the recorded mount is in place and is kept.
 	Mounted bool
+	// RootPath: prepare-storage's directory (Path plus the sub path).
+	RootPath string
 }
 
 func under(path, base string) bool {
@@ -63,6 +69,11 @@ func Check(op control.NodeDiskOp, inventory observability.Devices, roots []strin
 	if op.Action == "forget" {
 		return checkForget(op, inventory, roots, records)
 	}
+	if op.Action == "prepare-storage" && op.Format {
+		// The format half; the app checks the mount half again once the
+		// new filesystem is there.
+		op.Action = "format"
+	}
 	found := false
 	for _, d := range inventory.Disks {
 		if d.Name == op.Disk {
@@ -75,6 +86,9 @@ func Check(op control.NodeDiskOp, inventory observability.Devices, roots []strin
 	d := plan.Disk
 	if d.Class == "system" {
 		return Plan{}, refuse("system-disk", "the system disk is changed by hand on the server only")
+	}
+	if d.Class == "bundle-member" {
+		return Plan{}, refuse("busy", d.Name+" is a member of bundle "+d.Bundle)
 	}
 	if op.Serial != "" && op.Serial != d.Serial || op.WWN != "" && op.WWN != d.WWN || op.Size != 0 && op.Size != d.Size || op.TableID != "" && op.TableID != d.TableID {
 		return Plan{}, refuse("changed", "disk "+d.Name+" is not the one shown")
@@ -105,6 +119,9 @@ func Check(op control.NodeDiskOp, inventory observability.Devices, roots []strin
 		if d.ReadOnly {
 			return Plan{}, refuse("busy", "disk is read-only")
 		}
+		if d.Kind == "bundle" && plan.Whole {
+			return Plan{}, refuse("busy", "a bundle device gets its filesystem when it is bundled")
+		}
 		targets := []observability.BlockPart{plan.Part}
 		if plan.Whole {
 			targets = d.Parts
@@ -134,38 +151,53 @@ func Check(op control.NodeDiskOp, inventory observability.Devices, roots []strin
 		if plan.Path == "" {
 			plan.Path = control.DefaultDiskMountPath(p.Name)
 		}
-		if !control.ValidDiskMountPath(plan.Path) {
-			return Plan{}, refuse("mount-path", plan.Path+" is a system path")
+		if err := checkMountPoint(plan.Path, p, inventory, roots, records, dockerRoot); err != nil {
+			return Plan{}, err
 		}
-		if dockerRoot != "" && (under(dockerRoot, plan.Path) || under(plan.Path, dockerRoot) && dockerRoot != "/") {
-			return Plan{}, refuse("mount-path", plan.Path+" overlaps the Docker data root")
-		}
-		// The mount point must sit on the system disk, never inside
-		// another disk's mount.
-		best, class := "", ""
-		for _, disk := range inventory.Disks {
-			for _, part := range disk.Parts {
-				for _, m := range part.Mounted() {
-					if under(plan.Path, m) && len(m) > len(best) {
-						best, class = m, disk.Class
-					}
+		plan.Record = recorded(p)
+	case "prepare-storage":
+		p := plan.Part
+		plan.Record = recorded(p)
+		if plan.Record != nil {
+			plan.Path = plan.Record.Path
+			if op.MountPath != "" && op.MountPath != plan.Path {
+				return Plan{}, refuse("mount-path", p.Name+" is already set to be mounted at "+plan.Path)
+			}
+			for _, m := range p.Mounts {
+				if m == plan.Path {
+					plan.Mounted = true
 				}
 			}
 		}
-		if best == "" || best == plan.Path || class != "system" {
-			return Plan{}, refuse("mount-path", plan.Path+" is inside another disk's mount")
+		if !plan.Mounted {
+			if p.Busy() {
+				return Plan{}, refuse("not-managed", p.Name+" was mounted by hand; type the storage path instead")
+			}
+			if p.Filesystem != "ext4" {
+				return Plan{}, refuse("not-ext4", p.Name+" has no ext4 filesystem")
+			}
+			if d.ReadOnly {
+				return Plan{}, refuse("busy", p.Name+" is read-only")
+			}
+			if plan.Path == "" {
+				plan.Path = op.MountPath
+			}
+			if plan.Path == "" {
+				plan.Path = control.DefaultDiskMountPath(p.Name)
+			}
+			if err := checkMountPoint(plan.Path, p, inventory, roots, records, dockerRoot); err != nil {
+				return Plan{}, err
+			}
+		}
+		plan.RootPath = plan.Path
+		if op.SubPath != "" {
+			plan.RootPath = plan.Path + "/" + op.SubPath
 		}
 		for _, root := range roots {
-			if under(root, plan.Path) || under(plan.Path, root) {
-				return Plan{}, refuse("mount-path", plan.Path+" overlaps storage root "+root)
+			if under(root, plan.RootPath) || under(plan.RootPath, root) {
+				return Plan{}, refuse("mount-path", plan.RootPath+" overlaps storage root "+root)
 			}
 		}
-		for i := range records {
-			if records[i].Path == plan.Path && records[i].UUID != p.UUID {
-				return Plan{}, refuse("mount-path", plan.Path+" is recorded for another disk")
-			}
-		}
-		plan.Record = recorded(p)
 	case "unmount":
 		p := plan.Part
 		plan.Record = recorded(p)
@@ -199,6 +231,44 @@ func Check(op control.NodeDiskOp, inventory observability.Devices, roots []strin
 		}
 	}
 	return plan, nil
+}
+
+// checkMountPoint refuses a mount point that is a system path, overlaps the
+// engine data root or a storage root, sits inside another disk's mount or is
+// recorded for another filesystem.
+func checkMountPoint(path string, p observability.BlockPart, inventory observability.Devices, roots []string, records []Record, dockerRoot string) error {
+	if !control.ValidDiskMountPath(path) {
+		return refuse("mount-path", path+" is a system path")
+	}
+	if dockerRoot != "" && (under(dockerRoot, path) || under(path, dockerRoot) && dockerRoot != "/") {
+		return refuse("mount-path", path+" overlaps the Docker data root")
+	}
+	// The mount point must sit on the system disk, never inside another
+	// disk's mount.
+	best, class := "", ""
+	for _, disk := range inventory.Disks {
+		for _, part := range disk.Parts {
+			for _, m := range part.Mounted() {
+				if under(path, m) && len(m) > len(best) {
+					best, class = m, disk.Class
+				}
+			}
+		}
+	}
+	if best == "" || best == path || class != "system" {
+		return refuse("mount-path", path+" is inside another disk's mount")
+	}
+	for _, root := range roots {
+		if under(root, path) || under(path, root) {
+			return refuse("mount-path", path+" overlaps storage root "+root)
+		}
+	}
+	for i := range records {
+		if records[i].Path == path && records[i].UUID != p.UUID {
+			return refuse("mount-path", path+" is recorded for another disk")
+		}
+	}
+	return nil
 }
 
 // checkForget allows dropping a record only while its disk is absent; a

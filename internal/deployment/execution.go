@@ -66,6 +66,9 @@ type executionRecord struct {
 	CompletedAt              uint64
 	CompletionWitness        []Observation
 	Stages                   []StageRecord
+	// Images: the deploy's tag resolutions (execution_images.go), nil until
+	// resolved.
+	Images []ImageResolution `json:",omitempty"`
 }
 
 // Execution shares an immutable private record with read-only Inventory views.
@@ -168,7 +171,7 @@ func (e Execution) authorize(c access.Catalog, i int) error {
 		if json.Unmarshal(s.Goal, &service) != nil {
 			return ErrInputs
 		}
-		if _, err := c.CheckImage(b.Actor, b.Tenant, s.Node, service.Image); err != nil {
+		if _, err := c.CheckImageRef(b.Actor, b.Tenant, s.Node, service.Image); err != nil {
 			return err
 		}
 	}
@@ -209,6 +212,9 @@ func (e Execution) satisfies(i int, condition Condition, now uint64) bool {
 	return false
 }
 func (e Execution) dependencies(i int, now uint64) bool {
+	if !e.imagesReady(i) {
+		return false
+	}
 	for _, d := range e.d.Plan.Steps[i].Dependencies {
 		if ingressIdentity(e.d.Plan.Steps[i], d.Key) {
 			continue // backend availability is observed independently by the listener
@@ -251,6 +257,9 @@ func (e Execution) WaitingOn(key string, now uint64) []string {
 		return nil
 	}
 	var out []string
+	if !e.imagesReady(i) {
+		out = append(out, "image tag resolution")
+	}
 	for _, d := range e.d.Plan.Steps[i].Dependencies {
 		if ingressIdentity(e.d.Plan.Steps[i], d.Key) {
 			continue
@@ -861,17 +870,24 @@ func validResult(r state.Result) bool {
 // Health is current owner evidence; it is independent of the immutable fact
 // that an operation previously completed its required verification.
 func (e Execution) Health(now uint64) string {
+	health, _ := e.HealthWithReason(now)
+	return health
+}
+
+// HealthWithReason is Health and, unless Healthy, the first cause found, for
+// status display only.
+func (e Execution) HealthWithReason(now uint64) (string, *HealthReason) {
 	if e.d.Closed {
-		return "Unknown"
+		return "Unknown", nil
 	}
-	if e.partialReplicaHealth(now) {
-		return "Degraded"
+	if i, ok := e.partialReplicaIndex(now); ok {
+		return "Degraded", e.stageReason(HealthReplicasPartial, i)
 	}
 	for index, step := range e.d.Plan.Steps {
 		if step.Kind == "ingress" && len(step.Identity) != 0 {
 			o := e.d.Stages[index].Observation
 			if o != nil && o.AvailableAt(now) && !e.ingressAllReady(index, *o) {
-				return "Degraded"
+				return "Degraded", e.stageReason(HealthIngressNotReady, index)
 			}
 		}
 	}
@@ -880,8 +896,10 @@ func (e Execution) Health(now uint64) string {
 		// Held facts describe the original native, never target completion.
 		for i, stage := range e.d.Stages {
 			step, observation := e.observationStep(i), stage.Observation
-			if step.Kind == "task" && observation != nil && observation.Live(now) && (!observation.Applied || step.Completion == Healthy && !observation.Healthy || observation.Exit != nil && observation.Exit.Code != 0) {
-				return "Degraded"
+			if step.Kind == "task" && observation != nil && observation.Live(now) {
+				if code := observationProblem(step, *observation, false); code != "" {
+					return "Degraded", e.observationReason(code, i, *observation)
+				}
 			}
 		}
 	}
@@ -890,20 +908,25 @@ func (e Execution) Health(now uint64) string {
 			continue
 		}
 		s := e.d.Stages[i]
-		if s.Result == nil || s.Result.Code != state.Applied || s.Observation == nil || !s.Observation.Live(now) {
-			return "Unknown"
+		switch {
+		case s.Result == nil:
+			return "Unknown", e.stageReason(HealthStepPending, i)
+		case s.Result.Code != state.Applied:
+			return "Unknown", e.stageReason(HealthStepRejected, i)
+		case s.Observation == nil || !s.Observation.Live(now):
+			return "Unknown", e.stageReason(HealthNotObserved, i)
 		}
-		if !s.Observation.Applied || step.Completion == Healthy && !s.Observation.Healthy || step.Completion == Completed && !successfulCompletion(*s.Observation) || s.Observation.Exit != nil && s.Observation.Exit.Code != 0 {
-			return "Degraded"
+		if code := observationProblem(step, *s.Observation, true); code != "" {
+			return "Degraded", e.observationReason(code, i, *s.Observation)
 		}
 	}
 	switch e.appChecksStatus(now) {
 	case contract.Pass:
-		return "Healthy"
+		return "Healthy", nil
 	case contract.Fail:
-		return "Degraded"
+		return "Degraded", &HealthReason{Code: HealthAppCheckFailed}
 	default:
-		return "Unknown"
+		return "Unknown", &HealthReason{Code: HealthAppCheckPending}
 	}
 }
 
@@ -919,8 +942,13 @@ func (o Observation) AvailableAt(now uint64) bool {
 	return o.At != 0 && o.Live(now) && o.Applied && o.Healthy && !o.Released && !o.Stopped && !o.Gone && o.Exit == nil
 }
 
-func (e Execution) partialReplicaHealth(now uint64) bool {
-	type counts struct{ total, available int }
+// partialReplicaIndex is the first unavailable stage of a service whose
+// other replicas still serve.
+func (e Execution) partialReplicaIndex(now uint64) (int, bool) {
+	type counts struct {
+		total, available int
+		down             []int
+	}
 	services := map[string]counts{}
 	for i, step := range e.d.Plan.Steps {
 		if step.Kind != "task" {
@@ -939,15 +967,18 @@ func (e Execution) partialReplicaHealth(now uint64) bool {
 		}
 		if observation != nil && observation.AvailableAt(now) {
 			count.available++
+		} else {
+			count.down = append(count.down, i)
 		}
 		services[service.Sfc.Instance.Service] = count
 	}
+	first := -1
 	for _, count := range services {
-		if count.available > 0 && count.available < count.total {
-			return true
+		if count.available > 0 && count.available < count.total && (first < 0 || count.down[0] < first) {
+			first = count.down[0]
 		}
 	}
-	return false
+	return first, first >= 0
 }
 
 // ActivationReady separates an exact committed Task intent from permission to

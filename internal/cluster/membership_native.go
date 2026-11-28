@@ -64,3 +64,31 @@ func (e *Engine) DemoteMember(ctx context.Context, id string, previous uint64) e
 	}
 	return nil
 }
+
+// HandOffLeadership gives leadership to another voter before this server
+// stops, so a rolling upgrade does not leave the cluster without a leader for
+// an election timeout (devel/design/upgrades.md 3-5). It reports whether it
+// handed off; a follower, or a leader that is the only voter, has nothing to
+// hand off.
+func (e *Engine) HandOffLeadership(ctx context.Context) (bool, error) {
+	if e == nil || e.raft == nil || !e.IsLeader() {
+		return false, nil
+	}
+	future := e.raft.GetConfiguration()
+	if err := future.Error(); err != nil {
+		return false, err
+	}
+	others := false
+	for _, s := range future.Configuration().Servers {
+		if s.Suffrage == raft.Voter && string(s.ID) != e.id {
+			others = true
+		}
+	}
+	if !others {
+		return false, nil
+	}
+	if err := e.await(ctx, func() raft.Future { return e.raft.LeadershipTransfer() }); err != nil {
+		return false, fmt.Errorf("leadership hand-off: %w", err)
+	}
+	return true, nil
+}

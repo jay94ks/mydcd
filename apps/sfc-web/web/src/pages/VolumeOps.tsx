@@ -83,7 +83,7 @@ export function BackupCard({ tenant, v, q, canDeploy, isAdmin, onChanged }: { te
     void m.run(`${volumePath(tenant, v.name)}/backups`, appOf(v)).then(() => (q.refresh(), onChanged()));
   };
   return (
-    <Card title={`${v.name} · 백업 (UI-62)`}>
+    <Card title={`${v.name} · 백업`}>
       {rows.length === 0 ? (
         <span className="small muted">{q.data ? '백업이 없습니다.' : '불러오는 중…'}</span>
       ) : (
@@ -194,7 +194,7 @@ export function RestoreCard({ tenant, v, q, canDeploy, taken, onChanged }: { ten
   const restores = (q.data?.restores ?? []).filter((r) => r.phase !== 'Cancelled');
   const nameErr = !/^[a-z0-9][a-z0-9-]{0,62}$/.test(name) ? "소문자·숫자·'-'로 씁니다." : taken.includes(name) ? '이미 있는 이름입니다.' : undefined;
   return (
-    <Card title="복원 (UI-63)">
+    <Card title="복원">
       <Field label="백업">
         <select value={b?.id ?? ''} onChange={(e) => setPick(e.target.value)} disabled={ready.length === 0}>
           {ready.length === 0 && <option value="">완료된 백업이 없습니다</option>}

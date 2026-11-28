@@ -30,6 +30,14 @@ type NodeStoragePolicy struct {
 	CapacityBytes *uint64  `json:",omitempty"`
 }
 
+// NodeArchiveDefault makes a root its node's default Volume archive location
+// or stops it being one (set-node-archive-default). Expected is the root's
+// revision.
+type NodeArchiveDefault struct {
+	Node, ID string
+	Default  bool
+}
+
 type NodeStorageWork struct {
 	Root                       nodestorage.Root
 	Epoch, RootRevision, Index uint64
@@ -169,7 +177,8 @@ func registeredOnRoot(v Volumes, ref nodestorage.Reference) int {
 			count++
 		}
 	}
-	return count
+	archives, _ := archivedOnRoot(v, ref)
+	return count + archives
 }
 
 // reservedOnRoot sums the reservations of the fixed volumes on a root, counted
@@ -190,7 +199,8 @@ func reservedOnRoot(v Volumes, ref nodestorage.Reference) (uint64, error) {
 			total += bytes
 		}
 	}
-	return total, nil
+	_, archived := archivedOnRoot(v, ref)
+	return total + archived, nil
 }
 
 // rootAdmits reports whether a root with a capacity limit can take extra
@@ -285,7 +295,7 @@ func (p Policy) validateFixedVolumes(roots nodestorage.Catalog, v Volumes) error
 
 func (p Policy) authorizeNodeStorage(c access.Catalog, op UserOperation) error {
 	switch op.Change.Action {
-	case "add-node-storage", "set-node-storage-policy", "drain-node-storage", "remove-node-storage":
+	case "add-node-storage", "set-node-storage-policy", "set-node-archive-default", "drain-node-storage", "remove-node-storage":
 		return c.AuthorizeSession(op.Session, p.Cluster, p.Issuer(op.Session.Issuer), op.At, "", access.ManageCluster, "")
 	default:
 		return access.ErrInvalid
@@ -360,6 +370,12 @@ func (p Policy) reduceNodeStorage(s state.State, cmd state.Command) (map[string]
 			return nil, state.Invalid
 		}
 		roots, err = roots.ChangePolicy(c, op.Session.User, q.Node, q.ID, op.Change.Expected, policy, reserved)
+	case "set-node-archive-default":
+		var q NodeArchiveDefault
+		if canonical(op.Change.Payload, &q) != nil {
+			return nil, state.Invalid
+		}
+		roots, err = roots.SetArchiveDefault(c, op.Session.User, q.Node, q.ID, op.Change.Expected, q.Default)
 	case "drain-node-storage", "remove-node-storage":
 		var q NodeStorageSelection
 		if canonical(op.Change.Payload, &q) != nil {

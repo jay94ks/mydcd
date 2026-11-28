@@ -3,6 +3,7 @@
 package userauth
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/jay94ks/seafield/internal/cluster/control"
@@ -10,18 +11,36 @@ import (
 
 func TestRQ15ShellQueryFieldsAndFilteredReplyConsistency(t *testing.T) {
 	for _, state := range []string{"", "open", "closed"} {
-		q := Request{Method: "node-shell-sessions", State: state, Node: "node-b", After: "before"}
-		if !q.validNodeShellQuery() || !q.validMethodFields() || !q.validQuerySelectors() {
+		if !(NodeShellSessionsQuery{State: state, Node: "node-b", After: "before"}).Valid() {
 			t.Fatal("valid filtered query rejected", state)
 		}
 	}
-	for _, q := range []Request{
-		{Method: "node-shell-policy", State: "open"}, {Method: "node-shell-policy", Node: "node-b"},
-		{Method: "node-shell-sessions", State: "opened"}, {Method: "node-shell-sessions", State: "OPEN"},
-		{Method: "node-shell-sessions", State: "open", Node: "bad node"}, {Method: "node-shell-sessions", State: "open", Tenant: "foreign"},
+	for _, q := range []NodeShellSessionsQuery{{State: "opened"}, {State: "OPEN"}, {State: "open", Node: "bad node"}, {After: string(make([]byte, 257))}} {
+		if q.Valid() {
+			t.Fatal("invalid filtered query accepted", q.State, q.Node)
+		}
+	}
+	// Each method takes exactly its own Params: the policy takes {}, and
+	// neither takes a field of another method.
+	for _, r := range []Request{
+		{Schema: 1, Method: "node-shell-policy", Params: json.RawMessage(`{"State":"open"}`)},
+		{Schema: 1, Method: "node-shell-sessions", Params: json.RawMessage(`{"State":"open","Tenant":"foreign"}`)},
+		{Schema: 1, Method: "node-shell-sessions", Params: json.RawMessage(`{"State":"open"}`), Tenant: "foreign"},
+		{Schema: 1, Method: "members", Params: json.RawMessage(`{"After":"bad/cursor"}`)},
+		{Schema: 1, Method: "node-invitation", Params: json.RawMessage(`{"Node":"node-b","After":"x"}`)},
 	} {
-		if q.validNodeShellQuery() || q.validMethodFields() || q.validQuerySelectors() {
-			t.Fatal("invalid/foreign filtered query accepted", q.Method, q.State)
+		if r.validMethodFields() {
+			t.Fatal("foreign or invalid params accepted", r.Method, string(r.Params))
+		}
+	}
+	for _, r := range []Request{
+		{Schema: 1, Method: "node-shell-policy", Params: json.RawMessage(`{}`)},
+		{Schema: 1, Method: "node-shell-sessions", Params: json.RawMessage(`{"State":"open","Node":"node-b"}`)},
+		{Schema: 1, Method: "members", Params: json.RawMessage(`{}`)},
+		{Schema: 1, Method: "node-invitation", Params: json.RawMessage(`{"Node":"node-b"}`)},
+	} {
+		if !r.validMethodFields() {
+			t.Fatal("valid params rejected", r.Method, string(r.Params))
 		}
 	}
 	filter := control.NodeShellSessionsQuery{State: "open", Node: "node-b"}

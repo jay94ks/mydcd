@@ -22,7 +22,8 @@ const JOIN: Record<string, [string, 'pr' | 'wa' | 'ok' | 'un']> = {
   active: ['참여 중', 'ok'],
 };
 /** 마법사로 이어 할 수 있는 가입 단계 */
-export const joinInProgress = (n: NodeView) => !!n.join && n.join !== 'active';
+/** 가입이 아직 안 끝났다. ready는 설치 확인이 끝난 투표권 없는 서버의 자리(승격은 선택)라 가입 중이 아니다(membership: ready·active·demoting·moving은 가입 끝) */
+export const joinInProgress = (n: NodeView) => n.join === 'invited' || n.join === 'learner' || n.join === 'promoting';
 
 const ID_RE = /^[a-z][a-z0-9-]{0,62}$/;
 const EP_RE = /^([a-z0-9.-]+|\[[0-9a-f:]+\]):\d{1,5}$/i;

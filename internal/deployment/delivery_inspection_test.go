@@ -67,7 +67,7 @@ func TestCDFieldInspectionShowsOverrideAndDistinguishesAbsentNull(t *testing.T) 
 	if err != nil || !bytes.Equal(view.Source.Value, prior.Source.Value) || view.Source.Present != prior.Source.Present || !bytes.Equal(view.Current.Value, goal("debug")) {
 		t.Fatal("override changed Git field value", view, err)
 	}
-	if _, err = updated.FieldValues([]string{"services", "web", "x-sfc", "secret_env"}); err == nil {
+	if _, err = updated.FieldValues([]string{"services", "web", "x-sfc", "secrets"}); err == nil {
 		t.Fatal("nonwhitelisted secret selector read")
 	}
 	tree := map[string]any{"present": nil}

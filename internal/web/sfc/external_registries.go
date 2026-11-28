@@ -2,8 +2,6 @@
 
 package sfc
 
-import "github.com/jay94ks/seafield/internal/cluster/control"
-
 // REQ-17 private external image registry logins per tenant, in sfcd's
 // real shape (docs/reference/external-registries.md). The managed state
 // holds only vault references: no credential value appears in a row, a
@@ -19,12 +17,3 @@ const (
 	ActionBindExternalRegistry   = "bind-external-registry"
 	ActionUnbindExternalRegistry = "unbind-external-registry"
 )
-
-// ExternalRegistryPage: `external-registries` in sfcd's real shape (Reply
-// ExternalRegistriesRootRevision / ExternalRegistries / ExternalRegistriesNext),
-// 8 a page. Merge pages only while RootRevision stays the same.
-type ExternalRegistryPage struct {
-	RootRevision uint64
-	Items        []control.ExternalRegistryView
-	Next         string
-}

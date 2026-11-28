@@ -48,6 +48,7 @@ sfcd가 받는 동작 전체를 이름순으로 돌려준다.
 | `drain-network` | `Tenant`, `ID` | 그 망 구성원의 리비전 |
 | `configure-network-dns` | `Tenant`, `Network` | 그 망 DNS 설정의 리비전(아직 없으면 0) |
 | `set-node-storage-policy`, `drain-node-storage`, `remove-node-storage` | `Node`, `ID` | 저장소 리비전 |
+| `set-node-archive-default` | `Node`, `ID`, `Default`(true면 이 서버의 기본 보관 위치로, false면 뺌) | 저장소 리비전 |
 
 - `add-credential`은 시스템 관리자가 증명 없이 키를 더하는 경우다(본인 키 추가는 계정 화면이 증명을 서명한다).
 - 목록의 `base`가 `current`가 아닌 동작은 `422 unsupported`, 없는 동작은 `404 not-found`다.

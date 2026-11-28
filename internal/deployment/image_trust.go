@@ -20,7 +20,7 @@ func (a Inventory) ImageSourceNoLongerTrusted(c access.Catalog) bool {
 		if json.Unmarshal(step.Goal, &service) != nil {
 			return true
 		}
-		_, err := c.CheckImageTrust(a.d.Tenant, service.Image)
+		_, err := c.CheckImageRefTrust(a.d.Tenant, service.Image)
 		return err != nil
 	}
 	if active := a.d.Active; active != nil {

@@ -35,8 +35,8 @@ func verifyImageCacheUserNative(t *testing.T, ctx context.Context, r *Runtime, r
 		t.Fatal("original Task image detail", err)
 	}
 	originalID := original.Container.Detail.ImageID
-	protected, err := c.QueryImageCache(ctx, peer, session, true, imagecache.Query{Node: peer.ID, Images: []string{originalID}})
-	if err != nil || protected.ImageCachePlan == nil || len(protected.ImageCachePlan.Images) != 1 || protected.ImageCachePlan.DeleteReady() || protected.ImageCachePlan.Images[0].Containers == 0 || protected.ImageCachePlan.Images[0].References == 0 {
+	protected, err := c.PlanImageCache(ctx, peer, session, imagecache.Query{Node: peer.ID, Images: []string{originalID}})
+	if err != nil || len(protected.Images) != 1 || protected.DeleteReady() || protected.Images[0].Containers == 0 || protected.Images[0].References == 0 {
 		t.Fatal("actual live Task image not protected", err)
 	}
 	hash := sha256.Sum256([]byte(root))
@@ -47,8 +47,8 @@ func verifyImageCacheUserNative(t *testing.T, ctx context.Context, r *Runtime, r
 	if err != nil {
 		t.Fatal("owned stopped cache consumer", err)
 	}
-	stopped, err := c.QueryImageCache(ctx, peer, session, true, imagecache.Query{Node: peer.ID, Images: []string{f.Image}})
-	if err != nil || stopped.ImageCachePlan == nil || stopped.ImageCachePlan.DeleteReady() || stopped.ImageCachePlan.Images[0].Containers == 0 {
+	stopped, err := c.PlanImageCache(ctx, peer, session, imagecache.Query{Node: peer.ID, Images: []string{f.Image}})
+	if err != nil || len(stopped.Images) == 0 || stopped.DeleteReady() || stopped.Images[0].Containers == 0 {
 		t.Fatal("stopped non-Task container was not protected", err)
 	}
 	if _, err = f.Client.API.ContainerRemove(ctx, created.ID, client.ContainerRemoveOptions{}); err != nil {
@@ -70,9 +70,9 @@ func verifyImageCacheUserNative(t *testing.T, ctx context.Context, r *Runtime, r
 	run(args...)
 	var done *control.ImageCacheStatus
 	for {
-		reply, e := c.QueryImageCache(ctx, peer, session, false, imagecache.Query{Operation: "rq4-native-cache"})
-		if e == nil && reply.ImageCacheStatus != nil && (reply.ImageCacheStatus.State == "done" || reply.ImageCacheStatus.State == "failed") {
-			done = reply.ImageCacheStatus
+		status, e := c.ImageCacheStatus(ctx, peer, session, "rq4-native-cache")
+		if e == nil && (status.State == "done" || status.State == "failed") {
+			done = &status
 			break
 		}
 		select {

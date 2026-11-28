@@ -9,6 +9,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/json"
+	"slices"
 	"sync"
 	"time"
 
@@ -73,6 +74,9 @@ type ChangeEvent struct {
 	Tenant string `json:",omitempty"`
 	App    string `json:",omitempty"`
 	Note   string `json:",omitempty"` // an alarm's short text
+	// Container and Reasons name an engine notice (eventbus.TopicEngine).
+	Container string   `json:",omitempty"`
+	Reasons   []string `json:",omitempty"`
 }
 
 const (
@@ -196,14 +200,18 @@ func (f *ChangeFeed) Run(ctx context.Context) {
 // same gate as the query that reads that record.
 func changeWatchAllowed(c access.Catalog, session access.Session, cluster [32]byte, issuer access.Issuer, now int64, ref control.WatchRef) bool {
 	switch ref.Kind {
-	case "app", "volume", "network":
+	case "app", "volume", "network", "ingress", "dns":
 		if ref.Tenant == "" {
 			return c.AuthorizeSession(session, cluster, issuer, now, "", access.ManageCluster, "") == nil
 		}
 		return c.AuthorizeSession(session, cluster, issuer, now, ref.Tenant, access.Read, "") == nil
 	case "tenant":
 		return c.AuthorizeSession(session, cluster, issuer, now, ref.Tenant, access.Read, "") == nil || c.AuthorizeSession(session, cluster, issuer, now, "", access.ManageCluster, "") == nil
-	case "node":
+	case "registry", "registry-maintenance":
+		// The registry list also shows registries to their tenant's
+		// ManageRegistry holders.
+		return ref.Tenant != "" && (c.AuthorizeSession(session, cluster, issuer, now, ref.Tenant, access.Read, "") == nil || c.AuthorizeSession(session, cluster, issuer, now, ref.Tenant, access.ManageRegistry, "") == nil)
+	case "node", "certificate", "domain", "acme-responder":
 		return c.AuthorizeSession(session, cluster, issuer, now, "", access.ManageCluster, "") == nil
 	}
 	return false
@@ -232,7 +240,7 @@ func (s Service) watchTopics(ctx context.Context, topics []string) <-chan topicB
 	allAlarms := false
 	for _, t := range topics {
 		switch {
-		case t == eventbus.TopicReport, eventbus.IsAlarm(t):
+		case t == eventbus.TopicReport, t == eventbus.TopicEngine, eventbus.IsAlarm(t):
 			want[t] = true
 		case t == eventbus.TopicAlarmPrefix:
 			allAlarms = true
@@ -242,10 +250,15 @@ func (s Service) watchTopics(ctx context.Context, topics []string) <-chan topicB
 		return nil
 	}
 	out := make(chan topicBatch)
+	release := func() {}
+	if want[eventbus.TopicReport] && s.WantObservations != nil {
+		release = s.WantObservations()
+	}
 	sub := s.Events.Subscribe(changeWatchMaxRefs, func(e eventbus.Event) bool {
 		return want[e.Topic] || allAlarms && eventbus.IsAlarm(e.Topic)
 	})
 	go func() {
+		defer release()
 		defer sub.Close()
 		for {
 			batch, lost, err := sub.Next(ctx)
@@ -253,14 +266,22 @@ func (s Service) watchTopics(ctx context.Context, topics []string) <-chan topicB
 				return
 			}
 			b := topicBatch{lost: lost}
-			seen := map[ChangeEvent]bool{}
+			// One notice per item: a repeat only adds its reasons.
+			type item struct{ topic, kind, node, source, tenant, app, note, container string }
+			seen := map[item]int{}
 			for _, e := range batch {
-				ref := ChangeEvent{Topic: e.Topic, Kind: e.Kind, Node: e.Node, Source: e.Source, Tenant: e.Tenant, App: e.App, Note: e.Note}
-				if !seen[ref] {
-					seen[ref] = true
-					b.events = append(b.events, ref)
-					b.scopes = append(b.scopes, e.Scope)
+				k := item{e.Topic, e.Kind, e.Node, e.Source, e.Tenant, e.App, e.Note, e.Container}
+				if at, ok := seen[k]; ok {
+					for _, r := range e.Reasons {
+						if !slices.Contains(b.events[at].Reasons, r) {
+							b.events[at].Reasons = append(b.events[at].Reasons, r)
+						}
+					}
+					continue
 				}
+				seen[k] = len(b.events)
+				b.events = append(b.events, ChangeEvent{Topic: e.Topic, Kind: e.Kind, Node: e.Node, Source: e.Source, Tenant: e.Tenant, App: e.App, Note: e.Note, Container: e.Container, Reasons: slices.Clone(e.Reasons)})
+				b.scopes = append(b.scopes, e.Scope)
 			}
 			select {
 			case out <- b:
@@ -484,7 +505,7 @@ func (c Client) WatchChanges(base context.Context, peer sfcp.Peer, session acces
 			return last, err
 		}
 		var r ChangeWatchReply
-		if f.Purpose != sfcp.ChangeWatch || f.Kind != 2 || f.Request != id || conn.Admit(f, sfcp.ChangeWatch, false) != nil || !bytes.Equal(f.Fields[1].Value, header[:]) || strict(f.Fields[0].Value, &r) != nil || r.Schema != 1 {
+		if f.Purpose != sfcp.ChangeWatch || f.Kind != 2 || f.Request != id || conn.Admit(f, sfcp.ChangeWatch, false) != nil || !bytes.Equal(f.Fields[1].Value, header[:]) || lenient(f.Fields[0].Value, &r) != nil || r.Schema != 1 {
 			return last, sfcp.ErrFrame
 		}
 		if r.Code != "ok" {

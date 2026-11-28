@@ -247,8 +247,8 @@ func verifyRuntimeNodeLifecycle(t *testing.T, ctx context.Context, controls []*R
 	if err != nil || fresh.User != session.User || fresh.Issuer != successor.Identity.Public {
 		t.Fatal("successor current user login", err)
 	}
-	reply, err := user.Query(ctx, selectPeer(successor), fresh, "members", "")
-	if err != nil || reply.NodeVoters != 2 || reply.NodeQuorum != 2 || reply.NodeConfigurationIndex != actual.Index {
+	reply, err := user.MemberPage(ctx, selectPeer(successor), fresh, "")
+	if err != nil || reply.Voters != 2 || reply.Quorum != 2 || reply.ConfigurationIndex != actual.Index {
 		t.Fatal("current public runtime node view", reply, err)
 	}
 	var stopped *Runtime

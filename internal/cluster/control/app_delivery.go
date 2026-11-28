@@ -123,10 +123,10 @@ func (p Policy) appDeliveryProgress(s state.State, cmd state.Command) (AppDelive
 
 func validateAppDelivery(entry appEntry, uploads []deployment.Upload) error {
 	if entry.Delivery == nil {
-		if entry.DeliveryInput != nil || entry.Sync != nil && entry.Sync.Recreate == nil || entry.PendingSync != nil && entry.PendingSync.Recreate == nil {
+		if entry.DeliveryInput != nil || entry.Sync != nil || entry.PendingSync != nil {
 			return ErrCatalog
 		}
-		return validatePlainRecreation(entry)
+		return nil
 	}
 	d := *entry.Delivery
 	if d.Inventory().Scope() != entry.Inventory.Scope() || d.Principal() != entry.Origin.Session.User {

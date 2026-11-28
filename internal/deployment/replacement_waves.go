@@ -84,6 +84,19 @@ func (p ReplacementPlan) Valid(tenant, app string) bool {
 // and the target graph. It neither edits source nor fabricates an intermediate
 // all-new app, allocation, stopped writer, or successful Task observation.
 func (a Inventory) ReplacementPlan(b Blueprint, prune bool) (*ReplacementPlan, error) {
+	return a.replacementPlan(b, prune, false)
+}
+
+// DeployReplacementPlan is ReplacementPlan for an explicit app deploy: an
+// edited Task kept alone on its node (its command, image or environment
+// changed) is replaced in one wave on that node too. Without this, Begin had
+// no stop set for it and refused every such edit as TRANSITION_REQUIRED.
+// CD and drain keep ReplacementPlan; their own transitions cover that case.
+func (a Inventory) DeployReplacementPlan(b Blueprint, prune bool) (*ReplacementPlan, error) {
+	return a.replacementPlan(b, prune, true)
+}
+
+func (a Inventory) replacementPlan(b Blueprint, prune, edits bool) (*ReplacementPlan, error) {
 	changes, err := a.Changes(b, prune)
 	if err != nil {
 		return nil, err
@@ -142,7 +155,8 @@ func (a Inventory) ReplacementPlan(b Blueprint, prune bool) (*ReplacementPlan, e
 			}
 			target, present := steps[change.Key]
 			relocated := present && (target.Node != claim.Step.Node || target.Owner != claim.Step.Owner)
-			required = required || b.StandaloneName() != "" || counts[instance.Service] > 1 || oldCounts[instance.Service] > 1 || relocated
+			edited := edits && present && change.Action == "Replace"
+			required = required || b.StandaloneName() != "" || counts[instance.Service] > 1 || oldCounts[instance.Service] > 1 || relocated || edited
 		}
 	}
 	if !required {

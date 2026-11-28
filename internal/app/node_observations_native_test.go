@@ -285,7 +285,7 @@ func verifyTwoNodeNativeObservations(t *testing.T, ctx context.Context, a, b *Ru
 	})
 	// Collect actual host/Docker/root stats and deliver them using the ordinary
 	// signed member report adapter; the receiver checks current member + index.
-	for i, r := range runtimes {
+	for _, r := range runtimes {
 		view, e := r.Engine().Read(ctx, false)
 		if e != nil {
 			t.Fatal(e)
@@ -294,19 +294,9 @@ func verifyTwoNodeNativeObservations(t *testing.T, ctx context.Context, a, b *Ru
 		if e != nil {
 			t.Fatal(e)
 		}
-		peer := ap
-		if i == 0 {
-			peer = bp
-		}
-		link, e := r.Mesh.Dial(ctx, peer)
-		if e != nil {
-			t.Fatal(e)
-		}
+		// Stored locally only; queries subscribe over the Topic channel.
 		for _, raw := range rows {
 			if e = r.storeNodeObservation(sfcp.Identity(r.Identity.Public), raw); e != nil {
-				t.Fatal(e)
-			}
-			if e = link.Report(ctx, sfcp.KindNodeObservation, raw); e != nil {
 				t.Fatal(e)
 			}
 		}

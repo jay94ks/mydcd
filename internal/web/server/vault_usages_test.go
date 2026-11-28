@@ -11,7 +11,7 @@ func TestVaultUsages(t *testing.T) {
 	f, _ := newFakeFixture(t)
 	fakeLogin(t, f, "alice")
 	_, out := f.do("GET", "/api/v1/t/shop/apps/php-shop/source", nil)
-	doc := strings.Replace(out["yaml"].(string), "      node: node-b\n", "      node: node-b\n      secrets_from: [mysql]\n", 1)
+	doc := strings.Replace(out["yaml"].(string), "      node: node-b\n", "      node: node-b\n      secrets: {from: [mysql]}\n", 1)
 	if code, out := f.do("POST", "/api/v1/t/shop/apps/deploy", map[string]any{"opId": "fab2c3d4-0000-4000-8000-000000000001", "yaml": doc}); opState(t, code, out) != "applied" {
 		t.Fatalf("deploy: %d %v", code, out)
 	}

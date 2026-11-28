@@ -317,7 +317,7 @@ func (s *Server) runVaultWrite(ctx context.Context, c sfc.Conn, ws *webSession, 
 				}
 				reply, _ := c.WriteVault(ctx, j.Realm, *plan.Receiver, q)
 				q.Values = nil
-				o := reply.Observation
+				o := reply.VaultObservation
 				if o == nil {
 					return stop(store.OpUnknown, "input-unknown")
 				}

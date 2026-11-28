@@ -19,7 +19,7 @@ import (
 // These native facts are signed model inputs to the real product FSM. Actual
 // Docker/two-node behavior remains part of the RQ3 final adapter verification.
 func TestTaskPagesFilterBeforePagingAndNeverPromoteStaleEvidence(t *testing.T) {
-	f, o, selection := logClearPlanFixture(t, "local")
+	f, o, selection := observedTaskFixture(t, "local")
 	f.session.Scopes[0].Actions = append(f.session.Scopes[0].Actions, access.ManageMembers)
 	f.session.Signature = ed25519.Sign(f.node, access.SessionBytes(f.session))
 	o.Sequence++
@@ -112,7 +112,7 @@ func TestTaskPagesFilterBeforePagingAndNeverPromoteStaleEvidence(t *testing.T) {
 }
 
 func TestTaskProjectionIncludesAcceptedUncollectedSourcesAndFrozenNetworkNames(t *testing.T) {
-	f, _, _ := logClearPlanFixture(t, "local")
+	f, _, _ := observedTaskFixture(t, "local")
 	apps, err := f.p.ReadApps(f.s)
 	if err != nil {
 		t.Fatal(err)
@@ -154,7 +154,7 @@ func TestTaskProjectionIncludesAcceptedUncollectedSourcesAndFrozenNetworkNames(t
 
 // Process measurement is not a replacement for the control Start witness.
 func TestTaskMeasurementShowsRestartWithoutRewritingControlEvidence(t *testing.T) {
-	f, o, _ := logClearPlanFixture(t, "local")
+	f, o, _ := observedTaskFixture(t, "local")
 	before, _ := state.Encode(f.s)
 	fact := containerops.TaskFact{Name: "exact-native", Image: "sha256:actual", State: "running", RestartCount: 2}
 	task := observability.Task{Tenant: "tenant", App: "source-app", Deployment: "deploy", Key: o.Key, Native: o.Native, Generation: o.Generation, Revision: o.Revision, Fact: fact, StartedAt: "2026-11-21T00:00:00Z"}
@@ -182,7 +182,7 @@ func TestTaskMeasurementShowsRestartWithoutRewritingControlEvidence(t *testing.T
 func TestTaskEndpointProjectionUsesFreshExactOwnerFacts(t *testing.T) {
 	for _, mode := range []string{"legacy", "unknown", "present", "absent", "missing"} {
 		t.Run(mode, func(t *testing.T) {
-			f, o, _ := logClearPlanFixture(t, "local")
+			f, o, _ := observedTaskFixture(t, "local")
 			o.Sequence++
 			o.TaskFact = &containerops.TaskFact{Name: "exact-owned", State: "running"}
 			var want *bool
@@ -229,7 +229,7 @@ func TestTaskEndpointProjectionUsesFreshExactOwnerFacts(t *testing.T) {
 }
 
 func TestTaskEndpointNewerMeasurementReplacesAndClearsOlderProof(t *testing.T) {
-	f, o, _ := logClearPlanFixture(t, "local")
+	f, o, _ := observedTaskFixture(t, "local")
 	present := true
 	o.Sequence++
 	o.TaskFact = &containerops.TaskFact{Name: "exact-owned", State: "running", EndpointPresent: &present}

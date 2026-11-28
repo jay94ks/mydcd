@@ -162,3 +162,36 @@ func TestExternalRegistryReducerPreservesCredentialActionCeiling(t *testing.T) {
 	f.apply("manager", "delete-external-registry", 1, RegistrySelection{Tenant: "tenant", ID: "private"}, state.Forbidden)
 	f.apply("manager", "put-external-registry", 1, ExternalRegistryPut{spec}, state.Applied)
 }
+
+func TestClusterExternalRegistryNeedsManageClusterAndIsSharedReadOnly(t *testing.T) {
+	f, _ := registryFixture(t)
+	spec := imagesource.Source{ID: "mirror", Authority: "ghcr.io", Repository: "**", Enabled: true, Auth: "none"}
+	f.apply("manager", "put-external-registry", 0, ExternalRegistryPut{spec}, state.Forbidden)
+	f.apply("admin", "put-external-registry", 0, ExternalRegistryPut{spec}, state.Applied)
+	image, err := access.PinImage("ghcr.io/team/app@sha256:" + strings.Repeat("a", 64))
+	if err != nil {
+		t.Fatal(err)
+	}
+	selected, err := f.p.ExternalRegistryForImage(f.s, "tenant", image)
+	if err != nil || selected == nil || !selected.Cluster() || selected.ID != "mirror" {
+		t.Fatal("workspace did not use the cluster source", selected, err)
+	}
+	rows, _, err := f.p.ExternalRegistryPage(f.s, f.sessions["manager"], 2, "tenant", "")
+	if err != nil || len(rows) != 1 || !rows[0].Spec.Cluster() {
+		t.Fatal("workspace page did not list the cluster source", rows, err)
+	}
+	if _, _, err = f.p.ExternalRegistryPage(f.s, f.sessions["manager"], 2, "", ""); err == nil {
+		t.Fatal("cluster page without ManageCluster")
+	}
+	if rows, _, err = f.p.ExternalRegistryPage(f.s, f.sessions["admin"], 2, "", ""); err != nil || len(rows) != 1 {
+		t.Fatal("cluster page", rows, err)
+	}
+	// The workspace's own source for the same authority wins.
+	own := imagesource.Source{Tenant: "tenant", ID: "own", Authority: "ghcr.io", Repository: "**", Enabled: true, Auth: "none"}
+	f.apply("manager", "put-external-registry", 0, ExternalRegistryPut{own}, state.Applied)
+	if selected, err = f.p.ExternalRegistryForImage(f.s, "tenant", image); err != nil || selected == nil || selected.ID != "own" {
+		t.Fatal("cluster source beat the workspace source", selected, err)
+	}
+	f.apply("manager", "delete-external-registry", 1, RegistrySelection{ID: "mirror"}, state.Forbidden)
+	f.apply("admin", "delete-external-registry", 1, RegistrySelection{ID: "mirror"}, state.Applied)
+}

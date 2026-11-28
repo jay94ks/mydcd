@@ -21,7 +21,7 @@ func TestVaultApprovalList(t *testing.T) {
 	f.mu.Unlock()
 
 	// alice deploys php-shop with the protected Group and approves it.
-	doc := []byte(strings.Replace(phpShopYAML, "      node: node-b\n", "      node: node-b\n      secrets_from: [group/shop-db]\n", 1))
+	doc := []byte(strings.Replace(phpShopYAML, "      node: node-b\n", "      node: node-b\n      secrets: {from: [group/shop-db]}\n", 1))
 	uploadApp(t, alice, "shop", "php-shop", "up-g", doc)
 	apps, _ := alice.Apps(ctx, "shop", "")
 	var cur AppView
@@ -97,7 +97,7 @@ func TestVaultApprovalListCD(t *testing.T) {
 	f.mu.Lock()
 	a := f.w.apps["shop/php-shop"]
 	src := a.sources[len(a.sources)-1]
-	src.Document = []byte(strings.Replace(string(src.Document), "      node: node-b\n", "      node: node-b\n      secrets_from: [group/shop-db]\n", 1))
+	src.Document = []byte(strings.Replace(string(src.Document), "      node: node-b\n", "      node: node-b\n      secrets: {from: [group/shop-db]}\n", 1))
 	a.sources[len(a.sources)-1] = src
 	cand := candidateDigest("shop", "php-shop", a.view.CD.Candidate)
 	f.mu.Unlock()

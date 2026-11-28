@@ -6,6 +6,7 @@ import (
 	"context"
 	"net"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	quic "github.com/quic-go/quic-go"
@@ -48,6 +49,9 @@ type connectionPath struct {
 	observed   time.Time
 	changed    chan struct{}
 	route      nativeRoute
+	// contact is the peer's liveness record once the connection is
+	// authenticated; every received packet touches it.
+	contact atomic.Pointer[peerContact]
 }
 
 func newConnectionPath() *connectionPath {
@@ -72,6 +76,12 @@ func pathTrace(ctx context.Context, _ bool, _ quic.ConnectionID) qlogwriter.Trac
 func (p *connectionPath) AddProducer() qlogwriter.Recorder { return p }
 func (p *connectionPath) Close() error                     { return nil }
 func (p *connectionPath) RecordEvent(event qlogwriter.Event) {
+	if _, ok := event.(qlog.PacketReceived); ok {
+		if c := p.contact.Load(); c != nil {
+			c.touch()
+		}
+		return
+	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	switch e := event.(type) {

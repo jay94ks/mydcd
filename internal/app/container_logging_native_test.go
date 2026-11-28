@@ -5,17 +5,14 @@ package app
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"io"
 	"net/http"
 	"os"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"testing"
 	"time"
 
-	cerrdefs "github.com/containerd/errdefs"
 	"github.com/jay94ks/seafield/internal/access"
 	"github.com/jay94ks/seafield/internal/cluster"
 	"github.com/jay94ks/seafield/internal/cluster/control"
@@ -31,7 +28,7 @@ import (
 func TestRV4RealPlainLoggingRotationAndOriginalStopRecovery(t *testing.T) {
 	runManagedAppOwner(t, true, true, false, true, managedAppLoggingPlain, true, false, false)
 }
-func TestRV4RealCDLoggingOverrideAndExplicitRecreation(t *testing.T) {
+func TestRV4RealCDLoggingOverride(t *testing.T) {
 	runManagedAppOwner(t, true, true, false, true, managedAppLoggingCD, true, false, false)
 }
 
@@ -165,108 +162,11 @@ func verifyManagedContainerLogging(t *testing.T, ctx context.Context, runtime **
 		value := allLogs(old.id)
 		return !strings.Contains(value, marker+"-000:") && strings.Contains(value, marker+"-031:")
 	})
-	var preview struct{ Plan control.AppLogClearPlan }
-	if json.Unmarshal(call(0, "compose", "logs-clear", "-p", "app", "web", "--preview"), &preview) != nil || preview.Plan.LogDriver != wantDriver || preview.Plan.Container.NativeID != old.id {
-		t.Fatal("actual user impact plan")
-	}
-	call(2, "compose", "logs-clear", "-p", "app", "web")
-	if inspect().id != old.id {
-		t.Fatal("missing consent changed native target")
-	}
-	var policyBefore any
+	// Logs are cleared from the sfcd log store (logs-clear); the container
+	// is never recreated for it.
+	next := old
+	latest := ""
 	if cd {
-		a, _ := p.ReadApps(read().State)
-		d, _ := a.Delivery("tenant", "app")
-		policyBefore = d.Policy()
-	}
-	if remote != nil {
-		remotePeer, ok := (*runtime).Mesh.Peer(sfcp.Identity(remote.Identity.Public))
-		if !ok {
-			t.Fatal("missing real remote control")
-		}
-		if err := (*runtime).Engine().TransferLeadership(ctx, remotePeer.ID, remotePeer.Endpoint); err != nil {
-			t.Fatal(err)
-		}
-		wait("remote control owns logging command admission", func() bool { return remote.Engine().IsLeader() })
-		defer func() {
-			if err := remote.Engine().TransferLeadership(ctx, peer.ID, peer.Endpoint); err != nil {
-				t.Error("restore logging fixture leader", err)
-				return
-			}
-			wait("restored original logging owner control", func() bool { return (*runtime).Engine().IsLeader() })
-		}()
-	}
-	if stopFault != nil {
-		stopFault.holdStopResponse(old.id, old.name)
-	}
-	var accepted map[string]json.RawMessage
-	if json.Unmarshal(call(0, "compose", "logs-clear", "-p", "app", "web", "--recreate", "--operation", "clear-original"), &accepted) != nil {
-		t.Fatal("missing accepted original clear")
-	}
-	if stopFault != nil {
-		select {
-		case <-stopFault.stopEntered:
-		case <-ctx.Done():
-			t.Fatal("original Stop did not reach actual Engine", ctx.Err())
-		}
-		if err := (*runtime).Engine().Snapshot(ctx); err != nil {
-			t.Fatal(err)
-		}
-		if err := (*runtime).Close(); err != nil {
-			t.Fatal(err)
-		}
-		*runtime = nil
-		stopFault.releaseStop()
-		reopened, err := Open(cfg)
-		if err != nil {
-			t.Fatal(err)
-		}
-		*runtime = reopened
-		if _, err := reopened.InstallConfiguration(ctx); err != nil {
-			t.Fatal(err)
-		}
-		wait("same DB control after lost native Stop response", func() bool { return reopened.Engine().IsLeader() })
-	}
-	wait("original logs removed and replacement ready", func() bool {
-		a, err := p.ReadApps(read().State)
-		if err != nil {
-			return false
-		}
-		s := a.LogClearStatus("tenant", "app", "clear-original")
-		return s != nil && s.Status == "Succeeded" && len(s.NewContainers) > 0
-	})
-	next := inspect()
-	if next.id == old.id || next.volume != old.volume || next.driver != old.driver {
-		t.Fatal("wrong replacement or lost Volume/driver", old.id, next.id, old.volume, next.volume, old.driver, next.driver)
-	}
-	if _, err := (*runtime).docker.API.ContainerInspect(ctx, old.id, client.ContainerInspectOptions{}); !cerrdefs.IsNotFound(err) {
-		t.Fatal("old native still present", err)
-	}
-	for _, file := range old.logFiles {
-		if _, err := os.Stat(file); !os.IsNotExist(err) {
-			t.Fatal("old Engine local logs not physically removed", err)
-		}
-	}
-	if strings.Contains(allLogs(next.id), marker) {
-		t.Fatal("replacement retained deleted original logs")
-	}
-	if stopFault != nil && stopFault.stoppedCalls() != 1 {
-		t.Fatal("lost Stop response was replayed as another native effect", stopFault.stoppedCalls())
-	}
-	vol, err := (*runtime).docker.API.VolumeInspect(ctx, next.volume, client.VolumeInspectOptions{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if data, err := os.ReadFile(filepath.Join(vol.Volume.Mountpoint, "marker")); err != nil || string(data) != "volume-original" {
-		t.Fatal("volume data was lost", err)
-	}
-	latest := "clear-original"
-	if cd {
-		a, _ := p.ReadApps(read().State)
-		d, _ := a.Delivery("tenant", "app")
-		if !reflect.DeepEqual(policyBefore, d.Policy()) {
-			t.Fatal("recreation changed CD policy")
-		}
 		wait("real Git source candidate for logging override", func() bool {
 			a, err := p.ReadApps(read().State)
 			d, ok := a.Delivery("tenant", "app")
@@ -290,10 +190,8 @@ func verifyManagedContainerLogging(t *testing.T, ctx context.Context, runtime **
 		}
 		next, latest = configured, "logging-config"
 	} else {
-		// A completed recreation must not pin future explicit app acceptance
-		// to its old source proof, nor erase the old clear's native history.
 		call(0, "compose", "up", "-f", filepath.Join(root, "compose.yaml"), "--operation", "post-clear-acceptance")
-		wait("new explicit plain app acceptance after recreation", func() bool {
+		wait("new explicit plain app acceptance", func() bool {
 			a, err := p.ReadApps(read().State)
 			e, ok := a.Execution("tenant", "app")
 			return err == nil && ok && e.ActiveOperation() == "post-clear-acceptance" && e.Status() == "Succeeded"
@@ -303,26 +201,12 @@ func verifyManagedContainerLogging(t *testing.T, ctx context.Context, runtime **
 		}
 		latest = "post-clear-acceptance"
 	}
-	var repeated map[string]json.RawMessage
-	if json.Unmarshal(call(0, "compose", "logs-clear", "-p", "app", "web", "--recreate", "--operation", "clear-original"), &repeated) != nil {
-		t.Fatal("missing original repeated result")
-	}
-	for _, field := range []string{"target", "request", "epoch", "root_revision", "expected_revision"} {
-		if !bytes.Equal(accepted[field], repeated[field]) {
-			t.Fatal("repeated request rebuilt original intent", field)
-		}
-	}
-	if inspect().id != next.id {
-		t.Fatal("same log-clear ID deleted a replacement")
-	}
-	call(0, "compose", "logs-clear-status", "-p", "app", "--operation", "clear-original")
-	// The same current native/driver remains observable over the ordinary User
-	// path; metadata alone was not treated as the physical deletion proof.
+	// The current native/driver is observable over the ordinary User path.
 	q := containerops.Query{Schema: 1, Selection: containerops.Selection{App: "app", Service: "web"}, Kind: "logs", Tail: 200, Stdout: true, Stderr: true, MaxBytes: 16384}
 	observed, err := user.ObserveContainer(ctx, peer, session, "tenant", q)
 	if err != nil || observed.Container == nil || observed.Container.Target.NativeID != next.id || observed.Container.LogDriver != next.driver {
 		t.Fatal("current user logging observation", err)
 	}
-	t.Logf("actual %s rotation -> explicit user recreation -> old native/log path Gone; original ID preserved; Volume retained; faultStop=%t remoteOwner=%t CDpolicy=%t", wantDriver, stopFault != nil, remote != nil, cd)
+	t.Logf("actual %s rotation; CDpolicy=%t", wantDriver, cd)
 	return latest
 }

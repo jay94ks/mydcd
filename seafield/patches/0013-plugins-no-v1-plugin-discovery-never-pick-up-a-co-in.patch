@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Claude <noreply@anthropic.com>
 Date: Fri, 27 Nov 2026 08:56:05 +0000
-Subject: [PATCH 13/20] plugins: no v1 plugin discovery (never pick up a
+Subject: [PATCH 13/21] plugins: no v1 plugin discovery (never pick up a
  co-installed Docker's plugins)
 
 

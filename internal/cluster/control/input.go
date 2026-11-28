@@ -109,6 +109,8 @@ func InputChange(raw []byte, principal string) (Change, error) {
 		payload, err = normalizedPayload[nodestorage.Definition](d.Payload)
 	case "set-node-storage-policy":
 		payload, err = normalizedPayload[NodeStoragePolicy](d.Payload)
+	case "set-node-archive-default":
+		payload, err = normalizedPayload[NodeArchiveDefault](d.Payload)
 	case "drain-node-storage", "remove-node-storage":
 		payload, err = normalizedPayload[NodeStorageSelection](d.Payload)
 	case "vault-init":
@@ -123,6 +125,8 @@ func InputChange(raw []byte, principal string) (Change, error) {
 		payload, err = normalizedPayload[VaultMove](d.Payload)
 	case "vault-approval-age":
 		payload, err = normalizedPayload[VaultAge](d.Payload)
+	case "vault-registry-shared":
+		payload, err = normalizedPayload[VaultRegistryShared](d.Payload)
 	case "vault-set-profile":
 		payload, err = normalizedPayload[VaultProfile](d.Payload)
 	case "vault-prepare-write":
@@ -185,8 +189,6 @@ func InputChange(raw []byte, principal string) (Change, error) {
 		payload, err = normalizedPayload[AppCDApproverChange](d.Payload)
 	case "standalone-stop", "standalone-start", "standalone-restart", "restart-task":
 		payload, err = normalizedPayload[TaskRestartChange](d.Payload)
-	case "clear-app-logs", "standalone-clear-logs":
-		payload, err = normalizedPayload[AppLogClear](d.Payload)
 	case "down-app":
 		payload, err = normalizedPayload[AppDown](d.Payload)
 	case "resume-app-retirement":
@@ -211,6 +213,12 @@ func InputChange(raw []byte, principal string) (Change, error) {
 		payload, err = normalizedPayload[VolumeBackupBegin](d.Payload)
 	case "cancel-volume-backup", "delete-volume-backup":
 		payload, err = normalizedPayload[VolumeBackupSelection](d.Payload)
+	case "archive-volume":
+		payload, err = normalizedPayload[VolumeArchiveBegin](d.Payload)
+	case "cancel-volume-archive", "unarchive-volume", "discard-volume-archive":
+		payload, err = normalizedPayload[VolumeArchiveSelection](d.Payload)
+	case "set-volume-archive-admin-key":
+		payload, err = normalizedPayload[VolumeArchiveAdminKey](d.Payload)
 	case "begin-volume-create":
 		payload, err = normalizedPayload[VolumeCreate](d.Payload)
 	case "register-fixed-volume":

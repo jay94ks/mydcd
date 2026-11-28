@@ -8,17 +8,20 @@ import (
 	"github.com/jay94ks/seafield/internal/cluster/control"
 )
 
-func TestRegistryActionPlanCannotMixScopeAndMethodFields(t *testing.T) {
+func TestRegistryActionPlanCannotCarryOtherFields(t *testing.T) {
 	q := control.RegistryActionQuery{Action: "stop-registry", ID: "private"}
-	base := Request{Method: "registry-action-plan", Tenant: "tenant", RegistryAction: &q}
-	if !base.validQuerySelectors() {
+	if !(RegistryActionQuery{Tenant: "tenant", Query: q}).Valid() {
 		t.Fatal("typed registry plan rejected")
 	}
-	for _, edit := range []func(*Request){func(r *Request) { r.Tenant = "" }, func(r *Request) { r.Node = "node-a" }, func(r *Request) { r.After = "cursor" }, func(r *Request) { r.Method = "whoami" }, func(r *Request) { r.RegistryAction = nil }} {
-		bad := base
-		edit(&bad)
-		if bad.validQuerySelectors() {
-			t.Fatal("mixed registry action request accepted")
+	if (RegistryActionQuery{Query: q}).Valid() || (RegistryActionQuery{Tenant: "tenant", Query: control.RegistryActionQuery{Action: "delete-registry", ID: "private"}}).Valid() {
+		t.Fatal("registry plan without tenant or with a foreign action accepted")
+	}
+	for _, raw := range []string{
+		`{"Tenant":"tenant","Query":{"Action":"stop-registry","ID":"private"},"Node":"node-a"}`,
+		`{"Tenant":"tenant","Query":{"Action":"stop-registry","ID":"private"},"After":"cursor"}`,
+	} {
+		if strict([]byte(raw), &RegistryActionQuery{}) == nil {
+			t.Fatal("mixed registry action request accepted", raw)
 		}
 	}
 }

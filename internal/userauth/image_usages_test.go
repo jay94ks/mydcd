@@ -10,24 +10,28 @@ import (
 )
 
 func TestImageUsageSelectorsKeepTenantCursorAndSourceFieldsSeparate(t *testing.T) {
-	base := Request{Method: "image-usages", Tenant: "tenant", ImageUsage: &control.ImageUsageQuery{Refs: []string{"alpine:latest"}}}
-	if !base.validQuerySelectors() || !base.validMethodFields() {
+	base := ImageUsagesQuery{Tenant: "tenant", Query: control.ImageUsageQuery{Refs: []string{"alpine:latest"}}}
+	if !base.Valid() {
 		t.Fatal("typed image usages query rejected")
 	}
-	for _, edit := range []func(*Request){
-		func(q *Request) { q.Tenant = "" }, func(q *Request) { q.Node = "node-a" }, func(q *Request) { q.After = "not-a-cursor" },
-		func(q *Request) { q.ImageUsage = nil }, func(q *Request) { q.Method = "image-resolve" },
-		func(q *Request) { q.ImageUsage = &control.ImageUsageQuery{ExternalSource: "../private"} },
-		func(q *Request) {
-			q.ImageUsage = &control.ImageUsageQuery{Refs: []string{"alpine", "docker.io/library/alpine:latest"}}
+	for _, edit := range []func(*ImageUsagesQuery){
+		func(q *ImageUsagesQuery) { q.Tenant = "" }, func(q *ImageUsagesQuery) { q.After = "not-a-cursor" },
+		func(q *ImageUsagesQuery) { q.Query = control.ImageUsageQuery{ExternalSource: "../private"} },
+		func(q *ImageUsagesQuery) {
+			q.Query = control.ImageUsageQuery{Refs: []string{"alpine", "docker.io/library/alpine:latest"}}
 		},
-		func(q *Request) { q.ImageUsage = &control.ImageUsageQuery{Refs: []string{strings.Repeat("a", 1025)}} },
+		func(q *ImageUsagesQuery) {
+			q.Query = control.ImageUsageQuery{Refs: []string{strings.Repeat("a", 1025)}}
+		},
 	} {
 		bad := base
 		edit(&bad)
-		if bad.validQuerySelectors() {
+		if bad.Valid() {
 			t.Fatal("mixed/invalid reference query accepted")
 		}
+	}
+	if strict([]byte(`{"Tenant":"tenant","Query":{"Refs":["alpine:latest"]},"Node":"node-a"}`), &ImageUsagesQuery{}) == nil {
+		t.Fatal("foreign usage field accepted")
 	}
 	q := control.ImageUsageQuery{ExternalSource: "source"}
 	if !q.Valid() {

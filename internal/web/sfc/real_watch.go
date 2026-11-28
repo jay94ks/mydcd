@@ -16,7 +16,8 @@ import (
 // delivered. Refs name the records that changed (never their content);
 // Resync means changes before Index are no longer known: read again.
 //
-// Events are report notices (a node report changed what sfcd stores),
+// Events are report notices (a node report changed what sfcd stores) and
+// this server's engine notices (a container started, stopped, died ...),
 // not numbered or resumed; EventsLost means some were dropped, so screens
 // built from reports read again.
 type ChangeBatch struct {
@@ -49,7 +50,7 @@ func (c *realConn) WatchChanges(ctx context.Context, from uint64, each func(Chan
 	}
 	defer mesh.Close()
 	client := userauth.Client{Cluster: c.c.Cluster, Self: self, Mesh: mesh, Peers: []sfcp.Peer{peer}}
-	last, err := client.WatchChanges(ctx, peer, s, from, []string{eventbus.TopicReport}, func(r userauth.ChangeWatchReply) error {
+	last, err := client.WatchChanges(ctx, peer, s, from, []string{eventbus.TopicReport, eventbus.TopicEngine}, func(r userauth.ChangeWatchReply) error {
 		return each(ChangeBatch{Index: r.Index, Resync: r.Resync, Refs: r.Refs, Events: r.Events, EventsLost: r.EventsLost})
 	})
 	if err != nil && ctx.Err() == nil {

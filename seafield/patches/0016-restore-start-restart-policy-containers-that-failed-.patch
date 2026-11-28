@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Claude <noreply@anthropic.com>
 Date: Fri, 27 Nov 2026 09:25:45 +0000
-Subject: [PATCH 16/20] restore: start restart-policy containers that failed
+Subject: [PATCH 16/21] restore: start restart-policy containers that failed
  before the sfcd session was up
 
 

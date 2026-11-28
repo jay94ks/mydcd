@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"strconv"
 	"sync"
+	"time"
 
 	"github.com/jay94ks/seafield/internal/nodestorage"
 	"github.com/jay94ks/seafield/internal/volumeshare"
@@ -38,6 +39,7 @@ type Home struct {
 }
 
 type servedRoot struct {
+	used  time.Time // last Authorize; a sweep on an older read leaves it
 	ready volumes.NativeReady
 	root  *localroot.Root
 	ro    volumeshare.Ops
@@ -79,6 +81,7 @@ func (h *Home) served(ctx context.Context, ready volumes.NativeReady) (*servedRo
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if r := h.roots[key]; r != nil && reflect.DeepEqual(r.ready, ready) {
+		r.used = time.Now()
 		return r, nil
 	} else if r != nil {
 		// The record changed under the same key: never serve the old one.
@@ -94,7 +97,7 @@ func (h *Home) served(ctx context.Context, ready volumes.NativeReady) (*servedRo
 	if err != nil {
 		return nil, err
 	}
-	r := &servedRoot{ready: ready, root: root, ro: volumeshare.ReadOnly(root)}
+	r := &servedRoot{used: time.Now(), ready: ready, root: root, ro: volumeshare.ReadOnly(root)}
 	h.roots[key] = r
 	return r, nil
 }
@@ -109,4 +112,23 @@ func (h *Home) Close() error {
 		delete(h.roots, key)
 	}
 	return err
+}
+
+// Sweep stops serving every Volume generation keep says no consumer uses
+// any more (a delete or a new generation also lands here). Sessions still
+// open on it then get EBADF; there is no consumer left to use them. A root
+// granted since read (the time of the state keep looked at) stays: keep
+// may not know its consumer yet.
+func (h *Home) Sweep(read time.Time, keep func(volumes.NativeReady) bool) int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	n := 0
+	for key, r := range h.roots {
+		if !r.used.After(read) && !keep(r.ready) {
+			_ = r.root.Shutdown()
+			delete(h.roots, key)
+			n++
+		}
+	}
+	return n
 }

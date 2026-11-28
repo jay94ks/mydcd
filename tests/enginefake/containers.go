@@ -325,6 +325,7 @@ func (e *Engine) exit(c *ctr, code int, oom bool) {
 	if !c.State.Running && c.State.Status != container.StatePaused {
 		return
 	}
+	e.endExecs(c)
 	e.stopSandbox(c)
 	c.State.Status, c.State.Running, c.State.Paused, c.State.Pid = container.StateExited, false, false, 0
 	c.State.ExitCode, c.State.OOMKilled, c.State.FinishedAt = code, oom, stamp(time.Now())

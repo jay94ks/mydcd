@@ -253,8 +253,12 @@ export function streamEndText(code: string): string {
       return '로그인이 만료됐습니다.';
     case 'unavailable':
       return '서버가 지금 응답하지 않습니다.';
+    case 'invalid':
+    case 'rejected':
+    case 'bad-request':
+      return '서버가 이 따라가기 요청을 받지 않았습니다.';
     default:
-      return `스트림이 끝났습니다 (${code}).`;
+      return '스트림이 끝났습니다.';
   }
 }
 

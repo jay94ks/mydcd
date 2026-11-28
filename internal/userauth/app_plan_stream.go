@@ -72,10 +72,12 @@ func (c Client) planExchange(ctx context.Context, target sfcp.Peer, document []b
 	if c.Mesh == nil || c.Self == nil || c.Self.Public != [32]byte(c.Mesh.LocalKey()) {
 		return nil, Reply{}, sfcp.ErrAdmission
 	}
-	conn, err := c.Mesh.Dial(ctx, target)
+	conn, stream, err := c.openUser(ctx, target)
 	if err != nil {
 		return nil, Reply{}, err
 	}
+	defer stream.CancelRead(0)
+	defer stream.Close()
 	envelope, err := makeEnvelope(conn)
 	if err != nil {
 		return nil, Reply{}, err
@@ -85,12 +87,6 @@ func (c Client) planExchange(ctx context.Context, target sfcp.Peer, document []b
 		return nil, Reply{}, err
 	}
 	digest := sha256.Sum256(header)
-	stream, err := conn.OpenManagement(ctx)
-	if err != nil {
-		return nil, Reply{}, err
-	}
-	defer stream.CancelRead(0)
-	defer stream.Close()
 	stop := context.AfterFunc(ctx, func() { stream.CancelRead(1); stream.CancelWrite(1) })
 	defer stop()
 	id := c.Mesh.NextRequest()
@@ -104,7 +100,7 @@ func (c Client) planExchange(ctx context.Context, target sfcp.Peer, document []b
 		if err != nil {
 			return reply, err
 		}
-		if f.Purpose != sfcp.User || f.Kind != 2 || f.Request != id || conn.Admit(f, sfcp.User, false) != nil || !bytes.Equal(f.Fields[1].Value, digest[:]) || strict(f.Fields[0].Value, &reply) != nil || reply.Schema != 1 {
+		if f.Purpose != sfcp.User || f.Kind != 2 || f.Request != id || conn.Admit(f, sfcp.User, false) != nil || !bytes.Equal(f.Fields[1].Value, digest[:]) || lenient(f.Fields[0].Value, &reply) != nil || reply.Schema != 1 {
 			return reply, sfcp.ErrFrame
 		}
 		return reply, nil

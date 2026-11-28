@@ -129,7 +129,7 @@ export const devices: Record<string, D.DNodeDevices> = {
         ] },
       { name: 'sdb', class: 'additional', size: 2048 * GiB, model: 'WDC WD20EFRX', serial: 'WD-WCC4M0', rotational: true, table: 'gpt', purposes: ['storage-root'],
         parts: [
-          { name: 'sdb1', number: 1, size: 1024 * GiB, fsType: 'xfs', mounts: ['/srv/sfc/data1'], space: { total: 1024 * GiB, used: 412 * GiB, available: 612 * GiB }, purposes: ['storage-root'], storageRoots: ['data1'] },
+          { name: 'sdb1', number: 1, size: 1024 * GiB, fsType: 'xfs', uuid: '2d7f0c3e-6a1b-4e95-8f20-c4b7d1a9e360', mounts: ['/srv/sfc/data1'], space: { total: 1024 * GiB, used: 412 * GiB, available: 612 * GiB }, purposes: ['storage-root'], storageRoots: ['data1'] },
           { name: 'sdb2', number: 2, size: 1024 * GiB, fsType: 'LVM2_member', holders: [{ name: 'dm-0', kind: 'lvm', mapper: 'vg0-media', fsType: 'ext4', mounts: ['/mnt/media'], space: { total: 1000 * GiB, used: 120 * GiB, available: 830 * GiB } }] },
         ] },
       // sfcd가 마운트한 디스크(#689 3단계): 위에 저장 경로가 없어 마운트를 풀 수 있다
@@ -138,9 +138,18 @@ export const devices: Record<string, D.DNodeDevices> = {
       { name: 'sdh', class: 'unused', size: 14904 * GiB, model: 'TOSHIBA MG08', serial: '51R0A0XKF', rotational: true, table: 'gpt', tableID: '3f6e1b90-44a2-4c1d-8e57-b0d29a6c5f13',
         parts: [{ name: 'sdh1', number: 1, size: 14904 * GiB, fsType: 'ext4', uuid: '9b2e7a41-0c6d-4f38-a5e2-1d84c07bd410', label: 'old-backup' }] },
       { name: 'sdz', class: 'unused', size: 4096 * GiB, model: 'ST4000VN008', serial: 'ZDH8K2LQ', rotational: true, parts: [] },
+      { name: 'sdk', class: 'unused', size: 4096 * GiB, model: 'ST4000VN008', serial: 'ZDH8K7RM', rotational: true, parts: [] },
+      { name: 'sdg', class: 'unused', size: 931.5 * GiB, model: 'Samsung SSD 870 EVO', serial: 'S6PNNM1K', rotational: false, parts: [] },
+      // 디스크 묶음 pool1 (#811): LVM 미러, sdj를 찾지 못해 한쪽 고장
+      { name: 'pool1', class: 'additional', kind: 'bundle', bundle: 'pool1', size: 3726 * GiB, parts: [{ name: 'pool1', number: 0, size: 3726 * GiB, fsType: 'ext4', uuid: 'b00d1a2e-7c41-4f0a-9d3e-5a6b7c8d9e01', label: 'pool1', mounts: ['/var/lib/sfc-disks/pool1'], space: { total: 3650 * GiB, used: 1130 * GiB, available: 2330 * GiB } }] },
+      { name: 'sdi', class: 'bundle-member', bundle: 'pool1', size: 3726 * GiB, model: 'WDC WD40EFRX', serial: 'WD-WCC7K1A2', rotational: true, parts: [] },
+    ],
+    bundles: [
+      { name: 'pool1', backend: 'lvm', mode: 'mirror', size: 3726 * GiB, device: '/dev/dm-9', state: 'degraded', syncPercent: 0, members: [{ disk: 'sdi', serial: 'WD-WCC7K1A2', size: 3726 * GiB, state: 'ok' }, { disk: 'sdj', serial: 'WD-WCC7K9F3', size: 3726 * GiB, state: 'missing' }] },
     ],
     recorded: [
       { uuid: 'c3a14f0e-58d2-4b7a-9e10-6a2f8c4d71b5', path: '/var/lib/sfc-disks/fast1', disk: 'sdc', part: 'sdc1' },
+      { uuid: 'b00d1a2e-7c41-4f0a-9d3e-5a6b7c8d9e01', path: '/var/lib/sfc-disks/pool1', disk: 'pool1', part: 'pool1' },
       { uuid: '6f1c3d57-92ab-4e06-b8f4-7c15e9d0a02e', path: '/var/lib/sfc-disks/media', disk: 'sdd', part: 'sdd1', reason: 'disk-not-found' },
     ],
   },
@@ -277,6 +286,10 @@ export const sources: Record<string, MockSource[]> = {
   'shop/worker-batch': [{ version: 5, yaml: simpleApp('worker-batch', 'shop', 'worker', 2), submitter: 'cd', operation: 'cd-77aa', status: 'succeeded', acceptedAt: agoSec(86400) }],
   'internal/grafana': [{ version: 2, yaml: simpleApp('grafana', 'internal', 'grafana', 1, 'node-a').replace('name: grafana\n', 'name: grafana\nx-sfc:\n  ingress:\n    routes:\n      - host: grafana.internal\n        prefix: /\n        service: grafana\n        port: 3000\n        gateway: local\n').replace('    deploy:', '    expose: ["3000"]\n    deploy:'), submitter: 'carol', operation: 'up-ff01', status: 'succeeded', acceptedAt: agoSec(86400 * 6) }],
   'lab/notebook': [{ version: 1, yaml: simpleApp('notebook', 'lab', 'jupyter', 1), submitter: 'alice', operation: 'up-0001', status: 'succeeded', acceptedAt: agoSec(86400 * 9) }],
+  // 장애 기록·외부 접속 목업이 가리키는 앱(shop-api·billing·metrics)도 실제로 있게 둔다
+  'shop/shop-api': [{ version: 16, yaml: simpleApp('shop-api', 'shop', 'api', 2, 'node-b'), submitter: 'cd', operation: 'cd-5b20', status: 'succeeded', acceptedAt: agoSec(150 * 60) }],
+  'shop/billing': [{ version: 9, yaml: simpleApp('billing', 'shop', 'billing-api', 1), submitter: 'bob', operation: 'up-b909', status: 'succeeded', acceptedAt: agoSec(27 * 3600) }],
+  'internal/metrics': [{ version: 4, yaml: simpleApp('metrics', 'internal', 'prometheus', 1, 'node-a'), submitter: 'carol', operation: 'up-m004', status: 'succeeded', acceptedAt: agoSec(86400 * 5) }],
 };
 
 const opsum = (id: string, status: string, completedAgo: number, submitter = 'alice', failed = false): D.DOperationSummary => ({ id, status, completedAt: status === 'running' ? 0 : agoSec(completedAgo), submitter, failed, epoch: 1 });
@@ -296,6 +309,9 @@ export const apps: D.DAppView[] = [
   },
   { tenant: 'internal', app: 'grafana', deployment: 'main', revision: 2, operation: opsum('up-ff01', 'succeeded', 86400 * 6, 'carol'), claims: 1, health: 'healthy', observedAt: agoSec(7) },
   { tenant: 'lab', app: 'notebook', deployment: 'main', revision: 1, operation: opsum('up-0001', 'succeeded', 86400 * 9), claims: 0, health: 'healthy', observedAt: agoSec(8) },
+  { tenant: 'shop', app: 'shop-api', deployment: 'main', revision: 16, operation: opsum('cd-5b20', 'succeeded', 150 * 60, 'cd'), claims: 2, health: 'degraded', observedAt: agoSec(6) },
+  { tenant: 'shop', app: 'billing', deployment: 'main', revision: 9, operation: opsum('up-b909', 'succeeded', 27 * 3600, 'bob'), claims: 1, health: 'degraded', observedAt: agoSec(6) },
+  { tenant: 'internal', app: 'metrics', deployment: 'main', revision: 4, operation: opsum('up-m004', 'succeeded', 86400 * 5, 'carol'), claims: 1, health: 'healthy', observedAt: agoSec(7) },
 ];
 
 export const archived: D.DArchived[] = [
@@ -377,7 +393,7 @@ export const vault: (D.DVault & { tenant: string })[] = [
   vrow('shop', 'registry-login/harbor-robot', 'object', 1, { keys: ['username', 'password'], group: 'registry-login' }),
   vrow('shop', 'corp-root-ca', 'object', 1, { keys: ['ca.pem'] }),
   vrow('internal', 'grafana-admin', 'object', 2, { keys: ['user', 'password'] }),
-  // 클러스터 보관함(realm "", 시스템 관리자, 데몬 #74). 뿌리 묶음 'cluster'(parent ""). 목업은 처음에 초기화 전이고 초기화하면 아래가 보인다
+  // 클러스터 보관함(realm "", 시스템 관리자, 데몬 #74). 최상위 묶음 'cluster'(parent ""). 목업은 처음에 초기화 전이고 초기화하면 아래가 보인다
   { ...vrow('cluster', 'cluster', 'group', 1), realm: '', path: '', parent: '' },
   { ...vrow('cluster', 'shared-smtp', 'group', 3), realm: '', parent: 'cluster' },
   { ...vrow('cluster', 'shared-smtp/relay-password', 'object', 4, { keys: ['password'], group: 'shared-smtp' }), realm: '' },
@@ -431,7 +447,7 @@ export const registryLimits = (gib: number): D.DRegistryLimits => ({
   tokenSeconds: 300,
 });
 export const registries: D.DRegistry[] = [
-  { tenant: 'shop', id: 'builtin', name: 'builtin', endpoint: 'registry.shop.internal', revision: 4, generation: 1, active: true, repositories: 2, node: 'node-a', address: '0.0.0.0:443', certificateID: '9c41d2e85f30a7b16c94e0d3f8a2b57e1c06d49a3b8e72f5c1d0a6e94b3f7e07a', volume: 'registry-data', enabled: true, observedAt: Date.now() - 5000, status: 'serving', limits: registryLimits(200) },
+  { tenant: 'shop', id: 'builtin', name: 'builtin', endpoint: 'registry.shop.internal', revision: 4, generation: 1, active: true, repositories: 2, node: 'node-a', address: '0.0.0.0:443', certificateID: '9c41d2e85f30a7b16c94e0d3f8a2b57e1c06d49a3b8e72f5c1d0a6e94b3f7e07', volume: 'registry-data', enabled: true, observedAt: Date.now() - 5000, status: 'serving', limits: registryLimits(200) },
   { tenant: 'shop', id: 'shop-staging', name: 'shop-staging', endpoint: 'registry-stg.sfc:5000', revision: 2, generation: 1, active: false, repositories: 0, node: 'node-b', address: '0.0.0.0:5000', volume: 'registry-stg-data', enabled: false, status: 'stopped', limits: registryLimits(12) },
 ];
 

@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Claude <noreply@anthropic.com>
 Date: Fri, 27 Nov 2026 08:41:17 +0000
-Subject: [PATCH 11/20] network: built-in sfc network driver, bridge driver
+Subject: [PATCH 11/21] network: built-in sfc network driver, bridge driver
  with synchronous sfcd hooks
 
 

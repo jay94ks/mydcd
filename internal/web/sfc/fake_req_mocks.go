@@ -56,7 +56,7 @@ func (c *fakeConn) TenantStoragePage(ctx context.Context, tenant, node, after st
 			out.Next = snapshot + ":" + prev.Node + "/" + prev.ID
 			break
 		}
-		out.Items = append(out.Items, control.TenantStorageRoot{Node: r.Node, ID: r.ID, Generation: max(r.Generation, 1), Revision: r.Revision, Draining: r.Draining, Allowed: true, Root: w.storageRef(r)})
+		out.Items = append(out.Items, control.TenantStorageRoot{Node: r.Node, ID: r.ID, Generation: max(r.Generation, 1), Revision: r.Revision, Draining: r.Draining, Allowed: true, Root: w.storageRef(r), ArchiveDefault: r.ArchiveDefault})
 	}
 	return out, nil
 }

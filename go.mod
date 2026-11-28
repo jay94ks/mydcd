@@ -14,10 +14,12 @@ require (
 	github.com/go-git/go-git/v5 v5.19.3
 	github.com/google/go-containerregistry v0.22.1
 	github.com/google/nftables v0.3.0
+	github.com/hanwen/go-fuse/v2 v2.11.0
 	github.com/hashicorp/go-immutable-radix v1.3.1
 	github.com/hashicorp/raft v1.8.0
 	github.com/hashicorp/raft-boltdb/v2 v2.4.2
 	github.com/hashicorp/vault/api v1.23.0
+	github.com/klauspost/compress v1.20.2
 	github.com/miekg/dns v1.1.73
 	github.com/moby/buildkit v0.35.1
 	github.com/moby/docker-image-spec v1.3.1
@@ -98,7 +100,6 @@ require (
 	github.com/invopop/jsonschema v0.14.0 // indirect
 	github.com/jbenet/go-context v0.0.0-20150711004518-d14ea06fba99 // indirect
 	github.com/kevinburke/ssh_config v1.2.0 // indirect
-	github.com/klauspost/compress v1.20.2 // indirect
 	github.com/mattn/go-colorable v0.1.15 // indirect
 	github.com/mattn/go-isatty v0.0.24 // indirect
 	github.com/mattn/go-shellwords v1.0.12 // indirect

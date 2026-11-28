@@ -36,6 +36,9 @@ type Host struct {
 	CPUUsed                 *uint64  `json:",omitempty"`
 	MemoryTotal, MemoryUsed *uint64  `json:",omitempty"`
 	ModuleReady             bool
+	// Unready says why ModuleReady is false, in fixed codes only: the error
+	// text may hold secrets and stays in the daemon log.
+	Unready *Unready `json:",omitempty"`
 	// TunnelWaits names managed TUN networks whose path this server cannot
 	// open yet, with a fixed-format reason (never peer data or secrets).
 	TunnelWaits []TunnelWait `json:",omitempty"`
@@ -45,6 +48,45 @@ type Host struct {
 	// Build says whether this server runs image builds. Absent means an
 	// older daemon that did not say.
 	Build *Build `json:",omitempty"`
+}
+
+// Unready is why a server is not ready. Reason is one of UnreadyReasons;
+// Steps are the reconciliation steps that failed (MODULE_PASS_FAILED),
+// and Since is when the failure began (Unix milliseconds; 0 when not
+// tracked, as for HOST_READ_FAILED).
+type Unready struct {
+	Reason string
+	Steps  []string `json:",omitempty"`
+	Since  uint64
+}
+
+// UnreadyReasons: a reconciliation pass (or the event log it writes)
+// failed, or the host could not be read.
+var UnreadyReasons = []string{"MODULE_PASS_FAILED", "HOST_READ_FAILED"}
+
+func (u Unready) valid() bool {
+	if !slices.Contains(UnreadyReasons, u.Reason) || len(u.Steps) > 32 {
+		return false
+	}
+	for _, step := range u.Steps {
+		if !validStep(step) {
+			return false
+		}
+	}
+	return true
+}
+
+// validStep: a step name such as "node-storage" (lowercase, digits, '-').
+func validStep(s string) bool {
+	if s == "" || len(s) > 48 {
+		return false
+	}
+	for _, c := range s {
+		if !(c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '-') {
+			return false
+		}
+	}
+	return true
 }
 
 // Build is one server's image build capability. Reason is empty when
@@ -270,7 +312,7 @@ func (r Report) Valid() bool {
 				return false
 			}
 		}
-		if len(h.TunnelWaits) > 32 || h.Build != nil && !h.Build.valid() {
+		if len(h.TunnelWaits) > 32 || h.Build != nil && !h.Build.valid() || h.Unready != nil && (h.ModuleReady || !h.Unready.valid()) {
 			return false
 		}
 		for _, w := range h.TunnelWaits {
@@ -382,15 +424,17 @@ func FilesystemID(node, filesystem string) string {
 
 func Fresh(at, now uint64) bool { return at != 0 && at <= now && now-at <= MaxAge }
 
-// validFeatureNames: at most 64 distinct lowercase names, each 1-32 bytes of
-// a-z, 0-9 and '-'. Order is the reporter's table order, not checked.
+// validFeatureNames: at most 64 distinct lowercase written names
+// (group-set-vN[-postfix], buildinfo), each 1-64 bytes of a-z, 0-9 and '-'.
+// Names a newer build defines are accepted as long as they are well formed;
+// order is the reporter's, not checked.
 func validFeatureNames(names []string) bool {
 	if len(names) > 64 {
 		return false
 	}
 	seen := map[string]bool{}
 	for _, n := range names {
-		if n == "" || len(n) > 32 || seen[n] {
+		if n == "" || len(n) > 64 || seen[n] {
 			return false
 		}
 		for _, c := range n {

@@ -17,7 +17,7 @@ import { dashboardLive } from '../lib/liveTopics';
 
 export const ATTN: Record<AttentionItem['kind'], [Tone, string]> = {
   approval: ['wa', '승인 대기'],
-  problem: ['er', '문제'],
+  problem: ['er', '오류'],
   disk: ['wa', '디스크'],
   'unknown-op': ['un', '결과 불명'],
   progress: ['pr', '진행 중'],
@@ -44,7 +44,7 @@ export function NodeCard({ n, admin }: { n: NodeView; admin: boolean }) {
         </span>
         <span className="row">
           {n.stale && <Badge tone="wa">오래된 관측</Badge>}
-          <PhaseBadge phase={n.phase} />
+          <PhaseBadge phase={n.phase} reason={n.phaseReason} />
         </span>
       </div>
       {n.endpoint && <span className="small muted break-any">{n.endpoint}</span>}
@@ -121,7 +121,7 @@ function DesktopDashboard() {
               <div className="grid tiles">
                 <Tile label="서버" value={`${ready} / ${v.nodes.length} 준비됨`} sub={joining.length ? `가입 대기 ${joining.length} (${joining.map((n) => n.id).join(', ')})` : notReady ? `준비 안 됨 ${notReady}` : '모두 준비됨'} />
                 <Tile label="컨테이너" value={`${containers}개`} sub="보이는 서버의 합" />
-                <Tile label="앱" value={v.apps.length} sub={`정상 ${count('healthy')} · 진행 중 ${count('progressing')} · 일부 문제 ${count('degraded')}${count('unhealthy') ? ` · 문제 ${count('unhealthy')}` : ''}${count('unknown') ? ` · 확인 불가 ${count('unknown')}` : ''}`} />
+                <Tile label="앱" value={v.apps.length} sub={`정상 ${count('healthy')} · 진행 중 ${count('progressing')} · 일부 오류 ${count('degraded')}${count('unhealthy') ? ` · 오류 ${count('unhealthy')}` : ''}${count('unknown') ? ` · 확인 불가 ${count('unknown')}` : ''}`} />
                 <Tile label="주의" value={`${v.attention.length}건`} tone={v.attention.length ? 'wa' : 'ok'} sub={v.attention.length ? '아래 목록 참고' : '지금 주의할 것 없음'} />
               </div>
               <section className="col">
@@ -130,7 +130,7 @@ function DesktopDashboard() {
                   <span className="row">
                     <select value={sort} onChange={(e) => setSort(e.target.value as typeof sort)} aria-label="정렬">
                       <option value="name">정렬: 이름</option>
-                      <option value="problem">정렬: 문제 먼저</option>
+                      <option value="problem">정렬: 오류 많은 순</option>
                       <option value="usage">정렬: 사용률 높은 순</option>
                     </select>
                     {admin && (

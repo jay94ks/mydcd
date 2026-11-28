@@ -28,13 +28,28 @@ func (p *NodeChangePlan) block(code string) {
 // directory entry for a suffrage change. A current leader may transfer to a
 // remaining voter before dispatch; this core does not invent a self ban.
 func (d Directory) PlanNodeChange(id string, remove bool) (NodeChangePlan, error) {
+	return d.planNodeChange(id, remove, false)
+}
+
+// PlanForceRemoval is PlanNodeChange for a forced removal of a server that
+// no longer answers. Its own unfinished key rotation does not block it: only
+// that server can finish the rotation, so a dead server would otherwise stay
+// a member forever. The removal closes that rotation (abandonIdentityRotations).
+func (d Directory) PlanForceRemoval(id string) (NodeChangePlan, error) {
+	return d.planNodeChange(id, true, true)
+}
+
+func (d Directory) planNodeChange(id string, remove, force bool) (NodeChangePlan, error) {
 	e, exists := d.Entry(id)
 	out := NodeChangePlan{Epoch: 1, Expected: e.Revision, Blockers: []string{}}
 	if !exists || !FullMember(e) {
 		return out, ErrMember
 	}
 	for _, row := range d.Rotations {
-		if row.Phase != "Installed" && (row.Node == id || !remove) {
+		if force && row.Node == id {
+			continue
+		}
+		if !row.Settled() && (row.Node == id || !remove) {
 			out.PendingOperation = row.Operation
 			out.block("NODE_OPERATION_PENDING")
 		}

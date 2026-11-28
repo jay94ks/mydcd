@@ -253,7 +253,7 @@ func (p Policy) reduceImageBuilds(s state.State, cmd state.Command) (map[string]
 			if b.storedBytes(tenant) > spec.CacheBytes {
 				return nil, state.ConditionFailed
 			}
-			if _, err := c.CheckImageTrust(tenant, spec.BuilderImage); err != nil {
+			if _, err := c.CheckImageRefTrust(tenant, spec.BuilderImage); err != nil {
 				return nil, state.Forbidden
 			}
 			registries, err := p.Registries(s)

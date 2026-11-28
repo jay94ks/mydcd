@@ -543,20 +543,20 @@ func cdMemberID(c *cli.Context, g *globals, s *session, tenant, username string)
 	after := ""
 	for range 4096 {
 		ctx, cancel := g.Deadline(c)
-		reply, err := s.Client.TenantMembersPage(ctx, s.Target, s.Stored.Session, tenant, after)
+		reply, err := s.Client.TenantMembers(ctx, s.Target, s.Stored.Session, tenant, after)
 		cancel()
 		if err != nil {
 			return "", err
 		}
-		for _, m := range reply.TenantMembers {
+		for _, m := range reply.Members {
 			if m.Username == username {
 				return m.User, nil
 			}
 		}
-		if reply.TenantMembersNext == "" || reply.TenantMembersNext == after {
+		if reply.Next == "" || reply.Next == after {
 			break
 		}
-		after = reply.TenantMembersNext
+		after = reply.Next
 	}
 	return "", fmt.Errorf("%s is not a member of tenant %s", username, tenant)
 }

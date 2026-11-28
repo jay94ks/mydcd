@@ -35,7 +35,7 @@ func matchNativeContainerOptions(got container.InspectResponse, identity engine.
 	}
 	c, h := got.Config, got.HostConfig
 	wc, wh := want.Config, want.HostConfig
-	if c.Image != wc.Image || c.User != wc.User || c.WorkingDir != wc.WorkingDir || !slices.Equal(c.Entrypoint, wc.Entrypoint) || !slices.Equal(c.Cmd, wc.Cmd) || c.OpenStdin || c.Tty || c.StdinOnce || len(c.ExposedPorts) != 0 || !slices.Equal(c.Env, wc.Env) || c.StopSignal != wc.StopSignal || c.StopTimeout == nil || *c.StopTimeout != *wc.StopTimeout || c.Healthcheck == nil || !slices.Equal(c.Healthcheck.Test, []string{"NONE"}) {
+	if c.Image != wc.Image && c.Image != imageID || c.User != wc.User || c.WorkingDir != wc.WorkingDir || !slices.Equal(c.Entrypoint, wc.Entrypoint) || !slices.Equal(c.Cmd, wc.Cmd) || c.OpenStdin || c.Tty || c.StdinOnce || len(c.ExposedPorts) != 0 || !slices.Equal(c.Env, wc.Env) || c.StopSignal != wc.StopSignal || c.StopTimeout == nil || *c.StopTimeout != *wc.StopTimeout || c.Healthcheck == nil || !slices.Equal(c.Healthcheck.Test, []string{"NONE"}) {
 		return false
 	}
 	if h.Privileged || h.AutoRemove || h.NetworkMode != wh.NetworkMode || h.IpcMode != wh.IpcMode || h.PidMode != "" || h.UsernsMode == "host" || h.UTSMode != "" || !h.ReadonlyRootfs || h.RestartPolicy.Name != "no" || h.LogConfig.Type != "none" || h.Memory != wh.Memory || h.MemorySwap != wh.MemorySwap || h.NanoCPUs != wh.NanoCPUs || h.PidsLimit == nil || *h.PidsLimit != *wh.PidsLimit || len(h.Binds) != 0 || len(h.VolumesFrom) != 0 || len(h.Devices) != 0 || len(h.DeviceRequests) != 0 || len(h.CapAdd) != 0 || len(h.CapDrop) != 0 || len(h.PortBindings) != 0 || !reflect.DeepEqual(h.Tmpfs, wh.Tmpfs) || len(h.Mounts) != len(wh.Mounts) {
@@ -72,7 +72,8 @@ func (n *NativeJobs) Create(ctx context.Context, spec JobSpec) error {
 		return err
 	}
 	check := func() error { _, err := n.current(ctx, &r, false); return err }
-	if err := check(); err != nil {
+	grant, err := n.current(ctx, &r, false)
+	if err != nil {
 		return err
 	}
 	if r.Cancel || r.Removed || r.CreateNotSent {
@@ -86,6 +87,9 @@ func (n *NativeJobs) Create(ctx context.Context, spec JobSpec) error {
 	if err != nil {
 		return err
 	}
+	// The container is created from this job's own builder pin, which the
+	// caller has already pulled; the policy keeps only its reference.
+	options.Config.Image = grant.Run.BuilderImage()
 	files, err := n.openWorkspace(r)
 	if err != nil {
 		return err

@@ -3,6 +3,7 @@
 package userauth
 
 import (
+	"context"
 	"fmt"
 	"testing"
 
@@ -55,13 +56,8 @@ func TestQueryReplyWhoamiUsesOriginalViewWithoutLoadingPages(t *testing.T) {
 		call func(Request) Reply
 	}{
 		{"registries", func(r Request) Reply {
-			return svc.registryQueryReply(original, access.Session{}, r, Reply{Schema: 1, Code: "ok"})
-		}},
-		{"node-storage", func(r Request) Reply {
-			return svc.storageQueryReply(original, access.Catalog{}, access.Session{}, r, Reply{Schema: 1, Code: "ok"})
-		}},
-		{"vault", func(r Request) Reply {
-			return svc.vaultQueryReply(original, access.Catalog{}, access.Session{}, r, Reply{Schema: 1, Code: "ok"})
+			_, code := methodRules["registries"].run(context.Background(), svc, original, access.Session{}, TenantPageQuery{Tenant: r.Tenant})
+			return Reply{Schema: 1, Code: code}
 		}},
 		{"apps", func(r Request) Reply {
 			return svc.appsQueryReply(original, access.Catalog{}, access.Session{}, r, Reply{Schema: 1, Code: "ok"})

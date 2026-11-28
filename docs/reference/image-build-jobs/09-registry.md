@@ -34,7 +34,7 @@ Docker Engine에 설치한 CA가 자동으로 `sfcd`의 신뢰로 전달되는 �
 원 builder는 authenticated member `image-build-publication-owner`로 정확한 원 출력 태그의
 공개 digest 정보만 조회한다. 조회는 현재 quorum의 설치 owner·accepted job·원 registry
 namespace에 고정하며 새 push·임의 이미지/본문/Secret 읽기를 허가하지 않는다. 입력/응답은
-[SFCP 메시지](../../protocol/sfcp/26-cd.md#원-빌드-게시의-owner-관측)를 따른다.
+[SFCP 메시지](../../protocol/sfcp/rules/26-cd.md#원-빌드-게시의-owner-관측)를 따른다.
 
 같은 원 registry의 미종결 running/unknown 빌드가 남으면 listener를 닫고 원 Store·Volume
 pin을 정산용으로 보존한다. 실제 process shutdown은 Store/FD를 닫되 원 pin/DB 기록은

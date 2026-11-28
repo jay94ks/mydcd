@@ -54,7 +54,7 @@ func defaultRegistryLimits(capacity uint64) registryLimits {
 }
 
 type registryRow struct {
-	sfc.RegistryView
+	registryView
 	Status string         `json:"status"`
 	Limits registryLimits `json:"limits"`
 }
@@ -70,14 +70,15 @@ func (s *Server) handleRegistries(w http.ResponseWriter, r *http.Request, ws *we
 			return listPage{}, err
 		}
 		rows := []registryRow{}
-		for _, v := range p.Items {
-			rows = append(rows, registryRow{v, v.Status(), limitsOf(v.Spec)})
+		for _, r := range p.Items {
+			v := registryViewOf(r)
+			rows = append(rows, registryRow{v, v.status(), limitsOf(v.Spec)})
 		}
-		return s.page(rows, p.Next, p.Revision), nil
+		return s.page(rows, p.Next, p.RootRevision), nil
 	})
 }
 
-func findRegistry(ctx context.Context, c sfc.Conn, tenant, id string) (*sfc.RegistryView, error) {
+func findRegistry(ctx context.Context, c sfc.Conn, tenant, id string) (*registryView, error) {
 	after := ""
 	for {
 		p, err := c.Registries(ctx, tenant, after)
@@ -85,8 +86,9 @@ func findRegistry(ctx context.Context, c sfc.Conn, tenant, id string) (*sfc.Regi
 			return nil, err
 		}
 		for i := range p.Items {
-			if p.Items[i].ID == id {
-				return &p.Items[i], nil
+			if p.Items[i].Spec.ID == id {
+				v := registryViewOf(p.Items[i])
+				return &v, nil
 			}
 		}
 		if p.Next == "" {

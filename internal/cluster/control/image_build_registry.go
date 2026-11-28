@@ -56,7 +56,7 @@ func (p Policy) ImageBuildRegistryPermit(s state.State, caller [32]byte, q Image
 		}
 		authority = image.Registry
 		repository = image.Repository
-		if work.Run.Phase != "queued" && !slices.ContainsFunc(work.Run.Inputs, func(input imagebuild.FrozenSource) bool { return input.Image == q.Image }) {
+		if work.Run.Phase != "queued" && !slices.ContainsFunc(work.Run.Frozen(), func(input imagebuild.FrozenSource) bool { return input.Image == q.Image }) {
 			return ImageBuildRegistryPermit{}, access.ErrDenied
 		}
 	}

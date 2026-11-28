@@ -20,6 +20,7 @@ import { Load } from '../components/states';
 import { DataTable } from '../components/DataTable';
 import { DNS_TTL_DEFAULT, DnsReviewDialog, useDnsDraft } from './NetworkChange';
 import { NET_NEED, NetFrame, useNetLists } from './NetFrame';
+import { networkDnsLive } from '../lib/liveTopics';
 
 /** 지우는 중: 변경 계획 없이 비우는 서버가 있음 */
 const deleting = (n: NetworkView) => n.members.some((x) => x.draining && !x.phase);
@@ -143,7 +144,7 @@ export function groupNames(r: NetworkDnsNames) {
 function NamesCard({ tenant, net }: { tenant: string; net: NetworkView }) {
   const { canDeploy } = useTenantRole();
   const [dlg, setDlg] = useState<{ kind: 'edit'; g?: RecordGroup } | { kind: 'remove'; g: RecordGroup }>();
-  const q = usePoll((s) => (on(net) ? networkDnsNames(tenant, net.name, s) : Promise.resolve(undefined)), [tenant, net.name, net.dns?.revision, on(net)], 30_000);
+  const q = usePoll((s) => (on(net) ? networkDnsNames(tenant, net.name, s) : Promise.resolve(undefined)), [tenant, net.name, net.dns?.revision, on(net)], 30_000, networkDnsLive(tenant, net.name));
   const [find, setFind] = useState('');
   const toast = useToast();
   const rows = useMemo(() => (q.data ? groupNames(q.data) : []), [q.data]);

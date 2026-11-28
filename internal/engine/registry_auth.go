@@ -7,6 +7,7 @@ import (
 	"io"
 	"strings"
 
+	"github.com/jay94ks/seafield/internal/engineimage"
 	"github.com/jay94ks/seafield/internal/registryclient"
 )
 
@@ -18,6 +19,7 @@ import (
 type RegistryAuth struct {
 	authority   string
 	source      *registryclient.Access
+	open        engineimage.Opener
 	observePull func(registryclient.PullOutcome)
 }
 
@@ -45,6 +47,16 @@ func NewExternalRegistryAuth(authority string, username, password, ca []byte) (R
 		return RegistryAuth{}, err
 	}
 	return RegistryAuth{authority: authority, source: a}, nil
+}
+
+// NewOpenerAuth reads a pinned image through open, a source sfcd already
+// authorized for this one pull (for example a build's frozen builder image
+// read through its source's owner). The engine still sees no credential.
+func NewOpenerAuth(authority string, open engineimage.Opener) (RegistryAuth, error) {
+	if authority == "" || strings.ContainsAny(authority, "/@?#\\ \t\r\n") || open == nil {
+		return RegistryAuth{}, ErrOwnership
+	}
+	return RegistryAuth{authority: authority, open: open}, nil
 }
 
 // WithPullObserver attaches a diagnostic sink to this single-call input. It

@@ -21,6 +21,7 @@ import { usePoll } from '../lib/usePoll';
 import { addRoute, removeRoute, replaceRoute, routeProblems, RouteEditError, servicePorts, type RouteGateway, type RouteSpec } from '../lib/ingressRoutesYaml';
 import { yamlDigest } from './DeployFlow';
 import { routeStatus, flatten, type Flat } from './Ingress';
+import { clusterAppRoutesLive, domainListLive } from '../lib/liveTopics';
 
 type GwFilter = 'all' | Gateway;
 type StateFilter = 'all' | 'blocked' | 'problem' | 'nocert';
@@ -111,7 +112,7 @@ export function GwPills({ g }: { g: Gateway[] }) {
 export type MapDialog = { kind: 'add'; host?: string } | { kind: 'edit'; m: Mapping } | { kind: 'remove'; m: Mapping };
 
 export function useClusterRoutes(admin: boolean) {
-  return usePoll((s) => (admin ? clusterAppRoutes(s).catch(() => undefined) : Promise.resolve(undefined)), [admin], 30_000);
+  return usePoll((s) => (admin ? clusterAppRoutes(s).catch(() => undefined) : Promise.resolve(undefined)), [admin], 0, clusterAppRoutesLive);
 }
 
 export function RoutesTab({ v, gw, find, blocks, cluster, onDialog, onBlock }: { v: IngressView; gw: GwFilter; find: string; blocks: IngressBlock[]; cluster?: ClusterAppRoutes; onDialog: (d: MapDialog) => void; onBlock: (s: BlockScope) => void }) {
@@ -121,7 +122,7 @@ export function RoutesTab({ v, gw, find, blocks, cluster, onDialog, onBlock }: {
   const canDeploy = (t?: string) => admin || (!!t && session.tenants.some((x) => x.id === t && x.role === 'manager'));
   const [state, setState] = useState<StateFilter>('all');
   const [ctx, setCtx] = useState<{ at: { x: number; y: number }; host: string; ms: Mapping[] }>();
-  const dq = usePoll((s) => dnsDomainList(s).catch(() => ({ items: [], cluster: false })), [], 60_000);
+  const dq = usePoll((s) => dnsDomainList(s).catch(() => ({ items: [], cluster: false })), [], 60_000, domainListLive);
   const domains = (dq.data?.items ?? []).map((d) => d.domain);
   const all = useMemo(() => buildMappings(v, cluster), [v, cluster]);
   const q = lc(find.trim());
@@ -155,7 +156,7 @@ export function RoutesTab({ v, gw, find, blocks, cluster, onDialog, onBlock }: {
         items={[
           { label: '고치기…', onSelect: () => onDialog({ kind: 'edit', m }), disabledReason: auto ?? may },
           m.cluster ? { label: '클러스터 앱에서 보기', hint: 'web', onSelect: () => nav('/servers/cluster-apps') } : { label: '앱 정의에서 보기', hint: `${m.app} › 외부 접속`, onSelect: () => nav(`${appPath(m.tenant!, m.app!)}/edit`) },
-          { label: '컨테이너까지 흐름 보기', hint: 'UI-5B', onSelect: () => nav(`/shared/ingress/${m.tenant}/${m.app}`), disabledReason: m.cluster ? '클러스터 앱은 서버 › 클러스터 앱에서 봅니다' : undefined },
+          { label: '컨테이너까지 흐름 보기', onSelect: () => nav(`/shared/ingress/${m.tenant}/${m.app}`), disabledReason: m.cluster ? '클러스터 앱은 서버 › 클러스터 앱에서 봅니다' : undefined },
           { label: '⛔ 긴급 차단…', danger: true, onSelect: () => f && onBlock({ kind: 'route', tenant: m.tenant!, app: m.app!, node: f.i.node, host: f.r.host, prefix: f.r.prefix, gateway: f.r.gateway }), disabledReason: m.cluster ? '클러스터 앱 경로는 여기서 막지 않습니다' : !f ? '아직 서버에 반영되지 않았습니다' : canNet ? undefined : NEED_NET },
           { label: '매핑 빼기…', danger: true, onSelect: () => onDialog({ kind: 'remove', m }), disabledReason: auto ?? may },
         ]}
@@ -191,7 +192,7 @@ export function RoutesTab({ v, gw, find, blocks, cluster, onDialog, onBlock }: {
           options={[
             ['all', '전체'],
             ['blocked', '차단 중'],
-            ['problem', '문제 있음'],
+            ['problem', '오류'],
             ['nocert', '인증서 없음'],
           ]}
         />
@@ -404,7 +405,7 @@ export function MappingDialog({ d, v, cluster, onClose, onDone, onShow }: { d: E
     const same = all.find((m) => lc(m.host) === lc(spec.host) && m.flats.some((f) => hasRouteCert(f.r)));
     return same ? `자동 (${routeCertText(same.flats.find((f) => hasRouteCert(f.r))!.r)}가 이 호스트를 덮음)` : '자동 (외부 도메인에 등록된 이름이면 저절로 받음)';
   }, [all, spec.host]);
-  const dq = usePoll((s) => dnsDomainList(s).catch(() => undefined), [], 0);
+  const dq = usePoll((s) => dnsDomainList(s).catch(() => undefined), [], 0, domainListLive);
   const registered = !dq.data || !spec.host || dq.data.items.some((x) => inDomain(spec.host, x.domain));
   const isCluster = dest === 'cluster';
   const verb = isCluster ? '저장' : orig ? '고치고 배포' : '더하고 배포';

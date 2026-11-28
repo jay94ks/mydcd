@@ -155,17 +155,30 @@ func pruneTimeOrdered(s *Store, bucket, pfx []byte, cutoff time.Time) (int, erro
 // Notification is a copy of an event for one user (UI-C0). The event's
 // authority stays with sfcd or the web feature that raised it.
 type Notification struct {
-	ID        string    `json:"id"`
-	User      string    `json:"user"`
-	Kind      string    `json:"kind"` // op-failed, op-unknown, deploy-done, ...
-	Severity  string    `json:"severity"`
-	Tenant    string    `json:"tenant,omitempty"`
-	Title     string    `json:"title"`
-	Body      string    `json:"body,omitempty"`
-	Link      string    `json:"link,omitempty"` // UI route
-	Action    bool      `json:"action"`         // needs something from the user
-	CreatedAt time.Time `json:"createdAt"`
-	ReadAt    time.Time `json:"readAt,omitzero"`
+	ID       string `json:"id"`
+	User     string `json:"user"`
+	Kind     string `json:"kind"` // op-failed, op-unknown, deploy-done, ...
+	Severity string `json:"severity"`
+	Tenant   string `json:"tenant,omitempty"`
+	Title    string `json:"title"`
+	Body     string `json:"body,omitempty"`
+	// Text is the notification as message codes and values; when set, the
+	// reader's language renders Title and Body (rows stored before it keep
+	// their Korean Title and Body).
+	Text      *NoticeText `json:"text,omitempty"`
+	Link      string      `json:"link,omitempty"` // UI route
+	Action    bool        `json:"action"`         // needs something from the user
+	CreatedAt time.Time   `json:"createdAt"`
+	ReadAt    time.Time   `json:"readAt,omitzero"`
+}
+
+// NoticeText names a notification's message codes: Title, then Body as one
+// or more sentences joined in order. Args fill {name} in them; values (an
+// sfcd error code, a host) are never translated.
+type NoticeText struct {
+	Title string            `json:"title"`
+	Body  []string          `json:"body,omitempty"`
+	Args  map[string]string `json:"args,omitempty"`
 }
 
 func notifyKey(user string, at time.Time, id string) []byte {

@@ -21,8 +21,7 @@ interface Fw {
   nextId: number;
   rules: DFirewallRule[];
   locked: DFirewall['locked'];
-  operator4: string[];
-  operator6: string[];
+  operator: string[];
   applied: boolean;
   applyError?: string;
   log: DFirewallChange[];
@@ -53,8 +52,14 @@ const fws: Record<string, Fw> = {
       { id: 'r6', action: 'allow', proto: 'udp', ports: '30000-30100', from: ['203.0.113.0/24'], comment: '게임 서버 시험' },
     ],
     locked: LOCKED([80, 443]),
-    operator4: ['-P INPUT ACCEPT', '-A INPUT -j SFC-INPUT', '-A INPUT -p tcp -m tcp --dport 22 -j ACCEPT', '-A INPUT -s 192.168.1.0/24 -p tcp -m tcp --dport 3000 -j ACCEPT', '-A INPUT -j DROP'],
-    operator6: ['-P INPUT ACCEPT', '-A INPUT -j SFC-INPUT', '-A INPUT -p tcp -m tcp --dport 22 -j ACCEPT'],
+    operator: [
+      'ip filter INPUT (hook input, priority 0, policy accept)',
+      '  ip protocol tcp tcp dport 22 counter accept',
+      '  ip saddr 192.168.1.0/24 ip protocol tcp tcp dport 3000 counter accept',
+      '  counter drop',
+      'ip6 filter INPUT (hook input, priority 0, policy accept)',
+      '  meta l4proto tcp tcp dport 22 counter accept',
+    ],
     applied: true,
     log: [
       { operation: 'fw-0010', user: 'u-bob', at: now() - 2 * 86400, from: 10, to: 11, delta: { add: [{ action: 'allow', proto: 'tcp', ports: '5432', from: ['10.0.0.0/8', 'fd00::/8'], comment: '사내망 DB' }] }, added: ['r3'] },
@@ -71,8 +76,7 @@ const fws: Record<string, Fw> = {
     nextId: 1,
     rules: [],
     locked: LOCKED([]),
-    operator4: ['-P INPUT ACCEPT', '-A INPUT -j SFC-INPUT'],
-    operator6: ['-P INPUT ACCEPT', '-A INPUT -j SFC-INPUT'],
+    operator: ['ip filter INPUT (hook input, priority 0, policy accept)', 'ip6 filter INPUT (hook input, priority 0, policy accept)'],
     applied: true,
     log: [],
     ops: new Map(),
@@ -97,8 +101,8 @@ export const mockFirewall = {
 };
 
 function view(node: string, f: Fw): DFirewall {
-  if (!f.managed) return { node, managed: false, revision: 0, rules: [], locked: [], operator4: [], operator6: [], applied: false };
-  return { node, managed: true, revision: f.revision, policy: f.policy, rules: f.rules.map((r) => ({ ...r, from: [...r.from] })), maxRules: 256, locked: f.locked, operator4: f.operator4, operator6: f.operator6, applied: f.applied, applyError: f.applyError };
+  if (!f.managed) return { node, managed: false, revision: 0, rules: [], locked: [], operator: [], applied: false };
+  return { node, managed: true, revision: f.revision, policy: f.policy, rules: f.rules.map((r) => ({ ...r, from: [...r.from] })), maxRules: 256, locked: f.locked, operator: f.operator, operatorFormat: 'nft', applied: f.applied, applyError: f.applyError };
 }
 
 const cleanRule = (x: unknown): DFirewallRule => {

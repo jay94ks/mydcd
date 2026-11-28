@@ -7,7 +7,7 @@ import (
 
 	"github.com/jay94ks/seafield/internal/cluster/control"
 	"github.com/jay94ks/seafield/internal/config"
-	"github.com/jay94ks/seafield/internal/secrets"
+	"github.com/jay94ks/seafield/internal/userauth"
 )
 
 // Vault provider writes (real sfcd actions). A Secret value or a Group
@@ -40,12 +40,10 @@ type SecretWrite struct {
 	Values          map[string][]byte
 }
 
-// SecretWriteReply is the receiver's answer: Code ok/unknown/denied and, once
-// the receiver ran or settled the write, its signed public observation.
-type SecretWriteReply struct {
-	Code        string
-	Observation *secrets.WriteObservation
-}
+// SecretWriteReply is sfcd's SecretInput reply as is: Code ok/unknown/denied
+// and, once the receiver ran or settled the write, its signed public
+// observation (VaultObservation).
+type SecretWriteReply = userauth.Reply
 
 // VaultWriter is the part of Conn for provider writes.
 type VaultWriter interface {

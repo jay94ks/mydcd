@@ -25,7 +25,7 @@ func TestAppSourceQueriesRejectCrossMethodSelectorsAndUnpinnedParts(t *testing.T
 		{Method: "app-source", Tenant: "tenant"},
 		{Method: "app-source", Tenant: "tenant", AppSource: &q, After: "cursor"},
 		{Method: "app-source", Tenant: "tenant", AppSource: &q, Node: "node-a"},
-		{Method: "app-source", Tenant: "tenant", AppSource: &q, TargetUser: "other"},
+		{Method: "app-source", Tenant: "tenant", AppSource: &q, After: "other"},
 		{Method: "whoami", AppSource: &q},
 		{Method: "submit", AppSource: &q},
 		{Method: "app-source", Tenant: "tenant", AppSource: &control.AppSourceSelection{App: "app", Part: 1}},

@@ -506,7 +506,7 @@ function RoleOptions({ role, c, onChange }: { role: AiRole; c: AiRoleConf; onCha
         <div className="col" style={{ gap: 8, padding: 6 }}>
           <b style={{ fontSize: 13 }}>{ROLE_SHORT[role]} 설정</b>
           {c.effort !== undefined && (
-            <Field label="노력">
+            <Field label="추론 강도">
               <select value={c.effort} onChange={(e) => onChange({ ...c, effort: e.target.value as AiRoleConf['effort'] })}>
                 {Object.entries(EFFORT).map(([k, v]) => (
                   <option key={k} value={k}>
@@ -517,7 +517,7 @@ function RoleOptions({ role, c, onChange }: { role: AiRole; c: AiRoleConf; onCha
             </Field>
           )}
           {c.thinking !== undefined && (
-            <Field label="생각">
+            <Field label="확장 사고">
               <select value={c.thinking} onChange={(e) => onChange({ ...c, thinking: e.target.value as AiRoleConf['thinking'] })}>
                 <option value="auto">자동 (adaptive)</option>
                 <option value="off">끔</option>

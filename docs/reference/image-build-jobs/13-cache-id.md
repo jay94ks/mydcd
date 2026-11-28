@@ -5,11 +5,11 @@ cache identity의 항목을 읽는다. `CACHE_HEX`는 32바이트 Cache의 소�
 기존 Job selector와 같은 사용자 메서드를 쓰며 selector를 혼합하지 않는다.
 
 ```text
-Job 조회:   ImageBuildCache:{Job:"job-id"}
-Cache 조회: ImageBuildCache:{Job:"",Cache:[32],Node:"node-id"}
-Request = {Schema:1,Method:"image-build-cache",Nonce:[32],Tenant,
-           ImageBuildCache,After?}
-Reply.ImageBuildCache = {Page,Tenant,Job,Context,Node,JobSnapshot:[32],
+Job 조회:   Query:{Job:"job-id"}
+Cache 조회: Query:{Job:"",Cache:[32],Node:"node-id"}
+Request = {Schema:1,Method:"image-build-cache",Nonce:[32],Params:{Tenant,
+           Query,After?}}
+Reply.Data = {Page,Tenant,Job,Context,Node,JobSnapshot:[32],
                         CacheScope?:[32],Epoch,Next}
 ```
 

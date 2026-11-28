@@ -4,10 +4,16 @@
 #   make            build bin/sfcd, bin/sfcli, bin/sfc-web (with the web UI)
 #   make test       unit tests
 #   make lint       gofmt, go vet, SPDX headers, documentation links
-#   make dist       release archives, checksums, notices and SBOM in dist/
+#   make dist       packages, notices, SBOM and checksums in dist/
+#   make packages   deb, rpm and tar.gz for GOARCH in dist/, built in Docker
+#                   from packaging/ (sfcd, sfcli, Seafield Engine with its own
+#                   containerd and runc; sfc-web-image when dist/ holds the
+#                   web bundle from make webbundle)
+#   make featurenotes  feature-set table for the release notes in
+#                   dist/FEATURES.md (PREV=<previous release's FEATURES.txt>)
 #   make webbundle  signed sfc-web cluster app image bundle in dist/ (needs
 #                   docker buildx and SFC_RELEASE_KEY, the release key)
-#   make install    install binaries and the sfcli agent guide under PREFIX
+#   make install    install sfcd, sfcli and the sfcli agent guide under PREFIX
 
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 GOOS    ?= linux
@@ -24,7 +30,18 @@ PREFIX  ?= /usr/local
 # then at <bin>/../share/sfc/SKILL.md (see docs/cli/README.md).
 SKILL   := cmd/sfcli/SKILL.md
 
-.PHONY: all build ui test lint notices sbom dist webbundle install clean
+# Package version: v0.1.0 is 0.1.0; a development VERSION (no tag) sorts
+# before any release, 0.0.0~dev.<describe>.
+PKGVERSION = $(shell echo '$(VERSION:v%=%)' | sed -E -e 's/^([^0-9])/0.0.0~dev.\1/' -e 's/-/~/g')
+PKGBUILD   := dist/pkg-$(GOARCH)
+WEBIMAGE   ?= $(wildcard dist/sfc-web-image_$(VERSION)_$(GOOS)_$(GOARCH).tar.gz)
+# Extra docker flags for a network that needs them (a proxy, --network host).
+PKGDOCKERFLAGS ?=
+PKGRUN      = docker run --rm $(PKGDOCKERFLAGS) --platform $(GOOS)/$(GOARCH) --user $$(id -u):$$(id -g) \
+              -e HOME=/tmp -e SOURCE_DATE_EPOCH=$$(git log -1 --format=%ct) \
+              -v $(CURDIR):/src -w /src
+
+.PHONY: all build ui test lint notices sbom dist packages featurenotes webbundle install clean
 
 all: build
 
@@ -49,25 +66,53 @@ lint:
 	python3 -I tools/check-spdx.py
 	python3 -I tools/check-links.py
 
+# in-toto's LICENSE files are a short Apache-2.0 header that go-licenses
+# cannot classify, so they are copied by hand instead of failing the save.
+NOTICE_BYHAND := github.com/in-toto/attestation github.com/in-toto/in-toto-golang
+
 notices:
 	@mkdir -p dist
-	go run github.com/google/go-licenses/v2@v2.0.1 report ./cmd/... > dist/THIRD_PARTY_GO.csv
-	go run github.com/google/go-licenses/v2@v2.0.1 save ./cmd/... --save_path dist/third_party --force
+	cd $(WEB) && npm ci
+	go run github.com/google/go-licenses/v2@v2.0.1 report ./cmd/... --ignore github.com/in-toto > dist/THIRD_PARTY_GO.csv
+	go run github.com/google/go-licenses/v2@v2.0.1 save ./cmd/... --ignore github.com/in-toto --save_path dist/third_party --force
+	for m in $(NOTICE_BYHAND); do \
+	  install -D -m 0644 "$$(go list -m -f '{{.Dir}}' $$m)/LICENSE" dist/third_party/$$m/LICENSE && \
+	  echo "$$m,https://$$m/blob/HEAD/LICENSE,Apache-2.0" >> dist/THIRD_PARTY_GO.csv || exit 1; \
+	done
 	python3 -I tools/publish/notices.py dist/third_party $(WEB)/package-lock.json > dist/THIRD_PARTY_NOTICES
 
-sbom: build
-	@mkdir -p dist
-	syft dir:bin -o spdx-json=dist/sfc_$(VERSION)_$(GOOS)_$(GOARCH).spdx.json
+sbom: packages
+	syft dir:$(PKGBUILD)/bin -o spdx-json=dist/sfc_$(VERSION)_$(GOOS)_$(GOARCH).spdx.json
 
-dist: build notices sbom
-	rm -rf dist/stage && mkdir -p dist/stage/sfc_$(VERSION)
-	cp bin/sfcd bin/sfcli bin/sfc-web $(SKILL) LICENSE NOTICE dist/THIRD_PARTY_NOTICES dist/stage/sfc_$(VERSION)/
-	tar -C dist/stage -czf dist/sfc_$(VERSION)_$(GOOS)_$(GOARCH).tar.gz sfc_$(VERSION)
-	rm -rf dist/stage
-	cd dist && sha256sum *.tar.gz *.spdx.json > SHA256SUMS
+dist: packages sbom
+	cd dist && sha256sum *.deb *.rpm *.tar.gz *.spdx.json > SHA256SUMS
+
+# Every binary is built inside packaging/builder, then packaged inside
+# packaging/deb and packaging/rpm; only the package files come out
+# (devel/design/install-packages.md 2). THIRD_PARTY_NOTICES (make notices)
+# goes into each package with the engine's notices.
+packages: notices
+	docker build $(PKGDOCKERFLAGS) --platform $(GOOS)/$(GOARCH) -q -t sfc-pkg-builder packaging/builder
+	docker build $(PKGDOCKERFLAGS) --platform $(GOOS)/$(GOARCH) -q -t sfc-pkg-deb packaging/deb
+	docker build $(PKGDOCKERFLAGS) --platform $(GOOS)/$(GOARCH) -q -t sfc-pkg-rpm packaging/rpm
+	rm -rf dist/pkg-$(GOARCH)
+	mkdir -p $(PKGBUILD)
+	cp dist/THIRD_PARTY_NOTICES $(PKGBUILD)/
+	$(PKGRUN) sfc-pkg-builder packaging/build.sh $(PKGBUILD) $(VERSION)
+	$(PKGRUN) sfc-pkg-deb packaging/deb/build.sh $(PKGBUILD) $(PKGVERSION) $(GOARCH) dist $(WEBIMAGE)
+	$(PKGRUN) sfc-pkg-rpm packaging/rpm/build.sh $(PKGBUILD) $(PKGVERSION) $(GOARCH) dist $(WEBIMAGE)
+	$(PKGRUN) sfc-pkg-deb packaging/tar.sh $(PKGBUILD) $(VERSION) $(GOARCH) dist $(WEBIMAGE)
+
+# Every release announces its feature-set changes and version ranges in a
+# table (devel/design/upgrades.md 3-1). FEATURES.txt is this build's names,
+# attached to the release so the next one can compare (PREV).
+featurenotes:
+	@mkdir -p dist
+	go run ./tools/featurenotes -list > dist/FEATURES.txt
+	go run ./tools/featurenotes $(if $(PREV),-prev '$(PREV)') > dist/FEATURES.md
 
 # The sfc-web cluster app image for one platform, as the bundle sfcd reads
-# from /usr/local/lib/sfc/images/sfc-web/: an OCI layout plus its release
+# from <prefix>/lib/sfc/images/sfc-web/: an OCI layout plus its release
 # manifest signed with SFC_RELEASE_KEY, checked against the keys built into
 # sfcd (devel/design/cluster-apps.md 3.3).
 webbundle:
@@ -82,9 +127,13 @@ webbundle:
 	tar -C dist/images -czf dist/sfc-web-image_$(VERSION)_$(GOOS)_$(GOARCH).tar.gz sfc-web
 	rm -rf dist/images
 
+# The archive's layout without the engine: the real sfcd in lib/sfc/bin,
+# where sfed accepts it, and a link in bin (devel/design/install-packages.md 4).
 install:
-	install -d $(DESTDIR)$(PREFIX)/bin $(DESTDIR)$(PREFIX)/share/sfc
-	install -m 0755 bin/sfcd bin/sfcli $(DESTDIR)$(PREFIX)/bin/
+	install -d $(DESTDIR)$(PREFIX)/bin $(DESTDIR)$(PREFIX)/lib/sfc/bin $(DESTDIR)$(PREFIX)/share/sfc
+	install -m 0755 bin/sfcd $(DESTDIR)$(PREFIX)/lib/sfc/bin/
+	ln -sfn ../lib/sfc/bin/sfcd $(DESTDIR)$(PREFIX)/bin/sfcd
+	install -m 0755 bin/sfcli $(DESTDIR)$(PREFIX)/bin/
 	install -m 0644 $(SKILL) $(DESTDIR)$(PREFIX)/share/sfc/SKILL.md
 
 clean:

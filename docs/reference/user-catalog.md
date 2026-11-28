@@ -5,12 +5,12 @@
 ## 사용자 목록
 
 ```json
-{"Schema":1,"Method":"users","Nonce":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]}
+{"Schema":1,"Method":"users","Nonce":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"Params":{"After":"..."}}
 ```
 
-위 객체는 인증 envelope의 Body 내용 예시다. 실제 client는 매 요청 새 Nonce와 현재 연결 challenge의 요청 서명을 만든다. `After`만 선택 가능하며 Tenant·Node·TargetUser는 허용하지 않는다. 현재 활성 system-admin과 Session의 ManageCluster scope가 모두 필요하다.
+위 객체는 인증 envelope의 Body 내용 예시다. 실제 client는 매 요청 새 Nonce와 현재 연결 challenge의 요청 서명을 만든다. typed method라 `Params:{After?}`만 받고 Request의 다른 필드는 모두 거부한다(R09). 현재 활성 system-admin과 Session의 ManageCluster scope가 모두 필요하다.
 
-응답의 `Users`는 ID 오름차순이며 각 행은 다음 형식이다.
+응답 `Data:{Users,Next?,Revision}`의 `Users`는 ID 오름차순이며 각 행은 다음 형식이다.
 
 | 필드 | 타입·의미 |
 |---|---|
@@ -21,25 +21,24 @@
 
 비활성 계정·credential도 관리 목적상 보인다. `VerifierRef` 필드·비밀번호·토큰·개인키는 반환하지 않는다. 기존 `user-credentials` 한 계정 상세와 공개 필드 이름·타입은 같으며 목록에는 backend 참조가 없다. 목록은 현재 catalog의 projection일 뿐 인증/로그인을 대신하지 않는다.
 
-`UsersRevision`은 catalog의 논리 revision, `RootRevision`은 이 응답을 만든 원 FSM catalog 객체 revision이다. `UsersNext`가 비어 있으면 마지막 페이지다. 명령은 `sfcli user list`이며 모든 페이지를 합쳐 보여 준다.
+`Revision`은 catalog의 논리 revision이다. 변경의 CAS root는 `whoami`의 `Roots`를 쓴다. `Next`가 비어 있으면 마지막 페이지다. 명령은 `sfcli user list`이며 모든 페이지를 합쳐 보여 준다.
 
 ## tenant 구성원
 
 ```json
-{"Schema":1,"Method":"tenant-members","Tenant":"shop","Nonce":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]}
+{"Schema":1,"Method":"tenant-members","Nonce":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"Params":{"Tenant":"shop","After":"..."}}
 ```
 
-Tenant 필수, After 선택, Node·TargetUser 금지다. 해당 tenant의 현재 ManageMembers와 동일한 Session scope가 필요하다. system-admin도 scope 교집합을 지키며 viewer나 다른 tenant의 manager는 거부된다.
+`Params:{Tenant,After?}`이고 Tenant는 필수다. 해당 tenant의 현재 ManageMembers와 동일한 Session scope가 필요하다. system-admin도 scope 교집합을 지키며 viewer나 다른 tenant의 manager는 거부된다.
 
-| 응답 필드 | 타입·의미 |
+| `Data` 필드 | 타입·의미 |
 |---|---|
 | Tenant | 선택 tenant ID |
 | TenantRevision | tenant 설정 자체의 revision(set-nodes/set-trust 등의 CAS 대상) |
-| TenantMembersRevision | 현재 catalog revision. membership 변경도 증가하며 TenantRevision과 별개 |
-| RootRevision | 동일한 원 FSM catalog 객체 revision. 사용자 변경은 이보다 크지 않은 root면 받고, CAS는 대상 기록의 revision으로 한다 |
-| TenantMembers | User ID 순 `{User,Username,Revision,Role,Enabled,AccountEnabled,Implicit,Actions}` |
-| TenantAllowedNodes | tenant 전체의 허용 node ID를 ID 순으로 나눈 이번 페이지 부분 |
-| TenantMembersNext | 구성원 또는 허용 node가 더 있으면 다음 cursor |
+| Revision | 현재 catalog revision. membership 변경도 증가하며 TenantRevision과 별개 |
+| Members | User ID 순 `{User,Username,Revision,Role,Enabled,AccountEnabled,Implicit,Actions}` |
+| AllowedNodes | tenant 전체의 허용 node ID를 ID 순으로 나눈 이번 페이지 부분 |
+| Next | 구성원 또는 허용 node가 더 있으면 다음 cursor |
 
 `Revision`은 명시 membership의 CAS revision이다. 명시 membership이 없는 활성 system-admin은 `Implicit:true,Revision:0,Role:manager`로 표시한다. 비활성 명시 membership도 보이지만 Actions는 비어 있다. 계정이 비활성화되어도 Actions는 비어 있다. Actions는 계정·tenant·membership의 현재 유효 권한을 나타내며 그 사용자가 발급받은 특정 Session/token의 추가 제한은 이 표에 합성하지 않는다. 실제 요청에서는 해당 Session 제한도 검사한다. 다른 tenant의 구성원·credential 목록은 반환하지 않는다.
 
@@ -48,10 +47,10 @@ Tenant 필수, After 선택, Node·TargetUser 금지다. 해당 tenant의 현재
 ## 페이지·충돌
 
 - users는 최대32행·행 JSON 합96KiB, tenant-members는 구성원32행과 허용 node32개를 각각 반환한다. 큰 credential/허용 node 목록을 단일 무제한 응답으로 만들지 않는다.
-- `*Next`의 URL-safe opaque cursor를 수정 없이 다음 Request.After에 넣는다. cursor는 catalog revision·method·tenant·각 목록 위치에 고정되며 최대512바이트다.
+- `Next`의 URL-safe opaque cursor를 수정 없이 다음 `Params.After`에 넣는다. cursor는 catalog revision·method·tenant·각 목록 위치에 고정되며 최대512바이트다.
 - 매 페이지 현재 인증·역할·signed scope를 다시 검사한다. 회수된 권한은 기존 cursor로 우회할 수 없다.
 - catalog가 바뀌면 `Code:conflict`이고 행은 없다. 모아 둔 이전 페이지를 버리고 After 없이 다시 시작한다. 불명/다른 method·tenant cursor는 denied다.
-- 내용이 비어 있는 배열은 공통 Reply의 omitempty에 따라 생략될 수 있다. 다음 cursor와 revision을 기준으로 종료를 판정한다.
+- 비어 있는 목록은 `null`일 수 있다. 다음 cursor와 revision을 기준으로 종료를 판정한다.
 
 관리 변경은 [명령 대상표의 typed payload](../architecture/command-targets/09-tenant-typed-payload.md)를 따른다. 조회는 새 계정·membership·tenant를 만들지 않는다.
 

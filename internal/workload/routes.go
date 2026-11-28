@@ -15,39 +15,76 @@ type ContainerRoute struct {
 	Gateway     netip.Addr
 }
 
-func ValidateContainerRoutes(s ContainerSpec, bridge network.BridgeSpec) error {
-	return validateContainerRoutes(s, &bridge)
+// ValidateContainerRoutes checks the Task's routes against the Bridge specs
+// of its attachments, given in ContainerSpec.Networks order.
+func ValidateContainerRoutes(s ContainerSpec, bridges ...network.BridgeSpec) error {
+	if bridges == nil {
+		bridges = []network.BridgeSpec{}
+	}
+	return validateContainerRoutes(s, bridges)
 }
 
-func validateContainerRoutes(s ContainerSpec, bridge *network.BridgeSpec) error {
-	if len(s.Routes) > 64 {
+// attachedRoute is one route with the index (Networks order) of the
+// attachment it leaves through: ContainerSpec.Routes leave through the
+// primary attachment, each TaskAttachment.Routes through that attachment.
+type attachedRoute struct {
+	at    int
+	route ContainerRoute
+}
+
+func (s ContainerSpec) allRoutes() []attachedRoute {
+	var out []attachedRoute
+	for i, a := range s.Networks() {
+		routes := s.Routes
+		if i > 0 {
+			routes = a.Routes
+		}
+		for _, r := range routes {
+			out = append(out, attachedRoute{at: i, route: r})
+		}
+	}
+	return out
+}
+
+// A nil bridges checks only the spec itself (decode time). With bridges, each
+// route's gateway must be in a pool of its own attachment's Bridge.
+func validateContainerRoutes(s ContainerSpec, bridges []network.BridgeSpec) error {
+	networks := s.Networks()
+	all := s.allRoutes()
+	if len(all) > 64 || bridges != nil && len(bridges) != len(networks) {
 		return ErrPlacement
 	}
-	previous := ""
-	for i, r := range s.Routes {
-		p, g := r.Destination, r.Gateway
-		if !p.IsValid() || p != p.Masked() || p.Bits() == 0 || !routeAddress(p.Addr()) || !routeAddress(g) || g.Is4() != p.Addr().Is4() || p.String() <= previous {
+	previous := map[int]string{}
+	for i, ar := range all {
+		p, g := ar.route.Destination, ar.route.Gateway
+		if !p.IsValid() || p != p.Masked() || p.Bits() == 0 || !routeAddress(p.Addr()) || !routeAddress(g) || g.Is4() != p.Addr().Is4() || p.String() <= previous[ar.at] || p.Contains(g) {
 			return ErrPlacement
 		}
-		previous = p.String()
-		local := s.IPv6
-		if g.Is4() {
-			local = s.IPv4
-		}
-		if !local.IsValid() || g == local || p.Contains(local) || p.Contains(g) {
+		previous[ar.at] = p.String()
+		local := routeFamily(networks[ar.at], g)
+		if !local.IsValid() || g == local {
 			return ErrPlacement
 		}
-		for _, old := range s.Routes[:i] {
-			if p.Overlaps(old.Destination) {
+		for _, a := range networks {
+			if other := routeFamily(a, g); other.IsValid() && p.Contains(other) {
 				return ErrPlacement
 			}
 		}
-		if bridge != nil {
-			allowed := false
-			for _, pool := range bridge.Pools {
-				if p.Overlaps(pool.Prefix) {
-					return ErrPlacement
+		for _, old := range all[:i] {
+			if p.Overlaps(old.route.Destination) {
+				return ErrPlacement
+			}
+		}
+		if bridges != nil {
+			for _, bridge := range bridges {
+				for _, pool := range bridge.Pools {
+					if p.Overlaps(pool.Prefix) {
+						return ErrPlacement
+					}
 				}
+			}
+			allowed := false
+			for _, pool := range bridges[ar.at].Pools {
 				if pool.Prefix.Contains(local) && pool.Gateway == g && pool.Prefix.Contains(g) {
 					allowed = true
 				}
@@ -58,6 +95,13 @@ func validateContainerRoutes(s ContainerSpec, bridge *network.BridgeSpec) error 
 		}
 	}
 	return nil
+}
+
+func routeFamily(a TaskAttachment, gateway netip.Addr) netip.Addr {
+	if gateway.Is4() {
+		return a.IPv4
+	}
+	return a.IPv6
 }
 
 func routeAddress(a netip.Addr) bool {

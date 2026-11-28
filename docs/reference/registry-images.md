@@ -13,14 +13,16 @@ sfcli --tenant payments image list company team/app --external
 
 ## 메시지
 
-User method는 `registry-catalog`다. 공통 Schema=1·Nonce·사용자 envelope·유한 EOF 규칙은 [Unix 소켓 API](unix-sockets.md)를 따른다. method 고유 입력은 다음과 같다.
+User method는 `registry-catalog`다. 공통 Schema=1·Nonce·사용자 envelope·유한 EOF 규칙은 [Unix 소켓 API](unix-sockets.md)를 따른다. method 고유 입력은 `Params`에 담는다.
 
 ```json
 {
   "Method": "registry-catalog",
-  "Tenant": "payments",
-  "RegistryCatalog": {"Kind": "managed", "ID": "private", "Repository": "team/app"},
-  "After": ""
+  "Params": {
+    "Tenant": "payments",
+    "Query": {"Kind": "managed", "ID": "private", "Repository": "team/app"},
+    "After": ""
+  }
 }
 ```
 
@@ -31,7 +33,7 @@ User method는 `registry-catalog`다. 공통 Schema=1·Nonce·사용자 envelope
 | Repository | 비우면 repository 목록. 지정하면 정확한 repository의 태그/다이제스트 목록. URL·이미지 tag·digest·경로 패턴은 받지 않는다 |
 | After | 이전 응답의 Next. 임의 offset·다른 사용자/선택의 cursor로 바꾸지 않는다 |
 
-응답 `Reply.RegistryCatalog`는 `{Kind,ID,Page}`다.
+typed method이므로 응답 `Data`가 `{Kind,ID,Page}`다.
 
 | Page 필드 | 의미 |
 |---|---|

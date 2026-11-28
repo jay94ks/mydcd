@@ -56,22 +56,29 @@ func (m *Manager) ObserveContainerDetail(ctx context.Context, target containerop
 		return out, err
 	}
 	defer filter.Destroy()
-	bridge := m.driver.taskNetworkManager(spec)
-	if bridge == nil {
+	if !m.driver.attachmentOwners(spec) {
 		return out, engine.ErrOwnership
 	}
-	lease, bridgeErr := bridge.InspectConsumer(ctx, spec.Bridge, containerConsumer(id), spec.BridgeGeneration)
+	leases, bridgeErr := m.driver.inspectNetworks(ctx, spec, id)
+	allowed := map[string]bool{}
+	for _, lease := range leases {
+		allowed[lease.NetworkID] = true
+	}
 	mounts, mountErr := m.driver.specMounts(spec)
-	detail, err := containerDetail(spec, id, actual, inputs.Files, mounts, lease.NetworkID, expectedEnv, declaration, filter)
+	detail, err := containerDetail(spec, id, actual, inputs.Files, mounts, allowed, expectedEnv, declaration, filter)
 	if err != nil {
 		return out, err
 	}
-	if bridgeErr != nil || actual.HostConfig.NetworkMode != container.NetworkMode(lease.NetworkID) || len(actual.NetworkSettings.Networks) != 1 {
+	networks := spec.Networks()
+	if bridgeErr != nil || len(leases) != len(networks) || actual.HostConfig.NetworkMode != container.NetworkMode(leases[0].NetworkID) || len(actual.NetworkSettings.Networks) != len(networks) {
 		detail.Drift = append(detail.Drift, "network")
 	} else {
-		endpoint, exists := actual.NetworkSettings.Networks[lease.NetworkName]
-		if !exists || endpoint == nil || endpoint.NetworkID != lease.NetworkID || spec.IPv4.IsValid() && endpoint.IPAddress != spec.IPv4 || spec.IPv6.IsValid() && endpoint.GlobalIPv6Address != spec.IPv6 {
-			detail.Drift = append(detail.Drift, "network")
+		for i, a := range networks {
+			endpoint, exists := actual.NetworkSettings.Networks[leases[i].NetworkName]
+			if !exists || endpoint == nil || endpoint.NetworkID != leases[i].NetworkID || a.IPv4.IsValid() && endpoint.IPAddress != a.IPv4 || a.IPv6.IsValid() && endpoint.GlobalIPv6Address != a.IPv6 {
+				detail.Drift = append(detail.Drift, "network")
+				break
+			}
 		}
 	}
 	if mountErr != nil || !matchResolvedTaskMounts(actual, inputs.Files, len(spec.Volumes)+len(spec.RemoteVolumes), mounts) || !matchTmpfs(actual, spec.Tmpfs) {
@@ -112,7 +119,7 @@ func (m *Manager) ObserveContainerDetail(ctx context.Context, target containerop
 // containerDetail is the reusable native-to-public projection used by the
 // actual owner and fault tests. Raw Inspect, host paths and env values never
 // cross this boundary. All free native text passes the same Secret filter.
-func containerDetail(s ContainerSpec, id engine.Identity, got container.InspectResponse, files []InputFile, volumeMounts []mount.Mount, allowedNetwork string, expectedEnv []string, decl containerops.DetailDeclaration, filter *containerops.Redactor) (containerops.ContainerDetail, error) {
+func containerDetail(s ContainerSpec, id engine.Identity, got container.InspectResponse, files []InputFile, volumeMounts []mount.Mount, allowedNetworks map[string]bool, expectedEnv []string, decl containerops.DetailDeclaration, filter *containerops.Redactor) (containerops.ContainerDetail, error) {
 	var d containerops.ContainerDetail
 	if got.Config == nil || got.HostConfig == nil || got.State == nil || got.NetworkSettings == nil || filter == nil {
 		return d, engine.ErrOwnership
@@ -259,7 +266,7 @@ func containerDetail(s ContainerSpec, id engine.Identity, got container.InspectR
 			drift(true, "network")
 			continue
 		}
-		if allowedNetwork == "" || n.NetworkID != allowedNetwork {
+		if n.NetworkID == "" || !allowedNetworks[n.NetworkID] {
 			d.NetworksOmitted++
 			continue
 		}

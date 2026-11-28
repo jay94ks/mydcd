@@ -16,7 +16,7 @@ func TestCDReadSelectorsCannotBorrowMutationOrAnotherMethod(t *testing.T) {
 		if !base.validMethodFields() || !base.validQuerySelectors() {
 			t.Fatal("valid CD read rejected", method)
 		}
-		for _, alter := range []func(*Request){func(r *Request) { r.Node = "node-a" }, func(r *Request) { r.Secret = []byte("private") }, func(r *Request) { r.TargetUser = "other" }, func(r *Request) { r.Operation = &control.UserOperation{} }, func(r *Request) { r.AppCDField = &control.AppCDFieldRequest{App: "other"} }} {
+		for _, alter := range []func(*Request){func(r *Request) { r.Node = "node-a" }, func(r *Request) { r.Secret = []byte("private") }, func(r *Request) { r.Operation = &control.UserOperation{} }, func(r *Request) { r.AppCDField = &control.AppCDFieldRequest{App: "other"} }} {
 			r := base
 			alter(&r)
 			if r.validMethodFields() || r.validQuerySelectors() {

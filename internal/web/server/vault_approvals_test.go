@@ -13,7 +13,7 @@ func TestCDGroupApproval(t *testing.T) {
 	fakeLogin(t, f, "alice")
 	fake.SetGroupPassword("shop", "shop-db", "open-sesame")
 	_, out := f.do("GET", "/api/v1/t/shop/apps/php-shop/source", nil)
-	doc := strings.Replace(out["yaml"].(string), "      node: node-b\n", "      node: node-b\n      secrets_from: [group/shop-db]\n", 1)
+	doc := strings.Replace(out["yaml"].(string), "      node: node-b\n", "      node: node-b\n      secrets: {from: [group/shop-db]}\n", 1)
 	// deploy the app with the Group first (approved), so its CD candidate uses it
 	opID := fmt.Sprintf("e9b2c3d4-0000-4000-8000-%012d", 2)
 	f.do("POST", "/api/v1/t/shop/apps/deploy", map[string]any{"opId": opID, "yaml": doc})

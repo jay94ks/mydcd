@@ -42,6 +42,11 @@ const (
 type ACL struct {
 	Users, Services, DenyUsers, DenyServices []string
 	TenantGrants                             []string
+	// RegistryShared opens a cluster-realm Group (and what is under it) to
+	// image registry reads only: every workspace's registry pull and the
+	// cluster's own source readers. Its secrets can never be selected as an
+	// app's env, file or build input. Only SetRegistryShared changes it.
+	RegistryShared bool `json:",omitempty"`
 }
 type Reference struct {
 	Profile, Object string
@@ -240,7 +245,7 @@ func (t Tree) Create(c access.Catalog, actor string, expected uint64, o Object) 
 	}
 	var err error
 	o.ACL, err = canonicalACL(o.ACL)
-	if err != nil || len(o.ACL.TenantGrants) != 0 {
+	if err != nil || len(o.ACL.TenantGrants) != 0 || o.ACL.RegistryShared {
 		return t, ErrPolicy
 	}
 	if o.Kind == Secret {
@@ -293,7 +298,7 @@ func (t Tree) SetACL(c access.Catalog, actor, id string, expected uint64, a ACL)
 		return t, access.ErrConflict
 	}
 	a, err := canonicalACL(a)
-	if err != nil || len(a.TenantGrants) > 0 && (t.tenant != "" || id != t.root) || o.Status != Active {
+	if err != nil || len(a.TenantGrants) > 0 && (t.tenant != "" || id != t.root) || a.RegistryShared != o.ACL.RegistryShared || o.Status != Active {
 		return t, ErrPolicy
 	}
 	n, err := t.clone()
@@ -329,7 +334,7 @@ func (t Tree) ChangeACL(c access.Catalog, actor, id string, expected uint64, add
 		return t, ErrPolicy
 	}
 	remove, err = canonicalACL(remove)
-	if err != nil {
+	if err != nil || add.RegistryShared || remove.RegistryShared {
 		return t, ErrPolicy
 	}
 	next := ownACL(o.ACL)
@@ -494,6 +499,32 @@ func (t Tree) BeginPasswordChange(c access.Catalog, actor, id, change string, ex
 	n.objects[id] = ownObject(o)
 	return n, nil
 }
+
+// SetRegistryShared opens or closes a cluster-realm Group for image registry
+// reads (ACL.RegistryShared). Expected is the group's revision.
+func (t Tree) SetRegistryShared(c access.Catalog, actor, id string, expected uint64, shared bool) (Tree, error) {
+	if !t.managed(c, actor) {
+		return t, access.ErrDenied
+	}
+	o, ok := t.objects[id]
+	if !ok || o.Revision != expected {
+		return t, access.ErrConflict
+	}
+	if t.tenant != "" || o.Kind != Group || o.Status != Active || o.ACL.RegistryShared == shared {
+		return t, ErrPolicy
+	}
+	n, err := t.clone()
+	if err != nil {
+		return t, err
+	}
+	o.ACL = ownACL(o.ACL)
+	o.ACL.RegistryShared = shared
+	o.Revision = n.revision
+	o.PolicyRevision = n.revision
+	n.objects[id] = ownObject(o)
+	return n, nil
+}
+
 func (t Tree) SetApprovalAge(c access.Catalog, actor, id string, expected uint64, seconds int64) (Tree, error) {
 	if !t.managed(c, actor) {
 		return t, access.ErrDenied
@@ -637,7 +668,7 @@ func DecodeTree(b []byte) (Tree, error) {
 		a, err := canonicalACL(o.ACL)
 		ab, _ := json.Marshal(a)
 		ob, _ := json.Marshal(o.ACL)
-		if err != nil || !bytes.Equal(ab, ob) || len(a.TenantGrants) > 0 && (r.Tenant != "" || o.ID != r.Root) {
+		if err != nil || !bytes.Equal(ab, ob) || len(a.TenantGrants) > 0 && (r.Tenant != "" || o.ID != r.Root) || a.RegistryShared && (r.Tenant != "" || o.Kind != Group) {
 			return Tree{}, ErrPolicy
 		}
 		if o.Kind == Secret {

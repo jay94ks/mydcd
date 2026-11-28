@@ -37,10 +37,8 @@ func (p Policy) approvalUsesFor(s state.State, session access.Session, at int64,
 	if err != nil {
 		return nil, err
 	}
-	for _, action := range []access.Action{access.ManageRegistry, access.Deploy} {
-		if c.AuthorizeSession(session, p.Cluster, p.Issuer(session.Issuer), at, bind.Tenant, action, bind.Node) != nil || c.AuthorizeAccepted(origin.Session, p.Cluster, origin.At, bind.Tenant, action, bind.Node) != nil {
-			return nil, access.ErrDenied
-		}
+	if p.authorizeSourceOwner(c, session, at, bind.Tenant, bind.Node, false) != nil || p.authorizeAcceptedSourceOwner(c, *origin, bind.Tenant, bind.Node) != nil {
+		return nil, access.ErrDenied
 	}
 	if c.OperationAllowed(session, "bind-external-registry") != nil || c.OperationAllowed(origin.Session, "bind-external-registry") != nil {
 		return nil, access.ErrDenied

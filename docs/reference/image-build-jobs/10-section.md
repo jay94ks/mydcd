@@ -9,9 +9,9 @@ User `image-build-cache`의 Job selector는 선택한 tenant의 원 job이 사�
 사용자 Unix와 네트워크 SFCP User 요청은 같다.
 
 ```text
-Request = {Schema:1,Method:"image-build-cache",Nonce:[32],Tenant,
-           ImageBuildCache:{Job},After?}
-Reply   = {Schema:1,Code:"ok",ImageBuildCache:{
+Request = {Schema:1,Method:"image-build-cache",Nonce:[32],Params:{Tenant,
+           Query:{Job},After?}}
+Reply   = {Schema:1,Code:"ok",Data:{
   Tenant,Job,Context,Node,JobSnapshot:[32],Epoch,Next,
   Page:{Schema:1,Cache:[32],Snapshot:[32],ObservedBy:[32],ObservedKind?:"cache-prune",
         Available,Borrowed,ObservedAt,LastAttemptAt,LastAttemptCode,

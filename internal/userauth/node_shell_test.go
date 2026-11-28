@@ -13,36 +13,30 @@ import (
 
 	"github.com/jay94ks/seafield/internal/access"
 	"github.com/jay94ks/seafield/internal/cluster/control"
-	"github.com/jay94ks/seafield/internal/loginlog"
 	"github.com/jay94ks/seafield/internal/sfcp"
 )
 
 func TestNodeShellQueriesHaveExactSelectorsAndOriginalSigningRoot(t *testing.T) {
 	for _, method := range []string{"node-shell-policy", "node-shell-sessions"} {
-		q := Request{Schema: 1, Method: method, Nonce: [32]byte{1}}
-		if !q.validMethodFields() || !q.validQuerySelectors() {
+		q := Request{Schema: 1, Method: method, Nonce: [32]byte{1}, Params: json.RawMessage(`{}`)}
+		if !q.validMethodFields() {
 			t.Fatal("query rejected", method)
 		}
-		foreign := []func(*Request){func(r *Request) { r.Tenant = "tenant" }, func(r *Request) { r.Operation = &control.UserOperation{} }, func(r *Request) { r.Container = nil; r.LoginQuery = &loginlog.Query{Limit: 1} }}
-		if method == "node-shell-policy" {
-			// node-shell-sessions takes a Node filter; the policy has none.
-			foreign = append(foreign, func(r *Request) { r.Node = "node-a" })
-		}
-		for _, mutate := range foreign {
+		// The typed request carries only its Params; every old selector
+		// field next to them is foreign.
+		for _, mutate := range []func(*Request){func(r *Request) { r.Tenant = "tenant" }, func(r *Request) { r.Operation = &control.UserOperation{} }, func(r *Request) { r.Node = "node-a" }, func(r *Request) { r.After = "original" }} {
 			bad := q
 			mutate(&bad)
-			if bad.validMethodFields() || bad.validQuerySelectors() {
+			if bad.validMethodFields() {
 				t.Fatal("foreign selector accepted", method)
 			}
 		}
 	}
-	q := Request{Method: "node-shell-sessions", After: "original"}
-	if !q.validNodeShellQuery() {
-		t.Fatal("session cursor rejected")
-	}
-	q.Method = "node-shell-policy"
-	if q.validNodeShellQuery() {
+	if (Request{Schema: 1, Method: "node-shell-policy", Params: json.RawMessage(`{"After":"original"}`)}).validMethodFields() {
 		t.Fatal("policy accepts hidden paging state")
+	}
+	if !(Request{Schema: 1, Method: "node-shell-sessions", Params: json.RawMessage(`{"After":"original"}`)}).validMethodFields() {
+		t.Fatal("session cursor rejected")
 	}
 	_, c, session, _ := journalFixture(t)
 	raw, _ := control.ChangeBytes("open-node-shell", session.User, 0, control.NodeShellOpen{Node: "node-a", Cols: 80, Rows: 24})

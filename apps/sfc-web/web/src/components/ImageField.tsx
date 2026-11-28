@@ -9,6 +9,7 @@ import { ago, hhmmss, middle } from '../lib/format';
 import { Dialog } from './Dialog';
 import { Badge, Field, Segmented } from './ui';
 import { Empty, Load } from './states';
+import { registriesLive } from '../lib/liveTopics';
 
 /** 고른 이미지를 원문에 쓸 이름으로: 저장소 주소/repo:tag 또는 @digest(내용 고정) */
 export function imageRef(i: ImageView, endpoint: string | undefined, pin: boolean): string {
@@ -140,7 +141,7 @@ export function ImagePickDialog({ tenant, current = '', onPick, onClose }: { ten
   const [pin, setPin] = useState(true);
   // 목록
   const list = usePoll((s) => (listReady ? images(tenant, s) : Promise.resolve(emptyPage())), [tenant], 0);
-  const regs = usePoll((s) => registries(tenant, s), [tenant], 0);
+  const regs = usePoll((s) => registries(tenant, s), [tenant], 0, registriesLive(tenant));
   const [find, setFind] = useState('');
   const [reg, setReg] = useState('');
   const [sel, setSel] = useState<ImageView>();
@@ -283,8 +284,8 @@ export function ImagePickDialog({ tenant, current = '', onPick, onClose }: { ten
               <span className="muted">{sel ? ` ${middle(sel.digest, 11, 4)}로 넣어 나중에 태그가 바뀌어도 같은 이미지` : ' 나중에 태그가 바뀌어도 같은 이미지'}</span>
             </label>
             <span className="small muted">
-              이미지 관리(UI-84)와 같은 목록(웹 캐시, {list.asOf ? `${hhmmss(list.asOf)} 기준` : '읽는 중'} ·{' '}
-              <button type="button" className="btn ghost sm" onClick={() => list.refresh()}>
+              이미지 관리와 같은 목록(웹 캐시, {list.asOf ? `${hhmmss(list.asOf)} 기준` : '읽는 중'} ·{' '}
+              <button type="button" className="btn ghost sm" onClick={() => list.refreshByUser()}>
                 ↻ 새로고침
               </button>
               )입니다. 신뢰하지 않는 이미지는 고를 수 있지만 실행 전 확인에서 막힙니다.
@@ -322,7 +323,7 @@ export function ImagePickDialog({ tenant, current = '', onPick, onClose }: { ten
               여러 플랫폼 이미지: {res.platforms.map((p) => p.platform ?? '플랫폼 미상').join(', ')}. 고정하면 목록 전체(index) digest로 고정하고, 서버가 자기 플랫폼을 고릅니다.
             </span>
           )}
-          {res && checked === manual && (res.trusted === false || res.code === 'untrusted') && <div className="note er small">신뢰 출처가 아니라 이대로는 실행할 수 없습니다. 신뢰 출처(UI-82)에 추가하거나 다른 이미지를 고르세요.</div>}
+          {res && checked === manual && (res.trusted === false || res.code === 'untrusted') && <div className="note er small">신뢰 출처가 아니라 이대로는 실행할 수 없습니다. 신뢰 출처에 추가하거나 다른 이미지를 고르세요.</div>}
           <span className="small muted">입력이 끝나면(포커스를 옮기거나 [확인]) 저장소에서 digest를 확인합니다. 목록에 없는 이미지도 쓸 수 있습니다.</span>
         </div>
       )}

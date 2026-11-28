@@ -166,6 +166,12 @@ func TestAppCommandsAgainstManagedNode(t *testing.T) {
 	if code, _, _ := sfcli(t, "app", "logs", "app"); code != 2 {
 		t.Fatal("logs without a service", code)
 	}
+	// sfcli logs picks one target; --container alone never picks an app's.
+	for _, args := range [][]string{{"logs"}, {"logs", "--container", "web"}, {"logs", "--app", "app"}, {"logs", "--app", "app", "--container", "web", "--node", "node-a"}, {"logs", "--node", "node-a"}, {"logs", "--node", "node-a", "web", "--container", "x"}, {"logs", "--standalone", "s", "--container", "web"}, {"node", "logs", "node-a"}, {"logs", "--node", "node-a", "web", "--tail", "0"}, {"logs", "--node", "node-a", "web", "-f", "--until", "2026-11-28T00:00:00Z"}} {
+		if code, _, e := sfcli(t, args...); code != 2 {
+			t.Fatal("bad logs target accepted", args, code, e)
+		}
+	}
 	// clear-logs is one request with each server's answer, no operation.
 	if code, _, e := sfcli(t, "app", "clear-logs", "app", "web"); code == 0 || !strings.Contains(e, "-y") {
 		t.Fatal("clear-logs without confirmation", code, e)

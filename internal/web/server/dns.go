@@ -858,7 +858,7 @@ func (s *Server) handleDNSApply(w http.ResponseWriter, r *http.Request, ws *webS
 		}
 		_ = s.opt.Store.PutDNSHistory(h)
 		if h.Result == "failed" {
-			s.notify(&store.Notification{User: ws.user.ID, Kind: NotifyOpFailed, Severity: "error", Tenant: h.Tenant, Title: "DNS 변경 실패: " + d.Domain, Body: h.Error, Link: "/dns/" + d.Domain})
+			s.notify(&store.Notification{User: ws.user.ID, Kind: NotifyOpFailed, Severity: "error", Tenant: h.Tenant, Text: notice("dns-failed", map[string]string{"domain": d.Domain, "error": h.Error}, bodyIf(h.Error != "", "dns-failed.error")...), Link: "/dns/" + d.Domain})
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"history": h})
 		return

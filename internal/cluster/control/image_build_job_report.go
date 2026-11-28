@@ -84,7 +84,7 @@ func (p Policy) ImageBuildJobWork(s state.State, caller [32]byte, q ImageBuildJo
 	if work, err := p.workNodeOwner(s, spec.Scope.Root.Node); err != nil || work != caller {
 		allowed = false
 	}
-	if _, err := c.CheckImageTrust(q.Tenant, spec.Policy.BuilderImage); err != nil {
+	if _, err := c.CheckImageRefTrust(q.Tenant, spec.Policy.BuilderImage); err != nil {
 		allowed = false
 	}
 	if err := p.imageCacheAvailable(s, spec.Scope.Root.Node, spec.Policy.BuilderImage); err != nil {
@@ -103,7 +103,7 @@ func (p Policy) ImageBuildJobWork(s state.State, caller [32]byte, q ImageBuildJo
 			allowed = false
 		}
 	}
-	for _, input := range r.Run.Inputs {
+	for _, input := range r.Run.Frozen() {
 		if _, err := c.CheckImageTrust(q.Tenant, input.Image); err != nil {
 			allowed = false
 		}
@@ -112,7 +112,7 @@ func (p Policy) ImageBuildJobWork(s state.State, caller [32]byte, q ImageBuildJo
 		}
 	}
 	if allowed && r.Begin != nil {
-		current, err := p.imageBuildSourceBindings(s, c, spec, r.Run.Inputs, q.At)
+		current, err := p.imageBuildSourceBindings(s, c, spec, r.Run.Read(), q.At)
 		if err != nil || !buildJSONEqual(current, r.Sources) {
 			allowed = false
 		}
@@ -145,6 +145,25 @@ func (p Policy) ImageBuildJobWork(s state.State, caller [32]byte, q ImageBuildJo
 	}
 	return ImageBuildJobWork{Schema: 1, Run: r.Run, Allowed: allowed, RootRevision: s.Object(ImageBuildKey).Revision, Epoch: s.ModuleEpoch(), Index: s.Index(), Blocked: blocked}, nil
 }
+
+// frozen is the begin report's pinned images, builder included.
+func (r ImageBuildJobReport) frozen() []imagebuild.FrozenSource {
+	out := append([]imagebuild.FrozenSource(nil), r.Inputs...)
+	if r.Builder != nil {
+		out = append(out, *r.Builder)
+	}
+	return out
+}
+
+// read is frozen without a builder taken from the node's local copy: only
+// registry reads carry a source binding.
+func (r ImageBuildJobReport) read() []imagebuild.FrozenSource {
+	if r.BuilderLocal != "" {
+		return append([]imagebuild.FrozenSource(nil), r.Inputs...)
+	}
+	return r.frozen()
+}
+
 func mustJobTags(spec imagebuild.JobSpec) []string { tags, _ := spec.OutputTags(); return tags }
 
 type ImageBuildJobReport struct {
@@ -154,6 +173,8 @@ type ImageBuildJobReport struct {
 	Tenant, Job, Action               string
 	Expected, RootRevision, Epoch, At uint64
 	Inputs                            []imagebuild.FrozenSource `json:",omitempty"`
+	Builder                           *imagebuild.FrozenSource  `json:",omitempty"`
+	BuilderLocal                      string                    `json:",omitempty"`
 	Sources                           []ImageBuildSourceBinding `json:",omitempty"`
 	Closure                           *imagebuild.JobClosure    `json:",omitempty"`
 	Secrets                           []secrets.UseGone         `json:",omitempty"`
@@ -171,11 +192,11 @@ func (r ImageBuildJobReport) Valid(spec imagebuild.JobSpec) bool {
 	}
 	switch r.Action {
 	case "begin":
-		return r.Closure == nil && len(r.Secrets) == 0 && imagebuild.ValidateJobInputs(spec, r.Inputs) == nil && validImageBuildSources(spec, r.Inputs, r.Sources)
+		return r.Closure == nil && len(r.Secrets) == 0 && imagebuild.ValidateJobInputs(spec, r.Inputs) == nil && (r.Builder == nil && r.BuilderLocal == "" || imagebuild.ValidateJobBuilder(spec, r.Builder, r.BuilderLocal) == nil) && validImageBuildSources(spec, r.read(), r.Sources)
 	case "uncertain":
-		return r.Closure == nil && len(r.Inputs) == 0 && len(r.Sources) == 0 && len(r.Secrets) == 0
+		return r.Closure == nil && len(r.Inputs) == 0 && r.Builder == nil && r.BuilderLocal == "" && len(r.Sources) == 0 && len(r.Secrets) == 0
 	case "complete":
-		return len(r.Inputs) == 0 && len(r.Sources) == 0 && r.Closure != nil && r.Closure.Valid(spec) && r.Closure.At <= r.At
+		return len(r.Inputs) == 0 && r.Builder == nil && r.BuilderLocal == "" && len(r.Sources) == 0 && r.Closure != nil && r.Closure.Valid(spec) && r.Closure.At <= r.At
 	}
 	return false
 }
@@ -225,12 +246,12 @@ func (p Policy) imageBuildJobReport(s state.State, cmd state.Command) (ImageBuil
 		if err != nil {
 			return r, work, err
 		}
-		for _, input := range r.Inputs {
+		for _, input := range r.frozen() {
 			if _, err := c.CheckImageTrust(r.Tenant, input.Image); err != nil || p.imageCacheAvailable(s, work.Run.Spec.Scope.Root.Node, input.Image) != nil {
 				return r, work, access.ErrDenied
 			}
 		}
-		sources, err := p.imageBuildSourceBindings(s, c, work.Run.Spec, r.Inputs, int64(r.At))
+		sources, err := p.imageBuildSourceBindings(s, c, work.Run.Spec, r.read(), int64(r.At))
 		if err != nil || !buildJSONEqual(sources, r.Sources) {
 			return r, work, access.ErrDenied
 		}
@@ -262,7 +283,7 @@ func (p Policy) reduceImageBuildJobReport(s state.State, cmd state.Command) (map
 	var run imagebuild.JobRun
 	switch r.Action {
 	case "begin":
-		run, err = work.Run.Begin(r.Expected, r.At, r.Inputs)
+		run, err = work.Run.Begin(r.Expected, r.At, r.Inputs, r.Builder, r.BuilderLocal)
 		row.Sources = r.Sources
 	case "uncertain":
 		run, err = work.Run.Uncertain(r.Expected)
@@ -276,8 +297,9 @@ func (p Policy) reduceImageBuildJobReport(s state.State, cmd state.Command) (map
 	}
 	row.Run = run
 	row.OwnerSteps++
-	r.Inputs = nil  // normalized proof: its signed inputs live once in Run.Inputs
-	r.Sources = nil // original source references live once in the same row
+	r.Inputs = nil                      // normalized proof: its signed inputs live once in Run.Inputs
+	r.Builder, r.BuilderLocal = nil, "" // and its builder pin in Run.Builder
+	r.Sources = nil                     // original source references live once in the same row
 	row.Progress = &r
 	if r.Action == "begin" {
 		row.Begin = &r

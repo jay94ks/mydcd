@@ -3,6 +3,7 @@
 // 브라우저 안 목업 계층. docs/reference/web-api.md(/api/v1)와 같은 경로·DTO 모양·오류를 돌려준다.
 // 실제 성공 근거가 아니다. 화면 개발과 실패 상태 확인용이다.
 import opActionCatalog from './opActions.json';
+import { appYamlOldKeys } from './appYamlKeys';
 import YAML from 'yaml';
 import { cidrText, hostIn, inSystem, overlaps, parseCidr, type Cidr } from '../../lib/cidr';
 import type { RawResponse } from '../client';
@@ -1096,10 +1097,42 @@ function devicesView(node: string, dev: D.DNodeDevices): D.DNodeDevices {
     ...dev,
     observedAt: Math.floor(Date.now() / 1000) - 2,
     disks: (dev.disks ?? []).map((d) => ({ ...d, parts: (d.parts ?? []).map((p) => ({ ...p, storageRoots: [...new Set([...(p.storageRoots ?? []), ...(p.mounts ?? []).flatMap(on)])] })) })),
+    bundles: (dev.bundles ?? []).map(bundleView),
   };
+}
+/** 묶음 미러 재동기화(목업): 교체한 뒤 20초에 걸쳐 0→100% */
+const syncStart = new Map<string, number>();
+function bundleView(b: D.DDiskBundle): D.DDiskBundle {
+  const t0 = syncStart.get(b.name);
+  if (t0 === undefined || b.state !== 'syncing') return b;
+  const pc = Math.min(100, Math.floor((Date.now() - t0) / 200));
+  if (pc >= 100) {
+    syncStart.delete(b.name);
+    Object.assign(b, { state: 'ok', syncPercent: 0 });
+    b.members?.forEach((m) => (m.state = 'ok'));
+    return b;
+  }
+  return { ...b, syncPercent: pc };
 }
 const diskOpView = (o: D.DDiskOp & { key: string; at: number }): D.DDiskOp => {
   const { key: _k, at, ...v } = o;
+  if (v.action === 'bundle' && v.state === 'running') {
+    const t = Date.now() - at;
+    if (t < 1000) return { ...v, step: 'members' };
+    if (t < 2000) return { ...v, step: 'create' };
+    if (t < 4000) return { ...v, step: 'format' };
+    if (t < 5000) return { ...v, step: 'mount' };
+    Object.assign(o, { state: 'done', step: 'mount', finishedAt: Math.floor(Date.now() / 1000) });
+    return diskOpView(o);
+  }
+  if (v.action === 'prepare-storage' && v.state === 'running') {
+    const t = Date.now() - at;
+    if (t < 1500) return { ...v, step: 'partition' };
+    if (t < 4500) return { ...v, step: 'format' };
+    if (t < 5500) return { ...v, step: 'record' };
+    Object.assign(o, { state: 'done', step: 'directory', finishedAt: Math.floor(Date.now() / 1000) });
+    return diskOpView(o);
+  }
   if (v.action !== 'format' || v.state !== 'running') return v;
   const t = Date.now() - at;
   if (t < 1500) return { ...v, step: 'partition' };
@@ -1121,7 +1154,10 @@ on('POST', '/nodes/:id/disks/:disk/:action', (m, body) => {
   if (prev) return prev.key === key ? ok(diskOpView(prev)) : ok({ ...diskOpView(prev), state: 'failed', code: 'operation-conflict', error: 'opId is used for another request' });
   const mountPath = body.mountPath === undefined ? undefined : String(body.mountPath);
   const uuid = body.uuid === undefined ? undefined : String(body.uuid);
-  if (!opId || !part || !['format', 'mount', 'unmount', 'forget'].includes(action)) return invalid('opId, part and action');
+  if (!opId || !part || !['format', 'mount', 'unmount', 'forget', 'prepare-storage'].includes(action)) return invalid('opId, part and action');
+  const subPath = String(body.subPath ?? '');
+  if (action === 'prepare-storage' && ((body.format ? !(Number(body.size) > 0 && (body.serial || body.wwn)) || part !== name || !!uuid : !uuid || !!body.label) || (subPath && (subPath.split('/').length > 8 || subPath.split('/').some((x) => !/^[A-Za-z0-9._-]+$/.test(x) || x === '.' || x === '..'))) || (mountPath !== undefined && !diskPathOk(mountPath))))
+    return invalid('prepare-storage: format with serial or wwn and size on the whole disk, or uuid; subPath a relative path of plain names');
   if (action === 'format' && !(Number(body.size) > 0 && (body.serial || body.wwn))) return invalid('format: serial or wwn and size');
   if (action === 'mount' && (!uuid || (mountPath !== undefined && !diskPathOk(mountPath)))) return invalid('mount: uuid, mountPath a non-system absolute path');
   if (action === 'forget' && !uuid) return invalid('forget: uuid');
@@ -1142,6 +1178,46 @@ on('POST', '/nodes/:id/disks/:disk/:action', (m, body) => {
   if (d.class === 'system' || d.locked) return fail('system-disk', 'the disk holds /');
   const parts = d.parts ?? [];
   const roots = (devicesView(node, dev).disks ?? []).find((x) => x.name === name)?.parts?.flatMap((p) => p.storageRoots ?? []) ?? [];
+  if (action === 'prepare-storage') {
+    const under = (mp: string) => (subPath ? `${mp}/${subPath}` : mp);
+    const mountAt = (pt: D.DBlockPart, path: string) => {
+      pt.mounts = [path];
+      pt.space = { total: Math.round(pt.size * 0.98), used: Math.round(pt.size * 0.01), available: Math.round(pt.size * 0.92) };
+      d.class = 'additional';
+      dev.recorded!.push({ uuid: pt.uuid ?? '', path, disk: name, part: pt.name });
+    };
+    const taken = (path: string) => (dev.disks ?? []).flatMap((x) => (x.parts ?? []).flatMap((y) => y.mounts ?? [])).filter((x) => x !== '/').some((x) => x === path || path.startsWith(x + '/') || x.startsWith(path + '/')) || dev.recorded!.some((r) => r.path === path);
+    if (body.format) {
+      if (body.size !== d.size || (body.serial ?? '') !== (d.serial ?? '') || (body.wwn ?? '') !== (d.wwn ?? '') || (body.tableId ?? '') !== (d.tableID ?? '')) return fail('changed', 'the device no longer matches');
+      if (parts.some((p) => (p.mounts ?? []).length || p.swap || (p.holders ?? []).length || p.busy)) return fail('busy', 'mounted, swap or held');
+      const path = mountPath ?? `/var/lib/sfc-disks/${name}1`;
+      if (taken(path)) return fail('mount-path', 'the mount point is inside another mount');
+      const id = crypto.randomUUID();
+      const label = body.label ? String(body.label) : undefined;
+      const pn = `${name}1`;
+      Object.assign(o, { state: 'running', step: 'partition', part: pn, uuid: id, device: `/dev/${pn}`, label, mountPath: path, rootPath: under(path), finishedAt: undefined });
+      diskOps.set(opId, o);
+      setTimeout(() => {
+        const np: D.DBlockPart = { name: pn, number: 1, size: d.size - 16 * 1024 * 1024, fsType: 'ext4', uuid: id, label };
+        Object.assign(d, { table: 'gpt', tableID: crypto.randomUUID(), parts: [np] });
+        mountAt(np, path);
+      }, 5500);
+      return ok(diskOpView(o));
+    }
+    const p = parts.find((x) => x.uuid === uuid);
+    if (!p) return fail('not-found', 'no such part');
+    const rec = dev.recorded.find((r) => r.uuid === uuid && !r.reason);
+    if ((p.mounts ?? []).length && !rec) return fail('not-managed', 'mounted by the operator');
+    let path = rec?.path;
+    if (!path) {
+      path = mountPath ?? `/var/lib/sfc-disks/${p.name}`;
+      if (taken(path)) return fail('mount-path', 'the mount point is inside another mount');
+      mountAt(p, path);
+    }
+    Object.assign(o, { step: 'directory', part: p.name, uuid, device: `/dev/${p.name}`, mountPath: path, rootPath: under(path) });
+    diskOps.set(opId, o);
+    return ok(diskOpView(o));
+  }
   if (action === 'format') {
     if (body.size !== d.size || (body.serial ?? '') !== (d.serial ?? '') || (body.wwn ?? '') !== (d.wwn ?? '') || (body.tableId ?? '') !== (d.tableID ?? '')) return fail('changed', 'the device no longer matches');
     if (roots.length) return fail('storage-root', 'a storage root is on it');
@@ -1190,6 +1266,152 @@ on('POST', '/nodes/:id/disks/:disk/:action', (m, body) => {
   diskOps.set(opId, o);
   return ok(diskOpView(o));
 });
+// fuse 묶음 (#819): 마운트된 파티션에 조각 파일을 두고 묶는다. 구성원 파티션은 포맷하지 않는다
+function fuseBundle(dev: D.DNodeDevices, o: D.DDiskOp & { key: string; at: number }, name: string, body: Record<string, unknown>, members: Record<string, unknown>[], fail: (code: string, error: string) => RawResponse): RawResponse {
+  const alloc = String(body.allocation ?? '');
+  if (!['reserve', 'grow'].includes(alloc)) return invalid('allocation: reserve or grow');
+  const used = new Set((dev.bundles ?? []).flatMap((b) => (b.members ?? []).map((x) => x.part ?? '')));
+  const rows: { d: D.DBlockDisk; p: D.DBlockPart; bytes: number; copy: number }[] = [];
+  for (const x of members) {
+    const d = (dev.disks ?? []).find((y) => y.name === x.disk);
+    const p = d?.parts?.find((y) => y.name === x.part);
+    const bytes = Number(x.bytes);
+    const copy = Number(x.copy);
+    if (!d || !p) return fail('not-found', `no part ${String(x.part)}`);
+    if (d.class === 'system' || d.locked) return fail('system-disk', 'a part of the system disk cannot be a bundle member');
+    if (d.kind === 'bundle' || used.has(p.name)) return fail('busy', `${p.name} is part of a bundle`);
+    if (!(p.mounts ?? []).length) return fail('not-mounted', `${p.name} is not mounted`);
+    if (p.uuid !== x.uuid) return fail('changed', `the filesystem on ${p.name} is not the one shown`);
+    if (!(bytes >= 64 * 2 ** 20)) return invalid('bytes: 64MiB or more');
+    if ((body.mode === 'mirror') !== copy > 0) return invalid('copy: 1… for a mirror, none for linear');
+    if (alloc === 'reserve' && bytes > (p.space?.available ?? 0)) return fail('too-small', `${p.name} has less room than ${bytes} bytes`);
+    rows.push({ d, p, bytes, copy: body.mode === 'mirror' ? copy : 1 });
+  }
+  const copies = [...new Set(rows.map((r) => r.copy))].sort((a, b) => a - b);
+  if (body.mode === 'mirror') {
+    if (copies.length < 2 || copies.some((c, i) => c !== i + 1)) return fail('members', 'mirror copies must be numbered from 1 without gaps');
+    for (const r of rows) if (rows.some((q) => q.d === r.d && q.copy !== r.copy)) return fail('members', 'two copies on the same disk');
+  }
+  const per = copies.map((c) => rows.filter((r) => r.copy === c).reduce((n, r) => n + r.bytes, 0));
+  const size = body.mode === 'mirror' ? Math.min(...per) : per[0];
+  const path = body.mountPath ? String(body.mountPath) : `/var/lib/sfc-disks/${name}`;
+  const uuid = crypto.randomUUID();
+  Object.assign(o, { state: 'running', step: 'members', uuid, device: '/dev/loop7', mountPath: path, label: body.label ? String(body.label) : undefined, finishedAt: undefined });
+  diskOps.set(String(body.opId), o);
+  setTimeout(() => {
+    if (alloc === 'reserve') for (const r of rows) if (r.p.space) Object.assign(r.p.space, { used: r.p.space.used + r.bytes, available: Math.max(0, r.p.space.available - r.bytes) });
+    dev.disks!.push({ name, class: 'additional', kind: 'bundle', bundle: name, size, parts: [{ name, number: 0, size, fsType: 'ext4', uuid, label: name.slice(0, 16), mounts: [path], space: { total: Math.round(size * 0.98), used: Math.round(size * 0.01), available: Math.round(size * 0.92) } }] });
+    dev.bundles!.push({ name, backend: 'fuse', mode: String(body.mode), size, device: '/dev/loop7', state: 'ok', syncPercent: 0, members: rows.map((r) => ({ disk: r.d.name, part: r.p.name, size: r.bytes, state: 'ok' })) });
+    dev.recorded!.push({ uuid, path, disk: name, part: name });
+  }, 5000);
+  return ok(diskOpView(o));
+}
+// 디스크 묶음 (#811 lvm, #819 fuse)
+on('POST', '/nodes/:id/disk-bundles', (m, body) => {
+  const { user } = requireSession();
+  requireAdmin(user);
+  const node = m[0];
+  const dev = fx.devices[node];
+  const opId = String(body.opId ?? '');
+  const name = String(body.name ?? '');
+  const members = Array.isArray(body.members) ? (body.members as Record<string, unknown>[]) : [];
+  const key = JSON.stringify({ node, ...body });
+  const prev = diskOps.get(opId);
+  if (prev) return prev.key === key ? ok(diskOpView(prev)) : ok({ ...diskOpView(prev), state: 'failed', code: 'operation-conflict', error: 'opId is used for another request' });
+  if (!opId || !/^[a-z0-9-]{1,32}$/.test(name) || !['lvm', 'fuse'].includes(String(body.backend)) || !['linear', 'mirror'].includes(String(body.mode)) || members.length < 2 || members.length > 32 || (body.mountPath !== undefined && !diskPathOk(String(body.mountPath))))
+    return invalid('opId, name, backend lvm or fuse, mode linear or mirror, 2–32 members');
+  if (!dev) return err(404, 'not-found', 'no device list for this server');
+  const now = Math.floor(Date.now() / 1000);
+  const o: D.DDiskOp & { key: string; at: number } = { key, at: Date.now(), operation: opId, node, action: 'bundle', user: user.id, bundle: name, state: 'done', step: 'check', startedAt: now, finishedAt: now };
+  const fail = (code: string, error: string) => (Object.assign(o, { state: 'failed', code, error }), diskOps.set(opId, o), ok(diskOpView(o)));
+  dev.bundles ??= [];
+  dev.recorded ??= [];
+  if (dev.bundles.some((b) => b.name === name) || (dev.disks ?? []).some((d) => d.name === name)) return fail('invalid', 'a bundle or disk with that name exists');
+  if (body.backend === 'fuse') return fuseBundle(dev, o, name, body, members, fail);
+  const ds = members.map((x) => (dev.disks ?? []).find((d) => d.name === x.disk));
+  for (let i = 0; i < members.length; i++) {
+    const d = ds[i];
+    const x = members[i];
+    if (!d) return fail('not-found', `no such disk: ${String(x.disk)}`);
+    if (d.class === 'system' || d.locked) return fail('system-disk', 'the disk holds /');
+    if (d.class !== 'unused' || (d.parts ?? []).some((p) => (p.mounts ?? []).length || p.swap || (p.holders ?? []).length || p.busy)) return fail('busy', `${d.name} is in use`);
+    if (x.size !== d.size || (x.serial ?? '') !== (d.serial ?? '') || (x.wwn ?? '') !== (d.wwn ?? '')) return fail('changed', 'the device no longer matches');
+  }
+  const mirror = body.mode === 'mirror';
+  const size = mirror ? Math.min(...ds.map((d) => d!.size)) : ds.reduce((n, d) => n + d!.size, 0);
+  const path = body.mountPath ? String(body.mountPath) : `/var/lib/sfc-disks/${name}`;
+  const uuid = crypto.randomUUID();
+  Object.assign(o, { state: 'running', step: 'members', uuid, device: '/dev/dm-8', mountPath: path, label: body.label ? String(body.label) : undefined, finishedAt: undefined });
+  diskOps.set(opId, o);
+  setTimeout(() => {
+    for (const d of ds) Object.assign(d!, { class: 'bundle-member', bundle: name, parts: [], table: undefined, tableID: undefined });
+    dev.disks!.push({ name, class: 'additional', kind: 'bundle', bundle: name, size, parts: [{ name, number: 0, size, fsType: 'ext4', uuid, label: name.slice(0, 16), mounts: [path], space: { total: Math.round(size * 0.98), used: Math.round(size * 0.01), available: Math.round(size * 0.92) } }] });
+    dev.bundles!.push({ name, backend: 'lvm', mode: String(body.mode), size, device: '/dev/dm-8', state: 'ok', syncPercent: 0, members: ds.map((d) => ({ disk: d!.name, serial: d!.serial, wwn: d!.wwn, size: d!.size, state: 'ok' })) });
+    dev.recorded!.push({ uuid, path, disk: name, part: name });
+  }, 5000);
+  return ok(diskOpView(o));
+});
+on('POST', '/nodes/:id/disk-bundles/:name/:action', (m, body) => {
+  const { user } = requireSession();
+  requireAdmin(user);
+  const [node, name, action] = m;
+  const dev = fx.devices[node];
+  const opId = String(body.opId ?? '');
+  const key = JSON.stringify({ node, name, action, ...body });
+  const prev = diskOps.get(opId);
+  if (prev) return prev.key === key ? ok(diskOpView(prev)) : ok({ ...diskOpView(prev), state: 'failed', code: 'operation-conflict', error: 'opId is used for another request' });
+  if (!['unbundle', 'replace-member'].includes(action)) return err(404, 'not-found', 'action: unbundle or replace-member');
+  const nw = body.new as Record<string, unknown> | undefined;
+  const old = body.old as Record<string, unknown> | undefined;
+  if (!opId || (action === 'replace-member' && !(old?.disk && nw?.disk && Number(nw.size) > 0 && (nw.serial || nw.wwn)))) return invalid('opId; replace-member: old {disk, serial or wwn} and new {disk, serial or wwn, size}');
+  const now = Math.floor(Date.now() / 1000);
+  const o: D.DDiskOp & { key: string; at: number } = { key, at: Date.now(), operation: opId, node, action: action as D.DDiskOp['action'], user: user.id, bundle: name, state: 'done', step: 'done', startedAt: now, finishedAt: now };
+  const fail = (code: string, error: string) => (Object.assign(o, { state: 'failed', code, error }), diskOps.set(opId, o), ok(diskOpView(o)));
+  const b = dev?.bundles?.find((x) => x.name === name);
+  if (!dev || !b) return fail('not-found', 'no such bundle');
+  const view = devicesView(node, dev);
+  const bd = (view.disks ?? []).find((d) => d.kind === 'bundle' && d.bundle === name);
+  if (action === 'unbundle') {
+    if ((bd?.parts ?? []).some((p) => (p.storageRoots ?? []).length)) return fail('storage-root', 'a storage root is on it');
+    if (b.backend === 'fuse') {
+      for (const mb of b.members ?? []) {
+        const pt = (dev.disks ?? []).find((x) => x.name === mb.disk)?.parts?.find((x) => x.name === mb.part);
+        if (pt?.space && mb.size) Object.assign(pt.space, { used: Math.max(0, pt.space.used - mb.size), available: pt.space.available + mb.size });
+      }
+      dev.disks = (dev.disks ?? []).filter((d) => !(d.kind === 'bundle' && d.bundle === name));
+      dev.bundles = dev.bundles!.filter((x) => x !== b);
+      dev.recorded = (dev.recorded ?? []).filter((r) => r.disk !== name);
+      diskOps.set(opId, o);
+      return ok(diskOpView(o));
+    }
+    for (const mb of b.members ?? []) {
+      const d = (dev.disks ?? []).find((x) => x.name === mb.disk);
+      if (d) Object.assign(d, { class: 'unused', bundle: undefined, parts: [] });
+    }
+    dev.disks = (dev.disks ?? []).filter((d) => !(d.kind === 'bundle' && d.bundle === name));
+    dev.bundles = dev.bundles!.filter((x) => x !== b);
+    dev.recorded = (dev.recorded ?? []).filter((r) => r.disk !== name);
+    diskOps.set(opId, o);
+    return ok(diskOpView(o));
+  }
+  if (b.backend === 'fuse') return fail('not-supported', 'a fuse bundle does not replace members; unbundle and bundle again');
+  if (b.mode !== 'mirror') return fail('not-mirror', 'only a mirror replaces a member');
+  if (bundleView(b).state === 'syncing') return fail('busy', 'a copy is running');
+  const nd = (dev.disks ?? []).find((d) => d.name === nw!.disk);
+  if (!nd || nd.class !== 'unused') return fail('not-found', 'no such unused disk');
+  if (nd.size < b.size) return fail('too-small', 'the new disk is smaller than the bundle');
+  const i = (b.members ?? []).findIndex((x) => x.disk === old!.disk);
+  if (i < 0) return fail('not-found', 'no such member');
+  Object.assign(nd, { class: 'bundle-member', bundle: name, parts: [] });
+  const gone = (dev.disks ?? []).find((d) => d.name === old!.disk);
+  if (gone) Object.assign(gone, { class: 'unused', bundle: undefined, parts: [] });
+  b.members![i] = { disk: nd.name, serial: nd.serial, wwn: nd.wwn, size: nd.size, state: 'syncing' };
+  Object.assign(b, { state: 'syncing', syncPercent: 0 });
+  syncStart.set(name, Date.now());
+  Object.assign(o, { step: 'record', disk: nd.name });
+  diskOps.set(opId, o);
+  return ok(diskOpView(o));
+});
 on('GET', '/nodes/:id/disk-operations/:op', (m) => {
   const { user } = requireSession();
   requireAdmin(user);
@@ -1206,18 +1428,35 @@ on('GET', '/raft', () => {
   requireAdmin(user);
   return ok({ ...fx.raft, commitIndex: fx.raft.commitIndex + Math.floor((Date.now() / 1000) % 1000) });
 });
-// SFCP 기능(UI-17): 캔버스 v268 그대로. node-c는 0.1.0이라 transit을 알리지 않아 클러스터에서 꺼진다
+// 기능 집합(UI-17): node-c는 0.1.0이라 network-transit을 알리지 않아 클러스터가 쓰지 못한다
 on('GET', '/cluster/features', () => {
   const { user } = requireSession();
   requireAdmin(user);
+  // 캔버스 v271 예시: transit은 v1을 쓰고, volume share는 node-c(0.1.1)가 알리지 않아 쓰지 않음. node-b는 끊겨 마지막 보고로 센다
   return ok({
-    major: 1,
-    features: [{ id: 1, name: 'transit', desc: '다른 서버를 거쳐 가는 연결 (0.1.1부터)' }],
-    cluster: [],
+    major: 0,
+    groups: [
+      {
+        name: 'network',
+        sets: [
+          {
+            name: 'network-transit',
+            versions: [
+              { name: 'network-transit-v1', version: 1, postfix: 'mainline', desc: '다른 서버를 거쳐 가는 연결 (SFCP purpose 25)' },
+              { name: 'network-transit-v2-preview', version: 2, postfix: 'preview', desc: '거쳐 가는 연결 묶어 보내기 (시험)' },
+            ],
+            cluster: 1,
+            behind: [],
+          },
+        ],
+      },
+      { name: 'volume', sets: [{ name: 'volume-share', versions: [{ name: 'volume-share-v1', version: 1, postfix: 'mainline', desc: '여러 서버에서 쓰기 (VolumeFS)' }], cluster: 0, behind: ['node-c'] }] },
+    ],
+    cluster: ['network-transit-v1'],
     nodes: [
-      { node: 'node-a', major: 1, build: '0.1.1', features: [1], seen: true },
-      { node: 'node-b', major: 1, build: '0.1.1', features: [1], seen: true },
-      { node: 'node-c', major: 1, build: '0.1.0', features: [], seen: true },
+      { node: 'node-a', major: 0, build: '0.1.2', features: ['network-transit-v1', 'network-transit-v2-preview', 'volume-share-v1'], seen: true, reportedAt: Math.floor(Date.now() / 1000) - 2 },
+      { node: 'node-b', major: 0, build: '0.1.2', features: ['network-transit-v1', 'network-transit-v2-preview', 'volume-share-v1'], seen: false, reportedAt: Math.floor(Date.now() / 1000) - 180 },
+      { node: 'node-c', major: 0, build: '0.1.1', features: ['network-transit-v1'], seen: true, reportedAt: Math.floor(Date.now() / 1000) - 2 },
     ],
   });
 });
@@ -1673,7 +1912,7 @@ on('GET', '/t/:t/networks/:n/users', (m) => {
 tenantGet('volumes', (t) => byTenant(fx.volumes, t));
 tenantGet('volume-backups', (t) => byTenant(fx.volumeBackups, t));
 tenantGet('vault', (t) => strip(byTenant(fx.vault, t)));
-// 클러스터 보관함(데몬 #74): 처음에는 없다. POST /vault/init으로 뿌리를 만든다
+// 클러스터 보관함(데몬 #74): 처음에는 없다. POST /vault/init으로 최상위 묶음을 만든다
 let clusterVaultReady = false;
 on('GET', '/vault', () => {
   const { user } = requireSession();
@@ -2832,7 +3071,7 @@ const vaultCreate: Handler = (m, body) => {
   } else if (body.kind === 'secret') {
     if (!keys.length || keys.length > 64) return invalid('keys: 1..64 names');
   } else return invalid('kind: "secret" or "group"');
-  // parent는 묶음 ID, 뿌리는 작업 공간 이름(데몬 #58)
+  // parent는 묶음 ID, 최상위는 작업 공간 이름(데몬 #58)
   if (!parent) return invalid('parent: a group ID or the workspace');
   const pg = parent === t ? undefined : fx.vault.find((v) => v.tenant === t && v.kind === 'group' && v.id === parent);
   const full = pg ? `${pg.path}/${id}` : id;
@@ -3731,35 +3970,13 @@ on('POST', '/t/:t/apps/deploy', async (m, body) => {
 });
 
 // ── 묶음 승인 (UI-72) ──
-// 서비스의 x-sfc.secrets_from: [group/Y]가 비밀번호가 걸린 묶음이면 begin-app 앞에서 승인을 기다린다(데몬 가짜와 같음).
+// 서비스의 x-sfc.secrets.from: [group/Y]가 비밀번호가 걸린 묶음이면 begin-app 앞에서 승인을 기다린다(데몬 가짜와 같음).
 // 목업은 비밀번호를 저장하지 않는다: 'wrong'은 틀린 비밀번호, 'mock:unknown'은 답 유실, 그 밖은 맞는 것으로 본다.
-/** 새 형식에서 없어진 키를 쓰면 그 안내(데몬 파서와 같은 거절). 문제 없으면 '' */
-function appYamlOldKeys(doc: Record<string, unknown>): string {
-  for (const [n, v] of Object.entries((doc.services ?? {}) as Record<string, Record<string, unknown> | null>)) {
-    const x = (v?.['x-sfc'] ?? {}) as Record<string, unknown>;
-    if ('readiness' in x) return `services.${n}.x-sfc.readiness: ready로 바뀌었습니다(ready: {http: /readyz, port: 8080} 또는 ready: healthcheck).`;
-    if ('secret_sources' in x) return `services.${n}.x-sfc.secret_sources: secrets_from 문자열 목록으로 바뀌었습니다(예: [db, group/app, cluster/tls]).`;
-    const from = x.secrets_from;
-    if (from !== undefined) {
-      if (!Array.isArray(from)) return `services.${n}.x-sfc.secrets_from: 문자열 목록이어야 합니다.`;
-      // [cluster/][group/]이름. 이름은 소문자로 시작하는 a-z·0-9·- 1~63자라 '/'가 들어갈 수 없다
-      const bad = from.find((e) => !/^(cluster\/)?(group\/)?[a-z][a-z0-9-]{0,62}$/.test(String(e)));
-      if (bad !== undefined) return `services.${n}.x-sfc.secrets_from: ${String(bad)}은(는) [cluster/][group/]이름 꼴이 아닙니다.`;
-    }
-  }
-  const allow: [string, string[]][] = [['volumes', ['node', 'size', 'uid', 'gid', 'mode']], ['secrets', ['key']]];
-  for (const [kind, keys] of allow)
-    for (const [n, v] of Object.entries((doc[kind] ?? {}) as Record<string, Record<string, unknown> | null>)) {
-      const bad = Object.keys((v?.['x-sfc'] ?? {}) as Record<string, unknown>).find((k) => !keys.includes(k));
-      if (bad) return `${kind}.${n}.x-sfc.${bad}: 받지 않는 키입니다(${keys.join(', ')}만).${bad === 'capacity_bytes' ? ' 용량은 size(예: 2GiB)로 쓰세요.' : ''}`;
-    }
-  return '';
-}
 function protectedUses(tenant: string, doc: Record<string, unknown>): D.DGroupApproval[] {
   const by = new Map<string, string[]>();
   for (const [svc, v] of Object.entries((doc.services ?? {}) as Record<string, Record<string, unknown> | null>)) {
-    // secrets_from: [X, group/Y, cluster/X, cluster/group/Y]. cluster/는 작업 공간 묶음이 아니다
-    const src = (((v?.['x-sfc'] ?? {}) as Record<string, unknown>).secrets_from ?? []) as unknown[];
+    // secrets.from: [X, group/Y, cluster/X, cluster/group/Y]. cluster/는 작업 공간 묶음이 아니다
+    const src = ((((v?.['x-sfc'] ?? {}) as Record<string, unknown>).secrets as Record<string, unknown> | undefined)?.from ?? []) as unknown[];
     for (const x of Array.isArray(src) ? src : []) {
       const m = /^group\/(.+)$/.exec(String(x));
       if (!m) continue;
@@ -3935,7 +4152,7 @@ function cdState(t: string, a: string): D.DCdState | undefined {
       changeCount: c.candidate ? 1 : 0,
       policyRevision: 1,
       principal: 'u-alice',
-      policy: { enabled: true, source: { kind: 'git', repository: c.repository, ref: `refs/heads/${c.branch}`, path: 'app.yaml', credential: '' }, poll: 60, sync: { mode: c.mode, drift: 'report', prune: false, allowEmpty: false }, runtime: { mode: '', expiry: '' }, limits: { fetch: 0, bytes: 0, queued: 0, active: 0 } },
+      policy: { enabled: true, source: { kind: 'git', repository: c.repository, ref: `refs/heads/${c.branch}`, path: 'app.yaml', credential: '' }, poll: 60, sync: { mode: c.mode, drift: 'report', prune: false, allowEmpty: false }, runtime: { mode: 'require-explicit-override', expiry: 'manual-release' }, limits: { fetch: 30, bytes: 4 << 20, queued: 1, active: 1 } },
       overrideRevision: 0,
       overrideCount: 0,
       overridePaths: [],
@@ -3986,8 +4203,12 @@ on('POST', '/t/:t/apps/:a/cd/(sync|recover|replan|pause|resume|abandon)', (m, bo
 on('PUT', '/t/:t/apps/:a/cd/policy', (m, body) => {
   const { user } = requireSession();
   requireTenant(user, m[0]);
-  const s = cdOr404(m[0], m[1]);
-  if (isRaw(s)) return s;
+  // CD가 없는 앱에 처음 보내면 등록한다(sfcd configure-app-cd, PolicyRevision 0). 그때 expected는 앱 revision
+  const app = findApp(m[0], m[1]);
+  if (!app) return err(404, 'not-cd', 'this app is not managed by CD');
+  const fresh = !app.cd;
+  const s = fresh ? undefined : cdOr404(m[0], m[1]);
+  if (s && isRaw(s)) return s;
   const p = body.policy as D.DCdPolicy | undefined;
   if (!p || typeof p !== 'object') return invalid('policy: required');
   const known = ['enabled', 'source', 'poll', 'sync', 'runtime', 'limits'];
@@ -3996,10 +4217,22 @@ on('PUT', '/t/:t/apps/:a/cd/policy', (m, body) => {
   if (!(p.poll >= 1 && p.poll <= 86400)) return invalid('policy.poll: 1..86400');
   if (!['report', 'reconcile'].includes(p.sync?.drift)) return invalid('policy.sync.drift: report or reconcile');
   if (p.runtime?.mode && p.runtime.mode !== 'require-explicit-override') return invalid('policy.runtime.mode: require-explicit-override');
-  // expected는 CD revision(모든 동작과 같다). 없으면 지금 값
-  const expected = Number(body.expected ?? 0) || s.revision;
+  if (!p.source?.repository) return invalid('policy.source.repository: required');
+  const lim = p.limits;
+  if (!lim || !(lim.fetch >= 1 && lim.fetch <= 300) || !(lim.bytes >= 1 && lim.bytes <= 4 << 20) || lim.queued !== 1 || lim.active !== 1) return invalid('policy.limits: fetch 1..300, bytes 1..4MiB, queued 1, active 1 (INVALID_CD_POLICY)');
+  if (!/^https:\/\/[^\s@?#]+$/.test(p.source.repository)) return invalid('policy.source.repository: https:// only (INVALID_GIT_SOURCE)');
+  // expected는 CD revision(모든 동작과 같다), 처음 등록이면 앱 revision. 없으면 지금 값
+  const expected = Number(body.expected ?? 0) || (s ? s.revision : app.revision);
   return submit(user, { ...body, tenant: m[0], target: `app/${m[1]}` }, 'cd-policy', () => {
     if (!canWrite(user, m[0])) return FORBIDDEN;
+    if (!s) {
+      if (expected !== app.revision) return CAS;
+      const branch = p.source.ref.replace(/^refs\/heads\//, '');
+      app.cd = { revision: 1, repository: p.source.repository, branch, mode: p.sync.mode as 'manual', paused: false, running: '', candidate: 'c0ffee1', candidateDigest: 'c0ffee1'.padEnd(64, '0') };
+      const n = cdState(m[0], m[1])!;
+      n.policy = structuredClone(p);
+      return;
+    }
     if (expected !== s.revision) return CAS;
     s.policy = structuredClone(p);
     s.mode = p.sync.mode;
@@ -4505,6 +4738,9 @@ on('GET', '/t/:t/standalone/:n', (m) => {
 on('POST', '/t/:t/standalone/plan', async (m, body) => {
   const { user } = requireSession();
   requireTenant(user, m[0]);
+  // 데몬처럼 모르는 필드는 거절한다(standalone_real.go: { yaml }만)
+  const extra = Object.keys(body ?? {}).find((k) => k !== 'yaml');
+  if (extra) return err(400, 'bad-request', `invalid JSON body: json: unknown field "${extra}"`);
   saSweep();
   const text = String(body.yaml ?? '');
   const p = parseSa(m[0], text);
@@ -4571,7 +4807,7 @@ on('POST', '/t/:t/standalone/up', (m, body) => {
     const d = p.doc;
     if (p.node === 'node-a' && ((d.ports ?? []) as unknown[]).some((x) => /(^|:)18080:/.test(typeof x === 'string' ? x : `${(x as { published?: unknown }).published}:`))) return err(409, 'host-port-conflict', 'ports: 18080 is already published on node-a');
   }
-  // 보호된 묶음(x-sfc.secrets_from의 group/Y)을 쓰면 승인을 기다린다. 승인은 배포 승인 끝점, 승인 목록의 kind는 standalone(#291)
+  // 보호된 묶음(x-sfc.secrets.from의 group/Y)을 쓰면 승인을 기다린다. 승인은 배포 승인 끝점, 승인 목록의 kind는 standalone(#291)
   const opId = String(body.opId ?? '');
   const w = saWaits.get(opId);
   if (w) return opReply(w.op);

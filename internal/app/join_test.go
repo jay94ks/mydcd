@@ -559,7 +559,7 @@ func testRealManagedJoin(t *testing.T, streamPlan bool, scenario ...string) {
 		}
 		// The leader's stored reports, which the node table shows.
 		reported := func(l *Runtime, lv cluster.View, node string, since uint64, term uint64) bool {
-			rows, err := l.nodeObservations(ctx, lv)
+			rows, _, err := l.nodeObservations(ctx, lv)
 			if err != nil {
 				return false
 			}

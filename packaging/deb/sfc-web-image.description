@@ -1,0 +1,2 @@
+The signed sfc-web cluster app image bundle under /usr/lib/sfc/images. sfcd
+runs it as the cluster's web UI when node.yaml enables cluster_apps.web.

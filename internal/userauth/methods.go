@@ -12,6 +12,7 @@ import (
 
 	"github.com/jay94ks/seafield/internal/access"
 	"github.com/jay94ks/seafield/internal/cluster"
+	"github.com/jay94ks/seafield/internal/cluster/state"
 	"github.com/jay94ks/seafield/internal/sfcp"
 )
 
@@ -28,8 +29,12 @@ type methodRule struct {
 	// sessionless: sent before a session exists (login_methods.go); serve
 	// answers it on its own path and never through typedQuery.
 	sessionless bool
-	decode      func(json.RawMessage) (any, bool)
-	run         func(context.Context, Service, cluster.View, access.Session, any) (any, string)
+	// admit, when set, lets a member that runs no workloads serve this
+	// request only when it reads true on the committed state. It sees the
+	// decoded P and no session; run still checks the user's authority.
+	admit  func(Service, state.State, any) bool
+	decode func(json.RawMessage) (any, bool)
+	run    func(context.Context, Service, cluster.View, access.Session, any) (any, string)
 }
 
 var methodRules = map[string]methodRule{}
@@ -45,20 +50,22 @@ func define[P, R any](m Method[P, R], ingress bool, run func(context.Context, Se
 	}
 	methodRules[m.Name] = methodRule{
 		ingress: ingress,
-		decode: func(raw json.RawMessage) (any, bool) {
-			var p P
-			if strict(raw, &p) != nil {
-				return nil, false
-			}
-			if v, ok := any(p).(validator); ok && !v.Valid() {
-				return nil, false
-			}
-			return p, true
-		},
+		decode:  decoder[P](),
 		run: func(ctx context.Context, s Service, view cluster.View, session access.Session, p any) (any, string) {
 			return run(ctx, s, view, session, p.(P))
 		},
 	}
+	return m
+}
+
+// defineIngressIf registers a session query that a member running no
+// workloads serves only when admit reads true on its committed state, for
+// example to find an original before its recovery call.
+func defineIngressIf[P, R any](m Method[P, R], admit func(Service, state.State, P) bool, run func(context.Context, Service, cluster.View, access.Session, P) (R, string)) Method[P, R] {
+	define(m, false, run)
+	rule := methodRules[m.Name]
+	rule.admit = func(s Service, view state.State, p any) bool { return admit(s, view, p.(P)) }
+	methodRules[m.Name] = rule
 	return m
 }
 
@@ -98,6 +105,34 @@ func cutRefusal(refusal string) (code, input string, ok bool) {
 	return code, input, ok
 }
 
+// decoder strictly decodes P and checks its own Valid.
+func decoder[P any]() func(json.RawMessage) (any, bool) {
+	return func(raw json.RawMessage) (any, bool) {
+		var p P
+		if strict(raw, &p) != nil {
+			return nil, false
+		}
+		if v, ok := any(p).(validator); ok && !v.Valid() {
+			return nil, false
+		}
+		return p, true
+	}
+}
+
+// defineRoute registers a method with its own handler path (an upload,
+// stream or relay) instead of run: the server checks the request shape and
+// decodes P, and the handler answers R in Data. typedQuery refuses it.
+func defineRoute[P, R any](m Method[P, R], ingress bool) Method[P, R] {
+	if _, exists := methodRules[m.Name]; exists {
+		panic("duplicate user method " + m.Name)
+	}
+	methodRules[m.Name] = methodRule{
+		ingress: ingress,
+		decode:  decoder[P](),
+	}
+	return m
+}
+
 // typedMethod says whether r is a typed method, and whether it carries
 // nothing but its header and Params.
 func (r Request) typedMethod() (methodRule, bool, bool) {
@@ -117,7 +152,7 @@ func (r Request) typedMethod() (methodRule, bool, bool) {
 func (s Service) typedQuery(ctx context.Context, view cluster.View, c access.Catalog, binding userBinding, r Request, envelope Envelope) Reply {
 	denied := Reply{Schema: 1, Code: "denied"}
 	rule, typed, ok := r.typedMethod()
-	if !typed || !ok || rule.sessionless || envelope.Session == nil {
+	if !typed || !ok || rule.run == nil || rule.sessionless || envelope.Session == nil {
 		return denied
 	}
 	session := *envelope.Session
@@ -171,7 +206,7 @@ func callRoute[P, R any](ctx context.Context, c Client, target sfcp.Peer, sessio
 		return zero, Route{}, err
 	}
 	var result R
-	if len(reply.Data) == 0 || strict(reply.Data, &result) != nil {
+	if len(reply.Data) == 0 || lenient(reply.Data, &result) != nil {
 		return zero, Route{}, sfcp.ErrFrame
 	}
 	return result, Route{Node: reply.Node, RelayedBy: reply.RelayedBy}, nil

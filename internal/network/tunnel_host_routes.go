@@ -256,3 +256,18 @@ func LocalHostRoutes(s TunnelSpec, sources []netip.Prefix) TunnelSpec {
 	s.HostSources = slices.Compact(s.HostSources)
 	return s
 }
+
+// CommittedLayout undoes LocalHostRoutes: the host routes go back into
+// Routes in the committed (string) order and HostSources is dropped. A
+// native permit hashes the committed source, so a journal holding the local
+// layout is checked against the permit through this.
+func (s TunnelSpec) CommittedLayout() TunnelSpec {
+	if len(s.HostRoutes) == 0 && len(s.HostSources) == 0 {
+		return s
+	}
+	s = s.Clone()
+	s.Routes = append(s.Routes, s.HostRoutes...)
+	slices.SortFunc(s.Routes, func(a, b netip.Prefix) int { return strings.Compare(a.String(), b.String()) })
+	s.HostRoutes, s.HostSources = nil, nil
+	return s
+}

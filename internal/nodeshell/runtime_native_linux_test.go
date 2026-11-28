@@ -300,19 +300,19 @@ func nodeShellRuntimeNativeAssertions(t *testing.T, ctx context.Context) {
 	}
 	policy := func() control.NodeShellPolicyView {
 		t.Helper()
-		reply, err := client.NodeShellPolicy(ctx, peer, adminSession)
-		if err != nil || reply.NodeShellPolicy == nil {
+		p, err := client.NodeShellPolicy(ctx, peer, adminSession)
+		if err != nil {
 			t.Fatal("actual policy/readiness read", err)
 		}
-		return *reply.NodeShellPolicy
+		return p
 	}
 	sessions := func() []control.NodeShellSession {
 		t.Helper()
 		reply, err := client.NodeShellSessions(ctx, peer, adminSession, "")
-		if err != nil || reply.NodeShellSessions == nil {
+		if err != nil {
 			t.Fatal("actual session read", err)
 		}
-		return reply.NodeShellSessions.Sessions
+		return reply.Sessions
 	}
 	row := func(id string) (control.NodeShellSession, bool) {
 		for _, r := range sessions() {

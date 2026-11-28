@@ -34,7 +34,13 @@ jobs:
         with:
           go-version-file: go.mod
       - run: go build ./...
-      - run: go test -p 2 -timeout 50m ./...
+      # The real-node tests start sfcd, which needs root for netlink
+      # (nftables, TUN), tmpfs mounts and network namespaces. Without root they
+      # fail or skip, so run the suite as root on the throwaway runner.
+      - run: sudo --preserve-env=GOCACHE,GOMODCACHE,GOPATH,GOFLAGS env "PATH=$PATH" go test -p 2 -timeout 50m ./...
+        env:
+          GOCACHE: /tmp/go-cache
+          GOMODCACHE: /tmp/go-mod
 
   web:
     runs-on: ubuntu-24.04

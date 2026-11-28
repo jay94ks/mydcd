@@ -52,7 +52,7 @@ func (f *fakeFirewall) view(node string) *control.NodeFirewallView {
 	ls := firewall.Layers{Node: f.state, Cluster: cluster}
 	return &control.NodeFirewallView{Schema: 1, Node: node, Managed: true, Revision: f.state.Revision, Policy: f.state.Policy, Rules: append([]firewall.Rule{}, f.state.Rules...), MaxRules: firewall.MaxRules, Locked: locks.List(),
 		Cluster: &cluster, Effective: firewall.Effective(f.state, cluster), Shadowed: firewall.Shadowed(ls),
-		Operator4: []string{"-P INPUT ACCEPT", "-A INPUT -p tcp -m tcp --dport 8080 -j DROP"}, Operator6: []string{"-P INPUT ACCEPT"}, Applied: true}
+		Operator: []string{"ip filter INPUT (hook input, priority 0, policy accept)", "  ip protocol tcp tcp dport 8080 counter drop", "ip6 filter INPUT (hook input, priority 0, policy accept)"}, OperatorFormat: "nft", Applied: true}
 }
 
 // NodeFirewall: the fake applies changes like a server (revision + delta,

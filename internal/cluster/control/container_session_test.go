@@ -11,7 +11,7 @@ import (
 )
 
 func TestContainerSessionPermitNeedsUserIntentAndExactLiveOwner(t *testing.T) {
-	f, _, selection := logClearPlanFixture(t, "local")
+	f, _, selection := observedTaskFixture(t, "local")
 	spec := containerops.SessionSpec{Kind: "exec", Exec: &containerops.ExecSpec{Argv: []string{"custom-cli"}, Stdin: true}}
 	target, err := f.p.ContainerSessionTarget(f.s, ContainerSessionPlan{Session: f.session, Tenant: "tenant", Selection: selection, Spec: spec}, 11)
 	if err != nil {
@@ -65,7 +65,7 @@ func TestContainerSessionPermitNeedsUserIntentAndExactLiveOwner(t *testing.T) {
 }
 
 func TestContainerExecStatusUsesCurrentLoginAndRetainedOriginalProof(t *testing.T) {
-	f, _, selection := logClearPlanFixture(t, "json-file")
+	f, _, selection := observedTaskFixture(t, "json-file")
 	spec := containerops.SessionSpec{Kind: "exec", Exec: &containerops.ExecSpec{Argv: []string{"custom-cli"}}}
 	target, err := f.p.ContainerSessionTarget(f.s, ContainerSessionPlan{Session: f.session, Tenant: "tenant", Selection: selection, Spec: spec}, 11)
 	if err != nil {

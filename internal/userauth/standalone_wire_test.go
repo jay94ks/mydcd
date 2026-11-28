@@ -25,10 +25,9 @@ func TestRQ9SelectorsPreserveOtherAuthenticatedFeatureBoundaries(t *testing.T) {
 	}
 	foreign := []func(*Request){
 		func(r *Request) { r.Params = json.RawMessage("{}") },
-		func(r *Request) { r.ServiceCall = &call; r.ServiceInput = &input },
-		func(r *Request) { r.CDProbe = &probe },
+		func(r *Request) { r.Params = callRequest(call, input).Params },
+		func(r *Request) { r.Params = probeRequest(probe).Params },
 		func(r *Request) { r.Node = "node-a" },
-		func(r *Request) { r.ImageBuild = &control.ImageBuildQuery{Part: "contexts"} },
 	}
 	for _, q := range queries {
 		t.Run(q.Method, func(t *testing.T) {
@@ -60,8 +59,6 @@ func TestRQ9QueryMethodsPreservePreviousSDKAdmission(t *testing.T) {
 	for _, q := range []Request{
 		{Method: "standalone-list", Tenant: "tenant", Standalone: &control.StandaloneQuery{}},
 		{Method: "standalone-get", Tenant: "tenant", Standalone: &control.StandaloneQuery{Name: "debug"}},
-		{Method: "tenant-storage", Tenant: "tenant"},
-		{Method: "cd-probe", Tenant: "tenant", CDProbe: &deployment.GitProbeRequest{App: "shop", Repository: "https://git.example/repo.git", Branch: "main", Path: "app.yaml"}},
 	} {
 		// No transport is installed. Every supported method must reach the same
 		// transport admission boundary instead of the unsupported-query branch.

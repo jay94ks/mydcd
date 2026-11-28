@@ -71,14 +71,11 @@ never opens another one.`,
 }
 
 func shellPolicy(ctx context.Context, s *session) (*control.NodeShellPolicyView, error) {
-	reply, err := s.Client.NodeShellPolicy(ctx, s.Target, s.Stored.Session)
+	p, err := s.Client.NodeShellPolicy(ctx, s.Target, s.Stored.Session)
 	if err != nil {
 		return nil, err
 	}
-	if reply.NodeShellPolicy == nil {
-		return nil, errors.New("server sent no shell policy")
-	}
-	return reply.NodeShellPolicy, nil
+	return &p, nil
 }
 
 func nodeShellPolicyCommand(g *globals) *cli.Command {
@@ -253,11 +250,8 @@ func nodeShellSessionsCommand(g *globals) *cli.Command {
 				if err != nil {
 					return err
 				}
-				if reply.NodeShellSessions == nil {
-					return errors.New("server sent no session page")
-				}
-				sessions = append(sessions, reply.NodeShellSessions.Sessions...)
-				if after = reply.NodeShellSessions.Next; after == "" {
+				sessions = append(sessions, reply.Sessions...)
+				if after = reply.Next; after == "" {
 					break
 				}
 			}

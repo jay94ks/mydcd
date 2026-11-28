@@ -22,6 +22,11 @@ export const refreshAll = () => window.dispatchEvent(new Event(REFRESH_ALL));
  */
 export interface LiveTopic<T> {
   match: (r: LiveRef) => boolean;
+  /**
+   * 값에 서버가 그때그때 잰 수치(요청 수·지연·적용 상태)가 섞여 있다. 그 수치는 바뀜 알림이 없어
+   * 주기도 그대로 두고, 기록이 바뀌면 주기를 기다리지 않고 바로 다시 읽는다.
+   */
+  measured?: boolean;
   patch?(data: T, refs: LiveRef[], signal: AbortSignal): Promise<T>;
 }
 
@@ -31,8 +36,12 @@ export interface Loaded<T> {
   loading: boolean;
   /** 마지막으로 성공한 읽기 시각 */
   asOf: Date | undefined;
-  /** 즉시 다시 읽고 간격 시계를 다시 센다 */
+  /** 즉시 다시 읽고 간격 시계를 다시 센다(조용히: 진행 막대 없음) */
   refresh: () => void;
+  /** 사람이 새로고침·다시 시도를 눌렀을 때. 그 읽기 동안 manual이 참이라 진행 막대를 보인다 */
+  refreshByUser: () => void;
+  /** 사람이 누른 다시 읽기가 진행 중. 주기·실시간·변경 뒤 자동 다시 읽기에는 진행 막대를 보이지 않는다(Jay 2026-11-28) */
+  manual: boolean;
   interval: number;
   setInterval: (ms: number) => void;
   /** 실시간 주제로 고쳐지는 조회(주기 없음). 카드 머리가 '실시간 · 기준'으로 보인다 */
@@ -45,10 +54,13 @@ export interface Loaded<T> {
  */
 export function usePoll<T>(load: (signal: AbortSignal) => Promise<T>, deps: unknown[], initialInterval = 0, live?: LiveTopic<T>): Loaded<T> {
   // 실시간 주제가 있으면 주기는 없다(목업 계층에는 소켓이 없어 예전처럼 주기로 읽는다)
-  if (live && liveAvailable()) initialInterval = 0;
+  if (live && !live.measured && liveAvailable()) initialInterval = 0;
   const [data, setData] = useState<T>();
   const [error, setError] = useState<unknown>();
   const [loading, setLoading] = useState(true);
+  const [manual, setManual] = useState(false);
+  const manualNext = useRef(false);
+  const manualInFlight = useRef(false);
   const [asOf, setAsOf] = useState<Date>();
   // 기본 주기(30초)로 감시하는 화면은 내 화면 설정의 자동 갱신 주기를 따른다
   const [interval, setIntervalMs] = useState(() => (initialInterval === DEFAULT_POLL_MS ? (prefPollMs() ?? initialInterval) : initialInterval));
@@ -69,6 +81,11 @@ export function usePoll<T>(load: (signal: AbortSignal) => Promise<T>, deps: unkn
       setError(undefined);
     }
     setLoading(true);
+    // 사람이 누른 읽기가 다른 읽기로 끊겨도 끝날 때까지 진행 막대를 유지한다
+    const m = manualNext.current || manualInFlight.current;
+    manualNext.current = false;
+    manualInFlight.current = m;
+    setManual(m);
     if (timerTick.current) markBackground(ctl.signal);
     timerTick.current = false;
     loadRef
@@ -84,7 +101,10 @@ export function usePoll<T>(load: (signal: AbortSignal) => Promise<T>, deps: unkn
         setError(e);
       })
       .finally(() => {
-        if (!ctl.signal.aborted) setLoading(false);
+        if (ctl.signal.aborted) return;
+        setLoading(false);
+        manualInFlight.current = false;
+        setManual(false);
       });
     return () => ctl.abort();
   }, [depKey, tick]);
@@ -99,6 +119,10 @@ export function usePoll<T>(load: (signal: AbortSignal) => Promise<T>, deps: unkn
   }, [interval, tick, asOf]);
 
   const refresh = useCallback(() => setTick((x) => x + 1), []);
+  const refreshByUser = useCallback(() => {
+    manualNext.current = true;
+    setTick((x) => x + 1);
+  }, []);
 
   // 실시간: 맞는 참조가 오면 바뀐 항목만 읽어 고친다. 이어 받을 수 없으면(resync) 한 번 다시 읽는다.
   const liveRef = useRef(live);
@@ -163,5 +187,5 @@ export function usePoll<T>(load: (signal: AbortSignal) => Promise<T>, deps: unkn
     window.addEventListener(REFRESH_ALL, refresh);
     return () => window.removeEventListener(REFRESH_ALL, refresh);
   }, [refresh]);
-  return { data, error, loading, asOf, refresh, interval, setInterval: setIntervalMs, live: hasLive };
+  return { data, error, loading, asOf, refresh, refreshByUser, manual, interval, setInterval: setIntervalMs, live: hasLive && !live?.measured };
 }

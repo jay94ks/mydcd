@@ -154,12 +154,8 @@ func (p Policy) admitManagedNetworkPatch(s state.State, cmd state.Command, keys 
 	case cmd.Kind == state.Module && strings.HasPrefix(cmd.Actor, "user/"):
 		writes, code = p.reduceResources(s, cmd)
 	case cmd.Kind == state.ModuleReport && strings.HasPrefix(cmd.Actor, "node/"):
-		// a server's own system network step
-		if bridgeClosedValue(cmd.Value) {
-			writes, code = p.reduceBridgeClosedReport(s, cmd)
-		} else {
-			writes, code = p.reduceSystemNetworkReport(s, cmd)
-		}
+		// a server's own system network step or workspace network leave
+		writes, code = p.reduceNodeResourceReport(s, cmd)
 	}
 	if code != state.Applied {
 		return false

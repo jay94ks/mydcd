@@ -85,9 +85,9 @@ interface TNode {
   children: TNode[];
 }
 
-/** 부모 ID로 트리를 만든다. 목록에 없는 부모(행이 없는 묶음)는 뿌리 아래 이름만 있는 마디로 둔다 */
+/** 부모 ID로 트리를 만든다. 목록에 없는 부모(행이 없는 묶음)는 최상위 아래 이름만 있는 마디로 둔다 */
 function buildTree(items: SecretView[], rootId: string): TNode {
-  // 뿌리 묶음이 한 행으로 오면(parent "") 그 행이 뿌리 마디다
+  // 최상위 묶음이 한 행으로 오면(parent "") 그 행이 최상위 마디다
   const root: TNode = { id: rootId, row: items.find((v) => v.id === rootId), children: [] };
   const byId = new Map<string, TNode>([[rootId, root]]);
   const rest = items.filter((v) => v.id !== rootId);
@@ -223,7 +223,7 @@ function DesktopVault() {
   const base: VaultScope | undefined = cluster ? CLUSTER_VAULT : tenant ? tenantVault(tenant) : undefined;
   const canDeploy = cluster ? isAdmin : role.canDeploy;
   const q = usePoll((s) => (base ? vaultList(base, s) : Promise.resolve(EMPTY())), [base?.base]);
-  // 뿌리 묶음 ID: 응답의 root, 없으면 parent가 빈 행, 그것도 없으면 작업 공간 이름
+  // 최상위 묶음 ID: 응답의 root, 없으면 parent가 빈 행, 그것도 없으면 작업 공간 이름
   const rootId = q.data?.root || q.data?.items.find((v) => v.parent === '')?.id || base?.root || '';
   const scope: VaultScope | undefined = base && { ...base, root: rootId };
   const uninit = cluster && q.data?.initialized === false;
@@ -268,7 +268,7 @@ function DesktopVault() {
       )}
       <HelpBox terms="비밀값 보관함 (Vault) · 비밀값 (Secret) · 묶음 (Group, 비밀번호로 사용을 승인받는 비밀값 모음) · 접근 권한 (ACL) · 무효화 (revoke)">
         <b>이 화면은</b> DB 비밀번호 같은 비밀값을 보관합니다. 값은 화면에 절대 나오지 않고, 이름과 쓰는 곳 같은 정보만 보입니다.
-        {cluster && <> 클러스터 보관함은 모든 작업 공간이 함께 쓰는 비밀값이고, 시스템 관리자만 다룹니다. 작업 공간이 쓰려면 뿌리에 그 작업 공간 허용이 있어야 합니다.</>}
+        {cluster && <> 클러스터 보관함은 모든 작업 공간이 함께 쓰는 비밀값이고, 시스템 관리자만 다룹니다. 작업 공간이 쓰려면 최상위 묶음에 그 작업 공간 허용이 있어야 합니다.</>}
       </HelpBox>
       {!scope ? (
         <NoTenant />
@@ -402,7 +402,7 @@ function Tree({ root, rootLabel, sel, onPick, onMenu }: { root: TNode; rootLabel
   };
   walk(root, 0);
   return (
-    <div role="tree" aria-label="비밀값 트리" className="col" style={{ gap: 2 }}>
+    <div role="tree" aria-label="비밀값 묶음 구조" className="col" style={{ gap: 2 }}>
       {rows}
     </div>
   );
@@ -414,7 +414,7 @@ type Act = Exclude<Dlg['kind'], 'group' | 'secret' | 'init'>;
 function why(v: SecretView, act: Act | 'write', canDeploy: boolean, isRoot = false): string | undefined {
   if (act === 'users') return undefined;
   if (!canDeploy) return NEED;
-  if (isRoot && (act === 'move' || act === 'revoke' || act === 'retire')) return '뿌리 묶음은 옮기거나 지울 수 없습니다';
+  if (isRoot && (act === 'move' || act === 'revoke' || act === 'retire')) return '최상위 묶음은 옮기거나 지울 수 없습니다';
   if (v.status === 'retired') return '폐기된 항목입니다';
   switch (act) {
     case 'revoke':
@@ -527,7 +527,7 @@ function NewValueCard({ scope, v, canDeploy, onDone }: { scope: VaultScope; v: S
   const op = m.op;
   return (
     <section className="card" id="vault-new-value" style={{ borderColor: 'var(--accent-line)' }}>
-      <h2>새 값 쓰기 (UI-71)</h2>
+      <h2>새 값 쓰기</h2>
       {keys.map((k) => (
         <div key={k} className={keys.length > 1 ? 'g2' : 'col'} style={{ gap: 12 }}>
           <Field label={keys.length > 1 ? `새 값 · ${k}` : '새 값'}>
@@ -898,7 +898,7 @@ function InitDialog({ onClose, onDone }: { onClose: () => void; onDone: () => vo
       }
     >
       <div className="col" style={{ gap: 12 }}>
-        <div>클러스터 범위의 보관함 뿌리를 만듭니다. 한 번만 하면 됩니다. 작업 공간 보관함에는 영향이 없습니다.</div>
+        <div>클러스터 범위의 최상위 보관함을 만듭니다. 한 번만 하면 됩니다. 작업 공간 보관함에는 영향이 없습니다.</div>
         {exists ? <div className="note small">이미 초기화되어 있습니다. 목록을 새로 읽었습니다.</div> : <VaultErr e={m.error} />}
         {m.op && <OpPanel op={m.op} onChange={(o) => (m.setOp(o), o.state === 'applied' && onDone())} />}
       </div>

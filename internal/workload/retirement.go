@@ -97,7 +97,7 @@ func (d *DockerDriver) Retire(ctx context.Context, key string, op reconcile.Oper
 	if proof.NativeID != "" && got.Container.ID != proof.NativeID {
 		return false, engine.ErrOwnership
 	}
-	lease, err := d.taskNetworkManager(s).InspectConsumer(ctx, s.Bridge, containerConsumer(id), s.BridgeGeneration)
+	lease, err := d.inspectNetworks(ctx, s, id)
 	if err != nil {
 		return false, err
 	}

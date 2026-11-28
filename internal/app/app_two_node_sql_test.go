@@ -155,7 +155,7 @@ services:
   healthcheck: {test: [CMD, /usr/bin/php8.3, -n, -d, extension=pdo, -d, extension=mysqlnd, -d, extension=pdo_mysql, /app/web.php], interval: 1s, timeout: 3s, retries: 3}
   depends_on: {db: {condition: service_healthy}}
   networks: {app: {ipv4_address: 198.19.80.2}}
-  x-sfc: {node: node-a, secrets_from: [group/common], ready: {http: /readyz, port: 8080}}
+  x-sfc: {node: node-a, secrets: {from: [group/common]}, ready: {http: /readyz, port: 8080}}
  db:
   image: %s
   user: '10001:10001'
@@ -171,7 +171,7 @@ services:
   tmpfs: ['/tmp:size=16m,mode=1777', '/run/sfc:size=4m,uid=10001,gid=10001,mode=0700']
   healthcheck: {test: [CMD, /sfc-mysql, --health], interval: 1s, timeout: 3s, retries: 30, start_period: 30s}
   networks: {app: {ipv4_address: 198.19.80.18}}
-  x-sfc: {node: node-b, secrets_from: [group/common, group/db-admin]}
+  x-sfc: {node: node-b, secrets: {from: [group/common, group/db-admin]}}
 networks:
  app:
   x-sfc:

@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -789,16 +790,12 @@ func (s *Server) notifyMCPTools(ctx context.Context, ws *webSession, m *store.MC
 		s.log.Warn("mcp notify", "err", err)
 		users = []string{ws.user.ID}
 	}
-	var parts []string
-	if len(added) > 0 {
-		parts = append(parts, fmt.Sprintf("새 도구 %d개(꺼진 채): %s", len(added), strings.Join(added, ", ")))
-	}
-	if len(removed) > 0 {
-		parts = append(parts, fmt.Sprintf("없어진 도구 %d개: %s", len(removed), strings.Join(removed, ", ")))
-	}
+	args := map[string]string{"name": m.Name, "count": strconv.Itoa(len(added)), "tools": oneLine(strings.Join(added, ", "), 240),
+		"removedCount": strconv.Itoa(len(removed)), "removedTools": oneLine(strings.Join(removed, ", "), 240)}
+	parts := append(bodyIf(len(added) > 0, "mcp-tools-changed.added"), bodyIf(len(removed) > 0, "mcp-tools-changed.removed")...)
 	for _, u := range users {
-		s.notify(&store.Notification{User: u, Kind: NotifyMCPToolsChanged, Severity: "info", Title: "MCP 서버 " + m.Name + "의 도구가 바뀌었어요",
-			Body: oneLine(strings.Join(parts, " · "), 500), Link: "/system/ai/mcp", Action: len(added) > 0})
+		s.notify(&store.Notification{User: u, Kind: NotifyMCPToolsChanged, Severity: "info", Text: notice("mcp-tools-changed", args, parts...),
+			Link: "/system/ai/mcp", Action: len(added) > 0})
 	}
 }
 

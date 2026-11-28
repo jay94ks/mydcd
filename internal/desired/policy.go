@@ -361,7 +361,9 @@ func (p Policy) Project(s state.State) (Graph, error) {
 			return g, ErrPolicy
 		}
 		b, known := g.Bridges[t.Bridge]
-		if !known || b.Owner != t.Node || b.Lifecycle.Released() || b.Lifecycle.Drain && !t.Lifecycle.Drain || s.Object(t.Bridge).Generation != t.BridgeGeneration {
+		// Raw desired Tasks carry one network; extra attachments come only
+		// from an app's Task recipe.
+		if !known || len(t.Attachments) != 0 || b.Owner != t.Node || b.Lifecycle.Released() || b.Lifecycle.Drain && !t.Lifecycle.Drain || s.Object(t.Bridge).Generation != t.BridgeGeneration {
 			return g, ErrPolicy
 		}
 		taskCount[t.Node]++

@@ -42,6 +42,12 @@ export function fmtTime(iso: string | undefined): string {
   return d.toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false, timeZone: tz });
 }
 
+/** 날짜만, 연도까지: '2026. 2. 25.' (화면 설정 시간대). 유효 기간·갱신 예정처럼 날짜가 중요한 곳 */
+export function fmtDate(iso: string | undefined): string {
+  if (!iso) return '—';
+  return new Date(iso).toLocaleDateString('ko-KR', { year: 'numeric', month: 'numeric', day: 'numeric', timeZone: prefTimeZone() });
+}
+
 /** '오늘 07:12' · '어제 22:05' · '11월 25일 22:05' (화면 설정 시간대) */
 export function dayTime(iso: string | undefined, now = new Date()): string {
   if (!iso) return '—';

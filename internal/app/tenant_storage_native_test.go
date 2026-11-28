@@ -87,28 +87,28 @@ func (f *managedRegistryNative) verifyTenantStorageNative(t *testing.T, ctx cont
 			if after != "" {
 				args = append(args, "--after", after)
 			}
-			var page userauth.Reply
-			if err := json.Unmarshal(f.cli(nil, args...), &page); err != nil || page.TenantStorageViewIndex == 0 || len(page.TenantStorage) > 8 {
+			var page control.TenantStoragePage
+			if err := json.Unmarshal(f.cli(nil, args...), &page); err != nil || page.Index == 0 || len(page.Items) > 8 {
 				t.Fatal("actual tenant storage CLI page missing", err)
 			}
-			if after != "" && (page.TenantStorageViewIndex < index || page.NodeStorageRevision != revision || page.NodeStorageRootRevision != rootRevision) {
+			if after != "" && (page.Index < index || page.Revision != revision || page.RootRevision != rootRevision) {
 				t.Fatal("tenant root pages mixed storage revisions")
 			}
-			index, revision, rootRevision = page.TenantStorageViewIndex, page.NodeStorageRevision, page.NodeStorageRootRevision
-			for _, row := range page.TenantStorage {
+			index, revision, rootRevision = page.Index, page.Revision, page.RootRevision
+			for _, row := range page.Items {
 				id := row.Node + "/" + row.ID
 				if _, duplicate := rows[id]; duplicate || !row.Allowed || row.Root.Validate() != nil || row.Root.Cluster != p.Cluster || row.Root.Node != row.Node || row.Root.ID != row.ID || row.Root.Generation != row.Generation || node != "" && row.Node != node {
 					t.Fatal("tenant root page lost complete reference or node filter", id)
 				}
 				rows[id] = row
 			}
-			if page.TenantStorageNext == "" {
+			if page.Next == "" {
 				return rows
 			}
-			if len(page.TenantStorage) == 0 || page.TenantStorageNext == after || len(rows) > 1024 {
+			if len(page.Items) == 0 || page.Next == after || len(rows) > 1024 {
 				t.Fatal("tenant root cursor did not advance")
 			}
-			after = page.TenantStorageNext
+			after = page.Next
 		}
 	}
 	all, filtered := list(""), list(selected.Node)

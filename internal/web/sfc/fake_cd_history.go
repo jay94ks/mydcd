@@ -310,10 +310,10 @@ func (c *fakeConn) AppDeliveryValues(ctx context.Context, tenant string, q contr
 			out.Current, out.Overridden = slices.Clone(o.Value), true
 		}
 	}
-	// An environment key Git does not set may come from secrets_from:
+	// An environment key Git does not set may come from secrets.from:
 	// name the selectors, never a value.
 	if q.Path[2] == "environment" && out.GitRunning == nil && !out.Overridden {
-		if v, ok := cdLookup(run, []string{"services", q.Path[1], "x-sfc", "secrets_from"}); ok {
+		if v, ok := cdLookup(run, []string{"services", q.Path[1], "x-sfc", "secrets", "from"}); ok {
 			l, _ := v.([]any)
 			for _, s := range l {
 				if text, ok := s.(string); ok {

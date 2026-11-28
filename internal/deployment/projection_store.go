@@ -33,9 +33,19 @@ var ErrProjectionStore = errors.New("private task projection unavailable or inco
 type ProjectionGate func(context.Context, Binding) error
 
 type ProjectionStore struct {
-	mu            sync.Mutex
-	root          *os.Root
-	path          string
+	mu   sync.Mutex
+	root *os.Root
+	path string
+	// values holds the private value directories (file-NNNN, manifest).
+	// The node daemon puts it on a tmpfs, so plain values never reach a
+	// disk; root keeps only the journal and the public scope receipts.
+	values     *os.Root
+	valuesPath string
+	// Each value directory written into values leaves a seen-NAME marker
+	// there. An applied generation whose directory and marker are both gone
+	// was lost with an earlier boot's tmpfs and may be written again, from a
+	// fresh read under current authority; a directory that went missing or
+	// changed within one boot stays an error.
 	cluster, node [32]byte
 	gate          ProjectionGate
 	maxBytes      int
@@ -92,8 +102,13 @@ func projectionSync(root *os.Root) error {
 	return nil
 }
 
+// OpenProjections keeps the values next to path, in path+"-values".
 func OpenProjections(path string, cluster, node [32]byte, maxBytes int, gate ProjectionGate) (*ProjectionStore, error) {
-	if !filepath.IsAbs(path) || filepath.Clean(path) != path || cluster == ([32]byte{}) || node == ([32]byte{}) || gate == nil || maxBytes <= 0 || maxBytes > 64<<20 {
+	return OpenProjectionsWithValues(path, path+"-values", cluster, node, maxBytes, gate)
+}
+
+func projectionDirectory(path string) (*os.Root, error) {
+	if !filepath.IsAbs(path) || filepath.Clean(path) != path {
 		return nil, ErrProjectionStore
 	}
 	if err := os.MkdirAll(path, 0700); err != nil {
@@ -111,7 +126,25 @@ func OpenProjections(path string, cluster, node [32]byte, maxBytes int, gate Pro
 	if err != nil {
 		return nil, ErrProjectionStore
 	}
-	m := &ProjectionStore{root: r, path: path, cluster: cluster, node: node, maxBytes: maxBytes, gate: gate}
+	return r, nil
+}
+
+// OpenProjectionsWithValues keeps the journal and scope receipts in path
+// and the private value directories in values (a tmpfs on a node).
+func OpenProjectionsWithValues(path, values string, cluster, node [32]byte, maxBytes int, gate ProjectionGate) (*ProjectionStore, error) {
+	if path == values || cluster == ([32]byte{}) || node == ([32]byte{}) || gate == nil || maxBytes <= 0 || maxBytes > 64<<20 {
+		return nil, ErrProjectionStore
+	}
+	r, err := projectionDirectory(path)
+	if err != nil {
+		return nil, err
+	}
+	v, err := projectionDirectory(values)
+	if err != nil {
+		_ = r.Close()
+		return nil, err
+	}
+	m := &ProjectionStore{root: r, path: path, values: v, valuesPath: values, cluster: cluster, node: node, maxBytes: maxBytes, gate: gate}
 	ok := false
 	defer func() {
 		if !ok {
@@ -136,6 +169,21 @@ func OpenProjections(path string, cluster, node [32]byte, maxBytes int, gate Pro
 	got, err := projectionRead(r, "owner.json", nil, 4096)
 	if err != nil || !bytes.Equal(got, header) {
 		return nil, ErrProjectionStore
+	}
+	if _, err = v.Lstat("owner.json"); os.IsNotExist(err) {
+		if projectionMetadata(v, "owner.json", header) != nil {
+			return nil, ErrProjectionStore
+		}
+	} else if err != nil {
+		return nil, ErrProjectionStore
+	}
+	if got, err = projectionRead(v, "owner.json", nil, 4096); err != nil || !bytes.Equal(got, header) {
+		return nil, ErrProjectionStore
+	}
+	// Value directories an older daemon kept in path are plain values on a
+	// disk: delete them. Their generations are restored as after a reboot.
+	if err = m.dropDiskValues(); err != nil {
+		return nil, err
 	}
 	m.journal, err = reconcile.OpenJournal(filepath.Join(path, "journal.db"))
 	if err != nil {
@@ -194,14 +242,27 @@ func (m *ProjectionStore) Publish(ctx context.Context, b Binding, stage Stage, r
 			return ref, reconcile.ErrPending
 		}
 		// A dispatched Apply can only recover its original synced files; absence
-		// must not trigger publication/recreation under a new attempt.
+		// must not trigger publication/recreation under a new attempt, except
+		// a directory lost with an earlier boot's tmpfs.
+		if m.lost(b) {
+			if err = m.restore(ctx, b, files); err != nil {
+				return ref, err
+			}
+		}
 		if err = m.verify(b, files); err != nil {
 			return ref, err
 		}
 		return ref, m.journal.Step(ctx, ref.Key, projectionDriver{m})
 	}
-	if err == nil && old.State.Applied.Present && old.State.Applied.Generation == ref.Generation && m.verify(b, files) != nil {
-		return ref, ErrProjectionStore
+	if err == nil && old.State.Applied.Present && old.State.Applied.Generation == ref.Generation {
+		if m.lost(b) {
+			if err = m.restore(ctx, b, files); err != nil {
+				return ref, err
+			}
+		}
+		if m.verify(b, files) != nil {
+			return ref, ErrProjectionStore
+		}
 	}
 	if err = m.journal.Desired(ref.Key, d, capacity); err != nil {
 		return ref, err
@@ -265,10 +326,22 @@ func (m *ProjectionStore) Ready(ctx context.Context, ref workload.InputRef) (boo
 	if err = m.gate(ctx, b); err != nil {
 		return false, err
 	}
+	if m.lost(b) {
+		return false, nil
+	}
 	if err = m.verify(b, nil); err != nil {
 		return false, err
 	}
 	return true, nil
+}
+
+// lost reports whether b's applied value directory went with the tmpfs of
+// an earlier boot and has not been written again yet.
+func (m *ProjectionStore) lost(b Binding) bool {
+	name := projectionName(projectionKey(b), b.d.Needs.Generation)
+	_, err := m.values.Lstat(name)
+	_, seen := m.values.Lstat("seen-" + name)
+	return os.IsNotExist(err) && os.IsNotExist(seen)
 }
 
 func (m *ProjectionStore) lease(ref workload.InputRef, b Binding, pin reconcile.Lease, verify bool) (workload.InputLease, error) {
@@ -291,7 +364,7 @@ func (m *ProjectionStore) lease(ref workload.InputRef, b Binding, pin reconcile.
 		if len(manifest.Sources) != 0 {
 			reference = manifest.Sources[i] + "/" + p.Key
 		}
-		l.Files = append(l.Files, workload.InputFile{Source: filepath.Join(m.path, projectionName(ref.Key, ref.Generation), fmt.Sprintf("file-%04d", i)), Target: p.Target, UID: p.UID, GID: p.GID, Mode: p.Mode, Kind: p.Kind, Reference: reference})
+		l.Files = append(l.Files, workload.InputFile{Source: filepath.Join(m.valuesPath, projectionName(ref.Key, ref.Generation), fmt.Sprintf("file-%04d", i)), Target: p.Target, UID: p.UID, GID: p.GID, Mode: p.Mode, Kind: p.Kind, Reference: reference})
 	}
 	return l, nil
 }
@@ -431,7 +504,7 @@ func (m *ProjectionStore) gone(ref workload.InputRef) (bool, error) {
 			return false, nil
 		}
 	}
-	_, err = m.root.Lstat(projectionName(ref.Key, ref.Generation))
+	_, err = m.values.Lstat(projectionName(ref.Key, ref.Generation))
 	if os.IsNotExist(err) {
 		return true, nil
 	}
@@ -550,6 +623,9 @@ func (m *ProjectionStore) Close() error {
 	if m.root != nil {
 		err = errors.Join(err, m.root.Close())
 	}
+	if m.values != nil {
+		err = errors.Join(err, m.values.Close())
+	}
 	return err
 }
 
@@ -574,13 +650,16 @@ func (d projectionDriver) Execute(ctx context.Context, key string, op reconcile.
 		return reconcile.EffectUnknown, reconcile.ErrOperation
 	}
 	name := projectionName(key, op.Target.Generation)
-	if _, err = m.root.Lstat(name); os.IsNotExist(err) {
-		return reconcile.EffectApplied, nil
+	if _, err = m.values.Lstat(name); !os.IsNotExist(err) {
+		if err = m.verify(b, nil); err != nil {
+			return reconcile.EffectUnknown, err
+		}
+		if err = m.values.RemoveAll(name); err != nil || projectionSync(m.values) != nil {
+			return reconcile.EffectUnknown, ErrProjectionStore
+		}
 	}
-	if err = m.verify(b, nil); err != nil {
-		return reconcile.EffectUnknown, err
-	}
-	if err = m.root.RemoveAll(name); err != nil || projectionSync(m.root) != nil {
+	// A removed generation is never restored, so its seen marker can go too.
+	if err = m.values.Remove("seen-" + name); err != nil && !os.IsNotExist(err) {
 		return reconcile.EffectUnknown, ErrProjectionStore
 	}
 	return reconcile.EffectApplied, nil

@@ -14,6 +14,7 @@ import { Dialog } from '../components/Dialog';
 import { MutationError, OpPanel, sendOp, uncertain, useMutation } from '../components/OpPanel';
 import { Field } from '../components/ui';
 import { fmtBytes } from '../lib/format';
+import { BundleDialog, ReplaceDialog, UnbundleDialog } from './DiskBundles';
 import { diskNameError, MOUNT_BASE, mountPathError, rootIdFor, rootsUnder, shortUuid, type DiskDlg } from './NodeDisks';
 
 /** 서버가 거절한 이유 (NodeDiskCodes) */
@@ -32,11 +33,13 @@ export const DISK_CODE: Record<string, string> = {
   io: '장치를 읽거나 쓰지 못했습니다',
   interrupted: 'sfcd가 작업 중에 멈췄습니다',
 };
-const ACTION_TEXT: Record<DiskAction, string> = { format: '포맷', mount: '마운트', unmount: '마운트 풀기', forget: '기록 지우기' };
+const ACTION_TEXT: Record<DDiskOp['action'], string> = { format: '포맷', mount: '마운트', unmount: '마운트 풀기', forget: '기록 지우기', 'prepare-storage': '저장 경로 준비', bundle: '디스크 묶기', unbundle: '묶음 풀기', 'replace-member': '구성원 교체' };
+/** 받침이 있으면 을, 없으면 를 */
+const eul = (w: string) => ((w.charCodeAt(w.length - 1) - 0xac00) % 28 ? '을' : '를');
 /** 실패한 디스크 작업 한 줄 */
 export function diskOpText(o: DDiskOp): string {
   const why = DISK_CODE[o.code ?? ''] ?? o.error ?? o.code ?? '알 수 없는 이유';
-  return `${o.disk ?? ''} ${ACTION_TEXT[o.action]}${o.action === 'forget' ? '를' : '을'} 거절했습니다: ${why}${o.code === 'interrupted' && o.step ? ` (마지막 단계: ${o.step})` : ''}.`;
+  return `${o.bundle ?? o.disk ?? ''} ${ACTION_TEXT[o.action]}${eul(ACTION_TEXT[o.action])} 거절했습니다: ${why}${o.code === 'interrupted' && o.step ? ` (마지막 단계: ${o.step})` : ''}.`;
 }
 
 type Fail = { op?: DDiskOp; error?: unknown };
@@ -44,7 +47,7 @@ type DiskBody = Omit<Parameters<typeof diskAction>[3], 'opId'>;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /** 디스크 작업 하나를 보내고 running이면 끝날 때까지 2초마다 묻는다 */
-function useDiskRunner(node: string, disk: string) {
+export function useDiskRunner(node: string, disk: string) {
   const ids = useRef<Partial<Record<DiskAction, string>>>({});
   const alive = useRef(true);
   useEffect(() => {
@@ -86,7 +89,7 @@ function useDiskRunner(node: string, disk: string) {
 }
 
 /** 실패 띠. changed면 다시 읽기 */
-function FailBand({ fail, onReload }: { fail?: Fail; onReload: () => void }) {
+export function FailBand({ fail, onReload }: { fail?: Fail; onReload: () => void }) {
   if (!fail) return null;
   if (fail.op)
     return (
@@ -111,8 +114,8 @@ function FailBand({ fail, onReload }: { fail?: Fail; onReload: () => void }) {
   );
 }
 
-type StepState = 'wait' | 'run' | 'done' | 'fail';
-function Steps({ rows }: { rows: { label: ReactNode; state: StepState; detail?: ReactNode }[] }) {
+export type StepState = 'wait' | 'run' | 'done' | 'fail';
+export function Steps({ rows }: { rows: { label: ReactNode; state: StepState; detail?: ReactNode }[] }) {
   return (
     <div className="steps-list" aria-label="진행">
       {rows.map((r, i) => (
@@ -127,7 +130,7 @@ function Steps({ rows }: { rows: { label: ReactNode; state: StepState; detail?: 
 }
 
 /** 1초마다 다시 그려 진행 중 경과를 보인다 */
-function useTicker(on: boolean) {
+export function useTicker(on: boolean) {
   const [, set] = useState(0);
   useEffect(() => {
     if (!on) return;
@@ -135,7 +138,7 @@ function useTicker(on: boolean) {
     return () => clearInterval(t);
   }, [on]);
 }
-const elapsed = (from?: number) => (from ? `진행 중 · ${Math.max(0, Math.round((Date.now() - from) / 1000))}초` : '진행 중');
+export const elapsed = (from?: number) => (from ? `진행 중 · ${Math.max(0, Math.round((Date.now() - from) / 1000))}초` : '진행 중');
 
 function RootCheck({ on, set, disabled, id }: { on: boolean; set: (v: boolean) => void; disabled: boolean; id: string }) {
   return (
@@ -433,6 +436,12 @@ function BlockedDialog({ dlg, roots, onClose }: { dlg: Extract<DiskDlg, { kind: 
       </>,
       '서버에 직접 접속해 옮기기',
     ]),
+    ...dlg.fuse.map((b): [ReactNode, ReactNode] => [
+      <>
+        묶음 <b>{b}</b>의 조각 파일 (FUSE)
+      </>,
+      `묶음 ${b}를 먼저 풀기`,
+    ]),
     ...(dlg.fstab
       ? [
           [
@@ -503,6 +512,12 @@ export function DiskActionDialog({ node, dlg, dev, roots, onClose, onChanged }: 
       );
     case 'forget':
       return <ForgetBody {...p} rec={dlg.rec} />;
+    case 'bundle':
+      return <BundleDialog node={node} dev={dev} initialBackend={dlg.backend} onClose={onClose} onChanged={onChanged} onReload={reload} />;
+    case 'unbundle':
+      return <UnbundleDialog node={node} b={dlg.b} onClose={onClose} onChanged={onChanged} onReload={reload} />;
+    case 'replace':
+      return <ReplaceDialog node={node} dev={dev} b={dlg.b} member={dlg.member} onClose={onClose} onChanged={onChanged} onReload={reload} />;
   }
 }
 

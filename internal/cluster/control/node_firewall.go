@@ -76,9 +76,10 @@ func (p Policy) ReadNodeFirewall(s state.State, session access.Session, at int64
 // node.yaml does not let sfcd control it: every other field is empty and a
 // change is refused with not-managed.
 //
-// Operator4/Operator6 are the operator's own INPUT rules as `iptables -S
-// INPUT` / `ip6tables -S INPUT` print them, without sfcd's jump; they are
-// shown only. Applied says SFC-INPUT holds the current rules in every
+// Operator is the server's other input rules, read from the kernel as nft
+// expressions (OperatorFormat "nft"): every input-hook chain of the ip, ip6
+// and inet tables and the chains they jump to, without SFC-INPUT and its
+// jump. They are shown only. Applied says SFC-INPUT holds the current rules in every
 // family; ApplyError is why it does not.
 type NodeFirewallView struct {
 	Schema   uint8
@@ -93,12 +94,13 @@ type NodeFirewallView struct {
 	Cluster   *firewall.State `json:",omitempty"`
 	Effective string          `json:",omitempty"`
 	// Shadowed are server rules a required cluster rule partly overrides.
-	Shadowed             []string          `json:",omitempty"`
-	Locked               []firewall.Locked `json:",omitempty"`
-	Operator4, Operator6 []string          `json:",omitempty"`
-	OperatorTruncated    bool              `json:",omitempty"`
-	Applied              bool              `json:",omitempty"`
-	ApplyError           string            `json:",omitempty"`
+	Shadowed          []string          `json:",omitempty"`
+	Locked            []firewall.Locked `json:",omitempty"`
+	Operator          []string          `json:",omitempty"`
+	OperatorFormat    string            `json:",omitempty"`
+	OperatorTruncated bool              `json:",omitempty"`
+	Applied           bool              `json:",omitempty"`
+	ApplyError        string            `json:",omitempty"`
 }
 
 // NodeFirewallChange is one applied change, kept on the server (the newest
@@ -137,7 +139,7 @@ var NodeFirewallCodes = []string{
 	"duplicate",          // the same rule exists twice
 	"too-many",           // more than firewall.MaxRules rules
 	"missing",            // update or delete of a rule that is not there
-	"apply-failed",       // iptables-restore failed; the previous rules stay
+	"apply-failed",       // netfilter write failed; the previous rules stay
 	"operation-conflict", // the ID is in use for another change
 }
 

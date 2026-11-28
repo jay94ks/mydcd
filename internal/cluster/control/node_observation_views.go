@@ -38,11 +38,24 @@ type NodeAdminView struct {
 }
 
 type NodeSummaryView struct {
-	CordonedBy, CordonedAt        string `json:",omitempty"`
-	Scheduling                    membership.CordonView
-	ObserveLimitSeconds           uint64
-	Node, State                   string
-	Ready, Stale                  bool
+	CordonedBy, CordonedAt string `json:",omitempty"`
+	Scheduling             membership.CordonView
+	ObserveLimitSeconds    uint64
+	Node, State            string
+	Ready, Stale           bool
+	// Waiting: the server did not answer this query in time; the row
+	// shows what was stored before ("대기 중").
+	Waiting bool `json:",omitempty"`
+	// AdmitsWork: the server takes work (apps, builds). One that does not
+	// can still be ready: State "ready" with Ready false.
+	AdmitsWork bool
+	// Reason says why State is "unready": one of
+	// observability.UnreadyReasons, or UNKNOWN when the server did not say.
+	// FailedSteps and FailingSince (Unix ms, 0 unknown) are cluster-admin
+	// only. Error text stays in that server's log.
+	Reason                        string   `json:",omitempty"`
+	FailedSteps                   []string `json:",omitempty"`
+	FailingSince                  uint64   `json:",omitempty"`
 	ObservedAt, ObservationMaxAge uint64
 	Usage                         *NodeUsageView `json:",omitempty"`
 	Admin                         *NodeAdminView `json:",omitempty"`
@@ -112,6 +125,7 @@ type NodeDevicesView struct {
 	// Recorded: mounts sfcd made and mounts again at start; Reason says
 	// why one is not mounted now (disk-not-found shows 디스크를 찾지 못함).
 	Recorded                      []observability.RecordedMount
+	Bundles                       []observability.BlockBundle
 	ObservedAt, ObservationMaxAge uint64
 	Stale                         bool
 }
@@ -327,17 +341,28 @@ func (p Policy) NodeSummary(s state.State, session access.Session, at int64, ten
 				row.State = string(view.Node.Phase)
 			}
 		}
+		row.AdmitsWork = work
 		host, known := selected[id]["host"]
 		row.Build = nodeBuild(host, known, now)
 		if known && host.Host != nil {
 			row.ObservedAt, row.Stale = host.At, !observability.Fresh(host.At, now)
-			row.Ready = !row.Stale && host.Host.ModuleReady && work
-			if row.State == "unknown" {
-				if row.Ready {
+			healthy := !row.Stale && host.Host.ModuleReady
+			row.Ready = healthy && work
+			if row.State == "unknown" && !row.Stale {
+				if healthy {
 					row.State = "ready"
 				} else {
 					row.State = "unready"
+					row.Reason = "UNKNOWN"
+					if u := host.Host.Unready; u != nil {
+						row.Reason = u.Reason
+						if a.admin {
+							row.FailedSteps, row.FailingSince = append([]string(nil), u.Steps...), u.Since
+						}
+					}
 				}
+			} else if row.State == "unknown" {
+				row.State = "unready"
 			}
 		}
 		if work && (row.ObservedAt == 0 || row.Stale) {

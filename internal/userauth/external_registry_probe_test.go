@@ -8,32 +8,22 @@ import (
 	"github.com/jay94ks/seafield/internal/cluster/control"
 )
 
-func TestRegistryLoginProbeCannotMixOtherSelectorsOrCredentials(t *testing.T) {
+func TestRegistryLoginProbeCannotCarryOtherFieldsOrCredentials(t *testing.T) {
 	q := control.ExternalRegistryProbeQuery{ID: "private", Image: "ghcr.io/team/app:stable"}
-	base := Request{Method: "registry-login-test", Tenant: "tenant", ExternalRegistryProbe: &q}
-	if !base.validQuerySelectors() {
+	if !(ExternalRegistryProbeQuery{Tenant: "tenant", Query: q}).Valid() {
 		t.Fatal("source login query rejected")
 	}
-	for _, edit := range []func(*Request){
-		func(r *Request) { r.Tenant = "" },
-		func(r *Request) { r.Node = "node-a" },
-		func(r *Request) { r.After = "cursor" },
-		func(r *Request) { r.Method = "external-registries" },
-		func(r *Request) { r.ExternalRegistryProbe = nil },
-		func(r *Request) {
-			r.ExternalRegistryBind = &control.ExternalRegistryBindQuery{ID: "private", Node: "node-a"}
-		},
-	} {
-		bad := base
-		edit(&bad)
-		if bad.validQuerySelectors() {
-			t.Fatal("foreign source/Secret selector accepted")
-		}
+	if (ExternalRegistryProbeQuery{Query: q}).Valid() {
+		t.Fatal("login query without a tenant accepted")
 	}
-	bad := base
-	bad.Secret = []byte("not allowed")
-	if bad.validCredentialFields(Envelope{}, 1) {
-		t.Fatal("registry query accepted raw login Secret")
+	for _, raw := range []string{
+		`{"Tenant":"tenant","Query":{"ID":"private"},"Node":"node-a"}`,
+		`{"Tenant":"tenant","Query":{"ID":"private"},"Secret":"bm90IGFsbG93ZWQ="}`,
+		`{"Tenant":"tenant","Query":{"ID":"private","Node":"node-a"}}`,
+	} {
+		if strict([]byte(raw), &ExternalRegistryProbeQuery{}) == nil {
+			t.Fatal("foreign field accepted", raw)
+		}
 	}
 }
 

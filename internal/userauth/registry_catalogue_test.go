@@ -3,24 +3,29 @@
 package userauth
 
 import (
-	"github.com/jay94ks/seafield/internal/cluster/control"
 	"testing"
+
+	"github.com/jay94ks/seafield/internal/cluster/control"
 )
 
 func TestRegistryCatalogueRequestRequiresExactReadSelection(t *testing.T) {
-	valid := Request{Method: "registry-catalog", Tenant: "tenant", RegistryCatalog: &control.RegistryCatalogueQuery{Kind: "external", ID: "source", Repository: "team/app"}}
-	if !valid.validMethodFields() || !valid.validQuerySelectors() {
+	valid := RegistryCatalogQuery{Tenant: "tenant", Query: control.RegistryCatalogueQuery{Kind: "external", ID: "source", Repository: "team/app"}}
+	if !valid.Valid() {
 		t.Fatal("valid catalogue query")
 	}
-	for _, change := range []func(*Request){
-		func(r *Request) { r.Tenant = "" }, func(r *Request) { r.Node = "node-a" }, func(r *Request) { r.After = "invalid" }, func(r *Request) { r.RegistryCatalog = nil }, func(r *Request) { r.TargetUser = "app" }, func(r *Request) {
-			r.RegistryCatalog = &control.RegistryCatalogueQuery{Kind: "external", ID: "source", Repository: "../escape"}
+	for _, change := range []func(*RegistryCatalogQuery){
+		func(q *RegistryCatalogQuery) { q.Tenant = "" }, func(q *RegistryCatalogQuery) { q.After = "invalid" },
+		func(q *RegistryCatalogQuery) {
+			q.Query = control.RegistryCatalogueQuery{Kind: "external", ID: "source", Repository: "../escape"}
 		},
 	} {
 		copy := valid
 		change(&copy)
-		if copy.validMethodFields() && copy.validQuerySelectors() {
-			t.Fatal("foreign/invalid catalogue fields", copy)
+		if copy.Valid() {
+			t.Fatal("invalid catalogue fields", copy)
 		}
+	}
+	if strict([]byte(`{"Tenant":"tenant","Query":{"Kind":"external","ID":"source"},"Node":"node-a"}`), &RegistryCatalogQuery{}) == nil {
+		t.Fatal("foreign catalogue field accepted")
 	}
 }

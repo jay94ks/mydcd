@@ -248,7 +248,7 @@ func cleanupManagedTaskVolumes(t *testing.T, ctx context.Context, c *engine.Clie
 		return
 	}
 	defer activation.Close()
-	store, err := deployment.OpenProjections(filepath.Join(cfg.Node.StateDir, "workload", "inputs"), clusterID, nodeKey, maxAppInputBytes, func(context.Context, deployment.Binding) error { return deployment.ErrInputs })
+	store, err := deployment.OpenProjectionsWithValues(filepath.Join(cfg.Node.StateDir, "workload", "inputs"), filepath.Join(cfg.Node.StateDir, "workload", "inputs-memory"), clusterID, nodeKey, maxAppInputBytes, func(context.Context, deployment.Binding) error { return deployment.ErrInputs })
 	if err != nil {
 		t.Error(err)
 		return

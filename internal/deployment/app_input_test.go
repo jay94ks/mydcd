@@ -29,7 +29,7 @@ func TestAppInputSeparatesManagementBeforeNormalization(t *testing.T) {
 		t.Run(field, func(t *testing.T) {
 			bad := strings.Replace(raw, "x-sfc: {}", "x-sfc: {"+field+"}", 1)
 			_, err := ParseApp([]byte(bad))
-			if err == nil || !strings.Contains(err.Error(), "CLUSTER_SETTING_IN_APP") {
+			if err == nil || !strings.Contains(err.Error(), "INVALID_FIELD") {
 				t.Fatal("management field not rejected before normalization", err)
 			}
 		})

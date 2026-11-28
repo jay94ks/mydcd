@@ -74,6 +74,7 @@ tenant. FILE defaults to app.yaml (or compose.yaml) in this directory.`,
 			appDiffCommand(g),
 			appDeployCommand(g),
 			appDownCommand(g),
+			appArchiveCommand(g),
 			appResendCommand(g),
 			appHistoryCommand(g),
 			appSourceCommand(g),
@@ -743,35 +744,25 @@ func (g *globals) streamContext() (context.Context, context.CancelFunc) {
 	return containerStreamContext(g.timeout)
 }
 
+// appLogsCommand is `sfcli app logs APP CONTAINER`, an alias of
+// `sfcli logs --app APP --container CONTAINER`.
 func appLogsCommand(g *globals) *cli.Command {
 	var follow bool
+	var instance string
 	return &cli.Command{
 		Name:  "logs",
-		Args:  "APP SERVICE",
-		Short: "Print a service's container logs",
-		Long:  `Prints the last 200 lines. -f keeps printing new lines until Ctrl-C.`,
+		Args:  "APP CONTAINER",
+		Short: "Print a container's logs (same as sfcli logs --app --container)",
+		Long:  `Same as sfcli logs --app APP --container CONTAINER. Prints the last 200 lines. -f keeps printing new lines until Ctrl-C.`,
 		Flags: func(fs *flag.FlagSet) {
-			fs.BoolVar(&follow, "f", false, "follow new lines")
-			fs.String("tail", "", "last `N` lines (at most 10000)")
-			fs.String("since", "", "from this RFC3339 `time`")
-			fs.String("until", "", "up to this RFC3339 `time`")
-			fs.String("cursor", "", "continue from this `CURSOR`")
-			fs.Bool("timestamps", false, "show timestamps")
-			fs.Bool("stdout", false, "only standard output")
-			fs.Bool("stderr", false, "only standard error")
-			fs.String("instance", "", "one `TASK` of a service with several")
-			fs.String("max-bytes", "", "print at most `N` bytes")
+			logsFlags(fs, &follow)
+			fs.StringVar(&instance, "instance", "", "one `TASK` of a container with several")
 		},
 		Run: g.withSession(func(c *cli.Context, s *session, args []string) error {
-			app, service, err := appTarget(args, "logs")
-			if err != nil {
-				return err
+			if len(args) != 2 {
+				return cli.Usagef("logs needs APP CONTAINER")
 			}
-			flow := append([]string{"logs", "-p", app, service}, forward(c, "tail", "since", "until", "cursor", "timestamps", "stdout", "stderr", "instance", "max-bytes")...)
-			if follow {
-				flow = append(flow, "--follow")
-			}
-			return g.containerRead(c, s, follow, flow)
+			return g.runLogs(c, s, logsTarget{App: args[0], Container: args[1], Instance: instance}, follow)
 		}),
 	}
 }

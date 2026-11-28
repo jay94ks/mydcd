@@ -5,6 +5,7 @@ package userauth
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/jay94ks/seafield/internal/access"
 	"github.com/jay94ks/seafield/internal/cluster"
@@ -12,13 +13,27 @@ import (
 	"github.com/jay94ks/seafield/internal/sfcp"
 )
 
-func (s Service) eventQuery(ctx context.Context, view cluster.View, session access.Session, q eventlog.Query) Reply {
+// EventsMethod reads one page of the event log. A tenant's events need
+// Read in it; the cluster-wide log (no tenant) needs ManageCluster.
+var EventsMethod = define(Method[eventlog.Query, eventlog.Page]{Name: "events"}, true, func(ctx context.Context, s Service, view cluster.View, session access.Session, q eventlog.Query) (eventlog.Page, string) {
+	c, issuer, ok := s.accountCatalog(view, session)
+	action := access.Read
+	if q.Tenant == "" {
+		action = access.ManageCluster
+	}
+	if !ok || c.AuthorizeSession(session, s.Policy.Cluster, issuer, time.Now().Unix(), q.Tenant, action, "") != nil {
+		return eventlog.Page{}, "denied"
+	}
+	return s.eventQuery(ctx, view, session, q)
+})
+
+func (s Service) eventQuery(ctx context.Context, view cluster.View, session access.Session, q eventlog.Query) (eventlog.Page, string) {
 	if s.EventReader == nil {
-		return Reply{Schema: 1, Code: "unavailable"}
+		return eventlog.Page{}, "unavailable"
 	}
 	page, err := s.EventReader(ctx, view, session, q)
 	if err == nil {
-		return Reply{Schema: 1, Code: "ok", Events: &page}
+		return page, "ok"
 	}
 	code := "unavailable"
 	if errors.Is(err, eventlog.ErrCursorExpired) {
@@ -26,23 +41,21 @@ func (s Service) eventQuery(ctx context.Context, view cluster.View, session acce
 	} else if errors.Is(err, access.ErrDenied) || errors.Is(err, access.ErrInvalid) || errors.Is(err, eventlog.ErrInvalid) {
 		code = "denied"
 	}
-	return Reply{Schema: 1, Code: code}
+	return eventlog.Page{}, code
 }
+
 func (c Client) EventsPage(ctx context.Context, peer sfcp.Peer, session access.Session, q eventlog.Query) (eventlog.Page, error) {
-	if !q.Valid() {
-		return eventlog.Page{}, sfcp.ErrAdmission
-	}
-	reply, err := c.query(ctx, peer, session, Request{Method: "events", Tenant: q.Tenant, Events: &q})
+	p, err := call(ctx, c, peer, session, EventsMethod, q)
 	if err != nil {
 		return eventlog.Page{}, err
 	}
-	if reply.Events == nil || reply.Events.Schema != 1 || reply.Events.Cursor == "" || len(reply.Events.Cursor) > 1536 || len(reply.Events.Items) > 100 {
+	if p.Schema != 1 || p.Cursor == "" || len(p.Cursor) > 1536 || len(p.Items) > 100 {
 		return eventlog.Page{}, sfcp.ErrFrame
 	}
-	for _, item := range reply.Events.Items {
+	for _, item := range p.Items {
 		if !item.Event.Valid() || item.ID == "" || item.Cursor == "" || q.Tenant != "" && item.Target.Tenant != q.Tenant || q.App != "" && item.Target.App != q.App {
 			return eventlog.Page{}, sfcp.ErrFrame
 		}
 	}
-	return *reply.Events, nil
+	return p, nil
 }

@@ -110,7 +110,7 @@ func (r *Runtime) reconcileVolumeWork(ctx context.Context, view cluster.View) er
 	if err != nil {
 		return err
 	}
-	return errors.Join(r.reconcileVolumeBackups(ctx, registry), r.reconcileVolumeRestores(ctx, registry), r.reconcileVolumeDeletions(ctx, registry), r.reconcileVolumeCreations(ctx, registry), r.reconcileVolumeMoveSources(ctx, view, registry), r.reconcileVolumeMoveTargetsInView(ctx, view, registry))
+	return errors.Join(r.reconcileVolumeArchives(ctx, view, registry), r.reconcileVolumeBackups(ctx, registry), r.reconcileVolumeRestores(ctx, registry), r.reconcileVolumeDeletions(ctx, registry), r.reconcileVolumeCreations(ctx, registry), r.reconcileVolumeMoveSources(ctx, view, registry), r.reconcileVolumeMoveTargetsInView(ctx, view, registry))
 }
 
 func (r *Runtime) reconcileVolumeBackups(ctx context.Context, registry control.Volumes) error {

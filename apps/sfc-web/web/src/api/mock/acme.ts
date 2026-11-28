@@ -30,8 +30,11 @@ const accounts: AcmeAccount[] = [
 ];
 const step = (name: string, at: string, state: AcmeStep['state'] = 'done', detail?: string): AcmeStep => ({ name, state, at, detail });
 const doneSteps = (at: string) => STEP_ORDER.map((n) => step(n, at));
+// 외부 접속 목업(ingress.ts)의 경로가 가리키는 인증서 ID와 맞춘다
+const SHOP_FP = '9c41d2e85f30a7b16c94e0d3f8a2b57e1c06d49a3b8e72f5c1d0a6e94b3f7e07';
+const GRAFANA_FP = 'b2a85f0c3e961d47a0c5e8b3f21d6a94c7e03b58d1f6a29e4c70b3d85a1e6f90';
 const certs: AcmeCert[] = [
-  { name: 'shop-example', names: ['shop.example.com', '*.shop.example.com'], account: 'acc-le', keyTypes: ['ec256'], autoRenew: true, fingerprint: fp(), keyType: 'ec256', issuer: "Let's Encrypt E6", notBefore: ago(3600), notAfter: later(86400 * 89), nextRenew: later(86400 * 59), failures: 0, createdBy: 'alice', createdAt: ago(86400 * 120), running: false },
+  { name: 'shop-example', names: ['shop.example.com', '*.shop.example.com'], account: 'acc-le', keyTypes: ['ec256'], autoRenew: true, fingerprint: SHOP_FP, keyType: 'ec256', issuer: "Let's Encrypt E6", notBefore: ago(3600), notAfter: later(86400 * 89), nextRenew: later(86400 * 59), failures: 0, createdBy: 'alice', createdAt: ago(86400 * 120), running: false },
   { name: 'blog-example', names: ['blog.example.com'], account: 'acc-le', keyTypes: ['ec256'], autoRenew: true, fingerprint: fp(), keyType: 'ec256', issuer: "Let's Encrypt E5", notBefore: ago(86400 * 66), notAfter: later(86400 * 24), nextRenew: ago(600), failures: 0, createdBy: 'alice', createdAt: ago(86400 * 70), running: false, renewBlocked: ago(600) },
   { name: 'api-acme', names: ['api.acme.dev'], account: 'acc-le', keyTypes: ['ec256'], autoRenew: true, fingerprint: fp(), keyType: 'ec256', issuer: "Let's Encrypt E6", notBefore: ago(86400 * 84), notAfter: later(86400 * 6), nextRenew: ago(86400 * 24), nextTry: later(3600 * 4), failures: 3, createdBy: 'alice', createdAt: ago(86400 * 200), running: false },
   { name: 'lab-wild', names: ['*.lab.example.com'], account: 'acc-les', keyTypes: ['ec256'], autoRenew: false, fingerprint: fp(), keyType: 'ec256', issuer: '(STAGING) Pretend Pear X1', notBefore: ago(86400 * 2), notAfter: later(86400 * 88), failures: 0, createdBy: 'alice', createdAt: ago(86400 * 2), running: false },
@@ -124,7 +127,7 @@ const store: SC[] = [
   // 이전 갱신분: 새 인증서가 링크를 모두 가져가 파기 대기
   { id: fp(), names: ['shop.example.com', '*.shop.example.com'], keyType: 'ecdsa-p256', issuer: LE, serial: ser(), notBefore: ago(86400 * 49), notAfter: later(86400 * 41), uploadedBy: 'sfc-web-tls', uploadedAt: ago(86400 * 49) },
   // 사내 인증 기관: 등록된 도메인 아래 이름이 아니라 미연결
-  { id: fp(), names: ['grafana.internal'], keyType: 'ecdsa-p256', issuer: 'CN=Intra Root CA, O=사내 인증 기관', serial: ser(), notBefore: ago(86400 * 353), notAfter: later(86400 * 12), uploadedBy: 'alice', uploadedAt: ago(86400 * 353) },
+  { id: GRAFANA_FP, names: ['grafana.internal'], keyType: 'ecdsa-p256', issuer: 'CN=Intra Root CA, O=사내 인증 기관', serial: ser(), notBefore: ago(86400 * 353), notAfter: later(86400 * 12), uploadedBy: 'alice', uploadedAt: ago(86400 * 353) },
 ];
 const fam = (k: string) => (k.startsWith('rsa') ? 'rsa' : 'ecdsa');
 const underReg = (name: string) => {

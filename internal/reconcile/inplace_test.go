@@ -50,3 +50,46 @@ func TestInPlaceApplyRunsUnderLiveConsumersOnlyWhenTheDriverSaysSo(t *testing.T)
 		t.Fatal("in-place change lost its consumer or result", r)
 	}
 }
+
+type inPlaceCheckpointDriver struct {
+	inPlaceDriver
+}
+
+func (d *inPlaceCheckpointDriver) ExecuteCheckpoint(ctx context.Context, key string, op Operation, save func([]byte) error) (Outcome, error) {
+	if op.ID == 1 {
+		if err := save([]byte("start-witness")); err != nil {
+			return EffectUnknown, err
+		}
+	}
+	return d.fileDriver.Execute(ctx, key, op)
+}
+
+// A same-generation in-place Apply keeps the original start witness, bound to
+// the new Applied target, so the record stays valid across a reopen.
+func TestInPlaceApplyCarriesTheStartCheckpoint(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	path := filepath.Join(root, "j.db")
+	j, err := OpenJournal(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := &inPlaceCheckpointDriver{inPlaceDriver{fileDriver: fileDriver{path: filepath.Join(root, "effect"), j: j, t: t}, allow: true}}
+	for revision, spec := range []string{"a", "b"} {
+		if err = j.Desired("k", Desired{Revision: uint64(revision + 1), Resource: Resource{Present: true, Generation: 1, Spec: spec}}, 2); err != nil {
+			t.Fatal(err)
+		}
+		if err = j.Step(ctx, "k", d); err != nil {
+			t.Fatal(spec, err)
+		}
+	}
+	r, _ := j.Read("k")
+	if c := r.Checkpoint; c == nil || c.Operation != r.State.LastID || c.Target != r.State.Applied || string(c.Data) != "start-witness" {
+		t.Fatal("in-place Apply lost or kept a stale start witness", r.Checkpoint)
+	}
+	_ = j.Close()
+	if j, err = OpenJournal(path); err != nil {
+		t.Fatal("record invalid after in-place Apply", err)
+	}
+	_ = j.Close()
+}

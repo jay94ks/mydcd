@@ -1,0 +1,3 @@
+# Go binaries are static by design: the CLI runs on any Linux without
+# depending on the host's libraries.
+sfcli: statically-linked-binary [usr/bin/sfcli]

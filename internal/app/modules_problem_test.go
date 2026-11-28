@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"errors"
 	"log"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -47,5 +48,26 @@ func TestPassStepKeepsCause(t *testing.T) {
 	err := passStep("system-network", reconcile.ErrPending)
 	if !errors.Is(err, reconcile.ErrPending) || !strings.HasPrefix(err.Error(), "system-network: ") {
 		t.Fatal(err)
+	}
+}
+
+func TestFailedStepsNamesOnlySteps(t *testing.T) {
+	err := errors.Join(passStep("certificates", errors.New("secret detail")), errors.Join(passStep("node-storage", reconcile.ErrPending), passStep("certificates", errors.New("again"))), errors.New("unnamed"))
+	if got := failedSteps(err); !slices.Equal(got, []string{"certificates", "node-storage"}) {
+		t.Fatal(got)
+	}
+	if failedSteps(nil) != nil {
+		t.Fatal("nil error has steps")
+	}
+	var r Runtime
+	now := time.UnixMilli(5000)
+	r.setModuleErrorLocked(err, now)
+	r.setModuleErrorLocked(err, now.Add(time.Minute))
+	if !r.moduleErrorSince.Equal(now) {
+		t.Fatal("failing stretch restarted", r.moduleErrorSince)
+	}
+	r.setModuleErrorLocked(nil, now.Add(2*time.Minute))
+	if !r.moduleErrorSince.IsZero() {
+		t.Fatal("since kept after recovery")
 	}
 }

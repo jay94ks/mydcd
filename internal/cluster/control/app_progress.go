@@ -101,6 +101,9 @@ type AppProgress struct {
 	// not against the whole app revision, so progress on other stages and
 	// unrelated app changes do not reject them.
 	Stage string `json:",omitempty"`
+	// Images are a resolve-images report's tag resolutions: the deploy's
+	// tags, once, before its tasks are prepared (Execution.ResolveImages).
+	Images []deployment.ImageResolution `json:",omitempty"`
 }
 
 // StageDigest is the digest a member puts in a stage report planned on s.
@@ -161,7 +164,7 @@ func (p Policy) appProgress(s state.State, cmd state.Command) (AppProgress, erro
 		return r, ErrCatalog
 	}
 	members, err := p.Members(s)
-	if err != nil || !members.MemberKey(r.Reporter) || (r.Action == "recreate-continue" || r.Action == "advance-wave") && !members.WorkKey(r.Reporter) {
+	if err != nil || !members.MemberKey(r.Reporter) || r.Action == "advance-wave" && !members.WorkKey(r.Reporter) {
 		return r, ErrCatalog
 	}
 
@@ -177,7 +180,7 @@ func (p Policy) appProgress(s state.State, cmd state.Command) (AppProgress, erro
 			return r, ErrCatalog
 		}
 	}
-	if r.Retire != nil || r.ExpireSequence != 0 && r.Action != "expire-observation" {
+	if r.Retire != nil || r.ExpireSequence != 0 && r.Action != "expire-observation" || r.Images != nil && r.Action != "resolve-images" {
 		return r, ErrCatalog
 	}
 	if StageReport(r.Action) != (len(r.Stage) == 64) || r.Stage != strings.ToLower(r.Stage) {
@@ -197,8 +200,12 @@ func (p Policy) appProgress(s state.State, cmd state.Command) (AppProgress, erro
 		if r.Observation == nil || r.Observation.Key != r.Key || r.Release != nil || r.Volume != nil {
 			return r, ErrCatalog
 		}
-	case "finish", "recreate-continue", "advance-wave":
+	case "finish", "advance-wave":
 		if r.Key != "" || r.Observation != nil || r.Release != nil || r.Volume != nil {
+			return r, ErrCatalog
+		}
+	case "resolve-images":
+		if r.Key != "" || len(r.Images) == 0 || r.Observation != nil || r.Release != nil || r.Volume != nil {
 			return r, ErrCatalog
 		}
 	case "expire-observation":
@@ -259,15 +266,11 @@ func (p Policy) authorizeAppSourceStep(s state.State, c access.Catalog, entry ap
 			return access.ErrDenied
 		}
 		if entry.Sync != nil {
-			if entry.Sync.Recreate == nil && c.AuthorizeAccepted(entry.Origin.Session, p.Cluster, entry.Origin.At, e.Scope().Tenant, access.ManageCD, "") != nil {
+			if c.AuthorizeAccepted(entry.Origin.Session, p.Cluster, entry.Origin.At, e.Scope().Tenant, access.ManageCD, "") != nil {
 				return access.ErrDenied
 			}
 			if u := entry.Sync.User; u != nil {
-				action := step.Action()
-				if entry.Sync.Recreate != nil {
-					action = access.Deploy
-				}
-				if entry.Sync.Recreate == nil && c.AuthorizeAccepted(u.Session, p.Cluster, u.At, e.Scope().Tenant, access.ManageCD, "") != nil || c.AuthorizeAccepted(u.Session, p.Cluster, u.At, e.Scope().Tenant, action, step.Node) != nil {
+				if c.AuthorizeAccepted(u.Session, p.Cluster, u.At, e.Scope().Tenant, access.ManageCD, "") != nil || c.AuthorizeAccepted(u.Session, p.Cluster, u.At, e.Scope().Tenant, step.Action(), step.Node) != nil {
 					return access.ErrDenied
 				}
 			}
@@ -314,23 +317,15 @@ func (p Policy) reduceAppProgress(s state.State, cmd state.Command) (map[string]
 	// stage record. Only whole-app transitions need the exact app revision.
 	switch {
 	case cmd.Target == state.AppObservationTarget && r.Action == "observe":
+	case r.Action == "resolve-images":
+		// Checked by the operation and by the deploy still waiting for its
+		// tags, so progress on other stages meanwhile does not reject it.
 	case r.Stage != "":
 		if e, ok := entry.Inventory.Execution(); !ok || e.StageDigest(r.Key) != r.Stage {
 			return nil, state.ConditionFailed
 		}
 	case entry.Inventory.Revision() != r.Expected:
 		return nil, state.ConditionFailed
-	}
-	if r.Action == "recreate-continue" {
-		if entry.PendingSync == nil || entry.PendingSync.Recreate == nil || r.Operation != entry.PendingSync.Choice.Operation || r.At < uint64(entry.PendingSync.User.At) {
-			return nil, state.ConditionFailed
-		}
-		next, err := p.continueAppLogClear(s, entry)
-		if err != nil {
-			return nil, state.ConditionFailed
-		}
-		a.entries[appKey(r.Tenant, r.App)] = next
-		return p.appsCheckpoint(s, a, r.At)
 	}
 	if isRetirementAction(r.Action) {
 		return p.reduceAppRetirement(s, r, a, entry)
@@ -375,6 +370,8 @@ func (p Policy) reduceAppProgress(s state.State, cmd state.Command) (map[string]
 		}
 	}
 	switch r.Action {
+	case "resolve-images":
+		e, err = e.ResolveImages(e.Revision(), r.Images)
 	case "prepare":
 		e, _, err = e.Prepare(c, e.Revision(), r.Key, s.Object(r.Key), r.At)
 	case "send":
@@ -417,14 +414,6 @@ func (p Policy) reduceAppProgress(s state.State, cmd state.Command) (map[string]
 	entry.Inventory, err = p.advanceAppInventory(s, entry.Inventory, e)
 	if err != nil {
 		return nil, state.ConditionFailed
-	}
-	if r.Action == "finish" {
-		for j := range entry.LogClears {
-			if entry.LogClears[j].Source.Choice.Operation == r.Operation {
-				entry.LogClears[j].Status = "succeeded"
-				entry.LogClears[j].Replacements = recreatedContainers(entry.Inventory, entry.LogClears[j].Source.Recreate.Plan.Impact)
-			}
-		}
 	}
 	a.entries[appKey(r.Tenant, r.App)] = entry
 	return p.appsCheckpoint(s, a, r.At)

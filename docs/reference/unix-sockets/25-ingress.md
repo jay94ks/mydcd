@@ -28,6 +28,6 @@ User `ingresses`의 Part에는 `gateways`, `history`도 있다. gateways는 Node
 
 최종 `put-certificate`는 이 receipt를 기존 UserOperation으로 서명해 Raft에서 확정한다. `delete-certificate`, `disable-certificate`(payload `{ID}`), `ingress-block`, `ingress-unblock`, `ingress-block-extend`, `set-ingress-host-policy`도 User의 기존 apply/result/resume를 사용한다. SecretInput 성공만으로 관리 게시 완료를 뜻하지 않는다.
 
-node 간 비공개 version key 전송 `CertificateMaterial=17`은 이 Unix listener에 노출하지 않는다. 전용 member kind1/2·64KiB·현재 ingress 소비 참조/권한·EOF 계약은 [SFCP](../../protocol/sfcp/28-ingress-raft-certificatematerial.md)에서 규정한다.
+node 간 비공개 version key 전송 `CertificateMaterial=17`은 이 Unix listener에 노출하지 않는다. 전용 member kind1/2·64KiB·현재 ingress 소비 참조/권한·EOF 계약은 [SFCP](../../protocol/sfcp/rules/28-ingress-raft-certificatematerial.md)에서 규정한다.
 
 

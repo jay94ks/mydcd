@@ -17,18 +17,20 @@ Read 또는 ManageRegistry 권한이 필요하다. 관리 operation이나 자격
 {
   "Schema": 1,
   "Method": "image-usages",
-  "Tenant": "payments",
-  "ImageUsage": {
-    "Refs": ["ghcr.io/my-org/app:release"],
-    "ExternalSource": "ghcr"
-  },
-  "After": ""
+  "Params": {
+    "Tenant": "payments",
+    "Query": {
+      "Refs": ["ghcr.io/my-org/app:release"],
+      "ExternalSource": "ghcr"
+    },
+    "After": ""
+  }
 }
 ```
 
-`Refs`는 선택 사항이며 최대32개의 image ref 또는 `sha256:` digest다. 이름은 같은 OCI parser로 정규화하고 같은 이름으로 정규화되는 중복 입력은 거부한다. `ExternalSource`는 선택 tenant의 외부 source 이름으로, 삭제된 정의도 원 사용처를 조회할 수 있다. 두 selector를 함께 주면 교집합을 읽고 둘 다 비우면 해당 tenant의 전체 사용처를 읽는다. 다른 tenant의 source나 존재하지 않는 source를 지정하면 거부한다. Node·다른 method의 selector·자격 입력은 받지 않는다.
+`Refs`는 선택 사항이며 최대32개의 image ref 또는 `sha256:` digest다. 이름은 같은 OCI parser로 정규화하고 같은 이름으로 정규화되는 중복 입력은 거부한다. `ExternalSource`는 선택 tenant의 외부 source 이름으로, 삭제된 정의도 원 사용처를 조회할 수 있다. 두 selector를 함께 주면 교집합을 읽고 둘 다 비우면 해당 tenant의 전체 사용처를 읽는다. 다른 tenant의 source나 존재하지 않는 source를 지정하면 거부한다. typed method라 `Params`의 다른 필드(Node·자격 입력 등)는 받지 않는다.
 
-Reply의 `ImageUsages`는 다음 형식이다.
+응답 `Data`는 다음 형식이다.
 
 | 필드 | 내용 |
 |---|---|

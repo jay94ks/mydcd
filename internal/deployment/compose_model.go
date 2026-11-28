@@ -107,15 +107,31 @@ type SecretEnvironment struct {
 	Name   string `yaml:"name"`
 }
 
+// ServiceExtension is a service's x-sfc. In app.yaml the secret fields are
+// one block, `secrets: {from, env, socket}` (app_yaml.go); the Go fields and
+// their JSON stay flat.
 type ServiceExtension struct {
 	Instance  *TaskInstance       `yaml:"-" json:",omitempty"`
 	Nodes     []string            `yaml:"nodes,omitempty" json:",omitempty"`
 	PerNode   uint32              `yaml:"per_node,omitempty" json:",omitempty"`
-	SecretEnv []SecretEnvironment `yaml:"secret_env,omitempty" json:",omitempty"`
+	SecretEnv []SecretEnvironment `yaml:"-" json:",omitempty"`
 	Node      string              `yaml:"node,omitempty"`
 	Readiness *Readiness          `yaml:"ready,omitempty"`
-	Sources   SecretSources       `yaml:"secrets_from,omitempty"`
-	Lifecycle *ServiceLifecycle   `yaml:"lifecycle,omitempty" json:",omitempty"`
+	Sources   SecretSources       `yaml:"-"`
+	// Socket is `secrets.socket` (sfev.sock). It is not served yet, so
+	// validate refuses a non-empty list.
+	Socket    SecretSources     `yaml:"-" json:",omitempty"`
+	Lifecycle *ServiceLifecycle `yaml:"lifecycle,omitempty" json:",omitempty"`
+	// Logs is this service's stored-log policy (x-sfc.logs); it overrides
+	// the app's and node.yaml's.
+	Logs *LogsDeclaration `yaml:"logs,omitempty" json:",omitempty"`
+}
+
+// LogsDeclaration is x-sfc.logs: how long sfcd's log stores keep the logs
+// of this app's (or service's) containers once they are gone. Keep is a
+// duration ("7d", "168h") or "forever". It never changes a container.
+type LogsDeclaration struct {
+	Keep string `yaml:"keep,omitempty" json:",omitempty"`
 }
 type ComposeNetwork struct {
 	Name     string           `yaml:"name,omitempty"`
@@ -229,6 +245,7 @@ type AppExtension struct {
 		Routes  []RouteDeclaration `yaml:"routes"`
 	} `yaml:"routing,omitempty"`
 	Registries map[string]RegistryDeclaration `yaml:"registries,omitempty"`
+	Logs       *LogsDeclaration               `yaml:"logs,omitempty" json:",omitempty"`
 }
 type IngressDeclaration struct {
 	Node      string                    `yaml:"node"`

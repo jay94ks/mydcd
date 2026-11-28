@@ -152,6 +152,9 @@ func (f *fsm) Restore(source io.ReadCloser) error {
 			return err
 		}
 	}
+	if err = haveStateFeatures(verified.State()); err != nil {
+		return err
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.failed != nil {

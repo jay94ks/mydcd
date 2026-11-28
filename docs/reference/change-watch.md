@@ -34,6 +34,15 @@ sfcd가 적용한 클러스터 변경 가운데 **그 세션이 읽을 수 있�
 | `network` | 작업 공간, 시스템 네트워크 구성원은 `""` | 네트워크 ID | `resources` | 작업 공간 Read, `""`는 ManageCluster |
 | `tenant` | 작업 공간 | 작업 공간 ID | `tenants` | 그 작업 공간 Read 또는 ManageCluster |
 | `node` | `""` | 서버 ID | `members` | ManageCluster |
+| `registry` | 작업 공간 | Registry ID | `registries` | 그 작업 공간 Read 또는 ManageRegistry |
+| `registry-maintenance` | 작업 공간 | Registry ID (그 Registry의 정리·가지치기 작업이 바뀜) | `registries`, `registry-maintenance-status` | 그 작업 공간 Read 또는 ManageRegistry |
+| `ingress` | 작업 공간, 클러스터 부분은 `""` | 바뀐 부분: `block/<ID>`, `host-policy`, `balance/<앱>/<경로>`, `drain/<앱>/<서버>`, `gateway/<서버>`, `cluster-app-route/<앱>`, `history` | `ingresses` | 작업 공간 Read, `""`는 ManageCluster |
+| `dns` | 작업 공간 | 네트워크 ID (관리 DNS 설정) | `network-dns-names` | 그 작업 공간 Read |
+| `certificate` | `""` | 인증서 ID | `certificates` | ManageCluster |
+| `domain` | `""` | 도메인 이름 | `certificates` | ManageCluster |
+| `acme-responder` | `""` | `acme-responder` | `certificates` | ManageCluster |
+
+ingress 매핑(앱별 공개 경로)은 앱 목표에서 나오므로 `app` 기록이 바뀔 때 같이 바뀐다. 서버가 잰 수치(요청 수·지연·차단 적용 상태)와 관리 DNS의 서버별 반영 상태는 기록이 아니라서 여기로 오지 않는다.
 
 기록 종류는 늘어날 수 있다. 모르는 Kind는 무시한다.
 
@@ -46,3 +55,10 @@ sfcd가 적용한 클러스터 변경 가운데 **그 세션이 읽을 수 있�
 | `node-observation` | `Node`의 관측 `Source`. 작업(Task)·사용량·레지스트리 가져오기면 `Tenant`/`App`도 | `Tenant`가 있으면 그 작업 공간 Read, 없으면 ManageCluster |
 | `node-report` | `Node`의 작업량 보고 | ManageCluster |
 | `diagnostic` | `Node`의 사건 묶음 | ManageCluster |
+
+`engine`: 이 노드 Seafield 엔진의 사건. 다른 노드의 엔진 사건은 0.1.0에서는 오지 않는다(다른 서버는 `report`로 따라간다).
+
+| Kind | 대상 | 받는 세션 |
+|---|---|---|
+| `engine.container` | `Node`의 `Container`, 작업이면 `Tenant`/`App`. `Reasons` ⊆ start, stop, die, oom, pressure, health | `Tenant`가 있으면 그 작업 공간 Read, 없으면 ManageCluster |
+| `engine.node` | `Node`의 엔진. `Reasons` ⊆ boot, lag(사건을 놓침: 엔진 화면을 모두 다시 읽음), build | ManageCluster |

@@ -1,16 +1,16 @@
 ## User 조회 메시지
 
-등록된 Git source의 확인은 `build context check CONTEXT` 또는 User `check-build-context {Tenant,ImageBuildSource:{ID}}`다. 현재 ManageRegistry·허용 node/root/context/policy에 고정하고 owner가 설치된 정확한 tenant/profile/repository 자격으로 fetch한다. mutable ref를 단일 commit으로 고정한 뒤 지정 폴더의 Dockerfile과 모든 target platform의 FROM/COPY/RUN 외부 이미지 신뢰를 검사한다. `#syntax`/BUILDKIT_SYNTAX override·symlink/submodule/LFS pointer와 추가 source fetch는 받지 않는다.
+등록된 Git source의 확인은 `build context check CONTEXT` 또는 User `check-build-context` Params `{Tenant,Query:{ID}}`다. 현재 ManageRegistry·허용 node/root/context/policy에 고정하고 owner가 설치된 정확한 tenant/profile/repository 자격으로 fetch한다. mutable ref를 단일 commit으로 고정한 뒤 지정 폴더의 Dockerfile과 모든 target platform의 FROM/COPY/RUN 외부 이미지 신뢰를 검사한다. `#syntax`/BUILDKIT_SYNTAX override·symlink/submodule/LFS pointer와 추가 source fetch는 받지 않는다.
 
-Reply의 `ImageBuildSource`는 `{Schema:1,Context,Code,Commit,Tree:[32],Entries,BaseSources,ExpandedBytes,ContextRevision,PolicyRevision,Epoch}`다. Code는 `OK|SOURCE_FETCH|UNTRUSTED_BASE|INVALID_CONTEXT`; 실패에는 commit/tree/개수·본문/자격을 넣지 않는다. 현재 repository 전송은64MiB pack/HTTP·expanded object128MiB·16,384 objects·최대300초이며 workspace와 ZIP 한도도 적용한다. 이는 실제 go-git 읽기·구조/trust 확인이며 private FROM의 실제 pull·BuildKit build/push나 Git version 보관/자동 build를 수행하지 않는다. 원 source/정책/사용자 권한이 바뀌면 확인 결과를 현재 결과로 반환하지 않는다.
+응답 `Data`는 `{Schema:1,Context,Code,Commit,Tree:[32],Entries,BaseSources,ExpandedBytes,ContextRevision,PolicyRevision,Epoch}`다. Code는 `OK|SOURCE_FETCH|UNTRUSTED_BASE|INVALID_CONTEXT`; 실패에는 commit/tree/개수·본문/자격을 넣지 않는다. 현재 repository 전송은64MiB pack/HTTP·expanded object128MiB·16,384 objects·최대300초이며 workspace와 ZIP 한도도 적용한다. 이는 실제 go-git 읽기·구조/trust 확인이며 private FROM의 실제 pull·BuildKit build/push나 Git version 보관/자동 build를 수행하지 않는다. 원 source/정책/사용자 권한이 바뀌면 확인 결과를 현재 결과로 반환하지 않는다.
 
 Unix와 QUIC 모두 기존 User purpose8 kind1/2로 같은 메시지를 사용한다. 연결·Session proof는 [Unix API](../unix-sockets.md)와 [SFCP](../../protocol/sfcp.md)를 따른다.
 
 ```json
-{"Schema":1,"Method":"image-builds","UserKey":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"Tenant":"tenant-a","Nonce":[1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"ImageBuild":{"Part":"contexts","ID":"","Upload":""}}
+{"Schema":1,"Method":"image-builds","UserKey":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"Nonce":[1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"Params":{"Tenant":"tenant-a","Query":{"Part":"contexts","ID":"","Upload":""}}}
 ```
 
-| `ImageBuild.Part` | selector | 결과 |
+| `Query.Part` | selector | 결과 |
 |---|---|---|
 | `caches` | ID=context 선택, Node=node 선택; Upload/Job 빈 값 | Caches: 원 namespace별 node 요약·상태. [필드·cursor](../image-build-jobs/12-section.md) |
 | `policy` | ID/Upload 빈 값 | Policies: `{Spec,Revision,Deleted}` |

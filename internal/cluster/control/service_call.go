@@ -3,7 +3,9 @@
 package control
 
 import (
+	"maps"
 	"net/netip"
+	"slices"
 	"sort"
 	"time"
 
@@ -71,15 +73,14 @@ func (p Policy) ServiceCallTarget(s state.State, session access.Session, at int6
 			continue
 		}
 		var service deployment.ComposeService
-		if canonical(goal.Config, &service) != nil || len(service.Networks) != 1 {
+		if canonical(goal.Config, &service) != nil || len(service.Networks) == 0 {
 			continue
 		}
-		var address netip.Addr
-		for _, network := range service.Networks {
-			address, _ = netip.ParseAddr(network.IPv4)
-			if !address.IsValid() {
-				address, _ = netip.ParseAddr(network.IPv6)
-			}
+		// The Task's primary attachment (first alias), as in its recipe.
+		primary := slices.Min(slices.Collect(maps.Keys(service.Networks)))
+		address, _ := netip.ParseAddr(service.Networks[primary].IPv4)
+		if !address.IsValid() {
+			address, _ = netip.ParseAddr(service.Networks[primary].IPv6)
 		}
 		native := observed.Native
 		if native == "" {

@@ -117,14 +117,15 @@ function Shell() {
   const { tenant, setTenant, expired, disconnected, clearDisconnected } = useAuth();
   const navigate = useNavigate();
   useNow(30_000);
-  // 내 화면 설정(시간대·자동 갱신 주기·표 밀도)을 로그인한 계정 것으로 맞춘다
+  // 내 화면 설정(시간대·자동 갱신 주기·표 줄 간격)을 로그인한 계정 것으로 맞춘다
   useEffect(() => {
     const ctl = new AbortController();
     loadPrefs(ctl.signal).then(applyPrefs, () => undefined);
     return () => ctl.abort();
   }, [session.user.username]);
   // 실시간 반영 소켓: 로그인한 동안 하나
-  useEffect(() => startLive(), [session.user.username]);
+  // 세션이 만료되면 닫고, 그 자리에서 다시 로그인하면 새로 연다
+  useEffect(() => (expired ? undefined : startLive()), [session.user.username, expired]);
   const notes = usePoll((s) => notifications(s, true, 20), [session.user.username], DEFAULT_POLL_MS, notificationsLive);
   const unread = notes.data?.unread ?? 0;
   useBrowserNotify(notes.data?.items);
@@ -186,7 +187,7 @@ function Shell() {
       {API_MODE === 'mock' && <MockBar />}
       {disconnected && (
         <div className="banner-global" role="alert">
-          <b>sfcd 연결이 끊겼습니다.</b> 변경은 잠시 막아 둡니다. 보이는 내용은 마지막으로 읽은 값입니다.
+          <b>sfcd 연결이 끊겼습니다.</b> 변경은 잠시 막아 둡니다. 보이는 내용은 마지막으로 읽은 값입니다. 다시 이어지면 이 띠는 저절로 사라지고 화면을 다시 읽습니다.
           <button type="button" className="btn sm" onClick={clearDisconnected}>
             다시 확인
           </button>

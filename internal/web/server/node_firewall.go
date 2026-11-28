@@ -47,15 +47,17 @@ type firewallView struct {
 	// effective is the policy in force (policy inherit follows the
 	// cluster); shadowed are rule IDs a required cluster rule partly
 	// overrides ("일부 가려짐").
-	Cluster           *clusterFirewallView `json:"cluster,omitempty"`
-	Effective         string               `json:"effective,omitempty"`
-	Shadowed          []string             `json:"shadowed"`
-	Locked            []firewallLockedView `json:"locked"`
-	Operator4         []string             `json:"operator4"`
-	Operator6         []string             `json:"operator6"`
-	OperatorTruncated bool                 `json:"operatorTruncated,omitempty"`
-	Applied           bool                 `json:"applied"`
-	ApplyError        string               `json:"applyError,omitempty"`
+	Cluster   *clusterFirewallView `json:"cluster,omitempty"`
+	Effective string               `json:"effective,omitempty"`
+	Shadowed  []string             `json:"shadowed"`
+	Locked    []firewallLockedView `json:"locked"`
+	// Operator: the server's other input rules as nft expressions
+	// (operatorFormat "nft"), read only.
+	Operator          []string `json:"operator"`
+	OperatorFormat    string   `json:"operatorFormat,omitempty"`
+	OperatorTruncated bool     `json:"operatorTruncated,omitempty"`
+	Applied           bool     `json:"applied"`
+	ApplyError        string   `json:"applyError,omitempty"`
 }
 
 type firewallDeltaView struct {
@@ -122,7 +124,7 @@ func newFirewallChangeView(c control.NodeFirewallChange) firewallChangeView {
 func newFirewallResultView(r control.NodeFirewallResult) firewallResultView {
 	out := firewallResultView{Code: r.Code, Error: r.Error, More: r.More}
 	if v := r.View; v != nil {
-		fv := &firewallView{Node: v.Node, Managed: v.Managed, Revision: v.Revision, Policy: v.Policy, Rules: firewallRuleViews(v.Rules), MaxRules: v.MaxRules, Locked: []firewallLockedView{}, Operator4: append([]string{}, v.Operator4...), Operator6: append([]string{}, v.Operator6...), OperatorTruncated: v.OperatorTruncated, Applied: v.Applied, ApplyError: v.ApplyError, Effective: v.Effective, Shadowed: append([]string{}, v.Shadowed...)}
+		fv := &firewallView{Node: v.Node, Managed: v.Managed, Revision: v.Revision, Policy: v.Policy, Rules: firewallRuleViews(v.Rules), MaxRules: v.MaxRules, Locked: []firewallLockedView{}, Operator: append([]string{}, v.Operator...), OperatorFormat: v.OperatorFormat, OperatorTruncated: v.OperatorTruncated, Applied: v.Applied, ApplyError: v.ApplyError, Effective: v.Effective, Shadowed: append([]string{}, v.Shadowed...)}
 		if v.Cluster != nil {
 			c := newClusterFirewallView(*v.Cluster)
 			fv.Cluster = &c

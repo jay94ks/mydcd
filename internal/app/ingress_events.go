@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
+
 	"github.com/jay94ks/seafield/internal/deployment"
 	"github.com/jay94ks/seafield/internal/eventlog"
 	"github.com/jay94ks/seafield/internal/ingress"
@@ -31,7 +33,7 @@ func (r *Runtime) ingressEvent(e ingress.Event) {
 	tag := fmt.Sprintf("ingress/%x", sha256.Sum256(raw))
 	if _, err := r.events.Append(tag, row, e.ObservedAt); err != nil {
 		r.mu.Lock()
-		r.moduleError = errors.Join(r.moduleError, err)
+		r.setModuleErrorLocked(errors.Join(r.moduleError, passStep("event-log", err)), time.Now())
 		r.mu.Unlock()
 		r.wakeReport()
 	}

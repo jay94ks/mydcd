@@ -62,14 +62,14 @@ type Conn interface {
 	Whoami(ctx context.Context) (Whoami, error)
 	Tenants(ctx context.Context) ([]TenantView, error)
 	SelectTenant(ctx context.Context, tenant string) (TenantView, error)
-	// UserCredentials: `user-credentials` (Reply.CredentialUser, system
+	// UserCredentials: `user-credentials` (typed Data, system
 	// admin).
 	UserCredentials(ctx context.Context, username string) (User, error)
 	// IssueInvite: the provider step of an invitation's single-use token
 	// (system admin); the caller submits ActionIssueInitialCredential with
 	// its Fact (invite.go).
 	IssueInvite(ctx context.Context, username string, seconds int64) (InviteIssue, error)
-	// OwnCredentials: `my-credentials` (Reply.SelfCredentials) — the
+	// OwnCredentials: `my-credentials` (typed Data) — the
 	// caller's own public User record for "내 계정". Revision is the account
 	// revision add/disable expect.
 	OwnCredentials(ctx context.Context) (PublicUser, error)
@@ -149,12 +149,19 @@ type Conn interface {
 	VolumeBackups(ctx context.Context, tenant, after string) (Page[VolumeBackupView], error)
 	// VolumeRestores: `volume-restores`.
 	VolumeRestores(ctx context.Context, tenant, after string) (Page[VolumeRestoreView], error)
+	// VolumeArchives: `volume-archives` — archive rows and the public
+	// recipient keys new packages are sealed to (userauth.VolumeArchivesPage).
+	VolumeArchives(ctx context.Context, tenant, after string) (userauth.VolumeArchivesPage, error)
 	// VolumeBackupSource: `volume-backup-source` for an app volume (TM Volumes).
 	VolumeBackupSource(ctx context.Context, tenant string, q control.VolumeSelector) (VolumeSource, error)
-	Vault(ctx context.Context, tenant, after string) (Page[VaultView], error)
+	// Vault: one sfcd `vault` page (control.VaultView rows — an Object or a
+	// Write — in ID order; Revision = RootRevision, Collection =
+	// TreeRevision, ApprovalRevision). The screen rows (paths, the root's
+	// parent) are built by internal/web/server.
+	Vault(ctx context.Context, tenant, after string) (Page[control.VaultView], error)
 	VaultWriter
 	VaultApprover
-	Lifecycles(ctx context.Context, tenant, after string) (Page[LifecycleEntry], error)
+	Lifecycles(ctx context.Context, tenant, after string) (userauth.LifecyclesPage, error)
 	// REQ-39/40 in the real shape (docs/reference/lifecycle-sources.md,
 	// ManageServices): the original nonzero upload ID is the caller's and
 	// is kept across retries; node "" lets sfcd pick (keep the reply Node
@@ -168,13 +175,13 @@ type Conn interface {
 	LifecycleSourceRecover(ctx context.Context, node string, d checker.SourceDescriptor, upload [32]byte) (userauth.LifecycleStageResult, error)
 	LifecycleModuleRecover(ctx context.Context, node string, d checker.SourceDescriptor, upload [32]byte, pin checker.ModulePin) (userauth.LifecycleStageResult, error)
 	LifecycleSourcePage(ctx context.Context, tenant string, q control.LifecycleSourceQuery) (checker.SourcePage, error)
-	Registries(ctx context.Context, tenant, after string) (Page[RegistryView], error)
+	Registries(ctx context.Context, tenant, after string) (userauth.RegistriesPage, error)
 	// RegistryCredential: `registry-credential` (pull needs Deploy or
 	// ManageRegistry, push ManageRegistry on the registry's node): a
 	// login for an enabled, running registry. The real adapter checks the
 	// grant (issuer, audience, scope, session) as `sfcli registry
 	// credential` does.
-	RegistryCredential(ctx context.Context, tenant string, q RegistryCredentialRequest) (RegistryCredential, error)
+	RegistryCredential(ctx context.Context, tenant string, q RegistryCredentialRequest) (userauth.RegistryCredential, error)
 
 	// --- apps ---
 
@@ -323,7 +330,7 @@ type Conn interface {
 	// (`registry-login-test`, ManageRegistry) needs a bound, not draining
 	// reader. RegistryPulls: `external-registry-pulls`. ImageUsages:
 	// `image-usages`, with ExternalSource = the source's users.
-	ExternalRegistryPage(ctx context.Context, tenant, after string) (ExternalRegistryPage, error)
+	ExternalRegistryPage(ctx context.Context, tenant, after string) (userauth.ExternalRegistriesPage, error)
 	PlanExternalRegistryBind(ctx context.Context, tenant string, q control.ExternalRegistryBindQuery) (control.ExternalRegistryBindPlan, error)
 	ProbeExternalRegistry(ctx context.Context, tenant string, q control.ExternalRegistryProbeQuery) (control.ExternalRegistryProbeResult, error)
 	RegistryPulls(ctx context.Context, tenant, after string) (control.RegistryPullPage, error)
@@ -573,6 +580,11 @@ const (
 	ActionCancelVolumeMove    = "cancel-volume-move"
 	ActionDeleteRetained      = "delete-retained-volume"
 	ActionUnregisterFixed     = "unregister-fixed-volume"
+	ActionArchiveVolume       = "archive-volume"
+	ActionCancelArchive       = "cancel-volume-archive"
+	ActionUnarchiveVolume     = "unarchive-volume"
+	ActionDiscardArchive      = "discard-volume-archive"
+	ActionSetArchiveAdminKey  = "set-volume-archive-admin-key"
 	ActionVaultInit           = "vault-init"
 	ActionVaultCreate         = "vault-create"
 	ActionVaultACL            = "vault-acl"
@@ -580,6 +592,7 @@ const (
 	ActionVaultRevoke         = "vault-revoke"
 	ActionVaultRetire         = "vault-retire"
 	ActionVaultApprovalAge    = "vault-approval-age"
+	ActionVaultRegistryShared = "vault-registry-shared"
 
 	// lifecycle (state check) scripts and the tenant policy
 	ActionSetLifecyclePolicy    = "set-lifecycle-policy"
@@ -588,12 +601,13 @@ const (
 	ActionDeleteLifecycleScript = "delete-lifecycle-script"
 
 	// node storage roots and node limits (system administrator)
-	ActionAddNodeStorage       = "add-node-storage"
-	ActionSetNodeStoragePolicy = "set-node-storage-policy"
-	ActionDrainNodeStorage     = "drain-node-storage"
-	ActionRemoveNodeStorage    = "remove-node-storage"
-	ActionSetNodeQuota         = "set-node-quota"
-	ActionRotateLedger         = "rotate-ledger"
+	ActionAddNodeStorage        = "add-node-storage"
+	ActionSetNodeStoragePolicy  = "set-node-storage-policy"
+	ActionSetNodeArchiveDefault = "set-node-archive-default"
+	ActionDrainNodeStorage      = "drain-node-storage"
+	ActionRemoveNodeStorage     = "remove-node-storage"
+	ActionSetNodeQuota          = "set-node-quota"
+	ActionRotateLedger          = "rotate-ledger"
 
 	// tenant retirement (system administrator)
 	ActionBeginTenantRetirement  = "begin-tenant-retirement"

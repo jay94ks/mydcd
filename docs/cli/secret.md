@@ -39,6 +39,7 @@ sfcli secret group approval-age common 720h
 - prefix는 쓰기 서버에만 있으므로 `create`는 이를 검사하지 못한다. prefix 밖의 경로면 `put`이 아무것도 쓰지 않고 `notapplied`로 끝나며, 쓰기 서버 로그에 이유가 남는다. `sfcli secret write abandon ID`로 그 쓰기를 끝낸 뒤 경로를 고친 secret을 다시 만든다.
 - `group reorder GROUP ENTRY`는 항목 하나를 `--after`로 준 항목 바로 뒤로, 주지 않으면 맨 앞으로 옮긴다. 옮긴 항목만 보내고, 순서가 그대로인 이동은 거절된다. 앱은 같은 이름의 값을 먼저 나오는 항목에서 가져온다.
 - `group approval-age`는 비밀번호로 받은 승인이 유지되는 시간이다.
+- `group registry-shared GROUP on|off --all`은 클러스터 Vault 그룹에만 쓴다. 켜면 그 아래 secret은 이미지 저장소 자격 증명으로만 쓰인다. 클러스터 소유 외부 저장소가 그 비밀을 고를 때만, 그 저장소를 거치는 모든 작업 공간의 이미지 pull이 작업 공간 허용(`--grant-tenant`) 없이 쓸 수 있다. 작업 공간 소유 외부 저장소가 같은 비밀을 가리키면 거절된다. 어떤 앱도 env·파일·빌드 입력으로 고를 수 없다. 시스템 관리자만 바꾼다.
 
 ## 값과 비밀번호 쓰기
 
@@ -52,7 +53,7 @@ sfcli secret group password common --profile auth --password-file ./common.txt
 - **바깥 Vault의 객체는 통째로 바뀐다.** 적지 않은 키는 그 객체에서 빠진다.
 - `group password`는 `--password-file`, 터미널이 아닌 표준 입력, 보이지 않는 입력 칸(두 번 묻는다) 순서로 비밀번호를 읽는다. 클러스터에는 비밀번호 대신 검증 값만 남는다. `--profile`은 처음 정할 때만 적는다. 비밀번호를 바꾸면 옛 비밀번호로 받은 승인은 더 쓰이지 않는다. 검증 값은 `groups/<작업 공간>/<그룹>/<세대>` 경로에 놓이므로(클러스터 범위는 `groups/_cluster/...`), verifier를 쓰는 profile의 `prefix`는 `groups/<작업 공간>`이나 `groups`여야 한다.
 - 바깥 Vault에는 각 값이 원래 바이트의 base64로 저장되고, `_sfc_receipt` 항목이 함께 놓인다. Vault를 직접 읽으면 base64를 풀어야 원래 값이 나온다.
-- 쓰기는 준비, 보내기, 쓰기 서버에서 저장, 확인, 게시 순서로 간다. 명령은 끝까지 기다린다. 응답을 놓쳤으면 `sfcli op resume ID`나 같은 `--id`로 다시 실행한다. 쓰기 서버에 닿았을지도 모르는 값은 다시 보내지 않는다.
+- 쓰기는 준비, 보내기, 쓰기 서버에서 저장, 확인, 게시 순서로 간다. 명령은 끝까지 기다린다. 응답을 놓쳤으면 `sfcli op resume ID`나 같은 `--id`로 다시 실행한다. 쓰기 서버에 닿았을지도 모르는 값은 다시 보내지 않는다. 같은 `--id`로 다시 실행하면 처음 값으로 그 쓰기를 이어 가고, 그때 준 값은 쓰지 않는다(명령이 그렇게 알린다). 새 값을 쓰려면 다른 `--id`로(또는 `--id` 없이) 실행한다.
 - 저장되지 않은 쓰기는 `secret write abandon ID`로 포기한다. 끝난 쓰기 기록은 `secret write clear`로 정리한다. 저장된 값은 그대로다.
 
 ## 쓰는 사람과 정리

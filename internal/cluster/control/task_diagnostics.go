@@ -79,22 +79,4 @@ func (p Policy) DiagnosticTaskReason(s state.State, target eventlog.Target, deta
 			return
 		}
 	}
-	for _, cleared := range entry.LogClears {
-		if cleared.Source.Recreate == nil {
-			continue
-		}
-		for _, impact := range cleared.Source.Recreate.Plan.Impact {
-			if impact.Key == target.Task && impact.NativeID == target.Native && impact.Generation == target.Generation {
-				detail.Reason = "log-clear"
-				detail.Operation = cleared.Origin.RequestID
-				detail.Actor = cleared.Origin.Session.User
-				if cleared.Origin.Reason != nil {
-					detail.OperatorReason = cleared.Origin.Reason.Text
-					detail.IncidentID = cleared.Origin.Reason.IncidentID
-					detail.ApprovedBy = cleared.Origin.Reason.ApprovedBy
-				}
-				return
-			}
-		}
-	}
 }

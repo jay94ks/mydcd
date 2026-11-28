@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"math"
 	"path/filepath"
 	"time"
@@ -63,7 +64,13 @@ func (r *Runtime) appProjectionStore() (*deployment.ProjectionStore, error) {
 		_, err = r.appInputPermit(ctx, control.AppBindingRequest{Task: source.Task, Digest: b.Digest()})
 		return err
 	}
-	store, err := deployment.OpenProjections(filepath.Join(r.nativeRoot, "workload", "inputs"), r.controlPolicy.Cluster, r.Identity.Public, maxAppInputBytes, gate)
+	// Values live only on a tmpfs; the journal and scope receipts stay on disk.
+	memory := filepath.Join(r.nativeRoot, "workload", "inputs-memory")
+	if err := mountInputMemory(memory); err != nil {
+		log.Printf("app inputs: %v", err)
+		return nil, deployment.ErrInputs
+	}
+	store, err := deployment.OpenProjectionsWithValues(filepath.Join(r.nativeRoot, "workload", "inputs"), memory, r.controlPolicy.Cluster, r.Identity.Public, maxAppInputBytes, gate)
 	if err != nil {
 		return nil, err
 	}
@@ -96,7 +103,7 @@ func (r *Runtime) PrepareAppInputs(ctx context.Context, request control.AppBindi
 		permit, err = r.appInputPermit(ctx, request)
 		if err != nil {
 			r.forgetAppInputPermit(request)
-			return workload.InputRef{}, err
+			return workload.InputRef{}, fmt.Errorf("binding permit: %w", err)
 		}
 		r.rememberAppInputPermit(request, permit, link, asked)
 	}
@@ -109,8 +116,10 @@ func (r *Runtime) PrepareAppInputs(ctx context.Context, request control.AppBindi
 	if err != nil {
 		return ref, err
 	}
-	if ready, err := store.Ready(ctx, ref); err != nil || ready {
-		return ref, err
+	if ready, err := store.Ready(ctx, ref); err != nil {
+		return ref, fmt.Errorf("published inputs: %w", err)
+	} else if ready {
+		return ref, nil
 	}
 	v, err := r.Engine().Read(ctx, false)
 	if err != nil {
@@ -118,7 +127,7 @@ func (r *Runtime) PrepareAppInputs(ctx context.Context, request control.AppBindi
 	}
 	reads, err := r.controlPolicy.AppInputReads(v.State, r.commandIdentity().Public, request, permit)
 	if err != nil {
-		return ref, err
+		return ref, fmt.Errorf("local read set at index %d (permit %d): %w", v.State.Index(), permit.CommandIndex, err)
 	}
 	var values []deployment.Fetched
 	defer func() {
@@ -136,28 +145,25 @@ func (r *Runtime) PrepareAppInputs(ctx context.Context, request control.AppBindi
 				continue
 			}
 			seen[id] = true
-			var profile secrets.WriteProfile
-			for _, p := range read.Profiles {
-				if p.ID == leaf.Reference.Profile {
-					profile = p
-					break
-				}
-			}
-			if profile.Key == ([32]byte{}) {
+			profile, ok := leafProvider(read.Profiles, leaf)
+			if !ok {
 				return ref, secrets.ErrProvider
 			}
 			fetch := control.AppInputFetch{Schema: 1, Consumer: r.commandIdentity().Public, Binding: request, ReadSet: permit.ReadSet, MinimumIndex: permit.CommandIndex, Realm: read.Realm, Secret: leaf.Secret}
 			value, err := r.fetchAppInputLeaf(ctx, fetch, profile)
 			if err != nil {
-				return ref, err
+				return ref, fmt.Errorf("read %s: %w", id, err)
 			}
 			values = append(values, deployment.Fetched{Realm: read.Realm, Value: value})
 		}
 	}
 	request.At = time.Now().Unix()
 	latest, err := r.appInputPermit(ctx, request)
-	if err != nil || latest.ReadSet != permit.ReadSet || latest.Task != permit.Task || latest.Inputs != permit.Inputs {
-		return ref, deployment.ErrInputs
+	if err != nil {
+		return ref, fmt.Errorf("final binding permit: %w", err)
+	}
+	if latest.ReadSet != permit.ReadSet || latest.Task != permit.Task || latest.Inputs != permit.Inputs {
+		return ref, fmt.Errorf("binding permit changed during reads: %w", deployment.ErrInputs)
 	}
 	v, err = r.Engine().Read(ctx, false)
 	if err != nil {
@@ -165,10 +171,14 @@ func (r *Runtime) PrepareAppInputs(ctx context.Context, request control.AppBindi
 	}
 	stage, err := r.controlPolicy.MaterializeAppInputs(v.State, r.commandIdentity().Public, request, latest, values, maxAppInputBytes)
 	if err != nil {
-		return ref, err
+		return ref, fmt.Errorf("materialize: %w", err)
 	}
 	defer stage.Destroy()
-	return store.Publish(ctx, b, stage, latest.Inputs.Revision, latest.MaxConsumers)
+	published, err := store.Publish(ctx, b, stage, latest.Inputs.Revision, latest.MaxConsumers)
+	if err != nil {
+		return published, fmt.Errorf("publish: %w", err)
+	}
+	return published, nil
 }
 
 // appInputPermitReuse bounds how long PrepareAppInputs lets an earlier
@@ -266,4 +276,16 @@ func (r *Runtime) retireAppInputs(ctx context.Context, request control.AppBindin
 		return deployment.Closure{}, errors.Join(deployment.ErrInputs, err)
 	}
 	return store.SecretClosure(ref, r.Identity.Private)
+}
+
+// leafProvider is the read's profile that serves leaf: an installed profile
+// names its owner key; the builtin profile names none (any current voter
+// serves it).
+func leafProvider(profiles []secrets.WriteProfile, leaf secrets.Leaf) (secrets.WriteProfile, bool) {
+	for _, p := range profiles {
+		if p.ID == leaf.Reference.Profile {
+			return p, p.Builtin() || p.Key != ([32]byte{})
+		}
+	}
+	return secrets.WriteProfile{}, false
 }

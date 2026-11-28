@@ -9,7 +9,7 @@
 
 ### 앱 Secret 공급 선언
 
-`app check/diff/deploy`는 [Secret 공급](../../reference/secret-delivery.md)의 `secrets` 파일 target과 `x-sfc.secret_env`를 같은 앱 입력으로 처리한다. `environment`는 일반 명시 값이고 같은 키의 Secret 환경 변수 선언과 겹치면 오류다. Secret 값은 CLI가 앱 파일에 확장하지 않는다. plan/diff의 `SecretEnvRequiresNewGeneration`에 열거한 서비스는 값/참조 교체에 새 Task 세대가 필요하다. 실제 환경 값은 Docker/컨테이너에만 공급하고 CLI 로그 조회는 서버에서 가린 결과를 받는다.
+`app check/diff/deploy`는 [Secret 공급](../../reference/secret-delivery.md)의 `secrets` 파일 target과 `x-sfc.secrets.env`를 같은 앱 입력으로 처리한다. `environment`는 일반 명시 값이고 같은 키의 Secret 환경 변수 선언과 겹치면 오류다. Secret 값은 CLI가 앱 파일에 확장하지 않는다. plan/diff의 `SecretEnvRequiresNewGeneration`에 열거한 서비스는 값/참조 교체에 새 Task 세대가 필요하다. 실제 환경 값은 Docker/컨테이너에만 공급하고 CLI 로그 조회는 서버에서 가린 결과를 받는다.
 
 로그의 다음 페이지는 동일 옵션으로 `app logs APP SERVICE --cursor CURSOR`를 사용한다. `-o json`의 NextCursor 또는 일반 출력의 stderr 안내에서 cursor를 얻는다. `--follow`와 함께 쓰지 않으며, 만료는 CURSOR_EXPIRED로 명시 거부한다. [보관/출력 한도](../../reference/container-operations.md#로그-페이지의-원-구간)를 따른다.
 

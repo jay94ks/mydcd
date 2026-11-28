@@ -5,7 +5,6 @@ package engine
 import (
 	"bufio"
 	"context"
-	"encoding/binary"
 	"errors"
 	"io"
 	"net"
@@ -15,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jay94ks/seafield/internal/peercred"
 	"github.com/moby/moby/client"
 	"golang.org/x/sys/unix"
 )
@@ -33,14 +33,11 @@ type BindSource struct {
 // Fresh connections and disabled redirects are mandatory for this fact.
 var ErrBindBeforeRequest = errors.New("fixed bind API request was not dispatched")
 
+// The kernel identity checks live in internal/peercred, shared with the
+// sfev socket. Here their failures stay ErrOwnership.
 func livePeer(fd int) error {
-	fds := []unix.PollFd{{Fd: int32(fd), Events: unix.POLLIN}}
-	n, err := unix.Poll(fds, 0)
-	if err != nil {
-		return err
-	}
-	if n != 0 || fds[0].Revents != 0 {
-		return ErrOwnership
+	if err := peercred.Alive(fd); err != nil {
+		return errors.Join(ErrOwnership, err)
 	}
 	return nil
 }
@@ -49,93 +46,16 @@ func livePeer(fd int) error {
 // credentials/pidfd identify its actual sender, including socket activation
 // where SO_PEERCRED refers to the listener creator rather than dockerd.
 func senderIdentity(conn *net.UnixConn) (*unix.Ucred, int, error) {
-	raw, err := conn.SyscallConn()
+	p, err := peercred.Sender(conn)
 	if err != nil {
-		return nil, -1, err
+		return nil, -1, errors.Join(ErrOwnership, err)
 	}
-	data := make([]byte, 1)
-	oob := make([]byte, unix.CmsgSpace(unix.SizeofUcred)+unix.CmsgSpace(4)+unix.CmsgSpace(4*253))
-	n, oobn, flags := 0, 0, 0
-	var readErr error
-	err = raw.Read(func(fd uintptr) bool {
-		for {
-			n, oobn, flags, _, readErr = unix.Recvmsg(int(fd), data, oob, unix.MSG_PEEK|unix.MSG_DONTWAIT|unix.MSG_CMSG_CLOEXEC)
-			if errors.Is(readErr, unix.EINTR) {
-				continue
-			}
-			return !errors.Is(readErr, unix.EAGAIN) && !errors.Is(readErr, unix.EWOULDBLOCK)
-		}
-	})
-	messages, parseErr := unix.ParseSocketControlMessage(oob[:oobn])
-	var credentials *unix.Ucred
-	pidfd := -1
-	unexpected := false
-	for _, message := range messages {
-		if message.Header.Level != unix.SOL_SOCKET {
-			unexpected = true
-			continue
-		}
-		switch message.Header.Type {
-		case unix.SCM_CREDENTIALS:
-			if credentials != nil {
-				unexpected = true
-			}
-			c, e := unix.ParseUnixCredentials(&message)
-			if e != nil {
-				parseErr = errors.Join(parseErr, e)
-			} else {
-				credentials = c
-			}
-		case unix.SCM_PIDFD:
-			if len(message.Data) != 4 {
-				unexpected = true
-				continue
-			}
-			fd := int(int32(binary.NativeEndian.Uint32(message.Data)))
-			if fd < 0 {
-				unexpected = true
-				continue
-			}
-			unix.CloseOnExec(fd)
-			if pidfd >= 0 {
-				_ = unix.Close(fd)
-				unexpected = true
-			} else {
-				pidfd = fd
-			}
-		case unix.SCM_RIGHTS:
-			fds, e := unix.ParseUnixRights(&message)
-			parseErr = errors.Join(parseErr, e)
-			for _, fd := range fds {
-				_ = unix.Close(fd)
-			}
-			unexpected = true
-		default:
-			unexpected = true
-		}
-	}
-	if err != nil || readErr != nil || parseErr != nil || n != 1 || flags&unix.MSG_CTRUNC != 0 || unexpected || credentials == nil || credentials.Pid <= 0 || pidfd < 0 {
-		if pidfd >= 0 {
-			_ = unix.Close(pidfd)
-		}
-		return nil, -1, errors.Join(ErrOwnership, err, readErr, parseErr)
-	}
-	return credentials, pidfd, nil
+	return &unix.Ucred{Pid: int32(p.PID), Uid: p.UID, Gid: p.GID}, p.FD, nil
 }
 
 func enableSenderIdentity(conn *net.UnixConn) error {
-	raw, err := conn.SyscallConn()
-	if err != nil {
-		return err
-	}
-	var optionErr error
-	if err = raw.Control(func(fd uintptr) {
-		optionErr = unix.SetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_PASSCRED, 1)
-		if optionErr == nil {
-			optionErr = unix.SetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_PASSPIDFD, 1)
-		}
-	}); err != nil || optionErr != nil {
-		return errors.Join(ErrOwnership, err, optionErr)
+	if err := peercred.EnableSender(conn); err != nil {
+		return errors.Join(ErrOwnership, err)
 	}
 	return nil
 }

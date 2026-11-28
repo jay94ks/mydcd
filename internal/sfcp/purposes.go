@@ -3,6 +3,7 @@
 package sfcp
 
 import (
+	"slices"
 	"sync"
 
 	"github.com/jay94ks/seafield/internal/buildinfo"
@@ -48,6 +49,9 @@ type purposeSpec struct {
 	// node; perPeer bounds them for one authenticated key, so one slow peer
 	// cannot use up the whole limit. Zero perPeer means limit.
 	limit, perPeer int
+	// unlimited purposes take no stream permits at all (limit and perPeer
+	// stay zero); their handler bounds its own resources.
+	unlimited bool
 	// local admits the purpose on the management Unix socket too.
 	local bool
 	// longLived handlers get the transport's lifetime instead of the 30s
@@ -57,10 +61,13 @@ type purposeSpec struct {
 	// needs are the features every kind of this purpose requires; a peer
 	// that did not announce them in its handshake is never sent the purpose
 	// and its frames of it are refused (devel/design/sfcp-transit.md 12).
-	needs buildinfo.Features
-	// kindNeeds adds features one kind needs beyond the purpose's own (a
-	// kind added to an existing purpose later in the major).
-	kindNeeds map[uint8]buildinfo.Features
+	// Each is a mainline version range of one feature set (such as
+	// buildinfo.From(buildinfo.NetworkTransitV1)) that the two ends' common
+	// set must reach.
+	needs []buildinfo.Range
+	// kindNeeds adds ranges one kind needs beyond the purpose's own (a kind
+	// added to an existing purpose later in the major).
+	kindNeeds map[uint8][]buildinfo.Range
 }
 
 func allowAny(bits ...func(Policy) bool) func(Policy) bool {
@@ -166,12 +173,10 @@ var purposes = map[Purpose]purposeSpec{
 		KindDone:    {fields: []int{8, 8, 32}, budget: 128, allow: bySnapshot},
 	}, limit: 2},
 	Observation: {name: "observation", shape: ShapeReport, kinds: map[uint8]kindSpec{
-		KindResponse:        {fields: []int{32}, budget: 2048, allow: byRespond}, // + optional refused-item bitmap
-		KindWorkloadReport:  report(),
-		KindNodeObservation: report(),
-		KindEventBatch:      report(),
-		KindAppRenewal:      report(),
-		KindAlarm:           report(),
+		KindResponse:       {fields: []int{32}, budget: 2048, allow: byRespond}, // + optional refused-item bitmap
+		KindWorkloadReport: report(),
+		KindEventBatch:     report(),
+		KindAppRenewal:     report(),
 	}, limit: 8, perPeer: 4},
 	Packet: {name: "packet", shape: ShapeDatagram, kinds: map[uint8]kindSpec{
 		1: {fields: []int{32, 16, 16, -1}, budget: 65535 + 128, allow: byTunnel},
@@ -242,6 +247,20 @@ var purposes = map[Purpose]purposeSpec{
 		1: {fields: []int{-1, 32}, budget: VolumeFSData + 8<<10, allow: byMember},
 		2: {fields: []int{-1, 32}, budget: VolumeFSData + 8<<10, allow: byMember},
 	}, limit: 64, perPeer: 16},
+	// Subscribe/publish (devel/design/sfcp-topics.md): one long-lived stream
+	// per subscription, with no stream limit (Jay 2026-11-28 10:27 KST); the
+	// handler bounds queues, patterns and held messages per stream. Messages ride tag 1 of kind 16 (optional extension
+	// tag 128 = bulk reply); the handler checks family ACLs.
+	Topic: {name: "topic", shape: ShapeDuplex, kinds: map[uint8]kindSpec{
+		KindRequest:        {fields: []int{-1}, budget: topicFrameBudget + 64, allow: byMember},
+		KindResponse:       {fields: []int{-1}, budget: 1024, allow: byMember},
+		KindStored:         {fields: []int{-1}, budget: topicFrameBudget + 64, allow: byMember},
+		KindTopicMessages:  {fields: []int{-1}, budget: topicFrameBudget + 64, allow: byMember},
+		KindTopicLost:      {fields: []int{-1}, budget: topicFrameBudget + 64, allow: byMember},
+		KindTopicBulkGet:   {fields: []int{-1}, budget: topicFrameBudget + 64, allow: byMember},
+		KindTopicBulkEnd:   {fields: []int{-1}, budget: 64, allow: byMember},
+		KindTopicAvailable: {fields: []int{-1}, budget: 64, allow: byMember},
+	}, unlimited: true, longLived: true},
 }
 
 // imageContentKinds: the user transfer kinds with data chunks only from the
@@ -260,13 +279,20 @@ func specOf(p Purpose) (purposeSpec, bool) {
 	return s, ok
 }
 
-// needsOf is the features a purpose/kind frame requires of both ends.
-func needsOf(p Purpose, kind uint8) buildinfo.Features {
+// needsOf is the version ranges a purpose/kind frame requires of both ends.
+func needsOf(p Purpose, kind uint8) []buildinfo.Range {
 	s, ok := purposes[p]
 	if !ok {
-		return 0
+		return nil
 	}
-	return s.needs | s.kindNeeds[kind]
+	k := s.kindNeeds[kind]
+	switch {
+	case len(k) == 0:
+		return s.needs
+	case len(s.needs) == 0:
+		return k
+	}
+	return append(slices.Clip(s.needs), k...)
 }
 
 func kindOf(p Purpose, kind uint8) (kindSpec, bool) {
@@ -322,6 +348,9 @@ func newPurposeLimits() map[Purpose]chan struct{} {
 // acquire takes one stream of purpose p for key, or reports false when the
 // purpose or that peer's share is full. release undoes a true acquire.
 func (t *Transport) acquire(key Identity, p Purpose) (release func(), ok bool) {
+	if purposes[p].unlimited {
+		return func() {}, true
+	}
 	global := t.limits[p]
 	if global == nil {
 		return nil, false

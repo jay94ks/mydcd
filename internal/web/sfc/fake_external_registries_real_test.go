@@ -8,6 +8,7 @@ import (
 
 	"github.com/jay94ks/seafield/internal/cluster/control"
 	"github.com/jay94ks/seafield/internal/imagesource"
+	"github.com/jay94ks/seafield/internal/userauth"
 )
 
 // REQ-17 in sfcd's real shape: list, put/delete with the record Revision,
@@ -18,7 +19,7 @@ func TestExternalRegistryReal(t *testing.T) {
 	f.SetIdleTimeout(0)
 	alice := passwordLogin(t, f, "alice", "alice")
 	bob, _ := keyLogin(t, f, "bob", FixtureKey("bob"))
-	page := func(c Conn) ExternalRegistryPage {
+	page := func(c Conn) userauth.ExternalRegistriesPage {
 		t.Helper()
 		p, err := c.ExternalRegistryPage(ctx, "shop", "")
 		if err != nil {

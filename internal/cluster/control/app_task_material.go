@@ -7,6 +7,7 @@ import (
 	"github.com/jay94ks/seafield/internal/cluster/state"
 	"github.com/jay94ks/seafield/internal/deployment"
 	"github.com/jay94ks/seafield/internal/workload"
+	"slices"
 )
 
 // AppTaskMaterial is only an original committed metadata view. Activation
@@ -51,18 +52,29 @@ func (p Policy) AppTaskMaterial(s state.State, task deployment.ObjectRef) (deplo
 		return m, err
 	}
 	var service deployment.ComposeService
-	if json.Unmarshal(goal.Config, &service) != nil || len(service.Networks) != 1 {
+	if json.Unmarshal(goal.Config, &service) != nil || len(service.Networks) == 0 || len(service.Networks) > workload.MaxTaskNetworks {
 		return m, ErrCatalog
 	}
 	if service.CheckVolumeNeeds(b.Needs()) != nil {
 		return m, ErrCatalog
 	}
+	// Alias order: the first is the primary attachment, the rest are Extra.
+	aliases := make([]string, 0, len(service.Networks))
 	for alias := range service.Networks {
-		source, err := deployment.ResolveTaskNetwork(p.Cluster, goal, alias, s.Objects(""))
+		aliases = append(aliases, alias)
+	}
+	slices.Sort(aliases)
+	objects := s.Objects("")
+	for i, alias := range aliases {
+		source, err := deployment.ResolveTaskNetwork(p.Cluster, goal, alias, objects)
 		if err != nil {
 			return m, err
 		}
-		m.Network, m.Bridge = source.Source, source.Bridge
+		if i == 0 {
+			m.Network, m.Bridge = source.Source, source.Bridge
+			continue
+		}
+		m.Extra = append(m.Extra, deployment.TaskNetworkBinding{Alias: alias, Network: source.Source, Bridge: source.Bridge})
 	}
 	return m, nil
 }

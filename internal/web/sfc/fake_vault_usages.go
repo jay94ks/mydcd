@@ -44,7 +44,7 @@ func (w *world) vaultSecretsUnder(realm, id string) []string {
 }
 
 // vaultUsages: app services whose current definition names, in
-// x-sfc.secrets_from (tenant scope), the object or something that
+// x-sfc.secrets.from (tenant scope), the object or something that
 // delivers it or is under it.
 func (w *world) vaultUsages(realm, id string) []VaultUsage {
 	covered := w.vaultSecretsUnder(realm, id)
@@ -57,8 +57,10 @@ func (w *world) vaultUsages(realm, id string) []VaultUsage {
 		var d struct {
 			Services map[string]struct {
 				XSfc struct {
-					Node    string                   `yaml:"node"`
-					Sources deployment.SecretSources `yaml:"secrets_from"`
+					Node    string `yaml:"node"`
+					Secrets struct {
+						From deployment.SecretSources `yaml:"from"`
+					} `yaml:"secrets"`
 				} `yaml:"x-sfc"`
 			} `yaml:"services"`
 		}
@@ -67,7 +69,7 @@ func (w *world) vaultUsages(realm, id string) []VaultUsage {
 		}
 		for _, svc := range sortedKeys(d.Services) {
 			s := d.Services[svc]
-			for _, src := range s.XSfc.Sources {
+			for _, src := range s.XSfc.Secrets.From {
 				sel := src.Secret + src.Group
 				if src.Scope == "cluster" || sel == "" {
 					continue

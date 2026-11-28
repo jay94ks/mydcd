@@ -19,7 +19,7 @@ func TestTypedMethodRequestShape(t *testing.T) {
 		"unknown field":  {Schema: 1, Method: "certificates", Params: json.RawMessage(`{"Nope":1}`)},
 		"other spelling": {Schema: 1, Method: "certificates", Params: json.RawMessage(`{ }`)},
 		"extra field":    {Schema: 1, Method: "certificates", Tenant: "tenant", Params: json.RawMessage(`{}`)},
-		"untyped":        {Schema: 1, Method: "users", Params: json.RawMessage(`{}`)},
+		"untyped":        {Schema: 1, Method: "apps", Params: json.RawMessage(`{}`)},
 	} {
 		if r.validMethodFields() {
 			t.Fatal(name, "accepted")

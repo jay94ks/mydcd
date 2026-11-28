@@ -20,6 +20,7 @@ func TestNodeOperationsRejectForeignSelectorsBeforeDispatch(t *testing.T) {
 		"node-remove-plan":       `{"Node":"node-a"}`,
 		"node-demote-plan":       `{"Node":"node-a"}`,
 		"node-diagnostics":       `{"Node":"node-a"}`,
+		"node-logs":              `{"Node":"node-a","App":"web","Stdout":true,"Stderr":true}`,
 	}
 	for method, params := range requests {
 		t.Run(method, func(t *testing.T) {
@@ -29,7 +30,6 @@ func TestNodeOperationsRejectForeignSelectorsBeforeDispatch(t *testing.T) {
 			}
 			for _, mutate := range []func(*Request){
 				func(r *Request) { r.Tenant = "foreign" },
-				func(r *Request) { r.TargetUser = "foreign" },
 				func(r *Request) { r.After = "foreign" },
 				func(r *Request) { r.Method = "whoami" },
 				func(r *Request) { r.Params = json.RawMessage(`{"Node":"node-a","Tenant":"foreign"}`) },
@@ -65,6 +65,10 @@ func TestNodeOperationTypedClientsReachTransportAdmission(t *testing.T) {
 			return err
 		},
 		func() error { _, err := client.NodeDiagnostics(ctx, peer, session, "node-a"); return err },
+		func() error {
+			_, err := client.NodeLogs(ctx, peer, session, control.NodeLogsQuery{Node: "node-a", App: "web", Stdout: true, Stderr: true})
+			return err
+		},
 	} {
 		if err := call(); !errors.Is(err, sfcp.ErrAdmission) {
 			t.Fatal("typed node query did not reach transport admission", err)

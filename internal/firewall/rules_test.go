@@ -88,7 +88,7 @@ func TestLinesOrderAndFamilies(t *testing.T) {
 		t.Fatal("locks, then deny, then allow, per family, each port once:\n" + joined)
 	}
 	v6 := strings.Join(Lines(6, only(s), l), "\n")
-	if !strings.Contains(v6, "-s 2001:db8::/32") || strings.Contains(v6, "198.51.100") || !strings.Contains(v6, "-p ipv6-icmp -m comment --comment \"sfc r3\" -j ACCEPT") || !strings.Contains(v6, "neighbour-solicitation") {
+	if !strings.Contains(v6, "-s 2001:db8::/32") || strings.Contains(v6, "198.51.100") || !strings.Contains(v6, "-p ipv6-icmp -m comment --comment \"sfc r3\" -j ACCEPT") || !strings.Contains(v6, "--icmpv6-type 135") {
 		t.Fatal(v6)
 	}
 	r, _, _ := New().Change(0, Delta{Add: []Rule{{Action: "allow", Proto: "tcp", Ports: "1"}}})

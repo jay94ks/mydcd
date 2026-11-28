@@ -47,7 +47,7 @@ func (r Readiness) MarshalYAML() (any, error) {
 	return readyYAML{HTTP: r.Path, Port: r.Port, Timeout: r.Timeout}, nil
 }
 
-// SecretSources is `secrets_from: [NAME, group/NAME, cluster/NAME,
+// SecretSources is `secrets.from: [NAME, group/NAME, cluster/NAME,
 // cluster/group/NAME]`. Without "cluster/" the source is in the tenant.
 type SecretSources []Selector
 
@@ -136,4 +136,44 @@ func (v VolumeSize) MarshalYAML() (any, error) {
 		}
 	}
 	return uint64(v), nil
+}
+
+// serviceSecretsYAML is a service's `x-sfc.secrets` block: `from` (secret
+// sources whose keys become files), `env` (one key into an environment
+// variable) and `socket` (sources served over sfev.sock).
+type serviceSecretsYAML struct {
+	From   SecretSources       `yaml:"from,omitempty"`
+	Env    []SecretEnvironment `yaml:"env,omitempty"`
+	Socket SecretSources       `yaml:"socket,omitempty"`
+}
+
+type serviceExtensionYAML struct {
+	Nodes     []string            `yaml:"nodes,omitempty"`
+	PerNode   uint32              `yaml:"per_node,omitempty"`
+	Node      string              `yaml:"node,omitempty"`
+	Readiness *Readiness          `yaml:"ready,omitempty"`
+	Secrets   *serviceSecretsYAML `yaml:"secrets,omitempty"`
+	Lifecycle *ServiceLifecycle   `yaml:"lifecycle,omitempty"`
+	Logs      *LogsDeclaration    `yaml:"logs,omitempty"`
+}
+
+func (x *ServiceExtension) UnmarshalYAML(n *yaml.Node) error {
+	var v serviceExtensionYAML
+	if err := strictNode(n, &v); err != nil {
+		return err
+	}
+	out := ServiceExtension{Nodes: v.Nodes, PerNode: v.PerNode, Node: v.Node, Readiness: v.Readiness, Lifecycle: v.Lifecycle, Logs: v.Logs}
+	if s := v.Secrets; s != nil {
+		out.Sources, out.SecretEnv, out.Socket = s.From, s.Env, s.Socket
+	}
+	*x = out
+	return nil
+}
+
+func (x ServiceExtension) MarshalYAML() (any, error) {
+	v := serviceExtensionYAML{Nodes: x.Nodes, PerNode: x.PerNode, Node: x.Node, Readiness: x.Readiness, Lifecycle: x.Lifecycle, Logs: x.Logs}
+	if len(x.Sources) != 0 || len(x.SecretEnv) != 0 || len(x.Socket) != 0 {
+		v.Secrets = &serviceSecretsYAML{From: x.Sources, Env: x.SecretEnv, Socket: x.Socket}
+	}
+	return v, nil
 }

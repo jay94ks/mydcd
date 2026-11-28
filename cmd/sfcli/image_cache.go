@@ -42,15 +42,12 @@ func nodeImagesCommand(g *globals) *cli.Command {
 				if pages == 256 {
 					return errors.New("too many image pages")
 				}
-				reply, err := s.Client.QueryImageCache(ctx, s.Target, s.Stored.Session, true, q)
+				plan, err := s.Client.PlanImageCache(ctx, s.Target, s.Stored.Session, q)
 				if err != nil {
 					return err
 				}
-				if reply.ImageCachePlan == nil {
-					return errors.New("server sent no image list")
-				}
-				images = append(images, reply.ImageCachePlan.Images...)
-				if q.After = reply.ImageCachePlan.Next; q.After == "" {
+				images = append(images, plan.Images...)
+				if q.After = plan.Next; q.After == "" {
 					break
 				}
 			}
@@ -95,13 +92,9 @@ func nodeImagesDeleteCommand(g *globals) *cli.Command {
 			defer s.Close()
 			ctx, cancel := g.Deadline(c)
 			defer cancel()
-			reply, err := s.Client.QueryImageCache(ctx, s.Target, s.Stored.Session, true, imagecache.Query{Node: node, Images: ids})
+			plan, err := s.Client.PlanImageCache(ctx, s.Target, s.Stored.Session, imagecache.Query{Node: node, Images: ids})
 			if err != nil {
 				return err
-			}
-			plan := reply.ImageCachePlan
-			if plan == nil {
-				return errors.New("server sent no image plan")
 			}
 			for _, i := range plan.Images {
 				fmt.Fprintf(c.Err, "%s  %s  %d containers, used by %d\n", i.ID, cli.Size(max(0, i.Bytes)), i.Containers, i.References)
@@ -116,7 +109,7 @@ func nodeImagesDeleteCommand(g *globals) *cli.Command {
 				return err
 			}
 			return g.apply(c, s, change{Kind: "node-images", Async: true, Summary: fmt.Sprintf("node images delete %s (%d images)", node, len(ids)), ID: id,
-				Action: "prune-node-images", Payload: imagecache.Change{Operation: id, Plan: *plan}}, f.noWait)
+				Action: "prune-node-images", Payload: imagecache.Change{Operation: id, Plan: plan}}, f.noWait)
 		},
 	}
 }
@@ -126,12 +119,9 @@ func followImages(ctx context.Context, s *session, op control.UserOperation) (cl
 	if err != nil {
 		return "", "", err
 	}
-	reply, err := s.Client.QueryImageCache(ctx, s.Target, s.Stored.Session, false, imagecache.Query{Operation: operation})
+	status, err := s.Client.ImageCacheStatus(ctx, s.Target, s.Stored.Session, operation)
 	if err != nil {
 		return "", "", err
 	}
-	if reply.ImageCacheStatus == nil {
-		return "", "", errors.New("server sent no image delete status")
-	}
-	return jobState(reply.ImageCacheStatus.State), "image delete " + reply.ImageCacheStatus.State, nil
+	return jobState(status.State), "image delete " + status.State, nil
 }

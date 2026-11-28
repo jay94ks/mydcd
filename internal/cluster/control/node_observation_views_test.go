@@ -7,6 +7,7 @@ import (
 	"crypto/ed25519"
 	"encoding/json"
 	"errors"
+	"slices"
 	"testing"
 
 	"github.com/jay94ks/seafield/internal/access"
@@ -131,5 +132,52 @@ func TestNodeBuildCapabilityComesFromAFreshHostReport(t *testing.T) {
 		if r.Valid() {
 			t.Fatal("an invalid build fact passed", bad)
 		}
+	}
+}
+
+// An unready row carries the server's fixed reason; steps and start time
+// only for a cluster admin. A ready report is "ready" also on a server
+// that takes no work (Ready stays false there).
+func TestNodeSummaryUnreadyReason(t *testing.T) {
+	f := newBackupCore(t)
+	f.session.Scopes[0].Actions = append(f.session.Scopes[0].Actions, access.ManageMembers)
+	f.session.Signature = ed25519.Sign(f.node, access.SessionBytes(f.session))
+	public := [32]byte(f.node.Public().(ed25519.PublicKey))
+	host := func(h observability.Host) []observability.Report {
+		h.Version, h.CPUCapacity = "1", 4e9
+		r := observability.Report{Kind: "node-observation", Schema: 1, Cluster: f.p.Cluster, Node: "node-a", Key: public, Index: f.s.Index(), At: 10000, Host: &h}
+		r.Signature = ed25519.Sign(f.node, observability.SigningBytes(r))
+		if !r.Valid() {
+			t.Fatal("signed host fixture", h)
+		}
+		return []observability.Report{r}
+	}
+	page, err := f.p.NodeSummary(f.s, f.session, 10, "", "", "", host(observability.Host{Unready: &observability.Unready{Reason: "MODULE_PASS_FAILED", Steps: []string{"node-storage", "event-log"}, Since: 4000}}), true)
+	if err != nil || len(page.Nodes) != 1 {
+		t.Fatal(page, err)
+	}
+	n := page.Nodes[0]
+	if n.State != "unready" || n.Ready || n.Reason != "MODULE_PASS_FAILED" || !slices.Equal(n.FailedSteps, []string{"node-storage", "event-log"}) || n.FailingSince != 4000 || !n.AdmitsWork {
+		t.Fatal("unready row", n)
+	}
+	page, _ = f.p.NodeSummary(f.s, f.session, 10, "", "", "", host(observability.Host{}), true)
+	if n := page.Nodes[0]; n.State != "unready" || n.Reason != "UNKNOWN" {
+		t.Fatal("older daemon without a reason", n)
+	}
+	page, _ = f.p.NodeSummary(f.s, f.session, 10, "", "", "", host(observability.Host{ModuleReady: true}), true)
+	if n := page.Nodes[0]; n.State != "ready" || n.Reason != "" || n.FailedSteps != nil {
+		t.Fatal("ready row", n)
+	}
+	for _, bad := range []observability.Unready{{Reason: "elsewhere"}, {Reason: "MODULE_PASS_FAILED", Steps: []string{"Bad Step"}}} {
+		r := host(observability.Host{})[0]
+		r.Host.Unready = &bad
+		if r.Valid() {
+			t.Fatal("invalid unready accepted", bad)
+		}
+	}
+	r := host(observability.Host{ModuleReady: true})[0]
+	r.Host.Unready = &observability.Unready{Reason: "HOST_READ_FAILED"}
+	if r.Valid() {
+		t.Fatal("ready host with a reason accepted")
 	}
 }

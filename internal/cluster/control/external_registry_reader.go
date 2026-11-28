@@ -95,7 +95,13 @@ func externalRegistryUses(spec imagesource.Source, origin UserOperation, node st
 		if !ok {
 			use = secrets.Use{Purpose: secrets.PurposeRegistrySource, Tenant: spec.Tenant, User: origin.Session.User, App: scope, Deployment: scope, Service: "registry", Node: node, NodeKey: owner, RequesterKey: origin.Session.Key}
 		}
+		// A cluster source reader reads only to pull images, so a
+		// RegistryShared cluster secret may serve it. A workspace source's
+		// reader never may, even when it names a cluster secret.
 		use.Sources = append(use.Sources, ref.ID)
+		if spec.Cluster() {
+			use.RegistrySources = append(use.RegistrySources, ref.ID)
+		}
 		uses[ref.Realm] = use
 	}
 	return uses
@@ -110,7 +116,7 @@ func (p Policy) PlanExternalRegistryBind(s state.State, session access.Session, 
 	if err != nil {
 		return ExternalRegistryBindPlan{}, err
 	}
-	if !validID(tenant) || !validID(id) || !validID(node) || c.OperationAllowed(session, "bind-external-registry") != nil || c.AuthorizeSession(session, p.Cluster, p.Issuer(session.Issuer), at, tenant, access.ManageRegistry, node) != nil || c.AuthorizeSession(session, p.Cluster, p.Issuer(session.Issuer), at, tenant, access.Deploy, node) != nil {
+	if !validSourceOwner(tenant) || !validID(id) || !validID(node) || c.OperationAllowed(session, "bind-external-registry") != nil || p.authorizeSourceOwner(c, session, at, tenant, node, false) != nil {
 		return ExternalRegistryBindPlan{}, access.ErrDenied
 	}
 	owner, err := p.workNodeOwner(s, node)
@@ -312,7 +318,7 @@ func (p Policy) ExternalRegistryWork(s state.State, caller [32]byte, q ExternalR
 		if err != nil {
 			return ExternalRegistryWork{}, err
 		}
-		if c.OperationAllowed(reader.Origin.Session, "bind-external-registry") != nil || c.AuthorizeAccepted(reader.Origin.Session, p.Cluster, reader.Origin.At, entry.Spec.Tenant, access.ManageRegistry, reader.Node) != nil || c.AuthorizeAccepted(reader.Origin.Session, p.Cluster, reader.Origin.At, entry.Spec.Tenant, access.Deploy, reader.Node) != nil {
+		if c.OperationAllowed(reader.Origin.Session, "bind-external-registry") != nil || p.authorizeAcceptedSourceOwner(c, reader.Origin, entry.Spec.Tenant, reader.Node) != nil {
 			return ExternalRegistryWork{}, access.ErrDenied
 		}
 		vault, err := p.Vault(s)

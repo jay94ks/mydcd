@@ -152,10 +152,10 @@ func TestInitialCredentialActualVaultManagedRaftAndUserLogin(t *testing.T) {
 	}
 	apply(adminSession, "put-user", 0, access.User{ID: "new-user", Username: "new.user", Enabled: true})
 	account, err := c.UserCredentials(ctx, peer, adminSession, "new.user")
-	if err != nil || account.CredentialUser == nil {
+	if err != nil {
 		t.Fatal(err)
 	}
-	r := credentials.InitialRequest{Schema: 1, Cluster: clusterID, Owner: node.Public, Operation: [32]byte{1}, User: "new-user", Username: "new.user", Credential: "first-password", Profile: "system", Method: access.Password, ExpectedUserRevision: account.CredentialUser.Revision, At: time.Now().Unix()}
+	r := credentials.InitialRequest{Schema: 1, Cluster: clusterID, Owner: node.Public, Operation: [32]byte{1}, User: "new-user", Username: "new.user", Credential: "first-password", Profile: "system", Method: access.Password, ExpectedUserRevision: account.Revision, At: time.Now().Unix()}
 	if _, err = StageInitialIntent(root, c, adminSession, "password-stage", r); err != nil {
 		t.Fatal(err)
 	}
@@ -190,10 +190,10 @@ func TestInitialCredentialActualVaultManagedRaftAndUserLogin(t *testing.T) {
 	// A separate ordinary user gets a token whose raw bytes never enter Raft.
 	apply(adminSession, "put-user", 0, access.User{ID: "token-user", Username: "token.user", Enabled: true})
 	account, err = c.UserCredentials(ctx, peer, adminSession, "token.user")
-	if err != nil || account.CredentialUser == nil {
+	if err != nil {
 		t.Fatal(err)
 	}
-	r.User, r.Username, r.Credential, r.Method, r.ExpectedUserRevision, r.Operation = "token-user", "token.user", "first-token", access.Token, account.CredentialUser.Revision, [32]byte{2}
+	r.User, r.Username, r.Credential, r.Method, r.ExpectedUserRevision, r.Operation = "token-user", "token.user", "first-token", access.Token, account.Revision, [32]byte{2}
 	r.At = time.Now().Unix()
 	if _, err = StageInitialIntent(root, c, adminSession, "token-stage", r); err != nil {
 		t.Fatal(err)

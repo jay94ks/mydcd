@@ -204,14 +204,25 @@ func inspectDevices(src deviceSources) (Devices, error) {
 		}
 		dir := filepath.Join(src.Sys, "block", name)
 		size := sysNumber(filepath.Join(dir, "size")) * 512
-		if skip || size == 0 {
+		// A disk bundle's own device is listed like a disk.
+		bundle, sub := LVMBundle(sysText(filepath.Join(dir, "dm", "name")))
+		bundleDevice := strings.HasPrefix(name, "dm-") && bundle != "" && sub == "" && strings.HasPrefix(sysText(filepath.Join(dir, "dm", "uuid")), "LVM-")
+		if b, ok := FuseBundle(sysText(filepath.Join(dir, "loop", "backing_file"))); ok && strings.HasPrefix(name, "loop") {
+			bundle, sub, bundleDevice = b, "", true
+		}
+		if skip && !bundleDevice || size == 0 {
 			continue
 		}
 		if len(out.Disks) == maxBlockDisks {
 			out.Truncated = true
 			break
 		}
-		out.Disks = append(out.Disks, inspectDisk(src, name, dir, size, mounts, swaps))
+		d := inspectDisk(src, name, dir, size, mounts, swaps)
+		if bundleDevice {
+			d.Bundle, d.Kind = bundle, "bundle"
+			d.Class = classOf(d)
+		}
+		out.Disks = append(out.Disks, d)
 	}
 	slices.SortFunc(out.Disks, func(a, b BlockDisk) int { return strings.Compare(a.Name, b.Name) })
 	for !out.valid() && len(out.Disks) > 0 {
@@ -257,6 +268,13 @@ func inspectDisk(src deviceSources, name, dir string, size uint64, mounts map[st
 		fillPart(src, &p, dir, head, mounts, swaps)
 		if p.Filesystem != "" || p.Busy() {
 			d.Parts = []BlockPart{p}
+		}
+	}
+	for _, p := range d.Parts {
+		for _, h := range p.Holders {
+			if h.Bundle != "" {
+				d.Bundle = h.Bundle
+			}
 		}
 	}
 	d.Class = classOf(d)
@@ -340,6 +358,9 @@ func fillPart(src deviceSources, p *BlockPart, dir string, head []byte, mounts m
 				h.Kind = "lvm"
 			case strings.HasPrefix(uuid, "CRYPT-"):
 				h.Kind = "crypt"
+			}
+			if b, _ := LVMBundle(h.Mapper); b != "" && h.Kind == "lvm" {
+				h.Bundle = b
 			}
 			h.Mounts, h.Filesystem, h.Space = placeMounts(deviceMounts(mounts, hdir, name), src.Space)
 			h.Swap = swaps[name]

@@ -202,7 +202,7 @@ services:
     x-sfc:
       node: node-a
       ready: {http: /readyz, port: 8080}
-      secrets_from: [tenant-defaults, group/common, web-runtime-overrides]
+      secrets: {from: [tenant-defaults, group/common, web-runtime-overrides]}
     dns:
     - 10.240.10.1
     dns_search:
@@ -257,7 +257,7 @@ services:
         ipv4_address: 10.240.20.10
     x-sfc:
       node: node-b
-      secrets_from: [tenant-defaults, group/common, group/db-admin]
+      secrets: {from: [tenant-defaults, group/common, group/db-admin]}
     dns:
     - 10.240.20.1
     dns_search:

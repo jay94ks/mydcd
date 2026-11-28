@@ -42,19 +42,20 @@ func (c Client) WithCheckerUpload(i CheckerScriptIntent) Client {
 
 func (s Service) streamCheckerSource(ctx context.Context, conn *sfcp.Session, stream sfcp.Stream, frame sfcp.Frame, header [32]byte, envelope Envelope, request Request, binding userBinding) error {
 	denied := func(code string) error { return s.respond(stream, frame, header, Reply{Schema: 1, Code: code}) }
-	module := request.Method == "checker-module-stage" || request.Method == "checker-module-recover"
-	if frame.Kind != 1 || envelope.Relay != nil || envelope.Session == nil || envelope.Session.Key != binding.key || access.VerifyRequest(*envelope.Session, binding.challenge, envelope.Body, envelope.Signature) != nil || request.Operation != nil || request.Enrollment != nil || request.UserKey != ([32]byte{}) || request.After != "" || request.Node != "" || request.CheckerUpload == nil || request.CheckerSource == nil || request.CheckerSource.Validate() != nil || request.Tenant != request.CheckerSource.Tenant || (request.CheckerModule != nil) != module || module && !moduleInput(*request.CheckerSource, *request.CheckerModule) {
+	q, ok := request.checkerStage()
+	if frame.Kind != 1 || envelope.Relay != nil || envelope.Session == nil || envelope.Session.Key != binding.key || access.VerifyRequest(*envelope.Session, binding.challenge, envelope.Body, envelope.Signature) != nil || !ok || !request.checkerArtifactRequest() {
 		return denied("denied")
 	}
-	d := request.CheckerSource.Clone()
-	recover := request.Method == "checker-source-recover" || request.Method == "checker-module-recover"
+	module := moduleMethod(request.Method)
+	d := q.Source.Clone()
+	recover := recoverMethod(request.Method)
 	if s.CheckerSources == nil {
 		return denied("unavailable")
 	}
 	if err := s.CheckerSources.Permit(ctx, *envelope.Session, d, recover); err != nil {
 		return denied("denied")
 	}
-	upload := *request.CheckerUpload
+	upload := q.Upload
 	done, err := s.CheckerSources.BeginPublication(ctx, *envelope.Session, d, upload, recover)
 	if err != nil {
 		return denied(checkerArtifactFailure(err))
@@ -71,7 +72,7 @@ func (s Service) streamCheckerSource(ctx context.Context, conn *sfcp.Session, st
 		}
 		length, digest, limit := d.Length, d.Digest, checker.MaxScriptBytes
 		if module {
-			length, digest, limit = request.CheckerModule.Length, request.CheckerModule.Digest, checker.MaxModuleBytes
+			length, digest, limit = q.Module.Length, q.Module.Digest, checker.MaxModuleBytes
 		}
 		data, err = readUserInput(conn, stream, frame.Request, header, int(length), digest, limit)
 		if err != nil {
@@ -79,9 +80,9 @@ func (s Service) streamCheckerSource(ctx context.Context, conn *sfcp.Session, st
 		}
 		defer clear(data)
 	}
-	reply := Reply{Schema: 1, Code: "ok", Tenant: d.Tenant}
+	var reply Reply
 	if module {
-		pin := *request.CheckerModule
+		pin := *q.Module
 		var fact checker.ModuleFact
 		if recover {
 			fact, err = s.CheckerSources.RecoverPublicationModule(ctx, *envelope.Session, d, upload, pin)
@@ -94,7 +95,7 @@ func (s Service) streamCheckerSource(ctx context.Context, conn *sfcp.Session, st
 		if fact.Verify() != nil || fact.Cluster != s.Policy.Cluster || fact.Owner != s.Self.Public || fact.Tenant != d.Tenant || fact.Module != pin {
 			return denied("invalid")
 		}
-		reply.CheckerModule = &fact
+		reply = dataReply("ok", fact)
 	} else {
 		var fact checker.SourceFact
 		if recover {
@@ -108,7 +109,7 @@ func (s Service) streamCheckerSource(ctx context.Context, conn *sfcp.Session, st
 		if fact.Verify() != nil || fact.Cluster != s.Policy.Cluster || fact.Owner != s.Self.Public || fact.Tenant != d.Tenant || fact.ContentDigest() != d.ContentDigest() {
 			return denied("invalid")
 		}
-		reply.CheckerSource = &fact
+		reply = dataReply("ok", fact)
 	}
 	return s.respond(stream, frame, header, reply)
 }
@@ -131,11 +132,24 @@ func checkerArtifactFailure(err error) string {
 }
 
 func (c Client) sourceReply(target sfcp.Peer, d checker.SourceDescriptor, reply Reply) (checker.SourceFact, error) {
-	f := reply.CheckerSource
-	if reply.Code != "ok" || reply.CheckerModule != nil || reply.Tenant != d.Tenant || reply.Node != hex.EncodeToString(target.Key[:]) || f == nil || f.Verify() != nil || f.Owner != [32]byte(target.Key) || f.Cluster != c.Cluster || f.Tenant != d.Tenant || f.ContentDigest() != d.ContentDigest() || c.checkerUpload == nil || f.Upload == nil || *f.Upload != *c.checkerUpload {
+	var fact checker.SourceFact
+	f := &fact
+	if reply.Code != "ok" || len(reply.Data) == 0 || strict(reply.Data, f) != nil || reply.Node != hex.EncodeToString(target.Key[:]) || f.Verify() != nil || f.Owner != [32]byte(target.Key) || f.Cluster != c.Cluster || f.Tenant != d.Tenant || f.ContentDigest() != d.ContentDigest() || c.checkerUpload == nil || f.Upload == nil || *f.Upload != *c.checkerUpload {
 		return checker.SourceFact{}, sfcp.ErrAdmission
 	}
 	return f.Clone(), nil
+}
+
+// checkerRequest is a checker-* request for d under this client's upload ID.
+func (c Client) checkerRequest(method string, d checker.SourceDescriptor, pin *checker.ModulePin) (Request, error) {
+	if c.checkerUpload == nil {
+		return Request{}, sfcp.ErrAdmission
+	}
+	q := CheckerStageQuery{Tenant: d.Tenant, Source: d.Clone(), Module: pin, Upload: *c.checkerUpload}
+	if !q.validFor(method) {
+		return Request{}, sfcp.ErrAdmission
+	}
+	return stageRequest(method, q)
 }
 
 // StageCheckerSource does not redirect or auto-resubmit. A transport failure
@@ -144,8 +158,11 @@ func (c Client) StageCheckerSource(ctx context.Context, target sfcp.Peer, sessio
 	if c.Verify(session) != nil || d.Validate() != nil || uint64(len(data)) != d.Length || sha256.Sum256(data) != d.Digest {
 		return checker.SourceFact{}, sfcp.ErrAdmission
 	}
-	d = d.Clone()
-	reply, err := c.stageCheckerArtifact(ctx, target, session, Request{CheckerUpload: c.checkerUpload, Method: "checker-source-stage", Tenant: d.Tenant, CheckerSource: &d}, data)
+	request, err := c.checkerRequest(CheckerSourceStageMethod.Name, d, nil)
+	if err != nil {
+		return checker.SourceFact{}, err
+	}
+	reply, err := c.stageCheckerArtifact(ctx, target, session, request, data)
 	if err != nil {
 		return checker.SourceFact{}, err
 	}
@@ -172,10 +189,12 @@ func (c Client) stageCheckerExchange(ctx context.Context, target sfcp.Peer, data
 	}
 	data = bytes.Clone(data)
 	defer clear(data)
-	conn, err := c.Mesh.Dial(ctx, target)
+	conn, stream, err := c.openUser(ctx, target)
 	if err != nil {
-		return Reply{}, &Error{Code: "transport", Phase: sfcp.NotSent, Cause: err}
+		return Reply{}, err
 	}
+	defer stream.CancelRead(0)
+	defer stream.Close()
 	envelope, err := makeEnvelope(conn)
 	if err != nil {
 		return Reply{}, err
@@ -185,12 +204,6 @@ func (c Client) stageCheckerExchange(ctx context.Context, target sfcp.Peer, data
 		return Reply{}, err
 	}
 	header := sha256.Sum256(raw)
-	stream, err := conn.OpenManagement(ctx)
-	if err != nil {
-		return Reply{}, &Error{Code: "transport", Phase: sfcp.NotSent, Cause: err}
-	}
-	defer stream.CancelRead(0)
-	defer stream.Close()
 	stop := context.AfterFunc(ctx, func() { stream.CancelRead(1); stream.CancelWrite(1) })
 	defer stop()
 	id := c.Mesh.NextRequest()
@@ -210,7 +223,7 @@ func (c Client) stageCheckerExchange(ctx context.Context, target sfcp.Peer, data
 		if err != nil {
 			return reply, err
 		}
-		if f.Purpose != sfcp.User || f.Kind != 2 || f.Request != id || conn.Admit(f, sfcp.User, false) != nil || !bytes.Equal(f.Fields[1].Value, header[:]) || strict(f.Fields[0].Value, &reply) != nil || reply.Schema != 1 {
+		if f.Purpose != sfcp.User || f.Kind != 2 || f.Request != id || conn.Admit(f, sfcp.User, false) != nil || !bytes.Equal(f.Fields[1].Value, header[:]) || lenient(f.Fields[0].Value, &reply) != nil || reply.Schema != 1 {
 			return reply, sfcp.ErrFrame
 		}
 		return reply, nil
@@ -219,8 +232,8 @@ func (c Client) stageCheckerExchange(ctx context.Context, target sfcp.Peer, data
 	if err != nil {
 		return unknown(err)
 	}
-	if ready.LifecycleStage != nil {
-		prepared = Reply{Schema: 1, LifecycleStage: ready.LifecycleStage}
+	if len(ready.Data) != 0 {
+		prepared = Reply{Schema: 1, Data: ready.Data}
 	}
 	if ready.Code != "continue" {
 		// A Unix request is bidirectional: even an initial rejection needs
@@ -238,7 +251,7 @@ func (c Client) stageCheckerExchange(ctx context.Context, target sfcp.Peer, data
 		lifetime, _ = lifetime.Reply(requestID, header)
 		return prepared, &Error{Code: ready.Code, Phase: lifetime.Phase()}
 	}
-	if ready.Node != hex.EncodeToString(target.Key[:]) || (ready.CheckerSource != nil || ready.CheckerModule != nil) {
+	if ready.Node != hex.EncodeToString(target.Key[:]) {
 		return unknown(sfcp.ErrFrame)
 	}
 	if err = writeUserInput(stream, id, header, data); err != nil {
@@ -267,8 +280,11 @@ func (c Client) RecoverCheckerSource(ctx context.Context, target sfcp.Peer, sess
 	if c.Verify(session) != nil || d.Validate() != nil {
 		return checker.SourceFact{}, sfcp.ErrAdmission
 	}
-	d = d.Clone()
-	body, err := requestBody(Request{CheckerUpload: c.checkerUpload, Method: "checker-source-recover", Tenant: d.Tenant, CheckerSource: &d})
+	request, err := c.checkerRequest(CheckerSourceRecoverMethod.Name, d, nil)
+	if err != nil {
+		return checker.SourceFact{}, err
+	}
+	body, err := requestBody(request)
 	if err != nil {
 		return checker.SourceFact{}, err
 	}

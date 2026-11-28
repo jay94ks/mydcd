@@ -106,6 +106,10 @@ func (r *Runtime) membershipRequest(ctx context.Context, session *sfcp.Session, 
 		switch req.Method {
 		case "join":
 			if req.Ack == nil {
+				if refused := joinFeatures(view, session, r.Mesh, requester, relayed); refused != nil {
+					reply.Code, reply.Message = "version", refused.Error()
+					return r.writeMemberReply(stream, f, digest, reply)
+				}
 				work, cancel := context.WithTimeout(r.ctx, 20*time.Second)
 				err = r.advanceMember(work, req.Node, true)
 				cancel()
@@ -153,6 +157,25 @@ func (r *Runtime) membershipRequest(ctx context.Context, session *sfcp.Session, 
 		}
 	}
 	return r.writeMemberReply(stream, f, digest, reply)
+}
+
+// joinFeatures refuses a joining server that lacks a feature the cluster's
+// entries have used (devel/design/upgrades.md 3-5): it could not apply them.
+// The joiner's set is what it announced on this session, or, for a relayed
+// request, what this node last saw from it (none when never seen).
+func joinFeatures(view cluster.View, session *sfcp.Session, mesh *sfcp.Transport, requester sfcp.Identity, relayed bool) error {
+	used, ok := view.State.FeaturesUsed()
+	if !ok {
+		return errors.New("this cluster's feature record is unreadable")
+	}
+	if used.Empty() {
+		return nil
+	}
+	have := session.PeerFeatures()
+	if relayed {
+		have, _ = mesh.PeerFeatures(requester)
+	}
+	return cluster.MissingFeatures("this cluster", used, have, "the joining server")
 }
 
 func (r *Runtime) writeMemberReply(stream *quic.Stream, f sfcp.Frame, digest [32]byte, reply MemberReply) error {

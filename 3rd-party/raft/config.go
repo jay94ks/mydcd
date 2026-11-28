@@ -160,6 +160,16 @@ type Config struct {
 	// for votes.
 	HeartbeatInterval time.Duration
 
+	// PeerContact, when set, reports when any packet of any kind last
+	// arrived from a server over the transport (zero if never). Raft then
+	// counts it as contact with that server: the leader skips a periodic
+	// heartbeat to a follower it heard from within the heartbeat interval,
+	// its lease check counts that contact, and a follower counts packets
+	// from its leader as contact from the leader. Heartbeats forced by
+	// PeerConnected or a notify still go out. The transport keeps its own
+	// idle ping, so an idle connection still produces packets.
+	PeerContact func(ServerID) time.Time
+
 	// ElectionTimeout specifies the time in candidate state without contact
 	// from a leader before we attempt an election.
 	ElectionTimeout time.Duration

@@ -40,7 +40,7 @@ type Fixture struct {
 	// Lifecycle policies (current = last per tenant) and script records.
 	LifecyclePolicies []checker.TenantPolicy
 	LifecycleScripts  []FixtureLifecycleScript
-	Registries        []RegistryView
+	Registries        []FixtureRegistry
 
 	// Apps are deployed through the same path as begin-app: the document is
 	// parsed into services and tasks. Health/Restarts overrides apply after.
@@ -278,6 +278,8 @@ func DefaultFixture() Fixture {
 		Volumes: []volumeRow{
 			{Key: "shop/mysql-data", Tenant: "shop", Name: "mysql-data", Kind: "fixed", Node: "node-b", Storage: "ssd", App: "php-shop", Revision: 25, Consumers: 1, CapacityBytes: 50 * gib, UsedBytes: 31 * gib, Retain: true},
 			{Key: "shop/uploads", Tenant: "shop", Name: "uploads", Kind: "shared", Revision: 26, Consumers: 0, CapacityBytes: 10 * gib, UsedBytes: 2 * gib},
+			// an app volume nothing mounts: what 보관 (archive-volume) takes
+			{Key: "shop/sessions", Tenant: "shop", Name: "sessions", Kind: "shared", Node: "node-a", App: "php-shop", Revision: 34, CapacityBytes: 2 * gib, UsedBytes: 300 << 20},
 			{Key: "payments/ledger-data", Tenant: "payments", Name: "ledger-data", Kind: "fixed", Node: "node-c", Storage: "hdd", Revision: 27, CapacityBytes: 100 * gib, UsedBytes: 12 * gib, Retain: true},
 		},
 		Backups: []VolumeBackupView{
@@ -292,7 +294,7 @@ func DefaultFixture() Fixture {
 		GroupPasswords:    map[string]string{"shop/shop-ops": "ops-pass"},
 		LifecyclePolicies: []checker.TenantPolicy{FixtureLifecyclePolicy("shop")},
 		LifecycleScripts:  fixtureLifecycleScripts(),
-		Registries: []RegistryView{
+		Registries: []FixtureRegistry{
 			{Tenant: "shop", ID: "builtin", Name: "내장 저장소", Endpoint: "registry.sfc.local", Revision: 19, Generation: 1, Active: true, Repositories: 2},
 			{Tenant: "payments", ID: "builtin", Name: "내장 저장소", Endpoint: "registry.sfc.local", Revision: 19, Generation: 1, Active: true, Repositories: 1},
 		},

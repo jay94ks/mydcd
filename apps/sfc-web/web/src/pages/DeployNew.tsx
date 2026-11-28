@@ -28,7 +28,7 @@ function Uploads({ tenant }: { tenant: string }) {
   const m = useMutation();
   const [target, setTarget] = useState<string>();
   return (
-    <Card title="끝나지 않은 업로드 (UI-34)" actions={<span className="small muted">웹 배포의 업로드는 같은 작업으로 다시 보내면 이어 올립니다</span>}>
+    <Card title="끝나지 않은 업로드" actions={<span className="small muted">웹 배포의 업로드는 같은 작업으로 다시 보내면 이어 올립니다</span>}>
       <Load q={u}>
         {(p) =>
           p.items.length === 0 ? (

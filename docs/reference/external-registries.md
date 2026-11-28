@@ -45,7 +45,7 @@ sfcli --tenant payments registry external list
 sfcli --tenant payments registry external show ghcr
 ```
 
-User method `external-registries`는 `{Schema:1,Method:"external-registries",Tenant,After?,Nonce}`를 받는다. 응답은 기존 Reply의 `ExternalRegistriesRootRevision`, `ExternalRegistries`(최대8개), `ExternalRegistriesNext`다. 행은 `{Spec,Revision,Deleted,Reader?}`이며 Reader는 `{Node,Owner,Generation,Draining}`만 담는다. 원 서명/Session·자격 값은 포함하지 않는다. 현재 tenant의 Read 또는 ManageRegistry 권한이 필요하다. 여러 페이지를 합칠 때 root revision이 달라지면 혼합하지 않고 처음부터 조회한다. CLI의 상세 조회도 같은 권한·페이지를 사용한다.
+User typed method `external-registries`는 `Params:{Tenant,After?}`를 받는다. 응답 `Data`는 `{RootRevision,Items,Next}`이며 Items는 최대8개다. 행은 `{Spec,Revision,Deleted,Reader?}`이며 Reader는 `{Node,Owner,Generation,Draining}`만 담는다. 원 서명/Session·자격 값은 포함하지 않는다. 현재 tenant의 Read 또는 ManageRegistry 권한이 필요하다. 여러 페이지를 합칠 때 root revision이 달라지면 혼합하지 않고 처음부터 조회한다. CLI의 상세 조회도 같은 권한·페이지를 사용한다.
 
 ## 승인·값 공급과 실제 연결 범위
 
@@ -82,10 +82,10 @@ bind에는 현재 tenant ManageRegistry와 지정 노드 Deploy 권한이 필요
 
 관리 source 사용의 `Use.Purpose`는 `registry-source`이고, Group 서명 대상의 `purpose`도 같은 값이다. 이 승인의 actions는 `resolve,registry`이며 앱의 기본 `resolve,mount`와 호환되지 않는다. source와 앱이 같은 이름·사용자를 사용해도 승인·usage·종료 증명을 교환할 수 없다. schema는1이며 기존 purpose 없는 앱 서명 형식은 유지한다.
 
-| User method | 입력 | Reply 필드 |
+| User typed method | `Params` | `Data` |
 |---|---|---|
-| `external-registry-bind-plan` | `Tenant`, `ExternalRegistryBind:{ID,Node}` | `ExternalRegistryBindPlan:{Schema,Cluster,Selection:{Tenant,ID,Node,Definition},Spec,Expected,RootRevision,Epoch,Uses}`. Uses는 realm별 공개 `secrets.Use` 목록이며 자격 값이 아님 |
-| `registry-login-test` | `Tenant`, `ExternalRegistryProbe:{ID,Image?}` | `ExternalRegistryProbe:{Selection:{Tenant,ID,Generation},Owner,At,Code,Image?,Pull?}` |
+| `external-registry-bind-plan` | `{Tenant,Query:{ID,Node}}` | `{Schema,Cluster,Selection:{Tenant,ID,Node,Definition},Spec,Expected,RootRevision,Epoch,Uses}`. Uses는 realm별 공개 `secrets.Use` 목록이며 자격 값이 아님 |
+| `registry-login-test` | `{Tenant,Query:{ID,Image?}}` | `{Selection:{Tenant,ID,Generation},Owner,At,Code,Image?,Pull?}` |
 
 두 method는 기존 User envelope/Session·Nonce·finite EOF를 따른다. Node/After나 다른 method의 selector를 섞지 않는다. bind 실행의 typed action은 `bind-external-registry`이고 payload는 계획의 `Selection`, expected는 계획의 `Expected`다. Vault Group 계획은 기존 `vault-approval-plan`의 `Origin`에 이 원 bind operation을 넣어 계산한다. 현재 조회 계정과 원 승인 요청자의 같은 user를 확인하며 실제 requester key·source 선택은 원 operation에 고정한다.
 
@@ -121,7 +121,7 @@ owner는 원 source 세대를 로컬에서 fence하고, 진행 중인 Secret fet
 {"Schema":1,"Method":"external-registry-pulls","Tenant":"payments","After":""}
 ```
 
-`Reply.RegistryPulls`는 `{Schema,Tenant,Root,Index,Rows,Next}`다. `Root`는 기존 JSON 형식의 32바이트 배열이며 cursor는 서버가 반환한 불투명 문자열이다. 한 페이지는 최대 8행이다. `Rows`의 형식은 다음과 같다.
+typed method `external-registry-pulls`(`Params:{Tenant,After?}`)의 응답 `Data`는 `{Schema,Tenant,Root,Index,Rows,Next}`다. `Root`는 기존 JSON 형식의 32바이트 배열이며 cursor는 서버가 반환한 불투명 문자열이다. 한 페이지는 최대 8행이다. `Rows`의 형식은 다음과 같다.
 
 | 필드 | 의미 |
 |---|---|

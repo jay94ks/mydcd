@@ -31,7 +31,7 @@ func buildMultiSourceTokenFixture(t *testing.T, separateReaders bool) (*nodeStor
 		}
 		f.apply("manager", "bind-external-registry", bind.Expected, bind.Selection, state.Applied)
 	}
-	sources, err := f.p.ImageBuildBeginSources(f.s, plan.Spec.Scope.Root.Key, ImageBuildJobWorkQuery{Tenant: "tenant", ID: plan.Spec.ID, At: 3}, inputs)
+	sources, err := f.p.ImageBuildBeginSources(f.s, plan.Spec.Scope.Root.Key, ImageBuildJobWorkQuery{Tenant: "tenant", ID: plan.Spec.ID, At: 3}, inputs, testBuilder(plan.Spec), "")
 	if err != nil || len(sources) != 2 {
 		t.Fatal("missing two original source reservations", err)
 	}

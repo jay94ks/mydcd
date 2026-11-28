@@ -4,6 +4,7 @@ package deployment
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
@@ -89,11 +90,11 @@ func (m *ProjectionStore) retainedScope(ref workload.InputRef) (Binding, error) 
 
 func (m *ProjectionStore) directory(b Binding) (*os.Root, error) {
 	name := projectionName(projectionKey(b), b.d.Needs.Generation)
-	info, err := m.root.Lstat(name)
+	info, err := m.values.Lstat(name)
 	if err != nil || !projectionPrivate(info, true) {
 		return nil, ErrProjectionStore
 	}
-	r, err := m.root.OpenRoot(name)
+	r, err := m.values.OpenRoot(name)
 	if err != nil {
 		return nil, ErrProjectionStore
 	}
@@ -187,7 +188,7 @@ func projectionWrite(root *os.Root, name string, data []byte, p *Projection) err
 
 func (m *ProjectionStore) prepare(b Binding, files []File) error {
 	name := projectionName(projectionKey(b), b.d.Needs.Generation)
-	if _, err := m.root.Lstat(name); err == nil {
+	if _, err := m.values.Lstat(name); err == nil {
 		return m.verify(b, files)
 	} else if !os.IsNotExist(err) {
 		return ErrProjectionStore
@@ -197,11 +198,11 @@ func (m *ProjectionStore) prepare(b Binding, files []File) error {
 		return ErrProjectionStore
 	}
 	temp := "prepare-" + name + "-" + hex.EncodeToString(nonce[:])
-	if m.root.Mkdir(temp, 0700) != nil {
+	if m.values.Mkdir(temp, 0700) != nil {
 		return ErrProjectionStore
 	}
-	defer m.root.RemoveAll(temp)
-	r, err := m.root.OpenRoot(temp)
+	defer m.values.RemoveAll(temp)
+	r, err := m.values.OpenRoot(temp)
 	if err != nil {
 		return ErrProjectionStore
 	}
@@ -219,8 +220,51 @@ func (m *ProjectionStore) prepare(b Binding, files []File) error {
 	if projectionWrite(r, "manifest.json", raw, nil) != nil || projectionSync(r) != nil {
 		return ErrProjectionStore
 	}
-	if m.root.Rename(temp, name) != nil || projectionSync(m.root) != nil {
+	// The seen marker goes first: from here on a missing directory of this
+	// generation in this boot is a loss, never a restore.
+	if _, err = m.values.Lstat("seen-" + name); os.IsNotExist(err) && projectionMetadata(m.values, "seen-"+name, nil) != nil {
+		return ErrProjectionStore
+	}
+	if m.values.Rename(temp, name) != nil || projectionSync(m.values) != nil {
 		return ErrProjectionStore
 	}
 	return m.verify(b, files)
+}
+
+// restore writes b's value directory lost with an earlier boot's tmpfs
+// again, from values read now: the current gate (the approval for this
+// node and deployment) must still admit b, as for a first publication.
+func (m *ProjectionStore) restore(ctx context.Context, b Binding, files []File) error {
+	if err := m.gate(ctx, b); err != nil {
+		return err
+	}
+	return m.prepare(b, files)
+}
+
+// dropDiskValues deletes value directories (and unfinished ones) left in
+// the journal root by a daemon that kept values on a disk.
+func (m *ProjectionStore) dropDiskValues() error {
+	dir, err := m.root.Open(".")
+	if err != nil {
+		return ErrProjectionStore
+	}
+	names, err := dir.Readdirnames(-1)
+	_ = dir.Close()
+	if err != nil {
+		return ErrProjectionStore
+	}
+	dropped := false
+	for _, name := range names {
+		raw, decodeErr := hex.DecodeString(name)
+		if decodeErr == nil && len(raw) == 32 || strings.HasPrefix(name, "prepare-") {
+			if m.root.RemoveAll(name) != nil {
+				return ErrProjectionStore
+			}
+			dropped = true
+		}
+	}
+	if dropped {
+		return projectionSync(m.root)
+	}
+	return nil
 }

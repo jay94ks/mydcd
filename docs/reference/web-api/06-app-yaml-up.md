@@ -27,5 +27,5 @@
   - `GET /t/{t}/apps/{app}/cd/approvals?candidate=<hex>` (또는 `operation=<id>`) → `{app, approvals:[{realm, group, services, state(required/approved)}]}`. candidate는 앱 행의 `cd.candidateDigest`이고, 둘 다 없으면 422다. 등록한 사람이 아니면 403이다.
   - `POST /t/{t}/apps/{app}/cd/approvals` `{candidate?|operation?, realm?, group, password}` → `{app, approvals}`. 오류 코드는 배포 승인과 같다(403 `approval-denied`, 502 `approval-unknown`, 409 `not-required`/`already-approved`/`no-approver`).
   - `POST /t/{t}/apps/{app}/cd/probe {repository, branch, path, credential?}` → `{commit, size, node?}`. 자동 배포 연결 전 '읽기 확인'(REQ-56 `cd-probe`, 그 사람 세션, 아무것도 바꾸지 않음). `branch`는 이름이고 앞의 `refs/heads/`는 데몬이 뗀다. 못 읽으면 422에 코드 `auth-failed`·`no-repository`·`no-branch`·`no-file`·`no-credential`·`timeout`·`too-large`·`source-error`, 횟수 제한은 429 `rate-limited`. 권한은 sfcd(그 앱 Deploy 권한, 아니면 403), 입력 오류 422 `invalid`, 없는 앱 404.
-- 가짜 어댑터: 서비스의 `x-sfc.secrets_from: [group/ID]`가 비밀번호가 있는 묶음(비밀번호 쓰기 또는 `Fake.SetGroupPassword`)을 가리키면 승인이 필요하다. 승인 없이 온 `begin-app`은 `ResultInvalid`다.
+- 가짜 어댑터: 서비스의 `x-sfc.secrets.from: [group/ID]`가 비밀번호가 있는 묶음(비밀번호 쓰기 또는 `Fake.SetGroupPassword`)을 가리키면 승인이 필요하다. 승인 없이 온 `begin-app`은 `ResultInvalid`다.
 

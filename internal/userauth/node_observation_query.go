@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/jay94ks/seafield/internal/access"
@@ -64,38 +65,42 @@ func (c Client) MeshLinks(ctx context.Context, peer sfcp.Peer, session access.Se
 // on each server it shows.
 var (
 	NodeSummaryMethod = define(Method[NodeObservationQuery, control.NodeSummaryPage]{Name: "node-summary"}, true, func(ctx context.Context, s Service, view cluster.View, session access.Session, q NodeObservationQuery) (control.NodeSummaryPage, string) {
-		return observe(ctx, s, view, func(now int64, reports []observability.Report) (control.NodeSummaryPage, error) {
-			return s.Policy.NodeSummary(view.State, session, now, q.Tenant, q.Node, q.After, reports, !view.Local)
+		return observe(ctx, s, view, func(now int64, reports []observability.Report, waiting []string) (control.NodeSummaryPage, error) {
+			page, err := s.Policy.NodeSummary(view.State, session, now, q.Tenant, q.Node, q.After, reports, !view.Local)
+			for i := range page.Nodes {
+				page.Nodes[i].Waiting = slices.Contains(waiting, page.Nodes[i].Node)
+			}
+			return page, err
 		})
 	})
 	NodeDisksMethod = define(Method[NodeObservationQuery, control.NodeDisksPage]{Name: "node-disks"}, true, func(ctx context.Context, s Service, view cluster.View, session access.Session, q NodeObservationQuery) (control.NodeDisksPage, string) {
-		return observe(ctx, s, view, func(now int64, reports []observability.Report) (control.NodeDisksPage, error) {
+		return observe(ctx, s, view, func(now int64, reports []observability.Report, waiting []string) (control.NodeDisksPage, error) {
 			return s.Policy.NodeDisks(view.State, session, now, q.Tenant, q.Node, q.After, reports)
 		})
 	})
 	NodeTenantUsageMethod = define(Method[NodeTenantUsageQuery, control.NodeTenantPage]{Name: "node-tenant-usage"}, true, func(ctx context.Context, s Service, view cluster.View, session access.Session, q NodeTenantUsageQuery) (control.NodeTenantPage, string) {
-		return observe(ctx, s, view, func(now int64, reports []observability.Report) (control.NodeTenantPage, error) {
+		return observe(ctx, s, view, func(now int64, reports []observability.Report, waiting []string) (control.NodeTenantPage, error) {
 			return s.Policy.NodeTenantUsage(view.State, session, now, q.Node, q.After, reports)
 		})
 	})
 	MeshLinksMethod = define(Method[NodeObservationQuery, control.MeshLinksPage]{Name: "mesh-links"}, true, func(ctx context.Context, s Service, view cluster.View, session access.Session, q NodeObservationQuery) (control.MeshLinksPage, string) {
-		return observe(ctx, s, view, func(now int64, reports []observability.Report) (control.MeshLinksPage, error) {
+		return observe(ctx, s, view, func(now int64, reports []observability.Report, waiting []string) (control.MeshLinksPage, error) {
 			return s.Policy.MeshLinks(view.State, session, now, q.Tenant, q.Node, q.After, reports)
 		})
 	})
 )
 
 // observe loads the local authenticated measurements and runs one page reader.
-func observe[R any](ctx context.Context, s Service, view cluster.View, read func(int64, []observability.Report) (R, error)) (R, string) {
+func observe[R any](ctx context.Context, s Service, view cluster.View, read func(int64, []observability.Report, []string) (R, error)) (R, string) {
 	var zero R
 	if s.NodeObservations == nil {
 		return zero, "unavailable"
 	}
-	reports, err := s.NodeObservations(ctx, view)
+	reports, waiting, err := s.NodeObservations(ctx, view)
 	if err != nil {
 		return zero, "unavailable"
 	}
-	page, err := read(time.Now().Unix(), reports)
+	page, err := read(time.Now().Unix(), reports, waiting)
 	switch {
 	case err == nil:
 		return page, "ok"
@@ -109,7 +114,9 @@ func observe[R any](ctx context.Context, s Service, view cluster.View, read func
 
 // Keep the callback typed at the ownership boundary: Runtime loads local
 // authenticated measurements, control owns authorization/public projections.
-type NodeObservations func(context.Context, cluster.View) ([]observability.Report, error)
+// The second result names the servers that did not answer in time; their
+// reports may be missing or old, and views show them as waiting ("대기 중").
+type NodeObservations func(context.Context, cluster.View) ([]observability.Report, []string, error)
 
 // tunnelWaits lists, for a deploy that waits, the tenant's own TUN networks a
 // server reports it cannot open yet. Other tenants' rows are never included.
@@ -119,7 +126,7 @@ func (s Service) tunnelWaits(ctx context.Context, view cluster.View, tenant stri
 	}
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
-	reports, err := s.NodeObservations(ctx, view)
+	reports, _, err := s.NodeObservations(ctx, view)
 	if err != nil {
 		return nil
 	}

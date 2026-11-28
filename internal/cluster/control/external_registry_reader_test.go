@@ -219,3 +219,122 @@ func TestSourceReaderReservesAndReturnsOriginalVaultUsageAtomically(t *testing.T
 		t.Fatal("revocation/receipt not preserved", err)
 	}
 }
+
+func TestClusterSourceReaderIsBoundByClusterAdminAndServesWorkspaces(t *testing.T) {
+	f, _ := registryFixture(t)
+	admin := f.sessions["admin"]
+	spec := imagesource.Source{ID: "mirror", Authority: "ghcr.io", Repository: "team/**", Enabled: true, Auth: "none"}
+	f.apply("admin", "put-external-registry", 0, ExternalRegistryPut{spec}, state.Applied)
+	if _, err := f.p.PlanExternalRegistryBind(f.s, f.sessions["manager"], 2, "", "mirror", "node-a"); err == nil {
+		t.Fatal("workspace manager planned a cluster reader")
+	}
+	plan, err := f.p.PlanExternalRegistryBind(f.s, admin, 2, "", "mirror", "node-a")
+	if err != nil || plan.Selection.Tenant != "" {
+		t.Fatal("cluster reader plan", plan, err)
+	}
+	f.apply("manager", "bind-external-registry", plan.Expected, plan.Selection, state.Forbidden)
+	f.apply("admin", "bind-external-registry", plan.Expected, plan.Selection, state.Applied)
+	entries, err := f.p.ExternalRegistries(f.s)
+	if err != nil || len(entries) != 1 || entries[0].Reader == nil {
+		t.Fatal("cluster reader not committed", err)
+	}
+	reader := *entries[0].Reader
+	selection := ExternalRegistryReadSelection{ID: "mirror", Generation: reader.Generation}
+	if _, err = f.p.ExternalRegistryWork(f.s, reader.Owner, ExternalRegistryWorkRequest{selection, 2}); err != nil {
+		t.Fatal("cluster reader work", err)
+	}
+	c, err := f.p.Catalog(f.s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	target, err := f.p.imageResolveTarget(f.s, c, 2, "tenant", "ghcr.io/team/app:latest", reader.Owner)
+	if err != nil || target.Kind != "external" || target.External == nil || *target.External != selection {
+		t.Fatal("workspace resolve did not use the cluster reader", target, err)
+	}
+}
+
+func TestClusterSourceWithCredentialsNeedsRegistrySharedGroup(t *testing.T) {
+	f, _ := registryFixture(t)
+	admin := f.sessions["admin"]
+	c, err := f.p.Catalog(f.s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	vault, err := f.p.Vault(f.s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tree, err := secrets.NewTree(f.p.Cluster, "", "root")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, o := range []secrets.Object{
+		{ID: "registry", Parent: "root", Kind: secrets.Group},
+		{ID: "login", Parent: "registry", Kind: secrets.Secret, Reference: secrets.Reference{Profile: "vault", Object: "system/login", Revision: 1, Keys: []string{"password", "username"}}},
+	} {
+		if tree, err = tree.Create(c, "admin", tree.Revision(), o); err != nil {
+			t.Fatal(err)
+		}
+	}
+	vault.Trees[""] = tree
+	writes, code := f.p.vaultCheckpoint(f.s, vault)
+	if code != state.Applied {
+		t.Fatal(code)
+	}
+	f.checkpoint(VaultKey, writes)
+	spec := imagesource.Source{ID: "mirror", Authority: "ghcr.io", Repository: "team/**", Enabled: true, Auth: "password", Credential: &imagesource.Credential{ID: "login", UsernameKey: "username", PasswordKey: "password"}}
+	f.apply("admin", "put-external-registry", 0, ExternalRegistryPut{spec}, state.Applied)
+	if early, err := f.p.PlanExternalRegistryBind(f.s, admin, 2, "", "mirror", "node-a"); err == nil {
+		f.apply("admin", "bind-external-registry", early.Expected, early.Selection, state.ConditionFailed)
+	}
+	vault, _ = f.p.Vault(f.s)
+	group, _ := vault.Trees[""].Object("registry")
+	f.apply("manager", "vault-registry-shared", group.Revision, VaultRegistryShared{ID: "registry", Shared: true}, state.Forbidden)
+	f.apply("admin", "vault-registry-shared", group.Revision, VaultRegistryShared{ID: "registry", Shared: true}, state.Applied)
+	// A workspace manager's own source naming the shared secret, pointed at
+	// any host, must not reach it: only cluster-owned sources may.
+	session := f.sessions["manager"]
+	session.Scopes[0].Actions = append(session.Scopes[0].Actions, access.Deploy)
+	session.Signature = ed25519.Sign(f.node, access.SessionBytes(session))
+	f.sessions["manager"] = session
+	steal := imagesource.Source{Tenant: "tenant", ID: "steal", Authority: "attacker.example", Repository: "**", Enabled: true, Auth: "password", Credential: &imagesource.Credential{ID: "login", UsernameKey: "username", PasswordKey: "password"}}
+	f.apply("manager", "put-external-registry", 0, ExternalRegistryPut{steal}, state.Applied)
+	if bad, err := f.p.PlanExternalRegistryBind(f.s, session, 2, "tenant", "steal", "node-a"); err == nil {
+		f.apply("manager", "bind-external-registry", bad.Expected, bad.Selection, state.ConditionFailed)
+	}
+	plan, err := f.p.PlanExternalRegistryBind(f.s, admin, 2, "", "mirror", "node-a")
+	if err != nil || len(plan.Uses[""]) != 1 || !plan.Uses[""][0].ClusterConsumer() {
+		t.Fatal("cluster reader use", plan.Uses, err)
+	}
+	f.apply("admin", "bind-external-registry", plan.Expected, plan.Selection, state.Applied)
+	entries, err := f.p.ExternalRegistries(f.s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var reader ExternalRegistryReader
+	for _, e := range entries {
+		switch {
+		case e.Spec.ID == "steal" && e.Reader != nil:
+			t.Fatal("workspace source bound a RegistryShared secret")
+		case e.Spec.ID == "mirror" && e.Reader != nil:
+			reader = *e.Reader
+		}
+	}
+	if len(reader.Grants) != 1 {
+		t.Fatal("cluster reader grants")
+	}
+	// The owner's read-set (values are fetched later through write profiles,
+	// which this fixture has none of) is the shared group's secret.
+	vault, _ = f.p.Vault(f.s)
+	read, err := vault.Approvals.ReadSet(c, vault.Trees[""], reader.Grants[0], 2)
+	if err != nil || len(read.Leaves) != 1 || read.Leaves[0].Secret != "login" {
+		t.Fatal("cluster reader read-set", read, err)
+	}
+	// Turning the group back off stops fresh reads of the bound reader.
+	group, _ = vault.Trees[""].Object("registry")
+	f.apply("admin", "vault-registry-shared", group.Revision, VaultRegistryShared{ID: "registry"}, state.Applied)
+	vault, _ = f.p.Vault(f.s)
+	if _, err = vault.Approvals.ReadSet(c, vault.Trees[""], reader.Grants[0], 2); err == nil {
+		t.Fatal("unshared group still served the bound reader")
+	}
+}

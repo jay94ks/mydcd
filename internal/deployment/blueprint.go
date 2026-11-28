@@ -86,6 +86,11 @@ type PlanningContext struct {
 	Features                                        map[string]bool                    // verified adapter capability set, not YAML grants
 	Current                                         map[string]state.Object            // same committed view used by the plan
 	Reserved                                        map[string]workload.Resources      // per-resource desired reservation already counted in Nodes.Used
+	// SecretRevisions digests the current value references of the Vault
+	// objects a service's inputs read (hex). A service's inputs step carries
+	// it, so a secret updated since the last deploy makes the same app.yaml
+	// replace that task and bind the new value. Nil leaves inputs unpinned.
+	SecretRevisions func([]Source) string `json:"-"`
 }
 type blueprintRecord struct {
 	RegistrySources                  map[string][]Source `json:",omitempty"`
@@ -605,7 +610,7 @@ func compile(c Compose, policy access.Catalog, ctx PlanningContext, move *Volume
 			if e != nil {
 				return Blueprint{}, e
 			}
-			if _, e = policy.CheckImage(ctx.Actor, b.d.Tenant, s.Sfc.Node, s.Image); e != nil {
+			if _, e = policy.CheckImageRef(ctx.Actor, b.d.Tenant, s.Sfc.Node, s.Image); e != nil {
 				return Blueprint{}, imageCheckError(policy, ctx.Actor, b.d.Tenant, s.Sfc.Node, e, "services."+logical+".image")
 			}
 			cpu, _ := nanoCPU(s.CPUs)
@@ -750,12 +755,19 @@ func compile(c Compose, policy access.Catalog, ctx PlanningContext, move *Volume
 						inputDeps = append(inputDeps, Dependency{key("volume", mount.Source), Applied})
 					}
 				}
+				var revisions string
+				if ctx.SecretRevisions != nil {
+					if sources := secretInputSources(c, b.d.Tenant, s); len(sources) != 0 {
+						revisions = ctx.SecretRevisions(sources)
+					}
+				}
 				if e = add(Step{Key: key("inputs", id), Kind: "inputs", Identity: []string{key("task", id)}, Node: s.Sfc.Node, Owner: n.Key, Goal: goal(struct {
 					Sources         []Selector
 					Mounts          SecretMounts
 					Environment     []SecretEnvironment `json:",omitempty"`
 					RegistrySources []Source            `json:",omitempty"`
-				}{Sources: s.Sfc.Sources, Mounts: s.Secrets, Environment: s.Sfc.SecretEnv, RegistrySources: b.d.RegistrySources[logical]}), Dependencies: inputDeps, Completion: Applied}); e != nil {
+					SecretRevisions string              `json:",omitempty"`
+				}{Sources: s.Sfc.Sources, Mounts: s.Secrets, Environment: s.Sfc.SecretEnv, RegistrySources: b.d.RegistrySources[logical], SecretRevisions: revisions}), Dependencies: inputDeps, Completion: Applied}); e != nil {
 					return Blueprint{}, e
 				}
 				activation = append(activation, Dependency{Key: key("inputs", id), Condition: Applied})

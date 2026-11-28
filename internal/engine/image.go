@@ -57,6 +57,43 @@ func (c *Client) ImageWithAuth(ctx context.Context, ref string, pull bool, auth 
 	return got, nil
 }
 
+// LocalImage inspects a tag or digest reference on this node only; it never
+// pulls. A tag is whatever the node has for it now: the container created
+// from the returned image ID keeps that image, and nothing else pins it.
+func (c *Client) LocalImage(ctx context.Context, ref string) (client.ImageInspectResult, error) {
+	r, err := reference.ParseAnyReference(ref)
+	if err != nil {
+		return client.ImageInspectResult{}, err
+	}
+	if _, ok := r.(reference.Named); !ok {
+		return client.ImageInspectResult{}, ErrOwnership
+	}
+	return c.API.ImageInspect(ctx, ref)
+}
+
+// TagLocal points the node's own tag at a pinned image it just pulled: the
+// node-local record of the copy it last received for that tag, used only
+// when the registry cannot answer. It is never a cluster record.
+func (c *Client) TagLocal(ctx context.Context, pinned, tag string) error {
+	p, err := reference.ParseNormalizedNamed(pinned)
+	if err != nil {
+		return ErrOwnership
+	}
+	t, err := reference.ParseNormalizedNamed(tag)
+	if err != nil {
+		return ErrOwnership
+	}
+	if _, ok := p.(reference.Digested); !ok {
+		return ErrOwnership
+	}
+	tagged, ok := t.(reference.Tagged)
+	if _, digested := t.(reference.Digested); !ok || digested || p.Name() != t.Name() {
+		return ErrOwnership
+	}
+	_, err = c.API.ImageTag(ctx, client.ImageTagOptions{Source: pinned, Target: t.Name() + ":" + tagged.Tag()})
+	return err
+}
+
 // pullTicketed walks root through its source ("resolve"), then lets the
 // engine pull exactly that graph ("load") and closes the ticket.
 func (c *Client) pullTicketed(ctx context.Context, root string, auth RegistryAuth) (failure error) {
@@ -70,7 +107,9 @@ func (c *Client) pullTicketed(ctx context.Context, root string, auth RegistryAut
 		return ErrOwnership
 	}
 	var open engineimage.Opener
-	if auth.source != nil {
+	if auth.open != nil {
+		open = auth.open
+	} else if auth.source != nil {
 		open = auth.source.OpenGraphContentAt
 	} else {
 		_, authority, _, err := registryclient.Normalize(root)

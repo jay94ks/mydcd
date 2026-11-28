@@ -56,41 +56,63 @@ type buildContextFile struct {
 	Node       string            `yaml:"node"`
 	Dockerfile string            `yaml:"dockerfile,omitempty"`
 	Args       map[string]string `yaml:"args,omitempty"`
-	Secrets    []struct {
-		ID     string `yaml:"id"`
-		Realm  string `yaml:"realm"`
-		Secret string `yaml:"secret"`
-		Key    string `yaml:"key"`
-	} `yaml:"secrets,omitempty"`
-	Repository string   `yaml:"repository"`
-	Tags       []string `yaml:"tags"`
-	Platforms  []string `yaml:"platforms,omitempty"`
+	Secrets    []buildSecretFile `yaml:"secrets,omitempty"`
+	Repository string            `yaml:"repository"`
+	Tags       []string          `yaml:"tags"`
+	Platforms  []string          `yaml:"platforms,omitempty"`
 	Git        *struct {
-		Repository        string `yaml:"repository"`
-		Ref               string `yaml:"ref"`
-		Path              string `yaml:"path,omitempty"`
-		CredentialProfile string `yaml:"credential_profile,omitempty"`
-		Automatic         bool   `yaml:"automatic,omitempty"`
+		Repository string `yaml:"repository"`
+		Ref        string `yaml:"ref"`
+		Path       string `yaml:"path,omitempty"`
+		Credential string `yaml:"credential,omitempty"`
+		Automatic  bool   `yaml:"automatic,omitempty"`
 	} `yaml:"git,omitempty"`
+}
+
+// buildSecretFile is one build secret: source is a Secret of the tenant
+// (NAME) or of the cluster (cluster/NAME), the same form as app.yaml.
+type buildSecretFile struct {
+	ID     string `yaml:"id"`
+	Source string `yaml:"source"`
+	Key    string `yaml:"key"`
+}
+
+// buildSecretSource reads a source into its Vault realm and Secret name.
+func buildSecretSource(tenant, source string) (realm, secret string) {
+	if rest, ok := strings.CutPrefix(source, "cluster/"); ok {
+		return "", rest
+	}
+	return tenant, source
+}
+
+// buildSecretSourceOf is the file form of a realm and Secret; ok is false for
+// a realm that is neither the tenant nor the cluster.
+func buildSecretSourceOf(tenant, realm, secret string) (string, bool) {
+	switch realm {
+	case "":
+		return "cluster/" + secret, true
+	case tenant:
+		return secret, true
+	}
+	return "", false
 }
 
 func contextFileOf(sp imagebuild.ContextSpec) buildContextFile {
 	f := buildContextFile{Version: 1, Kind: sp.Kind, Node: sp.Root.Node, Dockerfile: sp.Dockerfile, Args: sp.Arguments, Repository: sp.Repository, Tags: sp.Tags, Platforms: sp.Platforms}
 	for _, m := range sp.Secrets {
-		f.Secrets = append(f.Secrets, struct {
-			ID     string `yaml:"id"`
-			Realm  string `yaml:"realm"`
-			Secret string `yaml:"secret"`
-			Key    string `yaml:"key"`
-		}{m.ID, m.Realm, m.Secret, m.Key})
+		source, ok := buildSecretSourceOf(sp.Tenant, m.Realm, m.Secret)
+		if !ok {
+			source = m.Realm + ":" + m.Secret // not writable back; shows what is stored
+		}
+		f.Secrets = append(f.Secrets, buildSecretFile{ID: m.ID, Source: source, Key: m.Key})
 	}
 	if g := sp.Git; g != nil {
 		f.Git = &struct {
-			Repository        string `yaml:"repository"`
-			Ref               string `yaml:"ref"`
-			Path              string `yaml:"path,omitempty"`
-			CredentialProfile string `yaml:"credential_profile,omitempty"`
-			Automatic         bool   `yaml:"automatic,omitempty"`
+			Repository string `yaml:"repository"`
+			Ref        string `yaml:"ref"`
+			Path       string `yaml:"path,omitempty"`
+			Credential string `yaml:"credential,omitempty"`
+			Automatic  bool   `yaml:"automatic,omitempty"`
 		}{g.Repository, g.Ref, g.Path, g.CredentialProfile, g.Automatic}
 	}
 	return f
@@ -255,7 +277,7 @@ one (after asking). The file (see docs/cli/build.md):
   node: node-a               # a server of the build policy
   dockerfile: Dockerfile     # default Dockerfile
   args: {NODE_ENV: production}
-  secrets: [{id: npm, realm: shop, secret: npm-token, key: token}]
+  secrets: [{id: npm, source: npm-token, key: token}]   # cluster/NAME: a cluster Secret
   repository: shop/web       # in the policy's registry
   tags: [latest]
   platforms: [linux/amd64]   # default: the policy's platforms
@@ -263,7 +285,7 @@ one (after asking). The file (see docs/cli/build.md):
     repository: https://git.example/shop/web.git
     ref: main
     path: web
-    credential_profile: git-read
+    credential: git-read
     automatic: true`,
 		Flags: func(fs *flag.FlagSet) {
 			fs.Var(&id, "id", "operation `id` (default: a new one)")
@@ -315,10 +337,11 @@ one (after asking). The file (see docs/cli/build.md):
 				return cli.Usagef("%s: node %q is not a server of the build policy", file, f.Node)
 			}
 			for _, m := range f.Secrets {
-				sp.Secrets = append(sp.Secrets, imagebuild.SecretMount{ID: m.ID, Realm: m.Realm, Secret: m.Secret, Key: m.Key})
+				realm, secret := buildSecretSource(tenant, m.Source)
+				sp.Secrets = append(sp.Secrets, imagebuild.SecretMount{ID: m.ID, Realm: realm, Secret: secret, Key: m.Key})
 			}
 			if x := f.Git; x != nil {
-				sp.Git = &imagebuild.GitContext{Repository: x.Repository, Ref: x.Ref, Path: x.Path, CredentialProfile: x.CredentialProfile, Automatic: x.Automatic}
+				sp.Git = &imagebuild.GitContext{Repository: x.Repository, Ref: x.Ref, Path: x.Path, CredentialProfile: x.Credential, Automatic: x.Automatic}
 			}
 			if sp.Validate() != nil {
 				return cli.Usagef("%s: invalid context: kind upload, git or draft (git: only for kind git), a clean dockerfile path, a repository name, 1-16 tags and platforms, at most 128 args and 32 secrets", file)

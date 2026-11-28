@@ -248,7 +248,7 @@ func (p Policy) AppPlanArtifact(s state.State, session access.Session, at int64,
 		if err != nil {
 			return nil, err
 		}
-		replacement, err := i.ReplacementPlan(plan, false)
+		replacement, err := i.DeployReplacementPlan(plan, false)
 		if err != nil {
 			return nil, err
 		}

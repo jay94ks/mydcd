@@ -24,7 +24,6 @@ import (
 	"github.com/jay94ks/seafield/internal/containerops"
 	"github.com/jay94ks/seafield/internal/deployment"
 	"github.com/jay94ks/seafield/internal/identity"
-	"github.com/jay94ks/seafield/internal/secrets"
 	"github.com/jay94ks/seafield/internal/sfcp"
 	"github.com/jay94ks/seafield/internal/userauth"
 	"github.com/jay94ks/seafield/tests/enginefake"
@@ -314,7 +313,7 @@ func TestRealAdapterAccountAndClusterReads(t *testing.T) {
 	}
 
 	m, err := conn.Members(ctx, "")
-	if err != nil || len(m.Entries) != 1 || m.Entries[0].Peer.ID != "node-a" || m.RootRevision == 0 || m.LedgerEpoch != 1 || m.NodeVoters != 1 {
+	if err != nil || len(m.Entries) != 1 || m.Entries[0].Peer.ID != "node-a" || m.RootRevision == 0 || m.NodeVoters != 1 {
 		t.Fatalf("members %+v %v", m, err)
 	}
 	if st, err := conn.RaftStatus(ctx); err != nil || st.Leader == "" || st.Voters != 1 || len(st.Nodes) != 1 {
@@ -441,7 +440,7 @@ func TestRealAdapterTenantReadsAndClose(t *testing.T) {
 	// Private input goes to the pinned node over the socket; an unknown write
 	// is refused there, never relayed. The refusal is the reply's code.
 	pinned := config.Peer{ID: "node-a", Key: hex.EncodeToString(n.Config.NodeKey[:])}
-	if r, err := conn.WriteVault(ctx, "shop", pinned, SecretWrite{Realm: "shop", ID: "w-1", Mode: "recover"}); err != nil || r.Code != "denied" || r.Observation != nil {
+	if r, err := conn.WriteVault(ctx, "shop", pinned, SecretWrite{Realm: "shop", ID: "w-1", Mode: "recover"}); err != nil || r.Code != "denied" || r.VaultObservation != nil {
 		t.Fatalf("write-vault %+v %v", r, err)
 	}
 	if _, err := conn.WriteVault(ctx, "shop", config.Peer{ID: "node-a", Key: "zz"}, SecretWrite{Realm: "shop", ID: "w-1", Mode: "recover"}); !errors.As(err, &bad) || bad.Code != CodeInvalid {
@@ -501,27 +500,6 @@ func TestRealAppViewFlattensCD(t *testing.T) {
 	}
 	if appView(control.AppView{App: "plain"}).CD != nil {
 		t.Fatal("cd without a cd view")
-	}
-}
-
-func TestRealVaultPaths(t *testing.T) {
-	got := vaultViews("shop", []secrets.Object{
-		{ID: "app", Parent: "shop", Kind: secrets.Group, Revision: 2, ACL: secrets.ACL{Users: []string{"u2", "u1"}}},
-		{ID: "db", Parent: "app", Kind: secrets.Secret, Revision: 3, Reference: secrets.Reference{Profile: "main", Keys: []string{"pw", "user"}}},
-		{ID: "shop", Kind: secrets.Group, Revision: 1},
-	})
-	paths := map[string]VaultView{}
-	for _, v := range got {
-		paths[v.Path] = v
-	}
-	if r, ok := paths["shop"]; !ok || r.Parent != "shop" || r.Kind != "group" {
-		t.Fatalf("root %+v", got)
-	}
-	if g := paths["app"]; g.Parent != "shop" || !slices.Equal(g.ACL.Users, []string{"u1", "u2"}) {
-		t.Fatalf("group %+v", g)
-	}
-	if o := paths["app/db"]; o.Kind != "object" || o.Profile != "main" || len(o.Keys) != 2 || o.Revision != 3 {
-		t.Fatalf("object %+v", got)
 	}
 }
 

@@ -42,12 +42,14 @@ type ContainerSpec struct {
 	Bridge           string
 	BridgeGeneration uint64
 	IPv4, IPv6       netip.Addr
-	Memory, NanoCPU  int64
-	Lifecycle        schema.Lifecycle
-	Process          *Process      `json:",omitempty"`
-	Inputs           *InputRef     `json:",omitempty"`
-	Tmpfs            []Tmpfs       `json:",omitempty"`
-	Volumes          []VolumeMount `json:",omitempty"`
+	// Attachments are the Task's networks after the primary one above.
+	Attachments     []TaskAttachment `json:",omitempty"`
+	Memory, NanoCPU int64
+	Lifecycle       schema.Lifecycle
+	Process         *Process      `json:",omitempty"`
+	Inputs          *InputRef     `json:",omitempty"`
+	Tmpfs           []Tmpfs       `json:",omitempty"`
+	Volumes         []VolumeMount `json:",omitempty"`
 	// RemoteVolumes are shared Volumes whose home is another server.
 	RemoteVolumes []RemoteVolumeMount `json:",omitempty"`
 	Readiness     *HTTPReadiness      `json:",omitempty"`
@@ -55,7 +57,16 @@ type ContainerSpec struct {
 	Resolver      *Resolver           `json:",omitempty"`
 	Stop          *engine.StopPolicy  `json:",omitempty"`
 	Logging       *LogPolicy          `json:",omitempty"`
+	// ImageDigest is the digest (repo@sha256:…) this container was made
+	// from when Image names a tag; ImageSource says it is this server's own
+	// copy because the deploy could not resolve the tag (ImageSources).
+	ImageDigest string `json:",omitempty"`
+	ImageSource string `json:",omitempty"`
 }
+
+// ImageSources: the registry could not be reached, or it no longer has the
+// tag; the container was made from this server's last copy of it.
+var ImageSources = []string{"registry-unreachable", "registry-missing"}
 
 func DecodeContainer(value string) (ContainerSpec, error) {
 	s, err := schema.Decode[ContainerSpec]([]byte(value))
@@ -70,6 +81,9 @@ func DecodeContainer(value string) (ContainerSpec, error) {
 	}
 	if s.Logging != nil && s.Logging.Validate() != nil {
 		return s, ErrLogPolicy
+	}
+	if s.ImageSource != "" && (s.ImageDigest == "" || !slices.Contains(ImageSources, s.ImageSource)) || s.ImageDigest != "" && (len(s.ImageDigest) > 1024 || !strings.Contains(s.ImageDigest, "@sha256:")) {
+		return s, ErrPlacement
 	}
 	if s.Stop != nil && (s.Process == nil || s.Stop.Validate() != nil) {
 		return s, engine.ErrStopPolicy
@@ -104,7 +118,7 @@ func DecodeContainer(value string) (ContainerSpec, error) {
 	if _, ok := r.(reference.Digested); !ok {
 		return s, ErrPlacement
 	}
-	if !s.IPv4.IsValid() && !s.IPv6.IsValid() || s.IPv4.IsValid() && (!s.IPv4.Is4() || s.IPv4.IsUnspecified() || s.IPv4.IsMulticast()) || s.IPv6.IsValid() && (!s.IPv6.Is6() || s.IPv6.Is4In6() || s.IPv6.Zone() != "" || s.IPv6.IsUnspecified() || s.IPv6.IsMulticast()) {
+	if !s.validAttachments() {
 		return s, ErrPlacement
 	}
 	for _, v := range append(append([]string(nil), s.Command...), s.Env...) {
@@ -126,6 +140,9 @@ type DockerDriver struct {
 	// These belong to one Manager.Step invocation; never shared across actors.
 	startCheckpoint *reconcile.EffectCheckpoint
 	saveStart       func([]byte) error
+	// previous is the Applied resource a same-generation Apply changes in
+	// place (only its extra network attachments differ), else nil.
+	previous *reconcile.Resource
 }
 
 // TaskAuthority checks current app admission immediately before a new Create
@@ -144,7 +161,7 @@ type BridgeProvider interface {
 
 func (d *DockerDriver) parameters(key string, op reconcile.Operation) (ContainerSpec, engine.Identity, error) {
 	s, err := DecodeContainer(op.Target.Spec)
-	if err != nil || d.Engine == nil || d.Network == nil || d.taskNetworkManager(s) == nil || s.Node != d.Engine.Owner || s.Inputs != nil && s.Inputs.Generation != op.Target.Generation {
+	if err != nil || d.Engine == nil || d.Network == nil || !d.attachmentOwners(s) || s.Node != d.Engine.Owner || s.Inputs != nil && s.Inputs.Generation != op.Target.Generation {
 		return s, engine.Identity{}, engine.ErrOwnership
 	}
 	if len(s.Volumes) > 0 {
@@ -158,40 +175,47 @@ func (d *DockerDriver) parameters(key string, op reconcile.Operation) (Container
 	if len(s.RemoteVolumes) > 0 && d.Remote == nil {
 		return s, engine.Identity{}, ErrVolumeMount
 	}
-	id, err := d.Engine.Identity("container", key, op.Target)
+	id, err := d.Engine.Identity("container", key, TaskIdentityResource(op.Target))
 	return s, id, err
 }
 func containerConsumer(id engine.Identity) string { return "workload/" + id.Name }
 
+func (d *DockerDriver) attachmentOwners(s ContainerSpec) bool {
+	for _, a := range s.Networks() {
+		if d.bridgeManager(s, a.BridgeOwner) == nil {
+			return false
+		}
+	}
+	return true
+}
+
 func (d *DockerDriver) options(ctx context.Context, s ContainerSpec, id engine.Identity, key string, generation uint64) (client.ContainerCreateOptions, error) {
-	l, err := d.taskNetworkManager(s).Acquire(ctx, s.Bridge, containerConsumer(id), s.BridgeGeneration)
+	leases, err := d.acquireNetworks(ctx, s, id)
 	if err != nil {
 		return client.ContainerCreateOptions{}, err
 	}
-	for _, address := range []netip.Addr{s.IPv4, s.IPv6} {
-		if !address.IsValid() {
-			continue
-		}
-		allowed := false
-		for _, p := range l.Spec.Pools {
-			if p.Prefix.Contains(address) && address != p.Gateway && address != p.Prefix.Addr() && (!address.Is4() || p.Prefix.Contains(address.Next())) {
-				allowed = true
+	endpoints := map[string]*dockernet.EndpointSettings{}
+	for i, a := range s.Networks() {
+		for _, address := range []netip.Addr{a.IPv4, a.IPv6} {
+			if address.IsValid() && !allowedTaskAddress(address, leases[i].Spec) {
+				return client.ContainerCreateOptions{}, network.ErrPolicy
 			}
 		}
-		if !allowed {
-			return client.ContainerCreateOptions{}, network.ErrPolicy
+		ipam := &dockernet.EndpointIPAMConfig{}
+		if a.IPv4.IsValid() {
+			ipam.IPv4Address = a.IPv4
 		}
+		if a.IPv6.IsValid() {
+			ipam.IPv6Address = a.IPv6
+		}
+		// The engine creates every endpoint before the first Start, so the
+		// process never runs with only some of its networks.
+		endpoints[leases[i].NetworkID] = &dockernet.EndpointSettings{IPAMConfig: ipam}
 	}
-	if err = ValidateContainerRoutes(s, l.Spec); err != nil {
+	if err = ValidateContainerRoutes(s, bridgeSpecs(leases)...); err != nil {
 		return client.ContainerCreateOptions{}, err
 	}
-	ipam := &dockernet.EndpointIPAMConfig{}
-	if s.IPv4.IsValid() {
-		ipam.IPv4Address = s.IPv4
-	}
-	if s.IPv6.IsValid() {
-		ipam.IPv6Address = s.IPv6
-	}
+	l := leases[0]
 	config := &container.Config{Image: s.Image, Cmd: s.Command, Env: s.Env, Labels: id.Labels}
 	if s.Process != nil {
 		config, err = s.Process.ContainerConfig(id.Labels)
@@ -252,15 +276,19 @@ func (d *DockerDriver) options(ctx context.Context, s ContainerSpec, id engine.I
 		host.DNS = slices.Clone(s.Resolver.Servers)
 		host.DNSSearch = slices.Clone(s.Resolver.Search)
 	}
-	return client.ContainerCreateOptions{Name: id.Name, Config: config, HostConfig: host, NetworkingConfig: &dockernet.NetworkingConfig{EndpointsConfig: map[string]*dockernet.EndpointSettings{l.NetworkID: {IPAMConfig: ipam}}}}, nil
+	return client.ContainerCreateOptions{Name: id.Name, Config: config, HostConfig: host, NetworkingConfig: &dockernet.NetworkingConfig{EndpointsConfig: endpoints}}, nil
 }
 
-func (d *DockerDriver) matchContainer(ctx context.Context, got container.InspectResponse, s ContainerSpec, id engine.Identity, l network.BridgeLease, files []InputFile) bool {
+func (d *DockerDriver) matchContainer(ctx context.Context, got container.InspectResponse, s ContainerSpec, id engine.Identity, leases []network.BridgeLease, files []InputFile) bool {
 	volumeMounts, err := d.specMounts(s)
 	if err != nil {
 		return false
 	}
-	networkID := l.NetworkID
+	networks := s.Networks()
+	if len(leases) != len(networks) {
+		return false
+	}
+	networkID := leases[0].NetworkID
 	image, command, env := s.Image, s.Command, s.Env
 	if s.Process != nil {
 		image, command, env = s.Process.ImageID, s.Process.Command, s.Process.Env
@@ -290,25 +318,26 @@ func (d *DockerDriver) matchContainer(ctx context.Context, got container.Inspect
 	if got.HostConfig.RestartPolicy.Name != "" && got.HostConfig.RestartPolicy.Name != "no" || got.HostConfig.RestartPolicy.MaximumRetryCount != 0 || got.HostConfig.AutoRemove {
 		return false
 	}
-	if len(got.NetworkSettings.Networks) != 1 {
+	if len(got.NetworkSettings.Networks) != len(networks) {
 		return false
 	}
 	if s.Resolver != nil && (!slices.Equal(got.HostConfig.DNS, s.Resolver.Servers) || !slices.Equal(got.HostConfig.DNSSearch, s.Resolver.Search)) {
 		return false
 	}
-	for name, e := range got.NetworkSettings.Networks {
-		if name != l.NetworkName || e.IPAMConfig == nil || e.NetworkID != "" && e.NetworkID != networkID || got.State.Running && e.NetworkID != networkID {
+	for i, a := range networks {
+		e := got.NetworkSettings.Networks[leases[i].NetworkName]
+		if e == nil || e.IPAMConfig == nil || e.NetworkID != "" && e.NetworkID != leases[i].NetworkID || got.State.Running && e.NetworkID != leases[i].NetworkID {
 			return false
 		}
-		if e.IPAMConfig.IPv4Address != s.IPv4 || e.IPAMConfig.IPv6Address != s.IPv6 || got.State.Running && (s.IPv4.IsValid() && e.IPAddress != s.IPv4 || s.IPv6.IsValid() && e.GlobalIPv6Address != s.IPv6) {
+		if e.IPAMConfig.IPv4Address != a.IPv4 || e.IPAMConfig.IPv6Address != a.IPv6 || got.State.Running && (a.IPv4.IsValid() && e.IPAddress != a.IPv4 || a.IPv6.IsValid() && e.GlobalIPv6Address != a.IPv6) {
 			return false
 		}
 	}
 	return true
 }
 
-func (d *DockerDriver) dependency(ctx context.Context, s ContainerSpec, id engine.Identity) (network.BridgeLease, error) {
-	return d.taskNetworkManager(s).Acquire(ctx, s.Bridge, containerConsumer(id), s.BridgeGeneration)
+func (d *DockerDriver) dependency(ctx context.Context, s ContainerSpec, id engine.Identity) ([]network.BridgeLease, error) {
+	return d.acquireNetworks(ctx, s, id)
 }
 
 func (d *DockerDriver) Execute(ctx context.Context, key string, op reconcile.Operation) (reconcile.Outcome, error) {
@@ -443,7 +472,7 @@ func (d *DockerDriver) release(ctx context.Context, s ContainerSpec, id engine.I
 
 func (d *DockerDriver) releaseDependencies(_ context.Context, s ContainerSpec, id engine.Identity, key string, generation uint64) (reconcile.Outcome, error) {
 	consumer := containerConsumer(id)
-	if err := d.taskNetworkManager(s).ReturnConsumer(s.Bridge, consumer, s.BridgeGeneration); err != nil {
+	if err := d.returnNetworks(s, consumer); err != nil {
 		return reconcile.EffectUnknown, err
 	}
 	if s.Inputs != nil {
@@ -502,10 +531,17 @@ func (d *DockerDriver) Recover(ctx context.Context, key string, op reconcile.Ope
 	if err != nil {
 		return reconcile.EffectUnknown, err
 	}
-	var l network.BridgeLease
+	if op.Kind == reconcile.Apply {
+		synced, syncErr := d.syncAttachments(ctx, s, id, op.Target, got.Container)
+		if syncErr != nil {
+			return reconcile.EffectUnknown, syncErr
+		}
+		got.Container = synced
+	}
+	var l []network.BridgeLease
 	exited := engine.ObserveContainerExit(got.Container.State) != nil
 	if got.Container.State != nil && got.Container.State.Running || exited || op.Kind == reconcile.Remove {
-		l, err = d.taskNetworkManager(s).InspectConsumer(ctx, s.Bridge, containerConsumer(id), s.BridgeGeneration)
+		l, err = d.inspectNetworks(ctx, s, id)
 	} else {
 		l, err = d.dependency(ctx, s, id)
 	}
@@ -610,7 +646,7 @@ func (d *DockerDriver) Recover(ctx context.Context, key string, op reconcile.Ope
 	if !got.Container.State.Running {
 		return reconcile.EffectUnknown, errors.New("container is not running after start")
 	}
-	ready, routeErr := containerRoutes(ctx, s, l.Spec, got.Container, false)
+	ready, routeErr := containerRoutes(ctx, s, bridgeSpecs(l), got.Container, false)
 	if routeErr != nil {
 		return reconcile.EffectUnknown, routeErr
 	}
@@ -620,7 +656,7 @@ func (d *DockerDriver) Recover(ctx context.Context, key string, op reconcile.Ope
 				return reconcile.EffectUnknown, err
 			}
 		}
-		ready, routeErr = containerRoutes(ctx, s, l.Spec, got.Container, true)
+		ready, routeErr = containerRoutes(ctx, s, bridgeSpecs(l), got.Container, true)
 		if routeErr != nil || !ready {
 			return reconcile.EffectUnknown, errors.Join(routeErr, engine.ErrOwnership)
 		}
@@ -733,6 +769,9 @@ func (m *Manager) Step(ctx context.Context, key string) error {
 	}
 	driver := *m.driver
 	driver.startCheckpoint = before.Checkpoint
+	if applied, next := before.State.Applied, before.State.Desired.Resource; inPlaceAttachments(applied, next) {
+		driver.previous = &applied
+	}
 	if err := m.journal.Step(ctx, key, &driver); err != nil {
 		return err
 	}
@@ -885,11 +924,7 @@ func (m *Manager) statusRecord(ctx context.Context, key string, r reconcile.Reco
 	}
 	stage = "network"
 	at := time.Now()
-	bridge := m.driver.taskNetworkManager(s)
-	if bridge == nil {
-		return ContainerStatus{}, engine.ErrOwnership
-	}
-	l, err := bridge.InspectConsumer(ctx, s.Bridge, containerConsumer(id), s.BridgeGeneration)
+	l, err := m.driver.inspectNetworks(ctx, s, id)
 	networkTime = time.Since(at)
 	if err != nil {
 		return ContainerStatus{}, err
@@ -914,7 +949,7 @@ func (m *Manager) statusRecord(ctx context.Context, key string, r reconcile.Reco
 	if got.Container.State.Running && inspectRoutes {
 		stage = "routes"
 		at = time.Now()
-		ready, e := containerRoutes(ctx, s, l.Spec, got.Container, false)
+		ready, e := containerRoutes(ctx, s, bridgeSpecs(l), got.Container, false)
 		routeTime = time.Since(at)
 		if e != nil || !ready {
 			return ContainerStatus{}, errors.Join(e, engine.ErrOwnership)
@@ -937,12 +972,13 @@ func (m *Manager) statusRecord(ctx context.Context, key string, r reconcile.Reco
 	status.LogDriver = got.Container.HostConfig.LogConfig.Type
 	stage = "complete"
 	fact := containerops.TaskFact{Name: strings.TrimPrefix(got.Container.Name, "/"), Image: got.Container.Image, State: "unknown"}
-	// matchContainer already proved the one original network attachment. The
-	// endpoint's own inspected IDs, independently of process Running, prove
-	// whether that attachment currently has a native endpoint.
-	endpointPresent := false
-	for _, endpoint := range got.Container.NetworkSettings.Networks {
-		endpointPresent = endpoint.EndpointID != "" && endpoint.NetworkID == l.NetworkID
+	// matchContainer already proved the original network attachments. The
+	// endpoints' own inspected IDs, independently of process Running, prove
+	// whether every attachment currently has a native endpoint.
+	endpointPresent := true
+	for _, lease := range l {
+		endpoint := got.Container.NetworkSettings.Networks[lease.NetworkName]
+		endpointPresent = endpointPresent && endpoint != nil && endpoint.EndpointID != "" && endpoint.NetworkID == lease.NetworkID
 	}
 	fact.EndpointPresent = &endpointPresent
 	if got.Container.RestartCount >= 0 {

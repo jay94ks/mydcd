@@ -25,13 +25,9 @@ func (s Service) nodeRequestAllowed(view state.State, catalog access.Catalog, re
 		if command, err := request.Operation.Command(); err == nil {
 			_, knownOriginal = view.LookupResult(command)
 		}
-	} else if request.Method == "vault-approval-plan" && request.VaultPlan != nil {
-		knownOriginal = acceptedNodeApproval(view, request.VaultPlan.Origin, request.VaultPlan.Selection)
-	} else if request.Method == "vault-write-plan" && request.VaultWritePlan != nil {
-		if vault, err := s.Policy.Vault(view); err == nil {
-			if tree, found := vault.Trees[request.VaultWritePlan.Realm]; found {
-				_, knownOriginal = tree.Write(request.VaultWritePlan.ID)
-			}
+	} else if rule, typed := methodRules[request.Method]; typed && rule.admit != nil {
+		if p, ok := rule.decode(request.Params); ok {
+			knownOriginal = rule.admit(s, view, p)
 		}
 	}
 	return nodeIngressAllowed(s.Self.Public, members, catalog, request, envelope, knownOriginal)
@@ -56,15 +52,12 @@ func nodeIngressAllowed(self [32]byte, members membership.Directory, catalog acc
 		return true
 	}
 	if rule, typed := methodRules[request.Method]; typed {
-		return rule.ingress
+		// knownOriginal is only set for a rule with admit.
+		return rule.ingress || knownOriginal
 	}
 	switch request.Method {
-	case "node-shell-policy", "node-shell-sessions", "lifecycle-source-recover", "lifecycle-module-recover", "standalone-list", "standalone-get", "tenant-storage", "image-build-cache", "image-build-logs", "build-context-content", "check-build-context", "image-builds", "events", "login-records", "own-sessions", "app-cd-toggle-plan", "registry-action-plan", "external-registries", "external-registry-bind-plan", "registry-login-test", "image-resolve", "image-content", "image-usages", "registry-maintenance-plan", "registry-maintenance-status", "registry-catalog", "registry-prune-preview", "registry-prune-results", "external-registry-pulls", "raft-status", "app-source", "app-revisions", "my-credentials", "users", "tenant-members", "container-exec-status", "app-log-clear-plan", "app-log-clear-status", "user-credentials", "node-cli-policy", "container-observe", "tenant-retirement", "members", "node-storage", "node-storage-space", "apps", "app-operation", "app-cd-field", "app-cd-history", "app-cd-diff", "app-cd-registration", "app-uploads", "vault", "registries", "result", "checker-source-recover", "checker-module-recover":
+	case "standalone-list", "standalone-get", "app-cd-toggle-plan", "image-content", "raft-status", "app-source", "app-revisions", "container-exec-status", "container-observe", "apps", "app-operation", "app-cd-field", "app-cd-history", "app-cd-diff", "app-cd-registration", "app-uploads", "result":
 		return true
-	case "vault-write-plan", "vault-approval-plan":
-		// Locating an original write/accepted approval must remain possible
-		// before its sensitive recover call. Fresh planning is not recovery.
-		return knownOriginal
 	case "submit", "resume":
 		if request.Operation == nil {
 			return false

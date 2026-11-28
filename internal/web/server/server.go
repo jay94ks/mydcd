@@ -345,6 +345,14 @@ func readJSON(w http.ResponseWriter, r *http.Request, v any) bool {
 	return true
 }
 
+// callCtx bounds one sfcd call. A read does not follow the browser's
+// cancellation: a login's calls share one sfcd connection, and a call
+// cancelled mid-way closes it for every call behind it, so a read runs to
+// its answer or CallTimeout. A write still stops when the request does.
 func (s *Server) callCtx(r *http.Request) (context.Context, context.CancelFunc) {
-	return context.WithTimeout(r.Context(), s.opt.CallTimeout)
+	parent := r.Context()
+	if r.Method == http.MethodGet || r.Method == http.MethodHead {
+		parent = context.WithoutCancel(parent)
+	}
+	return context.WithTimeout(parent, s.opt.CallTimeout)
 }

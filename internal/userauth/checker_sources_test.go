@@ -287,7 +287,8 @@ func TestCheckerActualSourceRejectsWrongOffsetHeaderAndTrailingBytes(t *testing.
 			}
 			defer stream.CancelRead(0)
 			defer stream.Close()
-			body, _ := requestBody(Request{CheckerUpload: withUpload(c, mode).checkerUpload, Method: "checker-source-stage", Tenant: "tenant", CheckerSource: &d})
+			request, _ := withUpload(c, mode).checkerRequest("checker-source-stage", d, nil)
+			body, _ := requestBody(request)
 			envelope := Envelope{Body: body, Session: &session, Signature: ed25519.Sign(c.Self.Private, access.RequestBytes(session, conn.PeerChallenge(), body))}
 			raw, _ := json.Marshal(envelope)
 			header := sha256.Sum256(raw)

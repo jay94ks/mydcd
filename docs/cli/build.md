@@ -26,17 +26,19 @@ version: 1
 nodes: {node-a: data}        # 빌드 서버: 그 서버의 저장 경로(sfcli node storage)
 concurrency: 2               # 동시에 도는 빌드 수 (1-32)
 timeout: 30m                 # 빌드 하나의 최대 시간 (최대 24h)
-cpu: 2
+cpus: 2                      # 빌드 하나가 쓰는 CPU 수
 memory: 4GiB
 workspace: 10GiB             # 컨텍스트 하나를 펼친 최대 크기
 cache: 20GiB                 # 서버별 빌드 캐시 목표 크기
 registry: shop-registry      # 만든 이미지를 올릴 내장 registry
 platforms: [linux/amd64]
-builder_image: registry.example/moby/buildkit:v0.35.1-rootless   # digest로 고정해 저장한다
-cleanup: {high_water_percent: 80, unused_days: 14}
+builder: registry.example/moby/buildkit:v0.35.1-rootless   # 태그 그대로 저장한다
+cleanup: {threshold: 80%, unused: 14d}   # 캐시가 80%를 넘거나 14일 안 쓰이면 정리
 ```
 
-- `builder_image`는 rootless BuildKit v0.35.1 이미지여야 한다. 서버는 이 이미지를 받아 오지 않는다. 빌드 서버마다 Docker에 미리 받아 둔다. `policy set`은 정책의 빌드 서버마다 그 이미지가 있는지 보고, 없는 서버 이름을 말하며 거절한다. 서버 이미지 목록은 시스템 관리자만 읽을 수 있어서, 다른 사용자가 하면 확인하지 못했다고 알리고 그대로 진행한다. 이름에 digest가 없으면 `policy set`이 지금 digest로 고정하는데, 그 registry를 작업 공간이 믿어야 한다(`sfcli tenant trust add`).
+- `builder`는 rootless BuildKit v0.35.1 이미지여야 한다. 태그는 digest로 고정하지 않고 적힌 그대로 저장한다. 빌드를 시작할 때마다 sfcd가 그 태그를 저장소에서 한 번 해석하고, 그 digest를 빌드 서버로 받아 그 빌드의 컨테이너를 만든다. 그 digest는 그 빌드 기록에만 남는다. `repo@sha256:…`로 적으면 그 이미지만 쓴다. 저장소에 닿지 않거나 저장소에 그 태그가 없으면, 그 빌드 서버가 그 태그로 마지막에 받은 이미지로 빌드하고 빌드 기록에 그렇게 남긴다. 그 사본도 없으면 빌드는 `SOURCE_FETCH`로 실패한다. 신뢰나 권한이 막은 경우에는 사본을 쓰지 않는다. 어느 쪽이든 그 registry를 작업 공간이 믿어야 한다(`sfcli tenant trust add`).
+- `cleanup.unused`는 `14d`처럼 일 단위로 적는다(`336h`도 받는다). `threshold`는 `%`를 붙인다.
+- `secrets[].source`는 app.yaml과 같은 모양이다. 이름만 적으면 작업 공간 Secret, `cluster/이름`은 클러스터 Secret이다.
 - 빌드 서버의 저장 경로는 `sfcli node storage`로 등록한 것을 볼륨과 함께 쓴다. 서버 기본 저장 경로(`default`)도 고를 수 있다.
 
 ## 컨텍스트와 버전
@@ -62,7 +64,8 @@ node: node-a                 # 정책의 빌드 서버 중 하나
 dockerfile: Dockerfile       # 기본 Dockerfile
 args: {NODE_ENV: production}
 secrets:                     # 빌드 중에 RUN --mount=type=secret,id=npm 으로 읽는다
-  - {id: npm, realm: shop, secret: npm-token, key: token}
+  - {id: npm, source: npm-token, key: token}     # 작업 공간 Secret
+  - {id: ca, source: cluster/corp-ca, key: pem}  # 클러스터 Secret
 repository: shop/web         # 정책 registry 안의 repository
 tags: [latest]
 platforms: [linux/amd64]     # 기본은 정책의 platforms
@@ -70,7 +73,7 @@ git:                         # kind git에만
   repository: https://git.example/shop/web.git
   ref: main
   path: web                  # 저장소 안의 하위 경로
-  credential_profile: git-read
+  credential: git-read       # 서버의 Git 자격 증명 이름
   automatic: true            # 새 commit이 보이면 버전을 저장하고 빌드한다
 ```
 

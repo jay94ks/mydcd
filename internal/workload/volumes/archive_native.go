@@ -327,7 +327,7 @@ func (m *NativeManager) RestoreCold(ctx context.Context, ready NativeReady, c Co
 	if err != nil {
 		return err
 	}
-	if err = restoreArchive(ctx, root, in, receipt, o, m.archiveIO); err != nil {
+	if err = restoreArchive(ctx, root, seekerOpener(in, receipt), receipt, o, m.archiveIO); err != nil {
 		return err
 	}
 	return authorize(ctx, ready, c)
@@ -352,4 +352,60 @@ func (m *NativeManager) CheckColdReleased(ready NativeReady, c Consumer) error {
 		return reconcile.ErrLease
 	}
 	return nil
+}
+
+// WithCold runs fn on the unmounted materialization of an exclusive writable
+// consumer, such as a Volume archive's: fresh authorization before and after,
+// the declaration lock and the exact local cold pin, as RestoreCold. fn may
+// read, empty or fill the root; it must not keep it. An interrupted earlier
+// run may have left this consumer's own pin, which is reused.
+func (m *NativeManager) WithCold(ctx context.Context, ready NativeReady, c Consumer, authorize ColdAuthority, o ArchiveOptions, fn func(*os.Root) error) (err error) {
+	if authorize == nil || fn == nil {
+		return ErrNativeVolume
+	}
+	if err = authorize(ctx, ready, c); err != nil {
+		return err
+	}
+	guard := m.declaration(NativeKey(ready.Spec))
+	guard.Lock()
+	defer guard.Unlock()
+	root, err := m.coldRoot(ctx, ready, c, o, true, true)
+	if err != nil {
+		return err
+	}
+	defer func() { err = errors.Join(err, root.Close()) }()
+	pin, err := m.journal.Borrow(NativeKey(ready.Spec), coldPinName(c), ready.Generation)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		err = errors.Join(err, m.Return(NativeLease{Key: NativeKey(ready.Spec), Consumer: coldPinName(c), Owner: ready.Owner, Scope: ready.Spec.Scope, Pin: pin}))
+	}()
+	if err = fn(root); err != nil {
+		return err
+	}
+	return authorize(ctx, ready, c)
+}
+
+// ClearRoot removes everything under root and syncs it, leaving the empty
+// root directory itself (its owner and mode stay).
+func ClearRoot(ctx context.Context, root *os.Root) error {
+	dir, err := root.Open(".")
+	if err != nil {
+		return err
+	}
+	defer dir.Close()
+	names, err := dir.Readdirnames(-1)
+	if err != nil {
+		return err
+	}
+	for _, name := range names {
+		if err = ctx.Err(); err != nil {
+			return err
+		}
+		if err = root.RemoveAll(name); err != nil {
+			return err
+		}
+	}
+	return dir.Sync()
 }

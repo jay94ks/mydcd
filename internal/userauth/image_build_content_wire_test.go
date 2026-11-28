@@ -63,7 +63,8 @@ func TestBuildContentActualUserWireRejectsCorruptPages(t *testing.T) {
 							return err
 						}
 						request, err := schema.Decode[Request](envelope.Body)
-						if err != nil || !request.validMethodFields() || !request.validQuerySelectors() || request.ImageBuildContent == nil || *request.ImageBuildContent != q {
+						var params BuildContextContentQuery
+						if err != nil || !typedParams(request, BuildContextContentMethod.Name, &params) || params.Tenant != "tenant" || params.Query != q {
 							return sfcp.ErrFrame
 						}
 						if _, err := binding.binding(conn, frame.Kind, envelope); err != nil {
@@ -72,7 +73,7 @@ func TestBuildContentActualUserWireRejectsCorruptPages(t *testing.T) {
 						if err := streamEOF(stream); err != nil {
 							return err
 						}
-						reply := Reply{Schema: 1, Code: "ok", ImageBuildContent: &out}
+						reply := okReply(out)
 						if mode == "deleted" {
 							reply = Reply{Schema: 1, Code: "conflict"}
 						}

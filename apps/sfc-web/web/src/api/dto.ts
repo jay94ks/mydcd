@@ -187,6 +187,16 @@ export interface DNodeSummary {
   state?: string;
   ready?: boolean;
   stale?: boolean;
+  /** 이번 조회에서 2초 안에 답하지 않음(R18). 나머지 값은 그 전에 저장된 것이다 */
+  waiting?: boolean;
+  /** status degraded(sfcd unready)일 때만: MODULE_PASS_FAILED · HOST_READ_FAILED · UNKNOWN(이유를 보내지 않는 이전 서버) */
+  reason?: 'MODULE_PASS_FAILED' | 'HOST_READ_FAILED' | 'UNKNOWN' | string;
+  /** 관리자만: 실패한 맞추기 단계 이름(reconcileModules 단계, ingress 사건 기록 실패는 event-log) */
+  failedSteps?: string[];
+  /** 관리자만: 실패가 이어진 시작 시각(Unix 초) */
+  failingSince?: number;
+  /** 작업을 받는 서버인지. 작업 안 받는 서버도 맞추기가 성공하면 status ready(ready 칸만 false) */
+  admitsWork?: boolean;
   /** sfcd 값(leader/candidate/voter/non-voter/pending). 클러스터 전체 보기에서만 */
   role?: 'leader' | 'candidate' | 'voter' | 'non-voter' | 'pending' | string;
   /** 새 배치 제외(cordon) 상태 */
@@ -318,7 +328,12 @@ export interface DBlockPart {
 }
 export interface DBlockDisk {
   name: string;
-  class: 'system' | 'additional' | 'unused' | string;
+  /** bundle-member: 묶음 구성원(디스크 작업 없음, 묶음 상자 안에만) */
+  class: 'system' | 'additional' | 'unused' | 'bundle-member' | string;
+  /** bundle: 묶음 자체 장치(보통 디스크처럼 마운트·prepare-storage) */
+  kind?: 'bundle' | string;
+  /** 속한 묶음 이름 */
+  bundle?: string;
   /** 시스템 디스크: 포맷·마운트 단추 대신 수작업 안내 */
   locked?: boolean;
   size: number;
@@ -341,6 +356,19 @@ export interface DNodeDevices {
   stale?: boolean;
   /** sfcd가 마운트해 로컬에 기록한 것(#689 3단계). reason이 비면 마운트된 상태, disk-not-found면 디스크를 찾지 못함 */
   recorded?: DDiskRecord[] | null;
+  /** 디스크 묶음 (#811) */
+  bundles?: DDiskBundle[] | null;
+}
+/** 디스크 묶음. degraded = 미러가 구성원 없이 도는 중, missing = 쓸 수 없음(이어 붙이기 구성원 없음) */
+export interface DDiskBundle {
+  name: string;
+  backend: 'lvm' | 'fuse' | string;
+  mode: 'linear' | 'mirror' | string;
+  size: number;
+  device?: string;
+  state: 'ok' | 'degraded' | 'missing' | 'syncing' | string;
+  syncPercent?: number;
+  members: { disk: string; part?: string; serial?: string; wwn?: string; size?: number; state: 'ok' | 'missing' | 'syncing' | string }[] | null;
 }
 export interface DDiskRecord {
   uuid: string;
@@ -374,8 +402,9 @@ export interface DFirewall {
   rules: DFirewallRule[];
   maxRules?: number;
   locked: DFirewallLocked[];
-  operator4: string[];
-  operator6: string[];
+  /** 서버의 다른 들어오는 연결 규칙, operatorFormat "nft": 각 줄이 nft 표현식(읽기만) */
+  operator: string[];
+  operatorFormat?: 'nft';
   operatorTruncated?: boolean;
   applied: boolean;
   applyError?: string;
@@ -407,10 +436,12 @@ export interface DFirewallResult {
 export interface DDiskOp {
   operation: string;
   node: string;
-  action: 'format' | 'mount' | 'unmount' | 'forget';
+  action: 'format' | 'mount' | 'unmount' | 'forget' | 'prepare-storage' | 'bundle' | 'unbundle' | 'replace-member';
   user: string;
   disk?: string;
   part?: string;
+  /** 묶음 작업이면 묶음 이름 */
+  bundle?: string;
   state: 'running' | 'done' | 'failed';
   step: string;
   code?: string;
@@ -419,6 +450,8 @@ export interface DDiskOp {
   device?: string;
   mountPath?: string;
   label?: string;
+  /** prepare-storage: 저장 경로로 등록할 디렉터리(마운트 위치 + 하위 경로) */
+  rootPath?: string;
   startedAt?: number;
   finishedAt?: number;
 }
@@ -781,7 +814,7 @@ export interface DVault {
   group?: string;
   /** 비밀번호가 걸린 묶음 */
   protected?: boolean;
-  /** sfcd 객체 ID와 부모(뿌리 묶음 ID는 작업 공간 이름). 이전 데몬은 없음 */
+  /** sfcd 객체 ID와 부모(최상위 묶음 ID는 작업 공간 이름). 이전 데몬은 없음 */
   id?: string;
   parent?: string;
   status?: DVaultStatus;
@@ -1777,7 +1810,7 @@ export interface DTaskDetail {
   drift?: string[];
   observedAt: number;
 }
-export type DTaskExitReason = 'exit' | 'oom' | 'health' | 'node-restart' | 'user' | 'log-clear';
+export type DTaskExitReason = 'exit' | 'oom' | 'health' | 'node-restart' | 'user';
 export interface DTaskExit {
   at: number;
   reason: DTaskExitReason | string;
@@ -2012,10 +2045,27 @@ export interface DOpBase {
   current?: unknown;
 }
 
-/** GET /cluster/features (UI-17 'SFCP 기능', #779). cluster는 모든 서버 알린 기능의 교집합 */
+/** GET /cluster/features (UI-17 '기능 집합'). group › set › version, 이름은 network-transit-v1[-preview].
+ *  cluster는 모든 서버가 알린 기능의 교집합(이름), set.cluster는 모두가 가진 가장 높은 mainline 버전(0 = 없음) */
+export interface DFeatureVersion {
+  name: string;
+  version: number;
+  /** 접미사. 호환 약속 안의 버전은 'mainline' */
+  postfix: string;
+  desc: string;
+}
+export interface DFeatureSet {
+  /** network-transit 처럼 group-set */
+  name: string;
+  versions: DFeatureVersion[];
+  cluster: number;
+  /** 이 집합의 가장 높은 mainline 버전이 표의 최신보다 낮은 서버 */
+  behind: string[];
+}
 export interface DClusterFeatures {
   major: number;
-  features: { id: number; name: string; desc: string }[];
-  cluster: number[];
-  nodes: { node: string; major?: number; build?: string; features: number[]; seen: boolean }[];
+  groups: { name: string; sets: DFeatureSet[] }[];
+  cluster: string[];
+  /** reportedAt: 마지막 보고 관측 시각(Unix 초), 보고가 없던 서버는 없음 */
+  nodes: { node: string; major?: number; build?: string; features: string[]; seen: boolean; reportedAt?: number }[];
 }

@@ -4,11 +4,11 @@ User purpose8의 요청은 다음과 같다. 공통 Session/envelope 서명·Non
 선택 규칙을 사용한다. Unix와 네트워크 SFCP가 같은 형식이며 새 socket은 열지 않는다.
 
 ```text
-{Schema:1, Method:"image-build-logs", Nonce:[32], Tenant,
- ImageBuildLog:{Job, MaxBytes:1..24576, Tail?:true}, After?:cursor}
+{Schema:1, Method:"image-build-logs", Nonce:[32], Params:{Tenant,
+ Query:{Job, MaxBytes:1..24576, Tail?:true}, After?:cursor}}
 ```
 
-성공 응답의 `ImageBuildLog` 형식은 다음과 같다. `[32]`는32바이트 배열이고 Data는
+성공 응답의 `Data` 형식은 다음과 같다. `[32]`는32바이트 배열이고 Data는
 Go JSON의 base64 인코딩 byte 배열이다. 원 ZIP·Secret 값·사용자 자격은 포함하지 않는다.
 
 ```text

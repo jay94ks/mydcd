@@ -259,7 +259,7 @@ func (c *realConn) TaskHistory(ctx context.Context, tenant string, sel Container
 
 func exitReason(h containerops.DetailHistory) string {
 	switch h.Reason {
-	case ExitReasonOOM, ExitReasonHealth, ExitReasonNodeRestart, ExitReasonUser, ExitReasonLogClear:
+	case ExitReasonOOM, ExitReasonHealth, ExitReasonNodeRestart, ExitReasonUser:
 		return h.Reason
 	}
 	return ExitReasonExit

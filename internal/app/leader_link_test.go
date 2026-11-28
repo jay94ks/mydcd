@@ -27,31 +27,3 @@ func TestLeaderLinkHeldSince(t *testing.T) {
 		}
 	}
 }
-
-func TestObservationDueResendsChangedStaleOrRelinked(t *testing.T) {
-	now := time.Now()
-	digest := [32]byte{1}
-	last := observationSentAt{digest: digest, at: now.Add(-10 * time.Second)}
-	linked := now.Add(-time.Hour)
-	if observationDue(last, true, digest, linked, true, now) {
-		t.Fatal("unchanged report resent within the resend window")
-	}
-	for name, c := range map[string]struct {
-		last        observationSentAt
-		known       bool
-		digest      [32]byte
-		linkedSince time.Time
-		linked      bool
-		now         time.Time
-	}{
-		"never sent":         {observationSentAt{}, false, digest, linked, true, now},
-		"content changed":    {last, true, [32]byte{2}, linked, true, now},
-		"resend window over": {last, true, digest, linked, true, last.at.Add(observationResend)},
-		"link broke since":   {last, true, digest, now.Add(-time.Second), true, now},
-		"not linked":         {last, true, digest, time.Time{}, false, now},
-	} {
-		if !observationDue(c.last, c.known, c.digest, c.linkedSince, c.linked, c.now) {
-			t.Errorf("%s: report not resent", name)
-		}
-	}
-}

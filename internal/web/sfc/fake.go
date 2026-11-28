@@ -561,9 +561,10 @@ type world struct {
 	approvalRows   map[string]*VaultApprovalRow         // approval ID → row (revoked rows kept)
 	approvalRev    uint64                               // Vault.Approvals revision (vault-revoke-approval Expected)
 
-	moves map[string]*fakeMove // tenant/app/volume: accepted move (fake_volume_move.go)
+	moves    map[string]*fakeMove // tenant/app/volume: accepted move (fake_volume_move.go)
+	archives *fakeArchives        // Volume archives (fake_volume_archive.go)
 
-	registries []RegistryView
+	registries []FixtureRegistry
 
 	apps    map[string]*fakeApp // tenant/app
 	uploads map[string]*upload  // tenant/id
@@ -597,7 +598,8 @@ type world struct {
 
 func newWorld(f Fixture) *world {
 	w := &world{
-		cluster: f.Cluster, issuer: FixtureKey("issuer"), root: 100, ledgerEpoch: 1, retiring: map[string]string{}, retired: map[string]bool{},
+		cluster: f.Cluster, issuer: FixtureKey("issuer"), root: 100,
+		archives: &fakeArchives{rows: map[string]*control.VolumeArchiveView{}, keys: control.VolumeArchiveKeys{Cluster: [32]byte{0xc1}, Admin: [32]byte{0xad}, Revision: 1}}, ledgerEpoch: 1, retiring: map[string]string{}, retired: map[string]bool{},
 		users: map[string]*fakeUser{}, tenants: map[string]map[string]Role{},
 		tenantRev: map[string]uint64{}, tenantNodes: map[string][]string{}, revoked: map[string]bool{},
 		members: f.Members, summaries: f.Summaries, disks: f.Disks, links: f.Links, raft: f.Raft,

@@ -556,8 +556,8 @@ func (s *Server) notifyIncident(ctx context.Context, ws *webSession, in *store.I
 		if u == ws.user.ID {
 			continue
 		}
-		s.notify(&store.Notification{User: u, Kind: NotifyIncidentApproval, Severity: "warning", Tenant: in.Tenant, Title: "승인 요청: " + in.Title,
-			Body: in.Decision.Note, Link: "/incidents/" + in.ID, Action: true})
+		s.notify(&store.Notification{User: u, Kind: NotifyIncidentApproval, Severity: "warning", Tenant: in.Tenant, Text: notice("incident-approval", map[string]string{"title": in.Title, "note": in.Decision.Note}, bodyIf(in.Decision.Note != "", "incident-approval.note")...),
+			Link: "/incidents/" + in.ID, Action: true})
 	}
 	in.Timeline = append(in.Timeline, store.IncidentEntry{At: s.now(), Kind: "notify", Text: fmt.Sprintf("승인할 수 있는 %d명에게 알렸어요.", len(users))})
 	s.putIncident(in)

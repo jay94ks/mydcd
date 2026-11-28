@@ -21,6 +21,9 @@ type TenantStorageRoot struct {
 	Generation, Revision uint64
 	Draining, Allowed    bool
 	Root                 nodestorage.Reference
+	// ArchiveDefault: the node's default Volume archive location
+	// (set-node-archive-default).
+	ArchiveDefault bool `json:",omitempty"`
 }
 type TenantStoragePage struct {
 	Index, RootRevision, Revision uint64
@@ -91,7 +94,7 @@ func (p Policy) TenantStoragePage(s state.State, session access.Session, at int6
 			page.Next = snapshot + ":" + previous.Node + "/" + previous.ID
 			break
 		}
-		page.Items = append(page.Items, TenantStorageRoot{Node: definition.Node, ID: definition.ID, Generation: root.Generation, Revision: root.Revision, Draining: root.Draining, Allowed: true, Root: root.Reference(p.Cluster)})
+		page.Items = append(page.Items, TenantStorageRoot{Node: definition.Node, ID: definition.ID, Generation: root.Generation, Revision: root.Revision, Draining: root.Draining, Allowed: true, Root: root.Reference(p.Cluster), ArchiveDefault: root.ArchiveDefault})
 	}
 	return page, nil
 }

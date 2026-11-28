@@ -4,11 +4,12 @@
 
 ### typed method
 
-typed method는 요청과 응답이 그 method만의 타입 하나로 정해진 method다. 지금은 `certificates`, `vps`, `node-disk`, `node-summary`, `node-disks`, `node-tenant-usage`, `mesh-links`, `node-drain-plan`, `node-drain-status`, `node-diagnostics`, `node-force-remove-plan`, `node-remove-plan`, `node-demote-plan`, `tasks`, `raft-compact-plan`, `raft-compact-status`, `whoami`, `tenants`, `select-tenant`, `volumes`, `volume-backups`, `volume-restores`, `volume-usage`, `volume-backup-source`, `volume-file-plan`, `volume-file-status`, `lifecycles`, `lifecycle-source`, `ingresses`, `tunnel-reconnect-plan`, `tunnel-reconnect-status`, `resources`, `network-dns-names`와 공개 조회 12개(`volume-file-grants`, `volume-backup-limits`, `network-closure`, `network-users`, `volume-users`, `route-endpoints`, `bridge-endpoints`, `lifecycle-uses`, `vault-approvals`, `vault-usages`, `volume-retained-sources`, `image-trust`, [형식](28-section.md#관리-자원사용처-공개-조회)), 세션 없는 `server-version`, `challenge`, `login`, `credential-challenge`, `credential-login`이고, R09 순서대로 나머지 method도 옮긴다.
+typed method는 요청과 응답이 그 method만의 타입 하나로 정해진 method다. 지금은 `certificates`, `vps`, `node-disk`, `node-summary`, `node-disks`, `node-tenant-usage`, `mesh-links`, `node-drain-plan`, `node-drain-status`, `node-diagnostics`, `node-logs`, `node-force-remove-plan`, `node-remove-plan`, `node-demote-plan`, `tasks`, `raft-compact-plan`, `raft-compact-status`, `whoami`, `tenants`, `select-tenant`, `volumes`, `volume-backups`, `volume-restores`, `volume-archives`, `volume-usage`, `volume-backup-source`, `volume-file-plan`, `volume-file-status`, `vault`, `vault-approval-plan`, `vault-write-plan`, `node-storage`, `node-storage-space`, `tenant-storage`, `lifecycles`, `lifecycle-source`, `lifecycle-source-stage`, `lifecycle-module-stage`, `lifecycle-source-recover`, `lifecycle-module-recover`, `checker-source-stage`, `checker-source-recover`, `checker-module-stage`, `checker-module-recover`, `ingresses`, `tunnel-reconnect-plan`, `tunnel-reconnect-status`, `resources`, `network-dns-names`와 공개 조회 12개(`volume-file-grants`, `volume-backup-limits`, `network-closure`, `network-users`, `volume-users`, `route-endpoints`, `bridge-endpoints`, `lifecycle-uses`, `vault-approvals`, `vault-usages`, `volume-retained-sources`, `image-trust`, [형식](28-section.md#관리-자원사용처-공개-조회)), 세션 없는 `server-version`, `challenge`, `login`, `credential-challenge`, `credential-login`, `registries`, `external-registries`, `external-registry-pulls`, `external-registry-bind-plan`, `registry-catalog`, `registry-maintenance-plan`, `registry-maintenance-status`, `registry-prune-preview`, `registry-prune-results`, `registry-action-plan`, `registry-login-test`, `registry-credential`, `image-usages`, `image-resolve`, `image-cache-plan`, `image-cache-status`, `image-build-job-plan`, `image-builds`, `image-build-cache`, `image-build-logs`, `build-context-content`, `check-build-context`, `save-build-git`, `build-draft`, `build-zip-transfer`, 계정 조회 `users`, `tenant-members`, `my-credentials`, `user-credentials`, `node-cli-policy`, `tenant-retirement`, `members`, `node-invitation`, `node-shell-policy`, `node-shell-sessions`, 활동 조회 `login-records`, `own-sessions`, `events`이고, R09 순서대로 나머지 method도 옮긴다.
 
 - Request는 `Schema`, `Method`, `Nonce`, `Params`만 가진다. 다른 필드가 있거나 `Params`가 없으면 `denied`다.
 - `Params`는 그 method의 요청 타입으로 엄격하게 푼다. 모르는 필드가 있거나, 풀어서 다시 인코딩한 바이트가 원래 바이트와 다르면 `denied`다(빈 요청은 정확히 `{}`).
 - 성공 Reply는 `Schema`, `Code:"ok"`, `Data`만 가진다. `Data`는 그 method의 응답 타입이다. 실패 Reply는 `Code`와, 있으면 기호 코드 `InputCode`(대문자·숫자·`_`, 64바이트 이하)만 가진다.
+- 같은 major 안에서 sfcd는 응답(Reply와 `Data`)에 필드를 더할 수 있다. 클라이언트는 응답의 모르는 필드를 건너뛴다. 요청은 위처럼 언제나 엄격하다.
 - Session과 연결 서명(S)이 필요하다.
 
 ### 최초 등록·로그인·계정
@@ -20,9 +21,9 @@ typed method는 요청과 응답이 그 method만의 타입 하나로 정해진 
 | `login` | 세션 없음; typed `Params:{Ticket,Proof,LoginClient?}` | `Data`=Session: 같은 연결에 묶인 개인키 proof 검증. 이 노드가 세션을 발급하지 않으면 봉투째 leader로 넘긴다 |
 | `credential-challenge` | 세션 없음; typed `Params:{Username,AuthMethod=password 또는 token,Credential?}` | `Data`=Ticket: 보호 backend 자격 선택 |
 | `credential-login` | TLS client key 서명; typed `Params:{Ticket,Secret,LoginClient?}` | `Data`=Session: 비밀번호/토큰 검증. AuthMethod/Username/Credential은 Ticket 안에만 있다. Params는 처리 뒤 지운다 |
-| `users` | S; 선택 After, Tenant/Node/TargetUser 없음 | Users, UsersNext, UsersRevision, RootRevision. 현재 system-admin + 서명 ManageCluster. 공개 credential만 반환하고 VerifierRef 필드 없음 |
-| `tenant-members` | S; Tenant 필수, 선택 After, Node/TargetUser 없음 | TenantMembers, TenantAllowedNodes, TenantMembersNext, TenantRevision, TenantMembersRevision, RootRevision. 대상 tenant의 현재 ManageMembers + 서명 scope 필수 |
-| `my-credentials` | S; Tenant/After/Node/TargetUser 없음 | SelfCredentials: 현재 로그인 계정의 공개 credential과 Revision. verifier 참조 없음 |
+| `users` | S; typed `Params:{After?}` | `Data:{Users,Next?,Revision}`. 현재 system-admin + 서명 ManageCluster. 공개 credential만 반환하고 VerifierRef 필드 없음 |
+| `tenant-members` | S; typed `Params:{Tenant,After?}` | `Data:{Tenant,Members,AllowedNodes,Next?,TenantRevision,Revision}`. 대상 tenant의 현재 ManageMembers + 서명 scope 필수 |
+| `my-credentials` | S; typed `Params:{}` | `Data`=현재 로그인 계정의 공개 credential과 Revision(`access.PublicUser`). verifier 참조 없음 |
 | `lifecycles` | S; typed `Params:{Tenant,After?}` | `Data:{Items,Next,Revision,RootRevision}`. tenant ManageServices의 lifecycle 정책·script 버전 페이지 |
 | `lifecycle-source` | S; typed `Params:{Tenant,Source:{Name,Revision,Offset}}` | `Data:` 24KiB source page. [형식](../lifecycle-sources.md) |
 | `tasks` | S; typed `Params:{Node,Tenant,App,Standalone?,After?}` | `Data:{Tasks,Next,RootRevision}`. 현재 Read·tenant/허용 node로 먼저 거른 Task·관측 페이지. [행 형식·한도](../task-observability.md) |
@@ -33,8 +34,8 @@ typed method는 요청과 응답이 그 method만의 타입 하나로 정해진 
 | `raft-status` | S; 선택 After, Tenant/Node 금지 | RaftStatus: system-admin의 로컬 SDK/내구 FSM·복제 ACK·snapshot/선거/ledger 진단. 리더 전달·quorum 대기 없이 마지막 적용 정책으로 인증 |
 | `app-source` | S; Tenant·AppSource 필수, After/Node/TargetUser 없음 | AppSource:{Section,Version,RootRevision,Part,Data,Pending?}. 24KiB source/local-services/overlays/pending-local part(pending-local은 Pending이 문서를 고정), 고정 버전·Section별 digest와 현재 tenant Read |
 | `app-revisions` | S; Tenant·AppSource{App,Deployment?} 필수, 선택 After | AppRevisions, AppRevisionsNext, AppRevisionsRootRevision. 원문 버전16행/64KiB, 현재 권한과 root 고정 cursor |
-| `user-credentials` | S; TargetUser, Tenant/After/Node 없음 | CredentialUser: system-admin/ManageCluster 전용 전체 공개 User record·계정 Revision. private-key 원문·password/token 값은 없음 |
-| `node-cli-policy` | S; Tenant/After/Node 없음 | NodeCLI: system-admin/ManageCluster 전용 `{Revision:uint64,disable_node_cli_operation:bool}`. 미변경은 revision0/false |
+| `user-credentials` | S; typed `Params:{Username}` | `Data`=system-admin/ManageCluster 전용 전체 공개 User record·계정 Revision. private-key 원문·password/token 값은 없음 |
+| `node-cli-policy` | S; typed `Params:{}` | `Data`=system-admin/ManageCluster 전용 `{Revision:uint64,disable_node_cli_operation:bool}`. 미변경은 revision0/false |
 | `whoami` | S; Params `{}` | Data `{User,ModuleEpoch,Roots}`. Roots는 CommandKey(`control/catalog` 등)별 현재 root revision이다 |
 | `tenants` | S; Params `{}` | Data `{User,Tenants}`: 현재 접근 가능한 tenant |
 | `select-tenant` | S; Params `{Tenant}` | Data `{User,Tenant,Revision,AllowedNodes}`: 현재 접근 검사. 서버에 연결별 기본 tenant를 생성하지 않음 |
@@ -55,11 +56,11 @@ node 추가/삭제, tenant·망·Volume·Vault 정책 변경 같은 쓰기는 �
 
 | Method | S 이외의 입력 | 응답 |
 |---|---|---|
-| `members` | 선택 After | Members, MembersNext, NodeLifecycle, NodeRuntimeRevision, NodeOperationEpoch, NodeConfigurationIndex, NodeVoters, NodeQuorum |
-| `node-invitation` | Node | Invitation: 승인된 ID/key/endpoint/Join ID에 묶인 서명 초대 |
-| `node-storage` | 선택 Node, After; Tenant 없음 | NodeStorage, NodeStorageNext, NodeStorageRootRevision, NodeStorageRevision |
-| `node-storage-space` | NodeStorage; Tenant/After 없음 | NodeStorageSpace, NodeStorageObservedIndex |
-| `tenant-retirement` | Tenant, 선택 After | TenantRetirement: tenant 종료·owner 정산 상태 |
+| `members` | typed `Params:{After?}` (node ID) | `Data:{RootRevision,RuntimeRevision,OperationEpoch,ConfigurationIndex,Voters,Quorum,Members,Nodes,Next}`. 현재 ManageCluster. 한 페이지 최대 8항목, 같은 RootRevision으로 이어 읽는다 |
+| `node-invitation` | typed `Params:{Node}` | `Data`: 승인된 ID/key/endpoint/Join ID에 묶인 서명 초대(`membership.Invitation`). 현재 ManageCluster |
+| `node-storage` | typed `Params:{Node?,After?}` | `Data:{Items,Next?,Revision,RootRevision}`. ManageCluster |
+| `node-storage-space` | typed `Params:{Node,ID}` | `Data:{Space,Revision,RootRevision,ModuleEpoch,Index}`. ManageCluster, 소유 노드의 측정값 |
+| `tenant-retirement` | S; typed `Params:{Tenant,After?}` | `Data`=tenant 종료·owner 정산 상태(`control.TenantRetirementStatus`). system-admin/ManageCluster 전용 |
 | `resources` | typed `Params:{Tenant?,After?}` | `Data:{RootRevision,Index,Revision,NetworkRevision,QuotaRevision,Items,Next?}`. 빈 Tenant는 ManageCluster, 아니면 tenant Read. 8행 페이지 |
 | `network-dns-names` | typed `Params:{Tenant,Network}` | `Data:{Managed,Revision,Zone,Names,Records}`. 그 tenant 망의 DNS 이름. tenant Read |
 | `legacy-resource-closure` | LegacySource | LegacyTarget, LegacyRetirement: 정확한 기존 참조의 종료 근거 |
@@ -69,10 +70,8 @@ node 추가/삭제, tenant·망·Volume·Vault 정책 변경 같은 쓰기는 �
 | Method | S 이외의 입력 | 응답 |
 |---|---|---|
 | `apps` | 선택 Tenant, After | Apps, AppsNext, AppsRootRevision, AppRevision |
-| `service-call` | Tenant, ServiceCall, ServiceInput; continue 뒤 kind4 본문·EOF | ServiceCall: 현재 CallService·원 Task/owner 검사 후 한 번 POST. HTTP Status/Content-Type/본문 또는 제한 코드. 자동 재전송 없음 |
-| `cd-probe` | Tenant, CDProbe | CDProbe: 현재 Deploy·기존 앱/설치 credential로 고정 Commit·Size·Node 또는 제한 코드. CD/app 변경 없음 |
-| `app-log-clear-plan` | Tenant, LogClear(서비스/선택 instance, 빈 Operation) | LogClearPlan: Read/Deploy·실제 local/json-file 대상/파급 계획. 원 effect 없음. |
-| `app-log-clear-status` | Tenant, LogClear(App/Operation만) | LogClearStatus: 현재 Read 권한의 원 정리/교체 결과. |
+| `service-call` | typed `Params:{Tenant,Call,Input:{Length,Digest}}`; continue 뒤 kind4 본문·EOF | `Data:` 현재 CallService·원 Task/owner 검사 후 한 번 POST. HTTP Status/Content-Type/본문 또는 제한 코드. 자동 재전송 없음 |
+| `cd-probe` | typed `Params:{Tenant,Probe}` | `Data:` 고른 provider에서만 답함(leader로 넘기거나 따라가지 않음). 현재 Deploy·기존 앱/설치 credential로 고정 Commit·Size·Node 또는 제한 코드. CD/app 변경 없음 |
 | `app-operation` | Tenant, AppOperation | AppOperation: 특정 앱/원 operation 상태. 지금 배포라면 Waiting에 아직 시작되지 않은 단계와 그 서버·기다리는 의존 단계, 그리고 그 tenant의 TUN 망을 열지 못한 서버의 이유(Host.TunnelWaits)를 최대 8개씩 문장으로 담는다. 상태 표시용이고 허가 판단에 쓰지 않는다 |
 | `app-cd-field` | Tenant, AppCDField{App,Path,Part?,Digest?} | AppCDField: 명시 앱 field/override/참조와 Values 또는 ValuesPart. Git/현재 값 분리 |
 | `app-cd-history` | S; Tenant, AppCDRead{App}, 선택 After | AppCDHistory: 후보/원 실행 이력16행, 현재 history/권한 고정 cursor |
@@ -89,37 +88,47 @@ node 추가/삭제, tenant·망·Volume·Vault 정책 변경 같은 쓰기는 �
 | `volumes` | typed `Params:{Tenant?,After?}` | `Data:{Items,Next?,Revision,RootRevision,ModuleEpoch}`. Tenant Read, Tenant 생략 시 ManageCluster. RootRevision은 Volumes root, Revision은 volumes book |
 | `volume-restores` | typed `Params:{Tenant?,After?}` | `Data:{Items,Next?,Revision,RootRevision,ModuleEpoch}`. 권한은 `volumes`와 같다 |
 | `volume-backups` | typed `Params:{Tenant?,After?}` | `Data:{Items,Next?,Revision,RootRevision,ModuleEpoch}`. 권한은 `volumes`와 같다 |
+| `volume-archives` | typed `Params:{Tenant?,After?}` | `Data:{Items,Next?,Revision,RootRevision,ModuleEpoch,Keys:{Cluster,Admin,Revision}}`. 권한은 `volumes`와 같다. Keys는 새 묶음을 봉인할 공개 키이고, `set-volume-archive-admin-key`가 Keys.Revision을 기대한다 |
 | `volume-usage` | typed `Params:{Tenant,Volume:{App,ID}}` | `Data:{Usage,Index,RootRevision}`. 소유 노드의 측정값, Index는 다시 확인한 commit index |
 | `volume-backup-source` | typed `Params:{Tenant,Volume:{App,ID}}` | `Data:{Source,VolumeRevision,ModuleEpoch,RootRevision,Index}`. begin-volume-backup이 VolumeRevision·ModuleEpoch를 쓴다 |
 | `volume-file-plan` | typed `Params:{Tenant,File:VolumeFileQuery}` | `Data:VolumeFilePlan`. [파일 작업](../volume-files.md) |
 | `volume-file-status` | typed `Params:{Tenant,ID}` | `Data:VolumeFileView` |
-| `vault` | 선택 Tenant, After | Vault, VaultNext, VaultRootRevision, VaultRevision, VaultTreeRevision, VaultWriteEpoch, VaultApprovalRevision: 공개 metadata |
-| `vault-approval-plan` | Tenant, VaultPlan | VaultPlan: Secret Group 승인 대상 계획 part |
-| `vault-write-plan` | Tenant와 VaultWritePlan.Realm 일치, VaultWritePlan | VaultWritePlan: 보호 원문 없이 provider/원 write 계획 |
+| `vault` | typed `Params:{Tenant?,After?}` | `Data:{Items,Next?,RootRevision,Revision,ApprovalRevision,TreeRevision?,WriteEpoch?}`: 공개 metadata. tenant는 ManageSecrets(정리 권한 포함), 비우면 ManageCluster |
+| `vault-approval-plan` | typed `Params:{Tenant,Plan:VaultPlan}` | `Data:VaultPlan 응답 part`: Secret Group 승인 대상 계획 part. tenant Deploy |
+| `vault-write-plan` | typed `Params:VaultWritePlan 입력` | `Data:VaultWritePlan`: 보호 원문 없이 provider/원 write 계획. Realm의 ManageSecrets, 비우면 ManageCluster |
 
 ### Lifecycle script·registry
 
 | Method | S 이외의 입력 | 응답 |
 |---|---|---|
-| `checker-source-stage` | Tenant, CheckerSource, 선택 CheckerUpload; 후속 kind4 | continue 뒤 CheckerSource 서명 사실 |
-| `checker-source-recover` | 같은 source 선택, 원 CheckerUpload가 있으면 보존 | CheckerSource: 원 저장 사실 조회, source 원문 재전송 없음 |
-| `checker-module-stage` | Tenant, CheckerSource, CheckerModule, 선택 CheckerUpload; 후속 kind4 | continue 뒤 CheckerModule 서명 사실 |
-| `checker-module-recover` | 같은 source/module 선택, 원 CheckerUpload가 있으면 보존 | CheckerModule: 원 module 저장 사실 조회 |
-| `registries` | Tenant, 선택 After | Registries, RegistriesNext, RegistriesRootRevision, RegistriesRevision |
-| `external-registries` | Tenant, 선택 After | ExternalRegistriesRootRevision, ExternalRegistriesNext, ExternalRegistries: 공개 source 참조·선택 reader metadata |
-| `external-registry-bind-plan` | Tenant, ExternalRegistryBind:{ID,Node} | ExternalRegistryBindPlan: source 지문·record/root CAS·epoch·realm별 공개 Uses |
-| `image-usages` | Tenant, ImageUsage:{Refs?,ExternalSource?}, 선택 After | ImageUsages:{Schema,Tenant,Root,Index,Rows,Next}. Read 또는 ManageRegistry, 16행/페이지 |
-| `image-resolve` | Tenant, ImageResolve:{Ref} | ImageResolve: 정규화·managed/external/unknown source·현재 Trust·제한 Code·Image digest/index/platform. Read 또는 ManageRegistry 필요 |
-| `external-registry-pulls` | Tenant, 선택 After | RegistryPulls:{Schema,Tenant,Root,Index,Rows,Next}. 실제 pull 결과 8행/페이지, 현재 Read 또는 ManageRegistry |
-| `registry-catalog` | Tenant, RegistryCatalog:{Kind,ID,Repository?}, 선택 After | RegistryCatalog:{Kind,ID,Page}. 내장/외부 목록·metadata 8행/페이지, 현재 Read 또는 ManageRegistry |
-| `registry-maintenance-plan` | Tenant, RegistryMaintenance:{Action,ID,Repository,Reference,Digest,External?}; Operation은 빈 문자열 | RegistryMaintenancePlan:{Schema,Cluster,Tenant,Action,Expected,RootRevision,Epoch,Change,InUse}. 현재 ManageRegistry·동작 제한 필요 |
-| `registry-prune-preview` | Tenant, RegistryPrune:{ID,External?,Part,Conditions,Fact?}, 선택 After | RegistryPrune:{Schema,Tenant,Plan,Page}. ManageRegistry의 서명된 일괄 선택, 8행/페이지 |
-| `registry-prune-results` | Tenant, RegistryPrune:{Operation,Part:"items"}, 선택 After | 같은 원 부모의 항목별 사유/Native 결과. 현재 Read 또는 ManageRegistry |
-| `registry-maintenance-status` | Tenant, RegistryMaintenance:{Operation}; 나머지 선택은 비움 | RegistryMaintenanceStatus:{Schema,Tenant,Operation,Action,User,State,Revision,RootRevision,At,Change,Result?}. 현재 Read 또는 ManageRegistry |
-| `registry-login-test` | Tenant, ExternalRegistryProbe:{ID,Image?} | ExternalRegistryProbe: 선택 source 세대·owner·At·제한 Code, 성공 시 선택 Image/Pull metadata. ManageRegistry 필요 |
-| `registry-credential` | Tenant, Registry | RegistryCredential(base64), RegistryAuthority, RegistryCredentialExpires: 제한된 단기 자격. login 권한 요청은 거부 |
+| `checker-source-stage` | typed `Params:{Tenant,Source,Upload}`; 후속 kind4 | continue 뒤 `Data:` SourceFact 서명 사실 |
+| `checker-source-recover` | 같은 Params | `Data:` 원 저장 SourceFact 조회, source 원문 재전송 없음 |
+| `checker-module-stage` | typed `Params:{Tenant,Source,Module,Upload}`; 후속 kind4 | continue 뒤 `Data:` ModuleFact 서명 사실 |
+| `checker-module-recover` | 같은 Params | `Data:` 원 module 저장 ModuleFact 조회 |
+| `registries` | S; typed `Params:{Tenant,After?}` | `Data:{RootRevision,Revision,MaintenanceRootRevision,Items,Next}`. 현재 Read 또는 ManageRegistry |
+| `external-registries` | S; typed `Params:{Tenant,After?}` | `Data:{RootRevision,Items,Next}`: 공개 source 참조·선택 reader metadata. 현재 Read 또는 ManageRegistry |
+| `external-registry-bind-plan` | S; typed `Params:{Tenant,Query:{ID,Node}}` | `Data`: ExternalRegistryBindPlan(source 지문·record/root CAS·epoch·realm별 공개 Uses) |
+| `image-usages` | S; typed `Params:{Tenant,Query:{Refs?,ExternalSource?},After?}` | `Data:{Schema,Tenant,Root,Index,Rows,Next}`. Read 또는 ManageRegistry, 16행/페이지 |
+| `image-resolve` | S; typed `Params:{Tenant,Query:{Ref}}` | `Data`: 정규화·managed/external/unknown source·현재 Trust·제한 Code·Image digest/index/platform. Read 또는 ManageRegistry 필요 |
+| `external-registry-pulls` | S; typed `Params:{Tenant,After?}` | `Data:{Schema,Tenant,Root,Index,Rows,Next}`. 실제 pull 결과 8행/페이지, 현재 Read 또는 ManageRegistry |
+| `registry-catalog` | S; typed `Params:{Tenant,Query:{Kind,ID,Repository?},After?}` | `Data:{Kind,ID,Page}`. 내장/외부 목록·metadata 8행/페이지, 현재 Read 또는 ManageRegistry |
+| `registry-maintenance-plan` | S; typed `Params:{Tenant,Query:{Action,ID,Repository,Reference,Digest,External?}}`; Operation은 빈 문자열 | `Data:{Schema,Cluster,Tenant,Action,Expected,RootRevision,Epoch,Change,InUse}`. 현재 ManageRegistry·동작 제한 필요 |
+| `registry-prune-preview` | S; typed `Params:{Tenant,Query:{ID,External?,Part,Conditions,Fact?},After?}` | `Data:{Schema,Tenant,Plan,Page}`. ManageRegistry의 서명된 일괄 선택, 8행/페이지 |
+| `registry-prune-results` | S; typed `Params:{Tenant,Query:{Operation,Part:"items"},After?}` | `Data`: 같은 원 부모의 항목별 사유/Native 결과. 현재 Read 또는 ManageRegistry |
+| `registry-maintenance-status` | S; typed `Params:{Tenant,Operation}` | `Data:{Schema,Tenant,Operation,Action,User,State,Revision,RootRevision,At,Change,Result?}`. 현재 Read 또는 ManageRegistry |
+| `registry-login-test` | S; typed `Params:{Tenant,Query:{ID,Image?}}` | `Data`: 선택 source 세대·owner·At·제한 Code, 성공 시 선택 Image/Pull metadata. ManageRegistry 필요 |
+| `registry-credential` | S; typed `Params:{Tenant,ID,Repository,Actions}` | `Data:{Credential(base64),Authority,ExpiresAt}`: 제한된 단기 자격. login 권한 요청은 거부, workload를 돌리는 서버만 응답 |
+| `image-build-job-plan` | S; typed `Params:{Tenant,Query:{ID,Context,Version}}` | `Data`: ImageBuildJobPlan. ManageRegistry·begin-image-build operation, 새 보고가 빌드를 끈 서버면 `build-disabled` ([형식](../image-build-jobs/01-section.md)) |
+| `image-builds` | S; typed `Params:{Tenant,Query:{Part,ID?,Upload?,Job?,Node?},After?}` | `Data`: ImageBuildPage. 현재 Read 또는 ManageRegistry ([형식](../image-build-contexts/03-user.md)) |
+| `image-build-cache` | S; typed `Params:{Tenant,Query:{Job} 또는 {Job:"",Cache,Node},After?}` | `Data`: ImageBuildCachePage. 현재 Read 또는 ManageRegistry ([형식](../image-build-jobs/10-section.md)) |
+| `image-build-logs` | S; typed `Params:{Tenant,Query:{Job,MaxBytes,Tail?},After?}` | `Data`: ImageBuildLogPage. 현재 Read 또는 ManageRegistry, Tail과 After 혼합 거부 ([형식](../image-build-jobs/08-section.md)) |
+| `build-context-content` | S; typed `Params:{Tenant,Query:{Version,Part,Path?,Offset?},After?}` | `Data`: ImageBuildContentPage. 현재 Read 또는 ManageRegistry ([형식](../image-build-contexts/04-dockerfile.md)) |
+| `check-build-context` | S; typed `Params:{Tenant,Query:{ID}}` | `Data`: ImageBuildSourceResult. ManageRegistry ([형식](../image-build-contexts/03-user.md)) |
+| `save-build-git` | S; typed `Params:{Tenant,Request:{Plan,Proof,Result?}}` | `Data`: GitSaveResponse. ManageRegistry와 사용자 proof ([형식](../image-build-contexts/14-git-archive.md)) |
+| `build-draft` | S; typed `Params:{Tenant,Request:DraftRequest}` | `Data`: DraftResponse. ManageRegistry, 편집은 사용자 proof ([형식](../image-build-contexts/06-draft.md)) |
+| `build-zip-transfer` | S; typed `Params:{Tenant,Request:{Upload,Kind,Expected,Index?,Data?,Proof?,Record?}}` | `Data`: ImageBuildIOResult. ManageRegistry, 조각은 사용자 proof ([형식](../image-build-contexts/05-zip.md)) |
 
 `users`·`tenant-members`의 정확한 행 형식·페이지 한도·revision 충돌은 [사용자·구성원 조회](../user-catalog.md)를 따른다. 기존 user-credentials의 공개 필드 이름/타입을 재사용하지만 목록에는 보호 backend의 VerifierRef를 포함하지 않는다. 구성원 조회는 tenant의 명시 membership과 암묵적 활성 system-admin을 보여 주며 credential 목록은 노출하지 않는다.
 
-페이지의 다음 cursor는 응답의 `*Next`를 그대로 다음 Request.After로 보낸다. After는 최대512바이트이며 위에서 표시한 페이지 method만 허용한다. `tenant-retirement`의 cursor는 TenantRetirement 객체 안에 있다. 페이지 크기를 클라이언트가 임의로 지정하는 필드는 없다. revision이 바뀐 페이지를 하나의 snapshot으로 합치지 않는다.
+페이지의 다음 cursor는 응답의 `*Next`(typed method는 `Data.Next`)를 그대로 다음 Request.After(typed method는 `Params.After`)로 보낸다. After는 최대512바이트이며 위에서 표시한 페이지 method만 허용한다. `tenant-retirement`의 cursor는 TenantRetirementStatus 안에 있다. 페이지 크기를 클라이언트가 임의로 지정하는 필드는 없다. revision이 바뀐 페이지를 하나의 snapshot으로 합치지 않는다.
 

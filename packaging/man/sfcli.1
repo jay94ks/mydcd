@@ -1,0 +1,38 @@
+.\" SPDX-License-Identifier: Apache-2.0
+.TH SFCLI 1 "" "Seafield Cluster" "User Commands"
+.SH NAME
+sfcli \- manage a Seafield Cluster
+.SH SYNOPSIS
+.B sfcli
+.I resource verb
+.RI [ options ]
+.SH DESCRIPTION
+.B sfcli
+manages a Seafield Cluster: servers, apps, volumes, networks, images and
+users. It talks to
+.BR sfcd (8)
+over the local management socket
+.I /run/sfcdp.sock
+or a remote context saved in
+.IR ~/.sfc .
+Run
+.B sfcli \-\-help
+for the command list and
+.B sfcli
+.I resource
+.B \-\-help
+for one resource.
+.PP
+AI agents read
+.I SKILL.md
+in the share/sfc directory of the installation before running sfcli.
+.SH ENVIRONMENT
+.TP
+.B SFC_NONINTERACTIVE=1
+never ask for a password or a confirmation.
+.TP
+.B SFC_WALLET_PASSWORD_FILE
+read the wallet password from this file.
+.SH SEE ALSO
+.BR sfcd (8),
+https://github.com/jay94ks/seafield/tree/main/docs/cli

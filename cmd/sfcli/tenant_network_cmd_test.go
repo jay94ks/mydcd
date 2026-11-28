@@ -116,8 +116,9 @@ func TestNextNetworkStep(t *testing.T) {
 	if step, err = nextNetworkStep(v, nil); err != nil || step.Action != "configure-network-dns" || step.Expected != 2 {
 		t.Fatal(step, err)
 	}
-	// Then each server drains and leaves; the last to leave removes the
-	// network. A server mid-change finishes its change first.
+	// Then every server drains before any wait, so the servers finish the
+	// delete on their own; the last to leave removes the network. A server
+	// mid-change finishes its change first.
 	v.DNS = nil
 	v.Members[0].Change = nil
 	v.Members = append(v.Members, netMember{Source: tenancy.Network{Tenant: "shop", ID: "m2", Node: "node-b", Logical: "shop-net", Revision: 8}})
@@ -125,11 +126,16 @@ func TestNextNetworkStep(t *testing.T) {
 		t.Fatal(step, err)
 	}
 	v.Members[0].Source.Draining = true
-	if step, err = nextNetworkStep(v, nil); err != nil || step.Action != "leave-tun-network" || step.Closure != &v.Members[0] {
+	if step, err = nextNetworkStep(v, nil); err != nil || step.Action != "drain-network" || step.Expected != 8 {
+		t.Fatal(step, err)
+	}
+	v.Members[1].Source.Draining = true
+	// Drained servers leave on their own closure: the step sends nothing.
+	if step, err = nextNetworkStep(v, nil); err != nil || step.Action != "" || step.Leaving != &v.Members[0] || step.Closure != nil {
 		t.Fatal(step, err)
 	}
 	v.Members = v.Members[1:]
-	if step, err = nextNetworkStep(v, nil); err != nil || step.Action != "drain-network" || step.Expected != 8 {
+	if step, err = nextNetworkStep(v, nil); err != nil || step.Action != "" || step.Leaving != &v.Members[0] {
 		t.Fatal(step, err)
 	}
 	if step, err = nextNetworkStep(&netState{Tenant: "shop", Name: "shop-net"}, nil); err != nil || !step.Done {
@@ -168,17 +174,17 @@ func TestNextNetworkStepAddsAndRemovesOneServerAtATime(t *testing.T) {
 	if j := step.Payload.(control.NetworkJoin); j.Tenant != "shop" || j.Name != "shop-net" || j.Member.Node != "node-c" || j.Member.Pools[0].MTU != defaultTUNMTU {
 		t.Fatalf("%+v", j)
 	}
-	// Removing node-b keeps the current MTU: drain it, then leave on its
-	// closure.
+	// Removing node-b keeps the current MTU: drain it, then it leaves on
+	// its own closure.
 	if step, err = nextNetworkStep(v, &one); err != nil || step.Action != "drain-network" || step.Expected != 9 {
 		t.Fatal(step, err)
 	}
 	v.Members[1].Source.Draining = true
-	if step, err = nextNetworkStep(v, &one); err != nil || step.Action != "leave-tun-network" || step.Closure == nil || step.Closure.Source.Node != "node-b" {
+	if step, err = nextNetworkStep(v, &one); err != nil || step.Action != "" || step.Leaving == nil || step.Leaving.Source.Node != "node-b" {
 		t.Fatal(step, err)
 	}
 	// While node-b drains, replacing it with node-c finishes node-b first.
-	if step, err = nextNetworkStep(v, ptr(spec(nodeC))); err != nil || step.Action != "leave-tun-network" {
+	if step, err = nextNetworkStep(v, ptr(spec(nodeC))); err != nil || step.Leaving == nil {
 		t.Fatal(step, err)
 	}
 	// Otherwise the new server joins first.

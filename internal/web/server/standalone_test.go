@@ -253,7 +253,7 @@ func TestStandaloneUpGroupApproval(t *testing.T) {
 	f, fake := newFakeFixture(t)
 	fakeLogin(t, f, "alice")
 	fake.SetGroupPassword("shop", "shop-db", "open-sesame")
-	def := "name: sec-shell\nlifetime: fixed\nmode: shell\nimage: busybox:1.36\nnetworks: [shop-net]\nx-sfc:\n  node: node-b\n  secrets_from: [group/shop-db]\n"
+	def := "name: sec-shell\nlifetime: fixed\nmode: shell\nimage: busybox:1.36\nnetworks: [shop-net]\nx-sfc:\n  node: node-b\n  secrets: {from: [group/shop-db]}\n"
 	op := "b1b2c3d4-0000-4000-8000-000000000031"
 	code, out := f.do("POST", "/api/v1/t/shop/standalone/up", map[string]any{"opId": op, "yaml": def})
 	o, _ := out["op"].(map[string]any)

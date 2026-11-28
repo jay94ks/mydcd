@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: seafield <seafield@invalid>
 Date: Fri, 27 Nov 2026 08:14:12 +0000
-Subject: [PATCH 06/20] logs: seafield-queue log driver, numbered capped queue
+Subject: [PATCH 06/21] logs: seafield-queue log driver, numbered capped queue
  read and acked by sfcd
 
 

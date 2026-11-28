@@ -15,7 +15,6 @@ import (
 	"github.com/jay94ks/seafield/internal/cluster/control"
 	"github.com/jay94ks/seafield/internal/containerops"
 	"github.com/jay94ks/seafield/internal/identity"
-	"github.com/jay94ks/seafield/internal/registryclient"
 	"github.com/jay94ks/seafield/internal/sfcp"
 	checker "github.com/jay94ks/seafield/internal/workload/lifecycle"
 	quic "github.com/quic-go/quic-go"
@@ -26,25 +25,6 @@ func TestRequestValidationRequiredPayloadsCannotCrossMethods(t *testing.T) {
 		method string
 		set    func(*Request)
 	}{
-		{"registry-prune-preview", func(r *Request) {
-			r.RegistryPrune = &control.RegistryPruneQuery{ID: "private", Part: "items", Conditions: &registryclient.PruneConditions{}}
-		}},
-		{"registry-prune-results", func(r *Request) {
-			r.RegistryPrune = &control.RegistryPruneQuery{Operation: "original-prune", Part: "items"}
-		}},
-		{"registry-maintenance-plan", func(r *Request) {
-			r.RegistryMaintenance = &control.RegistryMaintenanceQuery{Action: "gc-registry", ID: "private"}
-		}},
-		{"registry-maintenance-status", func(r *Request) { r.RegistryMaintenance = &control.RegistryMaintenanceQuery{Operation: "original-42"} }},
-		{"registry-catalog", func(r *Request) { r.RegistryCatalog = &control.RegistryCatalogueQuery{Kind: "managed", ID: "private"} }},
-		{"image-usages", func(r *Request) { r.ImageUsage = &control.ImageUsageQuery{} }},
-		{"image-resolve", func(r *Request) { r.ImageResolve = &control.ImageResolveQuery{Ref: "alpine:latest"} }},
-		{"external-registry-bind-plan", func(r *Request) {
-			r.ExternalRegistryBind = &control.ExternalRegistryBindQuery{ID: "source", Node: "node-a"}
-		}},
-		{"registry-login-test", func(r *Request) {
-			r.ExternalRegistryProbe = &control.ExternalRegistryProbeQuery{ID: "source", Image: "ghcr.io/team/app:latest"}
-		}},
 		{"container-observe", func(r *Request) {
 			r.Container = &containerops.Query{Schema: 1, Selection: containerops.Selection{App: "app", Service: "web"}, Kind: "top", MaxBytes: 16384}
 		}},
@@ -57,19 +37,6 @@ func TestRequestValidationRequiredPayloadsCannotCrossMethods(t *testing.T) {
 		}},
 		{"app-cd-history", func(r *Request) { r.AppCDRead = &control.AppCDReadRequest{App: "app"} }},
 		{"app-cd-diff", func(r *Request) { r.AppCDRead = &control.AppCDReadRequest{App: "app"} }},
-		{"vault-approval-plan", func(r *Request) { r.VaultPlan = &control.VaultApprovalPlanRequest{} }},
-		{"vault-write-plan", func(r *Request) { r.VaultWritePlan = &control.VaultWritePlanRequest{Realm: "tenant"} }},
-		{"registry-credential", func(r *Request) { r.Registry = &RegistryCredentialRequest{} }},
-		{"checker-source-stage", func(r *Request) { r.CheckerSource = &checker.SourceDescriptor{} }},
-		{"checker-source-recover", func(r *Request) { r.CheckerSource = &checker.SourceDescriptor{} }},
-		{"checker-module-stage", func(r *Request) {
-			r.CheckerSource = &checker.SourceDescriptor{}
-			r.CheckerModule = &checker.ModulePin{}
-		}},
-		{"checker-module-recover", func(r *Request) {
-			r.CheckerSource = &checker.SourceDescriptor{}
-			r.CheckerModule = &checker.ModulePin{}
-		}},
 	} {
 		t.Run(tc.method, func(t *testing.T) {
 			r := Request{Method: tc.method, Tenant: "tenant"}
@@ -92,19 +59,21 @@ func TestRequestValidationRequiredPayloadsCannotCrossMethods(t *testing.T) {
 		{Method: "app-operation", AppOperation: &control.AppOperationRequest{}, After: "cursor"},
 		{Method: "app-cd-registration", AppCDApproval: &control.AppCDApprovalRequest{}},
 		{Method: "app-cd-field", Tenant: "tenant", AppCDField: &control.AppCDFieldRequest{}, After: "cursor"},
-		{Method: "vault-write-plan", Tenant: "other", VaultWritePlan: &control.VaultWritePlanRequest{Realm: "tenant"}},
-		{Method: "checker-source-stage", CheckerSource: &checker.SourceDescriptor{}, CheckerUpload: &[32]byte{}},
-		{Method: "whoami", CheckerUpload: &[32]byte{1}},
-		{Method: "checker-source-stage", CheckerSource: &checker.SourceDescriptor{}, CheckerModule: &checker.ModulePin{}},
+		{Method: "checker-source-stage", Tenant: "tenant"},
 	} {
 		if r.validMethodFields() {
 			t.Fatalf("invalid request shape accepted: %+v", r)
 		}
 	}
+	d := checker.SourceDescriptor{Tenant: "tenant", Digest: [32]byte{1}, Length: 1, SDK: 1}
 	for _, method := range []string{"checker-source-stage", "checker-source-recover"} {
-		r := Request{Method: method, CheckerSource: &checker.SourceDescriptor{}, CheckerUpload: &[32]byte{1}}
+		r, _ := stageRequest(method, CheckerStageQuery{Tenant: "tenant", Source: d, Upload: [32]byte{1}})
 		if !r.validMethodFields() {
 			t.Fatal("nonzero original upload rejected")
+		}
+		zero, _ := stageRequest(method, CheckerStageQuery{Tenant: "tenant", Source: d})
+		if zero.validMethodFields() {
+			t.Fatal("zero upload accepted")
 		}
 	}
 	// This is shape validation, not the method dispatcher or current authorization.
@@ -126,7 +95,7 @@ func TestRequestValidationCredentialAndSelectorBoundaries(t *testing.T) {
 	if !(Request{Method: "login"}).validCredentialFields(Envelope{}, 1) {
 		t.Fatal("private-key login rejected")
 	}
-	for _, method := range []string{"tenant-retirement", "members", "node-storage", "apps", "app-uploads", "vault", "registries"} {
+	for _, method := range []string{"apps", "app-uploads"} {
 		if !(Request{Method: method, After: "next"}).validQuerySelectors() {
 			t.Fatal("valid cursor rejected", method)
 		}
@@ -135,17 +104,12 @@ func TestRequestValidationCredentialAndSelectorBoundaries(t *testing.T) {
 		}
 	}
 	for _, r := range []Request{
-		{Method: "whoami", After: "next"}, {Method: "members", After: "../node"},
-		{Method: "node-invitation"}, {Method: "node-invitation", Node: "../node"},
-		{Method: "node-storage", Node: "../node"}, {Method: "whoami", Node: "node"},
-		{Method: "whoami", NodeStorage: &control.NodeStorageSelection{}},
+		{Method: "whoami", After: "next"},
+		{Method: "whoami", Node: "node"},
 	} {
 		if r.validQuerySelectors() {
 			t.Fatal("invalid selector accepted", r.Method)
 		}
-	}
-	if !(Request{Method: "node-invitation", Node: "node-a"}).validQuerySelectors() {
-		t.Fatal("valid invitation selector rejected")
 	}
 }
 

@@ -117,3 +117,36 @@ func TestVPSHostKeyPinnedAfterFirstContact(t *testing.T) {
 		t.Fatal("changed key accepted", err)
 	}
 }
+
+// iwinv's Ubuntu images must keep their network packages as they are: the
+// SSH installer refuses every package removal and any install of a
+// protected package, and the commands it does send do neither.
+func TestVPSSSHNeverRemovesPackages(t *testing.T) {
+	for _, c := range []string{"apt-get autoremove -y", "set -e; apt autoremove", "apt-get -y remove docker.io", "apt purge iproute2", "apt-get remove --purge isc-dhcp-client", "dpkg -r initscripts", "dpkg --purge systemd-resolved", "true && apt-get autopurge"} {
+		if !vpsRemovesPackages(c) {
+			t.Fatal("removal not refused", c)
+		}
+	}
+	for _, c := range []string{"apt-get install -y isc-dhcp-client", "apt install dhcpcd-base", "apt-get -y --reinstall install systemd-networkd"} {
+		if !vpsInstallsProtected(c) {
+			t.Fatal("protected install not refused", c)
+		}
+	}
+	if vpsInstallsProtected("apt-get install -y curl") || vpsRemovesPackages("apt-get install -y curl") {
+		t.Fatal("ordinary install refused")
+	}
+	key := strings.Repeat("ab", 32)
+	sh := &fakeShell{out: map[string]string{"identity": key + "\n"}}
+	if _, err := vpsSSHInstall(context.Background(), sh, strings.NewReader("BINARY"), control.VPSBuild{OS: "linux", Arch: "amd64"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range sh.commands {
+		if vpsRemovesPackages(c) || vpsInstallsProtected(c) {
+			t.Fatal("installer command changes packages", c)
+		}
+	}
+	// The guard sits in the real shell, before any SSH session opens.
+	if _, err := (sshShell{}).Run(context.Background(), "apt-get autoremove -y", nil); err == nil {
+		t.Fatal("real shell sent a removal")
+	}
+}

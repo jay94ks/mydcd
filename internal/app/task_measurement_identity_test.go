@@ -138,7 +138,7 @@ func verifyRetainedTaskMeasurementIdentity(t *testing.T, ctx context.Context, ta
 		if err != nil || !bytes.Equal(raw, after) {
 			t.Fatal("old external report changed current stored observation", err)
 		}
-		rows, err := current.nodeObservations(ctx, cluster.View{State: view.State})
+		rows, err := current.storedNodeObservations(ctx, cluster.View{State: view.State})
 		count := 0
 		for _, row := range rows {
 			if row.Task != nil && row.Task.Key == key {

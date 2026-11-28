@@ -7,7 +7,7 @@ import markDark2x from '../assets/brand/cluster-mark-on-dark-128.png';
 
 /**
  * Seafield Cluster 마크(원본: docs/brand). 글자 옆 장식이라 alt는 비운다.
- * onDark: 늘 어두운 바탕(상단 막대)에 놓일 때. 아니면 화면 밝기(data-theme)에 맞는 쪽을 CSS가 고른다.
+ * onDark: 늘 어두운 바탕(상단 막대)에 놓일 때. 아니면 화면 테마(data-theme)에 맞는 쪽을 CSS가 고른다.
  */
 export function BrandMark({ size, onDark = false }: { size: number; onDark?: boolean }) {
   const img = (src: string, src2x: string, cls?: string) => (

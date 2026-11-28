@@ -11,11 +11,11 @@ import (
 )
 
 // REQ-24/55 and REQ-56 in sfcd's real shape (docs/reference/
-// service-diagnostics.md, unix-sockets.md): User `service-call` {Tenant,
-// ServiceCall servicecall.Request, ServiceInput {Length, Digest}} with the
-// body as kind 4 input → Reply.ServiceCall servicecall.Result, and User
-// `cd-probe` {Tenant, CDProbe deployment.GitProbeRequest} →
-// Reply.CDProbe deployment.GitProbeResult. Same names as the SDK
+// service-diagnostics.md, unix-sockets.md): User `service-call` Params{Tenant,
+// Call servicecall.Request, Input {Length, Digest}} with the
+// body as kind 4 input → Reply.Data servicecall.Result, and User
+// `cd-probe` Params{Tenant, Probe deployment.GitProbeRequest} →
+// Reply.Data deployment.GitProbeResult. Same names as the SDK
 // (userauth.Client.CallService / ProbeCD). The fake runs the old mocks'
 // behaviour (fake_service_call.go, fake_cd_probe.go, now private) behind
 // the real types and validation:

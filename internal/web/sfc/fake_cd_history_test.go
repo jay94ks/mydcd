@@ -99,8 +99,8 @@ func TestCDHistory(t *testing.T) {
 	}
 
 	// A secret projection gives the selector, not a value; a removed service
-	// and a changed secrets_from count.
-	doc = strings.Replace(phpShopYAML, "      node: node-b\n", "      node: node-b\n      secrets_from: [mysql]\n", 1)
+	// and a changed secrets.from count.
+	doc = strings.Replace(phpShopYAML, "      node: node-b\n", "      node: node-b\n      secrets: {from: [mysql]}\n", 1)
 	doc = doc[:strings.Index(doc, "  db:\n")] + strings.Replace(doc[strings.Index(doc, "  db:\n"):], "  db:\n", "  store:\n", 1)
 	f.SetCDCandidate("shop", "php-shop", "f00d002", doc)
 	if got := results(); got[0] != "f00d002:candidate" || got[1] != "f00d001:abandoned" {

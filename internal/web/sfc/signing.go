@@ -36,7 +36,7 @@ type (
 	PublicUser       = access.PublicUser
 	PublicCredential = access.PublicCredential
 	TenantMember     = access.TenantMember
-	// TenantRetirement: `tenant-retirement` (Reply.TenantRetirement).
+	// TenantRetirement: `tenant-retirement` (typed Data).
 	TenantRetirement = control.TenantRetirementStatus
 	NodeDisksPage    = control.NodeDisksPage
 	NodeDiskView     = control.NodeDiskView
@@ -51,7 +51,7 @@ type (
 	RaftStatus     = userauth.RaftStatus
 	RaftNodeStatus = userauth.RaftNodeStatus
 	StorageRoot    = nodestorage.Root
-	// EventsPage: `events` (Reply.Events).
+	// EventsPage: typed `events`.
 	EventsPage = eventlog.Page
 	EventItem  = eventlog.Item
 	EventQuery = eventlog.Query

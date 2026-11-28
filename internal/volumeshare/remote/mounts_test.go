@@ -237,8 +237,11 @@ func TestMountsJournal(t *testing.T) {
 	if _, err := m.Gone(g.Scope, g.Consumer, private); err != nil {
 		t.Fatal("gone after restart", err)
 	}
-	if err := m.Forget(names["w1"]); err != nil || m.Forget(names["w2"]) == nil {
-		t.Fatal("forget", err)
+	if n := m.ForgetGone(func(Spec) bool { return false }); n != 0 {
+		t.Fatal("forgot a consumer Raft still has", n)
+	}
+	if n := m.ForgetGone(func(s Spec) bool { return true }); n != 1 || m.Forget(names["w2"]) == nil {
+		t.Fatal("forget gone", n)
 	}
 	if m, err = Open(db, f.attach); err != nil || len(m.EngineVolumeNames()) != 2 || len(m.Released()) != 0 {
 		t.Fatal("after forget", err)

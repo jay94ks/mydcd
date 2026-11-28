@@ -208,10 +208,18 @@ func (r *Runtime) engineLogHandler() engineevents.Handler {
 	return engineevents.Handler{
 		Name: "logs",
 		Wants: func(m events.Message) bool {
-			return m.Type == events.ContainerEventType && m.Action == "seafield.logs"
+			return m.Type == events.ContainerEventType && (m.Action == "seafield.logs" || m.Action == events.ActionDestroy)
 		},
 		Handle: func(ctx context.Context, rec engineevents.Record) error {
 			if r.logs == nil {
+				return nil
+			}
+			if rec.Event.Action == events.ActionDestroy {
+				// The container is gone; its stored log stays until
+				// node.yaml logs (keep, limit) removes it.
+				if err := r.logs.MarkGone(rec.Event.Actor.ID, time.Now()); err != nil && !errors.Is(err, logstore.ErrNotFound) {
+					return err
+				}
 				return nil
 			}
 			_, err := r.logs.Fetch(ctx, e, rec.Event.Actor.ID, logMeta(rec.Event.Actor.ID, rec.Event.Actor.Attributes))
@@ -235,6 +243,8 @@ func (r *Runtime) engineLogHandler() engineevents.Handler {
 					errs = append(errs, err)
 				}
 			}
+			// Destroy events missed while sfcd or the feed was away.
+			errs = append(errs, r.markGoneLogs(ctx))
 			return errors.Join(errs...)
 		},
 	}

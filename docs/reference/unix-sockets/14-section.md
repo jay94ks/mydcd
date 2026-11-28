@@ -6,7 +6,7 @@
 
 ```text
 client                                 server
-User/1 (AppInput 또는 CheckerSource/Module descriptor) →
+User/1 (AppInput 또는 typed CheckerStageQuery Params) →
                                      ← User/2 Code=continue
 User/4 offset=0, data, headerDigest    →
 User/4 offset=이전 끝, data, 동일digest → ...

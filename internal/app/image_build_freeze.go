@@ -47,33 +47,34 @@ func (r *Runtime) imageBuildDockerfile(ctx context.Context, spec imagebuild.JobS
 
 // Every executable image dependency uses the reusable Dockerfile/FreezeSources
 // core. Once begin fixes Inputs, recovery reuses those pins rather than asking
-// a mutable tag for a different digest. No native BuildKit work starts here.
-func (r *Runtime) freezeImageBuildInputs(ctx context.Context, spec imagebuild.JobSpec) ([]imagebuild.FrozenSource, error) {
+// a mutable tag for a different digest. The builder image is resolved the
+// same way, once, for this job only. No native BuildKit work starts here.
+func (r *Runtime) freezeImageBuildInputs(ctx context.Context, spec imagebuild.JobSpec) ([]imagebuild.FrozenSource, *imagebuild.FrozenSource, string, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	stop := context.AfterFunc(r.ctx, cancel)
 	defer stop()
 	grant, err := r.imageBuildAuthority(ctx, spec, true)
 	if err != nil || !grant.Allowed {
-		return nil, sfcp.ErrAdmission
+		return nil, nil, "", sfcp.ErrAdmission
 	}
 	if grant.Run.Phase != "queued" {
-		return slices.Clone(grant.Run.Inputs), nil
+		return slices.Clone(grant.Run.Inputs), grant.Run.Builder, grant.Run.BuilderLocal, nil
 	}
 	body, err := r.imageBuildDockerfile(ctx, spec)
 	if err != nil {
-		return nil, err
+		return nil, nil, "", err
 	}
 	var plans []imagebuild.DockerfilePlan
 	count := 0
 	for _, platform := range spec.Context.Platforms {
 		plan, err := imagebuild.AnalyzeDockerfile(body, imagebuild.DockerfileOptions{Platform: platform, BuildPlatform: runtime.GOOS + "/" + runtime.GOARCH, Arguments: spec.Context.Arguments})
 		if err != nil {
-			return nil, err
+			return nil, nil, "", err
 		}
 		count += len(plan.Sources)
 		if count > 128 {
-			return nil, imagebuild.ErrInvalid
+			return nil, nil, "", imagebuild.ErrInvalid
 		}
 		plans = append(plans, plan)
 	}
@@ -94,19 +95,23 @@ func (r *Runtime) freezeImageBuildInputs(ctx context.Context, spec imagebuild.Jo
 			return pinned, err
 		})
 		if err != nil {
-			return nil, err
+			return nil, nil, "", err
 		}
 		inputs = append(inputs, frozen...)
 	}
 	if err := imagebuild.ValidateJobInputs(spec, inputs); err != nil {
-		return nil, err
+		return nil, nil, "", err
+	}
+	builder, local, err := r.resolveImageBuildBuilder(ctx, spec)
+	if err != nil {
+		return nil, nil, "", err
 	}
 	grant, err = r.imageBuildAuthority(ctx, spec, true)
 	if err != nil || !grant.Allowed {
-		return nil, sfcp.ErrAdmission
+		return nil, nil, "", sfcp.ErrAdmission
 	}
 	if grant.Run.Phase != "queued" {
-		return slices.Clone(grant.Run.Inputs), nil
+		return slices.Clone(grant.Run.Inputs), grant.Run.Builder, grant.Run.BuilderLocal, nil
 	}
-	return inputs, nil
+	return inputs, &builder, local, nil
 }

@@ -28,9 +28,9 @@ func (b *Blueprint) freezeRegistrySources(input Compose, definitions []imagesour
 		return nil
 	}
 	for _, name := range mapKeys(input.Services) {
-		image, err := access.PinImage(input.Services[name].Image)
+		image, err := access.ParseImage(input.Services[name].Image)
 		if err != nil {
-			return inputError("IMAGE_NOT_PINNED", name)
+			return inputError("INVALID_IMAGE", name)
 		}
 		spec, err := imagesource.Select(definitions, b.d.Tenant, image)
 		if err != nil {
@@ -41,7 +41,7 @@ func (b *Blueprint) freezeRegistrySources(input Compose, definitions []imagesour
 		}
 		var sources []Source
 		for _, ref := range spec.References() {
-			sources = append(sources, Source{ref.Realm, ref.ID})
+			sources = append(sources, Source{Realm: ref.Realm, Object: ref.ID, Shared: spec.Cluster() && ref.Realm == ""})
 		}
 		if len(sources) > 0 {
 			if b.d.RegistrySources == nil {

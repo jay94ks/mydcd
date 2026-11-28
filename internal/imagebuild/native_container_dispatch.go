@@ -55,7 +55,7 @@ func (n *NativeJobs) createNativeContainer(ctx context.Context, identity engine.
 		if r.CreateSent {
 			return reconcile.ErrPending
 		}
-		image, imageErr := n.docker.Image(ctx, options.Config.Image, false)
+		image, imageErr := n.docker.LocalImage(ctx, options.Config.Image)
 		if imageErr != nil {
 			return nativeFailure(ctx)
 		}
@@ -83,7 +83,13 @@ func (n *NativeJobs) createNativeContainer(ctx context.Context, identity engine.
 		if err := save(*r); err != nil {
 			return err
 		}
-		created, createErr := api.ContainerCreate(ctx, options)
+		// Create from the image ID just checked, so a tag moved meanwhile
+		// cannot swap the builder; the record keeps that ID for this job.
+		pinned := options
+		config := *options.Config
+		config.Image = image.ID
+		pinned.Config = &config
+		created, createErr := api.ContainerCreate(ctx, pinned)
 		if createErr != nil {
 			if errors.Is(createErr, engine.ErrBindBeforeRequest) {
 				r.CreateNotSent = true

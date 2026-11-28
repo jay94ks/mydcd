@@ -216,32 +216,3 @@ func TestAppDownCASRejectsReplacedAcceptedOrigin(t *testing.T) {
 		t.Fatal("old target stopped a replacement acceptance")
 	}
 }
-
-func TestAppDownAfterRecreationUsesCurrentAcceptedTarget(t *testing.T) {
-	f, _ := downCASFixture(t)
-	a, _ := f.p.Apps(f.s)
-	entry := a.entries[appKey("tenant", "first")]
-	entry.Sync = &AppDeliverySync{Recreate: &AppRecreation{}, Plan: [32]byte{1}}
-	target := entry.downTarget()
-	if target == appDownTarget(entry.Origin) {
-		t.Fatal("fixture did not distinguish accepted executions")
-	}
-	expected := entry.Inventory.Revision()
-	op, cmd := signedDownCAS(t, f, "stop-recreated", expected, f.s.Object(AppsKey).Revision, AppDown{Tenant: "tenant", App: "first", Operation: "stop-recreated", Target: &target}, true)
-	catalog, _ := f.p.Catalog(f.s)
-	var err error
-	entry.Inventory, err = entry.Inventory.Retire(expected, catalog, op.Session.User, "stop-recreated", cmd.Actor, cmd.Epoch, nil, true)
-	if err != nil {
-		t.Fatal(err)
-	}
-	entry.Down = &op
-	if err := f.p.validateAppEntryDown(entry); err != nil {
-		t.Fatal("current accepted target rejected", err)
-	}
-	stale := appDownTarget(entry.Origin)
-	bad, _ := signedDownCAS(t, f, "stale-target", expected, f.s.Object(AppsKey).Revision, AppDown{Tenant: "tenant", App: "first", Operation: "stop-recreated", Target: &stale}, true)
-	entry.Down = &bad
-	if f.p.validateAppEntryDown(entry) == nil {
-		t.Fatal("original registration target accepted after recreation")
-	}
-}

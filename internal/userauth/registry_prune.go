@@ -10,66 +10,99 @@ import (
 	"github.com/jay94ks/seafield/internal/access"
 	"github.com/jay94ks/seafield/internal/cluster"
 	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/lifecycle"
 	"github.com/jay94ks/seafield/internal/registryclient"
 	"github.com/jay94ks/seafield/internal/sfcp"
 )
 
-func (s Service) registryPruneQuery(ctx context.Context, view cluster.View, q Request, session access.Session) Reply {
-	if s.RegistryPrune == nil || q.RegistryPrune == nil {
-		return Reply{Schema: 1, Code: "unavailable"}
+// RegistryPruneQuery selects one page of a prune preview or of a prune's
+// results.
+type RegistryPruneQuery struct {
+	Tenant string
+	Query  control.RegistryPruneQuery
+	After  string `json:",omitempty"`
+}
+
+func (q RegistryPruneQuery) valid(results bool) bool {
+	_, _, err := registryclient.CatalogueCursor(q.After)
+	return lifecycle.ValidID(q.Tenant) && q.Query.Valid(results) && err == nil
+}
+
+// RegistryPrunePreviewQuery and RegistryPruneResultsQuery differ only in
+// what Query must name.
+type (
+	RegistryPrunePreviewQuery struct{ RegistryPruneQuery }
+	RegistryPruneResultsQuery struct{ RegistryPruneQuery }
+)
+
+func (q RegistryPrunePreviewQuery) Valid() bool { return q.valid(false) }
+func (q RegistryPruneResultsQuery) Valid() bool { return q.valid(true) }
+
+var (
+	RegistryPrunePreviewMethod = define(Method[RegistryPrunePreviewQuery, control.RegistryPruneView]{Name: "registry-prune-preview"}, true, func(ctx context.Context, s Service, view cluster.View, session access.Session, q RegistryPrunePreviewQuery) (control.RegistryPruneView, string) {
+		if !s.mayAny(view, session, q.Tenant, access.ManageRegistry) {
+			return control.RegistryPruneView{}, "denied"
+		}
+		return s.registryPrune(ctx, view, session, q.RegistryPruneQuery, false)
+	})
+	RegistryPruneResultsMethod = define(Method[RegistryPruneResultsQuery, control.RegistryPruneView]{Name: "registry-prune-results"}, true, func(ctx context.Context, s Service, view cluster.View, session access.Session, q RegistryPruneResultsQuery) (control.RegistryPruneView, string) {
+		if !s.mayAny(view, session, q.Tenant, access.ManageRegistry, access.Read) {
+			return control.RegistryPruneView{}, "denied"
+		}
+		return s.registryPrune(ctx, view, session, q.RegistryPruneQuery, true)
+	})
+)
+
+// registryPrune reads the registry, then checks the read again on a fresh
+// view before it answers.
+func (s Service) registryPrune(ctx context.Context, view cluster.View, session access.Session, q RegistryPruneQuery, results bool) (control.RegistryPruneView, string) {
+	var zero control.RegistryPruneView
+	if s.RegistryPrune == nil {
+		return zero, "unavailable"
 	}
-	results := q.Method == "registry-prune-results"
-	read, err := s.Policy.RegistryPruneRead(view.State, session, time.Now().Unix(), q.Tenant, *q.RegistryPrune, q.After, results)
+	read, err := s.Policy.RegistryPruneRead(view.State, session, time.Now().Unix(), q.Tenant, q.Query, q.After, results)
 	if err != nil {
-		return registryPruneError(err)
+		return zero, registryPruneCode(err)
 	}
 	out, err := s.RegistryPrune(ctx, read, results)
 	if err != nil {
-		return registryPruneError(err)
+		return zero, registryPruneCode(err)
 	}
 	if !out.Valid(read, results) {
-		return Reply{Schema: 1, Code: "unavailable"}
+		return zero, "unavailable"
 	}
 	latest, err := s.Engine.Read(ctx, true)
 	if err != nil || latest.Local {
-		return Reply{Schema: 1, Code: "unavailable"}
+		return zero, "unavailable"
 	}
 	current, err := s.Policy.CurrentRegistryPruneRead(latest.State, read, time.Now().Unix(), results)
 	if err != nil {
-		return registryPruneError(err)
+		return zero, registryPruneCode(err)
 	}
 	if !out.Valid(current, results) {
-		return Reply{Schema: 1, Code: "denied"}
+		return zero, "denied"
 	}
-	return Reply{Schema: 1, Code: "ok", Tenant: q.Tenant, RegistryPrune: &out}
+	return out, "ok"
 }
-func registryPruneError(err error) Reply {
-	code := "unavailable"
-	if errors.Is(err, access.ErrDenied) || errors.Is(err, access.ErrInvalid) {
-		code = "denied"
+
+func registryPruneCode(err error) string {
+	if errors.Is(err, registryclient.ErrCatalogueChanged) {
+		return "conflict"
 	}
-	if errors.Is(err, access.ErrConflict) || errors.Is(err, registryclient.ErrCatalogueChanged) {
-		code = "conflict"
-	}
-	return Reply{Schema: 1, Code: code}
+	return errorCode(err)
 }
+
 func (c Client) RegistryPrune(ctx context.Context, peer sfcp.Peer, session access.Session, tenant string, q control.RegistryPruneQuery, after string, results bool) (control.RegistryPruneView, error) {
-	if tenant == "" || !q.Valid(results) {
-		return control.RegistryPruneView{}, sfcp.ErrAdmission
-	}
-	if _, _, err := registryclient.CatalogueCursor(after); err != nil {
-		return control.RegistryPruneView{}, err
-	}
-	method := "registry-prune-preview"
+	query := RegistryPruneQuery{Tenant: tenant, Query: q, After: after}
+	var view control.RegistryPruneView
+	var err error
 	if results {
-		method = "registry-prune-results"
+		view, err = call(ctx, c, peer, session, RegistryPruneResultsMethod, RegistryPruneResultsQuery{query})
+	} else {
+		view, err = call(ctx, c, peer, session, RegistryPrunePreviewMethod, RegistryPrunePreviewQuery{query})
 	}
-	reply, err := c.query(ctx, peer, session, Request{Method: method, Tenant: tenant, After: after, RegistryPrune: &q})
-	if err != nil {
-		return control.RegistryPruneView{}, err
-	}
-	if reply.Tenant != tenant || reply.RegistryPrune == nil || !reply.RegistryPrune.ValidQuery(c.Cluster, tenant, q, after, results) {
+	if err == nil && !view.ValidQuery(c.Cluster, tenant, q, after, results) {
 		return control.RegistryPruneView{}, sfcp.ErrFrame
 	}
-	return *reply.RegistryPrune, nil
+	return view, err
 }

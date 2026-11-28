@@ -51,7 +51,7 @@ func (w *world) loadRegistries(now int64) {
 }
 
 // syncRegistry copies the spec into the row's screen fields.
-func (w *world) syncRegistry(r *RegistryView) {
+func (w *world) syncRegistry(r *FixtureRegistry) {
 	r.Node, r.Address, r.Volume, r.Enabled = r.Spec.Node, r.Spec.Address, r.Spec.Volume.ID, r.Spec.Enabled
 	r.Endpoint = r.Spec.Authority
 	if r.Name == "" {
@@ -92,7 +92,7 @@ func (c *fakeConn) applyRegistry(op UserOperation, actor string) error {
 	if !w.canManage(actor, sel.Tenant) {
 		return errForbidden
 	}
-	i := slices.IndexFunc(w.registries, func(r RegistryView) bool { return r.Tenant == sel.Tenant && r.ID == sel.ID })
+	i := slices.IndexFunc(w.registries, func(r FixtureRegistry) bool { return r.Tenant == sel.Tenant && r.ID == sel.ID })
 	if i < 0 {
 		if ch.Action != ActionPutRegistry || ch.Expected != 0 {
 			return errCAS
@@ -101,7 +101,7 @@ func (c *fakeConn) applyRegistry(op UserOperation, actor string) error {
 		if v < 0 || w.volumes[v].Kind != "fixed" || w.volumes[v].App != "" || !w.volumes[v].Retain || w.volumes[v].Node != spec.Node {
 			return errCAS
 		}
-		r := RegistryView{Tenant: sel.Tenant, ID: sel.ID, Revision: 1, Generation: 1, Spec: spec, Active: spec.Enabled}
+		r := FixtureRegistry{Tenant: sel.Tenant, ID: sel.ID, Revision: 1, Generation: 1, Spec: spec, Active: spec.Enabled}
 		w.syncRegistry(&r)
 		w.registries = append(w.registries, r)
 		return nil

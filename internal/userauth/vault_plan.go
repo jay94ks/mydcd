@@ -21,12 +21,11 @@ func (c Client) PlanVaultApprovals(ctx context.Context, target sfcp.Peer, sessio
 	var root uint64
 	length := 0
 	for {
-		reply, err := c.query(ctx, target, session, Request{Method: "vault-approval-plan", Tenant: tenant, VaultPlan: &q})
+		part, err := call(ctx, c, target, session, VaultApprovalPlanMethod, VaultApprovalPlanQuery{Tenant: tenant, Plan: q})
 		if err != nil {
 			return control.VaultApprovalPlan{}, err
 		}
-		part := reply.VaultPlan
-		if part == nil || part.Part != q.Part || part.Length < 1 || part.Length > 4<<20 || len(part.Data) == 0 || len(part.Data) > 24<<10 {
+		if part.Part != q.Part || part.Length < 1 || part.Length > 4<<20 || len(part.Data) == 0 || len(part.Data) > 24<<10 {
 			return control.VaultApprovalPlan{}, sfcp.ErrFrame
 		}
 		if q.Part == 0 {

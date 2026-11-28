@@ -73,10 +73,7 @@ func legacyReduce(p Policy, s state.State, command state.Command) (map[string][]
 		return p.reduceStorage(s, command)
 	}
 	if command.Kind == state.ModuleReport && command.Key == ResourcesKey && strings.HasPrefix(command.Actor, "node/") {
-		if bridgeClosedValue(command.Value) {
-			return p.reduceBridgeClosedReport(s, command)
-		}
-		return p.reduceSystemNetworkReport(s, command)
+		return p.reduceNodeResourceReport(s, command)
 	}
 	if command.Kind == state.Module && command.Key == ResourcesKey {
 		return p.reduceResources(s, command)

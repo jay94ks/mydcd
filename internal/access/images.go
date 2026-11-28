@@ -13,7 +13,13 @@ import (
 )
 
 type TrustRule struct{ Registry, Repository string }
-type Image struct{ Reference, Registry, Repository, Digest string }
+
+// Image is a parsed image reference. Reference is the normalized form; Tag
+// is set only for a tag reference and Digest only for a digest reference.
+type Image struct{ Reference, Registry, Repository, Tag, Digest string }
+
+// Pinned reports a digest reference.
+func (i Image) Pinned() bool { return i.Digest != "" }
 
 func registryName(s string) bool {
 	if s == "" || len(s) > 253 || s != strings.ToLower(s) || strings.ContainsAny(s, "/@?#%\\ \t\r\n") || strings.HasSuffix(s, ".") {
@@ -66,6 +72,68 @@ func CanonicalTrust(rules []TrustRule) ([]TrustRule, error) {
 		}
 	}
 	return rules, nil
+}
+
+// ParseImage accepts a tag or a digest reference and normalizes it:
+// alpine is docker.io/library/alpine:latest, and a reference carrying both a
+// tag and a digest keeps only the digest. A tag is never resolved or pinned
+// here; only an instantiated container keeps the digest it was created from.
+// A bare local image ID is refused.
+func ParseImage(ref string) (Image, error) {
+	if len(ref) > 1024 || strings.ContainsAny(ref, "\x00\r\n \t") || strings.HasPrefix(ref, "sha256:") {
+		return Image{}, ErrInvalid
+	}
+	n, err := reference.ParseNormalizedNamed(ref)
+	if err != nil {
+		return Image{}, ErrInvalid
+	}
+	i := Image{Registry: reference.Domain(n), Repository: reference.Path(n)}
+	if d, ok := n.(reference.Digested); ok {
+		if d.Digest().Algorithm() != "sha256" || d.Digest().Validate() != nil {
+			return Image{}, ErrInvalid
+		}
+		i.Digest = d.Digest().String()
+		i.Reference = n.Name() + "@" + i.Digest
+	} else {
+		t, ok := reference.TagNameOnly(n).(reference.Tagged)
+		if !ok {
+			return Image{}, ErrInvalid
+		}
+		i.Tag = t.Tag()
+		i.Reference = n.Name() + ":" + i.Tag
+	}
+	if !registryName(i.Registry) {
+		return Image{}, ErrInvalid
+	}
+	return i, nil
+}
+
+// NormalizeImage is ParseImage's normalized reference.
+func NormalizeImage(ref string) (string, error) {
+	i, err := ParseImage(ref)
+	return i.Reference, err
+}
+
+// CheckImageRef is CheckImage for a tag or digest reference: Deploy on the
+// node plus repository trust. Creating a container still needs CheckImage
+// on the digest the tag resolved to at that moment.
+func (c Catalog) CheckImageRef(actor, tenant, node, ref string) (Image, error) {
+	if c.Authorize(actor, tenant, Deploy, node) != nil {
+		return Image{}, ErrDenied
+	}
+	return c.CheckImageRefTrust(tenant, ref)
+}
+
+// CheckImageRefTrust is CheckImageTrust for a tag or digest reference.
+func (c Catalog) CheckImageRefTrust(tenant, ref string) (Image, error) {
+	i, err := ParseImage(ref)
+	if err != nil {
+		return Image{}, err
+	}
+	if err := c.CheckImageRepositoryTrust(tenant, i.Registry, i.Repository); err != nil {
+		return Image{}, err
+	}
+	return i, nil
 }
 
 // PinImage normalizes Docker Hub aliases but never resolves mutable tags or

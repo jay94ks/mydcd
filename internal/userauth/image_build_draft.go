@@ -18,14 +18,14 @@ func (c Client) BuildDraft(ctx context.Context, target sfcp.Peer, session access
 	if tenant == "" || !q.Valid() || q.Scope != nil && (q.Scope.Tenant != tenant || q.Scope.Root.Cluster != c.Cluster) {
 		return imagebuild.DraftResponse{}, sfcp.ErrAdmission
 	}
-	reply, err := c.query(ctx, target, session, Request{Method: "build-draft", Tenant: tenant, ImageBuildDraft: &q})
+	out, err := call(ctx, c, target, session, BuildDraftMethod, BuildDraftQuery{Tenant: tenant, Request: q})
 	if err != nil {
 		return imagebuild.DraftResponse{}, err
 	}
-	if reply.ImageBuildDraft == nil || !reply.ImageBuildDraft.Valid(q) || reply.ImageBuildDraft.Scope.Tenant != tenant || reply.ImageBuildDraft.Scope.Root.Cluster != c.Cluster {
+	if !out.Valid(q) || out.Scope.Tenant != tenant || out.Scope.Root.Cluster != c.Cluster {
 		return imagebuild.DraftResponse{}, sfcp.ErrFrame
 	}
-	return *reply.ImageBuildDraft, nil
+	return out, nil
 }
 
 // EditBuildDraft signs the fixed scope and exact edit, not a relay-supplied

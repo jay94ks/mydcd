@@ -36,7 +36,7 @@ func TestContainerDetailProjectsDriftWithoutEnvValuesHostPathsOrHealthOutput(t *
 	files := []InputFile{{Source: "/private/node/inputs/never-public", Target: "/etc/app/key.pem", UID: 10001, GID: 10001, Mode: 0400, Reference: "tenant/signing/TOKEN"}, {Kind: "env", Target: "MY_PASS", Mode: 0400, Reference: "tenant/signing/TOKEN"}}
 	decl := containerops.DetailDeclaration{Environment: map[string]string{"MODE": "production"}, NetworkAliases: map[string][]string{"app-net": {"api"}}}
 	got.HostConfig.DNS = []netip.Addr{netip.MustParseAddr("192.0.2.53"), netip.MustParseAddr("2001:db8::53")}
-	detail, err := containerDetail(spec, engine.Identity{Name: "owned-original"}, got, files, nil, "", []string{"MODE=production", "IMAGE_ONLY=image-internal", "MY_PASS=" + secret}, decl, filter)
+	detail, err := containerDetail(spec, engine.Identity{Name: "owned-original"}, got, files, nil, nil, []string{"MODE=production", "IMAGE_ONLY=image-internal", "MY_PASS=" + secret}, decl, filter)
 	if err != nil {
 		t.Fatal(err)
 	}

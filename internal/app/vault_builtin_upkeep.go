@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"encoding/json"
+	"fmt"
 	"log"
 	"slices"
 	"time"
@@ -67,11 +68,14 @@ func (r *Runtime) advanceBuiltinVault(ctx context.Context) {
 	mark := r.builtinValues.Mark()
 	_, local, err := r.members(ctx, false)
 	if err != nil {
+		r.noteBuiltinUpkeep("local members: %v", err)
 		return
 	}
 	if !local.VoterKey(self) {
 		if certificateNonVoter(local, self) {
-			if n, err := r.builtinValues.Retain(nil, mark); err == nil && n > 0 {
+			if n, err := r.builtinValues.Retain(nil, mark); err != nil {
+				r.noteBuiltinUpkeep("not a voter; delete local values: %v", err)
+			} else if n > 0 {
 				log.Printf("builtin vault: not a voter; deleted %d local values", n)
 			}
 		}
@@ -79,15 +83,26 @@ func (r *Runtime) advanceBuiltinVault(ctx context.Context) {
 	}
 	// Deleting and reporting use the quorum view, never a lagging local one.
 	view, err := r.physicalOwners()[0].currentView(ctx)
-	if err != nil || view.Local {
+	if err != nil {
+		r.noteBuiltinUpkeep("quorum view: %v", err)
+		return
+	}
+	if view.Local {
+		r.noteBuiltinUpkeep("quorum view unavailable (local view only)")
 		return
 	}
 	members, err := r.controlPolicy.Members(view.State)
-	if err != nil || !members.VoterKey(self) {
+	if err != nil {
+		r.noteBuiltinUpkeep("members: %v", err)
+		return
+	}
+	if !members.VoterKey(self) {
+		r.noteBuiltinUpkeep("not a voter in the quorum view yet")
 		return
 	}
 	vault, err := r.controlPolicy.Vault(view.State)
 	if err != nil {
+		r.noteBuiltinUpkeep("vault: %v", err)
 		return
 	}
 	keep := map[[32]byte]bool{}
@@ -119,9 +134,43 @@ func (r *Runtime) advanceBuiltinVault(ctx context.Context) {
 			}
 		}
 	}
-	if n, err := r.builtinValues.Retain(keep, mark); err == nil && n > 0 {
+	n, err := r.builtinValues.Retain(keep, mark)
+	if err != nil {
+		r.noteBuiltinUpkeep("delete unread values: %v", err)
+		return
+	}
+	if n > 0 {
 		log.Printf("builtin vault: deleted %d local values nothing reads", n)
 	}
+	r.noteBuiltinUpkeep("")
+	// The counts (never values) show from outside whether this voter holds
+	// what the others hold; logged when they change.
+	if count, err := r.builtinValues.Count(); err == nil {
+		counts := fmt.Sprintf("%d local values; %d revisions still readable", count, len(keep))
+		if counts != r.builtinUpkeepCounts {
+			r.builtinUpkeepCounts = counts
+			log.Printf("builtin vault: %s", counts)
+		}
+	}
+}
+
+// noteBuiltinUpkeep logs why upkeep stopped early, once per distinct reason,
+// and once when it runs through again. Reasons never carry values.
+func (r *Runtime) noteBuiltinUpkeep(format string, args ...any) {
+	reason := ""
+	if format != "" {
+		reason = fmt.Sprintf(format, args...)
+	}
+	if reason == r.builtinUpkeepWhy {
+		return
+	}
+	previous := r.builtinUpkeepWhy
+	r.builtinUpkeepWhy = reason
+	if reason == "" {
+		log.Printf("builtin vault: upkeep runs again (was: %s)", previous)
+		return
+	}
+	log.Printf("builtin vault: upkeep stopped: %s", reason)
 }
 
 // fillBuiltin copies the sealed value of h from a holder voter, checking that

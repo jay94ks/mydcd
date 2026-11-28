@@ -36,7 +36,7 @@ import {
 } from '../api/acme';
 import { dnsDomains, dnsRecords, type DnsDomain } from '../api/dns';
 import { useAuth } from '../auth/session';
-import { Badge, Card, Field, HelpBox, KV, PageHeader, Segmented, type Tone } from '../components/ui';
+import { Badge, Card, Field, HelpBox, KV, PageHeader, Segmented, type Tone, ScreenIds } from '../components/ui';
 import { Empty, ErrorBand, Load } from '../components/states';
 import { ConfirmDialog, Dialog } from '../components/Dialog';
 import { Menu } from '../components/Menu';
@@ -45,15 +45,15 @@ import { useToast } from '../components/Toast';
 import { usePoll } from '../lib/usePoll';
 import { usePhone } from '../lib/viewport';
 import { MCerts } from './MCerts';
-import { ago, fmtTime } from '../lib/format';
+import { ago, fmtDate, fmtTime } from '../lib/format';
 import { Popover } from '../components/Popover';
 import { DOMAIN_TABS } from './Domains';
 import { CERT_STATE, certChainUrl, certificates, deletable, issuerName, short, type StoreCert } from '../api/certs';
 import { ingress, ingressMissing } from '../api/ingress';
 import { DeleteCertDialog, DisableCertDialog, RevokeDialog, RsaWarn, UploadCertDialog } from './CertDetail';
 import { randomUUID } from '../lib/cryptoCompat';
+import { certStoreLive, domainListLive, ingressLive } from '../lib/liveTopics';
 
-const day = (iso?: string) => (iso ? iso.slice(5, 10) : '');
 export const errText = (e: unknown) => (e instanceof ApiError ? acmeErrorText(e.code) || e.message : String(e));
 
 /** 인증서 한 줄의 상태 */
@@ -74,7 +74,7 @@ export function nextText(c: AcmeCert): string {
   if (!c.autoRenew) return '자동 갱신 꺼짐';
   if (c.nextTry && c.failures) return `실패 · 다음 시도 ${fmtTime(c.nextTry)}`;
   if (c.renewBlocked) return '직접 갱신 필요(위임 계정 대기)';
-  return c.nextRenew ? `${day(c.nextRenew)} 전후 자동 갱신` : '—';
+  return c.nextRenew ? `${fmtDate(c.nextRenew)} 전후 자동 갱신` : '—';
 }
 
 export function useCaOf() {
@@ -133,8 +133,8 @@ function DesktopCertsPage() {
   const nav = useNavigate();
   const toast = useToast();
   const q = usePoll((s) => acmeCerts(s), [], 5000);
-  const vq = usePoll((s) => certificates({}, s), [], 5000);
-  const dq = usePoll((s) => dnsDomains(s), []);
+  const vq = usePoll((s) => certificates({}, s), [], 0, certStoreLive);
+  const dq = usePoll((s) => dnsDomains(s), [], 0, domainListLive);
   const { aq, cq, caOf } = useCaOf();
   const [view, setView] = useState<View>('all');
   const [dlg, setDlg] = useState<
@@ -618,7 +618,7 @@ function IssueDialog({ domains, accounts, cas, taken, onClose, onChanged, onAcco
     <Dialog
       title={
         <>
-          인증서 발급 <span className="ids">UI-58</span>
+          인증서 발급 <ScreenIds ids="UI-58" />
         </>
       }
       width={720}
@@ -836,7 +836,7 @@ function AutoIssueCard({ accounts, cas, domains, onUpload }: { accounts: AcmeAcc
         </span>
       }
     >
-      <span className="small muted">외부 접속의 :443 호스트 규칙 중 맞는 인증서가 없는 호스트를 1분마다 찾아 바로 발급합니다. 외부 접속은 호스트와 맞는 인증서를 스스로 골라 쓰므로 앱을 다시 배포하지 않습니다(REQ-21 자동 고르기).</span>
+      <span className="small muted">외부 접속의 :443 호스트 규칙 중 맞는 인증서가 없는 호스트를 1분마다 찾아 바로 발급합니다. 외부 접속은 호스트와 맞는 인증서를 스스로 골라 쓰므로 앱을 다시 배포하지 않습니다.</span>
       {missing ? (
         <Empty kind="scope" title="웹 기능 준비 중">
           자동 발급 설정과 대기 목록은 웹 데몬에 이 기능이 들어오면 켭니다. 그때까지는 '＋ 인증서 발급'으로 직접 받으세요.
@@ -1169,7 +1169,7 @@ function DomainKeysBody({ d, base, allowed, onSave }: { d: AcmeAutoDomain; base:
 
 /** 이 이름들을 쓰는 외부 접속 호스트 규칙. 외부 접속은 보관함에서 호스트와 맞는 인증서를 스스로 고른다. */
 function WillUse({ names }: { names: string[] }) {
-  const q = usePoll((s) => ingress({}, s), []);
+  const q = usePoll((s) => ingress({}, s), [], 0, ingressLive());
   if (q.error !== undefined) return <span className="muted">{ingressMissing(q.error) ? '서버 기능 대기' : '읽지 못함'} · 보관함에 올린 뒤 외부 접속이 이름으로 고릅니다</span>;
   if (!q.data) return <span className="muted">읽는 중…</span>;
   const hit = (h: string) => names.some((n) => (n.startsWith('*.') ? h.endsWith(n.slice(1)) && h.split('.').length === n.split('.').length : h === n));

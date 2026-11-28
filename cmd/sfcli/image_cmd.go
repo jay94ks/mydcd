@@ -361,13 +361,9 @@ Run 'sfcli registry gc REGISTRY' afterwards to free its space.`,
 			if !q.Valid(true) {
 				return cli.Usagef("invalid repository or reference")
 			}
-			reply, err := s.Client.RegistryMaintenance(ctx, s.Target, s.Stored.Session, tenant, true, q)
+			plan, err := s.Client.PlanRegistryMaintenance(ctx, s.Target, s.Stored.Session, tenant, q)
 			if err != nil {
 				return err
-			}
-			plan := reply.RegistryMaintenancePlan
-			if plan == nil {
-				return errors.New("the server sent no delete plan")
 			}
 			if plan.InUse {
 				return fmt.Errorf("%s (%s) is in use; see 'sfcli image usages %s/%s@%s'", ref, digest, page.Authority, repo, digest)
@@ -379,7 +375,7 @@ Run 'sfcli registry gc REGISTRY' afterwards to free its space.`,
 			if err = g.Prompter(c).Confirm("Delete it?"); err != nil {
 				return err
 			}
-			return sendMaintenance(c, g, s, tenant, "image delete "+name+" "+ref, id.Get(), *plan, wait)
+			return sendMaintenance(c, g, s, tenant, "image delete "+name+" "+ref, id.Get(), plan, wait)
 		}),
 	}
 }

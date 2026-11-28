@@ -20,7 +20,7 @@ import { useToast } from '../components/Toast';
 import { fmtBytes, until } from '../lib/format';
 import { eulReul } from '../lib/josa';
 import { usePoll } from '../lib/usePoll';
-import { volumesLive } from '../lib/liveTopics';
+import { registriesLive, volumesLive } from '../lib/liveTopics';
 
 const NEED = '이 작업 공간의 관리 권한이 필요합니다';
 const GiB = 1 << 30;
@@ -56,7 +56,7 @@ function useRegistryUses(tenant: string) {
 
 export function RegistryTab() {
   const { tenant, canDeploy } = useTenantRole();
-  const q = usePoll((s) => registries(tenant, s), [tenant]);
+  const q = usePoll((s) => registries(tenant, s), [tenant], 0, registriesLive(tenant));
   const usesOf = useRegistryUses(tenant);
   const [sel, setSel] = useState<string>();
   const [cred, setCred] = useState<string>();
@@ -582,7 +582,7 @@ function CredentialCard({ tenant, r, focus }: { tenant: string; r: RegistryView;
   };
   const login = cred ? `docker login ${cred.authority} -u ${cred.username} --password-stdin` : '';
   return (
-    <Card title="접근 자격 발급 (UI-81)" className={focus ? 'focus' : undefined}>
+    <Card title="접근 자격 발급" className={focus ? 'focus' : undefined}>
       <div ref={ref} className="col" style={{ gap: 12 }}>
         <span className="small muted">
           {r.id} ({r.endpoint})에서 이미지를 받거나 올릴 짧은 자격을 발급합니다. 받기는 배포 권한, 올리기는 저장소 관리 권한이 필요합니다.

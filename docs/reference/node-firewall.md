@@ -17,20 +17,22 @@ firewall:
 | `managed` | `true`면 제어 대상이다. 없거나 `false`면 sfcd는 iptables를 건드리지 않고, 예전에 만든 `SFC-INPUT`이 남아 있으면 시작할 때 지운다. 바꾼 뒤 sfcd를 다시 시작한다 |
 | `keep_open` | `tcp/PORT`·`udp/PORT` 32개까지, 뒤에 ` from PREFIX[,PREFIX]`(32개까지, 호스트 비트 없이)를 붙이면 그 출처에서만 연다. 생략하면 `tcp/22`(어디서나), `[]`이면 아무것도 열어 두지 않는다. 이 파일에서만 바꿀 수 있고 원격 규칙·클러스터 규칙·`drop` 정책으로 막을 수 없다. VPS 같은 ingress gateway를 공인 IP로 관리한다면 출처 없이 둔다 |
 
-`iptables`·`ip6tables`·`iptables-restore`·`ip6tables-restore`가 있어야 한다(Ubuntu 기본 `iptables` 패키지). 둘 중 하나가 실패하면 두 family 모두 이전 규칙으로 돌아간다.
+sfcd는 iptables·nft 프로그램을 부르지 않고 netlink로 커널 netfilter에 직접 쓴다. 따로 설치할 패키지는 없다. 쓰는 곳은 iptables-nft가 쓰는 `ip filter`·`ip6 filter` 테이블이고, iptables-nft와 같은 모양으로 쓰므로 운영자의 `iptables -S`·`iptables-save`로 그대로 보이고 고칠 수 있다. 두 family는 한 번에 바뀌고, 하나라도 실패하면 둘 다 이전 규칙 그대로다.
+
+iptables-legacy(x_tables) 테이블이 쓰이는 서버(`/proc/net/ip_tables_names`나 `ip6_tables_names`가 비어 있지 않음)는 nftables로 sfcd 체인을 운영자 규칙 앞에 둘 수 없어 거절한다(`apply-failed`, 이유에 안내). `update-alternatives --set iptables /usr/sbin/iptables-nft`로 바꾸거나 `firewall.managed`를 끈다. Ubuntu 24.04·26.04 기본은 iptables-nft다.
 
 ## 어떻게 걸리나
 
 sfcd는 `filter` 테이블에 체인 `SFC-INPUT`을 만들고 `INPUT` 맨 위에 `-j SFC-INPUT` 한 줄만 넣는다(IPv4·IPv6 둘 다). `SFC-INPUT`은 차례로 본다.
 
-1. 잠금 규칙(지울 수 없음): 이미 열린 연결의 응답(`ESTABLISHED,RELATED`), `lo`, Seafield 브릿지 `md*`·TUN `mt*`에서 온 패킷(되돌려서 격리 규칙이 판정), IPv6 이웃 탐색·packet-too-big, SFCP 포트(`node.listen`의 UDP, 예: 7443), `keep_open`, 이 서버 Ingress listener의 포트(HTTP/3면 UDP도).
+1. 잠금 규칙(지울 수 없음): 이미 열린 연결의 응답(`RELATED,ESTABLISHED`), `lo`, Seafield 브릿지 `md*`·TUN `mt*`에서 온 패킷(되돌려서 격리 규칙이 판정), IPv6 이웃 탐색·packet-too-big, SFCP 포트(`node.listen`의 UDP, 예: 7443), `keep_open`, 이 서버 Ingress listener의 포트(HTTP/3면 UDP도).
 2. 클러스터 필수 규칙: `deny` → DROP, `allow` → ACCEPT. 서버 규칙으로 덮어쓸 수 없다.
 3. 서버 `deny` 규칙 → DROP
 4. 서버 `allow` 규칙 → ACCEPT
 5. 클러스터 일반 규칙: `deny` → DROP, `allow` → ACCEPT. 서버 규칙이 먼저라서 한 서버만 열거나 막을 수 있다.
 6. 정책: 서버 정책이 `inherit`(기본값)면 클러스터 정책을 따른다. `return`이면 `INPUT`으로 돌아가 운영자 규칙이 판정하고, `drop`이면 버린다.
 
-`SFC-INPUT`은 `iptables-restore --noflush`로 한 번에 바꾼다. 누가 체인을 비우거나 jump 줄을 옮기면 sfcd가 다음 점검에서 다시 넣는다(jump만 맨 위로 옮기고 다른 줄은 건드리지 않는다). sfcd가 멈춰도 체인은 커널에 남는다.
+`SFC-INPUT`은 netlink 한 batch로 한 번에 바꾼다. 누가 체인을 비우거나 jump 줄을 옮기면 sfcd가 다음 점검에서 다시 넣는다(jump만 맨 위로 옮기고 다른 줄은 건드리지 않는다). sfcd가 멈춰도 체인은 커널에 남는다.
 
 `drop` 정책에서는 conntrack이 응답으로 잡지 못하는 들어오는 UDP가 막힌다. 예: 서버가 DHCPv6로 주소를 받으면 `udp/546`을 allow하거나 `keep_open`에 넣는다.
 
@@ -45,7 +47,7 @@ sfcd는 `filter` 테이블에 체인 `SFC-INPUT`을 만들고 `INPUT` 맨 위에
 | `Proto` | `tcp`, `udp`(포트 필요), `icmp`, `any`(포트 없음). `icmp`는 IPv6에서 ICMPv6다 |
 | `Ports` | `443` 또는 `30000-30100` |
 | `From` | 출처 prefix 32개까지(호스트 비트 없이). 비우면 모든 곳. IPv4 prefix는 iptables에, IPv6 prefix는 ip6tables에만 들어간다 |
-| `Comment` | 한 줄 120자. iptables에는 넣지 않는다 |
+| `Comment` | 한 줄 120자. 커널 규칙에는 넣지 않는다 |
 | `Required` | 클러스터 규칙만. 서버 규칙보다 먼저 판정해 서버가 덮어쓸 수 없다 |
 
 deny가 allow보다 먼저라서 순서는 없다. 서버당 256개, 같은 action·proto·ports·from인 규칙은 두 개 둘 수 없다.
@@ -95,7 +97,7 @@ typed user method다(`control.NodeFirewallOp` → `control.NodeFirewallResult`).
 | `Effective` | 지금 걸린 정책(`return`·`drop`). `Policy`가 `inherit`면 클러스터 값 |
 | `Shadowed` | 클러스터 필수 규칙에 일부 가려지는 서버 규칙 ID(반대 action이고 같은 패킷을 잡을 수 있음) |
 | `Locked` | 잠금 규칙 `{Name, Proto, Port, From, Reason}` |
-| `Operator4`, `Operator6`, `OperatorTruncated` | 운영자 `INPUT` 규칙(`iptables -S INPUT` 줄, family당 200줄까지). 읽기만 한다 |
+| `Operator`, `OperatorFormat`, `OperatorTruncated` | 서버의 다른 들어오는 연결 규칙. `OperatorFormat`은 `nft`로, 각 줄이 nft 표현식이다(iptables 문법이 아님). `ip`·`ip6`·`inet` 테이블의 input hook 체인과 그 체인이 jump하는 체인을(sfcd 자신의 `sfc_*` 테이블은 빼고) 체인 머리줄(`ip filter INPUT (hook input, priority 0, policy accept)`)과 들여 쓴 규칙 줄로 보이고, `SFC-INPUT`과 그 jump는 뺀다. 400줄까지. 읽기만 한다 |
 | `Applied`, `ApplyError` | 체인이 지금 저장된 규칙을 담고 있는지, 아니면 그 이유 |
 
 `Change`·`Log` 항목은 `{Operation, User, At, From, To, Delta, Added}`다. 서버는 최근 500건을 둔다. `Log`는 한 번에 50건, 최신부터이고 `More`가 더 있음을 뜻한다.
@@ -105,7 +107,7 @@ typed user method다(`control.NodeFirewallOp` → `control.NodeFirewallResult`).
 | `not-managed` | 그 서버 node.yaml이 허락하지 않음 |
 | `revision` | 읽은 뒤 바뀜. `View`에 지금 revision |
 | `invalid`, `duplicate`, `too-many`, `missing` | 규칙·정책 오류, 같은 규칙, 256개 초과, 없는 ID |
-| `apply-failed` | iptables 적용·저장 실패. 이전 규칙이 그대로 |
+| `apply-failed` | netfilter 적용·저장 실패(iptables-legacy 서버 포함). 이전 규칙이 그대로 |
 | `operation-conflict` | 같은 작업 ID에 다른 내용 |
 
 서버에 연결되지 않으면 method가 `unavailable`로 끝난다. 나중에 적용되도록 쌓아 두지 않는다.

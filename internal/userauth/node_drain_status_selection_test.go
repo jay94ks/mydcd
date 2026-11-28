@@ -30,7 +30,6 @@ func TestNodeDrainStatusOptionalOperationRequestKeepsSelectorBoundaries(t *testi
 			func(r *Request) { r.Tenant = "tenant" },
 			func(r *Request) { r.Node = "node-b" },
 			func(r *Request) { r.After = "cursor" },
-			func(r *Request) { r.State = "open" },
 		} {
 			bad := r
 			edit(&bad)
@@ -48,12 +47,6 @@ func TestNodeDrainStatusOptionalOperationRequestKeepsSelectorBoundaries(t *testi
 	} {
 		if r.validMethodFields() {
 			t.Fatal("missing plan original or malformed status selector accepted", r.Method, string(r.Params))
-		}
-	}
-	for _, method := range []string{"whoami", "members", "unknown", "node-shell-policy", "login"} {
-		r := Request{Method: method, State: "closed"}
-		if r.validMethodFields() || r.validQuerySelectors() || r.validLookupFields() {
-			t.Fatal("shell-only State field leaked to a foreign method", method)
 		}
 	}
 	_, client, session, _ := journalFixture(t)

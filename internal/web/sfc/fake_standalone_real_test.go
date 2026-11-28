@@ -308,7 +308,7 @@ func TestStandaloneUpReal(t *testing.T) {
 	// A protected Group needs its approval on this original first.
 	f.SetGroupPassword("shop", "shop-db", "open-sesame")
 	sec := control.StandaloneDefinition{Name: "dbg-sec", Lifetime: "fixed"}
-	secDoc := []byte("services:\n  dbg-sec:\n    image: busybox:1.36\n    networks: [shop-net]\n    x-sfc:\n      node: node-a\n      secrets_from: [group/shop-db]\n")
+	secDoc := []byte("services:\n  dbg-sec:\n    image: busybox:1.36\n    networks: [shop-net]\n    x-sfc:\n      node: node-a\n      secrets: {from: [group/shop-db]}\n")
 	if res := up(sec, secDoc, "up-sec", [32]byte{}, 0); res.Code != ResultInvalid {
 		t.Fatalf("without approval %v", res.Code)
 	}
@@ -441,7 +441,7 @@ func TestStandaloneUpApprovalFixture(t *testing.T) {
 	f.SetIdleTimeout(0)
 	alice := passwordLogin(t, f, "alice", "alice")
 	def := control.StandaloneDefinition{Name: "ops-dbg", Lifetime: "fixed"}
-	doc := []byte("services:\n  ops-dbg:\n    image: busybox:1.36\n    networks: [shop-net]\n    x-sfc:\n      node: node-a\n      secrets_from: [group/shop-ops]\n")
+	doc := []byte("services:\n  ops-dbg:\n    image: busybox:1.36\n    networks: [shop-net]\n    x-sfc:\n      node: node-a\n      secrets: {from: [group/shop-ops]}\n")
 	p, err := alice.AppPlan(ctx, AppPlanRequest{Tenant: "shop", Document: doc, Standalone: &def})
 	if err != nil {
 		t.Fatal(err)

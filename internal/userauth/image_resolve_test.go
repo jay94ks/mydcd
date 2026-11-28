@@ -10,26 +10,24 @@ import (
 )
 
 func TestImageResolveRequestCannotCarryOtherScopeOrPrivateInput(t *testing.T) {
-	base := Request{Method: "image-resolve", Tenant: "tenant", ImageResolve: &control.ImageResolveQuery{Ref: "alpine:latest"}}
-	if !base.validQuerySelectors() || !base.validMethodFields() {
+	base := ImageResolveQuery{Tenant: "tenant", Query: control.ImageResolveQuery{Ref: "alpine:latest"}}
+	if !base.Valid() {
 		t.Fatal("typed image resolve rejected")
 	}
-	for _, edit := range []func(*Request){
-		func(q *Request) { q.Tenant = "" }, func(q *Request) { q.After = "cursor" }, func(q *Request) { q.Node = "node-a" },
-		func(q *Request) { q.ImageResolve = nil }, func(q *Request) { q.Method = "whoami" },
-		func(q *Request) { q.ImageResolve = &control.ImageResolveQuery{} },
-		func(q *Request) { q.ImageResolve = &control.ImageResolveQuery{Ref: strings.Repeat("a", 1025)} },
-		func(q *Request) { q.ExternalRegistryProbe = &control.ExternalRegistryProbeQuery{ID: "private"} },
+	for _, bad := range []ImageResolveQuery{
+		{Query: base.Query}, {Tenant: "tenant"},
+		{Tenant: "tenant", Query: control.ImageResolveQuery{Ref: strings.Repeat("a", 1025)}},
 	} {
-		bad := base
-		edit(&bad)
-		if bad.validQuerySelectors() {
-			t.Fatal("mixed image lookup selector accepted")
+		if bad.Valid() {
+			t.Fatal("invalid image lookup accepted", bad)
 		}
 	}
-	bad := base
-	bad.Secret = []byte("private input")
-	if bad.validCredentialFields(Envelope{}, 1) {
-		t.Fatal("image resolution accepted raw credential")
+	for _, raw := range []string{
+		`{"Tenant":"tenant","Query":{"Ref":"alpine:latest"},"After":"cursor"}`,
+		`{"Tenant":"tenant","Query":{"Ref":"alpine:latest"},"Secret":"cHJpdmF0ZQ=="}`,
+	} {
+		if strict([]byte(raw), &ImageResolveQuery{}) == nil {
+			t.Fatal("foreign image lookup field accepted", raw)
+		}
 	}
 }

@@ -20,7 +20,7 @@ import { usePhone } from '../lib/viewport';
 import { MIngressDetail } from './MIngressDetail';
 import { eulReul } from '../lib/josa';
 import { BlockDialog, ReleaseDialog, UnlinkDialog } from './Ingress';
-import { kindsLive } from '../lib/liveTopics';
+import { ingressLive, kindsLive } from '../lib/liveTopics';
 
 const n = (x: number) => x.toLocaleString('ko-KR');
 const NEED_NET = '이 작업 공간에서 망(Network) 관리 권한이 있어야 긴급 차단할 수 있습니다. 작업 공간 관리자에게 요청하세요.';
@@ -45,9 +45,9 @@ function DesktopIngressDetail() {
   const session = useSession();
   const admin = !!session.user.systemAdmin;
   const canNet = admin || session.tenants.some((t) => t.id === tenant && t.role === 'manager');
-  const dq = usePoll((s) => ingressApp(tenant, app, s, pickNode), [tenant, app, pickNode], 30_000);
-  const bq = usePoll((s) => ingressBlocks(s), [], 30_000);
-  const vq = usePoll((s) => ingress({ tenant }, s), [tenant]);
+  const dq = usePoll((s) => ingressApp(tenant, app, s, pickNode), [tenant, app, pickNode], 30_000, ingressLive(tenant));
+  const bq = usePoll((s) => ingressBlocks(s), [], 30_000, ingressLive(tenant));
+  const vq = usePoll((s) => ingress({ tenant }, s), [tenant], 0, ingressLive(tenant));
   const [block, setBlock] = useState<BlockScope | 'app'>();
   const [release, setRelease] = useState<IngressBlock>();
   const [drain, setDrain] = useState(false);
@@ -404,7 +404,7 @@ function BalanceCard({ d, r, tenant, app, canEdit, onDone }: { d: RouteDetail; r
             ))}
           </div>
           <p className="small muted">
-            <Link to={`/deploy/apps/${tenant}/${app}/versions`}>앱 버전 기록(UI-1D)</Link>에서 되돌릴 수 있습니다.
+            <Link to={`/deploy/apps/${tenant}/${app}/versions`}>앱 버전 기록</Link>에서 되돌릴 수 있습니다.
           </p>
         </Drawer>
       )}
@@ -629,7 +629,7 @@ function RouteHooks({ d, tenant, app, canEdit }: { d: RouteDetail; tenant: strin
         )}
       </Load>
       <p className="small muted" style={{ margin: '10px 0 0' }}>
-        조건: 5xx 비율 · 지연 p95 · 받을 컨테이너 0개 · 상태 검사 실패 · 인증서 없음/만료 임박 · 긴급 차단 걸림/풀림 · 분배 조건 묶음이 비어 기본으로 넘김. 같은 조건은 풀릴 때 한 번 더(회복) 부르고, 10분 안에 같은 알림은 묶습니다. 웹훅 자체(주소·서명 비밀)는 <Link to="/incidents/hooks">장애 대응 › 웹훅(UI-BB)</Link>에 한 번 등록하고 여기서는 연결만 합니다.
+        조건: 5xx 비율 · 지연 p95 · 받을 컨테이너 0개 · 상태 검사 실패 · 인증서 없음/만료 임박 · 긴급 차단 걸림/풀림 · 분배 조건 묶음이 비어 기본으로 넘김. 같은 조건은 풀릴 때 한 번 더(회복) 부르고, 10분 안에 같은 알림은 묶습니다. 웹훅 자체(주소·서명 비밀)는 <Link to="/incidents/hooks">장애 대응 › 웹훅</Link>에 한 번 등록하고 여기서는 연결만 합니다.
       </p>
       {add && <RouteHookDialog d={d} tenant={tenant} app={app} hooks={hq.data?.items ?? []} onClose={() => setAdd(false)} onDone={lq.refresh} />}
       {del && <UnlinkDialog l={del} onClose={() => setDel(undefined)} onDone={lq.refresh} />}
@@ -724,7 +724,7 @@ function RouteHookDialog({ d, tenant, app, hooks, onClose, onDone }: { d: RouteD
               <input type="number" value={limit} onChange={(e) => setLimit(Number(e.target.value))} style={{ width: 90 }} /> {ev === 'error-rate' ? '%' : 'ms'}
             </span>
           </Field>
-          <Field label="지속" error={badMins ? '1~60분' : undefined}>
+          <Field label="지속 시간" error={badMins ? '1~60분' : undefined}>
             <span style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
               <input type="number" value={mins} onChange={(e) => setMins(Number(e.target.value))} style={{ width: 70 }} /> 분
             </span>
@@ -749,7 +749,7 @@ function RouteHookDialog({ d, tenant, app, hooks, onClose, onDone }: { d: RouteD
         </label>
       </div>
       {w?.kind === 'internal' && <div className="note wa small">클러스터 내부 웹훅은 이 경로와 같은 망 장애에 함께 막힐 수 있습니다. 외부 호출 웹훅도 하나 연결해 두세요.</div>}
-      <p className="small muted">목록에 없는 웹훅은 장애 대응 › 웹훅(UI-BB)에서 먼저 등록합니다. 작업 공간 사용자는 자기 작업 공간이 등록한 웹훅과 시스템 관리자가 공개한 웹훅만 고를 수 있습니다.</p>
+      <p className="small muted">목록에 없는 웹훅은 장애 대응 › 웹훅에서 먼저 등록합니다. 작업 공간 사용자는 자기 작업 공간이 등록한 웹훅과 시스템 관리자가 공개한 웹훅만 고를 수 있습니다.</p>
       {error !== undefined && <ErrorBand error={error} what="연결하지 못했습니다" />}
     </Dialog>
   );
@@ -828,7 +828,7 @@ function ErrorsCard({ d, canNet, onBlockSource }: { d: RouteDetail; canNet: bool
         )}
       </div>
       <p className="small muted" style={{ margin: '8px 0 0' }}>
-        오류 응답만 최근 200개를 서버가 보관합니다(요청 본문·쿠키 없음, 출발지 IP 끝자리 가림). REQ-22.
+        오류 응답만 최근 200개를 서버가 보관합니다(요청 본문·쿠키 없음, 출발지 IP 끝자리 가림).
       </p>
       {pick && (
         <Drawer

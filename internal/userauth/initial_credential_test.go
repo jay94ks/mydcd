@@ -20,7 +20,7 @@ func TestInitialCredentialPrivateSelectorsNeverRelayOrCrossMethods(t *testing.T)
 	if !q.validMethodFields() || !q.validCredentialFields(envelope, 1) {
 		t.Fatal("private stage rejected")
 	}
-	for _, edit := range []func(*Request){func(q *Request) { q.Tenant = "tenant" }, func(q *Request) { q.Node = "node-a" }, func(q *Request) { q.TargetUser = "admin" }, func(q *Request) { q.Method = "whoami" }, func(q *Request) { q.Method = "initial-credential-observe" }, func(q *Request) { q.InitialCredential = nil }} {
+	for _, edit := range []func(*Request){func(q *Request) { q.Tenant = "tenant" }, func(q *Request) { q.Node = "node-a" }, func(q *Request) { q.Method = "whoami" }, func(q *Request) { q.Method = "initial-credential-observe" }, func(q *Request) { q.InitialCredential = nil }} {
 		bad := q
 		edit(&bad)
 		if bad.validMethodFields() && bad.validCredentialFields(envelope, 1) {

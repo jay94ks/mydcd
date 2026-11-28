@@ -39,7 +39,7 @@ var whoamiRoots = []string{
 	control.LifecycleKey, control.RegistriesKey, control.ExternalRegistriesKey, control.RegistryMaintenanceKey,
 	control.ImageBuildKey, control.ImageCacheKey, control.NodeStorageKey, control.StorageKey,
 	control.CertificatesKey, control.VPSKey, control.IngressManagementKey, control.CompactKey,
-	control.ClusterBackupKey, control.TunnelReconnectKey,
+	control.ClusterBackupKey, control.TunnelReconnectKey, control.MembersKey, control.NodeShellKey,
 }
 
 // rootsOf reads each book's root revision from the one committed view; it

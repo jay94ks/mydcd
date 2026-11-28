@@ -539,8 +539,13 @@ func (v Volumes) Quiescent() bool {
 			return false
 		}
 	}
-	for _, e := range v.entries {
-		if len(e.State.Consumers()) != 0 || e.State.Deleting() {
+	for key, e := range v.entries {
+		consumers := e.State.Consumers()
+		// A settled archive holds its Volume for as long as it is kept.
+		if j, ok := v.activeArchive(key); ok && j.Phase == "Archived" {
+			consumers = slices.DeleteFunc(consumers, func(c volumes.Consumer) bool { return c == j.Binding.Consumer })
+		}
+		if len(consumers) != 0 || e.State.Deleting() {
 			return false
 		}
 	}

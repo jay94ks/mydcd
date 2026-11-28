@@ -73,6 +73,11 @@ func (r *Runtime) consumeImageBuildSDK(ctx, jobctx context.Context, spec imagebu
 		if work.Run.Phase == "unknown" {
 			return r.finishImageBuild(ctx, spec, imagebuild.JobResult{Code: "BUILD_FAILED"})
 		}
+		if !record.CreateSent {
+			if err := r.pullImageBuildBuilder(jobctx, spec, work.Run); err != nil {
+				return r.finishImageBuild(ctx, spec, imageBuildFailure(err, jobctx.Err() != nil))
+			}
+		}
 		if err := native.Create(jobctx, spec); err != nil {
 			return errors.Join(err, r.markImageBuildUncertain(ctx, spec))
 		}

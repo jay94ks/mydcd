@@ -10,7 +10,7 @@ import { BLOCK_KIND_NAME, CIDR_RE, GW_NAME, GW_SHORT, RESP_NAME, addBlock, allSo
 import { createLink, deleteLink, webhookLinks, webhooks, type Webhook, type WebhookLink } from '../api/webhooks';
 import { node } from '../api/endpoints';
 import { useAuth, useSession } from '../auth/session';
-import { Badge, Card, Field, HelpBox, KV, PageHeader, Segmented } from '../components/ui';
+import { Badge, Card, Field, HelpBox, KV, PageHeader, Segmented, ScreenIds } from '../components/ui';
 import { ErrorBand, Load } from '../components/states';
 import { MutationError, OpPanel, useMutation } from '../components/OpPanel';
 import { Dialog } from '../components/Dialog';
@@ -27,7 +27,7 @@ import { Drawer } from '../components/Drawer';
 import { MappingDialog, RemoveMappingDialog, RoutesTab, useClusterRoutes, type MapDialog } from './IngressRoutes';
 import { Tabs } from '../components/Tabs';
 import { SHARED_TABS } from './Shared';
-import { kindsLive } from '../lib/liveTopics';
+import { ingressHistoryLive, ingressLive, kindsLive } from '../lib/liveTopics';
 
 type Tab = 'map' | 'blocks' | 'limits' | 'history';
 type View = 'node' | 'tenant' | 'route';
@@ -83,8 +83,8 @@ function MIngress() {
   const session = useSession();
   const admin = !!session?.user.systemAdmin;
   const navigate = useNavigate();
-  const q = usePoll((s) => ingress({}, s), [], 5_000);
-  const bq = usePoll((s) => ingressBlocks(s), [], 5_000);
+  const q = usePoll((s) => ingress({}, s), [], 5_000, ingressLive());
+  const bq = usePoll((s) => ingressBlocks(s), [], 5_000, ingressLive());
   // 해제 중(lifting)인 차단은 걸린 차단으로 세지 않는다.
   const blocks = (bq.data?.items ?? []).filter((b) => b.state !== 'lifting');
   const [view, setView] = useState<'blocks' | Flat>();
@@ -291,13 +291,13 @@ function DesktopIngress() {
     if (k === 'view') p.delete('pick');
     setSp(p, { replace: true });
   };
-  const q = usePoll((s) => ingress(view === 'node' && pick ? { node: pick } : view !== 'node' && pick ? { tenant: pick } : {}, s), [view, pick], 5_000);
-  const bq = usePoll((s) => ingressBlocks(s), [], 5_000);
+  const q = usePoll((s) => ingress(view === 'node' && pick ? { node: pick } : view !== 'node' && pick ? { tenant: pick } : {}, s), [view, pick], 5_000, ingressLive());
+  const bq = usePoll((s) => ingressBlocks(s), [], 5_000, ingressLive());
   const [block, setBlock] = useState<BlockScope | 'new'>();
   // 차단 탭은 해제 중인 것까지 보여 주고, 나머지(띠·지도)는 걸린 것만 쓴다.
   const allBlocks = bq.data?.items ?? [];
   const blocks = allBlocks.filter((b) => b.state !== 'lifting');
-  const all = usePoll((s) => ingress({}, s), [], 30_000);
+  const all = usePoll((s) => ingress({}, s), [], 30_000, ingressLive());
   const nodeNames = all.data?.nodes.map((x) => x.node) ?? [];
   const tenantNames = all.data?.tenants.map((x) => x.tenant) ?? [];
   const tabTo = (k: Tab) => {
@@ -782,7 +782,7 @@ function MapTable({ v, gw, view, blocks, onBlock, onRelease }: { v: IngressView;
             options={[
               ['all', '전체'],
               ['blocked', '차단 중'],
-              ['problem', '문제 있음'],
+              ['problem', '오류'],
             ]}
           />
         </span>
@@ -850,7 +850,7 @@ function MapTable({ v, gw, view, blocks, onBlock, onRelease }: { v: IngressView;
           ))}
         </div>
       </div>
-      <span className="small muted">줄을 누르면 그 경로의 상세(UI-5B)가 열립니다. 컨테이너 이름은 상세에서 컨테이너 화면(UI-3A)으로 이어집니다. 숫자는 최근 1분 평균이며 서버별 외부 접속 관측에서 옵니다.</span>
+      <span className="small muted">줄을 누르면 그 경로의 상세가 열립니다. 컨테이너 이름은 상세에서 컨테이너 화면으로 이어집니다. 숫자는 최근 1분 평균이며 서버별 외부 접속 관측에서 옵니다.</span>
       {release && <ReleaseDialog b={release} onClose={() => setRelease(undefined)} onDone={onRelease} />}
     </Card>
   );
@@ -1002,7 +1002,7 @@ function TenantExposure({ v }: { v: IngressView }) {
       ))}
       <div className="gr" style={{ gridTemplateColumns: '1fr' }}>
         <span className="small muted">
-          작업 공간 상세(UI-70)에서 시스템 관리자가 정합니다. 허용되지 않은 작업 공간이 app.yaml에 <span className="mono">gateway: external</span>을 쓰면 배포가 거부됩니다.
+          작업 공간 상세에서 시스템 관리자가 정합니다. 허용되지 않은 작업 공간이 app.yaml에 <span className="mono">gateway: external</span>을 쓰면 배포가 거부됩니다.
         </span>
       </div>
     </div>
@@ -1258,7 +1258,7 @@ function GatewayHooks({ admin, nodes }: { admin: boolean; nodes: IngressNode[] }
           )
         }
       </Load>
-      <span className="small muted">경로 규칙별 웹훅은 외부 접속 상세(UI-5B)에서 연결합니다. 게이트웨이 웹훅은 시스템 관리자만, 경로 규칙 웹훅은 그 작업 공간의 Network 관리 권한으로 연결합니다. 바깥 장애로 게이트웨이 전체가 끊겨도 부를 수 있게 외부 호출 웹훅을 하나 이상 두기를 권합니다.</span>
+      <span className="small muted">경로 규칙별 웹훅은 외부 접속 상세에서 연결합니다. 게이트웨이 웹훅은 시스템 관리자만, 경로 규칙 웹훅은 그 작업 공간의 Network 관리 권한으로 연결합니다. 바깥 장애로 게이트웨이 전체가 끊겨도 부를 수 있게 외부 호출 웹훅을 하나 이상 두기를 권합니다.</span>
       {add && <IngressHookDialog nodes={nodes} hooks={hq.data?.items ?? []} onClose={() => setAdd(false)} onDone={() => void lq.refresh()} />}
       {del && <UnlinkDialog l={del} onClose={() => setDel(undefined)} onDone={() => void lq.refresh()} />}
     </Card>
@@ -1590,12 +1590,12 @@ function LimitsTab({ v }: { v: IngressView }) {
             <UsageTable t={t} buffer={false} />
           </Card>
         ))}
-      <span className="small muted">작업 공간 × 서버 한도는 작업 공간 상세(UI-70)에서 바꿉니다.</span>
+      <span className="small muted">작업 공간 × 서버 한도는 작업 공간 상세에서 바꿉니다.</span>
     </>
   );
 }
 function HistoryTab() {
-  const q = usePoll((s) => ingressHistory(s), [], 15_000);
+  const q = usePoll((s) => ingressHistory(s), [], 0, ingressHistoryLive);
   // 다음 쪽은 next를 after로 이어 읽어 붙인다(새로 고침하면 첫 쪽부터)
   const [more, setMore] = useState<{ items: IngressEvent[]; next?: string }>();
   const [busy, setBusy] = useState(false);
@@ -1865,7 +1865,7 @@ export function BlockDialog({ v, preset, admin, onClose, onDone }: { v: IngressV
     <Dialog
       title={
         <>
-          ⛔ 긴급 차단 <span className="ids">UI-5C</span>
+          ⛔ 긴급 차단 <ScreenIds ids="UI-5C" />
         </>
       }
       width={720}

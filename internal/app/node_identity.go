@@ -22,7 +22,7 @@ func (r *Runtime) advanceIdentityRotation(ctx context.Context) error {
 		return err
 	}
 	for _, row := range d.Rotations {
-		if row.Node != r.installation.record.Root.Self.ID || row.Phase == "Installed" {
+		if row.Node != r.installation.record.Root.Self.ID || row.Settled() {
 			continue
 		}
 		switch row.Phase {

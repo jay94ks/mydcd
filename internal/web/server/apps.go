@@ -103,7 +103,7 @@ func (s *Server) handleMembers(w http.ResponseWriter, r *http.Request, ws *webSe
 		}
 		return membersView{listPage: s.page(items, p.Next, p.RootRevision), Voters: p.NodeVoters, Quorum: p.NodeQuorum,
 			RuntimeRevision: p.NodeRuntimeRevision, OperationEpoch: p.NodeOperationEpoch, ConfigurationIndex: p.NodeConfigurationIndex,
-			LedgerEpoch: max(p.LedgerEpoch, 1), LedgerRevision: who.LedgerRootRevision}, nil
+			LedgerEpoch: max(who.LedgerEpoch, 1), LedgerRevision: who.LedgerRootRevision}, nil
 	})
 }
 
@@ -456,6 +456,9 @@ func (s *Server) handleGetPrefs(w http.ResponseWriter, r *http.Request, ws *webS
 	writeJSON(w, http.StatusOK, map[string]any{"prefs": json.RawMessage(raw)})
 }
 
+// PUT /prefs {prefs}: the account's screen settings, one JSON object the
+// frontend owns. The daemon reads only language ("" = not set, "ko", "en":
+// the account's default language, devel/design/web-i18n.md).
 func (s *Server) handlePutPrefs(w http.ResponseWriter, r *http.Request, ws *webSession) {
 	var req struct {
 		Prefs json.RawMessage `json:"prefs"`
@@ -465,6 +468,13 @@ func (s *Server) handlePutPrefs(w http.ResponseWriter, r *http.Request, ws *webS
 	}
 	if len(req.Prefs) > 64<<10 || len(req.Prefs) == 0 || req.Prefs[0] != '{' {
 		writeError(w, http.StatusBadRequest, "bad-request", "prefs must be a JSON object up to 64 KiB")
+		return
+	}
+	var known struct {
+		Language *string `json:"language"`
+	}
+	if json.Unmarshal(req.Prefs, &known) != nil || known.Language != nil && *known.Language != "" && !knownLang(*known.Language) {
+		writeError(w, http.StatusBadRequest, "bad-request", `prefs.language: "", "ko" or "en"`)
 		return
 	}
 	if err := s.opt.Store.PutPrefs(ws.user.ID, req.Prefs); err != nil {

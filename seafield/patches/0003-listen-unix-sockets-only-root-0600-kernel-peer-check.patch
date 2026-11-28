@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: seafield <seafield@invalid>
 Date: Fri, 27 Nov 2026 08:03:05 +0000
-Subject: [PATCH 03/20] listen: unix sockets only, root 0600, kernel peer check
+Subject: [PATCH 03/21] listen: unix sockets only, root 0600, kernel peer check
 
 
 diff --git a/daemon/command/daemon.go b/daemon/command/daemon.go

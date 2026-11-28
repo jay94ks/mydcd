@@ -81,7 +81,7 @@ func TestLifecycleSourceActualUserWireKeepsExactBodyEOFAndPageDigest(t *testing.
 						digest := sha256.Sum256(frame.Fields[0].Value)
 						if request.Method == "lifecycle-source-stage" {
 							metadata := LifecycleStageResult{Node: "node", Owner: node.Public, Descriptor: d, Upload: upload}
-							if err = binding.respond(stream, frame, digest, Reply{Schema: 1, Code: "continue", LifecycleStage: &metadata}); err != nil {
+							if err = binding.respond(stream, frame, digest, dataReply("continue", metadata)); err != nil {
 								return err
 							}
 							body, err := readUserInput(conn, stream, frame.Request, digest, int(d.Length), d.Digest, checker.MaxScriptBytes)
@@ -101,7 +101,7 @@ func TestLifecycleSourceActualUserWireKeepsExactBodyEOFAndPageDigest(t *testing.
 							fact := checker.SourceFact{Upload: &upload, Schema: 1, Cluster: c.Cluster, Owner: node.Public, Tenant: d.Tenant, Digest: d.Digest, Length: d.Length, SDK: 1}
 							fact.Signature = ed25519.Sign(node.Private, checker.SourceFactBytes(fact))
 							result := LifecycleStageResult{Node: "node", Owner: node.Public, Descriptor: d, Upload: upload, Source: &fact}
-							return binding.respond(stream, frame, digest, Reply{Schema: 1, Code: "ok", LifecycleStage: &result})
+							return binding.respond(stream, frame, digest, dataReply("ok", result))
 						}
 						var typed LifecycleSourceQuery
 						if request.Method != "lifecycle-source" || strict(request.Params, &typed) != nil {
@@ -188,11 +188,17 @@ func TestLifecycleSourceActualUserWireKeepsExactBodyEOFAndPageDigest(t *testing.
 func TestLifecycleSourceRequestsCannotBorrowOtherMethodSelectors(t *testing.T) {
 	d := streamedSource([]byte("package checker\n"))
 	id := [32]byte{1}
-	request := Request{Method: "lifecycle-source-stage", Tenant: "tenant", CheckerSource: &d, CheckerUpload: &id}
-	if !request.validMethodFields() || !request.validQuerySelectors() {
+	request, err := stageRequest("lifecycle-source-stage", CheckerStageQuery{Tenant: "tenant", Source: d, Upload: id})
+	if err != nil || !request.validMethodFields() || !request.validQuerySelectors() {
 		t.Fatal("valid editor upload")
 	}
-	for _, change := range []func(*Request){func(r *Request) { r.After = "cursor" }, func(r *Request) { r.TargetUser = "other" }, func(r *Request) { r.Method = "whoami" }, func(r *Request) { r.CheckerUpload = nil }, func(r *Request) { r.Tenant = "other" }} {
+	recover, _ := stageRequest("lifecycle-source-recover", CheckerStageQuery{Tenant: "tenant", Source: d, Upload: id})
+	if recover.validQuerySelectors() {
+		t.Fatal("recover without its provider node admitted")
+	}
+	noUpload, _ := stageRequest("lifecycle-source-stage", CheckerStageQuery{Tenant: "tenant", Source: d})
+	withNode, _ := stageRequest("lifecycle-source-recover", CheckerStageQuery{Tenant: "tenant", Node: "node", Source: d, Upload: id})
+	for _, change := range []func(*Request){func(r *Request) { r.After = "cursor" }, func(r *Request) { r.Method = "whoami" }, func(r *Request) { r.Params = noUpload.Params }, func(r *Request) { r.Tenant = "other" }, func(r *Request) { r.Method = "checker-source-stage"; r.Params = withNode.Params }} {
 		copy := request
 		change(&copy)
 		if copy.validMethodFields() && copy.validQuerySelectors() {
@@ -208,35 +214,33 @@ func TestRQ11SourceSelectorsKeepEarlierTypedBoundaries(t *testing.T) {
 	callInput := ServiceCallInput{Digest: sha256.Sum256(nil)}
 	probe := deployment.GitProbeRequest{App: "shop", Repository: "https://git.example/repo.git", Branch: "main", Path: "app.yaml"}
 	earlier := []Request{
-		{Method: "image-builds", Tenant: "tenant", ImageBuild: &control.ImageBuildQuery{Part: "contexts"}},
-		{Method: "tenant-storage", Tenant: "tenant"},
-		{Method: "service-call", Tenant: "tenant", ServiceCall: &call, ServiceInput: &callInput},
-		{Method: "cd-probe", Tenant: "tenant", CDProbe: &probe},
+		callRequest(call, callInput),
+		probeRequest(probe),
 		{Method: "standalone-list", Tenant: "tenant", Standalone: &control.StandaloneQuery{}},
 	}
 	for _, request := range earlier {
 		if !request.validMethodFields() || !request.validQuerySelectors() {
 			t.Fatal("earlier typed method lost", request.Method)
 		}
-		request.CheckerSource = &descriptor
-		request.CheckerUpload = &upload
+		request.Params = json.RawMessage(`{"Tenant":"tenant"}`)
 		if request.validMethodFields() || request.validQuerySelectors() {
 			t.Fatal("source selector crossed earlier method", request.Method)
 		}
 	}
-	sources := []Request{
-		{Method: "lifecycle-source-stage", Tenant: descriptor.Tenant, CheckerSource: &descriptor, CheckerUpload: &upload},
+	stage, err := stageRequest("lifecycle-source-stage", CheckerStageQuery{Tenant: descriptor.Tenant, Source: descriptor, Upload: upload})
+	if err != nil {
+		t.Fatal(err)
 	}
+	sources := []Request{stage}
 	for _, source := range sources {
 		if !source.validMethodFields() || !source.validQuerySelectors() {
 			t.Fatal("valid source method lost", source.Method)
 		}
 		for _, mutate := range []func(*Request){
 			func(r *Request) { r.Params = json.RawMessage("{}") },
-			func(r *Request) { r.ServiceCall = &call; r.ServiceInput = &callInput },
-			func(r *Request) { r.CDProbe = &probe },
+			func(r *Request) { r.Params = callRequest(call, callInput).Params },
+			func(r *Request) { r.Params = probeRequest(probe).Params },
 			func(r *Request) { r.Standalone = &control.StandaloneQuery{Name: "debug"} },
-			func(r *Request) { r.ImageBuild = &control.ImageBuildQuery{Part: "contexts"} },
 		} {
 			bad := source
 			mutate(&bad)
@@ -249,8 +253,8 @@ func TestRQ11SourceSelectorsKeepEarlierTypedBoundaries(t *testing.T) {
 	// No transport is installed: every finite query must still reach normal
 	// transport admission rather than the unsupported-method branch.
 	for _, request := range earlier {
-		if request.Method == "service-call" {
-			continue // POST retains its own original body/continue exchange.
+		if request.Method == "service-call" || request.Method == "cd-probe" {
+			continue // POST and the provider probe have their own client paths.
 		}
 		if _, err := client.query(context.Background(), client.Peers[0], session, request); !errors.Is(err, sfcp.ErrAdmission) {
 			t.Fatal("SDK finite query disconnected", request.Method, err)

@@ -43,7 +43,7 @@ type CDFieldValues struct {
 	GitCandidate json.RawMessage `json:",omitempty"`
 	Current      json.RawMessage `json:",omitempty"`
 	Overridden   bool
-	Secrets      []string `json:",omitempty"` // secrets_from selectors
+	Secrets      []string `json:",omitempty"` // secrets.from selectors
 }
 
 // CDChanges: running commit → candidate.

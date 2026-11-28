@@ -37,19 +37,19 @@ CLI는 원 intent를 전송 전에 journal에 저장한다. 같은 request ID는
 Unix 소켓과 네트워크 SFCP의 기존 User purpose/frame·Session·서명 envelope를 사용한다. 다음은 추가 본문 예시이며 실제 client는 Nonce와 채널 challenge 서명을 포함한다. JSON 필드는 대문자로 시작하고 schema는1이다.
 
 ```json
-{"Schema":1,"Method":"image-cache-plan","ImageCache":{"Node":"node-a","After":"","Operation":"","Images":["sha256:FULL_64_HEX"]}}
+{"Schema":1,"Method":"image-cache-plan","Params":{"Query":{"Node":"node-a","After":"","Operation":"","Images":["sha256:FULL_64_HEX"]}}}
 ```
 
 ```json
-{"Schema":1,"Method":"image-cache-status","ImageCache":{"Node":"","After":"","Operation":"cache-42"}}
+{"Schema":1,"Method":"image-cache-status","Params":{"Operation":"cache-42"}}
 ```
 
-`FULL_64_HEX`는 설명용 자리표시자다. 실제 입력에는 전체64자 hex를 넣는다. Request.Tenant/Node/After 등 바깥 selector는 비워 둔다. `ImageCache.After`는 전체 목록에서만 사용하고 명시 Images와 섞지 않는다.
+`FULL_64_HEX`는 설명용 자리표시자다. 실제 입력에는 전체64자 hex를 넣는다. 두 method는 typed method라 `Params`에 다른 필드를 넣지 않는다. `Query.After`는 전체 목록에서만 사용하고 명시 Images와 섞지 않는다.
 
-| Method | Reply의 추가 필드 |
+| Method | 응답 |
 |---|---|
-| image-cache-plan | ImageCachePlan |
-| image-cache-status | ImageCacheStatus |
+| image-cache-plan | `Data`: 계획 |
+| image-cache-status | `Data`: 상태 |
 | whoami | `Data.Roots["control/image-cache"]`, `Data.ModuleEpoch` |
 | 기존 operation/result | 원 사용자 요청의 Result/Found·공개 사유 |
 

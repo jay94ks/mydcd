@@ -13,7 +13,7 @@
 | `sfcli standalone keep NAME [--name NEW] [--restart no\|on-failure\|always]` | 임시(temp)를 영구(fixed)로 바꾼다. 같은 컨테이너, 쓰기 계층, 자원 연결을 그대로 둔다 |
 | `sfcli standalone extend NAME DURATION` | 임시의 만료를 지금부터 DURATION(예: `2h`) 뒤로 늦춘다. 만든 때부터 24시간을 넘길 수 없다 |
 | `sfcli standalone remove NAME` | 지운다. 컨테이너와 쓰기 계층은 되돌릴 수 없다 |
-| `sfcli standalone logs NAME [-f]` | 컨테이너 로그. 옵션은 [app logs](app.md)와 같다 |
+| `sfcli standalone logs NAME [-f]` | 컨테이너 로그. [`sfcli logs --standalone NAME`](logs.md)의 별칭 |
 | `sfcli standalone top NAME` · `stats NAME` · `inspect NAME` | 프로세스, 자원 사용량, 컨테이너 상세. `--watch`로 계속 본다 |
 | `sfcli standalone exec NAME -- COMMAND [ARG...]` | 실행 중인 컨테이너에서 명령 하나를 실행한다. `-i` 입력 전달, `-t` 터미널 |
 | `sfcli standalone attach NAME [-i] [-t]` | 주 프로세스(`--mode shell`이면 셸)에 붙는다. 끊어도 프로세스는 계속 돈다 |

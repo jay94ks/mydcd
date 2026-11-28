@@ -48,13 +48,6 @@ u64LE(len(B)) || B
 | `AuthMethod`, `Credential`, `Secret` | string, string, bytes: password/token 인증 방식·자격 ID·보호 원문 |
 | `AppPlan`, `AppOperation`, `AppCDField`, `AppCDApproval`, `AppInput` | 아래 앱 입력 객체 |
 | `AppCDRead` | app-cd-history/app-cd-diff 전용 `{App,Part,Digest}`. 현재 tenant Read, history만 바깥 After 허용 |
-| `ServiceCall`, `ServiceInput` | service-call 전용 논리 `{App,Service,Port,Path,Method,Headers?,TimeoutMS,Scheme?,InsecureSkipVerify?}`와 `{Length,Digest}`. Body는 kind4 입력이며 JSON 객체에는 없음 |
-| `CDProbe` | cd-probe 전용 `{App,Repository,Branch,Path,Credential?}`. 설치된 credential 이름만 받고 비밀값은 없음 |
-| `VaultPlan`, `VaultWritePlan` | 아래 Vault 계획 입력 객체 |
-| `VolumeUsage`, `VolumeSource` | `{App:string,ID:string}`: 앱 소유/관리 Volume 선택 |
-| `NodeStorage` | `{Node:string,ID:string}`: 노드 저장 root 선택 |
-| `CheckerUpload` | digest32 포인터: 선택 업로드 ID |
-| `CheckerSource`, `CheckerModule` | 아래 source descriptor/module pin |
 | `Registry` | `{ID:string,Repository:string,Actions:string[]}`: 제한된 registry 자격 요청 |
 | `LogClear` | `{Selection:{App:string,Service:string,Instance:string},Operation:string}`: 로그 정리 계획/원 작업 상태 전용. 정확한 형식은 [컨테이너 API](../container-operations.md) 참조 |
 | `Container` | [컨테이너 조회 Query](../container-operations.md): app/service/instance·logs/top/stats·출력 옵션 |

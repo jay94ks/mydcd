@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Claude <noreply@anthropic.com>
 Date: Fri, 27 Nov 2026 08:42:39 +0000
-Subject: [PATCH 12/20] logs: bulk-only read in the segment record encoding
+Subject: [PATCH 12/21] logs: bulk-only read in the segment record encoding
 
 
 diff --git a/daemon/seafield/logqueue/queue.go b/daemon/seafield/logqueue/queue.go

@@ -29,7 +29,13 @@ const maxInputs = 256
 
 // Source is qualified even when two realms use the same stable object ID.
 // Realm empty means the explicitly shared cluster tree, not an implicit default.
-type Source struct{ Realm, Object string }
+type Source struct {
+	Realm, Object string
+	// Shared marks a registry credential chosen by a cluster-owned external
+	// source: only such a read may reach a RegistryShared cluster secret.
+	// App inputs and workspace-owned sources never carry it.
+	Shared bool `json:",omitempty"`
+}
 type Projection struct {
 	Key, Target    string
 	UID, GID, Mode uint32
@@ -153,6 +159,8 @@ func sameBase(a, b secrets.Use) bool {
 	b.Node = ""
 	b.NodeKey = [32]byte{}
 	b.Sources = nil
+	a.RegistrySources = nil
+	b.RegistrySources = nil
 	return useEqual(a, b)
 }
 
@@ -202,8 +210,13 @@ func validInputMetadata(n Needs) bool {
 			return false
 		}
 	}
+	for _, s := range n.Sources {
+		if s.Shared {
+			return false
+		}
+	}
 	for _, s := range n.ApprovalSources() {
-		if !identifier(s.Object) || s.Realm != "" && s.Realm != u.Tenant {
+		if !identifier(s.Object) || s.Realm != "" && s.Realm != u.Tenant || s.Shared && s.Realm != "" {
 			return false
 		}
 	}
@@ -249,10 +262,39 @@ func realmUses(n Needs) map[string]secrets.Use {
 	return out
 }
 
+// approvalRealmUses is one use per realm over app and registry sources. The
+// registry ones a cluster-owned source chose are also listed in
+// RegistrySources, so a RegistryShared secret passes only as such an image
+// pull read. The app input grant (realmUses) never marks any, so naming the
+// same shared object as an env source still fails at reserve.
 func approvalRealmUses(n Needs) map[string]secrets.Use {
+	registry := n.RegistrySources
 	n.Sources = n.ApprovalSources()
 	n.RegistrySources = nil
-	return realmUses(n)
+	out := realmUses(n)
+	markRegistrySources(out, registry)
+	return out
+}
+
+// registryRealmUses is the image pull reads' own uses (RegistryGrants).
+func registryRealmUses(n Needs) map[string]secrets.Use {
+	rn := registryInputNeeds(n)
+	out := realmUses(rn)
+	markRegistrySources(out, rn.Sources)
+	return out
+}
+
+func markRegistrySources(uses map[string]secrets.Use, sources []Source) {
+	for _, s := range sources {
+		if !s.Shared {
+			continue
+		}
+		u := uses[s.Realm]
+		if !slices.Contains(u.RegistrySources, s.Object) {
+			u.RegistrySources = append(u.RegistrySources, s.Object)
+		}
+		uses[s.Realm] = u
+	}
 }
 
 func registryInputNeeds(n Needs) Needs {
@@ -388,6 +430,9 @@ func reserve(cluster [32]byte, c access.Catalog, trees map[string]secrets.Tree, 
 		b := Binding{bindingRecord{Schema: 1, Cluster: cluster, Needs: ownNeeds(n)}}
 		for purpose, group := range []Needs{n, registryInputNeeds(n)} {
 			uses := realmUses(group)
+			if purpose == 1 {
+				uses = registryRealmUses(n)
+			}
 			for _, realm := range realms(group) {
 				var grant secrets.Grant
 				var err error
@@ -471,7 +516,7 @@ func validBinding(b Binding) bool {
 		}
 	}
 	rn := registryInputNeeds(d.Needs)
-	ru := realmUses(rn)
+	ru := registryRealmUses(d.Needs)
 	for i, realm := range realms(rn) {
 		g := d.RegistryGrants[i]
 		if g.Realm != realm || g.Consumer != rn.Consumer || g.Generation != rn.Generation || !useEqual(g.Use, ru[realm]) || g.Selection == ([32]byte{}) || g.Lifetime.Token == 0 || g.Lifetime.Generation != 1 || len(g.Pins) > 4096 {

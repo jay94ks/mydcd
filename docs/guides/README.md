@@ -2,7 +2,7 @@
 
 제품은 노드에서 실행하는 `sfcd`와 관리 명령 도구 `sfcli`로 구성된다. [모듈 설명](../architecture/modules.md)과 [실행·설정/명령 문법](../configuration/cli.md)을 함께 참조한다.
 
-클러스터를 처음 구축하려면 [Quick-start](../quick.md)의 단일 노드·3노드·실행 중 추가/제거 절차를 따른다.
+클러스터를 처음 구축하려면 [Quick-start](../quick.md)의 단일 노드·3노드·실행 중 추가/제거 절차를 따른다. 새 빌드로 바꿀 때는 [업그레이드](upgrade.md)를 따른다.
 
 ## 사용 순서
 

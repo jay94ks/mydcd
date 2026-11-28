@@ -5,6 +5,7 @@ package deployment
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"net/netip"
 	"os"
 	"slices"
@@ -30,7 +31,7 @@ services:
     networks: {app: {ipv4_address: 10.240.10.10}}
     x-sfc:
       node: node-a
-      secrets_from: [defaults, group/common, overrides]
+      secrets: {from: [defaults, group/common, overrides]}
       ready: {http: /readyz, port: 8080}
   db:
     image: docker.io/library/mysql@sha256:DIGEST
@@ -43,7 +44,7 @@ services:
     networks: {app: {ipv4_address: 10.240.20.10}}
     x-sfc:
       node: node-b
-      secrets_from: [defaults, group/common, group/db-admin]
+      secrets: {from: [defaults, group/common, group/db-admin]}
 networks:
   app:
     x-sfc:
@@ -437,4 +438,27 @@ func TestBlueprintStoredArtifactNeedsCurrentRevalidation(t *testing.T) {
 	n.Revision++
 	ctx.Nodes["node-b"] = n
 	deny(t, b.ValidateCurrent(f.c, ctx))
+}
+
+func TestComposeKeepsImageTagsUnpinned(t *testing.T) {
+	raw := strings.ReplaceAll(composeFixture, "DIGEST", strings.Repeat("a", 64))
+	raw = strings.Replace(raw, "docker.io/library/php@sha256:"+strings.Repeat("a", 64), "php:8.3-fpm", 1)
+	c, err := ParseCompose([]byte(raw))
+	if err != nil {
+		t.Fatal("tag refused", err)
+	}
+	found := false
+	for _, s := range c.Services {
+		if s.Image == "docker.io/library/php:8.3-fpm" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("tag not kept as a normalized tag reference")
+	}
+	bad := strings.Replace(raw, "php:8.3-fpm", "PHP:Bad Tag", 1)
+	var ie *InputError
+	if _, err = ParseCompose([]byte(bad)); !errors.As(err, &ie) || ie.Code != "INVALID_IMAGE" {
+		t.Fatal("bad reference", err)
+	}
 }

@@ -119,18 +119,18 @@ func readVaultTree(ctx context.Context, s *session, realm string) (vaultTree, er
 			return t, err
 		}
 		if cursor == "" {
-			t.root, t.tree, t.epoch, t.approvals, t.revision = page.VaultRootRevision, page.VaultTreeRevision, page.VaultWriteEpoch, page.VaultApprovalRevision, page.VaultRevision
-		} else if page.VaultRootRevision != t.root {
+			t.root, t.tree, t.epoch, t.approvals, t.revision = page.RootRevision, page.TreeRevision, page.WriteEpoch, page.ApprovalRevision, page.Revision
+		} else if page.RootRevision != t.root {
 			return t, errors.New("the Vault tree changed while it was read; try again")
 		}
-		t.rows = append(t.rows, page.Vault...)
-		if page.VaultNext == "" {
+		t.rows = append(t.rows, page.Items...)
+		if page.Next == "" {
 			return t, nil
 		}
-		if page.VaultNext <= cursor || len(t.rows) > 1<<16 {
+		if page.Next <= cursor || len(t.rows) > 1<<16 {
 			return t, sfcp.ErrAdmission
 		}
-		cursor = page.VaultNext
+		cursor = page.Next
 	}
 }
 
@@ -358,6 +358,7 @@ func secretGroupCommand(g *globals) *cli.Command {
 			secretPasswordCommand(g),
 			secretReorderCommand(g),
 			secretApprovalAgeCommand(g),
+			secretRegistrySharedCommand(g),
 		},
 	}
 }
@@ -475,6 +476,49 @@ func secretApprovalAgeCommand(g *globals) *cli.Command {
 			}
 			return g.vaultChange(c, s, &f, fmt.Sprintf("Approvals with the password of group %s last %s.", args[0], age),
 				"secret group approval-age "+args[0]+" "+age.String()+scopeSummary(realm), "vault-approval-age", o.Revision, control.VaultAge{Realm: realm, ID: args[0], Seconds: int64(age / time.Second)})
+		},
+	}
+}
+
+func secretRegistrySharedCommand(g *globals) *cli.Command {
+	var v vaultScope
+	var f changeFlags
+	return &cli.Command{
+		Name:  "registry-shared",
+		Args:  "GROUP on|off",
+		Short: "Let every tenant pull images with a cluster group's credentials (cluster vault, --all)",
+		Long: `Secrets under a registry-shared group serve only as image registry credentials:
+only when a cluster-owned external registry chooses them, its reader and every
+tenant's image pulls through it may use them without a tenant grant. A
+tenant-owned registry naming them is refused, and no app may select them as an
+env, file or build input.`,
+		Flags: func(fs *flag.FlagSet) { v.register(fs); f.register(fs, false, true) },
+		Run: func(c *cli.Context, args []string) error {
+			if len(args) != 2 || (args[1] != "on" && args[1] != "off") {
+				return cli.Usagef("registry-shared needs the group and on or off")
+			}
+			if err := validSecretID("group", args[0]); err != nil {
+				return err
+			}
+			s, realm, err := g.secretSession(c, v)
+			if err != nil {
+				return err
+			}
+			defer s.Close()
+			if realm != "" {
+				return cli.Usagef("registry-shared applies only to the cluster vault; add --all")
+			}
+			_, o, err := g.vaultObject(c, s, realm, args[0])
+			if err != nil {
+				return err
+			}
+			shared := args[1] == "on"
+			what := fmt.Sprintf("Secrets under group %s serve only as registry credentials for every tenant.", args[0])
+			if !shared {
+				what = fmt.Sprintf("Group %s stops serving registry credentials to every tenant.", args[0])
+			}
+			return g.vaultChange(c, s, &f, what,
+				"secret group registry-shared "+args[0]+" "+args[1]+scopeSummary(realm), "vault-registry-shared", o.Revision, control.VaultRegistryShared{Realm: realm, ID: args[0], Shared: shared})
 		},
 	}
 }
@@ -617,7 +661,13 @@ func secretSelectionCommand(g *globals, name, short, action string) *cli.Command
 			}
 			impact := fmt.Sprintf("Revoke %s %s: nothing new may use it; running apps keep what they have until they stop.", o.Kind, args[0])
 			if name == "retire" {
-				impact = fmt.Sprintf("Remove %s %s from the tree. The external Vault object is not deleted.", o.Kind, args[0])
+				impact = fmt.Sprintf("Remove %s %s from the tree.", o.Kind, args[0])
+				switch {
+				case o.Kind == secrets.Secret && o.Reference.Profile == secrets.BuiltinProfile:
+					impact += " Its builtin values are deleted from the voters once no running app uses them."
+				case o.Kind == secrets.Secret:
+					impact += " The external Vault object is not deleted."
+				}
 			}
 			return g.vaultChange(c, s, &f, impact, "secret "+name+" "+args[0]+scopeSummary(realm), action, o.Revision, control.VaultSelection{Realm: realm, ID: args[0]})
 		},
@@ -858,7 +908,7 @@ func secretIssuerCommand(g *globals) *cli.Command {
 func memberKey(ctx context.Context, s *session, node string) ([32]byte, error) {
 	after := ""
 	for range 256 {
-		reply, err := s.Client.Query(ctx, s.Target, s.Stored.Session, "members", after)
+		reply, err := s.Client.MemberPage(ctx, s.Target, s.Stored.Session, after)
 		if err != nil {
 			return [32]byte{}, err
 		}
@@ -867,10 +917,10 @@ func memberKey(ctx context.Context, s *session, node string) ([32]byte, error) {
 				return identity.ParseKey(m.Peer.Key)
 			}
 		}
-		if reply.MembersNext == "" || reply.MembersNext <= after {
+		if reply.Next == "" || reply.Next <= after {
 			break
 		}
-		after = reply.MembersNext
+		after = reply.Next
 	}
 	return [32]byte{}, fmt.Errorf("no node %s in the cluster", node)
 }

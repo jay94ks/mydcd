@@ -146,7 +146,7 @@ func (p Policy) currentCacheAutomaticAuthority(s state.State, b ImageBuildCatalo
 	if err != nil || owner != source.Scope.Root.Key {
 		return access.ErrDenied
 	}
-	if _, err := c.CheckImageTrust(source.Tenant, source.Policy.BuilderImage); err != nil {
+	if _, err := c.CheckImageRefTrust(source.Tenant, source.Policy.BuilderImage); err != nil {
 		return err
 	}
 	return p.imageCacheAvailable(s, source.Scope.Root.Node, source.Policy.BuilderImage)

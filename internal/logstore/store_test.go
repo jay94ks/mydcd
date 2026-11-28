@@ -290,3 +290,58 @@ func TestTrimWhereMatchesMeta(t *testing.T) {
 		t.Fatal("other service touched", in, err)
 	}
 }
+
+func TestPruneGoneByAgeThenTotal(t *testing.T) {
+	root := t.TempDir()
+	s, _ := Open(root)
+	ids := []string{"aaaaaaaaaaaa", "bbbbbbbbbbbb", "cccccccccccc", "dddddddddddd"}
+	for _, id := range ids {
+		if _, err := s.Append(id, Meta{}, recs(1, 10, 100)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	now := time.Date(2026, 11, 28, 0, 0, 0, 0, time.UTC)
+	// a: gone 8 days, b: gone 2 days, c: gone 1 day, d: still exists.
+	for id, ago := range map[string]time.Duration{ids[0]: 8 * 24 * time.Hour, ids[1]: 48 * time.Hour, ids[2]: 24 * time.Hour} {
+		if err := s.MarkGone(id, now.Add(-ago)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.MarkGone(ids[1], now); err != nil { // the first mark counts
+		t.Fatal(err)
+	}
+	if in, _ := s.Info(ids[1]); !in.Gone.Equal(now.Add(-48 * time.Hour)) {
+		t.Fatal("re-mark moved gone", in.Gone)
+	}
+	one, _ := s.Info(ids[3])
+
+	// Age only.
+	week := func(Info) time.Duration { return 7 * 24 * time.Hour }
+	forever := func(Info) time.Duration { return 0 }
+	removed, err := s.Prune(now, week, 0)
+	if err != nil || len(removed) != 1 || removed[0] != ids[0] {
+		t.Fatal("age prune", removed, err)
+	}
+	// Kept forever, but the total is over: the longest-gone goes first,
+	// and a live log is never pruned even if the total stays over.
+	removed, err = s.Prune(now, forever, 2*one.Size)
+	if err != nil || len(removed) != 1 || removed[0] != ids[1] {
+		t.Fatal("total prune", removed, err)
+	}
+	removed, err = s.Prune(now, forever, 1)
+	if err != nil || len(removed) != 1 || removed[0] != ids[2] {
+		t.Fatal("total prune to live only", removed, err)
+	}
+	if _, err := s.Info(ids[3]); err != nil {
+		t.Fatal("live log pruned", err)
+	}
+
+	// Gone survives a reopen.
+	if err := s.MarkGone(ids[3], now); err != nil {
+		t.Fatal(err)
+	}
+	s2, _ := Open(root)
+	if in, err := s2.Info(ids[3]); err != nil || !in.Gone.Equal(now) {
+		t.Fatal("gone after reopen", in.Gone, err)
+	}
+}

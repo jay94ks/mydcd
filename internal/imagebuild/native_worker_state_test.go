@@ -107,7 +107,7 @@ func TestExpiredQueuedJobCanAcceptOnlyCleanupIdentity(t *testing.T) {
 	if closure, err := f.jobs.SealCompletion(grant, JobResult{Code: "TIMEOUT"}, spec.CreatedAt+spec.Policy.Seconds, key); err != nil || !closure.Valid(spec) {
 		t.Fatal(closure, err)
 	}
-	running, err := run.Begin(run.Revision, spec.CreatedAt+1, nil)
+	running, err := run.Begin(run.Revision, spec.CreatedAt+1, nil, testBuilderPin(run.Spec), "")
 	if err != nil {
 		t.Fatal(err)
 	}

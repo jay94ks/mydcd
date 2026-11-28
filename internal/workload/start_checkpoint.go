@@ -34,7 +34,10 @@ func (d *DockerDriver) startIdentity(op reconcile.Operation, native string) erro
 	}
 	c := d.startCheckpoint
 	s, err := schema.Decode[containerStart](c.Data)
-	if err != nil || s.Schema != 1 || !validStartNative(s.Native) || s.Native != native || c.Operation != op.ID || c.Target != op.Target {
+	// A later in-place Apply of the same container (only its extra network
+	// attachments changed) keeps the original Start witness of its identity.
+	sameStart := c.Operation == op.ID && c.Target == op.Target || c.Target.Generation == op.Target.Generation && c.Target != op.Target && TaskIdentityResource(c.Target) == TaskIdentityResource(op.Target)
+	if err != nil || s.Schema != 1 || !validStartNative(s.Native) || s.Native != native || !sameStart {
 		return engine.ErrOwnership
 	}
 	return nil

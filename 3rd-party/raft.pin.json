@@ -8,8 +8,8 @@
     "Ref": "refs/tags/v1.8.0"
   },
   "source": "existing verified Go module cache; no fetch or version update",
-  "change": "followers report their commit index in AppendEntries responses; the leader wakes replication on commit advance and skips empty AppendEntries the follower does not need; separate HeartbeatInterval; PeerConnectionLost starts an election or re-checks the lease when the transport loses a peer; PeerConnected makes the leader heartbeat a follower whose connection came back; Raft requests are checked against the sender's role: a known non-voter cannot send AppendEntries/InstallSnapshot while the receiver follows or is another leader (unless they carry a configuration that makes it a voter) or raise a term with RequestVote, and TimeoutNow is accepted only from the current leader",
-  "patch_sha256": "59d42501ff504447b4fa188d609bd24b776f3eeef1ef5ebf11290e12a1e82885",
+  "change": "followers report their commit index in AppendEntries responses; the leader wakes replication on commit advance and skips empty AppendEntries the follower does not need; separate HeartbeatInterval; PeerConnectionLost starts an election or re-checks the lease when the transport loses a peer; PeerConnected makes the leader heartbeat a follower whose connection came back; Raft requests are checked against the sender's role: a known non-voter cannot send AppendEntries/InstallSnapshot while the receiver follows or is another leader (unless they carry a configuration that makes it a voter) or raise a term with RequestVote, and TimeoutNow is accepted only from the current leader; Config.PeerContact lets transport contact (any packet from a server) stand in for heartbeats: the leader skips periodic heartbeats to a follower it heard from within the interval and counts that contact in its lease, and a follower counts packets from its leader as leader contact",
+  "patch_sha256": "0630697bea55f6af8d75970bf542bcf4cfee8eb854edcace3fced165d468c1bb",
   "files": [
     {
       "path": ".github/CODEOWNERS",
@@ -84,7 +84,7 @@
     {
       "path": "api.go",
       "upstream_sha256": "98ea2895695e050fccc1c9693b5c670ddf75d11fdbe26677db310fca7e4e86cf",
-      "local_sha256": "3740d202c5e56f2f637fa01d39f5ebad92951355d55c8e54f666c9a20d4e9a66"
+      "local_sha256": "f7be5afb28c719923f534001df254b55df763243a30c50a2315087bd389e93e0"
     },
     {
       "path": "bench/bench.go",
@@ -114,7 +114,7 @@
     {
       "path": "config.go",
       "upstream_sha256": "baa36f7538d88c5228d282604b42e4d749e34ff557096b52b30850198b829806",
-      "local_sha256": "9386ae8ac355a6b1de1e41d3ab67ea03e8481e7ece2db35625958fb2b6f1b13f"
+      "local_sha256": "42e5fe66dae4eef7fc7397224aa493dbf1acdcde7b94a05804ae42427f85b0d9"
     },
     {
       "path": "configuration.go",
@@ -274,17 +274,17 @@
     {
       "path": "raft.go",
       "upstream_sha256": "a7b9f4f414719149d9a94c54de7bd2a2f566b1f194a447999d41d57853b7ae38",
-      "local_sha256": "219fa6b5d17dbe6a276529674605287600a8b8eb61015e64ca25c8caf4685368"
+      "local_sha256": "23287eea711d112334737cd9a6822eca31a5264c6c50467c1ac34df3e6ea1eef"
     },
     {
       "path": "raft_test.go",
       "upstream_sha256": "33d02fbb915164a24d1387e087ffe4d4f5c52d8861e73cbe828152fb3edfdb15",
-      "local_sha256": "efc1b3ae0b4dd9c5c665f5591ef5f61957b9d82c1d3c4906479c20595decc383"
+      "local_sha256": "4008e7ccbc47196fa3ed6f957ef14ef4b084849c21d6ca6649d99eae471d2cd7"
     },
     {
       "path": "replication.go",
       "upstream_sha256": "0bb8044f74aa0a3c46991162252e3810a00f906316d5830486c836c51d6a5c9c",
-      "local_sha256": "495ca8c8e9c111aae5ea2ce72b059e560fbb61b0227191766e8dc7366e30a874"
+      "local_sha256": "618b0667ecde55ad38886422af8504f72f2effb8959f2f7aea5f045ed8602561"
     },
     {
       "path": "saturation.go",

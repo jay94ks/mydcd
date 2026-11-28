@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { api, apiEvents, ApiError } from '../api/client';
+import { api, apiEvents, ApiError, markBackground } from '../api/client';
+import { refreshAll } from '../lib/usePoll';
 import type { CredentialChallengeReply, CredentialMethod, SessionView } from '../api/types';
 import type { DKeyChallenge, DKeyLoginReply, DSession } from '../api/dto';
 import { toSession } from '../api/endpoints';
@@ -14,6 +15,7 @@ interface AuthState {
   loading: boolean;
   /** 세션이 만료돼 그 자리 재로그인이 필요한 상태 */
   expired: boolean;
+  /** sfcd 연결이 끊긴 상태. 끊긴 동안 스스로 다시 묻고, 되면 저절로 풀린다 */
   disconnected: boolean;
   tenant: string;
   setTenant: (t: string) => void;
@@ -22,8 +24,13 @@ interface AuthState {
   /** username은 이번에 로그인할 사용자. 같은 키를 여러 사용자가 쓸 수 있어 키에 적힌 이름과 다를 수 있다. */
   loginKey: (key: StoredKey, passphrase: string, username: string) => Promise<void>;
   logout: () => Promise<void>;
+  /** '다시 확인': 기다리지 않고 지금 sfcd 연결을 묻는다. 되면 풀고 화면을 다시 읽는다 */
   clearDisconnected: () => void;
 }
+
+/** 끊긴 뒤 다시 묻는 간격: 2·4·8·16초, 그다음 30초마다 */
+export const RECHECK_MS = [2000, 4000, 8000, 16000, 30000];
+export const recheckDelay = (tries: number) => RECHECK_MS[Math.min(tries, RECHECK_MS.length - 1)];
 
 const Ctx = createContext<AuthState | null>(null);
 
@@ -89,14 +96,50 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     void refresh();
   }, [refresh]);
 
+  // sfcd 연결이 끊기면(disconnected) 세션 조회로 다시 묻는다. /auth/session은 sfcd를 거치므로 되면 연결이 돌아온 것이다.
+  // 돌아오면 띠를 내리고 모든 화면을 한 번 다시 읽는다. 새로고침하지 않아도 된다.
+  const [recheck, setRecheck] = useState(0);
+  useEffect(() => {
+    if (!disconnected) return;
+    let tries = 0;
+    let stop = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const ctl = new AbortController();
+    markBackground(ctl.signal);
+    const probe = async () => {
+      try {
+        await api.get('/auth/session', ctl.signal);
+        if (stop) return;
+        setDisconnected(false);
+        refreshAll();
+      } catch (e) {
+        if (stop || (e as Error).name === 'AbortError') return;
+        // 세션이 끝났으면 재로그인 다이얼로그가 맡는다
+        if (e instanceof ApiError && e.status === 401) return;
+        timer = setTimeout(probe, recheckDelay(++tries));
+      }
+    };
+    timer = setTimeout(probe, recheck ? 0 : recheckDelay(0));
+    return () => {
+      stop = true;
+      clearTimeout(timer);
+      ctl.abort();
+    };
+  }, [disconnected, recheck]);
+  const clearDisconnected = useCallback(() => setRecheck((n) => n + 1), []);
+
   useEffect(() => {
     const onExpired = () => setExpired(true);
     const onDisc = () => setDisconnected(true);
+    // 실시간 소켓이 다시 이어졌으면 다음 간격을 기다리지 않고 지금 확인한다
+    const onLive = () => setRecheck((n) => n + 1);
     apiEvents.addEventListener('session-expired', onExpired);
     apiEvents.addEventListener('disconnected', onDisc);
+    apiEvents.addEventListener('live', onLive);
     return () => {
       apiEvents.removeEventListener('session-expired', onExpired);
       apiEvents.removeEventListener('disconnected', onDisc);
+      apiEvents.removeEventListener('live', onLive);
     };
   }, []);
 
@@ -190,9 +233,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       loginCredential,
       loginKey,
       logout,
-      clearDisconnected: () => setDisconnected(false),
+      clearDisconnected,
     }),
-    [session, loading, expired, disconnected, tenant, setTenant, refresh, loginCredential, loginKey, logout],
+    [session, loading, expired, disconnected, tenant, setTenant, refresh, loginCredential, loginKey, logout, clearDisconnected],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

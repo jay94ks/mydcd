@@ -18,6 +18,7 @@ import { Dialog } from '../components/Dialog';
 import { Menu } from '../components/Menu';
 import { MutationError, OpPanel, useMutation } from '../components/OpPanel';
 import { MTopList, TopPane, useFollow } from '../components/ContainerConsole';
+import { streamEndText } from '../api/streams';
 import { Drawer } from '../components/Drawer';
 import { useToast } from '../components/Toast';
 import { usePhone } from '../lib/viewport';
@@ -29,7 +30,7 @@ import { matchRule } from '../lib/trust';
 import { fmtBytes, hhmmss } from '../lib/format';
 import type { RegistryView } from '../api/types';
 import type { RegistryImage } from '../api/endpoints';
-import { appLive, incidentsLive, opsLive } from '../lib/liveTopics';
+import { appLive, incidentsLive, opsLive, registriesLive } from '../lib/liveTopics';
 
 const LayersDialog = lazy(() => import('./ImageTools').then((m) => ({ default: m.LayersDialog })));
 
@@ -95,8 +96,8 @@ const nativeOf = (x: { nativeID?: string; nativeId?: string }) => x.nativeID ?? 
 /** secret:<object>/<key> → object */
 const secretObject = (ref?: string) => (ref ?? '').replace(/^secret:/, '').split('/')[0];
 
-const EXIT: Record<string, string> = { exit: '종료', oom: '메모리 부족', health: '상태 검사 실패', 'node-restart': '서버 재시작', user: '사용자가 다시 시작', 'log-clear': '로그 정리로 다시 만듦' };
-const exitText = (e: D.DTaskExit) => (e.reason === 'user' || e.reason === 'log-clear' || e.reason === 'node-restart' ? EXIT[e.reason] : `종료 코드 ${e.exitCode} · ${EXIT[e.reason] ?? e.reason}`);
+const EXIT: Record<string, string> = { exit: '종료', oom: '메모리 부족', health: '상태 검사 실패', 'node-restart': '서버 재시작', user: '사용자가 다시 시작' };
+const exitText = (e: D.DTaskExit) => (e.reason === 'user' || e.reason === 'node-restart' ? EXIT[e.reason] : `종료 코드 ${e.exitCode} · ${EXIT[e.reason] ?? e.reason}`);
 
 /** drift 경로(services.web.image 등)가 이 칸에 걸리는지. keys는 서비스 아래 첫 칸 이름 */
 function drifted(d: D.DTaskDetail, keys: string[]): string[] {
@@ -176,7 +177,7 @@ export function AppContainerPage() {
   const [restarting, setRestarting] = useState(false);
   const [raw, setRaw] = useState(false);
   const [layers, setLayers] = useState(false);
-  const regs = usePoll((s) => registries(tenant, s), [tenant]);
+  const regs = usePoll((s) => registries(tenant, s), [tenant], 0, registriesLive(tenant));
   // 장애 대응 사건 열기: 이 앱의 아직 끝나지 않은 최근 사건. 사건은 앱 단위라 컨테이너 대신 앱으로 찾는다
   const incs = usePoll((s) => incidents({ tenant, app, limit: 20 }, s), [tenant, app], 0, incidentsLive);
   const liveInc = incs.data?.items.find((x) => x.state === 'open' || x.state === 'mitigating');
@@ -502,8 +503,8 @@ function Overview({ r, d, task, hist, revision, base, onRefresh }: { r: TaskRef;
             </h2>
           }
           actions={
-            <button className="btn sm" title="지금 바로 다시 읽기" disabled={stats.loading} onClick={stats.refresh}>
-              {stats.loading ? '읽는 중…' : '↻ 새로고침'}
+            <button className="btn sm" title="지금 바로 다시 읽기" disabled={stats.manual} onClick={stats.refreshByUser}>
+              {stats.manual ? '읽는 중…' : '↻ 새로고침'}
             </button>
           }
         >
@@ -1011,7 +1012,7 @@ function MRes({ r, d, task }: { r: TaskRef; d: D.DTaskDetail; task?: TaskView })
     <>
       <div className="mchips">
         <span className="mchip">최근 1시간 · 30초</span>
-        <button type="button" className="mchip" aria-label="지금 바로 다시 읽기" disabled={stats.loading} onClick={stats.refresh}>
+        <button type="button" className="mchip" aria-label="지금 바로 다시 읽기" disabled={stats.manual} onClick={stats.refreshByUser}>
           ↻
         </button>
         <button type="button" className={`mchip${paused ? ' on' : ''}`} aria-label={paused ? '다시 읽기' : '멈춤'} onClick={() => setPaused((p) => !p)}>
@@ -1203,6 +1204,9 @@ function LogsTab({ r, d, task, canDeploy }: { r: TaskRef; d: D.DTaskDetail; task
   const [find, setFind] = useState('');
   const [time, setTime] = useState(true);
   const [followOn, setFollowOn] = useState(true);
+  /** 따라가기 스트림이 거부·끊김으로 멈춘 이유(코드). 다시 따라가면 지운다 */
+  const [followErr, setFollowErr] = useState<string>();
+  const [followTry, setFollowTry] = useState(0);
   const [lines, setLines] = useState<Row[]>([]);
   const [truncated, setTruncated] = useState(false);
   /** REQ-20(task/logs)로 읽었을 때만 안다 */
@@ -1337,7 +1341,7 @@ function LogsTab({ r, d, task, canDeploy }: { r: TaskRef; d: D.DTaskDetail; task
           ))}
           {loading && <span className="t">읽는 중…</span>}
           {!loading && shown.length === 0 && <span className="t">이 범위에 로그가 없습니다.</span>}
-          {following && task && !loading && <Follower task={task} d={d} onLine={(l) => (setLines((old) => old.concat(l).slice(-MAX_LINES)), atEnd.current ? undefined : setUnseen((n) => n + 1))} onReload={() => setGen((g) => g + 1)} />}
+          {following && task && !loading && <Follower key={followTry} task={task} d={d} onFail={setFollowErr} onRetry={() => (setFollowErr(undefined), setFollowTry((n) => n + 1))} onLine={(l) => (setLines((old) => old.concat(l).slice(-MAX_LINES)), atEnd.current ? undefined : setUnseen((n) => n + 1))} onReload={() => setGen((g) => g + 1)} />}
         </pre>
         <button
           type="button"
@@ -1349,7 +1353,7 @@ function LogsTab({ r, d, task, canDeploy }: { r: TaskRef; d: D.DTaskDetail; task
             setFollowOn(true);
           }}
         >
-          {following ? '● 따라가는 중' : `↓ 맨 아래로${unseen ? ` · 새 줄 ${unseen}` : ''}`}
+          {following ? (followErr ? '⚠ 따라가기 멈춤' : '● 따라가는 중') : `↓ 맨 아래로${unseen ? ` · 새 줄 ${unseen}` : ''}`}
         </button>
         <span className="muted small" style={{ textAlign: 'center' }}>
           ‘로그 지우기…’는 넓은 화면에서
@@ -1395,7 +1399,7 @@ function LogsTab({ r, d, task, canDeploy }: { r: TaskRef; d: D.DTaskDetail; task
             시각
           </label>
           <button className={`btn${following ? ' primary' : ''}`} onClick={() => setFollowOn((f) => !f)} aria-pressed={following} disabled={!!until} title={until ? '기간 끝을 정하면 따라가기는 꺼집니다' : undefined}>
-            {following ? '● 따라가는 중' : '○ 따라가기'}
+            {following ? (followErr ? '⚠ 따라가기 멈춤' : '● 따라가는 중') : '○ 따라가기'}
           </button>
           <button className="btn" onClick={download} disabled={!shown.length}>
             내려받기
@@ -1423,6 +1427,14 @@ function LogsTab({ r, d, task, canDeploy }: { r: TaskRef; d: D.DTaskDetail; task
           </span>
         </div>
         {error ? <ErrorBand error={error} what="로그를 읽지 못했습니다" /> : null}
+        {following && followErr && (
+          <div className="note er small" role="alert">
+            새 줄 따라가기를 열지 못했습니다 · {streamEndText(followErr)}{' '}
+            <button className="btn sm" onClick={() => (setFollowErr(undefined), setFollowTry((n) => n + 1))}>
+              다시 따라가기
+            </button>
+          </div>
+        )}
         <pre
           ref={box}
           className="lg box"
@@ -1448,7 +1460,7 @@ function LogsTab({ r, d, task, canDeploy }: { r: TaskRef; d: D.DTaskDetail; task
           ))}
           {loading && <span className="t">읽는 중…</span>}
           {!loading && shown.length === 0 && <span className="t">{find ? '찾는 줄이 없습니다.' : '이 범위에 로그가 없습니다.'}</span>}
-          {following && task && !loading && <Follower task={task} d={d} onLine={(l) => (setLines((old) => old.concat(l).slice(-MAX_LINES)), atEnd.current ? undefined : setUnseen((n) => n + 1))} onReload={() => setGen((g) => g + 1)} />}
+          {following && task && !loading && <Follower key={followTry} task={task} d={d} onFail={setFollowErr} onRetry={() => (setFollowErr(undefined), setFollowTry((n) => n + 1))} onLine={(l) => (setLines((old) => old.concat(l).slice(-MAX_LINES)), atEnd.current ? undefined : setUnseen((n) => n + 1))} onReload={() => setGen((g) => g + 1)} />}
         </pre>
         {unseen > 0 && (
           <button className="btn sm" style={{ alignSelf: 'center' }} onClick={() => box.current && (box.current.scrollTop = box.current.scrollHeight)}>
@@ -1456,8 +1468,8 @@ function LogsTab({ r, d, task, canDeploy }: { r: TaskRef; d: D.DTaskDetail; task
           </button>
         )}
         <span className="muted small">
-          비밀값으로 표시한 값이 로그에 찍히면 서버가 «가림»으로 바꿔 보냅니다 (REQ-20, 아직 지원 안 함: 지금은 이 화면 사용자에게만 보이고 AI로는 보내지 않음).
-          {truncated ? ' 앞부분은 24 KiB 상한으로 잘렸습니다. 더 앞을 보려면 기간을 좁히세요 (이어 읽기는 REQ-20).' : ''} 로그는 웹 데이터에 저장하지 않습니다.
+          비밀값으로 표시한 값이 로그에 찍히면 서버가 «가림»으로 바꿔 보낼 예정입니다(아직 지원하지 않음). 지금은 이 화면 사용자에게만 보이고 AI로는 보내지 않습니다.
+          {truncated ? ' 앞부분은 24 KiB 상한으로 잘렸습니다. 더 앞을 보려면 기간을 좁히세요.' : ''} 로그는 웹 데이터에 저장하지 않습니다.
         </span>
       </Card>
       {clearing && <LogClearDialog r={r} nativeID={d.nativeID ?? d.nativeId} onClose={() => setClearing(false)} onDone={() => setGen((g) => g + 1)} />}
@@ -1654,7 +1666,7 @@ export function LogClearDialog({ r, nativeID, onClose, onDone }: { r: TaskRef; n
   );
 }
 
-function Follower({ task, d, onLine, onReload }: { task: TaskView; d: D.DTaskDetail; onLine: (l: Row) => void; onReload: () => void }) {
+function Follower({ task, d, onLine, onReload, onFail, onRetry }: { task: TaskView; d: D.DTaskDetail; onLine: (l: Row) => void; onReload: () => void; onFail: (code?: string) => void; onRetry: () => void }) {
   const partial = useRef({ out: '', err: '' });
   const seq = useRef(1e12);
   const s = useFollow(task, { kind: 'logs', service: task.service, instance: task.instance, tail: 0, stdout: true, stderr: true }, (e) => {
@@ -1664,6 +1676,8 @@ function Follower({ task, d, onLine, onReload }: { task: TaskView; d: D.DTaskDet
     partial.current[k] = parts.pop() ?? '';
     for (const text of parts) onLine({ seq: ++seq.current, time: Math.floor(Date.now() / 1000), stream: e.type, text });
   });
+  // 거부·끊김을 위쪽 따라가기 단추와 안내에도 알린다
+  useEffect(() => onFail(s.phase === 'failed' ? (s.endCode ?? 'closed') : undefined), [s.phase, s.endCode]); // eslint-disable-line react-hooks/exhaustive-deps
   const changed = s.target && s.target.generation !== d.generation;
   return (
     <div style={{ fontFamily: 'var(--font)', marginTop: 6 }}>
@@ -1676,8 +1690,9 @@ function Follower({ task, d, onLine, onReload }: { task: TaskView; d: D.DTaskDet
         </div>
       ) : s.phase === 'failed' ? (
         <div className="note er small">
-          따라가기가 멈췄습니다 · 세션이 만료되었거나 권한이 바뀌었습니다. 다시 로그인한 뒤 '다시 따라가기'를 누르세요. 이미 받은 줄은 그대로 둡니다.{' '}
-          <button className="btn sm" onClick={s.reconnect}>
+          따라가기가 멈췄습니다 · {streamEndText(s.endCode ?? 'closed')}
+          {s.endCode === 'session-expired' ? " 다시 로그인한 뒤 '다시 따라가기'를 누르세요." : ''} 이미 받은 줄은 그대로 둡니다.{' '}
+          <button className="btn sm" onClick={onRetry}>
             다시 따라가기
           </button>
         </div>
@@ -1743,8 +1758,8 @@ function ResTab({ r, d, task, base }: { r: TaskRef; d: D.DTaskDetail; task?: Tas
           }
           actions={
             <span className="row" style={{ gap: 6 }}>
-              <button className="btn sm" title="지금 바로 다시 읽기" disabled={stats.loading} onClick={stats.refresh}>
-                {stats.loading ? '읽는 중…' : '↻ 새로고침'}
+              <button className="btn sm" title="지금 바로 다시 읽기" disabled={stats.manual} onClick={stats.refreshByUser}>
+                {stats.manual ? '읽는 중…' : '↻ 새로고침'}
               </button>
               <button className="btn sm" onClick={() => setPaused((p) => !p)}>
                 {paused ? '▶ 다시 읽기' : '⏸ 멈춤'}

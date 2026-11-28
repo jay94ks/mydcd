@@ -333,8 +333,8 @@ func (s *Server) vpsDNSWithdrawServer(ctx context.Context, ws *webSession, v con
 				if !s.vpsDNSFailed(v.Name + "\x00" + dom.d.Domain) {
 					continue
 				}
-				s.notify(&store.Notification{User: dom.row.By, Kind: NotifyOpFailed, Severity: "error", Title: "VPS 중지: DNS 변경 실패: " + dom.d.Domain,
-					Body: v.Name + " 주소를 DNS에서 빼지 못했습니다(" + string(dns.KindOf(err)) + ").", Link: "/dns/" + dom.d.Domain})
+				s.notify(&store.Notification{User: dom.row.By, Kind: NotifyOpFailed, Severity: "error", Text: notice("vps-dns-failed", map[string]string{"domain": dom.d.Domain, "vps": v.Name, "kind": string(dns.KindOf(err))}, "vps-dns-failed.body"),
+					Link: "/dns/" + dom.d.Domain})
 				continue
 			}
 			p.hold.History = id
@@ -343,12 +343,10 @@ func (s *Server) vpsDNSWithdrawServer(ctx context.Context, ws *webSession, v con
 			s.log.Error("vps dns: hold", "err", err)
 			continue
 		}
-		body := v.Name + "을(를) 멈춰 DNS 레코드 " + itoa(len(p.hold.Sets)) + "개에서 그 주소를 임시로 뺐습니다(재개하면 되돌림)."
-		if len(p.hold.Kept) > 0 {
-			body += " 이 서버만 받는 레코드 " + itoa(len(p.hold.Kept)) + "개는 남겼습니다."
-		}
+		body := notice("vps-stopped", map[string]string{"domain": dom.d.Domain, "vps": v.Name, "sets": itoa(len(p.hold.Sets)), "kept": itoa(len(p.hold.Kept))},
+			append([]string{"vps-stopped.body"}, bodyIf(len(p.hold.Kept) > 0, "vps-stopped.kept")...)...)
 		if len(p.hold.Sets)+len(p.hold.Kept) > 0 {
-			s.notify(&store.Notification{User: dom.row.By, Kind: NotifyVPSDNS, Severity: "info", Title: "VPS 중지: " + dom.d.Domain, Body: body, Link: "/nodes/vps"})
+			s.notify(&store.Notification{User: dom.row.By, Kind: NotifyVPSDNS, Severity: "info", Text: body, Link: "/nodes/vps"})
 		}
 	}
 }
@@ -443,8 +441,8 @@ func (s *Server) vpsDNSRestoreServer(ctx context.Context, ws *webSession, v cont
 		for _, b := range blocked {
 			names = append(names, b.Name+" "+b.Type)
 		}
-		s.notify(&store.Notification{User: dom.row.By, Kind: NotifyVPSDNS, Severity: "warning", Action: true, Title: "DNS 원복 못 함: " + domain,
-			Body: v.Name + "을(를) 재개했지만 " + strings.Join(names, ", ") + " 레코드는 되돌리지 않았습니다. 중지 동안 레코드가 바뀌었습니다. 외부 도메인에서 확인하고 직접 고치세요.", Link: "/dns/" + domain})
+		s.notify(&store.Notification{User: dom.row.By, Kind: NotifyVPSDNS, Severity: "warning", Action: true, Text: notice("vps-restore-failed", map[string]string{"domain": domain, "vps": v.Name, "records": strings.Join(names, ", ")}, "vps-restore-failed.body"),
+			Link: "/dns/" + domain})
 	}
 }
 

@@ -13,10 +13,10 @@ sfcli --tenant shop service-call storefront api --port 8443 --path /approve --sc
 User Request는 다음 필드를 사용한다. `Schema`는1이며 `Nonce`는 SDK가 매 요청 생성하는 기존 32바이트 nonce다. 아래는 body가 UTF-8 `{}` 두 바이트인 예시다. 표시된 Nonce는 형식 설명용이며 실제 요청마다 새 값을 사용한다.
 
 ```json
-{"Schema":1,"Method":"service-call","Nonce":[1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"Tenant":"shop","ServiceCall":{"App":"storefront","Service":"api","Port":8080,"Path":"/approve","Method":"POST","Headers":{"Content-Type":"application/json"},"TimeoutMS":10000,"Scheme":"http"},"ServiceInput":{"Length":2,"Digest":[68,19,111,163,85,179,103,138,17,70,173,22,247,232,100,158,148,251,79,194,31,231,126,131,16,192,96,246,28,170,255,138]}}
+{"Schema":1,"Method":"service-call","Nonce":[1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"Params":{"Tenant":"shop","Call":{"App":"storefront","Service":"api","Port":8080,"Path":"/approve","Method":"POST","Headers":{"Content-Type":"application/json"},"TimeoutMS":10000,"Scheme":"http"},"Input":{"Length":2,"Digest":[68,19,111,163,85,179,103,138,17,70,173,22,247,232,100,158,148,251,79,194,31,231,126,131,16,192,96,246,28,170,255,138]}}}
 ```
 
-`Nonce`와 `ServiceInput.Digest`는 Go `[32]byte`의 32개 숫자 배열이며 hex/base64 문자열이 아니다. `ServiceInput.Digest`는 원 body의 SHA-256이고, frame tag2의 Envelope SHA-256과 구분한다. `ServiceCall.Body`를 JSON에 넣지 않는다. 최대256KiB body는 기존 User kind4의 순차 입력으로 보내며, 서버는 길이·digest·EOF를 모두 확인한 뒤에만 POST한다. 빈 body도 SHA-256(empty)와 EOF가 필요하다. SDK `Client.CallService(ctx, peer, session, tenant, servicecall.Request)`에는 `Body []byte`를 전달한다.
+typed method다(`Params: ServiceCallQuery`, 응답은 `Data`). `Nonce`와 `Input.Digest`는 Go `[32]byte`의 32개 숫자 배열이며 hex/base64 문자열이 아니다. `Input.Digest`는 원 body의 SHA-256이고, frame tag2의 Envelope SHA-256과 구분한다. `Call.Body`를 JSON에 넣지 않는다. 최대256KiB body는 기존 User kind4의 순차 입력으로 보내며, 서버는 길이·digest·EOF를 모두 확인한 뒤에만 POST한다. 빈 body도 SHA-256(empty)와 EOF가 필요하다. SDK `Client.CallService(ctx, peer, session, tenant, servicecall.Request)`에는 `Body []byte`를 전달한다.
 
 서버는 현재 앱 Binding·원 Task 세대/리비전·fresh Healthy 관측과 설치된 owner를 확인한다. 같은 서버의 후보를 우선하고 이후 노드/Task 이름순으로 선택한다. 실행 owner는 현재 quorum의 권한/원 Task를 재검사하고 실제 Docker native 신원·IP·process 상태를 확인하며 원 Task read lease를 I/O 종료까지 보유한다. 사용자에게 IP·host·proxy·redirect 대상·Task/native를 입력받지 않는다. 현재 단일 네트워크와 주소가 확정된 Task의 원 IP로 한 번 연결한다. 포트는 그 컨테이너의 TCP 포트이며 호스트 published port나 Ingress gateway를 선택하는 입력이 아니다.
 
@@ -44,7 +44,7 @@ service_cas:
 
 `--insecure-skip-verify`는 해당 HTTPS 한 호출에만 적용되며 저장된 신뢰를 변경하지 않는다. TLS 인증서·handshake 오류와 HTTP 포트에 HTTPS를 사용한 오류는 `SERVICE_CALL_TLS`, TCP 연결 실패는 `SERVICE_CALL_REFUSED`다.
 
-응답 `Reply.ServiceCall`:
+응답 `Reply.Data`(`servicecall.Result`):
 
 ```json
 {"Status":200,"Headers":{"Content-Type":"application/json"},"Body":"eyJvayI6dHJ1ZX0=","Task":"task/...","Node":"node-a","ElapsedMS":24}
@@ -73,15 +73,15 @@ sfcli --tenant shop cd probe storefront --repository https://git.example/team/ap
   --branch main --path app.yaml --credential git-read
 ```
 
-`Client.ProbeCD(ctx, peer, session, tenant, deployment.GitProbeRequest)`는 User `cd-probe`를 보낸다.
+`Client.ProbeCD(ctx, peer, session, tenant, deployment.GitProbeRequest)`는 typed User `cd-probe`를 보낸다.
 
 ```json
-{"Schema":1,"Method":"cd-probe","Nonce":[1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"Tenant":"shop","CDProbe":{"App":"storefront","Repository":"https://git.example/team/app.git","Branch":"main","Path":"app.yaml","Credential":"git-read"}}
+{"Schema":1,"Method":"cd-probe","Nonce":[1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"Params":{"Tenant":"shop","Probe":{"App":"storefront","Repository":"https://git.example/team/app.git","Branch":"main","Path":"app.yaml","Credential":"git-read"}}}
 ```
 
 현재 tenant/app의 `deploy` 권한, **실제 Git provider 노드의 tenant 허용 노드 할당**, 명시 Session/위임 ceiling·credential operation `cd-probe`를 검사한다. 기존 앱이 필요하다. `Credential`은 해당 tenant/정확한 repository에 설치된 **자격 이름**이며 password/token/CA 경로·URL user-info/query를 받지 않는다. 공개 repository는 생략할 수 있다. 기존 CD HTTPS/provider·기한/pack 예산·redirect 금지를 재사용하며 `refs/heads/<Branch>`를 한 번 발견한 고정 commit의 regular file을 읽는다. Branch에는 `main`처럼 짧은 이름을 쓰고 `refs/heads/`는 붙이지 않는다.
 
-응답 `Reply.CDProbe`:
+응답 `Reply.Data`(deployment.GitProbeResult):
 
 ```json
 {"Code":"","Commit":"0123456789abcdef0123456789abcdef01234567","Node":"node-a","Size":2048}

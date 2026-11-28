@@ -346,7 +346,7 @@ func testRealComposeGroups(t *testing.T, unknown bool, secretCLI ...bool) {
 	}
 	apply("issuer", "vault-set-issuer", vaultState().Approvals.Revision(), control.VaultIssuer{Key: runtime.Identity.Public, Enabled: true})
 	doc := appComposeDocument(2)
-	doc = bytes.ReplaceAll(doc, []byte("x-sfc: {node: node-a}"), []byte("x-sfc: {node: node-a, secrets_from: [data, data]}"))
+	doc = bytes.ReplaceAll(doc, []byte("x-sfc: {node: node-a}"), []byte("x-sfc: {node: node-a, secrets: {from: [data, data]}}"))
 	file := filepath.Join(root, "compose.yaml")
 	if err = os.WriteFile(file, doc, 0600); err != nil {
 		t.Fatal(err)

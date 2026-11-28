@@ -23,6 +23,119 @@ type Devices struct {
 	// Recorded are the mounts sfcd made and mounts again at start, with
 	// why one is not mounted now (Reason empty = mounted).
 	Recorded []RecordedMount `json:",omitempty"`
+	// Bundles are the disk bundles sfcd made (several disks as one).
+	Bundles []BlockBundle `json:",omitempty"`
+}
+
+// BlockBundle is one disk bundle: lvm (a tagged volume group with one
+// logical volume) or fuse (image chunks on existing partitions). Its own
+// device is listed in Disks with Bundle set; a member disk of an lvm bundle
+// is listed with Class bundle-member.
+type BlockBundle struct {
+	Name, Backend, Mode string
+	Size                uint64
+	// Device is the bundle's kernel device name in Disks ("" while it is
+	// not active).
+	Device string `json:",omitempty"`
+	// State: ok, degraded (a mirror runs without a member), missing (not
+	// usable: a linear member is gone) or syncing.
+	State string
+	// SyncPercent is the mirror copy progress while State is syncing.
+	SyncPercent uint8          `json:",omitempty"`
+	Members     []BundleMember `json:",omitempty"`
+}
+
+// BundleMember is one disk (lvm) or partition (fuse) of a bundle.
+type BundleMember struct {
+	Disk   string
+	Part   string `json:",omitempty"`
+	Serial string `json:",omitempty"`
+	WWN    string `json:",omitempty"`
+	Size   uint64 `json:",omitempty"`
+	// State: ok, missing or syncing.
+	State string
+}
+
+var (
+	BundleBackends     = []string{"lvm", "fuse"}
+	BundleModes        = []string{"linear", "mirror"}
+	BundleStates       = []string{"ok", "degraded", "missing", "syncing"}
+	BundleMemberStates = []string{"ok", "missing", "syncing"}
+)
+
+// ValidBundleName: lowercase letters, digits and '-', starting with a
+// letter, at most 32 bytes.
+func ValidBundleName(s string) bool {
+	if s == "" || len(s) > 32 || !(s[0] >= 'a' && s[0] <= 'z') || strings.HasSuffix(s, "-") {
+		return false
+	}
+	for _, r := range s {
+		if !(r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '-') {
+			return false
+		}
+	}
+	return true
+}
+
+// LVMBundleVG is the volume group of a bundle; its one logical volume is
+// LVMBundleLV.
+func LVMBundleVG(bundle string) string { return "sfc-" + bundle }
+
+const LVMBundleLV = "data"
+
+// LVMBundle reads a device-mapper name ("sfc--pool-data", where LVM writes
+// '-' inside a name as "--"). It returns the bundle and, for a hidden
+// sub-volume of a mirror (data_rimage_0, data_rmeta_0), its suffix.
+func LVMBundle(mapper string) (bundle, sub string) {
+	var parts []string
+	cur := []byte{}
+	for i := 0; i < len(mapper); i++ {
+		if mapper[i] == '-' {
+			if i+1 < len(mapper) && mapper[i+1] == '-' {
+				cur = append(cur, '-')
+				i++
+				continue
+			}
+			parts, cur = append(parts, string(cur)), []byte{}
+			continue
+		}
+		cur = append(cur, mapper[i])
+	}
+	parts = append(parts, string(cur))
+	if len(parts) != 2 || !strings.HasPrefix(parts[0], "sfc-") || !ValidBundleName(strings.TrimPrefix(parts[0], "sfc-")) {
+		return "", ""
+	}
+	lv := parts[1]
+	switch {
+	case lv == LVMBundleLV:
+	case strings.HasPrefix(lv, LVMBundleLV+"_r"):
+		sub = strings.TrimPrefix(lv, LVMBundleLV+"_")
+	default:
+		return "", ""
+	}
+	return strings.TrimPrefix(parts[0], "sfc-"), sub
+}
+
+// FuseBundleRun is where sfcd diskfs serves fuse bundles: the bundle's
+// virtual disk is <FuseBundleRun>/<name>/mnt/disk.
+const FuseBundleRun = "/run/sfc-diskfs"
+
+// FuseBundle reads a loop device's backing file.
+func FuseBundle(backing string) (string, bool) {
+	rest, ok := strings.CutPrefix(backing, FuseBundleRun+"/")
+	if !ok {
+		return "", false
+	}
+	name, tail, ok := strings.Cut(rest, "/")
+	return name, ok && tail == "mnt/disk" && ValidBundleName(name)
+}
+
+func (b BlockBundle) valid() bool {
+	ok := ValidBundleName(b.Name) && slices.Contains(BundleBackends, b.Backend) && slices.Contains(BundleModes, b.Mode) && slices.Contains(BundleStates, b.State) && (b.Device == "" || deviceName(b.Device)) && b.SyncPercent <= 100 && len(b.Members) <= maxBlockDisks
+	for _, m := range b.Members {
+		ok = ok && deviceName(m.Disk) && (m.Part == "" || deviceName(m.Part)) && deviceText(m.Serial, maxDeviceText) && deviceText(m.WWN, maxDeviceText) && slices.Contains(BundleMemberStates, m.State)
+	}
+	return ok
 }
 
 // RecordedMount is one entry of sfcd's local mount record.
@@ -39,8 +152,9 @@ func (m RecordedMount) valid() bool {
 }
 
 // DeviceClasses: system holds "/"; additional has a mounted filesystem or
-// active swap; unused has neither.
-var DeviceClasses = []string{"system", "additional", "unused"}
+// active swap; unused has neither. bundle-member is a disk inside an lvm
+// bundle; it is shown under its bundle and takes no disk operation.
+var DeviceClasses = []string{"system", "additional", "unused", "bundle-member"}
 
 const (
 	MaxDevicesBytes = 32 << 10
@@ -68,6 +182,13 @@ type BlockDisk struct {
 	// Parts are the partitions. A filesystem written on the whole disk is
 	// one part with Number 0 and the disk's own Name.
 	Parts []BlockPart `json:",omitempty"`
+	// Bundle names the disk bundle this device belongs to: on a member
+	// disk (Class bundle-member) or on the bundle's own device (Kind
+	// bundle).
+	Bundle string `json:",omitempty"`
+	// Kind is "bundle" for a bundle's own device (a dm or loop device);
+	// empty for a physical disk.
+	Kind string `json:",omitempty"`
 }
 
 // BlockPart is one partition (or the whole disk). Filesystem/UUID/Label are
@@ -94,6 +215,8 @@ type BlockHolder struct {
 	Mounts     []string    `json:",omitempty"`
 	Swap       bool        `json:",omitempty"`
 	Space      *BlockSpace `json:",omitempty"`
+	// Bundle: the holder is part of this sfcd disk bundle.
+	Bundle string `json:",omitempty"`
 }
 
 // BlockSpace is statfs of the first mount point.
@@ -142,7 +265,7 @@ func (s *BlockSpace) valid() bool {
 }
 
 func (h BlockHolder) valid() bool {
-	return deviceName(h.Name) && slices.Contains(holderKinds, h.Kind) && deviceText(h.Mapper, maxDeviceText) && deviceText(h.Filesystem, 32) && validMounts(h.Mounts) && h.Space.valid() && (h.Space == nil || len(h.Mounts) > 0)
+	return deviceName(h.Name) && slices.Contains(holderKinds, h.Kind) && deviceText(h.Mapper, maxDeviceText) && deviceText(h.Filesystem, 32) && validMounts(h.Mounts) && h.Space.valid() && (h.Space == nil || len(h.Mounts) > 0) && (h.Bundle == "" || ValidBundleName(h.Bundle))
 }
 
 func (p BlockPart) valid(disk string) bool {
@@ -161,12 +284,18 @@ func (d BlockDisk) valid() bool {
 		ok = ok && p.valid(d.Name) && (i == 0 || d.Parts[i-1].Number < p.Number)
 	}
 	// A whole-disk filesystem has no partition table and is the only part.
+	ok = ok && (d.Bundle == "" || ValidBundleName(d.Bundle)) && (d.Kind == "" || d.Kind == "bundle" && d.Bundle != "")
 	return ok && (!whole || len(d.Parts) == 1 && d.Table == "") && d.Class == classOf(d)
 }
 
 func (v Devices) valid() bool {
-	if len(v.Disks) > maxBlockDisks || len(v.Recorded) > maxBlockDisks {
+	if len(v.Disks) > maxBlockDisks || len(v.Recorded) > maxBlockDisks || len(v.Bundles) > maxBlockDisks {
 		return false
+	}
+	for i, b := range v.Bundles {
+		if !b.valid() || i > 0 && v.Bundles[i-1].Name >= b.Name {
+			return false
+		}
 	}
 	for i, m := range v.Recorded {
 		if !m.valid() || i > 0 && v.Recorded[i-1].Path >= m.Path {
@@ -196,11 +325,16 @@ func (p BlockPart) Mounted() []string {
 }
 
 func classOf(d BlockDisk) string {
-	class := "unused"
 	for _, p := range d.Parts {
 		if slices.Contains(p.Mounted(), "/") {
 			return "system"
 		}
+	}
+	if d.Bundle != "" && d.Kind == "" {
+		return "bundle-member"
+	}
+	class := "unused"
+	for _, p := range d.Parts {
 		swap := p.Swap
 		for _, h := range p.Holders {
 			swap = swap || h.Swap

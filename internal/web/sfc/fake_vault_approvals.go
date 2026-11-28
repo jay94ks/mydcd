@@ -22,7 +22,7 @@ import (
 
 // Group approvals in the fake. A Group needs approval when it has a
 // password (a published verifier write, or Fake.SetGroupPassword) and a
-// service of the app names it in `x-sfc.secrets_from: [group/ID]`
+// service of the app names it in `x-sfc.secrets.from: [group/ID]`
 // (tenant scope). Approvals are kept per (realm, group, begin-app request),
 // and begin-app is refused (ResultInvalid) while one is missing, as sfcd
 // refuses an unapproved protected Group use. A begin-image-build original
@@ -60,8 +60,10 @@ func (w *world) groupUses(tenant string, doc []byte) (map[string][]string, map[s
 	var d struct {
 		Services map[string]struct {
 			XSfc struct {
-				Node    string                   `yaml:"node"`
-				Sources deployment.SecretSources `yaml:"secrets_from"`
+				Node    string `yaml:"node"`
+				Secrets struct {
+					From deployment.SecretSources `yaml:"from"`
+				} `yaml:"secrets"`
 			} `yaml:"x-sfc"`
 		} `yaml:"services"`
 	}
@@ -71,7 +73,7 @@ func (w *world) groupUses(tenant string, doc []byte) (map[string][]string, map[s
 	}
 	for svc, s := range d.Services {
 		nodes[svc] = s.XSfc.Node
-		for _, src := range s.XSfc.Sources {
+		for _, src := range s.XSfc.Secrets.From {
 			if src.Group == "" || src.Scope == "cluster" {
 				continue
 			}

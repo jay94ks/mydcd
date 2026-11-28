@@ -4,6 +4,7 @@ package userauth
 
 import (
 	"context"
+	"errors"
 	"github.com/jay94ks/seafield/internal/access"
 	"github.com/jay94ks/seafield/internal/cluster"
 	"github.com/jay94ks/seafield/internal/cluster/control"
@@ -67,6 +68,9 @@ var (
 			return control.NodeDrainStatus{}, "denied"
 		}
 		status, err := s.Policy.NodeDrainStatus(view.State, session, time.Now().Unix(), control.NodeDrainQuery(q))
+		if errors.Is(err, control.ErrNoNodeDrain) {
+			return control.NodeDrainStatus{}, "missing"
+		}
 		if err != nil {
 			return control.NodeDrainStatus{}, "denied"
 		}

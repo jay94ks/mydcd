@@ -70,6 +70,17 @@ func TestClusterBackupFromEveryMember(t *testing.T) {
 		t.Fatal("unrecorded backup:", err)
 	}
 	m.Change(0, "backup-1", "cluster-backup", 0, control.ClusterBackupChange{Operation: "backup-1", Recipient: recipient.Public()})
+	// A voter that joined after genesis fetches the master key from the
+	// others in the background (advanceCertificateMaster); until then it
+	// answers "unavailable", which is right but not what this test checks.
+	for _, r := range m.Nodes[:2] {
+		for !r.certificateNative().HasMaster() {
+			if ctx.Err() != nil {
+				t.Fatal("voter never received the master key")
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+	}
 
 	var masters [][]byte
 	for i := range m.Nodes {

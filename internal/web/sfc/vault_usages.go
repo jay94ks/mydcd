@@ -10,7 +10,7 @@ type VaultUsage struct {
 	App, Deployment, Service string
 	Standalone               string `json:",omitempty"` // not modeled by the fake yet
 	Node                     string
-	Selector                 string   // the secrets_from entry: secret ID or group ID
+	Selector                 string   // the secrets.from entry: secret ID or group ID
 	Secrets                  []string // secret object IDs it receives that the query covers
 	// Live: the usage still holds (the app is deployed); vault-retire is
 	// refused while one is live.

@@ -217,17 +217,25 @@ func Open(o Options) (*Engine, error) {
 	// sends none. CommitTimeout is now only the local re-check for a wake-up
 	// that could not be delivered.
 	//
-	// Failure detection is the SFCP connection's job: QUIC PINGs every 1s
-	// and closes after 3s of silence, and OnPeerLost below turns that into
-	// an election on a follower (after a random wait up to ElectionTimeout/2)
-	// or a lease re-check on the leader. A Raft heartbeat therefore only goes
-	// out every 10s. HeartbeatTimeout and LeaderLeaseTimeout are the backstop
-	// for a peer whose connection stays up while its Raft does not answer.
-	// Reads and writes still confirm leadership with real AppendEntries
-	// (confirmLeader), so none of these timers affect correctness.
+	// Liveness is one mechanism shared with SFCP (Jay 2026-11-28 10:42–10:45
+	// KST): any packet of any kind from a server counts as contact
+	// (Mesh.LastReceived, wired as PeerContact below), and only a connection
+	// that has received nothing for 10s sends a QUIC PING; after 30s of
+	// silence it closes and OnPeerLost turns that into an election on a
+	// follower (after a random wait up to ElectionTimeout/2) or a lease
+	// re-check on the leader. So the leader sends a Raft heartbeat to a
+	// follower only when nothing at all arrived from it for
+	// HeartbeatInterval, or when PeerConnected forces one, and a follower
+	// counts any packet from its leader as contact. Reads and writes still
+	// confirm leadership with real AppendEntries (confirmLeader), so none of
+	// these timers affect correctness; a leader whose Raft stops while its
+	// process still answers QUIC is found by those confirmations, not by
+	// heartbeats.
 	cfg.CommitTimeout = time.Second
 	cfg.HeartbeatInterval = 10 * time.Second
 	cfg.HeartbeatTimeout = 30 * time.Second
+	mesh := o.Mesh
+	cfg.PeerContact = func(id raft.ServerID) time.Time { return mesh.LastReceived(string(id)) }
 	cfg.ElectionTimeout = 2 * time.Second
 	cfg.LeaderLeaseTimeout = 20 * time.Second
 	cfg.MaxAppendEntries = 1
@@ -408,6 +416,9 @@ func (e *Engine) Submit(ctx context.Context, c state.Command) (Committed, error)
 	// Apply itself commits this command in log order and waits for the FSM.
 	// No state is read here after VerifyLeader, so a preceding Barrier only
 	// adds another durable, replicated log entry without fencing a consumer.
+	if err := e.submitFeatures(c); err != nil {
+		return Committed{}, err
+	}
 	b, err := state.EncodeCommand(c)
 	if err != nil {
 		return Committed{}, err

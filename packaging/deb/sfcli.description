@@ -1,0 +1,3 @@
+sfcli manages a Seafield Cluster: servers, apps, volumes, networks and
+users. It talks to sfcd over the management socket or a remote context, and
+runs on a cluster server or on an administrator's own Linux machine.

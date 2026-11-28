@@ -32,7 +32,7 @@ func TestRealBoundaryManagedOrderedSecretGroups(t *testing.T) {
 }
 
 func managedOrderedSecretDocument(raw []byte) []byte {
-	s := strings.Replace(string(raw), "secrets_from: [data]", "secrets_from: [group/common, group/department, data]", 1)
+	s := strings.Replace(string(raw), "secrets: {from: [data]}", "secrets: {from: [group/common, group/department, data]}", 1)
 	s = strings.Replace(s, "mode: '0400'}]", "mode: '0400'}, {source: username, target: /run/secrets/db-user, uid: '10001', gid: '10001', mode: '0400'}, {source: database, target: /run/secrets/database, uid: '10001', gid: '10001', mode: '0400'}]", 1)
 	s += " username:\n  x-sfc: {key: DB_USER}\n database:\n  x-sfc: {key: DATABASE}\n"
 	return []byte(s)

@@ -92,7 +92,7 @@ User 서명 action `cordon-node`/`uncordon-node`는 `{ID}`를 받고(cordon-node
 
 ### Registry 시작·정지 계획 메시지
 
-기존 User 요청 `registry-action-plan`은 `Tenant`, `RegistryAction:{Action:"start-registry"|"stop-registry",ID}`를 받고 `RegistryActionPlan`을 반환한다. After/Node·다른 method selector는 비워 둔다. 응답의 Schema/Cluster/Action/Tenant/ID, Expected/RootRevision/Epoch, Current RegistryView, WouldEnable/DataPreserved는 [Registry 조치 API](../registry-actions.md)에 정의한다. 계획은 인증된 quorum read이며 실행 가능한 unsigned operation이 아니다.
+User typed method `registry-action-plan`은 `Params:{Tenant,Query:{Action:"start-registry"|"stop-registry",ID}}`를 받고 계획을 `Data`로 반환한다. 다른 필드는 허용하지 않는다. 응답의 Schema/Cluster/Action/Tenant/ID, Expected/RootRevision/Epoch, Current RegistryView, WouldEnable/DataPreserved는 [Registry 조치 API](../registry-actions.md)에 정의한다. 계획은 인증된 quorum read이며 실행 가능한 unsigned operation이 아니다.
 
 실행은 기존 서명 start-registry/stop-registry action, record/root CAS와 원 operation/result를 사용한다. Unix·네트워크 SFCP가 같은 현재 사용자·credential 제한을 검사한다. 소켓 프로토콜·frame·schema 번호는1이며 새로운 노드 관리 권한을 부여하지 않는다.
 
@@ -104,7 +104,7 @@ User `tunnel-reconnect-plan`은 typed `Params:{Node,Peer}`, `tunnel-reconnect-st
 
 ### 노드 이미지 캐시 메시지
 
-기존 User image-cache-plan은 `ImageCache:{Node,Images?,After,Operation:""}`을, image-cache-status는 `ImageCache:{Node:"",After:"",Operation}`을 받는다. 바깥 Tenant/Node/After·다른 method selector는 비워 둔다. Plan은 원 owner 서명 Image ID/별칭/Bytes·Containers/References·Next이며 status는 원 job/주체/이유·revision과 이미지별 Parts다. whoami는 ImageCacheRootRevision을 제공한다.
+User typed method image-cache-plan은 `Params:{Query:{Node,Images?,After,Operation:""}}`을, image-cache-status는 `Params:{Operation}`을 받고 결과를 `Data`로 반환한다. 다른 필드는 허용하지 않는다. Plan은 원 owner 서명 Image ID/별칭/Bytes·Containers/References·Next이며 status는 원 job/주체/이유·revision과 이미지별 Parts다. whoami는 ImageCacheRootRevision을 제공한다.
 
 실행은 기존 UserOperation의 prune-node-images, Expected=0, Payload `{Operation,Plan}`과 현재 root/epoch를 사용한다. owner의 image-cache-native-plan/plan-permit/work/report는 기존 네트워크 Management 경계이며 Unix 사용자에게 이 노드 권한을 주지 않는다. 전체 공개 메시지·서명·정산/예산은 [노드 캐시 API](../node-image-cache.md)에 정의하며 protocol/record/frame 번호는1이다.
 

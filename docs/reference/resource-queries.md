@@ -65,7 +65,7 @@
 
 ## 로그인 전 서버 판 조회
 
-`server-version`은 `{Schema:1,Method:"server-version",Nonce:32바이트,Params:{}}`의 sessionless typed User 요청이다. envelope에 Session/Signature/Relay를 넣지 않는다. 응답 `Data:{Version,Protocol:1,Commit?,BuildTime?}`은 접속한 sfcd 자신이다. `Version`은 `major.minor.build`(릴리스) 또는 `major.minor.0-dev`(개발 빌드)다. TLS 키 pin 검증과 frame digest/EOF는 유지하며 leader로 전달하거나 quorum/login/wallet을 요구하지 않는다. `sfcli version`은 로컬 CLI 판이고 `sfcli server-version`은 원격 sfcd 판이다.
+`server-version`은 `{Schema:1,Method:"server-version",Nonce:32바이트,Params:{}}`의 sessionless typed User 요청이다. envelope에 Session/Signature/Relay를 넣지 않는다. 응답 `Data:{Version,Protocol:1,Commit?,BuildTime?,Features?,ClusterFeatures?}`은 접속한 sfcd 자신이다. `Features`는 그 sfcd 빌드가 아는 기능 이름(`network-transit-v1` 꼴, 오름차순), `ClusterFeatures`는 그 sfcd가 지금 보는 모든 서버와의 교집합이고, major의 기본 기능만 쓰면 둘 다 없다. `Version`은 `major.minor.build`(릴리스) 또는 `major.minor.0-dev`(개발 빌드)다. TLS 키 pin 검증과 frame digest/EOF는 유지하며 leader로 전달하거나 quorum/login/wallet을 요구하지 않는다. `sfcli version`은 로컬 CLI 판이고 `sfcli server-version`은 원격 sfcd 판이다.
 
 ```sh
 sfcli --cluster production server-version

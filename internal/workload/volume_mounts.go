@@ -32,7 +32,7 @@ type VolumeMount struct {
 func volumeReferences(s ContainerSpec, key string, op reconcile.Operation) ([]volumes.Activation, error) {
 	refs := make([]volumes.Activation, 0, len(s.Volumes))
 	for _, v := range s.Volumes {
-		r := volumes.Activation{Scope: v.Scope, Consumer: v.Consumer, NativeKey: v.NativeKey, NativeGeneration: v.NativeGeneration, TaskKey: key, Task: op.Target, Operation: op.ID, NativeBinding: v.NativeBinding}
+		r := volumes.Activation{Scope: v.Scope, Consumer: v.Consumer, NativeKey: v.NativeKey, NativeGeneration: v.NativeGeneration, TaskKey: key, Task: taskIdentity(op.Target, s), Operation: op.ID, NativeBinding: v.NativeBinding}
 		if r.Operation == 0 {
 			r.Operation = 1 // Read-only Status has no dispatch; resolved below.
 		}

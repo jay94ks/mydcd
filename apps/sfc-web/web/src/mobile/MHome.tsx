@@ -25,7 +25,7 @@ function ServerCard({ n, admin }: { n: NodeView; admin: boolean }) {
         <b>{n.id}</b>
         <span style={{ display: 'flex', gap: 4 }}>
           {n.leader && <Badge tone="pr">리더</Badge>}
-          <PhaseBadge phase={n.phase} />
+          <PhaseBadge phase={n.phase} reason={n.phaseReason} />
         </span>
       </div>
       {n.phase === 'joining' ? (
@@ -119,13 +119,15 @@ export function MHome() {
                   <div className="mtile">
                     <small>컨테이너</small>
                     <b>{containers}</b>
-                    <span>{problems ? `문제 ${problems}` : '문제 없음'}</span>
+                    <span>{problems ? `오류 ${problems}` : '오류 없음'}</span>
                   </div>
                   <div className="mtile">
                     <small>앱</small>
                     <b>{v.apps.length}</b>
                     <span>
-                      정상 {count('healthy')} · 진행 {count('progressing')} · 문제 {count('degraded') + count('unhealthy')}
+                      {/* 데스크톱 대시보드 앱 타일과 같은 말 */}
+                      정상 {count('healthy')} · 진행 중 {count('progressing')} · 일부 오류 {count('degraded')}
+                      {count('unhealthy') ? ` · 오류 ${count('unhealthy')}` : ''}
                     </span>
                   </div>
                 </>
@@ -172,7 +174,7 @@ export function MHome() {
                 <div className="m-sec">
                   <span>서버 현황</span>
                   <button type="button" onClick={() => setSortSheet(true)}>
-                    정렬: {sort === 'problem' ? '문제 많은 순' : sort === 'name' ? '이름' : '사용률 높은 순'} ▾
+                    정렬: {sort === 'problem' ? '오류 많은 순' : sort === 'name' ? '이름' : '사용률 높은 순'} ▾
                   </button>
                 </div>
                 {nodes.map((n) => (
@@ -193,7 +195,7 @@ export function MHome() {
                 title="서버 정렬"
                 onClose={() => setSortSheet(false)}
                 items={[
-                  { label: '문제 많은 순', onSelect: () => setSort('problem') },
+                  { label: '오류 많은 순', onSelect: () => setSort('problem') },
                   { label: '이름', onSelect: () => setSort('name') },
                   { label: '사용률 높은 순', onSelect: () => setSort('usage') },
                 ]}

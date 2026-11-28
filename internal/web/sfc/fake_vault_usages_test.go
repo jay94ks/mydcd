@@ -20,7 +20,7 @@ func TestVaultUsages(t *testing.T) {
 	// shop-worker's current app.yaml gains {secret: mysql} on worker.
 	src := f.w.apps["shop/shop-worker"].sources
 	last := &src[len(src)-1]
-	last.Document = []byte(strings.Replace(string(last.Document), "      node: node-b\n", "      node: node-b\n      secrets_from: [mysql]\n", 1))
+	last.Document = []byte(strings.Replace(string(last.Document), "      node: node-b\n", "      node: node-b\n      secrets: {from: [mysql]}\n", 1))
 	f.w.vault = append(f.w.vault, VaultView{Realm: "shop", ID: "shop-db", Path: "shop-db", Kind: "group", Parent: "shop", Status: "active", Revision: 31})
 	f.mu.Unlock()
 

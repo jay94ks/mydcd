@@ -104,7 +104,7 @@ func (c *fakeConn) WriteVault(ctx context.Context, tenant string, receiver confi
 		return SecretWriteReply{Code: "denied"}, nil
 	}
 	if fw.status != "Dispatched" {
-		return SecretWriteReply{Code: "ok", Observation: fw.obs}, nil
+		return SecretWriteReply{Code: "ok", VaultObservation: fw.obs}, nil
 	}
 	obs := &secrets.WriteObservation{Cluster: w.cluster, Tenant: q.Realm, Request: fw.req, Generation: fw.generation, ExpectedObjectRevision: fw.objRev,
 		Writer: fakeWriter(), Operation: fw.operation, Observer: fakeWriter(), Outcome: reconcile.EffectNotApplied}
@@ -135,7 +135,7 @@ func (c *fakeConn) WriteVault(ctx context.Context, tenant string, receiver confi
 			obs.VerifierRef = "vref-" + fw.req.ID
 		}
 	case q.Mode == "recover" && fw.attempted:
-		return SecretWriteReply{Code: "ok", Observation: fw.obs}, nil
+		return SecretWriteReply{Code: "ok", VaultObservation: fw.obs}, nil
 	case q.Mode == "recover":
 		// nothing arrived: a positive not-applied observation
 	default:
@@ -143,7 +143,7 @@ func (c *fakeConn) WriteVault(ctx context.Context, tenant string, receiver confi
 	}
 	obs.Signature = ed25519.Sign(FixtureKey("vault-writer"), secrets.WriteObservationBytes(*obs))
 	fw.obs = obs
-	return SecretWriteReply{Code: "ok", Observation: obs}, nil
+	return SecretWriteReply{Code: "ok", VaultObservation: obs}, nil
 }
 
 // VaultWriteReceived returns the key names (never values) that reached the

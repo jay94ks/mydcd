@@ -165,6 +165,7 @@ code, .mono { font-family: var(--mono); font-size: 12px; }
 /* ── 페이지 머리 ─────────────────────────── */
 .crumbs { font-size: 13px; color: var(--muted); }
 .ids { font-size: 12px; color: var(--muted); font-family: var(--mono); background: var(--chip); padding: 3px 8px; border-radius: 4px; }
+.page-sub { margin-top: -6px; }
 .help { background: var(--accent-bg); border: 1px solid var(--accent-line); border-radius: 10px; padding: 14px 18px; font-size: 13px; line-height: 20px; color: var(--text-2); display: flex; flex-direction: column; gap: 4px; }
 .help .terms { color: var(--muted); }
 .help .terms b { color: var(--text-2); }
@@ -256,7 +257,7 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
 .tbl th button { all: unset; cursor: pointer; }
 .tbl td { padding: 10px 12px; border-top: 1px solid var(--line-2); vertical-align: middle; max-width: 360px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tbl td.wrap { white-space: normal; }
-/* 내 계정 › 화면 설정 › 표 밀도 '좁게' */
+/* 내 계정 › 화면 설정 › 표 줄 간격 '좁게' */
 [data-density='compact'] .tbl th, [data-density='compact'] .tbl td { padding: 6px 10px; }
 .tbl tr.selected td { background: var(--accent-bg); }
 .tbl tr.clickable { cursor: pointer; }
@@ -284,7 +285,11 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
 @keyframes pl { 0% { transform: scaleX(0); } 60% { transform: scaleX(.8); } 100% { transform: scaleX(1); opacity: 0; } }
 .errband { border: 1px solid var(--er-line); background: var(--er-soft); border-radius: 10px; padding: 12px 16px; display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--text); }
 .errband .title { color: var(--er); font-weight: 600; }
-.errband details pre { margin: 6px 0 0; max-height: 240px; overflow: auto; background: var(--surface); border: 1px solid var(--line); padding: 8px; border-radius: 6px; }
+.errband { min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
+.errband .row { min-width: 0; }
+/* 원문이 길어도 띠(카드) 밖으로 넘치지 않고 그 안에서 스크롤한다 */
+.errband details { min-width: 0; max-width: 100%; flex: 1 1 100%; }
+.errband details pre { margin: 6px 0 0; max-height: 240px; max-width: 100%; overflow: auto; overflow-wrap: normal; white-space: pre; background: var(--surface); border: 1px solid var(--line); padding: 8px; border-radius: 6px; }
 .note { border-radius: 8px; padding: 10px 12px; font-size: 13px; }
 .note.wa { background: var(--wa-soft); border: 1px solid var(--wa-line); color: var(--wa); }
 .note.un { background: var(--un-bg); border: 1px dashed var(--faint); color: var(--un); }
@@ -363,7 +368,7 @@ button.tnode { cursor: pointer; }
 .login-card input, .login-card select { height: 40px; }
 .login-card .btn.primary { height: 44px; font-size: 15px; font-weight: 600; border-radius: 8px; }
 
-/* 앱 개요의 자원 나무(세로 목록) */
+/* 앱 개요의 앱 구성(세로 목록) */
 .res-tree { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 12px; }
 .res-tree > li { display: flex; flex-direction: column; gap: 4px; padding-left: 12px; border-left: 2px solid var(--line); }
 

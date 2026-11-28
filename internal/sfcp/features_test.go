@@ -20,10 +20,10 @@ import (
 func TestFeatureSetsGateSendingAndIntersect(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	transit := buildinfo.Features(0).With(buildinfo.FeatureTransit)
+	transit := buildinfo.MustFeatures(buildinfo.NetworkTransitV1)
 	spec := purposes[Observation]
 	saved := spec.kindNeeds
-	spec.kindNeeds = map[uint8]buildinfo.Features{KindWorkloadReport: transit}
+	spec.kindNeeds = map[uint8][]buildinfo.Range{KindWorkloadReport: {buildinfo.From(buildinfo.NetworkTransitV1)}}
 	purposes[Observation] = spec
 	defer func() { spec.kindNeeds = saved; purposes[Observation] = spec }()
 
@@ -70,28 +70,28 @@ func TestFeatureSetsGateSendingAndIntersect(t *testing.T) {
 	}
 
 	// A baseline sender: nothing needing transit leaves it.
-	old, s := dial(0)
-	if s.PeerFeatures() != transit || s.Supports(Observation, KindWorkloadReport) || !s.Supports(Observation, KindNodeObservation) {
+	old, s := dial(buildinfo.Features{})
+	if s.PeerFeatures() != transit || s.Supports(Observation, KindWorkloadReport) || !s.Supports(Observation, KindEventBatch) {
 		t.Fatal("baseline sender support", s.PeerFeatures())
 	}
 	if err = s.Report(ctx, KindWorkloadReport, []byte("x")); !errors.Is(err, ErrUnsupported) {
 		t.Fatal("unsupported kind sent", err)
 	}
-	if err = s.Report(ctx, KindNodeObservation, []byte("x")); err != nil {
+	if err = s.Report(ctx, KindEventBatch, []byte("x")); err != nil {
 		t.Fatal("baseline kind", err)
 	}
 	waitFor(t, func() bool {
 		f, live := receiver.PeerFeatures(Identity(a.Public))
-		return live && f == 0
+		return live && f.Empty()
 	})
 	members := []Identity{Identity(a.Public), Identity(b.Public)}
-	if got := receiver.ClusterFeatures(members); got != 0 {
+	if got := receiver.ClusterFeatures(members); !got.Empty() {
 		t.Fatal("intersection with a baseline member", got)
 	}
 	old.Close()
 	waitFor(t, func() bool { _, live := receiver.PeerFeatures(Identity(a.Public)); return !live })
 	// Away, it still counts with the set it last announced.
-	if got := receiver.ClusterFeatures(members); got != 0 {
+	if got := receiver.ClusterFeatures(members); !got.Empty() {
 		t.Fatal("away baseline member", got)
 	}
 
@@ -108,7 +108,7 @@ func TestFeatureSetsGateSendingAndIntersect(t *testing.T) {
 	// A member never seen since this process started counts as empty.
 	var unseen Identity
 	unseen[0] = 9
-	if got := receiver.ClusterFeatures(append(members, unseen)); got != 0 {
+	if got := receiver.ClusterFeatures(append(members, unseen)); !got.Empty() {
 		t.Fatal("never-seen member kept a feature on", got)
 	}
 	// A disconnected member keeps the set it last announced.
@@ -119,21 +119,48 @@ func TestFeatureSetsGateSendingAndIntersect(t *testing.T) {
 	}
 }
 
+// A frame that needs nothing is admitted without touching feature sets.
+func BenchmarkAdmitWithoutNeeds(b *testing.B) {
+	key := Identity{7}
+	g := &Gate{cluster: [32]byte{1}, challenge: [32]byte{2}, key: key, authenticated: true}
+	g.setPeerFeatures(buildinfo.MustFeatures(buildinfo.NetworkTransitV1))
+	f := Frame{Purpose: Observation, Kind: KindEventBatch, Request: 1, Fields: []Field{{Tag: 1, Required: true, Value: []byte("x")}}}
+	p := Policy{Key: key, Report: true}
+	b.ReportAllocs()
+	for b.Loop() {
+		if err := g.Admit(f, p, false, false); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
 // A peer that did not announce a needed feature has its frames refused.
 func TestGateRefusesFramesNeedingUnannouncedFeatures(t *testing.T) {
-	transit := buildinfo.Features(0).With(buildinfo.FeatureTransit)
+	transit := buildinfo.MustFeatures(buildinfo.NetworkTransitV1)
 	spec := purposes[Observation]
 	saved := spec.kindNeeds
-	spec.kindNeeds = map[uint8]buildinfo.Features{KindWorkloadReport: transit}
+	spec.kindNeeds = map[uint8][]buildinfo.Range{KindWorkloadReport: {buildinfo.From(buildinfo.NetworkTransitV1)}}
 	purposes[Observation] = spec
 	defer func() { spec.kindNeeds = saved; purposes[Observation] = spec }()
+	none := buildinfo.Features{}
+	v2f := buildinfo.Feature{Group: buildinfo.GroupNetwork, Set: buildinfo.SetNetworkTransit, Version: 2}
+	v2 := buildinfo.MustFeatures(v2f)
+	both := buildinfo.MustFeatures(buildinfo.NetworkTransitV1, v2f)
+	preview := buildinfo.MustFeatures(buildinfo.Feature{Group: buildinfo.GroupNetwork, Set: buildinfo.SetNetworkTransit, Version: 1, Postfix: "preview"})
 	key := Identity{7}
 	f := Frame{Purpose: Observation, Kind: KindWorkloadReport, Request: 1, Fields: []Field{{Tag: 1, Required: true, Value: []byte("x")}}}
 	for _, c := range []struct {
 		peer, own buildinfo.Features
 		ok        bool
-	}{{0, transit, false}, {transit, 0, false}, {transit, transit, true}} {
-		g := &Gate{cluster: [32]byte{1}, challenge: [32]byte{2}, key: key, authenticated: true, features: c.peer, own: c.own}
+	}{
+		{none, transit, false},
+		{transit, none, false},
+		{transit, transit, true},
+		{v2, both, true},          // the common v2 is inside the range
+		{preview, preview, false}, // a postfix never meets a mainline range
+	} {
+		g := &Gate{cluster: [32]byte{1}, challenge: [32]byte{2}, key: key, authenticated: true, own: c.own}
+		g.setPeerFeatures(c.peer)
 		if err := g.Admit(f, Policy{Key: key, Report: true}, false, false); (err == nil) != c.ok {
 			t.Fatalf("peer=%v own=%v: %v", c.peer, c.own, err)
 		}
@@ -141,14 +168,17 @@ func TestGateRefusesFramesNeedingUnannouncedFeatures(t *testing.T) {
 }
 
 func TestHelloFeaturesAreOptional(t *testing.T) {
-	transit := buildinfo.Features(0).With(buildinfo.FeatureTransit)
+	transit := buildinfo.MustFeatures(buildinfo.NetworkTransitV1)
 	if got := helloFeatures(Frame{Fields: []Field{featuresField(transit)}}); got != transit {
 		t.Fatal(got)
 	}
-	if got := helloFeatures(Frame{}); got != 0 {
+	if got := helloFeatures(Frame{}); !got.Empty() {
 		t.Fatal("missing extension is the baseline", got)
 	}
-	if got := helloFeatures(Frame{Fields: []Field{{Tag: tagFeatures, Value: []byte{1}}}}); got != 0 {
+	if string(featuresField(transit).Value) != "\x01\x00\x01\x01\x00" {
+		t.Fatalf("tag 129 is the 32-bit code and postfix: %x", featuresField(transit).Value)
+	}
+	if got := helloFeatures(Frame{Fields: []Field{{Tag: tagFeatures, Value: []byte{1}}}}); !got.Empty() {
 		t.Fatal("malformed extension is the baseline", got)
 	}
 	// The hello with the extension still parses under the handshake rule.

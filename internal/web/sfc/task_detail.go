@@ -90,7 +90,6 @@ const (
 	ExitReasonHealth      = "health"
 	ExitReasonNodeRestart = "node-restart"
 	ExitReasonUser        = "user"
-	ExitReasonLogClear    = "log-clear"
 )
 
 type TaskExit struct {

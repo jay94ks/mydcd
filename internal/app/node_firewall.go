@@ -168,7 +168,7 @@ func (f *nodeFirewallRuntime) ensure(ctx context.Context, s firewall.Layers) {
 		f.setApplyErr("")
 		return
 	}
-	if err := firewall.Apply(ctx, f.host, s, l, nil); err != nil {
+	if err := firewall.Apply(ctx, f.host, s, l); err != nil {
 		f.setApplyErr(err.Error())
 		return
 	}
@@ -329,7 +329,7 @@ func (f *nodeFirewallRuntime) serve(ctx context.Context, read control.NodeFirewa
 		return base
 	}
 	previous := f.layers(s)
-	if err := firewall.Apply(ctx, f.host, f.layers(next), f.locks(), &previous); err != nil {
+	if err := firewall.Apply(ctx, f.host, f.layers(next), f.locks()); err != nil {
 		base.Code, base.Error = "apply-failed", bounded(err.Error())
 		base.View = f.view(ctx, s)
 		record(base, read.Session.User)
@@ -401,17 +401,12 @@ func (f *nodeFirewallRuntime) view(ctx context.Context, s firewall.State) *contr
 	c := f.cluster
 	v := &control.NodeFirewallView{Schema: 1, Node: f.node, Managed: true, Revision: s.Revision, Policy: s.Policy, Rules: s.Rules, MaxRules: firewall.MaxRules, Cluster: &c, Effective: firewall.Effective(s, c), Shadowed: firewall.Shadowed(ls), Locked: l.List(), ApplyError: f.applyErr}
 	applied := true
+	lines, truncated, err := firewall.Operator(ctx, f.host)
+	if err != nil && v.ApplyError == "" {
+		v.ApplyError = bounded(err.Error())
+	}
+	v.Operator, v.OperatorFormat, v.OperatorTruncated = lines, "nft", truncated
 	for _, family := range firewall.Families {
-		lines, truncated, err := firewall.Operator(ctx, f.host, family)
-		if err != nil && v.ApplyError == "" {
-			v.ApplyError = bounded(err.Error())
-		}
-		if family == 4 {
-			v.Operator4 = lines
-		} else {
-			v.Operator6 = lines
-		}
-		v.OperatorTruncated = v.OperatorTruncated || truncated
 		in, err := firewall.Installed(ctx, f.host, family, firewall.Lines(family, ls, l))
 		applied = applied && err == nil && in
 	}

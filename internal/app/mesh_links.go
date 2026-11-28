@@ -4,6 +4,9 @@ package app
 
 import (
 	"context"
+	"fmt"
+	"log"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -34,6 +37,7 @@ type meshLink struct {
 	next    time.Time
 	retry   time.Duration
 	dialing bool
+	failure string // the last dial failure logged, "" after a success
 }
 
 // due returns the peers to dial now: those without a session, not already
@@ -92,34 +96,75 @@ func (m *meshLinks) done(now time.Time, key sfcp.Identity, ok bool) {
 	l.next = now.Add(l.retry)
 }
 
+// logged reports whether a dial outcome differs from the last one logged for
+// key, and records it: a dial failing the same way every few seconds is
+// logged once, and again when it changes or recovers.
+func (m *meshLinks) logged(key sfcp.Identity, err error) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	l := m.peers[key]
+	if l == nil {
+		return false
+	}
+	text := ""
+	if err != nil {
+		text = err.Error()
+	}
+	if l.failure == text {
+		return false
+	}
+	l.failure = text
+	return true
+}
+
 // meshPeers lists the nodes this node keeps a session with: every member
 // and joining node not removed or retired, except itself.
-func (r *Runtime) meshPeers(ctx context.Context) []sfcp.Peer {
+// skipped names, by member ID, why a member with an endpoint is not dialed.
+func (r *Runtime) meshPeers(ctx context.Context) (out []sfcp.Peer, skipped map[string]string) {
 	engine := r.Engine()
 	if engine == nil {
-		return nil
+		return nil, nil
 	}
 	_, d, err := r.members(ctx, false)
 	if err != nil {
-		return nil
+		return nil, map[string]string{"*": "membership unreadable: " + err.Error()}
 	}
-	var out []sfcp.Peer
+	skipped = map[string]string{}
 	for _, entry := range d.Entries {
 		full, err := identity.ParseKey(entry.CurrentPeer().Key)
-		if err != nil || full == r.Identity.Public || !d.ReplicationKey(full) || entry.Peer.Endpoint == "" || strings.HasPrefix(entry.Peer.Endpoint, "unix:") {
+		switch {
+		case err != nil:
+			skipped[entry.Peer.ID] = "its key does not parse"
+			continue
+		case full == r.Identity.Public:
+			continue
+		case !d.ReplicationKey(full):
+			skipped[entry.Peer.ID] = "its key is not a current replication key"
+			continue
+		case entry.Peer.Endpoint == "":
+			skipped[entry.Peer.ID] = "it has no endpoint (it connects to this node)"
+			continue
+		case strings.HasPrefix(entry.Peer.Endpoint, "unix:"):
 			continue
 		}
 		peer, ok := r.Mesh.Peer(sfcp.Identity(full))
-		if ok && peer.Endpoint == entry.Peer.Endpoint {
+		switch {
+		case !ok:
+			skipped[entry.Peer.ID] = "its key is not a known transport peer"
+		case peer.Endpoint != entry.Peer.Endpoint:
+			skipped[entry.Peer.ID] = "transport endpoint " + peer.Endpoint + " differs from member endpoint " + entry.Peer.Endpoint
+		default:
 			out = append(out, peer)
 		}
 	}
-	return out
+	return out, skipped
 }
 
 func (r *Runtime) meshLinkLoop() {
 	defer r.wg.Done()
 	var links meshLinks
+	skippedLogged := map[string]string{}
+	wantedLogged, inboundLogged := "", false
 	tick := time.NewTicker(meshLinkTick)
 	defer tick.Stop()
 	for {
@@ -129,11 +174,36 @@ func (r *Runtime) meshLinkLoop() {
 		case <-tick.C:
 		}
 		if r.Mesh.InboundOnly() {
+			if !inboundLogged {
+				log.Printf("SFCP mesh: this node is inbound-only and dials no peer")
+				inboundLogged = true
+			}
 			continue
 		}
 		ctx, cancel := context.WithTimeout(r.ctx, meshLinkTick)
-		wanted := r.meshPeers(ctx)
+		wanted, skipped := r.meshPeers(ctx)
 		cancel()
+		for id, reason := range skipped {
+			if skippedLogged[id] != reason {
+				log.Printf("SFCP mesh does not dial member %s: %s", id, reason)
+			}
+		}
+		if reason, unreadable := skipped["*"]; unreadable {
+			skippedLogged["*"] = reason
+		} else if skipped != nil {
+			skippedLogged = skipped
+		}
+		// The set this node keeps, and which of it is connected, logged when
+		// it changes: a peer it never dials and never logs about is visible.
+		var view []string
+		for _, p := range wanted {
+			view = append(view, fmt.Sprintf("%s=%t", p.ID, r.Mesh.Connected(p.Key)))
+		}
+		slices.Sort(view)
+		if summary := strings.Join(view, " "); summary != wantedLogged && skipped["*"] == "" {
+			log.Printf("SFCP mesh peers (connected): %s", summary)
+			wantedLogged = summary
+		}
 		for _, peer := range links.due(time.Now(), wanted, r.Mesh.Connected) {
 			r.wg.Add(1)
 			go func() {
@@ -141,6 +211,13 @@ func (r *Runtime) meshLinkLoop() {
 				ctx, cancel := context.WithTimeout(r.ctx, meshLinkDialLimit)
 				_, err := r.Mesh.Dial(ctx, peer)
 				cancel()
+				if links.logged(peer.Key, err) {
+					if err != nil {
+						log.Printf("SFCP mesh dial to peer=%s endpoint=%s failed, retrying: %v", peer.ID, peer.Endpoint, err)
+					} else {
+						log.Printf("SFCP mesh dial to peer=%s endpoint=%s connected", peer.ID, peer.Endpoint)
+					}
+				}
 				links.done(time.Now(), peer.Key, err == nil)
 			}()
 		}

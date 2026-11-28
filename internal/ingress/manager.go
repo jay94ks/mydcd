@@ -3,6 +3,7 @@
 package ingress
 
 import (
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
@@ -10,6 +11,7 @@ import (
 	"fmt"
 	"github.com/jay94ks/seafield/internal/storage"
 	"net/netip"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -181,13 +183,9 @@ func validateRecord(r instanceRecord) error {
 		if _, err := RestoreBalancer(j); err != nil {
 			return err
 		}
-		expected := map[string]BackendSpec{}
-		for _, b := range svc.Backends {
-			expected[b.ID] = b
-		}
 		for _, v := range j.Backends {
-			b, ok := expected[v.Spec.ID]
-			if !ok || v.Spec.Generation != b.Generation || v.Spec.Weight != b.Weight || v.Spec.Capacity != b.Capacity || v.Spec.Draining != backendDraining(r, b) || r.Gone && len(v.Pins.Active) != 0 {
+			b, ok := backendByID(Spec{Services: []Service{svc}}, v.Spec.ID, v.Spec.Generation)
+			if !ok || v.Spec.Weight != b.Weight || v.Spec.Capacity != b.Capacity || v.Spec.Draining != backendDraining(r, b) || r.Gone && len(v.Pins.Active) != 0 {
 				return ErrRoute
 			}
 		}
@@ -232,7 +230,10 @@ func newRecord(revision, generation uint64, s Spec) (instanceRecord, error) {
 	r := instanceRecord{Schema: 1, Revision: revision, Generation: generation, Spec: s, Balances: map[string]BalanceJournal{}}
 	for _, svc := range s.Services {
 		b, _ := NewBalancer(uint64(s.HealthIntervalMS*3 + s.DialTimeoutMS + s.ResponseHeaderTimeoutMS))
-		for _, v := range svc.Backends {
+		// An older surge generation enters first so its successor can take the ID.
+		ordered := slices.Clone(svc.Backends)
+		slices.SortStableFunc(ordered, func(a, b BackendSpec) int { return cmp.Compare(a.Generation, b.Generation) })
+		for _, v := range ordered {
 			if err := b.Update(Backend{ID: v.ID, Generation: v.Generation, Weight: v.Weight, Capacity: v.Capacity, Draining: s.Lifecycle.Drain || v.Draining}); err != nil {
 				return r, err
 			}
@@ -428,21 +429,24 @@ func (m *Manager) Observe(key string) (Observation, error) {
 		row                   BackendObservation
 		available, allDrained bool
 	}
-	tasks := map[string]taskEvidence{}
+	// One row per Task generation: during a same-node surge the successor
+	// serves while the older generation of the same Task drains.
+	tasks := map[BackendObservation]taskEvidence{}
 	for _, j := range i.record.Balances {
 		healthy := false
 		for _, b := range j.Backends {
-			declared, exists := backendByID(i.record.Spec, b.Spec.ID)
+			declared, exists := backendByID(i.record.Spec, b.Spec.ID, b.Spec.Generation)
 			available := exists && !declared.Suspended && b.Spec.Healthy && !b.Spec.Draining && b.Spec.ObservedAt <= now && now-b.Spec.ObservedAt <= j.MaxAge
 			healthy = healthy || available
 			if exists && i.record.Spec.DynamicBackends {
-				prior, known := tasks[declared.Task]
+				row := BackendObservation{Task: declared.Task, Generation: declared.Generation, Revision: declared.Revision}
+				prior, known := tasks[row]
 				if !known {
-					prior = taskEvidence{row: BackendObservation{Task: declared.Task, Generation: declared.Generation, Revision: declared.Revision}, allDrained: true}
+					prior = taskEvidence{row: row, allDrained: true}
 				}
 				prior.available = prior.available || available
 				prior.allDrained = prior.allDrained && i.started && i.failed == nil && b.Spec.Draining && len(b.Pins.Active) == 0
-				tasks[declared.Task] = prior
+				tasks[row] = prior
 			}
 		}
 		o.Ready = o.Ready && healthy
@@ -455,8 +459,14 @@ func (m *Manager) Observe(key string) (Observation, error) {
 			o.DrainedBackends = append(o.DrainedBackends, evidence.row)
 		}
 	}
-	sort.Slice(o.Backends, func(i, j int) bool { return o.Backends[i].Task < o.Backends[j].Task })
-	sort.Slice(o.DrainedBackends, func(i, j int) bool { return o.DrainedBackends[i].Task < o.DrainedBackends[j].Task })
+	byTask := func(a, b BackendObservation) int {
+		if d := strings.Compare(a.Task, b.Task); d != 0 {
+			return d
+		}
+		return cmp.Compare(a.Generation, b.Generation)
+	}
+	slices.SortFunc(o.Backends, byTask)
+	slices.SortFunc(o.DrainedBackends, byTask)
 	if i.failed != nil {
 		o.Error = i.failed.Error()
 	}

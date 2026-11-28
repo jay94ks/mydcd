@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Claude <noreply@anthropic.com>
 Date: Fri, 27 Nov 2026 09:25:45 +0000
-Subject: [PATCH 15/20] sfcd: engine-only SFCP session on /run/sfe/sfcd.sock
+Subject: [PATCH 15/21] sfcd: engine-only SFCP session on /run/sfe/sfcd.sock
  replaces the HTTP engine socket (events 32, log bulk 33, ack 34 served;
  volume 35, network 36 called)
 

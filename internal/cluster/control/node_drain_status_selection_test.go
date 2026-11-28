@@ -71,7 +71,7 @@ func TestNodeDrainStatusSelectsCurrentThenLatestCommittedOriginal(t *testing.T) 
 		return status
 	}
 	for _, q := range []NodeDrainQuery{{Node: "node-a"}, {Node: "node-a", Operation: "missing-original"}, {Node: "node-b"}} {
-		if _, err := f.p.NodeDrainStatus(f.s, f.sessions["admin"], 2, q); !errors.Is(err, access.ErrInvalid) {
+		if _, err := f.p.NodeDrainStatus(f.s, f.sessions["admin"], 2, q); !errors.Is(err, ErrNoNodeDrain) {
 			t.Fatal("empty history must fail explicitly", q, err)
 		}
 	}

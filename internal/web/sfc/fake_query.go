@@ -22,6 +22,7 @@ import (
 	"github.com/jay94ks/seafield/internal/eventlog"
 	"github.com/jay94ks/seafield/internal/nodestorage"
 	"github.com/jay94ks/seafield/internal/observability"
+	"github.com/jay94ks/seafield/internal/secrets"
 	"github.com/jay94ks/seafield/internal/userauth"
 )
 
@@ -279,7 +280,7 @@ func (c *fakeConn) Members(ctx context.Context, after string) (MembersPage, erro
 	pg := paginate(w.members, func(n FixtureMember) string { return n.ID }, after, c.f.pageSize, w.root)
 	out := MembersPage{
 		Entries: []membership.Entry{}, Next: pg.Next, RootRevision: w.root,
-		NodeRuntimeRevision: w.root, NodeOperationEpoch: fakeNodeEpoch, NodeConfigurationIndex: w.raft.ConfigurationIndex, LedgerEpoch: w.ledgerEpoch,
+		NodeRuntimeRevision: w.root, NodeOperationEpoch: fakeNodeEpoch, NodeConfigurationIndex: w.raft.ConfigurationIndex,
 		NodeVoters: voters, NodeQuorum: voters/2 + 1,
 	}
 	for _, n := range pg.Items {
@@ -398,7 +399,7 @@ func (w *world) summaryRow(s FixtureNodeSummary, tenant string, counts map[strin
 	case "ready":
 		row.Ready = !row.Stale
 	case "degraded", "isolated":
-		row.State = "unready"
+		row.State, row.Reason = "unready", "MODULE_PASS_FAILED"
 	}
 	if i := w.memberIndex(s.Node); i >= 0 {
 		mb := w.members[i]
@@ -465,7 +466,7 @@ func (c *fakeConn) NodeStorage(ctx context.Context, node, after string) (Page[St
 func (w *world) storageRoot(r FixtureStorageRoot) StorageRoot {
 	ref := w.storageRef(r)
 	out := StorageRoot{Definition: nodestorage.Definition{Node: r.Node, Key: ref.Key, ID: r.ID, Path: r.Path, Tenants: slices.Clone(r.Tenants), AllTenants: r.AllTenants, CapacityBytes: r.CapacityBytes},
-		Generation: r.Generation, Revision: r.Revision, Draining: r.Draining}
+		Generation: r.Generation, Revision: r.Revision, Draining: r.Draining, ArchiveDefault: r.ArchiveDefault}
 	if out.Definition.Tenants == nil {
 		out.Definition.Tenants = []string{}
 	}
@@ -593,6 +594,12 @@ func fakeDevices(disks []FixtureDisk, node string, now uint64) *NodeDevicesView 
 	}
 	if len(view.Disks) > 0 {
 		view.Disks = append(view.Disks, NodeBlockDiskView{BlockDisk: observability.BlockDisk{Name: "sdz", Class: "unused", Size: 1 << 40, Model: "Fake Disk", Serial: "FAKE-SDZ"}, Parts: []NodeBlockPartView{}, Purposes: []string{}})
+		// A mirror bundle of two disks, one copy still syncing.
+		for _, m := range []string{"sdx", "sdw"} {
+			view.Disks = append(view.Disks, NodeBlockDiskView{BlockDisk: observability.BlockDisk{Name: m, Class: "bundle-member", Bundle: "backup", Size: 2 << 40, Model: "Fake Disk", Serial: "FAKE-" + strings.ToUpper(m)}, Parts: []NodeBlockPartView{}, Purposes: []string{}})
+		}
+		view.Disks = append(view.Disks, NodeBlockDiskView{BlockDisk: observability.BlockDisk{Name: "dm-9", Class: "additional", Kind: "bundle", Bundle: "backup", Size: 2 << 40}, Parts: []NodeBlockPartView{{BlockPart: observability.BlockPart{Name: "dm-9", Size: 2 << 40, Filesystem: "ext4", UUID: "00000000-0000-4000-8000-0000000000b9", Mounts: []string{"/var/lib/sfc-disks/backup"}, Space: &observability.BlockSpace{Total: 2 << 40, Used: 1 << 38, Available: 2<<40 - 1<<38}}, Purposes: []string{}, StorageRoots: []string{}}}, Purposes: []string{}})
+		view.Bundles = []observability.BlockBundle{{Name: "backup", Backend: "lvm", Mode: "mirror", Size: 2 << 40, Device: "dm-9", State: "syncing", SyncPercent: 63, Members: []observability.BundleMember{{Disk: "sdw", Serial: "FAKE-SDW", Size: 2 << 40, State: "syncing"}, {Disk: "sdx", Serial: "FAKE-SDX", Size: 2 << 40, State: "ok"}}}}
 	}
 	slices.SortFunc(view.Disks, func(a, b NodeBlockDiskView) int { return strings.Compare(a.Name, b.Name) })
 	return view
@@ -883,65 +890,94 @@ func (c *fakeConn) VolumeBackups(ctx context.Context, tenant, after string) (Pag
 	return paginate(items, func(v VolumeBackupView) string { return v.Key }, after, c.f.pageSize, c.f.w.root), nil
 }
 
-func (c *fakeConn) Vault(ctx context.Context, tenant, after string) (Page[VaultView], error) {
+func (c *fakeConn) Vault(ctx context.Context, tenant, after string) (Page[control.VaultView], error) {
 	const m = "vault"
 	if err := checkAfter(m, after); err != nil {
-		return Page[VaultView]{}, err
+		return Page[control.VaultView]{}, err
 	}
 	user, err := c.lockSession(ctx, m)
 	if err != nil {
-		return Page[VaultView]{}, err
+		return Page[control.VaultView]{}, err
 	}
 	defer c.unlock()
 	w := c.f.w
 	// Vault metadata needs ManageSecrets (tenant manager) as in sfcd.
 	if tenant == "" && !w.admin(user) || tenant != "" && !w.canManage(user, tenant) {
-		return Page[VaultView]{}, fail(m, CodeDenied, "")
+		return Page[control.VaultView]{}, fail(m, CodeDenied, "")
 	}
-	var items []VaultView // realm "" is the cluster Vault, not every realm
+	var rows []VaultView // realm "" is the cluster Vault, not every realm
 	for _, v := range w.vault {
 		if v.Realm == tenant {
-			items = append(items, v)
+			rows = append(rows, v)
 		}
 	}
-	p := paginate(items, func(v VaultView) string { return v.Realm + "/" + v.Path }, after, c.f.pageSize, w.root)
+	// sfcd's shape: one Object row per object, in ID order.
+	items := make([]control.VaultView, 0, len(rows))
+	for _, v := range rows {
+		o := fakeVaultObject(v, rows)
+		items = append(items, control.VaultView{Realm: tenant, Object: &o})
+	}
+	slices.SortFunc(items, func(a, b control.VaultView) int { return strings.Compare(a.Object.ID, b.Object.ID) })
+	p := paginate(items, func(v control.VaultView) string { return v.Object.ID }, after, c.f.pageSize, w.root)
 	p.Collection, p.ApprovalRevision = w.vaultRev[tenant], w.approvalRev
 	return p, nil
 }
 
-func (c *fakeConn) Lifecycles(ctx context.Context, tenant, after string) (Page[LifecycleEntry], error) {
+// fakeVaultObject is the secrets.Object sfcd keeps for a fake row. The root
+// group has no parent: a row whose parent is itself, the realm or no row of
+// the realm.
+func fakeVaultObject(v VaultView, realm []VaultView) secrets.Object {
+	o := secrets.Object{ID: v.ID, Parent: v.Parent, Kind: secrets.Group, Revision: v.Revision, Protected: v.Protected, Status: secrets.Status(v.Status),
+		PendingWrite: v.PendingWrite, MaxApprovalAge: v.MaxApprovalAge,
+		ACL: secrets.ACL{Users: slices.Clone(v.ACL.Users), Services: slices.Clone(v.ACL.Services), DenyUsers: slices.Clone(v.ACL.DenyUsers),
+			DenyServices: slices.Clone(v.ACL.DenyServices), TenantGrants: slices.Clone(v.ACL.TenantGrants)}}
+	if v.Kind == "object" {
+		o.Kind, o.Reference = secrets.Secret, secrets.Reference{Profile: v.Profile, Keys: slices.Clone(v.Keys)}
+	}
+	if o.Parent == o.ID || !slices.ContainsFunc(realm, func(p VaultView) bool { return p.ID == o.Parent && p.ID != o.ID }) {
+		o.Parent = ""
+	}
+	return o
+}
+
+func (c *fakeConn) Lifecycles(ctx context.Context, tenant, after string) (userauth.LifecyclesPage, error) {
 	if tenant == "" {
-		return Page[LifecycleEntry]{}, fail("lifecycles", CodeInvalid, "tenant required")
+		return userauth.LifecyclesPage{}, fail("lifecycles", CodeInvalid, "tenant required")
 	}
 	if err := checkAfter("lifecycles", after); err != nil {
-		return Page[LifecycleEntry]{}, err
+		return userauth.LifecyclesPage{}, err
 	}
 	user, err := c.lockSession(ctx, "lifecycles")
 	if err != nil {
-		return Page[LifecycleEntry]{}, err
+		return userauth.LifecyclesPage{}, err
 	}
 	defer c.unlock()
 	// ManageServices (cleanup authority) as LifecyclePage.
 	if !c.f.w.canManage(user, tenant) {
-		return Page[LifecycleEntry]{}, fail("lifecycles", CodeDenied, "")
+		return userauth.LifecyclesPage{}, fail("lifecycles", CodeDenied, "")
 	}
-	items := c.f.w.lifecycleEntries(tenant)
-	return paginate(items, func(v LifecycleEntry) string { return v.Key }, after, c.f.pageSize, c.f.w.root), nil
+	p := paginate(c.f.w.lifecycleEntries(tenant), func(v LifecycleEntry) string { return v.Key }, after, c.f.pageSize, c.f.w.root)
+	return userauth.LifecyclesPage{Items: p.Items, Next: p.Next, RootRevision: p.Revision}, nil
 }
 
-func (c *fakeConn) Registries(ctx context.Context, tenant, after string) (Page[RegistryView], error) {
+func (c *fakeConn) Registries(ctx context.Context, tenant, after string) (userauth.RegistriesPage, error) {
 	if tenant == "" {
-		return Page[RegistryView]{}, fail("registries", CodeInvalid, "tenant required")
+		return userauth.RegistriesPage{}, fail("registries", CodeInvalid, "tenant required")
 	}
 	if err := c.tenantRead(ctx, "registries", tenant, after); err != nil {
-		return Page[RegistryView]{}, err
+		return userauth.RegistriesPage{}, err
 	}
 	defer c.unlock()
-	items := filterTenant(c.f.w.registries, tenant, func(v RegistryView) string { return v.Tenant })
-	for i := range items {
-		items[i].Maintenance = c.f.w.maintenanceSummary(tenant, items[i].ID)
+	rows := filterTenant(c.f.w.registries, tenant, func(v FixtureRegistry) string { return v.Tenant })
+	for i := range rows {
+		rows[i].Maintenance = c.f.w.maintenanceSummary(tenant, rows[i].ID)
 	}
-	return paginate(items, func(v RegistryView) string { return v.ID }, after, c.f.pageSize, c.f.w.root), nil
+	p := paginate(rows, func(v FixtureRegistry) string { return v.ID }, after, c.f.pageSize, c.f.w.root)
+	out := userauth.RegistriesPage{RootRevision: p.Revision, Next: p.Next}
+	for _, r := range p.Items {
+		out.Items = append(out.Items, r.view())
+	}
+	return out, nil
 }
 
 // --- apps ---

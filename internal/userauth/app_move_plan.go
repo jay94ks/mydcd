@@ -33,7 +33,7 @@ func (s Service) appPlanArtifact(ctx context.Context, view cluster.View, session
 	if s.NodeObservations != nil {
 		// Unavailable measurements are explicit unknown; they never replace
 		// the actual target space check or publish a fabricated zero value.
-		reports, err = s.NodeObservations(ctx, view)
+		reports, _, err = s.NodeObservations(ctx, view)
 		if err != nil {
 			reports = nil
 		}

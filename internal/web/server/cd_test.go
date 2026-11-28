@@ -104,3 +104,32 @@ func TestCD(t *testing.T) {
 		t.Fatalf("bob: %d %v", code, out)
 	}
 }
+
+// An app deployed without CD gets its first policy through PUT cd/policy
+// ("자동 배포 켜기"): policy revision 0, no target, CAS = the app's revision.
+func TestCDPolicyAttach(t *testing.T) {
+	f, _ := newFakeFixture(t)
+	fakeLogin(t, f, "alice")
+	if code, out := f.do("GET", "/api/v1/t/shop/apps/shop-worker/cd", nil); code != 404 {
+		t.Fatalf("not cd yet: %d %v", code, out)
+	}
+	code, out := f.do("GET", "/api/v1/t/shop/apps/php-shop/cd", nil)
+	if code != 200 {
+		t.Fatalf("cd: %d %v", code, out)
+	}
+	p := out["cd"].(map[string]any)["policy"].(map[string]any)
+	p["source"].(map[string]any)["repository"] = "https://git.example.invalid/shop/worker.git"
+	if code, out := f.do("PUT", "/api/v1/t/shop/apps/shop-worker/cd/policy", map[string]any{"opId": "cdd2c3d4-0000-4000-8000-000000000001", "policy": p, "expected": 1}); opState(t, code, out) == "applied" {
+		t.Fatalf("stale expected applied: %d %v", code, out)
+	}
+	if code, out := f.do("PUT", "/api/v1/t/shop/apps/shop-worker/cd/policy", map[string]any{"opId": "cdd2c3d4-0000-4000-8000-000000000002", "policy": p}); opState(t, code, out) != "applied" {
+		t.Fatalf("attach: %d %v", code, out)
+	}
+	code, out = f.do("GET", "/api/v1/t/shop/apps/shop-worker/cd", nil)
+	if code != 200 || out["cd"].(map[string]any)["policyRevision"] != float64(1) || out["cd"].(map[string]any)["repository"] != "https://git.example.invalid/shop/worker.git" {
+		t.Fatalf("attached: %d %v", code, out)
+	}
+	if code, out := f.do("PUT", "/api/v1/t/shop/apps/nope/cd/policy", map[string]any{"opId": "cdd2c3d4-0000-4000-8000-000000000003", "policy": p}); code != 404 {
+		t.Fatalf("no app: %d %v", code, out)
+	}
+}

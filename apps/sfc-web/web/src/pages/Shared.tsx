@@ -85,7 +85,7 @@ export function NetworkRoutesPage() {
         <HelpBox terms="연결 (route) · 보내는 쪽 (source) · 받는 쪽 (destination) · 승인 (approve) · 철회 (withdraw)">
           <b>이 화면은</b> 다른 작업 공간의 망과 정해진 포트로 잇는 연결을 관리합니다. 한쪽이 제안하고 양쪽 작업 공간 관리자가 모두 승인해야 열립니다. 어느 쪽이든 철회하면 닫힙니다. 망은 작업 공간마다 따로 있는 자원이라, 다른 작업 공간의 망과는 이 연결이나 가상 브릿지로만 닿습니다. 같은 작업 공간의 망끼리는 잇지 않습니다.
           <br />
-          <b>가상 브릿지와 다른 점</b> 이 연결은 망을 잇지 않고, 서버 한 대에서 상대 망으로 정한 포트만 통과시키는 관문(gateway)입니다. 망 전체를 이으려면 <Link to="/shared/networks/bridges">가상 브릿지</Link>를 쓰세요.
+          <b>가상 브릿지와 다른 점</b> 이 연결은 망을 잇지 않고, 서버 한 대에서 상대 망으로 정한 포트만 통과시키는 게이트웨이(gateway)입니다. 망 전체를 이으려면 <Link to="/shared/networks/bridges">가상 브릿지</Link>를 쓰세요.
         </HelpBox>
       }
     >
@@ -368,7 +368,7 @@ function NetworkScopeDialog({ tenant, net, onClose, onDone }: { tenant: string; 
   );
 }
 
-/** 종류: 고정 / 앱 소유(앱 이름 공간) / 관리(작업 공간 공유) */
+/** 종류: 고정 / 앱 소유(소속 앱) / 관리(작업 공간 공유) */
 // 앱이 정한 저장소는 서버에 묶여 있어도(kind fixed) 앱 소유다. 등록한 고정 저장소만 '고정'
 const volKind = (v: VolumeView) => (v.app ? '앱 소유' : v.kind === 'fixed' ? '고정' : '관리');
 

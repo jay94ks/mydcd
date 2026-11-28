@@ -11,7 +11,7 @@ import (
 func TestSkillPathLooksBesideTheExecutableThenInShare(t *testing.T) {
 	root := t.TempDir()
 	bin := filepath.Join(root, "bin")
-	share := filepath.Join(root, "share", "sfcli")
+	share := filepath.Join(root, "share", "sfc")
 	for _, d := range []string{bin, share} {
 		if err := os.MkdirAll(d, 0o755); err != nil {
 			t.Fatal(err)

@@ -169,7 +169,7 @@ func (a *Approvals) restoreUsages(pins reconcile.LeaseJournal, usages []Usage) e
 	a.usagePins = pins
 	for i, u := range usages {
 		g := u.Grant
-		if _, dup := a.usages[usageKey(g)]; dup || !validPurpose(g.Use.Purpose) || g.Lifetime != pins.Active[i] || g.Realm != "" && !identifier(g.Realm) || !identifier(g.Consumer) || g.Generation == 0 || !sameUse(g.Use, u.Plan.Use) || g.Selection != selectionHash(u.Plan) || len(g.Use.Sources) == 0 || len(g.Use.Sources) > 256 || !identifier(g.Use.Tenant) || !identifier(g.Use.User) || !identifier(g.Use.App) || !identifier(g.Use.Deployment) || !identifier(g.Use.Service) || !identifier(g.Use.Node) || g.Use.NodeKey == ([32]byte{}) || g.Use.RequesterKey == ([32]byte{}) || len(u.Plan.Dependencies) == 0 || len(u.Plan.Dependencies) > maxObjects || len(u.Plan.Gates) != len(g.Pins) {
+		if _, dup := a.usages[usageKey(g)]; dup || !validPurpose(g.Use.Purpose) || g.Lifetime != pins.Active[i] || g.Realm != "" && !identifier(g.Realm) || !identifier(g.Consumer) || g.Generation == 0 || !sameUse(g.Use, u.Plan.Use) || g.Selection != selectionHash(u.Plan) || len(g.Use.Sources) == 0 || len(g.Use.Sources) > 256 || !identifier(g.Use.Tenant) && !(g.Use.ClusterConsumer() && g.Realm == "") || !identifier(g.Use.User) || !identifier(g.Use.App) || !identifier(g.Use.Deployment) || !identifier(g.Use.Service) || !identifier(g.Use.Node) || g.Use.NodeKey == ([32]byte{}) || g.Use.RequesterKey == ([32]byte{}) || len(u.Plan.Dependencies) == 0 || len(u.Plan.Dependencies) > maxObjects || len(u.Plan.Gates) != len(g.Pins) {
 			return ErrPolicy
 		}
 		for _, s := range g.Use.Sources {

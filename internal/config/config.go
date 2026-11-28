@@ -126,6 +126,7 @@ type Node struct {
 	NodeShell      NodeShell          `yaml:"node_shell,omitempty" json:",omitempty"`
 	Engine         Engine             `yaml:"engine,omitempty" json:",omitempty"`
 	Firewall       NodeFirewall       `yaml:"firewall,omitempty" json:",omitempty"`
+	Logs           Logs               `yaml:"logs,omitempty" json:",omitempty"`
 
 	// EngineAPI and EngineSocket are not node.yaml settings: a server's
 	// engine always serves its API at DefaultEngineAPI and dials sfcd at
@@ -582,6 +583,9 @@ func LoadNode(path string) (Node, error) {
 		}
 	}
 	if err := c.Engine.Validate(); err != nil {
+		return c, err
+	}
+	if err := c.Logs.Validate(); err != nil {
 		return c, err
 	}
 	if _, err := c.Firewall.KeepOpenPorts(); err != nil {

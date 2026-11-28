@@ -77,12 +77,12 @@ func (c Client) requestGitSave(ctx context.Context, target sfcp.Peer, session ac
 	}
 	proof.Signature = ed25519.Sign(c.Self.Private, imagebuild.GitSaveProofBytes(proof))
 	q := imagebuild.GitSaveRequest{Plan: plan, Proof: proof, Result: result}
-	reply, err := c.query(ctx, target, session, Request{Method: "save-build-git", Tenant: plan.Tenant, ImageBuildGit: &q})
+	out, err := call(ctx, c, target, session, SaveBuildGitMethod, SaveBuildGitQuery{Tenant: plan.Tenant, Request: q})
 	if err != nil {
 		return imagebuild.GitSaveResponse{}, err
 	}
-	if reply.ImageBuildGit == nil || !reply.ImageBuildGit.Valid(q) {
+	if !out.Valid(q) {
 		return imagebuild.GitSaveResponse{}, sfcp.ErrFrame
 	}
-	return *reply.ImageBuildGit, nil
+	return out, nil
 }

@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/jay94ks/seafield/internal/deployment"
 	"gopkg.in/yaml.v3"
 )
 
@@ -31,10 +32,12 @@ type appDoc struct {
 			Nodes []string `yaml:"nodes"`
 			// SecretEnv: REQ-16 (mock) a secret's value as an
 			// environment variable.
-			SecretEnv []struct {
-				Source string `yaml:"source"`
-				Name   string `yaml:"name"`
-			} `yaml:"secret_env"`
+			Secrets struct {
+				Env []struct {
+					Source string `yaml:"source"`
+					Name   string `yaml:"name"`
+				} `yaml:"env"`
+			} `yaml:"secrets"`
 		} `yaml:"x-sfc"`
 		Environment any   `yaml:"environment"`
 		Secrets     []any `yaml:"secrets"`
@@ -91,7 +94,7 @@ func parseApp(doc []byte) (appDoc, error) {
 		if s.Image == "" || s.XSfc.Node == "" {
 			return d, fmt.Errorf("service %s needs image and x-sfc.node", name)
 		}
-		if err := checkServiceSecrets(name, s.Environment, s.Secrets, s.XSfc.SecretEnv); err != nil {
+		if err := checkServiceSecrets(name, s.Environment, s.Secrets, s.XSfc.Secrets.Env); err != nil {
 			return d, err
 		}
 		if len(s.XSfc.Nodes) == 0 {
@@ -249,6 +252,16 @@ func (a *fakeApp) applyOverrides() {
 		}
 		t.Restarts, t.ExitCode, t.LastCheck = o.Restarts, o.ExitCode, o.LastCheck
 		a.tasks[i] = t
+		if a.view.HealthReason == nil && t.Health == "unhealthy" {
+			// sfcd's first cause (deployment.HealthReason), as a real
+			// degraded app reports it.
+			r := &deployment.HealthReason{Code: deployment.HealthTaskUnhealthy, Kind: "task", Name: t.Service, Node: t.Node}
+			if t.ExitCode != 0 {
+				exit := t.ExitCode
+				r.Code, r.Exit = deployment.HealthTaskExited, &exit
+			}
+			a.view.HealthReason = r
+		}
 	}
 }
 
@@ -312,7 +325,7 @@ func (w *world) plan(tenant string, doc []byte, diff bool) (AppPlan, error) {
 		if len(s.XSfc.Nodes) > 1 {
 			ps.Nodes = slices.Clone(s.XSfc.Nodes)
 		}
-		for _, e := range s.XSfc.SecretEnv {
+		for _, e := range s.XSfc.Secrets.Env {
 			ps.SecretEnv = append(ps.SecretEnv, e.Name)
 		}
 		p.Services = append(p.Services, ps)

@@ -3,7 +3,7 @@
 // 배포 › 앱 › 자동 배포 탭 (UI-40 상태 · UI-41 정책 · UI-42 승인 · UI-43 값 고정, 캔버스 CD · CDIx).
 // 계약: docs/reference/web-api.md "자동 배포 (UI-40~43)". 후보 고르기·계획·권한은 sfcd 몫이고 웹은 CAS 값만 채운다.
 // 묶음 비밀번호는 PasswordApprove 입력 칸에만 있고 보낸 뒤 지운다.
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import YAML from 'yaml';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { ApiError, api, noEndpoint } from '../api/client';
@@ -19,11 +19,10 @@ import { DiffView } from '../components/Code';
 import { MutationError, OpPanel, sendOp, useMutation } from '../components/OpPanel';
 import { useToast } from '../components/Toast';
 import { lineDiff } from '../lib/diff';
-import { DeployFlow } from './DeployFlow';
 import { eulReul, eunNeun } from '../lib/josa';
 import { ago, fmtBytes, fmtTime } from '../lib/format';
 import { Drawer } from '../components/Drawer';
-import { DEFAULT_POLL_MS, usePoll } from '../lib/usePoll';
+import { DEFAULT_POLL_MS, refreshAll, usePoll } from '../lib/usePoll';
 import { PasswordApprove } from './VaultApproval';
 import { CdGateNote, CdHooksCard } from './CdHooks';
 import { CD_KIND_NAME, webhookLinks } from '../api/webhooks';
@@ -73,7 +72,8 @@ type Act = 'sync' | 'recover' | 'replan' | 'pause' | 'resume' | 'abandon';
 export function CdTab({ a, current }: { a: AppView; current?: string }) {
   const { canDeploy } = useTenantRole();
   const phone = usePhone();
-  const q = usePoll((s) => appCd(a.tenant, a.app, s), [a.tenant, a.app], DEFAULT_POLL_MS);
+  // CD를 처음 켜면(a.cd가 생기면) 다시 읽는다
+  const q = usePoll((s) => (a.cd ? appCd(a.tenant, a.app, s) : Promise.resolve(undefined as never)), [a.tenant, a.app, !!a.cd], DEFAULT_POLL_MS);
   const [act, setAct] = useState<Act>();
   // 연 순간의 상태로 창을 띄운다(승인·반려 뒤 후보가 사라져도 결과를 보이게)
   const [approveCd, setApproveCd] = useState<Cd>();
@@ -983,7 +983,7 @@ function PolicyCard({ a, cd, canDeploy, onDone }: { a: AppView; cd: Cd; canDeplo
   const p = edit ?? cd.policy;
   if (!p)
     return (
-      <Card title="자동 배포 정책 (UI-41)">
+      <Card title="자동 배포 정책">
         <span className="muted">정책을 읽지 못했습니다.</span>
       </Card>
     );
@@ -993,7 +993,7 @@ function PolicyCard({ a, cd, canDeploy, onDone }: { a: AppView; cd: Cd; canDeplo
   // 배포 전 확인 웹훅(UI-44)은 수동 모드에서만 걸린다(cd-mode)
   const gate = !!links.data?.items.some((l) => l.kind === 'pre-sync');
   return (
-    <Card title="자동 배포 정책 (UI-41)" actions={<span className="small muted">policy rev {cd.policyRevision}</span>}>
+    <Card title="자동 배포 정책" actions={<span className="small muted">policy rev {cd.policyRevision}</span>}>
       <div className="g2">
         <Field label="동기화 모드">
           <Segmented
@@ -1123,7 +1123,7 @@ function OverrideCard({ a, cd, canDeploy, onDone }: { a: AppView; cd: Cd; canDep
   const [release, setRelease] = useState<string[]>();
   return (
     <Card
-      title="설정 임시 변경 (UI-43)"
+      title="설정 임시 변경"
       actions={
         <button className="btn sm" disabled={!canDeploy} title={canDeploy ? undefined : NEED} onClick={() => setSet('new')}>
           ＋ 임시 변경
@@ -1285,8 +1285,8 @@ function ReleaseDialog({ a, path, onClose, onDone }: { a: AppView; path: string[
 }
 
 // ── 자동 배포 켜기 (CDIx '자동 배포 켜기 (꺼진 앱)') ──────────────────────────────
-// sfcd에서 자동 배포 등록은 CD 정책(x-sfc.delivery)을 담은 app.yaml의 배포 그 자체다(cli.md 'Git CD 선택').
-// 그래서 지금 app.yaml에 정책을 넣은 새 버전을 만들고 배포 경로(검사 → 미리보기 → 제출)로 보낸다.
+// CD 정책은 앱 정의와 따로 PUT /cd/policy로 정한다(#862). app.yaml의 x-sfc.delivery는 없어진다(yaml-formats.md).
+// CD가 없는 앱에 처음 보내면 sfcd가 등록하고(configure-app-cd, PolicyRevision 0), expected는 앱 revision이다.
 
 export interface ConnectInput {
   repository: string;
@@ -1296,53 +1296,62 @@ export interface ConnectInput {
   mode: 'manual' | 'automatic';
 }
 
-/** x-sfc.delivery만 넣은 원문. 다른 줄과 주석은 그대로 둔다 */
-export function withDelivery(text: string, c: ConnectInput): string {
-  const doc = YAML.parseDocument(text);
-  const source: Record<string, string> = { kind: 'git', repository: c.repository.trim(), ref: c.branch.trim(), path: c.path.trim() };
-  if (c.credential.trim()) source.credential_profile = c.credential.trim();
-  doc.setIn(
-    ['x-sfc', 'delivery'],
-    doc.createNode({
-      enabled: true,
-      source,
-      poll_interval_seconds: 60,
-      sync: { mode: c.mode, drift: 'report', prune: false, allow_empty: false },
-      runtime_edits: { mode: 'require-explicit-override', expiry: 'manual-release' },
-    }),
-  );
-  return doc.toString({ flowCollectionPadding: false });
+/** 처음 켤 때의 CD 정책. 나머지는 CLI 기본값과 같다(1분마다 확인, 어긋남은 알리기만, 정리 안 함, 가져오기 30초·4MiB·대기 1·동시 1). sfcd가 limits 범위를 검사한다(compose_parse.go) */
+export function connectPolicy(c: ConnectInput): DCdPolicy {
+  return {
+    enabled: true,
+    source: { kind: 'git', repository: c.repository.trim(), ref: c.branch.trim(), path: c.path.trim(), credential: c.credential.trim() },
+    poll: 60,
+    sync: { mode: c.mode, drift: 'report', prune: false, allowEmpty: false },
+    runtime: { mode: 'require-explicit-override', expiry: 'manual-release' },
+    limits: { fetch: 30, bytes: 4 << 20, queued: 1, active: 1 },
+  };
 }
 
-function ConnectTab({ a, current, canDeploy }: { a: AppView; current?: string; canDeploy: boolean }) {
+function ConnectTab({ a, canDeploy }: { a: AppView; current?: string; canDeploy: boolean }) {
   const [open, setOpen] = useState(false);
   const [input, setInput] = useState<ConnectInput>();
-  const yaml = useMemo(() => (current && input ? withDelivery(current, input) : undefined), [current, input]);
+  const m = useMutation();
+  // 카드를 연 순간의 앱 revision을 expected로 고정한다. 그사이 앱이 바뀌었으면 op가 failed다.
+  const [expected, setExpected] = useState(a.revision);
+  const send = async () => {
+    if (!input) return;
+    if (m.error) m.reset();
+    const o = await m.run(`${cdPath(a.tenant, a.app)}/policy`, { policy: connectPolicy(input), expected }, 'PUT');
+    if (o?.state === 'applied') refreshAll();
+  };
   return (
     <>
       <Empty title="자동 배포가 꺼져 있습니다">
         Git 저장소를 연결하면 새 커밋을 계획하고, 정책대로 배포합니다.
         <div className="row" style={{ justifyContent: 'center', marginTop: 12 }}>
-          <button className="btn primary" disabled={!canDeploy || current === undefined} title={!canDeploy ? NEED : current === undefined ? '실행 중 app.yaml을 읽는 중입니다' : undefined} onClick={() => setOpen(true)}>
+          <button className="btn primary" disabled={!canDeploy} title={!canDeploy ? NEED : undefined} onClick={() => setOpen(true)}>
             자동 배포 켜기
           </button>
         </div>
       </Empty>
-      {yaml && input && (
-        <Card title="자동 배포 켜기 · 첫 계획" actions={<span className="small muted">버전 {a.revision} → {a.revision + 1}</span>}>
+      {input && (
+        <Card title="자동 배포 켜기 · 확인" actions={<span className="small muted">앱 버전 {expected} 기준</span>}>
           <span className="small">
             <code className="break-any">{input.repository}</code> · {input.branch} · {input.path} · 동기화 {input.mode === 'manual' ? '수동' : '자동'}
+            {input.credential ? ` · 자격 증명 ${input.credential}` : ''}
           </span>
-          <span className="small muted">app.yaml에 자동 배포 정책(x-sfc.delivery)을 넣은 새 버전입니다. 제출하면 서버가 Git을 읽어 첫 후보를 계획합니다.</span>
-          <div className="row" style={{ justifyContent: 'flex-end' }}>
-            <button className="btn sm" onClick={() => setInput(undefined)}>
-              취소
-            </button>
-          </div>
-          <DeployFlow tenant={a.tenant} yaml={yaml} canDeploy={canDeploy} deployment={a.deployment} currentVersion={a.revision} />
+          <span className="small muted">앱 정의는 그대로 두고 자동 배포 정책만 등록합니다. 등록하면 서버가 Git을 읽어 첫 후보를 계획합니다.</span>
+          <Err e={m.error} />
+          {m.op && <OpPanel op={m.op} onChange={(o) => (m.setOp(o), o.state === 'applied' && refreshAll())} />}
+          {!m.op && (
+            <div className="row" style={{ justifyContent: 'flex-end' }}>
+              <button className="btn sm" onClick={() => setInput(undefined)}>
+                취소
+              </button>
+              <button className="btn sm primary" disabled={m.busy || !canDeploy} onClick={() => void send()}>
+                {m.busy ? '보내는 중…' : '자동 배포 켜기'}
+              </button>
+            </div>
+          )}
         </Card>
       )}
-      {open && <ConnectDialog a={a} onClose={() => setOpen(false)} onNext={(c) => (setInput(c), setOpen(false))} />}
+      {open && <ConnectDialog a={a} onClose={() => setOpen(false)} onNext={(c) => (m.reset(), setExpected(a.revision), setInput(c), setOpen(false))} />}
     </>
   );
 }
@@ -1371,7 +1380,8 @@ function ConnectDialog({ a, onClose, onNext }: { a: AppView; onClose: () => void
       setProbe(noEndpoint(e) ? { wait: true } : { error: e });
     }
   };
-  const ok = /^(https:\/\/|ssh:\/\/|git@)\S+$/.test(c.repository.trim()) && !!c.branch.trim() && !!c.path.trim();
+  // sfcd는 https:// 저장소만 받는다(사용자 정보·쿼리·조각 없이, compose_parse.go INVALID_GIT_SOURCE)
+  const ok = /^https:\/\/[^\s@?#]+$/.test(c.repository.trim()) && !!c.branch.trim() && !!c.path.trim();
   return (
     <Dialog
       title="Git 저장소 연결"
@@ -1383,13 +1393,13 @@ function ConnectDialog({ a, onClose, onNext }: { a: AppView; onClose: () => void
             취소
           </button>
           <button className="btn primary" disabled={!ok} onClick={() => onNext(c)}>
-            연결하고 첫 계획 보기
+            다음
           </button>
         </>
       }
     >
       <div className="col" style={{ gap: 12 }}>
-        <Field label="Git 저장소" error={c.repository && !ok && !/^(https:\/\/|ssh:\/\/|git@)/.test(c.repository.trim()) ? 'https://, ssh:// 또는 git@ 주소' : undefined}>
+        <Field label="Git 저장소" error={c.repository && !/^https:\/\/[^\s@?#]+$/.test(c.repository.trim()) ? 'https:// 주소만 됩니다(로그인 정보는 주소에 넣지 말고 접속 정보 이름으로)' : undefined}>
           <input className="mono" value={c.repository} onChange={set('repository')} placeholder="https://git.example/team/shop.git" spellCheck={false} autoComplete="off" />
         </Field>
         <div className="grid" style={{ gridTemplateColumns: '1fr 1fr', gap: 10 }}>
@@ -1504,7 +1514,7 @@ function HistoryCard({ a, cd, canDeploy, onRecover, onApprove }: { a: AppView; c
                         )}
                         {isCand && (r.reason === 'group-approval' || (manualOf(cd) && !cd.paused)) && (
                           <button className="btn sm" onClick={onApprove}>
-                            승인 (UI-42)
+                            승인
                           </button>
                         )}
                         {live && (
@@ -1561,7 +1571,7 @@ function HistoryFallback({ cd, canDeploy, onRecover, onApprove }: { cd: Cd; canD
                 <td className="row" style={{ gap: 6, justifyContent: 'flex-end' }}>
                   {(cd.blocked === 'group-approval' || (manualOf(cd) && !cd.paused)) && (
                     <button className="btn sm" onClick={() => setApprove(true)}>
-                      승인 (UI-42)
+                      승인
                     </button>
                   )}
                 </td>

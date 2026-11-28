@@ -29,6 +29,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"sync"
 	"time"
 )
@@ -226,16 +227,12 @@ func (r *Runtime) openModules(c config.Node, peers map[sfcp.Identity]sfcp.Peer) 
 				return errors.New("node is closing")
 			}
 			switch kind {
-			case sfcp.KindNodeObservation:
-				return r.storeNodeObservation(s.Peer().Key, b)
 			case sfcp.KindEventBatch:
 				return r.storeEventBatch(ctx, s.Peer().Key, b)
 			case sfcp.KindWorkloadReport:
 				return r.storeReport(s.Peer().Key, b)
 			case sfcp.KindAppRenewal:
 				return r.receiveAppRenewal(ctx, s, b)
-			case sfcp.KindAlarm:
-				return r.receiveAlarm(s, b)
 			}
 			return sfcp.ErrFrame
 		}); err != nil {
@@ -301,7 +298,7 @@ func (r *Runtime) moduleLoop() {
 			first = false
 			retry = err != nil
 			r.mu.Lock()
-			r.moduleError = err
+			r.setModuleErrorLocked(err, time.Now())
 			r.mu.Unlock()
 			problem.observe(err, time.Now())
 			r.wakeReport()
@@ -415,6 +412,7 @@ func (r *Runtime) reconcileModules(view cluster.View) error {
 		{"managed", func() error { return r.reconcileManaged(view) }},
 		{"system-network", func() error { return r.reconcileSystemNetwork(r.ctx, view) }},
 		{"bridge-closures", func() error { return r.reconcileBridgeClosures(r.ctx, view) }},
+		{"network-leaves", func() error { return r.reconcileNetworkLeaves(r.ctx, view) }},
 		{"cluster-apps", func() error { return r.reconcileClusterApps(r.ctx, view) }},
 		{"cluster-app-ingress", func() error { return r.reconcileClusterAppIngress(r.ctx, view) }},
 		{"registries", func() error { return r.reconcileRegistries(r.ctx, view) }},
@@ -439,7 +437,51 @@ func passStep(name string, err error) error {
 	if err == nil {
 		return nil
 	}
-	return fmt.Errorf("%s: %w", name, err)
+	return &stepError{name: name, err: err}
+}
+
+type stepError struct {
+	name string
+	err  error
+}
+
+func (e *stepError) Error() string { return e.name + ": " + e.err.Error() }
+func (e *stepError) Unwrap() error { return e.err }
+
+// failedSteps lists the step names in err (joined pass errors), in order,
+// without duplicates. Only names leave the server; the text stays in the log.
+func failedSteps(err error) []string {
+	var out []string
+	var walk func(error)
+	walk = func(err error) {
+		switch e := err.(type) {
+		case nil:
+		case *stepError:
+			if !slices.Contains(out, e.name) {
+				out = append(out, e.name)
+			}
+		case interface{ Unwrap() []error }:
+			for _, x := range e.Unwrap() {
+				walk(x)
+			}
+		case interface{ Unwrap() error }:
+			walk(e.Unwrap())
+		}
+	}
+	walk(err)
+	return out
+}
+
+// setModuleErrorLocked records the module error and when the current
+// failing stretch began. r.mu is held.
+func (r *Runtime) setModuleErrorLocked(err error, now time.Time) {
+	r.moduleError = err
+	switch {
+	case err == nil:
+		r.moduleErrorSince = time.Time{}
+	case r.moduleErrorSince.IsZero():
+		r.moduleErrorSince = now
+	}
 }
 
 // passWatch logs a reconciliation stage that runs longer than a minute, and

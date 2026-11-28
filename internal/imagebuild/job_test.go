@@ -46,7 +46,8 @@ func TestJobCoreOriginalInputsCancellationAndUnknownNeedOwnerClosure(t *testing.
 	if _, err := run.Complete(1, jobTestClosure(run.Spec, key, "OK")); err == nil {
 		t.Fatal("queued job fabricated success")
 	}
-	run, err = run.Begin(1, 101, nil)
+	builder := FrozenSource{Source: BuilderSource(run.Spec, "linux/amd64"), Image: run.Spec.Policy.BuilderImage}
+	run, err = run.Begin(1, 101, nil, &builder, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -54,7 +55,7 @@ func TestJobCoreOriginalInputsCancellationAndUnknownNeedOwnerClosure(t *testing.
 	if err != nil || run.Terminal() {
 		t.Fatal("unknown released inputs", err)
 	}
-	if _, err := run.Begin(run.Revision, 102, nil); err == nil {
+	if _, err := run.Begin(run.Revision, 102, nil, &builder, ""); err == nil {
 		t.Fatal("unknown starts replacement")
 	}
 	run, err = run.RequestCancel(run.Revision)
@@ -132,4 +133,8 @@ func TestJobInputPlatformUsesAllowedPolicyForCrossBuildStages(t *testing.T) {
 	if ValidateJobInputs(s, []FrozenSource{input}) == nil {
 		t.Fatal("policy-external platform accepted")
 	}
+}
+
+func testBuilderPin(spec JobSpec) *FrozenSource {
+	return &FrozenSource{Source: BuilderSource(spec, "linux/amd64"), Image: spec.Policy.BuilderImage}
 }

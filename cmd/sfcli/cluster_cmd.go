@@ -8,12 +8,14 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/jay94ks/seafield/internal/cli"
 	"github.com/jay94ks/seafield/internal/cluster/control"
 	"github.com/jay94ks/seafield/internal/cluster/lifecycle"
+	"github.com/jay94ks/seafield/internal/sfcp"
 	"github.com/jay94ks/seafield/internal/userauth"
 )
 
@@ -30,6 +32,7 @@ func clusterCommand(g *globals) *cli.Command {
 			clusterCompactCommand(g),
 			clusterBackupCommand(g),
 			clusterCLIPolicyCommand(g),
+			clusterUpgradeCommand(g),
 		},
 	}
 }
@@ -59,50 +62,38 @@ counts writes, so the command asks the leader when the context knows it.`,
 			defer s.Close()
 			ctx, cancel := g.Deadline(c)
 			defer cancel()
-			var status *userauth.RaftStatus
-			after := ""
-			for pages := 0; ; pages++ {
-				if pages == 256 {
-					return errors.New("too many status pages")
-				}
-				reply, err := s.Client.RaftStatusPage(ctx, s.Target, s.Stored.Session, after)
-				if err != nil {
-					return err
-				}
-				if reply.RaftStatus == nil {
-					return errors.New("server sent no cluster status")
-				}
-				if status == nil {
-					status = reply.RaftStatus
-				} else {
-					if reply.RaftStatus.NodesRootRevision != status.NodesRootRevision {
-						return errors.New("the node list changed while it was read; try again")
+			status, err := readRaftStatus(ctx, s, s.Target)
+			if err != nil {
+				return err
+			}
+			// A follower sees only itself and the leader, so with more than
+			// three voters its count stays below quorum and reads as Stale.
+			// Only the leader sees every voter's ACKs (and counts writes):
+			// ask it directly when the context knows its endpoint.
+			followerView := status.Leader != "" && status.Leader != status.ObservedBy
+			unreachable := ""
+			if followerView {
+				for _, peer := range s.Client.Peers {
+					if peer.ID != status.Leader {
+						continue
 					}
-					status.Nodes = append(status.Nodes, reply.RaftStatus.Nodes...)
-				}
-				if after = reply.RaftStatus.NodesNext; after == "" {
+					leader, err := readRaftStatus(ctx, s, peer)
+					if err != nil {
+						// Only --writes needs the leader. A plain status is
+						// most needed exactly when the leader cannot be
+						// reached (an old endpoint, a failing leader), so
+						// keep the follower's view and say why.
+						if writes {
+							return fmt.Errorf("ask leader %s: %w", status.Leader, err)
+						}
+						unreachable = fmt.Sprintf("could not reach leader %s: %v; showing follower view", status.Leader, err)
+						break
+					}
+					status, followerView = leader, leader.Leader != leader.ObservedBy
 					break
 				}
 			}
-			status.NodesNext = ""
 			if writes {
-				if status.Writes == nil && status.Leader != status.ObservedBy {
-					// Only the leader counts writes: ask it directly when the
-					// context knows its endpoint.
-					for _, peer := range s.Client.Peers {
-						if peer.ID != status.Leader || status.Leader == "" {
-							continue
-						}
-						reply, err := s.Client.RaftStatusPage(ctx, peer, s.Stored.Session, "")
-						if err != nil {
-							return fmt.Errorf("ask leader %s: %w", status.Leader, err)
-						}
-						if reply.RaftStatus != nil {
-							status = reply.RaftStatus
-						}
-						break
-					}
-				}
 				if status.Writes == nil && status.Leader != status.ObservedBy {
 					return fmt.Errorf("%s is not the leader and the context has no endpoint for leader %s; add it with 'sfcli context trust'", status.ObservedBy, status.Leader)
 				}
@@ -118,18 +109,199 @@ counts writes, so the command asks the leader when the context knows it.`,
 				})
 			}
 			if g.output.Format() == cli.Table {
-				fmt.Fprintf(c.Out, "Leader: %s  Term: %d  Voters: %d (quorum %d, responding %d)  Committed: %d  Stale: %v\n\n",
+				fmt.Fprintf(c.Out, "Leader: %s  Term: %d  Voters: %d (quorum %d, responding %d)  Committed: %d  Stale: %v\n",
 					status.Leader, status.Term, status.Voters, status.Quorum, status.RespondingVoters, status.CommitIndex, status.Stale)
+				if unreachable != "" {
+					fmt.Fprintln(c.Out, unreachable)
+				} else if followerView {
+					fmt.Fprintf(c.Out, "Observed by follower %s: it sees only itself and the leader; add the leader's endpoint with 'sfcli context trust' for every voter's contact\n", status.ObservedBy)
+				}
+				if mixed := mixedVersions(status.Nodes); mixed != "" {
+					fmt.Fprintf(c.Out, "Versions are mixed: %s\n", mixed)
+				}
+				fmt.Fprintln(c.Out)
 			}
 			return cli.Print(c.Out, g.output.Format(), status, func() cli.Rows {
-				t := cli.Rows{Header: []string{"node", "role", "term", "applied", "lag", "stale"}}
+				t := cli.Rows{Header: []string{"node", "role", "version", "term", "applied", "lag", "stale"}}
 				for _, n := range status.Nodes {
-					t.Add(n.Node, n.Role, n.Term, countText(n.AppliedIndex), countText(n.Lag), n.Stale)
+					v := n.Version
+					if v == "" {
+						v = "-"
+					}
+					role := n.Role
+					if n.Waiting {
+						role = "waiting"
+					}
+					t.Add(n.Node, role, v, n.Term, countText(n.AppliedIndex), countText(n.Lag), n.Stale)
 				}
 				return t
 			})
 		},
 	}
+}
+
+// readRaftStatus reads every page of raft-status from target (the
+// connected server, or the leader when a follower answered).
+func readRaftStatus(ctx context.Context, s *session, target sfcp.Peer) (*userauth.RaftStatus, error) {
+	var status *userauth.RaftStatus
+	after := ""
+	for pages := 0; ; pages++ {
+		if pages == 256 {
+			return nil, errors.New("too many status pages")
+		}
+		reply, err := s.Client.RaftStatusPage(ctx, target, s.Stored.Session, after)
+		if err != nil {
+			return nil, err
+		}
+		if reply.RaftStatus == nil {
+			return nil, errors.New("server sent no cluster status")
+		}
+		if status == nil {
+			status = reply.RaftStatus
+		} else {
+			if reply.RaftStatus.NodesRootRevision != status.NodesRootRevision {
+				return nil, errors.New("the node list changed while it was read; try again")
+			}
+			status.Nodes = append(status.Nodes, reply.RaftStatus.Nodes...)
+		}
+		if after = reply.RaftStatus.NodesNext; after == "" {
+			status.NodesNext = ""
+			return status, nil
+		}
+	}
+}
+
+// upgradeStatus is `cluster upgrade status` output.
+type upgradeStatus struct {
+	Server          string
+	Version         string
+	ClusterFeatures []string
+	Nodes           []upgradeNode
+}
+
+type upgradeNode struct {
+	Node, Version string
+	Features      []string
+	// Lacks are features some other server announces that this one does
+	// not: upgrading it lets the cluster use them.
+	Lacks []string
+}
+
+func clusterUpgradeCommand(g *globals) *cli.Command {
+	return &cli.Command{
+		Name:  "upgrade",
+		Short: "Follow a rolling upgrade",
+		Sub: []*cli.Command{{
+			Name:  "status",
+			Short: "Show each server's version and features, and what the cluster can use (system administrator)",
+			Long: `Shows the build version and feature names each server last reported, the
+features every server has (the only ones the cluster uses), and what each
+server lacks that another one has. Upgrade the servers that lack something
+to let the cluster use it (devel/design/upgrades.md 3-1).`,
+			Run: func(c *cli.Context, args []string) error {
+				if len(args) != 0 {
+					return cli.Usagef("status takes no arguments")
+				}
+				s, err := g.open(c)
+				if err != nil {
+					return err
+				}
+				defer s.Close()
+				ctx, cancel := g.Deadline(c)
+				defer cancel()
+				version, err := s.Client.ServerVersion(ctx, s.Target)
+				if err != nil {
+					return err
+				}
+				status, err := readRaftStatus(ctx, s, s.Target)
+				if err != nil {
+					return err
+				}
+				v := newUpgradeStatus(status, version)
+				if g.output.Format() == cli.Table {
+					fmt.Fprintf(c.Out, "Connected to %s (sfcd %s)\n", v.Server, v.Version)
+					if mixed := mixedVersions(status.Nodes); mixed != "" {
+						fmt.Fprintf(c.Out, "Versions are mixed: %s\n", mixed)
+					}
+					if len(v.ClusterFeatures) == 0 {
+						fmt.Fprintln(c.Out, "The cluster uses no features beyond the major's baseline.")
+					} else {
+						fmt.Fprintf(c.Out, "The cluster can use: %s\n", strings.Join(v.ClusterFeatures, ", "))
+					}
+					fmt.Fprintln(c.Out)
+				}
+				return cli.Print(c.Out, g.output.Format(), v, func() cli.Rows {
+					t := cli.Rows{Header: []string{"node", "version", "features", "lacks"}}
+					for _, n := range v.Nodes {
+						t.Add(n.Node, dash(n.Version), dash(strings.Join(n.Features, ",")), dash(strings.Join(n.Lacks, ",")))
+					}
+					return t
+				})
+			},
+		}},
+	}
+}
+
+func dash(s string) string {
+	if s == "" {
+		return "-"
+	}
+	return s
+}
+
+func newUpgradeStatus(status *userauth.RaftStatus, version userauth.ServerVersion) upgradeStatus {
+	v := upgradeStatus{Server: status.ObservedBy, Version: version.Version, ClusterFeatures: version.ClusterFeatures, Nodes: []upgradeNode{}}
+	if v.ClusterFeatures == nil {
+		v.ClusterFeatures = []string{}
+	}
+	var all []string
+	for _, n := range status.Nodes {
+		for _, f := range n.Features {
+			if !slices.Contains(all, f) {
+				all = append(all, f)
+			}
+		}
+	}
+	slices.Sort(all)
+	for _, n := range status.Nodes {
+		row := upgradeNode{Node: n.Node, Version: n.Version, Features: n.Features, Lacks: []string{}}
+		if row.Features == nil {
+			row.Features = []string{}
+		}
+		for _, f := range all {
+			// A server with no report yet (no version) is unknown, not lacking.
+			if n.Version != "" && !slices.Contains(n.Features, f) {
+				row.Lacks = append(row.Lacks, f)
+			}
+		}
+		v.Nodes = append(v.Nodes, row)
+	}
+	return v
+}
+
+// mixedVersions is "0.1.0 ×2, 0.1.1 ×2" when the servers that reported a
+// version run more than one, else "" (devel/design/upgrades.md 3-5).
+func mixedVersions(nodes []userauth.RaftNodeStatus) string {
+	count := map[string]int{}
+	var order []string
+	for _, n := range nodes {
+		if n.Version == "" {
+			continue
+		}
+		if count[n.Version] == 0 {
+			order = append(order, n.Version)
+		}
+		count[n.Version]++
+	}
+	if len(order) < 2 {
+		return ""
+	}
+	slices.Sort(order)
+	parts := make([]string, len(order))
+	for i, v := range order {
+		parts[i] = fmt.Sprintf("%s ×%d", v, count[v])
+	}
+	return strings.Join(parts, ", ")
 }
 
 func clusterMeshCommand(g *globals) *cli.Command {
@@ -361,27 +533,24 @@ user. 'allow' lifts that. Without an argument, shows the policy.`,
 			defer s.Close()
 			ctx, cancel := g.Deadline(c)
 			defer cancel()
-			reply, err := s.Client.Query(ctx, s.Target, s.Stored.Session, "node-cli-policy", "")
+			policy, err := s.Client.NodeCLIPolicy(ctx, s.Target, s.Stored.Session)
 			if err != nil {
 				return err
 			}
-			if reply.NodeCLI == nil {
-				return errors.New("server sent no node CLI policy")
-			}
 			if len(args) == 0 {
-				return cli.Print(c.Out, g.output.Format(), reply.NodeCLI, func() cli.Rows {
+				return cli.Print(c.Out, g.output.Format(), policy, func() cli.Rows {
 					t := cli.Rows{Header: []string{"node cli", "revision"}}
-					t.Add(map[bool]string{true: "blocked", false: "allowed"}[reply.NodeCLI.DisableNodeCLIOperation], reply.NodeCLI.Revision)
+					t.Add(map[bool]string{true: "blocked", false: "allowed"}[policy.DisableNodeCLIOperation], policy.Revision)
 					return t
 				})
 			}
 			block := args[0] == "block"
-			if reply.NodeCLI.DisableNodeCLIOperation == block {
+			if policy.DisableNodeCLIOperation == block {
 				fmt.Fprintf(c.Out, "node CLI is already %s\n", map[bool]string{true: "blocked", false: "allowed"}[block])
 				return nil
 			}
 			return g.apply(c, s, change{Summary: "cluster cli-policy " + args[0], ID: f.id.Get(), Action: "set-node-cli-policy",
-				Expected: f.expect(reply.NodeCLI.Revision), Payload: control.NodeCLIChange{DisableNodeCLIOperation: block}}, false)
+				Expected: f.expect(policy.Revision), Payload: control.NodeCLIChange{DisableNodeCLIOperation: block}}, false)
 		},
 	}
 }

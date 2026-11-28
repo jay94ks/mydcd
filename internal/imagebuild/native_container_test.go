@@ -133,7 +133,7 @@ func newNativeFixtureWithSpec(t *testing.T, secrets bool, configure func(*JobSpe
 	if err := f.jobs.PrepareWorkspace(context.Background(), spec, int(root.Fd())); err != nil {
 		t.Fatal(err)
 	}
-	f.grant.Run, err = f.grant.Run.Begin(f.grant.Run.Revision, 101, nil)
+	f.grant.Run, err = f.grant.Run.Begin(f.grant.Run.Revision, 101, nil, testBuilderPin(f.grant.Run.Spec), "")
 	if err != nil {
 		t.Fatal(err)
 	}

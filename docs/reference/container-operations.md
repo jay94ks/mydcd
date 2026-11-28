@@ -84,24 +84,9 @@ sfcli --tenant team-a app clear-logs shop -y           # 앱 전체, 묻지 않�
 
 `app clear-logs`와 `standalone clear-logs`는 User Method `logs-clear`(`control.LogsClear{Tenant, Selection}`) 하나를 보낸다. 받은 서버가 모든 멤버 서버에 나눠 보내고, 각 서버가 자기 상태로 Deploy를 확인한 뒤 자기 로그 보관소에서 지운다. Raft 명령이 아니고 컨테이너를 다시 만들지 않는다. 답은 서버별 `{Node, Code, Containers, Removed}`이며, CLI는 지우지 못한 서버가 있으면 그 수를 알리고 1로 끝난다(설계).
 
-아래는 옛 재생성 경로(`app-log-clear-plan`, `clear-app-logs`)다. CLI는 더 쓰지 않고, 서버 쪽은 Seafield 로그 지우기 작업에서 지운다.
+지워진 컨테이너의 로그는 각 서버의 node.yaml `logs`대로 자동으로 지운다. 기본값은 7일 뒤 지우고, 보관소가 디스크의 5%(1GiB–20GiB)를 넘으면 가장 오래전에 지워진 컨테이너의 로그부터 지운다. 앱·서비스별 기간은 app.yaml `x-sfc.logs.keep`으로 바꾼다. 살아 있는 컨테이너의 로그는 이렇게 지우지 않는다.
 
-실행은 표시된 컨테이너와 종속 서비스의 중단·writable layer/로컬 로그의 영구 손실에 동의한 재생성이다. Volume 데이터와 외부 보관 로그는 보존한다. 기존 Inventory의 정확한 Drain/Proof/Delete·참조 반환 뒤에만 같은 고정 앱 목표를 현재 권한/CAS로 다시 실행한다. 일반 앱에 CD를 붙이지 않으며 CD 앱은 실행 중이던 선언을 사용해 정책/override/대기 Git 후보를 보존한다. 새 후보를 몰래 배포하지 않는다.
-
-수락 성공과 실제 정리는 구분한다. 상태는 Retiring → Removed → Recreating → Succeeded이며 Removed는 원 로그/컨테이너의 긍정 종료가 확정됐지만 재시작 권한/입력이 아직 충족되지 않을 수 있는 상태다. 원 사용자/목표/서명을 보존하고 이미 제거한 로그를 복구하거나 다른 ID로 자동 배포하지 않는다. 같은 ID의 logs-clear 호출은 원 결과를 조회하며 새 native를 선택하지 않는다. 원 요청 ID는 출력에 제공하고 전송 결과가 불명하면 기존 `manage result/resume --request-id ID`로 같은 intent를 정산한다. status에는 이전 native/세대와 교체 결과를 보존하며 과거 성공이 현재 컨테이너 생존을 보장하는 것은 아니다.
-
-User Method는 `app-log-clear-plan`과 `app-log-clear-status`다. 둘 다 Tenant와 `LogClear:{Selection:{App,Service,Instance},Operation}`을 받는다. 계획은 Operation이 빈 문자열이고 Selection.Service가 필수다. 상태는 App/Operation만 지정하고 Service/Instance는 비운다. 다른 selector·After/Node와 섞을 수 없다. 실제 실행은 별도 `submit` UserOperation의 clear-app-logs action이다.
-
-| 형식 | 주요 필드 |
-|---|---|
-| LogClearPlan | Schema=1, Tenant/App, InventoryRevision, Target/SourcePlan/SourceCandidate/SourceArtifact=digest32, Container=정확한 Target, LogDriver, Impact 배열 |
-| Impact | Key/Kind/Node/NativeID/StartedAt/LogDriver=string, Generation/Revision=uint64, Retained=bool |
-| clear-app-logs payload | Tenant/App/Operation, Selection:{Service,Instance}, Target=digest32, Recreate=true |
-| LogClearStatus | Operation/Status, Target=digest32, OldContainers/NewContainers=Impact 배열 |
-
-Target은 원 앱 수락·선택된 native lifetime·실제 영향/고정 입력을 결합한다. health heartbeat만의 Inventory ordinal은 제외하므로 같은 대상의 관측 갱신으로 동의를 재작성하지 않는다. Change.Expected는 원 InventoryRevision, 바깥 RootRevision은 Apps root이며 신규 action은 기존 ModuleAppCAS 경계를 쓴다. 원 미정산 삭제/교체를 current target으로 재계획하거나 서명을 바꿔 제출하지 않는다. API는 승인 원문·Command·Secret·logger backend 옵션/자격을 반환하지 않는다.
-
-완료한 일반 앱 재생성 뒤 새 명시 `app deploy`는 새로운 앱 수락으로 처리하며 과거 정리 기록을 보존한다. 아직 제거/재생성을 정산 중인 원 작업은 새 up으로 대체하지 않는다.
+로그를 지우려고 컨테이너를 다시 만들던 옛 경로(`app-log-clear-plan`, `app-log-clear-status`, `clear-app-logs`, `standalone-clear-logs`, `compose logs-clear`)는 없앴다.
 
 ## interactive exec와 원 실행 조회
 

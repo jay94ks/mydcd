@@ -36,7 +36,7 @@ var TasksMethod = define(Method[TaskQuery, control.TasksPage]{Name: "tasks"}, tr
 	var reports []observability.Report
 	if s.NodeObservations != nil {
 		var err error
-		reports, err = s.NodeObservations(ctx, view)
+		reports, _, err = s.NodeObservations(ctx, view)
 		if err != nil {
 			return control.TasksPage{}, "unavailable"
 		}

@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: seafield <seafield@invalid>
 Date: Fri, 27 Nov 2026 07:54:43 +0000
-Subject: [PATCH 01/20] logdrivers: keep only json-file and local
+Subject: [PATCH 01/21] logdrivers: keep only json-file and local
 
 
 diff --git a/daemon/logdrivers_linux.go b/daemon/logdrivers_linux.go

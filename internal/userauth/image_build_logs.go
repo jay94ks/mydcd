@@ -19,13 +19,12 @@ func (c Client) ImageBuildLogs(ctx context.Context, target sfcp.Peer, session ac
 	if err != nil {
 		return control.ImageBuildLogPage{}, sfcp.ErrAdmission
 	}
-	reply, err := c.query(ctx, target, session, Request{Method: "image-build-logs", Tenant: tenant, ImageBuildLog: &q, After: after})
+	page, err := call(ctx, c, target, session, ImageBuildLogsMethod, ImageBuildLogsQuery{Tenant: tenant, Query: q, After: after})
 	if err != nil {
 		return control.ImageBuildLogPage{}, err
 	}
-	page := reply.ImageBuildLog
-	if page == nil || !page.ValidQuery(c.Cluster, tenant, q, after) {
+	if !page.ValidQuery(c.Cluster, tenant, q, after) {
 		return control.ImageBuildLogPage{}, sfcp.ErrFrame
 	}
-	return *page, nil
+	return page, nil
 }

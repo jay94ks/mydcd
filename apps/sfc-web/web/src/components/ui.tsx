@@ -5,6 +5,7 @@ import { useMobileTop } from '../mobile/top';
 import { useState, type ReactNode } from 'react';
 import type { Health, NodePhase, OpState } from '../api/types';
 import { middle, pct } from '../lib/format';
+import { API_MODE } from '../api/client';
 
 export type Tone = 'ok' | 'pr' | 'wa' | 'er' | 'un' | 'tag';
 
@@ -19,8 +20,8 @@ export function Badge({ tone = 'tag', children, title }: { tone?: Tone; children
 export const HEALTH: Record<Health, [Tone, string]> = {
   healthy: ['ok', '정상'],
   progressing: ['pr', '진행 중'],
-  degraded: ['wa', '일부 문제'],
-  unhealthy: ['er', '문제'],
+  degraded: ['wa', '일부 오류'],
+  unhealthy: ['er', '오류'],
   unknown: ['un', '확인 불가'],
 };
 export function HealthBadge({ health }: { health: Health }) {
@@ -46,19 +47,36 @@ const PHASE: Record<NodePhase, [Tone, string]> = {
   joining: ['un', '가입 대기'],
   isolated: ['wa', '격리됨'],
   removing: ['wa', '제거 중'],
-  problem: ['er', '문제'],
+  problem: ['er', '오류'],
   unknown: ['un', '확인 불가'],
+  waiting: ['un', '대기 중'],
 };
-export function PhaseBadge({ phase }: { phase: NodePhase }) {
+export const WAITING_TITLE = '이번 조회에서 2초 안에 답하지 않았습니다. 다른 값은 그 전에 저장된 것입니다.';
+export function PhaseBadge({ phase, reason }: { phase: NodePhase; reason?: string }) {
   const [tone, label] = PHASE[phase] ?? PHASE.unknown;
-  return <Badge tone={tone}>{label}</Badge>;
+  return (
+    <Badge tone={tone} title={phase === 'waiting' ? WAITING_TITLE : reason}>
+      {label}
+    </Badge>
+  );
 }
 
 export function Dot({ tone }: { tone: Tone }) {
   return <span className={`dot ${tone}`} aria-hidden="true" />;
 }
 
-export function PageHeader({ title, ids, actions, crumbs, after }: { title: ReactNode; ids?: string; actions?: ReactNode; crumbs?: ReactNode; after?: ReactNode }) {
+/** 화면 번호(UI-nn)는 설계 표시라 목업에서만 보인다. 실제 화면에서는 번호 배지를 통째로 뺀다(화면 설계 표시 기준, 캔버스 v284). */
+export function shownIds(ids: string | undefined, mock: boolean): string | undefined {
+  return mock ? ids : undefined;
+}
+
+/** 화면 번호 배지. 실제 화면에서는 번호만 있으면 그리지 않는다. */
+export function ScreenIds({ ids }: { ids?: string }) {
+  const shown = shownIds(ids, API_MODE === 'mock');
+  return shown ? <span className="ids">{shown}</span> : null;
+}
+
+export function PageHeader({ title, ids, actions, crumbs, after, sub }: { title: ReactNode; ids?: string; actions?: ReactNode; crumbs?: ReactNode; after?: ReactNode; sub?: ReactNode }) {
   // 휴대폰에서는 제목이 위쪽 막대로 가고 단추만 남긴다
   const phone = usePhone();
   useMobileTop(phone ? { title } : undefined, [phone, typeof title === 'string' ? title : ''], 'auto');
@@ -69,11 +87,12 @@ export function PageHeader({ title, ids, actions, crumbs, after }: { title: Reac
       <div className="row between">
         <div className="row" style={{ gap: 12 }}>
           <h1>{title}</h1>
-          {ids && <span className="ids">{ids}</span>}
+          <ScreenIds ids={ids} />
           {after}
         </div>
         {actions && <div className="row">{actions}</div>}
       </div>
+      {sub && <div className="page-sub">{sub}</div>}
     </>
   );
 }

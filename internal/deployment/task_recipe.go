@@ -32,8 +32,9 @@ type TaskMaterial struct {
 	Binding    Binding
 	Projection *workload.InputRef
 	Volumes    []volumes.NativeReady
-	Network    ObjectRef
+	Network    ObjectRef // primary (first alias) network source
 	Bridge     network.BridgeSpec
+	Extra      []TaskNetworkBinding `json:",omitempty"` // the other networks, in alias order
 }
 
 func (b Blueprint) taskRecipe(service string, m TaskMaterial, owner string) (ComposeService, workload.ContainerSpec, error) {
@@ -59,8 +60,6 @@ func (b Blueprint) taskRecipe(service string, m TaskMaterial, owner string) (Com
 		return s, workload.ContainerSpec{}, inputError("TASK_MATERIAL_MISMATCH", service+".projection (reference differs from the binding)")
 	case len(m.Volumes) != len(bound.d.Pins):
 		return s, workload.ContainerSpec{}, inputError("TASK_MATERIAL_MISMATCH", fmt.Sprintf("%s.volumes (ready=%d, pinned=%d)", service, len(m.Volumes), len(bound.d.Pins)))
-	case len(s.Networks) != 1:
-		return s, workload.ContainerSpec{}, inputError("TASK_MATERIAL_MISMATCH", fmt.Sprintf("%s.networks (%d, want 1)", service, len(s.Networks)))
 	}
 	n := b.d.Nodes[s.Sfc.Node]
 	if s.Memory == "" {
@@ -185,133 +184,177 @@ func (r Readiness) httpProbe() (*workload.HTTPReadiness, error) {
 	return p, nil
 }
 
+// TaskNetworkBinding is one more network of a Task beyond its primary one in
+// TaskMaterial.Network/Bridge: the alias it is declared under and its exact
+// committed source, as ResolveTaskNetwork returns it.
+type TaskNetworkBinding struct {
+	Alias   string
+	Network ObjectRef
+	Bridge  network.BridgeSpec
+}
+
+// taskNetwork binds every declared network, in alias order. The first alias is
+// the primary attachment in the recipe's own Bridge fields; the rest go to
+// Attachments in the same order, so one-network recipes keep their bytes.
 func (b Blueprint) taskNetwork(service string, s ComposeService, m TaskMaterial, result *workload.ContainerSpec) error {
-	raw, _ := json.Marshal(m.Bridge)
-	bridge, err := network.DecodeBridge(string(raw))
-	if err != nil || !b.d.Nodes[s.Sfc.Node].resourceIdentity(b.d.Cluster, s.Sfc.Node, ownerKey(bridge.Owner, b.d.Cluster)) || bridge.Lifecycle.Drain || m.Network.Generation == 0 || m.Network.Revision < m.Network.Generation {
-		return ErrInputs
+	aliases := mapKeys(s.Networks)
+	if len(aliases) == 0 || len(aliases) > workload.MaxTaskNetworks || len(m.Extra) != len(aliases)-1 {
+		return inputError("TASK_MATERIAL_MISMATCH", fmt.Sprintf("%s.networks (%d, material %d)", service, len(aliases), 1+len(m.Extra)))
 	}
-	if bridge.Owner != result.Node {
-		result.BridgeOwner = bridge.Owner
-	}
-	for alias, attachment := range s.Networks {
-		declared := b.d.Input.Networks[alias]
-		if declared.External {
-			var ref NetworkReference
-			found := false
-			for _, step := range b.d.Steps {
-				if step.Key == ResourceKey("network-ref", b.d.Tenant, b.d.App, alias+"/"+s.Sfc.Node) && json.Unmarshal(step.Goal, &ref) == nil {
-					found = true
-					break
-				}
-			}
-			if !found || ref.Schema != 1 || ref.Tenant != b.d.Tenant || ref.Node != s.Sfc.Node || !ref.RetainSource || !scopedBridgeKey(ref.Source.Key, b.d.Tenant) || ref.Source != m.Network || ref.Owner != ownerKey(bridge.Owner, b.d.Cluster) || ref.Network != bridge.Network || len(ref.Pools) != len(bridge.Pools) {
-				return ErrInputs
-			}
-			for _, p := range bridge.Pools {
-				if !slices.ContainsFunc(ref.Pools, func(q tenancy.Subnet) bool {
-					return q.Prefix == p.Prefix && q.Gateway == p.Gateway && q.MTU == p.MTU && q.IPAM == p.IPAM
-				}) {
-					return ErrInputs
-				}
-			}
-			for _, destination := range ref.Routes {
-				if destination.Addr().Is4() && attachment.IPv4 == "" || destination.Addr().Is6() && attachment.IPv6 == "" {
-					continue
-				}
-				gateway := netip.Addr{}
-				for _, p := range bridge.Pools {
-					if p.Prefix.Addr().Is4() == destination.Addr().Is4() {
-						if gateway.IsValid() && gateway != p.Gateway {
-							return ErrInputs
-						}
-						gateway = p.Gateway
-					}
-				}
-				if !gateway.IsValid() {
-					return ErrInputs
-				}
-				result.Routes = append(result.Routes, workload.ContainerRoute{Destination: destination, Gateway: gateway})
-			}
+	var bridges []network.BridgeSpec
+	for i, alias := range aliases {
+		n := TaskNetworkBinding{Alias: aliases[0], Network: m.Network, Bridge: m.Bridge}
+		if i > 0 {
+			n = m.Extra[i-1]
+		}
+		if n.Alias != alias {
+			return ErrInputs
+		}
+		a, routes, bridge, err := b.taskAttachment(service, s, alias, s.Networks[alias], n, result.Node, m.Binding.d.Needs.Generation)
+		if err != nil {
+			return err
+		}
+		slices.SortFunc(routes, func(a, b workload.ContainerRoute) int {
+			return strings.Compare(a.Destination.String(), b.Destination.String())
+		})
+		if i == 0 {
+			result.Bridge, result.BridgeGeneration, result.BridgeOwner, result.IPv4, result.IPv6, result.Routes = a.Bridge, a.BridgeGeneration, a.BridgeOwner, a.IPv4, a.IPv6, routes
 		} else {
-			pool := declared.Sfc.Pools[s.Sfc.Node]
-			if m.Network.Key != ResourceKey("bridge", b.d.Tenant, b.d.App, alias+"/"+s.Sfc.Node) || bridge.Network != PoolID(b.d.Tenant, b.d.App, alias, s.Sfc.Node) || bridge.MTU != declared.Sfc.MTU || len(bridge.Pools) != 1 || bridge.Pools[0].Prefix != mustPrefix(pool.CIDR) || bridge.Pools[0].Gateway != mustAddr(pool.Gateway) {
-				return ErrInputs
-			}
-			for node, remote := range declared.Sfc.Pools {
-				if node == s.Sfc.Node {
-					continue
-				}
-				prefix := mustPrefix(remote.CIDR)
-				if prefix.Addr().Is4() && attachment.IPv4 == "" || prefix.Addr().Is6() && attachment.IPv6 == "" {
-					continue
-				}
-				result.Routes = append(result.Routes, workload.ContainerRoute{Destination: prefix, Gateway: mustAddr(pool.Gateway)})
-			}
-			// A remote node's Ingress originates backend connections from its
-			// TUN host address, not from a container pool. The return route is
-			// part of the same overlay contract as its remote container routes.
-			for node, address := range declared.Sfc.TunnelAddresses {
-				if node == s.Sfc.Node {
-					continue
-				}
-				prefix := mustPrefix(address)
-				if prefix.Addr().Is4() && attachment.IPv4 == "" || prefix.Addr().Is6() && attachment.IPv6 == "" {
-					continue
-				}
-				result.Routes = append(result.Routes, workload.ContainerRoute{Destination: prefix, Gateway: mustAddr(pool.Gateway)})
+			a.Routes = routes
+			result.Attachments = append(result.Attachments, a)
+		}
+		bridges = append(bridges, bridge)
+	}
+	return workload.ValidateContainerRoutes(*result, bridges...)
+}
+
+func (b Blueprint) taskAttachment(service string, s ComposeService, alias string, attachment Attachment, n TaskNetworkBinding, owner string, generation uint64) (workload.TaskAttachment, []workload.ContainerRoute, network.BridgeSpec, error) {
+	out := workload.TaskAttachment{Bridge: n.Network.Key, BridgeGeneration: n.Network.Generation}
+	var routes []workload.ContainerRoute
+	raw, _ := json.Marshal(n.Bridge)
+	bridge, err := network.DecodeBridge(string(raw))
+	if err != nil || !b.d.Nodes[s.Sfc.Node].resourceIdentity(b.d.Cluster, s.Sfc.Node, ownerKey(bridge.Owner, b.d.Cluster)) || bridge.Lifecycle.Drain || n.Network.Generation == 0 || n.Network.Revision < n.Network.Generation {
+		return out, nil, bridge, ErrInputs
+	}
+	if bridge.Owner != owner {
+		out.BridgeOwner = bridge.Owner
+	}
+	declared := b.d.Input.Networks[alias]
+	if declared.External {
+		var ref NetworkReference
+		found := false
+		for _, step := range b.d.Steps {
+			if step.Key == ResourceKey("network-ref", b.d.Tenant, b.d.App, alias+"/"+s.Sfc.Node) && json.Unmarshal(step.Goal, &ref) == nil {
+				found = true
+				break
 			}
 		}
-		if attachment.IPv4 != "" {
-			result.IPv4, err = netip.ParseAddr(attachment.IPv4)
-			if err != nil {
-				return err
+		if !found || ref.Schema != 1 || ref.Tenant != b.d.Tenant || ref.Node != s.Sfc.Node || !ref.RetainSource || !scopedBridgeKey(ref.Source.Key, b.d.Tenant) || ref.Source != n.Network || ref.Owner != ownerKey(bridge.Owner, b.d.Cluster) || ref.Network != bridge.Network || len(ref.Pools) != len(bridge.Pools) {
+			return out, nil, bridge, ErrInputs
+		}
+		for _, p := range bridge.Pools {
+			if !slices.ContainsFunc(ref.Pools, func(q tenancy.Subnet) bool {
+				return q.Prefix == p.Prefix && q.Gateway == p.Gateway && q.MTU == p.MTU && q.IPAM == p.IPAM
+			}) {
+				return out, nil, bridge, ErrInputs
 			}
 		}
-		if attachment.IPv6 != "" {
-			result.IPv6, err = netip.ParseAddr(attachment.IPv6)
-			if err != nil {
-				return err
+		for _, destination := range ref.Routes {
+			if destination.Addr().Is4() && attachment.IPv4 == "" || destination.Addr().Is6() && attachment.IPv6 == "" {
+				continue
 			}
+			gateway := netip.Addr{}
+			for _, p := range bridge.Pools {
+				if p.Prefix.Addr().Is4() == destination.Addr().Is4() {
+					if gateway.IsValid() && gateway != p.Gateway {
+						return out, nil, bridge, ErrInputs
+					}
+					gateway = p.Gateway
+				}
+			}
+			if !gateway.IsValid() {
+				return out, nil, bridge, ErrInputs
+			}
+			routes = append(routes, workload.ContainerRoute{Destination: destination, Gateway: gateway})
+		}
+	} else {
+		pool := declared.Sfc.Pools[s.Sfc.Node]
+		if n.Network.Key != ResourceKey("bridge", b.d.Tenant, b.d.App, alias+"/"+s.Sfc.Node) || bridge.Network != PoolID(b.d.Tenant, b.d.App, alias, s.Sfc.Node) || bridge.MTU != declared.Sfc.MTU || len(bridge.Pools) != 1 || bridge.Pools[0].Prefix != mustPrefix(pool.CIDR) || bridge.Pools[0].Gateway != mustAddr(pool.Gateway) {
+			return out, nil, bridge, ErrInputs
+		}
+		for node, remote := range declared.Sfc.Pools {
+			if node == s.Sfc.Node {
+				continue
+			}
+			prefix := mustPrefix(remote.CIDR)
+			if prefix.Addr().Is4() && attachment.IPv4 == "" || prefix.Addr().Is6() && attachment.IPv6 == "" {
+				continue
+			}
+			routes = append(routes, workload.ContainerRoute{Destination: prefix, Gateway: mustAddr(pool.Gateway)})
+		}
+		// A remote node's Ingress originates backend connections from its
+		// TUN host address, not from a container pool. The return route is
+		// part of the same overlay contract as its remote container routes.
+		for node, address := range declared.Sfc.TunnelAddresses {
+			if node == s.Sfc.Node {
+				continue
+			}
+			prefix := mustPrefix(address)
+			if prefix.Addr().Is4() && attachment.IPv4 == "" || prefix.Addr().Is6() && attachment.IPv6 == "" {
+				continue
+			}
+			routes = append(routes, workload.ContainerRoute{Destination: prefix, Gateway: mustAddr(pool.Gateway)})
 		}
 	}
-	slices.SortFunc(result.Routes, func(a, b workload.ContainerRoute) int {
-		return strings.Compare(a.Destination.String(), b.Destination.String())
-	})
-	if err := workload.ValidateContainerRoutes(*result, bridge); err != nil {
-		return err
+	if attachment.IPv4 != "" {
+		out.IPv4, err = netip.ParseAddr(attachment.IPv4)
+		if err != nil {
+			return out, nil, bridge, err
+		}
 	}
-	if !result.IPv4.IsValid() && !result.IPv6.IsValid() {
-		return inputError("STATIC_ADDRESS_REQUIRED", service)
+	if attachment.IPv6 != "" {
+		out.IPv6, err = netip.ParseAddr(attachment.IPv6)
+		if err != nil {
+			return out, nil, bridge, err
+		}
+	}
+	if !out.IPv4.IsValid() && !out.IPv6.IsValid() {
+		return out, nil, bridge, inputError("STATIC_ADDRESS_REQUIRED", service)
 	}
 	book, _ := network.NewBook(2)
 	for _, p := range bridge.Pools {
 		book, err = book.AddPool(p)
 		if err != nil {
-			return err
+			return out, nil, bridge, err
 		}
 	}
-	for family, address := range []netip.Addr{result.IPv4, result.IPv6} {
+	for family, address := range []netip.Addr{out.IPv4, out.IPv6} {
 		if address.IsValid() {
-			book, _, err = book.Reserve(service+"/"+strconv.Itoa(family), bridge.Owner, bridge.Network, "", m.Binding.d.Needs.Generation, address)
+			book, _, err = book.Reserve(service+"/"+alias+"/"+strconv.Itoa(family), bridge.Owner, bridge.Network, "", generation, address)
 			if err != nil {
-				return err
+				return out, nil, bridge, err
 			}
 		}
 	}
-	return nil
+	return out, routes, bridge, nil
 }
 
 // ResolveTask maps the exact frozen single-file declaration and original
 // binding to the same native ContainerSpec used by the daemon's A2 adapter.
 // It inspects/pulls an image only after all metadata correspondence checks.
-func (b Blueprint) ResolveTask(ctx context.Context, service string, material TaskMaterial, catalog access.Catalog, docker *engine.Client, pull bool, credentials ...engine.RegistryAuth) (workload.ContainerSpec, error) {
+func (b Blueprint) ResolveTask(ctx context.Context, service string, material TaskMaterial, catalog access.Catalog, docker *engine.Client, pull bool, image TaskImage, credentials ...engine.RegistryAuth) (workload.ContainerSpec, error) {
 	if docker == nil {
 		return workload.ContainerSpec{}, ErrInputs
 	}
 	s, result, err := b.taskRecipe(service, material, docker.Owner)
 	if err != nil {
 		return workload.ContainerSpec{}, err
+	}
+	if image.Digest != "" {
+		// A tag: the container is made from the digest the deploy resolved
+		// (or this server's copy); the recipe keeps the tag.
+		s.Image = image.Digest
+		result.ImageDigest, result.ImageSource = image.Digest, image.Source
 	}
 	var targets []string
 	for _, f := range material.Binding.d.Needs.Files {
@@ -328,15 +371,15 @@ func (b Blueprint) ResolveTask(ctx context.Context, service string, material Tas
 	return workload.DecodeContainer(string(raw))
 }
 
-func (e Execution) ResolveTask(ctx context.Context, service string, material TaskMaterial, catalog access.Catalog, docker *engine.Client, pull bool, credentials ...engine.RegistryAuth) (workload.ContainerSpec, error) {
+func (e Execution) ResolveTask(ctx context.Context, service string, material TaskMaterial, catalog access.Catalog, docker *engine.Client, pull bool, image TaskImage, credentials ...engine.RegistryAuth) (workload.ContainerSpec, error) {
 	if old, held := e.heldExecution(ResourceKey("task", e.d.Plan.Tenant, e.d.Plan.App, service)); held {
-		return old.ResolveTask(ctx, service, material, catalog, docker, pull, credentials...)
+		return old.ResolveTask(ctx, service, material, catalog, docker, pull, image, credentials...)
 	}
 	stage, ok := e.Stage(ResourceKey("task", e.d.Plan.Tenant, e.d.Plan.App, service))
 	if !ok || stage.Result == nil || stage.Result.Code != state.Applied || stage.Result.Generation != material.Binding.Needs().Generation {
 		return workload.ContainerSpec{}, ErrInputs
 	}
-	return (Blueprint{e.d.Plan}).ResolveTask(ctx, service, material, catalog, docker, pull, credentials...)
+	return (Blueprint{e.d.Plan}).ResolveTask(ctx, service, material, catalog, docker, pull, image, credentials...)
 }
 
 // MatchesTaskRecipe checks the immutable public recipe without image/network
@@ -352,6 +395,10 @@ func (e Execution) MatchesTaskRecipe(service string, material TaskMaterial, spec
 	actual := spec
 	actual.Process = nil
 	actual.Pull = false
+	if actual.ImageDigest != "" && !e.TagAllows(actual.Image, actual.ImageDigest) {
+		return false
+	}
+	actual.ImageDigest, actual.ImageSource = "", ""
 	left, _ := json.Marshal(expected)
 	right, _ := json.Marshal(actual)
 	return bytes.Equal(left, right)

@@ -49,6 +49,9 @@ type startFixture struct {
 	gone           bool
 	lists          int
 	listItems      []container.Summary
+	// network connect/disconnect: the network ID from the path and body
+	onConnect    func(network string, body []byte) error
+	onDisconnect func(network string, body []byte) error
 }
 
 func makeStartFixture(t *testing.T) *startFixture {
@@ -98,6 +101,20 @@ func makeStartFixture(t *testing.T) *startFixture {
 				}
 			}
 			status = http.StatusNoContent
+		case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/networks/") && (strings.HasSuffix(r.URL.Path, "/connect") || strings.HasSuffix(r.URL.Path, "/disconnect")):
+			parts := strings.Split(r.URL.Path, "/")
+			networkID := parts[len(parts)-2]
+			raw, _ := io.ReadAll(r.Body)
+			hook := f.onConnect
+			if strings.HasSuffix(r.URL.Path, "/disconnect") {
+				hook = f.onDisconnect
+			}
+			if hook == nil {
+				t.Errorf("unexpected native request: %s %s", r.Method, r.URL.Path)
+				status = http.StatusInternalServerError
+			} else if err := hook(networkID, raw); err != nil {
+				return nil, err
+			}
 		case r.Method == http.MethodDelete && strings.Contains(r.URL.Path, "/containers/"):
 			f.removes++
 			f.gone, status = true, http.StatusNoContent

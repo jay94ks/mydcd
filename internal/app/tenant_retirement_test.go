@@ -51,11 +51,11 @@ func verifyControlOnlyTenantRetirement(t *testing.T, ctx context.Context, r *Run
 	submit("retirement-empty-tenant", "create-tenant", 0, control.TenantID{ID: tenantID})
 	read := func() control.TenantRetirementStatus {
 		t.Helper()
-		reply, err := c.TenantRetirementPage(ctx, peer, session, tenantID, "")
-		if err != nil || reply.TenantRetirement == nil {
+		reply, err := c.TenantRetirement(ctx, peer, session, tenantID, "")
+		if err != nil {
 			t.Fatal("actual retirement status", err)
 		}
-		return *reply.TenantRetirement
+		return reply
 	}
 	selected := read()
 	r.inputLife.Lock()

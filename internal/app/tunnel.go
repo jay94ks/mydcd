@@ -115,6 +115,22 @@ func pathScope(cluster [32]byte, v cluster.View, g tunnelView, a, b string) ([]b
 	return binary, max(at.MTU, bt.MTU), err
 }
 
+// livePeers leaves out the members whose TUN is draining.
+func livePeers(tunnels map[string]network.TunnelSpec, owners []string) []string {
+	return slices.DeleteFunc(slices.Clone(owners), func(owner string) bool {
+		_, spec, ok := tunnelFor(tunnels, owner)
+		return !ok || spec.Lifecycle.Drain
+	})
+}
+
+// shortOwner names a peer in a local error by the end of its owner ID.
+func shortOwner(owner string) string {
+	if len(owner) > 8 {
+		return owner[len(owner)-8:]
+	}
+	return owner
+}
+
 // RouteGet is read-only and resolves the actual connection destination. An
 // underlay endpoint inside an overlay route would route SFCP into itself.
 func currentRoute(s *sfcp.Session, spec network.TunnelSpec, mtu int) (routeStamp, error) {
@@ -219,15 +235,16 @@ func (t *tunnelInstance) Reconcile(v cluster.View, g tunnelView) (result error) 
 	r := t.r
 	wire, wireErr := r.localTunnelWireKey(v)
 	if wireErr != nil {
-		return errors.Join(wireErr, t.stopPlane())
+		return errors.Join(fmt.Errorf("this server's work key: %w", wireErr), t.stopPlane())
 	}
+	// An owner without a current work key (a member being retired, or a
+	// drained one) loses admission and only its own peer waits; it never
+	// stops this server's other peers or its own TUN from draining.
 	wireOwners := map[string][32]byte{}
 	for owner, original := range g.Owners {
-		key, err := r.tunnelWireKey(v.State, original)
-		if err != nil {
-			return errors.Join(err, t.stopPlane())
+		if key, err := r.tunnelWireKey(v.State, original); err == nil {
+			wireOwners[owner] = key
 		}
-		wireOwners[owner] = key
 	}
 	limits := g.Budgets[r.owner].Packets
 	configBytes, _ := json.Marshal(struct {
@@ -305,7 +322,7 @@ func (t *tunnelInstance) Reconcile(v cluster.View, g tunnelView) (result error) 
 				reply, err := r.appCall(r.ctx, "app-native-permit", raw)
 				if err != nil {
 					_ = t.stopPlane()
-					return err
+					return fmt.Errorf("native permit for %s (spec drain=%t): %w", key, spec.Lifecycle.Drain, err)
 				}
 				permit, err := schema.Decode[control.NativePermit](reply.Data)
 				native, _ := json.Marshal(target)
@@ -338,6 +355,13 @@ func (t *tunnelInstance) Reconcile(v cluster.View, g tunnelView) (result error) 
 			}
 			local := network.LocalHostRoutes(*target, pools)
 			target = &local
+			// A journal recorded before LocalHostRoutes holds the committed
+			// layout at this same revision; move it, or Desired refuses.
+			if slices.Contains(t.manager.Keys(), key) {
+				if _, err := t.manager.Relayout(key, o.Revision, o.Generation, local); err != nil {
+					return err
+				}
+			}
 		}
 		if err := t.manager.Desired(key, o.Revision, o.Generation, target, capacity); err != nil {
 			return err
@@ -383,6 +407,9 @@ func (t *tunnelInstance) Reconcile(v cluster.View, g tunnelView) (result error) 
 		_ = t.stopPlane()
 		return err
 	}
+	// A member that is leaving (Drain) opens no path: the plane drops its
+	// packets, and the members that stay keep applying while it drains.
+	owners = livePeers(g.Topology.Tunnels, owners)
 	wanted := map[[32]byte]bool{}
 	for _, owner := range owners {
 		wanted[g.Owners[owner]] = true
@@ -394,16 +421,28 @@ func (t *tunnelInstance) Reconcile(v cluster.View, g tunnelView) (result error) 
 	}
 	plan := network.PacketPlan{WireKey: wire, Peers: map[[32]byte]network.PacketPeer{}}
 	plan.Policy = g.Packets
+	// One peer whose path is not open never holds the others or the local
+	// TUN: the plane carries the peers that are open, drops packets for the
+	// rest, and the wait is still reported until every path is open.
+	var waiting error
 	for _, owner := range owners {
 		pub := g.Owners[owner]
-		peerWire := wireOwners[owner]
-		if peerWire == wire {
-			return errors.Join(sfcp.ErrAdmission, t.stopPlane())
+		peerWire, current := wireOwners[owner]
+		if current && peerWire == wire {
+			return errors.Join(fmt.Errorf("peer %s shares this server's work key: %w", shortOwner(owner), sfcp.ErrAdmission), t.stopPlane())
+		}
+		failed := func(e error) error { return fmt.Errorf("peer %s: %w", shortOwner(owner), e) }
+		if !current {
+			waiting = errors.Join(waiting, failed(fmt.Errorf("%w: no current work key", sfcp.ErrAdmission)))
+			continue
 		}
 		scope, mtu, e := pathScope(r.policy.Cluster, v, g, r.owner, owner)
 		if e != nil {
-			_ = t.stopPlane()
-			return e
+			if !keep {
+				_ = t.stopPlane()
+			}
+			waiting = errors.Join(waiting, failed(e))
+			continue
 		}
 		path, ok := t.paths[pub]
 		if ok {
@@ -414,8 +453,11 @@ func (t *tunnelInstance) Reconcile(v cluster.View, g tunnelView) (result error) 
 				ok = false
 			}
 			if routeErr != nil {
-				_ = t.stopPlane()
-				return routeErr
+				if !keep {
+					_ = t.stopPlane()
+				}
+				waiting = errors.Join(waiting, failed(routeErr))
+				continue
 			}
 			ok = ok && path.scope == string(scope) && path.Session.PathCurrent(path.Path)
 		}
@@ -424,11 +466,13 @@ func (t *tunnelInstance) Reconcile(v cluster.View, g tunnelView) (result error) 
 				_ = t.stopPlane()
 			}
 			if bytes.Compare(wire[:], peerWire[:]) > 0 {
-				return errTunnelPending
+				waiting = errors.Join(waiting, failed(fmt.Errorf("%w: waiting for it to open the path", errTunnelPending)))
+				continue
 			}
 			peer, known := r.Mesh.Peer(sfcp.Identity(peerWire))
 			if !known {
-				return sfcp.ErrAdmission
+				waiting = errors.Join(waiting, failed(sfcp.ErrAdmission))
+				continue
 			}
 			ctx, cancel := context.WithTimeout(r.ctx, 10*time.Second)
 			host, _, e := net.SplitHostPort(peer.Endpoint)
@@ -448,7 +492,8 @@ func (t *tunnelInstance) Reconcile(v cluster.View, g tunnelView) (result error) 
 			}
 			if e != nil {
 				cancel()
-				return e
+				waiting = errors.Join(waiting, failed(e))
+				continue
 			}
 			s, e := r.Mesh.Dial(ctx, peer)
 			if e == nil {
@@ -468,11 +513,13 @@ func (t *tunnelInstance) Reconcile(v cluster.View, g tunnelView) (result error) 
 			}
 			cancel()
 			if e != nil {
-				return e
+				waiting = errors.Join(waiting, failed(e))
+				continue
 			}
 			a, b := pair.Samples()
 			if e = admitPair(pair, a, b); e != nil {
-				return e
+				waiting = errors.Join(waiting, failed(e))
+				continue
 			}
 			path = tunnelPath{PacketPeer: network.PacketPeer{WireKey: peerWire, Session: s, Path: pair}, route: route, scope: string(scope)}
 			t.paths[pub] = path
@@ -480,6 +527,7 @@ func (t *tunnelInstance) Reconcile(v cluster.View, g tunnelView) (result error) 
 		path.WireKey = peerWire
 		plan.Peers[pub] = path.PacketPeer
 	}
+	result = errors.Join(result, waiting)
 	// An admitted operation retains its original target if a newer source
 	// arrives during its native effect. The next pass processes that source.
 	ctx, cancel := context.WithTimeout(r.ctx, 30*time.Second)
@@ -496,7 +544,10 @@ func (t *tunnelInstance) Reconcile(v cluster.View, g tunnelView) (result error) 
 	n := g.Budgets[r.owner].Packets
 	encoded := configBytes
 	for _, owner := range owners {
-		path := t.paths[g.Owners[owner]]
+		path, open := t.paths[g.Owners[owner]]
+		if _, planned := plan.Peers[g.Owners[owner]]; !open || !planned {
+			continue
+		}
 		a, b := path.Path.Samples()
 		bits, _ := json.Marshal([]sfcp.PacketBudget{a.Budget, b.Budget})
 		encoded = append(encoded, bits...)

@@ -18,7 +18,32 @@ import (
 const (
 	FailureProcessUser    = "PROCESS_USER"
 	FailureProcessInvalid = "PROCESS_INVALID"
+	// FailureImage*: the deploy could not resolve the Task's image tag and
+	// the server has no copy it may use instead (execution_images.go).
+	FailureImageUnreachable = "IMAGE_UNREACHABLE"
+	FailureImageNotFound    = "IMAGE_NOT_FOUND"
+	FailureImageUntrusted   = "IMAGE_UNTRUSTED"
+	FailureImageDenied      = "IMAGE_DENIED"
+	FailureImageRevoked     = "IMAGE_SOURCE_REVOKED"
+	FailureImageInvalid     = "IMAGE_INVALID"
 )
+
+// ImageFailure is the Task failure code for an unresolved tag.
+func ImageFailure(code string) string {
+	switch code {
+	case "UNREACHABLE":
+		return FailureImageUnreachable
+	case "NOT_FOUND":
+		return FailureImageNotFound
+	case "UNTRUSTED":
+		return FailureImageUntrusted
+	case "DENIED":
+		return FailureImageDenied
+	case "SOURCE_REVOKED":
+		return FailureImageRevoked
+	}
+	return FailureImageInvalid
+}
 
 // PreparationFailure names a permanent Task preparation error, or "" for an
 // error that a later pass may not meet (an unreachable source, a missing
@@ -39,6 +64,18 @@ func failureText(code string) string {
 		return "the image runs as root or a named user; set the service's user: to a non-zero UID:GID"
 	case FailureProcessInvalid:
 		return "the image's execution configuration is invalid or unsupported"
+	case FailureImageUnreachable:
+		return "the image registry could not be reached and this server has no copy of the tag"
+	case FailureImageNotFound:
+		return "the registry has no such tag or image and this server has no copy of it"
+	case FailureImageUntrusted:
+		return "the workspace's image sources do not trust this image"
+	case FailureImageDenied:
+		return "the registry refused to give the image"
+	case FailureImageRevoked:
+		return "the image's registry source was removed or turned off"
+	case FailureImageInvalid:
+		return "the image reference or manifest is invalid or unsupported"
 	}
 	return ""
 }

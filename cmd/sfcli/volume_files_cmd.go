@@ -435,7 +435,7 @@ func volumeFilesGrantCommand(g *globals, name, short, action string) *cli.Comman
 				return err
 			}
 			ctx, cancel := g.Deadline(c)
-			members, err := s.Client.TenantMembersPage(ctx, s.Target, s.Stored.Session, tenant, "")
+			members, err := s.Client.TenantMembers(ctx, s.Target, s.Stored.Session, tenant, "")
 			var epoch uint64
 			if err == nil {
 				epoch, err = moduleEpoch(ctx, s)
@@ -445,7 +445,7 @@ func volumeFilesGrantCommand(g *globals, name, short, action string) *cli.Comman
 				return err
 			}
 			q := access.VolumeFileFolderGrant{Tenant: tenant, App: ref.App, Volume: ref.ID, Prefix: dir, User: user}
-			err = sendResult(g.send(c, s, change{Summary: "volume files " + name + " " + ref.String() + " " + dir + " " + user, ID: f.id.Get(), Action: action, Expected: members.TenantMembersRevision, Epoch: epoch, Payload: q}))
+			err = sendResult(g.send(c, s, change{Summary: "volume files " + name + " " + ref.String() + " " + dir + " " + user, ID: f.id.Get(), Action: action, Expected: members.Revision, Epoch: epoch, Payload: q}))
 			if err == nil {
 				fmt.Fprintln(c.Err, "Done.")
 			}

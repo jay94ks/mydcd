@@ -4,10 +4,10 @@ package server
 
 import (
 	"errors"
-	"fmt"
 	"net/http"
 	"slices"
 	"strconv"
+	"strings"
 
 	"github.com/jay94ks/seafield/internal/web/store"
 )
@@ -30,6 +30,34 @@ const (
 )
 
 var notifyKinds = []string{NotifyOpFailed, NotifyOpUnknown, NotifyDeployDone, NotifyMoveStarted, NotifyCertificate, NotifyWebBackup, NotifyIncidentApproval, NotifyWebhookOff, NotifyMCPToolsChanged, NotifyVPSDNS}
+
+// notice is a notification's text as codes (texts.go): title, then the
+// body sentences in order.
+func notice(title string, args map[string]string, body ...string) *store.NoticeText {
+	return &store.NoticeText{Title: title, Body: body, Args: args}
+}
+
+// bodyIf is code when ok, else no sentence.
+func bodyIf(ok bool, code string) []string {
+	if ok {
+		return []string{code}
+	}
+	return nil
+}
+
+// renderNotice fills Title and Body in lang from Text; a row stored before
+// Text keeps its own (Korean) Title and Body.
+func renderNotice(lang string, n *store.Notification) {
+	if n.Text == nil {
+		return
+	}
+	n.Title = text(lang, n.Text.Title, n.Text.Args)
+	parts := make([]string, 0, len(n.Text.Body))
+	for _, code := range n.Text.Body {
+		parts = append(parts, text(lang, code, n.Text.Args))
+	}
+	n.Body = strings.Join(parts, " ")
+}
 
 // notify stores n for its user unless the user muted its kind or
 // workspace.
@@ -72,16 +100,16 @@ func (s *Server) saveOp(o *store.Op) error {
 	switch {
 	case o.State == store.OpFailed || (o.State == store.OpRejected && (o.Action == "deploy" || o.Action == "volume-move")):
 		s.notify(&store.Notification{User: o.User, Kind: NotifyOpFailed, Severity: "error", Tenant: o.Tenant,
-			Title: fmt.Sprintf("작업 실패: %s", what), Body: o.ErrorCode, Link: link})
+			Text: notice("op-failed", map[string]string{"what": what, "code": o.ErrorCode}, bodyIf(o.ErrorCode != "", "op-failed.code")...), Link: link})
 	case o.State == store.OpUnknown:
 		s.notify(&store.Notification{User: o.User, Kind: NotifyOpUnknown, Severity: "warning", Tenant: o.Tenant, Action: true,
-			Title: fmt.Sprintf("결과 확인 필요: %s", what), Body: "결과를 알 수 없습니다. 같은 작업으로 결과를 확인하세요.", Link: link})
+			Text: notice("op-unknown", map[string]string{"what": what}, "op-unknown.body"), Link: link})
 	case o.State == store.OpApplied && o.Action == "deploy":
 		s.notify(&store.Notification{User: o.User, Kind: NotifyDeployDone, Tenant: o.Tenant,
-			Title: fmt.Sprintf("배포 완료: %s", o.Target), Link: link})
+			Text: notice("deploy-done", map[string]string{"target": o.Target}), Link: link})
 	case o.State == store.OpApplied && o.Action == "volume-move":
 		s.notify(&store.Notification{User: o.User, Kind: NotifyMoveStarted, Tenant: o.Tenant,
-			Title: fmt.Sprintf("저장소 옮기기 시작: %s", o.Target), Body: "서버들이 자료를 복사하고 있습니다. 진행 상태는 저장소 화면에서 볼 수 있습니다.", Link: link})
+			Text: notice("move-started", map[string]string{"target": o.Target}, "move-started.body"), Link: link})
 	}
 	return nil
 }
@@ -104,6 +132,10 @@ func (s *Server) handleNotifications(w http.ResponseWriter, r *http.Request, ws 
 	}
 	if items == nil {
 		items = []*store.Notification{}
+	}
+	lang := s.requestLang(r, ws)
+	for _, n := range items {
+		renderNotice(lang, n)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"items": items, "unread": unread})
 }

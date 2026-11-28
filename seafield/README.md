@@ -14,7 +14,7 @@ Seafield는 sfc 노드에서 Docker Engine 대신 도는 컨테이너 엔진이�
 | [build.sh](build.sh) | `DIR`에서 `seafield` 바이너리 빌드 |
 | [refresh-patches.sh](refresh-patches.sh) | `DIR`의 커밋을 `patches/`·`series`로 다시 씀 |
 | [docs/](docs) | 업스트림과 다른 점만 적은 문서 |
-| [packaging/](packaging) | sfed.service, daemon.json 견본 |
+| [packaging/](packaging) | daemon.json 견본. 유닛과 패키지 정의는 [../packaging](../packaging/README.md) |
 
 ## 작업 순서
 

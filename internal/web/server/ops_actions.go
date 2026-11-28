@@ -192,9 +192,10 @@ var baseReaders = map[string]baseReader{
 		})
 		return b, err
 	},
-	"set-node-storage-policy": storageBase,
-	"drain-node-storage":      storageBase,
-	"remove-node-storage":     storageBase,
+	"set-node-storage-policy":  storageBase,
+	"set-node-archive-default": storageBase,
+	"drain-node-storage":       storageBase,
+	"remove-node-storage":      storageBase,
 }
 
 func userBase(field string) baseReader {

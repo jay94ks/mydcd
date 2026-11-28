@@ -210,7 +210,9 @@ func (r *Runtime) memberLoop() {
 		case <-ticker.C:
 		case <-r.Engine().Changes():
 		}
-		if err := r.advanceIdentityRotation(r.ctx); err != nil {
+		var rotationErr error
+		timedMemberStep("identity rotation", func() { rotationErr = r.advanceIdentityRotation(r.ctx) })
+		if rotationErr != nil {
 			r.recordIdentityFailure(r.ctx)
 		}
 		select {
@@ -218,15 +220,17 @@ func (r *Runtime) memberLoop() {
 			return
 		default:
 		}
-		r.advanceImageCache(r.ctx)
-		r.advanceRegistryMaintenance(r.ctx)
-		r.advanceTunnelReconnects(r.ctx)
-		r.advanceCompactions(r.ctx)
+		// These steps share one loop: a step that blocks holds back every
+		// later one (builtin vault upkeep included), so a slow step is logged.
+		timedMemberStep("image cache", func() { r.advanceImageCache(r.ctx) })
+		timedMemberStep("registry maintenance", func() { r.advanceRegistryMaintenance(r.ctx) })
+		timedMemberStep("tunnel reconnects", func() { r.advanceTunnelReconnects(r.ctx) })
+		timedMemberStep("compactions", func() { r.advanceCompactions(r.ctx) })
 		masterCtx, masterCancel := context.WithTimeout(r.ctx, 10*time.Second)
 		r.advanceCertificateMaster(masterCtx)
 		masterCancel()
 		vaultCtx, vaultCancel := context.WithTimeout(r.ctx, 30*time.Second)
-		r.advanceBuiltinVault(vaultCtx)
+		timedMemberStep("builtin vault upkeep", func() { r.advanceBuiltinVault(vaultCtx) })
 		vaultCancel()
 		if !r.Engine().IsLeader() {
 			continue
@@ -306,4 +310,20 @@ func (r *Runtime) advanceAbortJoin(ctx context.Context, id string) error {
 		return nil
 	}
 	return r.memberReport(ctx, view, control.MemberReport{Action: "join-aborted", Node: id, Expected: entry.Revision, ConfigurationIndex: installed.Index})
+}
+
+// memberStepSlow is how long one member-loop step may take before it is
+// logged as holding back the steps after it.
+const memberStepSlow = 45 * time.Second
+
+func timedMemberStep(name string, step func()) {
+	started := time.Now()
+	// A step that never returns is reported while it still runs.
+	slow := time.AfterFunc(memberStepSlow, func() {
+		log.Printf("member loop: %s still running after %s; later steps wait", name, memberStepSlow)
+	})
+	step()
+	if !slow.Stop() {
+		log.Printf("member loop: %s took %s", name, time.Since(started).Round(time.Second))
+	}
 }

@@ -98,6 +98,14 @@ func (s *BuiltinStore) Mark() uint64 {
 	return s.seq
 }
 
+// Count is the number of values the store holds.
+func (s *BuiltinStore) Count() (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	values, err := s.db.SizesBounded(builtinValuePrefix, 1<<20, 128<<20)
+	return len(values), err
+}
+
 // Get returns the value with digest d.
 func (s *BuiltinStore) Get(d [32]byte) (BuiltinValue, error) {
 	raw, err := s.db.GetBounded(builtinValuePrefix+hex.EncodeToString(d[:]), MaxBuiltinValue+4096)

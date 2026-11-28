@@ -51,7 +51,7 @@ func (p Policy) AppVolumeMaterial(s state.State, source deployment.ObjectRef) (A
 	if err != nil {
 		return AppVolumeMaterial{}, err
 	}
-	if entry, exists := v.entries[goal.Tenant+"/"+goal.App+"/"+id]; exists && entry.State.DeleteRevision() != 0 {
+	if entry, exists := v.entries[goal.Tenant+"/"+goal.App+"/"+id]; exists && (entry.State.DeleteRevision() != 0 || v.Archived(entry.State.Scope())) {
 		return AppVolumeMaterial{}, ErrCatalog
 	}
 	if original, exists := v.Native(goal.Tenant, goal.App, id); exists {

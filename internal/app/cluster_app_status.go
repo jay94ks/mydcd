@@ -179,11 +179,15 @@ func clusterAppReports(ctx context.Context, enabled []string, release func(strin
 // release manifest against this node's release keys.
 func readClusterAppRelease(name string) (clusterapp.Release, error) {
 	image, _ := clusterapp.Lookup(name)
+	dir, err := clusterapp.InstalledImageDir(image)
+	if err != nil {
+		return clusterapp.Release{}, err
+	}
 	trust, err := clusterapp.LoadTrust(clusterapp.KeyDir)
 	if err != nil {
 		return clusterapp.Release{}, err
 	}
-	return clusterapp.ReadRelease(clusterapp.ImageDir, image, trust)
+	return clusterapp.ReadRelease(dir, image, trust)
 }
 
 // withClusterAppLive puts one app's live state on its report row.

@@ -25,7 +25,7 @@ func (p Policy) ValidateImageBuildBaseTrust(s state.State, original ImageBuildBa
 		}
 		found := false
 		for _, entry := range entries {
-			if entry.Spec.Tenant == read.Query.Tenant && entry.Spec.ID == read.Target.External.ID && entry.Reader != nil && entry.Reader.Generation == read.Target.External.Generation {
+			if entry.Spec.Tenant == read.Target.External.Tenant && entry.Spec.ID == read.Target.External.ID && entry.Reader != nil && entry.Reader.Generation == read.Target.External.Generation {
 				found, expectsCA = true, entry.Spec.CA != nil
 			}
 		}

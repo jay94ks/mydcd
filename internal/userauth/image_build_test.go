@@ -15,23 +15,26 @@ func TestBuildContentQuerySelectorsAndCursorRejectCrossMethodInput(t *testing.T)
 	q := imagebuild.ContentQuery{Version: [32]byte{1}, Part: "tree"}
 	root := [32]byte{2}
 	cursor := base64.RawURLEncoding.EncodeToString(append(append([]byte{1}, root[:]...), []byte("0000000008")...))
-	r := Request{Schema: 1, Method: "build-context-content", Tenant: "tenant", ImageBuildContent: &q, After: cursor}
-	if !r.validMethodFields() || !r.validQuerySelectors() {
+	r := BuildContextContentQuery{Tenant: "tenant", Query: q, After: cursor}
+	if !r.Valid() {
 		t.Fatal("valid content cursor rejected")
 	}
-	for _, edit := range []func(*Request){
-		func(r *Request) { r.Method = "whoami" }, func(r *Request) { r.Tenant = "" }, func(r *Request) { r.Node = "other" },
-		func(r *Request) { r.Secret = []byte("secret") }, func(r *Request) { r.ImageBuild = &control.ImageBuildQuery{Part: "contexts"} },
-		func(r *Request) { r.After = strings.Repeat("a", 513) }, func(r *Request) { r.ImageBuildContent = nil },
-	} {
-		bad := r
-		edit(&bad)
-		if bad.validMethodFields() || bad.validQuerySelectors() {
-			t.Fatal("mixed content selector accepted", bad.Method)
+	for _, bad := range []BuildContextContentQuery{{Query: q, After: cursor}, {Tenant: "tenant", Query: q, After: strings.Repeat("a", 513)}, {Tenant: "tenant", After: cursor}} {
+		if bad.Valid() {
+			t.Fatal("invalid content selector accepted", bad)
 		}
 	}
-	metadata := Request{Schema: 1, Method: "image-builds", Tenant: "tenant", ImageBuild: &control.ImageBuildQuery{Part: "contexts"}, After: cursor}
-	if !metadata.validMethodFields() || !metadata.validQuerySelectors() {
+	for _, raw := range []string{
+		`{"Tenant":"tenant","Query":{"Version":[1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],"Part":"tree"},"Node":"other"}`,
+		`{"Tenant":"tenant","Query":{"Part":"tree"},"Secret":"c2VjcmV0"}`,
+		`{"Tenant":"tenant","Query":{"Part":"tree"},"ImageBuild":{"Part":"contexts"}}`,
+	} {
+		if strict([]byte(raw), &BuildContextContentQuery{}) == nil {
+			t.Fatal("foreign content field accepted", raw)
+		}
+	}
+	metadata := ImageBuildsQuery{Tenant: "tenant", Query: control.ImageBuildQuery{Part: "contexts"}, After: cursor}
+	if !metadata.Valid() {
 		t.Fatal("metadata next page rejected")
 	}
 }
@@ -59,53 +62,43 @@ func TestBuildContentClientRejectsMissingTrailingAndForeignPageEvidence(t *testi
 }
 
 func TestImageBuildRequestShapeKeepsUnrelatedSelectorsOut(t *testing.T) {
-	base := Request{Schema: 1, Method: "image-builds", Tenant: "tenant", ImageBuild: &control.ImageBuildQuery{Part: "contexts"}, Nonce: [32]byte{1}}
-	if !base.validMethodFields() {
+	base := ImageBuildsQuery{Tenant: "tenant", Query: control.ImageBuildQuery{Part: "contexts"}}
+	if !base.Valid() {
 		t.Fatal("valid metadata request rejected")
 	}
-	other := base
-	other.Method = "whoami"
-	if other.validMethodFields() {
-		t.Fatal("build selector accepted on another method")
-	}
-	other = base
-	other.Secret = []byte("secret")
-	if other.validMethodFields() {
-		t.Fatal("raw private input on metadata query")
-	}
-	other = base
-	other.Node = "other"
-	if other.validMethodFields() {
-		t.Fatal("unrelated node selector")
-	}
-	other = base
-	other.ImageBuild = &control.ImageBuildQuery{Part: "missing"}
-	if other.validMethodFields() {
+	if (ImageBuildsQuery{Tenant: "tenant", Query: control.ImageBuildQuery{Part: "missing"}}).Valid() {
 		t.Fatal("missing upload selector")
 	}
-	other = base
-	other.Operation = &control.UserOperation{}
-	if other.validMethodFields() {
-		t.Fatal("operation injected through read request")
+	for _, raw := range []string{
+		`{"Tenant":"tenant","Query":{"Part":"contexts"},"Secret":"c2VjcmV0"}`,
+		`{"Tenant":"tenant","Query":{"Part":"contexts"},"Node":"other"}`,
+		`{"Tenant":"tenant","Query":{"Part":"contexts"},"Operation":{}}`,
+	} {
+		if strict([]byte(raw), &ImageBuildsQuery{}) == nil {
+			t.Fatal("foreign metadata field accepted", raw)
+		}
 	}
 }
 
 func TestImageBuildJobPlanAndHistorySelectorsStaySeparate(t *testing.T) {
 	q := control.ImageBuildJobQuery{ID: "build-one", Context: "source", Version: [32]byte{1}}
-	r := Request{Schema: 1, Method: "image-build-job-plan", Tenant: "tenant", ImageBuildJob: &q}
-	if !r.validMethodFields() || !r.validQuerySelectors() {
+	r := ImageBuildJobPlanQuery{Tenant: "tenant", Query: q}
+	if !r.Valid() {
 		t.Fatal("valid job plan rejected")
 	}
-	for _, edit := range []func(*Request){func(r *Request) { r.Method = "whoami" }, func(r *Request) { r.Tenant = "" }, func(r *Request) { r.Node = "other" }, func(r *Request) { r.After = "cursor" }, func(r *Request) { r.Secret = []byte("password") }, func(r *Request) { r.ImageBuildJob = nil }} {
-		bad := r
-		edit(&bad)
-		if bad.validMethodFields() || bad.validQuerySelectors() {
-			t.Fatal("mixed build plan accepted", bad.Method)
+	if (ImageBuildJobPlanQuery{Query: q}).Valid() || (ImageBuildJobPlanQuery{Tenant: "tenant"}).Valid() {
+		t.Fatal("job plan without tenant or job accepted")
+	}
+	for _, raw := range []string{
+		`{"Tenant":"tenant","Query":{"ID":"build-one","Context":"source"},"After":"cursor"}`,
+		`{"Tenant":"tenant","Query":{"ID":"build-one","Context":"source"},"Secret":"cGFzc3dvcmQ="}`,
+	} {
+		if strict([]byte(raw), &ImageBuildJobPlanQuery{}) == nil {
+			t.Fatal("foreign job plan field accepted", raw)
 		}
 	}
 	for _, q := range []control.ImageBuildQuery{{Part: "jobs"}, {Part: "jobs", ID: "source"}, {Part: "jobs", Job: "build-one"}} {
-		r := Request{Schema: 1, Method: "image-builds", Tenant: "tenant", ImageBuild: &q}
-		if !r.validMethodFields() || !r.validQuerySelectors() {
+		if !(ImageBuildsQuery{Tenant: "tenant", Query: q}).Valid() {
 			t.Fatal(q)
 		}
 	}
@@ -115,42 +108,31 @@ func TestImageBuildJobPlanAndHistorySelectorsStaySeparate(t *testing.T) {
 }
 
 func TestBuildSourceReadOnlyRequestCannotSelectAnotherRepository(t *testing.T) {
-	r := Request{Schema: 1, Method: "check-build-context", Tenant: "tenant", ImageBuildSource: &control.ImageBuildSourceQuery{ID: "source"}, Nonce: [32]byte{1}}
-	if !r.validMethodFields() {
+	if !(CheckBuildContextQuery{Tenant: "tenant", Query: control.ImageBuildSourceQuery{ID: "source"}}).Valid() {
 		t.Fatal("registered source request rejected")
 	}
-	other := r
-	other.Secret = []byte("override credential")
-	if other.validMethodFields() {
-		t.Fatal("source query injects credentials")
-	}
-	other = r
-	other.ImageBuild = &control.ImageBuildQuery{Part: "contexts"}
-	if other.validMethodFields() {
-		t.Fatal("source query injects another selector")
+	for _, raw := range []string{
+		`{"Tenant":"tenant","Query":{"ID":"source"},"Secret":"b3ZlcnJpZGU="}`,
+		`{"Tenant":"tenant","Query":{"ID":"source"},"ImageBuild":{"Part":"contexts"}}`,
+		`{"Tenant":"tenant","Query":{"ID":"source","Repository":"https://other.example/repo.git"}}`,
+	} {
+		if strict([]byte(raw), &CheckBuildContextQuery{}) == nil {
+			t.Fatal("source query accepted foreign input", raw)
+		}
 	}
 }
 
 func TestBuildTransferShapeCannotSmuggleManagementOrRawSealInput(t *testing.T) {
-	r := Request{Schema: 1, Method: "build-zip-transfer", Tenant: "tenant", ImageBuildTransfer: &imagebuild.Transfer{Upload: "original", Kind: "seal", Expected: 1}, Nonce: [32]byte{1}}
-	if !r.validMethodFields() {
+	r := BuildZIPTransferQuery{Tenant: "tenant", Request: imagebuild.Transfer{Upload: "original", Kind: "seal", Expected: 1}}
+	if !r.Valid() {
 		t.Fatal("valid seal rejected")
 	}
 	other := r
-	other.Operation = &control.UserOperation{}
-	if other.validMethodFields() {
-		t.Fatal("operation on transfer boundary")
-	}
-	q := *r.ImageBuildTransfer
-	q.Data = []byte("another body")
-	other = r
-	other.ImageBuildTransfer = &q
-	if other.validMethodFields() {
+	other.Request.Data = []byte("another body")
+	if other.Valid() {
 		t.Fatal("seal raw bytes accepted")
 	}
-	other = r
-	other.Method = "image-builds"
-	if other.validMethodFields() {
-		t.Fatal("transfer used as a metadata selector")
+	if strict([]byte(`{"Tenant":"tenant","Request":{"Upload":"original","Kind":"seal","Expected":1},"Operation":{}}`), &BuildZIPTransferQuery{}) == nil {
+		t.Fatal("operation on transfer boundary")
 	}
 }

@@ -39,6 +39,7 @@ export const ACTION_TITLE: Record<string, string> = {
   'set-node-cli-policy': '서버 키 관리 명령 막기',
   'add-node-storage': '서버 저장 공간 더하기',
   'set-node-storage-policy': '서버 저장 공간 정책',
+  'set-node-archive-default': '서버 기본 보관 위치',
   'drain-node-storage': '서버 저장 공간 비우기',
   'remove-node-storage': '서버 저장 공간 빼기',
   // 망
@@ -108,7 +109,6 @@ export const ACTION_TITLE: Record<string, string> = {
   'put-app-local-services': '앱 로컬 서비스 등록',
   'clear-app-local-services': '앱 로컬 서비스 지우기',
   'restart-task': '컨테이너 다시 시작',
-  'clear-app-logs': '앱 로그 지우기',
   'rotate-app-history': '앱 기록 정리',
   'configure-app-cd': '자동 배포 설정',
   'pause-app-cd': '자동 배포 멈추기',
@@ -124,7 +124,6 @@ export const ACTION_TITLE: Record<string, string> = {
   'standalone-extend': '단독 컨테이너 기한 연장',
   'standalone-pin': '단독 컨테이너 고정',
   'standalone-remove': '단독 컨테이너 지우기',
-  'standalone-clear-logs': '단독 컨테이너 로그 지우기',
   // 이미지 저장소
   'put-registry': '이미지 저장소 만들기·바꾸기',
   'start-registry': '이미지 저장소 시작',
@@ -213,6 +212,7 @@ export const ACTION_SCREEN: Record<string, string> = {
   'set-node-cli-policy': '/servers',
   'add-node-storage': '/servers',
   'set-node-storage-policy': '/servers',
+  'set-node-archive-default': '/servers',
   'drain-node-storage': '/servers',
   'remove-node-storage': '/servers',
   'create-tun-network': '/shared/networks',

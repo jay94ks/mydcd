@@ -8,25 +8,25 @@ sfcli --tenant shop manage tenant-storage --node node-b --after CURSOR
 sfcli --tenant shop node storage list
 ```
 
-첫 명령은 한 페이지를 출력한다. `TenantStorageNext`가 있으면 같은 tenant/node 선택에서 `--after`로 이어 읽는다. 저장 정책·사용자/tenant 권한·멤버십·epoch가 바뀌면 과거 cursor는 `conflict`로 거부되므로 처음부터 다시 읽는다. 기본 프로필의 tenant 선택 규칙은 다른 tenant 관리 명령과 같다. 이 명령은 root 등록·OS 디렉터리 생성·용량 예약·빌더 기동을 하지 않는다.
+첫 명령은 한 페이지를 출력한다. `Next`가 있으면 같은 tenant/node 선택에서 `--after`로 이어 읽는다. 저장 정책·사용자/tenant 권한·멤버십·epoch가 바뀌면 과거 cursor는 `conflict`로 거부되므로 처음부터 다시 읽는다. 기본 프로필의 tenant 선택 규칙은 다른 tenant 관리 명령과 같다. 이 명령은 root 등록·OS 디렉터리 생성·용량 예약·빌더 기동을 하지 않는다.
 
-Unix TLS와 QUIC User purpose8의 요청은 다음 필드만 받는다.
+Unix TLS와 QUIC User purpose8의 typed 요청은 `Params`에 다음 필드만 받는다.
 
 ```json
-{"Schema":1,"Method":"tenant-storage","Tenant":"shop","Node":"node-b","After":"","Nonce":[1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1]}
+{"Schema":1,"Method":"tenant-storage","Nonce":[1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],"Params":{"Tenant":"shop","Node":"node-b"}}
 ```
 
-실제 Nonce는 요청마다 난수로 만든다. Node·After는 선택 사항이고 Tenant는 필수다. 다른 업무 selector·NodeStorage selection·Secret·operation을 혼합하지 않는다. 기존 User Envelope의 Session/현재 연결 proof·digest·쓰기 EOF·응답/EOF 계약을 사용한다.
+실제 Nonce는 요청마다 난수로 만든다. Node·After는 선택 사항이고 Tenant는 필수다. 모르는 필드(다른 업무 selector·Secret·operation 등)는 거부한다. 기존 User Envelope의 Session/현재 연결 proof·digest·쓰기 EOF·응답/EOF 계약을 사용한다.
 
-Reply에는 다음 공개 필드가 있다.
+Reply의 `Data`에는 다음 공개 필드가 있다.
 
 | 필드 | 내용 |
 |---|---|
-| `TenantStorage` | 최대8개의 허용 root 행 |
-| `TenantStorageNext` | 다음 페이지의 opaque cursor, 없으면 마지막 |
-| `TenantStorageViewIndex` | 같은 committed 조회 상태의 Raft index |
-| `NodeStorageRootRevision` | `control/node-storage`의 root revision |
-| `NodeStorageRevision` | 저장 경로 catalog revision |
+| `Items` | 최대8개의 허용 root 행 |
+| `Next` | 다음 페이지의 opaque cursor, 없으면 마지막 |
+| `Index` | 같은 committed 조회 상태의 Raft index |
+| `RootRevision` | `control/node-storage`의 root revision |
+| `Revision` | 저장 경로 catalog revision |
 
 각 행은 `Node,ID,Generation,Revision,Draining,Allowed,Root`를 가진다. `Root`는 `nodestorage.Reference{Cluster,Node,Key,ID,Generation,Path}` 전체이며, Cluster·Key는 기존 Go `[32]byte`의 JSON 숫자 배열이다. 해당 tenant가 허용된 root의 실제 경로와 node 공개키는 반환한다. 다른 tenant의 목록/ACL·root·경로, node filesystem attestation·설치 개인키는 반환하지 않는다.
 

@@ -668,6 +668,27 @@ func (m *TunnelManager) Desired(key string, revision, generation uint64, spec *T
 	}
 	return m.journal.Desired(key, d, capacity)
 }
+
+// Relayout moves an already recorded Desired (and its pending Apply) to a
+// new local layout of the same committed input: same device identity, same
+// overlay prefixes, only routes moved between the main and host tables. A
+// server upgraded onto LocalHostRoutes keeps its journal this way instead of
+// refusing the same revision with a different spec.
+func (m *TunnelManager) Relayout(key string, revision, generation uint64, spec TunnelSpec) (bool, error) {
+	b, err := json.Marshal(spec)
+	if err != nil {
+		return false, err
+	}
+	if _, err = DecodeTunnel(string(b)); err != nil {
+		return false, err
+	}
+	return m.journal.Relayout(key, revision, generation, string(b), func(old, next string) bool {
+		a, errA := DecodeTunnel(old)
+		c, errC := DecodeTunnel(next)
+		return errA == nil && errC == nil && a.RoutePolicy == nil && c.RoutePolicy == nil && stableTunnelSpec(a) == stableTunnelSpec(c) && slices.Equal(a.Overlay(), c.Overlay())
+	})
+}
+
 func (m *TunnelManager) Step(ctx context.Context, key string) error {
 	if err := m.journal.RestoreApplied(ctx, key, m.driver); err != nil {
 		return err

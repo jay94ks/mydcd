@@ -45,8 +45,12 @@ type Root struct {
 	Definition           Definition
 	Generation, Revision uint64
 	Draining             bool
-	Attestation          *RootFact   `json:",omitempty"`
-	Closed               *RootClosed `json:",omitempty"`
+	// ArchiveDefault marks the node's default Volume archive location
+	// (devel/proposals/volume-archive-packages.md 3). At most one root per
+	// node; a draining root is never the default.
+	ArchiveDefault bool        `json:",omitempty"`
+	Attestation    *RootFact   `json:",omitempty"`
+	Closed         *RootClosed `json:",omitempty"`
 }
 
 func (r Root) Reference(cluster [32]byte) Reference {
@@ -323,10 +327,52 @@ func (c Catalog) Drain(users access.Catalog, actor, node, id string, expected ui
 		return c, err
 	}
 	r.Draining = true
+	r.ArchiveDefault = false
 	r.Revision = n.revision
 	n.roots[rootKey(node, id)] = r
 	return n, nil
 }
+
+// SetArchiveDefault makes root node/id the node's default archive location
+// (on) or stops it being one (off). Making one root the default clears it on
+// the node's other roots. expected is the root's revision.
+func (c Catalog) SetArchiveDefault(users access.Catalog, actor, node, id string, expected uint64, on bool) (Catalog, error) {
+	if !users.SystemAllowed(actor) {
+		return c, access.ErrDenied
+	}
+	r, ok := c.roots[rootKey(node, id)]
+	if !ok || r.Revision != expected || r.ArchiveDefault == on || on && (r.Draining || r.Closed != nil) {
+		return c, ErrStorage
+	}
+	n, err := c.clone()
+	if err != nil {
+		return c, err
+	}
+	if on {
+		for k, other := range n.roots {
+			if other.Definition.Node == node && other.ArchiveDefault {
+				other.ArchiveDefault = false
+				other.Revision = n.revision
+				n.roots[k] = other
+			}
+		}
+	}
+	r.ArchiveDefault = on
+	r.Revision = n.revision
+	n.roots[rootKey(node, id)] = r
+	return n, nil
+}
+
+// ArchiveDefault is the node's default archive location, if one is set.
+func (c Catalog) ArchiveDefault(node string) (Root, bool) {
+	for _, r := range c.roots {
+		if r.Definition.Node == node && r.ArchiveDefault {
+			return ownRoot(r), true
+		}
+	}
+	return Root{}, false
+}
+
 func (c Catalog) ObserveClosed(f RootClosed, reporter [32]byte) (Catalog, error) {
 	r, ok := c.roots[rootKey(f.Root.Node, f.Root.ID)]
 	if !ok || !r.Draining || f.Verify() != nil || reporter != r.Definition.Key || f.Root != r.Reference(c.cluster) {
@@ -418,7 +464,14 @@ func (c Catalog) Encode() ([]byte, error) {
 	if highest != c.next {
 		return nil, ErrStorage
 	}
+	archiveDefaults := map[string]bool{}
 	for i, r := range d.Roots {
+		if r.ArchiveDefault {
+			if r.Draining || archiveDefaults[r.Definition.Node] {
+				return nil, ErrStorage
+			}
+			archiveDefaults[r.Definition.Node] = true
+		}
 		if !validDefinition(r.Definition) || r.Generation == 0 || r.Generation > c.next || r.Revision < r.Generation || r.Revision > c.revision || c.floors[rootKey(r.Definition.Node, r.Definition.ID)] != r.Generation {
 			return nil, ErrStorage
 		}

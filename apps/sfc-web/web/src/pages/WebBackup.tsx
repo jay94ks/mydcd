@@ -216,7 +216,7 @@ const failText = (e: string) =>
   /seal|decrypt|cipher/i.test(e)
     ? `봉인 키가 맞지 않아 백업을 읽거나 쓸 수 없습니다. (${e})`
     : e === 'automation-account-missing'
-    ? '사람 없이 돌 자동 작업 계정이 아직 없어 예정 시각에 쓰지 못했습니다(서버 기능 대기 · REQ-9). 지금 백업을 눌러 주세요.'
+    ? '사람 없이 돌 자동 작업 계정이 아직 없어 예정 시각에 쓰지 못했습니다(아직 지원하지 않는 기능). 지금 백업을 눌러 주세요.'
     : /no space|quota|capacity/i.test(e)
     ? `데이터 저장소의 공간이 부족합니다. 보관 개수를 줄이거나 저장소 한도를 늘리세요. (${e})`
     : /grant|denied|forbidden/i.test(e)
@@ -383,7 +383,7 @@ function AutoBackupDialog({ cur, onClose, onSaved }: { cur: DAutoBackup; onClose
             {iGa(cur.account.username)}
           </>
         ) : (
-          '(서버 기능 대기 · REQ-9)이'
+          '자동 작업 계정(아직 지원하지 않음)이'
         )}{' '}
         이 데이터 저장소의 <span className="mono">{PREFIX}</span> 아래에서만 목록·쓰기·지우기를 합니다. 다른 폴더와 다른 저장소는 서버가 거절합니다. 위임은 그 작업 공간의 관리자만 할 수 있어 저장하면 서명을 한 번 더 받습니다. 자동 작업 계정은 그 작업 공간의 구성원(보기 이상)이어야 위임을 받을 수 있고, 구성원이 아니면 서버가 거절합니다. 백업 파일은 봉인 키로 암호화해 저장소를 읽는 사람도 내용을 볼 수 없고, 비밀번호·키·봉인 값은 들어 있지 않습니다.{!cur.account && ' 자동 작업 계정이 생기기 전에는 예정 시각에 쓰지 못하고 알림으로 알려 드립니다. 그때는 지금 백업을 눌러 주세요.'}
       </div>
@@ -585,7 +585,7 @@ function RestoreDialog({ cfg, initial, schema, onClose, onDone }: { cfg?: DAutoB
         <div className="row wrap" style={{ gap: 12, fontSize: 13 }}>
           <label className="row" style={{ gap: 6 }}>
             <input type="radio" name="src" checked={src === 'auto'} disabled={!canList} onChange={() => setSrc('auto')} />
-            자동 백업{!cfg?.volume ? ' (서버 기능 대기 · REQ-28)' : cfg.sealReady === false ? ' (봉인 키 준비 안 됨)' : ''}
+            자동 백업{!cfg?.volume ? ' (아직 지원하지 않음)' : cfg.sealReady === false ? ' (봉인 키 준비 안 됨)' : ''}
           </label>
           <label className="row" style={{ gap: 6 }}>
             <input type="radio" name="src" checked={src === 'file'} onChange={() => setSrc('file')} />

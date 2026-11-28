@@ -67,7 +67,7 @@ func (n *NativeJobs) SealCompletion(grant NativeGrant, result JobResult, at uint
 	} else if result.Code == "OK" {
 		return JobClosure{}, ErrConflict
 	}
-	closure := JobClosure{Schema: 1, Job: spec.Digest(), Native: nativeCompletionWitness(r), Result: result, At: at}
+	closure := JobClosure{Schema: 1, Job: spec.Digest(), Native: nativeCompletionWitness(r), Builder: r.ImageID, Result: result, At: at}
 	closure.Signature = ed25519.Sign(key, JobClosureBytes(closure))
 	if !closure.Valid(spec) {
 		return JobClosure{}, ErrInvalid

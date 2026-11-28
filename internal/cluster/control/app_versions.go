@@ -65,7 +65,7 @@ func captureAppVersion(entry appEntry) (appEntry, error) {
 		}
 	}
 	execution, active := entry.Inventory.Execution()
-	if !active || entry.Sync != nil && entry.Sync.Recreate != nil {
+	if !active {
 		return entry, nil
 	}
 	operation := execution.ActiveOperation()

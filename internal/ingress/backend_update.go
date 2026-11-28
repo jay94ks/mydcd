@@ -36,10 +36,12 @@ func sameBackend(a, b BackendSpec) bool {
 	return marshal(backendSource(a)) == marshal(backendSource(b))
 }
 
-func backendByID(s Spec, id string) (BackendSpec, bool) {
+// backendByID finds one exact generation of a backend ID: a same-node surge
+// lists an older draining generation beside its successor under one ID.
+func backendByID(s Spec, id string, generation uint64) (BackendSpec, bool) {
 	for _, service := range s.Services {
 		for _, b := range service.Backends {
-			if b.ID == id {
+			if b.ID == id && b.Generation == generation {
 				return b, true
 			}
 		}
@@ -52,7 +54,7 @@ func backendDraining(r instanceRecord, b BackendSpec) bool {
 		return true
 	}
 	if r.Update != nil {
-		wanted, exists := backendByID(r.Update.Target, b.ID)
+		wanted, exists := backendByID(r.Update.Target, b.ID, b.Generation)
 		return !exists || !sameBackend(b, wanted) || wanted.Draining
 	}
 	return false
@@ -111,8 +113,8 @@ func (m *Manager) reconcileBackends(ctx context.Context, i *instance, revision, 
 	}
 	for _, journal := range i.record.Balances {
 		for _, current := range journal.Backends {
-			old, known := backendByID(i.record.Spec, current.Spec.ID)
-			wanted, exists := backendByID(desired, current.Spec.ID)
+			old, known := backendByID(i.record.Spec, current.Spec.ID, current.Spec.Generation)
+			wanted, exists := backendByID(desired, current.Spec.ID, current.Spec.Generation)
 			if known && exists && current.Spec.Draining && sameBackend(old, wanted) && !wanted.Draining {
 				i.mu.Unlock()
 				return ErrRoute // a drained generation cannot become a serving generation again
@@ -141,11 +143,11 @@ func (m *Manager) reconcileBackends(ctx context.Context, i *instance, revision, 
 		i.mu.Unlock()
 		for _, service := range r.Update.Target.Services {
 			for _, added := range service.Backends {
-				old, held := backendByID(r.Spec, added.ID)
+				old, held := backendByID(r.Spec, added.ID, added.Generation)
 				if held && sameBackend(old, added) {
 					continue
 				}
-				wanted, retained := backendByID(desired, added.ID)
+				wanted, retained := backendByID(desired, added.ID, added.Generation)
 				if retained && sameBackend(wanted, added) {
 					continue
 				}
@@ -175,10 +177,10 @@ func (m *Manager) reconcileBackends(ctx context.Context, i *instance, revision, 
 			return err
 		}
 		for _, record := range journal.Backends {
-			b, _ := backendByID(r.Spec, record.Spec.ID)
+			b, _ := backendByID(r.Spec, record.Spec.ID, record.Spec.Generation)
 			v := record.Spec
 			v.Draining = backendDraining(r, b)
-			if wanted, exists := backendByID(r.Update.Target, b.ID); exists && wanted.Suspended {
+			if wanted, exists := backendByID(r.Update.Target, b.ID, b.Generation); exists && wanted.Suspended {
 				v.Healthy = false
 			}
 			if err := balancer.Update(v); err != nil {
@@ -192,9 +194,14 @@ func (m *Manager) reconcileBackends(ctx context.Context, i *instance, revision, 
 		i.mu.Unlock()
 		return err
 	}
+	// Only a backend leaving the view waits for its requests here; one that
+	// stays listed as draining (an older surge generation) settles later
+	// while its successor already serves.
 	for _, journal := range r.Balances {
 		for _, record := range journal.Backends {
-			if record.Spec.Draining && len(record.Pins.Active) != 0 {
+			old, _ := backendByID(r.Spec, record.Spec.ID, record.Spec.Generation)
+			wanted, retained := backendByID(r.Update.Target, old.ID, old.Generation)
+			if record.Spec.Draining && len(record.Pins.Active) != 0 && !(retained && sameBackend(old, wanted)) {
 				i.mu.Unlock()
 				return nil
 			}
@@ -203,7 +210,7 @@ func (m *Manager) reconcileBackends(ctx context.Context, i *instance, revision, 
 	i.mu.Unlock()
 	for _, service := range r.Spec.Services {
 		for _, old := range service.Backends {
-			wanted, exists := backendByID(r.Update.Target, old.ID)
+			wanted, exists := backendByID(r.Update.Target, old.ID, old.Generation)
 			if exists && sameBackend(old, wanted) {
 				continue
 			}
@@ -226,7 +233,7 @@ func (m *Manager) reconcileBackends(ctx context.Context, i *instance, revision, 
 	}
 	for _, service := range r.Update.Target.Services {
 		for _, wanted := range service.Backends {
-			old, exists := backendByID(r.Spec, wanted.ID)
+			old, exists := backendByID(r.Spec, wanted.ID, wanted.Generation)
 			if exists && sameBackend(old, wanted) {
 				continue
 			}
@@ -256,8 +263,8 @@ func (m *Manager) reconcileBackends(ctx context.Context, i *instance, revision, 
 			return err
 		}
 		for _, record := range journal.Backends {
-			old, _ := backendByID(r.Spec, record.Spec.ID)
-			wanted, exists := backendByID(r.Update.Target, old.ID)
+			old, _ := backendByID(r.Spec, record.Spec.ID, record.Spec.Generation)
+			wanted, exists := backendByID(r.Update.Target, old.ID, old.Generation)
 			if !exists || !sameBackend(old, wanted) {
 				if err := balancer.Remove(old.ID, old.Generation); err != nil {
 					return err
@@ -270,7 +277,7 @@ func (m *Manager) reconcileBackends(ctx context.Context, i *instance, revision, 
 			}
 			for _, wanted := range service.Backends {
 				v := Backend{ID: wanted.ID, Generation: wanted.Generation, Weight: wanted.Weight, Capacity: wanted.Capacity, Draining: wanted.Draining}
-				if prior := balancer.backends[wanted.ID]; prior != nil {
+				if prior, held := balancer.entry(wanted.ID, wanted.Generation); held {
 					v = prior.spec
 					v.Draining = wanted.Draining
 					if wanted.Suspended {

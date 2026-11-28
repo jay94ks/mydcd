@@ -6,7 +6,6 @@ import (
 	"context"
 	"crypto/ed25519"
 	"errors"
-	"reflect"
 	"slices"
 	"time"
 
@@ -56,71 +55,67 @@ func (s Service) recordLogin(t *Ticket, hint *loginlog.Client, source string, re
 	s.LoginRecorder(r)
 }
 
-func (s Service) loginRecordsQuery(ctx context.Context, view cluster.View, session access.Session, q loginlog.Query) Reply {
-	if s.LoginRecords == nil {
-		return Reply{Schema: 1, Code: "unavailable"}
-	}
-	q.User = session.User
-	page, err := s.LoginRecords(ctx, view, session, q)
-	if err != nil {
-		if errors.Is(err, loginlog.ErrInvalid) {
-			return Reply{Schema: 1, Code: "denied"}
-		}
-		return Reply{Schema: 1, Code: "unavailable"}
-	}
-	reply := Reply{Schema: 1, Code: "ok", LoginPage: &page}
-	if s.Credentials != nil && s.Self != nil {
-		catalog, err := s.Policy.Catalog(view.State)
-		if u, ok := catalog.User(session.User); err == nil && ok {
-			left, max := s.Credentials.AttemptsLeft(u.Username, time.Now())
-			reply.LoginBudget = &LoginBudget{Left: left, Max: max}
-		}
-	}
-	return reply
+// LoginRecordsQuery is a page of the caller's own logins. It names no
+// user: it is always the session's own.
+type LoginRecordsQuery struct {
+	After string `json:",omitempty"`
+	Limit int
 }
 
-// validLoginFields: LoginQuery only (and exactly) on login-records. The
-// query names no user: it is always the session's own. A login's client
-// description is in its typed request (login_methods.go).
-func (r Request) validLoginFields() bool {
-	if (r.LoginQuery != nil) != (r.Method == "login-records") {
-		return false
-	}
-	if r.Method == "own-sessions" {
-		return reflect.DeepEqual(r, Request{Schema: r.Schema, Method: r.Method, Nonce: r.Nonce})
-	}
-	if r.Method != "login-records" {
-		return true
-	}
-	q := *r.LoginQuery
-	if q.User != "" {
-		return false
-	}
-	q.User = "-"
-	want := Request{Schema: r.Schema, Method: r.Method, Nonce: r.Nonce, LoginQuery: r.LoginQuery}
-	return q.Valid() && reflect.DeepEqual(r, want)
+func (q LoginRecordsQuery) Valid() bool {
+	return loginlog.Query{User: "-", After: q.After, Limit: q.Limit}.Valid()
 }
+
+// LoginRecordsReply is one page and, when the answering server counts
+// attempts for the caller's username, its login budget.
+type LoginRecordsReply struct {
+	Page   loginlog.Page
+	Budget *LoginBudget `json:",omitempty"`
+}
+
+var (
+	LoginRecordsMethod = define(Method[LoginRecordsQuery, LoginRecordsReply]{Name: "login-records"}, true, func(ctx context.Context, s Service, view cluster.View, session access.Session, q LoginRecordsQuery) (LoginRecordsReply, string) {
+		if s.LoginRecords == nil {
+			return LoginRecordsReply{}, "unavailable"
+		}
+		page, err := s.LoginRecords(ctx, view, session, loginlog.Query{User: session.User, After: q.After, Limit: q.Limit})
+		if err != nil {
+			if errors.Is(err, loginlog.ErrInvalid) {
+				return LoginRecordsReply{}, "denied"
+			}
+			return LoginRecordsReply{}, "unavailable"
+		}
+		out := LoginRecordsReply{Page: page}
+		if s.Credentials != nil && s.Self != nil {
+			catalog, err := s.Policy.Catalog(view.State)
+			if u, ok := catalog.User(session.User); err == nil && ok {
+				left, max := s.Credentials.AttemptsLeft(u.Username, time.Now())
+				out.Budget = &LoginBudget{Left: left, Max: max}
+			}
+		}
+		return out, "ok"
+	})
+	OwnSessionsMethod = define(Method[NoParams, loginlog.Page]{Name: "own-sessions"}, true, func(ctx context.Context, s Service, view cluster.View, session access.Session, _ NoParams) (loginlog.Page, string) {
+		return s.ownSessions(ctx, view, session)
+	})
+)
 
 // LoginRecords reads the caller's own recent logins across the cluster,
 // newest first.
 func (c Client) LoginRecords(ctx context.Context, peer sfcp.Peer, session access.Session, after string, limit int) (loginlog.Page, *LoginBudget, error) {
-	q := loginlog.Query{After: after, Limit: limit}
-	if check := (loginlog.Query{User: "-", After: after, Limit: limit}); !check.Valid() {
-		return loginlog.Page{}, nil, sfcp.ErrAdmission
-	}
-	reply, err := c.query(ctx, peer, session, Request{Method: "login-records", LoginQuery: &q})
+	r, err := call(ctx, c, peer, session, LoginRecordsMethod, LoginRecordsQuery{After: after, Limit: limit})
 	if err != nil {
 		return loginlog.Page{}, nil, err
 	}
-	if reply.LoginPage == nil || len(reply.LoginPage.Items) > limit {
+	if len(r.Page.Items) > limit {
 		return loginlog.Page{}, nil, sfcp.ErrFrame
 	}
-	for _, r := range reply.LoginPage.Items {
-		if !r.Valid() || r.User != session.User {
+	for _, rec := range r.Page.Items {
+		if !rec.Valid() || rec.User != session.User {
 			return loginlog.Page{}, nil, sfcp.ErrFrame
 		}
 	}
-	return *reply.LoginPage, reply.LoginBudget, nil
+	return r.Page, r.Budget, nil
 }
 
 type loginClientKey struct{}
@@ -145,13 +140,13 @@ func LoginClientFrom(ctx context.Context) *loginlog.Client {
 // successful logins of the last session lifetime that are not expired,
 // revoked, or outdated by an account or credential change. A server that
 // did not answer is in Missing, and its sessions may be absent.
-func (s Service) ownSessions(ctx context.Context, view cluster.View, session access.Session) Reply {
+func (s Service) ownSessions(ctx context.Context, view cluster.View, session access.Session) (loginlog.Page, string) {
 	if s.LoginRecords == nil {
-		return Reply{Schema: 1, Code: "unavailable"}
+		return loginlog.Page{}, "unavailable"
 	}
 	catalog, err := s.Policy.Catalog(view.State)
 	if err != nil {
-		return Reply{Schema: 1, Code: "unavailable"}
+		return loginlog.Page{}, "unavailable"
 	}
 	now := time.Now()
 	oldest := now.Add(-time.Duration(access.MaxSessionSeconds)*time.Second - time.Minute).UnixMilli()
@@ -160,7 +155,7 @@ func (s Service) ownSessions(ctx context.Context, view cluster.View, session acc
 	for range 8 {
 		page, err := s.LoginRecords(ctx, view, session, q)
 		if err != nil {
-			return Reply{Schema: 1, Code: "unavailable"}
+			return loginlog.Page{}, "unavailable"
 		}
 		out.Missing = append(out.Missing, page.Missing...)
 		done := page.Next == ""
@@ -180,23 +175,23 @@ func (s Service) ownSessions(ctx context.Context, view cluster.View, session acc
 	}
 	slices.Sort(out.Missing)
 	out.Missing = slices.Compact(out.Missing)
-	return Reply{Schema: 1, Code: "ok", OwnSessions: &out}
+	return out, "ok"
 }
 
 // OwnSessions reads the caller's sessions that may still be open, newest
 // first (from login records; see Service.ownSessions).
 func (c Client) OwnSessions(ctx context.Context, peer sfcp.Peer, session access.Session) (loginlog.Page, error) {
-	reply, err := c.query(ctx, peer, session, Request{Method: "own-sessions"})
+	p, err := call(ctx, c, peer, session, OwnSessionsMethod, NoParams{})
 	if err != nil {
 		return loginlog.Page{}, err
 	}
-	if reply.OwnSessions == nil || len(reply.OwnSessions.Items) > 8*loginlog.MaxPage {
+	if len(p.Items) > 8*loginlog.MaxPage {
 		return loginlog.Page{}, sfcp.ErrFrame
 	}
-	for _, r := range reply.OwnSessions.Items {
+	for _, r := range p.Items {
 		if !r.Valid() || !r.OK || r.User != session.User {
 			return loginlog.Page{}, sfcp.ErrFrame
 		}
 	}
-	return *reply.OwnSessions, nil
+	return p, nil
 }

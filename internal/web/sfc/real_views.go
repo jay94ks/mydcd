@@ -20,14 +20,10 @@ import (
 // This file holds the real adapter's page reads whose web type is now the
 // product type (R04 step 2): the server shapes them for the screen.
 
-func (c *realConn) Lifecycles(ctx context.Context, tenant, after string) (Page[LifecycleEntry], error) {
-	page, err := realCall(ctx, c, "lifecycles", func(u userauth.Client, s access.Session) (userauth.LifecyclesPage, error) {
+func (c *realConn) Lifecycles(ctx context.Context, tenant, after string) (userauth.LifecyclesPage, error) {
+	return realCall(ctx, c, "lifecycles", func(u userauth.Client, s access.Session) (userauth.LifecyclesPage, error) {
 		return u.Lifecycles(ctx, c.peer, s, userauth.LifecyclesQuery{Tenant: tenant, After: after})
 	})
-	if err != nil {
-		return Page[LifecycleEntry]{}, err
-	}
-	return Page[LifecycleEntry]{Items: page.Items, Next: page.Next, Revision: page.RootRevision}, nil
 }
 
 func (c *realConn) AppUploads(ctx context.Context, tenant, after string) (Page[AppUploadView], error) {
@@ -58,7 +54,7 @@ func (c *realConn) Apps(ctx context.Context, tenant, after string) (Page[AppView
 // the source, sync mode and commits the screen shows.
 func appView(a control.AppView) AppView {
 	v := AppView{Tenant: a.Tenant, App: a.App, Deployment: a.Deployment, Revision: a.Revision, Operation: a.Operation,
-		Claims: a.Claims, Health: a.Health, ObservedAt: a.ObservedAt, Retiring: a.Retirement != nil}
+		Claims: a.Claims, Health: a.Health, HealthReason: a.HealthReason, ObservedAt: a.ObservedAt, Retiring: a.Retirement != nil}
 	if a.CD != nil {
 		v.CD = appCD(*a.CD)
 	}

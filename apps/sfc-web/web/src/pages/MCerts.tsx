@@ -13,6 +13,7 @@ import { fmtTime } from '../lib/format';
 import { MCards, MDetail, type MCardSpec, MSec, MTiles, useReadOnlyTop } from '../mobile/ReadOnly';
 import { certRows, linkText, nextText, rowHref, rowState, sourceText, useCaOf } from './Certs';
 import { DOMAIN_TABS } from './Domains';
+import { certLive, certStoreLive } from '../lib/liveTopics';
 
 const left = (iso?: string) => {
   const d = daysLeft(iso);
@@ -26,7 +27,7 @@ export function MCerts() {
   const admin = !!session?.user.systemAdmin;
   const nav = useNavigate();
   const q = usePoll((s) => (admin ? acmeCerts(s) : Promise.resolve(undefined)), [admin], 5000);
-  const vq = usePoll((s) => (admin ? certificates({}, s) : Promise.resolve(undefined)), [admin], 5000);
+  const vq = usePoll((s) => (admin ? certificates({}, s) : Promise.resolve(undefined)), [admin], 0, certStoreLive);
   const { caOf } = useCaOf();
   useReadOnlyTop('외부 도메인', '인증서 · 시스템 관리자', '발급·올리기·끊기·지우기는 넓은 화면에서', [admin]);
   const store = (vq.data ?? []).filter((c) => typeof c.id === 'string');
@@ -79,7 +80,7 @@ export function MCertDetail() {
 }
 
 function MStoreCertDetail({ id }: { id: string }) {
-  const q = usePoll((s) => certificate(id, s), [id], 3000);
+  const q = usePoll((s) => certificate(id, s), [id], 0, certLive(id));
   const dq = usePoll((s) => acmeCerts(s).catch(() => undefined), [], 5000);
   useReadOnlyTop(short(id), '인증서', '끊기·지우기·해지는 넓은 화면에서', [id]);
   const c = q.data;

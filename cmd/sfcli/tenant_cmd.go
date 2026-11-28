@@ -101,24 +101,24 @@ func readTenant(c *cli.Context, g *globals, s *session, tenant string) (tenantVi
 	after := ""
 	for {
 		ctx, cancel := g.Deadline(c)
-		reply, err := s.Client.TenantMembersPage(ctx, s.Target, s.Stored.Session, tenant, after)
+		reply, err := s.Client.TenantMembers(ctx, s.Target, s.Stored.Session, tenant, after)
 		cancel()
 		if err != nil {
 			return v, err
 		}
 		if after == "" {
 			v.Revision = reply.TenantRevision
-			if reply.TenantAllowedNodes != nil {
-				v.Servers = reply.TenantAllowedNodes
+			if reply.AllowedNodes != nil {
+				v.Servers = reply.AllowedNodes
 			}
 		} else if reply.TenantRevision != v.Revision {
 			return v, errors.New("the tenant changed while reading it; try again")
 		}
-		v.Members = append(v.Members, reply.TenantMembers...)
-		if reply.TenantMembersNext == "" {
+		v.Members = append(v.Members, reply.Members...)
+		if reply.Next == "" {
 			return v, nil
 		}
-		after = reply.TenantMembersNext
+		after = reply.Next
 	}
 }
 
@@ -165,17 +165,13 @@ func tenantStatusCommand(g *globals) *cli.Command {
 			after := ""
 			for {
 				ctx, cancel := g.Deadline(c)
-				reply, err := s.Client.TenantRetirementPage(ctx, s.Target, s.Stored.Session, tenant, after)
+				page, err := s.Client.TenantRetirement(ctx, s.Target, s.Stored.Session, tenant, after)
 				cancel()
 				if err != nil {
 					return err
 				}
-				page := reply.TenantRetirement
-				if page == nil {
-					return errors.New("the server did not report the tenant")
-				}
 				if after == "" {
-					v = *page
+					v = page
 				} else if page.Tenant.Revision != v.Tenant.Revision || page.Index != v.Index {
 					return errors.New("the tenant changed while reading it; try again")
 				} else {
@@ -436,14 +432,10 @@ func finishTenantDelete(c *cli.Context, g *globals, s *session, tenant, opID str
 	printed := -1
 	for {
 		ctx, cancel := g.Deadline(c)
-		reply, err := s.Client.TenantRetirementPage(ctx, s.Target, s.Stored.Session, tenant, "")
+		status, err := s.Client.TenantRetirement(ctx, s.Target, s.Stored.Session, tenant, "")
 		cancel()
 		if err != nil {
 			return cli.Accepted, "", err
-		}
-		status := reply.TenantRetirement
-		if status == nil {
-			return cli.Accepted, "", errors.New("the server did not report the tenant's deletion")
 		}
 		switch status.Tenant.Phase {
 		case access.TenantDeleted:
@@ -583,15 +575,12 @@ func tenantMemberSetCommand(g *globals, remove bool) *cli.Command {
 				return fmt.Errorf("%s is not a member of %s", username, tenant)
 			} else {
 				ctx, cancel := g.Deadline(c)
-				reply, err := s.Client.UserCredentials(ctx, s.Target, s.Stored.Session, username)
+				user, err := s.Client.UserCredentials(ctx, s.Target, s.Stored.Session, username)
 				cancel()
 				if err != nil {
 					return err
 				}
-				if reply.CredentialUser == nil {
-					return fmt.Errorf("no user %s", username)
-				}
-				m.User = reply.CredentialUser.ID
+				m.User = user.ID
 			}
 			rev, err := revision.Resolve(func() (uint64, error) {
 				if current == nil {

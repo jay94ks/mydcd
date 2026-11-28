@@ -18,13 +18,12 @@ func (c Client) ImageBuildCacheUsage(ctx context.Context, target sfcp.Peer, sess
 	if _, _, _, _, err := control.ImageBuildCacheOffset(after); err != nil {
 		return control.ImageBuildCachePage{}, sfcp.ErrAdmission
 	}
-	reply, err := c.query(ctx, target, session, Request{Method: "image-build-cache", Tenant: tenant, ImageBuildCache: &q, After: after})
+	page, err := call(ctx, c, target, session, ImageBuildCacheMethod, ImageBuildCacheQuery{Tenant: tenant, Query: q, After: after})
 	if err != nil {
 		return control.ImageBuildCachePage{}, err
 	}
-	page := reply.ImageBuildCache
-	if page == nil || !page.ValidQuery(tenant, q, after) {
+	if !page.ValidQuery(tenant, q, after) {
 		return control.ImageBuildCachePage{}, sfcp.ErrFrame
 	}
-	return *page, nil
+	return page, nil
 }

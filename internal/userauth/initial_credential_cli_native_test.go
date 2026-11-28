@@ -130,10 +130,10 @@ func verifyInitialCredentialCLI(t *testing.T, ctx context.Context, root string, 
 			t.Fatal(err)
 		}
 		detail, err := c.UserCredentials(ctx, peer, adminSession, username)
-		if err != nil || detail.CredentialUser == nil {
+		if err != nil {
 			t.Fatal(err)
 		}
-		return detail.CredentialUser.Revision
+		return detail.Revision
 	}
 	password := []byte("rq4-cli-first-password-private")
 	defer clear(password)

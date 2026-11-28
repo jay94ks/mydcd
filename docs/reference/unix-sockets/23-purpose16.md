@@ -11,7 +11,7 @@ kind2의 TLV1은 `{Schema:1,Code,Info?}`, TLV2는 원 요청 Envelope digest다.
 header 파싱은 기존30초, 권한/계획은5초, 인증 뒤 I/O 유휴는60초·전체는 signed ExpiresAt/caller context로 제한한다. 동시에 노드당2개 handler다. 같은 연결의 일반 RPC보다 길게 읽기 위해 전용 local 연결을 사용하고 종료 후 연결을 재사용 cache에 남기지 않는다. 새 블록을 시작할 때 최대8MiB 또는1초 간격과 마지막 결과 전에 현재 quorum/사용자/원 source·run을 검사한다. 이 읽기는 새 pull/push credential이나 관리 operation을 발급하지 않는다. 상세 EOF·descriptor·소비자 commit 계약은 링크한 명세를 따른다.
 
 
-cache 항목 조회의 cache-ID/node selector와 optional `Reply.ImageBuildCache.CacheScope`는
+cache 항목 조회의 cache-ID/node selector와 optional `Data.CacheScope`는
 [보존 항목 조회](../image-build-jobs/13-cache-id.md)를 따른다. 원 job cursor는
 유지하며 명시 cache cursor는 대표 job 교체와 구분한다. 관측의 원 native 증거 유실을
 미관측/사용량0으로 처리하지 않는다.
@@ -43,5 +43,5 @@ intent임을 뜻한다. 생략은 기존 build Spec digest다. [출처·원 관�
 사용하며 Unix/네트워크 응답 형식은 같다. Raw native record·Source/사용자 승인·SDK
 오류/Description을 응답에 추가하지 않는다.
 
-User `build-context-content Part:file`는 원 immutable version의 canonical Path와 선택64-bit Offset 또는 After를 받는다. `Reply.ImageBuildContent.Page.File`은 `{Entry:{Path,Directory:false,Executable,Bytes,Digest:[32]},Offset,Total,Next,Data?:base64}`이며 byte offset/크기는64-bit, Data는 최대24KiB다. 기존 Page의 Offset/Total/Next는0이고 Entries/Data는 없다. 바깥 Next는 원 version/tree/Part/Path/epoch에 고정한다. `build-draft Kind:file`는 원 Scope·tree Revision/Digest·Path·Offset을 받고 같은 FilePage를 `Reply.ImageBuildDraft.Content`로 반환한다. 변경된 tree는 conflict, 미완료 파일은 Content 없이 PENDING이며 mutable 파일은 ManageRegistry가 필요하다. 두 요청의 [전체 포맷·EOF/지문·owner 오류 계약](../image-build-contexts/04-dockerfile.md#임의-regular-file의-페이지와-eof-확인)을 따른다. 새 목적 번호/socket은 추가하지 않는다.
+User `build-context-content Part:file`는 원 immutable version의 canonical Path와 선택64-bit Offset 또는 After를 받는다. 응답 `Data.Page.File`은 `{Entry:{Path,Directory:false,Executable,Bytes,Digest:[32]},Offset,Total,Next,Data?:base64}`이며 byte offset/크기는64-bit, Data는 최대24KiB다. 기존 Page의 Offset/Total/Next는0이고 Entries/Data는 없다. 바깥 Next는 원 version/tree/Part/Path/epoch에 고정한다. `build-draft Kind:file`는 원 Scope·tree Revision/Digest·Path·Offset을 받고 같은 FilePage를 응답 `Data.Content`로 반환한다. 변경된 tree는 conflict, 미완료 파일은 Content 없이 PENDING이며 mutable 파일은 ManageRegistry가 필요하다. 두 요청의 [전체 포맷·EOF/지문·owner 오류 계약](../image-build-contexts/04-dockerfile.md#임의-regular-file의-페이지와-eof-확인)을 따른다. 새 목적 번호/socket은 추가하지 않는다.
 

@@ -17,6 +17,13 @@ import (
 
 func beginCASFixture(t *testing.T) (*backupCoreFixture, AppBegin, uint64) {
 	t.Helper()
+	return beginEditFixture(t, nil)
+}
+
+// beginEditFixture uploads the first app's original input, after edit if
+// given, as the replacement deploy.
+func beginEditFixture(t *testing.T, edit func(*deployment.Compose)) (*backupCoreFixture, AppBegin, uint64) {
+	t.Helper()
 	f, _ := downCASFixture(t)
 	applyDNSCoreReport(t, f, managedDNSCoreReport(t, f, f.node), state.Applied)
 	managedDNSTaskCoreSubmit(t, f, "first", deployment.ResourceKey("task", "tenant", "first", "web"), true, state.Applied)
@@ -33,6 +40,9 @@ func beginCASFixture(t *testing.T) (*backupCoreFixture, AppBegin, uint64) {
 	var original struct{ Input deployment.Compose }
 	if json.Unmarshal(encoded, &original) != nil {
 		t.Fatal("original app input")
+	}
+	if edit != nil {
+		edit(&original.Input)
 	}
 	context, err := f.p.AppPlanning(f.s, "admin", "tenant")
 	if err != nil {
@@ -257,5 +267,26 @@ func TestAppCreateTargetCASRejectsScopeCompetitionAndCurrentAuthorityLoss(t *tes
 				t.Fatal("rejected create changed app/upload state")
 			}
 		})
+	}
+}
+
+// Lab 2026-11-28: editing one service's command (one Task kept on its node)
+// and deploying again was refused on every try. It is now accepted as a
+// one-wave replacement on that node.
+func TestAppBeginAcceptsEditedSingleTaskOnItsNode(t *testing.T) {
+	f, q, revision := beginEditFixture(t, func(c *deployment.Compose) {
+		web := c.Services["web"]
+		web.Command = &deployment.Arguments{"/bin/sh", "-c", "exec sleep 3600"}
+		c.Services["web"] = web
+	})
+	_, command := signedBeginCAS(t, f, "accept-edit", revision, f.s.Object(AppsKey).Revision, q)
+	applyDownCAS(t, f, command, state.Applied)
+	apps, _ := f.p.Apps(f.s)
+	e, ok := apps.Execution("tenant", "first")
+	if !ok || e.ActiveOperation() == "" {
+		t.Fatal("edited deploy has no execution")
+	}
+	if _, replacing := e.Replacement(); !replacing {
+		t.Fatal("edited Task not replaced in a wave")
 	}
 }

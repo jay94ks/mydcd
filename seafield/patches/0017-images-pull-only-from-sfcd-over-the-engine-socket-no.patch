@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Claude <noreply@anthropic.com>
 Date: Fri, 27 Nov 2026 11:01:24 +0000
-Subject: [PATCH 17/20] images: pull only from sfcd over the engine socket; no
+Subject: [PATCH 17/21] images: pull only from sfcd over the engine socket; no
  registry access
 
 Every manifest and blob comes from sfcd (purpose 37, daemon/seafield/imagesrc).

@@ -31,16 +31,28 @@ import (
 
 // cdRow is the app's CD view; 404 not-cd when the app is not a CD app.
 func cdRow(ctx context.Context, c sfc.Conn, tenant, app string) (sfc.AppView, *sfc.AppCD, error) {
-	apps, err := allApps(ctx, c, tenant)
+	a, err := appRow(ctx, c, tenant, app)
 	if err != nil {
 		return sfc.AppView{}, nil, err
 	}
+	if a.CD == nil {
+		return sfc.AppView{}, nil, &httpErr{http.StatusNotFound, "not-cd", "no such app with automatic deployment"}
+	}
+	return a, a.CD, nil
+}
+
+// appRow is the app's row, CD or not; 404 not-cd when there is no such app.
+func appRow(ctx context.Context, c sfc.Conn, tenant, app string) (sfc.AppView, error) {
+	apps, err := allApps(ctx, c, tenant)
+	if err != nil {
+		return sfc.AppView{}, err
+	}
 	for _, a := range apps {
-		if a.App == app && a.CD != nil {
-			return a, a.CD, nil
+		if a.App == app {
+			return a, nil
 		}
 	}
-	return sfc.AppView{}, nil, &httpErr{http.StatusNotFound, "not-cd", "no such app with automatic deployment"}
+	return sfc.AppView{}, &httpErr{http.StatusNotFound, "not-cd", "no such app with automatic deployment"}
 }
 
 // GET /t/{t}/apps/{app}/cd → {app, deployment, health, operation, cd}: the
@@ -149,7 +161,8 @@ func cdTarget(q *control.AppCDChange, cd *sfc.AppCD, expected uint64) error {
 }
 
 // PUT /t/{t}/apps/{app}/cd/policy {opId, policy, expected?} →
-// configure-app-cd. policy is the CD policy object in the shape apps[].cd.
+// configure-app-cd. On an app without CD it is the first policy ("자동 배포
+// 켜기"): policy revision 0, no target, expected = the app's revision. policy is the CD policy object in the shape apps[].cd.
 // policy shows (enabled, source{kind, repository, ref, path, credential},
 // poll, sync{mode, drift, prune, allowEmpty}, runtime{mode, expiry},
 // limits{fetch, bytes, queued, active}); unknown fields are refused.
@@ -168,9 +181,16 @@ func (s *Server) handleCDPolicy(w http.ResponseWriter, r *http.Request, ws *webS
 		if err != nil {
 			return "", nil, 0, "", invalid("policy: not a valid CD policy object (at most 32 KiB, known fields only)")
 		}
-		_, cd, err := cdRow(ctx, c, tenant, app)
+		a, err := appRow(ctx, c, tenant, app)
 		if err != nil {
 			return "", nil, 0, "", err
+		}
+		cd := a.CD
+		if cd == nil {
+			// first policy of an app deployed without CD: sfcd attaches it
+			// (policy revision 0, no target, CAS = the app's revision).
+			q := control.AppCDChange{Tenant: tenant, App: app, Policy: &policy}
+			return sfc.ActionConfigureAppCD, q, expectedOr(req.Expected, a.Revision), "app/" + app, nil
 		}
 		q := control.AppCDChange{Tenant: tenant, App: app, Policy: &policy, PolicyRevision: cd.PolicyRevision}
 		if err := cdTarget(&q, cd, req.Expected); err != nil {

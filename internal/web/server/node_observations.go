@@ -56,6 +56,7 @@ type devicesView struct {
 	Disks      []blockDiskView `json:"disks"`
 	Truncated  bool            `json:"truncated"`
 	Recorded   []recordedView  `json:"recorded"`
+	Bundles    []bundleView    `json:"bundles"`
 	ObservedAt int64           `json:"observedAt"`
 	Stale      bool            `json:"stale"`
 }
@@ -70,9 +71,35 @@ type recordedView struct {
 	Reason string `json:"reason,omitempty"`
 }
 
+// bundleView: one disk bundle. state ok / degraded (a mirror runs without
+// a member) / missing (not usable) / syncing (syncPercent); device names its
+// own row in disks (kind bundle). Members are disks (lvm) or partitions
+// (fuse) with state ok / missing / syncing.
+type bundleView struct {
+	Name        string             `json:"name"`
+	Backend     string             `json:"backend"`
+	Mode        string             `json:"mode"`
+	Size        uint64             `json:"size"`
+	Device      string             `json:"device,omitempty"`
+	State       string             `json:"state"`
+	SyncPercent uint8              `json:"syncPercent"`
+	Members     []bundleMemberView `json:"members"`
+}
+
+type bundleMemberView struct {
+	Disk   string `json:"disk"`
+	Part   string `json:"part,omitempty"`
+	Serial string `json:"serial,omitempty"`
+	WWN    string `json:"wwn,omitempty"`
+	Size   uint64 `json:"size,omitempty"`
+	State  string `json:"state"`
+}
+
 type blockDiskView struct {
 	Name       string          `json:"name"`
 	Class      string          `json:"class"`
+	Kind       string          `json:"kind,omitempty"`
+	Bundle     string          `json:"bundle,omitempty"`
 	Locked     bool            `json:"locked"`
 	Size       uint64          `json:"size"`
 	Model      string          `json:"model,omitempty"`
@@ -130,12 +157,19 @@ func newDevicesView(d *sfc.NodeDevicesView) *devicesView {
 	if d == nil {
 		return nil
 	}
-	v := &devicesView{Node: d.Node, Disks: []blockDiskView{}, Recorded: []recordedView{}, Truncated: d.Truncated, ObservedAt: int64(d.ObservedAt / 1000), Stale: d.Stale}
+	v := &devicesView{Node: d.Node, Disks: []blockDiskView{}, Recorded: []recordedView{}, Bundles: []bundleView{}, Truncated: d.Truncated, ObservedAt: int64(d.ObservedAt / 1000), Stale: d.Stale}
 	for _, m := range d.Recorded {
 		v.Recorded = append(v.Recorded, recordedView{UUID: m.UUID, Path: m.Path, Disk: m.Disk, Part: m.Part, Reason: m.Reason})
 	}
+	for _, b := range d.Bundles {
+		row := bundleView{Name: b.Name, Backend: b.Backend, Mode: b.Mode, Size: b.Size, Device: b.Device, State: b.State, SyncPercent: b.SyncPercent, Members: []bundleMemberView{}}
+		for _, m := range b.Members {
+			row.Members = append(row.Members, bundleMemberView{Disk: m.Disk, Part: m.Part, Serial: m.Serial, WWN: m.WWN, Size: m.Size, State: m.State})
+		}
+		v.Bundles = append(v.Bundles, row)
+	}
 	for _, disk := range d.Disks {
-		row := blockDiskView{Name: disk.Name, Class: disk.Class, Locked: disk.Class == "system", Size: disk.Size, Model: disk.Model, Serial: disk.Serial, WWN: disk.WWN,
+		row := blockDiskView{Name: disk.Name, Class: disk.Class, Kind: disk.Kind, Bundle: disk.Bundle, Locked: disk.Class == "system", Size: disk.Size, Model: disk.Model, Serial: disk.Serial, WWN: disk.WWN,
 			Rotational: disk.Rotational, ReadOnly: disk.ReadOnly, Removable: disk.Removable, Table: disk.Table, TableID: disk.TableID,
 			Purposes: append([]string{}, disk.Purposes...), Parts: []blockPartView{}}
 		for _, p := range disk.Parts {
@@ -256,11 +290,23 @@ func (s *Server) handleMeshLinks(w http.ResponseWriter, r *http.Request, ws *web
 // and memory/disk totals come from the cluster-wide admin view; a tenant
 // view carries that tenant's memUsed (when reported) and containers.
 type summaryView struct {
-	Node                string                `json:"node"`
-	Status              string                `json:"status"`
-	State               string                `json:"state"`
-	Ready               bool                  `json:"ready"`
-	Stale               bool                  `json:"stale"`
+	Node   string `json:"node"`
+	Status string `json:"status"`
+	State  string `json:"state"`
+	Ready  bool   `json:"ready"`
+	Stale  bool   `json:"stale"`
+	// Waiting: sfcd did not hear from the server within the query's wait;
+	// the row is what was stored before (shown as "대기 중").
+	Waiting bool `json:"waiting,omitempty"`
+	// reason (status degraded): MODULE_PASS_FAILED, HOST_READ_FAILED or
+	// UNKNOWN; failedSteps names the failing reconciliation steps and
+	// failingSince (Unix seconds) when it began (cluster admins only).
+	Reason       string   `json:"reason,omitempty"`
+	FailedSteps  []string `json:"failedSteps,omitempty"`
+	FailingSince int64    `json:"failingSince,omitempty"`
+	// admitsWork: false for a server that takes no work; it can still be
+	// ready.
+	AdmitsWork          bool                  `json:"admitsWork"`
 	Role                string                `json:"role,omitempty"`
 	CPUPercent          *float64              `json:"cpuPercent,omitempty"`
 	MemUsed             *uint64               `json:"memUsed,omitempty"`
@@ -313,11 +359,12 @@ type clusterAppPort struct {
 }
 
 func newSummaryView(n sfc.NodeSummaryView) summaryView {
-	v := summaryView{Node: n.Node, Status: n.State, State: n.State, Ready: n.Ready, Stale: n.Stale, ObservedAt: int64(n.ObservedAt / 1000),
+	v := summaryView{Node: n.Node, Status: n.State, State: n.State, Ready: n.Ready, Stale: n.Stale, Waiting: n.Waiting, ObservedAt: int64(n.ObservedAt / 1000),
 		ObserveLimitSeconds: n.ObserveLimitSeconds, CordonedBy: n.CordonedBy, CordonedAt: n.CordonedAt, Scheduling: n.Scheduling, Build: buildView{Enabled: n.Build.Enabled, Reason: n.Build.Reason}}
 	if n.State == "unready" {
 		v.Status = "degraded"
 	}
+	v.Reason, v.FailedSteps, v.FailingSince, v.AdmitsWork = n.Reason, n.FailedSteps, int64(n.FailingSince/1000), n.AdmitsWork
 	if u := n.Usage; u != nil {
 		v.MemUsed = u.MemoryUsed
 		if u.Containers != nil {

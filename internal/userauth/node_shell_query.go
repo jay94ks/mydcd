@@ -4,7 +4,6 @@ package userauth
 
 import (
 	"context"
-	"reflect"
 	"time"
 
 	"github.com/jay94ks/seafield/internal/access"
@@ -14,40 +13,43 @@ import (
 	"github.com/jay94ks/seafield/internal/sfcp"
 )
 
-func nodeShellQuery(method string) bool {
-	return method == "node-shell-policy" || method == "node-shell-sessions"
+// NodeShellSessionsQuery selects one page of server shell sessions: those
+// after the session ID After, narrowed by State ("open" or "closed") and Node.
+type NodeShellSessionsQuery struct {
+	After string `json:",omitempty"`
+	State string `json:",omitempty"`
+	Node  string `json:",omitempty"`
 }
-func (r Request) validNodeShellQuery() bool {
-	want := Request{Schema: r.Schema, Method: r.Method, Nonce: r.Nonce}
-	if r.Method == "node-shell-sessions" {
-		want.After = r.After
-		want.State, want.Node = r.State, r.Node
+
+func (q NodeShellSessionsQuery) Valid() bool {
+	return len(q.After) <= 256 && (control.NodeShellSessionsQuery{State: q.State, Node: q.Node}).Valid()
+}
+
+func (c Client) NodeShellPolicy(ctx context.Context, peer sfcp.Peer, session access.Session) (control.NodeShellPolicyView, error) {
+	p, err := call(ctx, c, peer, session, NodeShellPolicyMethod, NoParams{})
+	if err == nil && (p.Account != access.NodeShellAccount || p.MaxSessions < 1 || p.MaxSessions > 16 || p.IdleSeconds < 60 || p.IdleSeconds > 86400) {
+		return control.NodeShellPolicyView{}, sfcp.ErrFrame
 	}
-	return nodeShellQuery(r.Method) && len(r.After) <= 256 && (control.NodeShellSessionsQuery{State: r.State, Node: r.Node}).Valid() && reflect.DeepEqual(r, want)
+	return p, err
 }
-func (c Client) NodeShellPolicy(ctx context.Context, peer sfcp.Peer, session access.Session) (Reply, error) {
-	reply, err := c.query(ctx, peer, session, Request{Method: "node-shell-policy"})
-	if err == nil && (reply.NodeShellPolicy == nil || reply.NodeShellPolicy.Account != access.NodeShellAccount || reply.NodeShellPolicy.MaxSessions < 1 || reply.NodeShellPolicy.MaxSessions > 16 || reply.NodeShellPolicy.IdleSeconds < 60 || reply.NodeShellPolicy.IdleSeconds > 86400 || reply.NodeShellPolicy.RootRevision != reply.NodeShellRootRevision) {
-		return Reply{}, sfcp.ErrFrame
-	}
-	return reply, err
-}
-func (c Client) NodeShellSessions(ctx context.Context, peer sfcp.Peer, session access.Session, after string, filters ...control.NodeShellSessionsQuery) (Reply, error) {
+
+func (c Client) NodeShellSessions(ctx context.Context, peer sfcp.Peer, session access.Session, after string, filters ...control.NodeShellSessionsQuery) (control.NodeShellSessionsPage, error) {
 	var q control.NodeShellSessionsQuery
 	if len(filters) > 1 {
-		return Reply{}, access.ErrInvalid
+		return control.NodeShellSessionsPage{}, access.ErrInvalid
 	}
 	if len(filters) == 1 {
 		q = filters[0]
 	}
-	if !q.Valid() {
-		return Reply{}, access.ErrInvalid
+	query := NodeShellSessionsQuery{After: after, State: q.State, Node: q.Node}
+	if !query.Valid() {
+		return control.NodeShellSessionsPage{}, access.ErrInvalid
 	}
-	reply, err := c.query(ctx, peer, session, Request{Method: "node-shell-sessions", After: after, State: q.State, Node: q.Node})
-	if err == nil && (reply.NodeShellSessions == nil || !validNodeShellSessionsPage(*reply.NodeShellSessions, q, after) || reply.NodeShellSessions.RootRevision != reply.NodeShellRootRevision) {
-		return Reply{}, sfcp.ErrFrame
+	page, err := call(ctx, c, peer, session, NodeShellSessionsMethod, query)
+	if err == nil && !validNodeShellSessionsPage(page, q, after) {
+		return control.NodeShellSessionsPage{}, sfcp.ErrFrame
 	}
-	return reply, err
+	return page, err
 }
 
 func validNodeShellSessionsPage(page control.NodeShellSessionsPage, q control.NodeShellSessionsQuery, after string) bool {
@@ -66,21 +68,22 @@ func validNodeShellSessionsPage(page control.NodeShellSessionsPage, q control.No
 	}
 	return page.Next == "" || len(page.Sessions) == 8 && page.Total > 8 && page.Next == previous
 }
-func (s Service) nodeShellQueryReply(view cluster.View, session access.Session, r Request) Reply {
-	reply := Reply{Schema: 1, Code: "ok", ModuleEpoch: view.State.ModuleEpoch(), NodeShellRootRevision: view.State.Object(control.NodeShellKey).Revision}
-	now := time.Now().Unix()
-	if r.Method == "node-shell-policy" {
-		value, err := s.Policy.NodeShellPolicy(view.State, session, now)
+
+// Both are authorized by their control.Policy reader. Each carries its book's
+// RootRevision, the CAS root a node-shell change starts from.
+var (
+	NodeShellPolicyMethod = define(Method[NoParams, control.NodeShellPolicyView]{Name: "node-shell-policy"}, true, func(_ context.Context, s Service, view cluster.View, session access.Session, _ NoParams) (control.NodeShellPolicyView, string) {
+		p, err := s.Policy.NodeShellPolicy(view.State, session, time.Now().Unix())
 		if err != nil {
-			return Reply{Schema: 1, Code: "denied"}
+			return control.NodeShellPolicyView{}, "denied"
 		}
-		reply.NodeShellPolicy = &value
-	} else {
-		value, err := s.Policy.NodeShellSessions(view.State, session, now, r.After, control.NodeShellSessionsQuery{State: r.State, Node: r.Node})
+		return p, "ok"
+	})
+	NodeShellSessionsMethod = define(Method[NodeShellSessionsQuery, control.NodeShellSessionsPage]{Name: "node-shell-sessions"}, true, func(_ context.Context, s Service, view cluster.View, session access.Session, q NodeShellSessionsQuery) (control.NodeShellSessionsPage, string) {
+		page, err := s.Policy.NodeShellSessions(view.State, session, time.Now().Unix(), q.After, control.NodeShellSessionsQuery{State: q.State, Node: q.Node})
 		if err != nil {
-			return Reply{Schema: 1, Code: "denied"}
+			return control.NodeShellSessionsPage{}, "denied"
 		}
-		reply.NodeShellSessions = &value
-	}
-	return reply
-}
+		return page, "ok"
+	})
+)

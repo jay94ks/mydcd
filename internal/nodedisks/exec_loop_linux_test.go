@@ -89,3 +89,29 @@ func kernelReadsGPT() bool {
 	raw, err := exec.Command("sh", "-c", "zcat /proc/config.gz 2>/dev/null | grep -c '^CONFIG_EFI_PARTITION=y'; true").Output()
 	return err != nil || strings.TrimSpace(string(raw)) != "0" && strings.TrimSpace(string(raw)) != ""
 }
+
+func TestMakeRootDir(t *testing.T) {
+	base := t.TempDir()
+	if err := MakeRootDir(base, "pool/a"); err != nil {
+		t.Fatal(err)
+	}
+	st, err := os.Stat(filepath.Join(base, "pool", "a"))
+	if err != nil || !st.IsDir() || st.Mode().Perm() != 0o700 {
+		t.Fatal("made dir", st, err)
+	}
+	if err := MakeRootDir(base, "pool/a"); err != nil {
+		t.Fatal("existing dir is kept", err)
+	}
+	if err := os.Symlink("/etc", filepath.Join(base, "link")); err != nil {
+		t.Fatal(err)
+	}
+	if code(MakeRootDir(base, "link/x")) != "mount-path" {
+		t.Fatal("followed a symlink")
+	}
+	if err := os.WriteFile(filepath.Join(base, "file"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if code(MakeRootDir(base, "file")) != "mount-path" {
+		t.Fatal("accepted a file")
+	}
+}

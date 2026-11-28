@@ -31,12 +31,14 @@ const (
 
 	// Observation report kinds name what a report carries; the receiver
 	// never peeks into the body to find out (design 4.6).
-	KindWorkloadReport  uint8 = KindOwn     // a node's workload report
-	KindNodeObservation uint8 = KindOwn + 1 // a stored node observation
-	KindEventBatch      uint8 = KindOwn + 2 // a batch of diagnostic events
-	KindAppRenewal      uint8 = KindOwn + 3 // an unchanged app observation's renewal, to the leader
-	KindAlarm           uint8 = KindOwn + 4 // an alarm/<name> event for the receiver's bus
+	KindWorkloadReport uint8 = KindOwn // a node's workload report
+	// KindOwn + 1 carried node observations to every member until they
+	// moved to the Topic channel (obs family); it is not reused.
+	KindEventBatch uint8 = KindOwn + 2 // a batch of diagnostic events
+	KindAppRenewal uint8 = KindOwn + 3 // an unchanged app observation's renewal, to the leader
+	// KindOwn + 4 carried alarms to the members in reach until they moved
+	// to the Topic channel (alm family); it is not reused.
 )
 
 // ReportKind reports whether kind is an Observation report kind.
-func ReportKind(kind uint8) bool { return kind >= KindWorkloadReport && kind <= KindAlarm }
+func ReportKind(kind uint8) bool { return kind >= KindWorkloadReport && kind <= KindAppRenewal }

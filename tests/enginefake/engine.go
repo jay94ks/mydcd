@@ -49,6 +49,7 @@ type Engine struct {
 	volumes    map[string]*vol
 	networks   map[string]*netw
 	execs      map[string]*execProcess
+	execPlan   func(container string, argv []string) ExecPlan
 	unknown    []string
 	remote     map[string]dockerspec.DockerOCIImage // pullable, by reference
 	pulls      []string

@@ -62,7 +62,7 @@ func realSecretApp(t *testing.T, c *clusterfixture.Cluster) string {
 	var cfg dockerspec.DockerOCIImage
 	cfg.Config.User, cfg.Config.Cmd = "10001:10001", []string{"/web"}
 	c.Nodes[1].Engine.Publish(cfg, image)
-	return "name: web\nservices:\n web:\n  image: " + image + "\n  cpus: 0.1\n  mem_limit: 16m\n  networks: {app: {}}\n  x-sfc:\n   node: node-1\n   secrets_from: [group/shop-db]\n   secret_env: [{source: db, name: DB_PASSWORD}]\nsecrets:\n db:\n  x-sfc: {key: DB_PASSWORD}\nnetworks:\n app: {external: true, name: lan}\n"
+	return "name: web\nservices:\n web:\n  image: " + image + "\n  cpus: 0.1\n  mem_limit: 16m\n  networks: {app: {}}\n  x-sfc:\n   node: node-1\n   secrets: {from: [group/shop-db], env: [{source: db, name: DB_PASSWORD}]}\nsecrets:\n db:\n  x-sfc: {key: DB_PASSWORD}\nnetworks:\n app: {external: true, name: lan}\n"
 }
 
 // A deploy that uses a Group with a password waits for its approval; the

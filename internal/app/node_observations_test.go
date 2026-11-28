@@ -58,9 +58,10 @@ func verifyTwoNodeObservations(t *testing.T, ctx context.Context, a, b *Runtime,
 	if _, e = b.Engine().ReadAtLeast(ctx, floor.State.Index()); e != nil {
 		t.Fatal(e)
 	}
-	// Measure twice for an actual CPU delta, and send exact signed bytes through
-	// Session.Report. No test-only write bypass is used at the receiving node.
-	collect := func(r *Runtime, target sfcp.Peer) {
+	// Measure twice for an actual CPU delta. Each node only stores its own
+	// signed reports; the queries below subscribe over the Topic channel
+	// and get them as the owner republishes them (node-observation-topics).
+	collect := func(r *Runtime, _ sfcp.Peer) {
 		t.Helper()
 		view, e := r.Engine().Read(ctx, false)
 		if e != nil {
@@ -70,16 +71,9 @@ func verifyTwoNodeObservations(t *testing.T, ctx context.Context, a, b *Runtime,
 		if e != nil {
 			t.Fatal(e)
 		}
-		link, e := r.Mesh.Dial(ctx, target)
-		if e != nil {
-			t.Fatal(e)
-		}
 		for _, raw := range reports {
 			if e = r.storeNodeObservation(sfcp.Identity(r.Identity.Public), raw); e != nil {
 				t.Fatal("local report", e)
-			}
-			if e = link.Report(ctx, sfcp.KindNodeObservation, raw); e != nil {
-				t.Fatal("authenticated remote report", e)
 			}
 		}
 	}
@@ -161,6 +155,21 @@ func verifyTwoNodeObservations(t *testing.T, ctx context.Context, a, b *Runtime,
 		defer cancel()
 		reply, e := client.RaftStatus(call, ap, session)
 		return e == nil && reply.RaftStatus != nil && reply.RaftStatus.Stale && reply.RaftStatus.LocalLastAppliedAuthorization && reply.RaftStatus.ObservedBy == "node-a" && reply.RaftStatus.Voters == 2
+	})
+	// The closed voter does not answer: its row says waiting ("대기 중").
+	wait("closed server shown as waiting", func() bool {
+		call, cancel := context.WithTimeout(ctx, 3*time.Second)
+		defer cancel()
+		reply, e := client.RaftStatus(call, ap, session)
+		if e != nil || reply.RaftStatus == nil {
+			return false
+		}
+		for _, node := range reply.RaftStatus.Nodes {
+			if node.Node == "node-b" {
+				return node.Waiting
+			}
+		}
+		return false
 	})
 	t.Log("two actual voters: signed OS observations over SFCP, tenant filtering, statfs, both Mesh ends, acknowledged Raft prefix, actual snapshot, and quorum-loss local authenticated stale query")
 }

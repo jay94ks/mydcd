@@ -3,17 +3,13 @@
 package firewall
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"net/netip"
-	"os/exec"
 	"strconv"
 	"strings"
-	"time"
 )
 
 // Port is one port the locked rules keep open.
@@ -70,32 +66,82 @@ func (l Locks) sorted() []Port {
 	return out
 }
 
-// Lines are the SFC-INPUT rules for one family, without the chain name
-// prefix "-A SFC-INPUT". The first line is a no-target marker carrying the
-// digest of the rest, so a later check can tell the chain is still ours.
+// Line is one SFC-INPUT rule. sfcd writes it to the kernel over netlink in
+// the shape iptables-nft itself uses, so `iptables -S SFC-INPUT` prints
+// String on a server that has iptables.
+type Line struct {
+	Src         string // source prefix
+	Iface       string // input interface; a trailing + matches a prefix
+	Proto       string // tcp, udp, icmp or ipv6-icmp
+	PortLo      uint16 // destination port (tcp, udp)
+	PortHi      uint16
+	ICMPv6      uint8 // ICMPv6 type (ipv6-icmp); 0: any
+	Established bool  // conntrack RELATED,ESTABLISHED
+	Comment     string
+	Target      string // ACCEPT, DROP or RETURN; empty: the marker
+}
+
+// String is the line as `iptables -S` prints it, without "-A SFC-INPUT".
+func (l Line) String() string {
+	parts := []string{}
+	if l.Src != "" {
+		parts = append(parts, "-s "+l.Src)
+	}
+	if l.Iface != "" {
+		parts = append(parts, "-i "+l.Iface)
+	}
+	if l.Proto != "" {
+		parts = append(parts, "-p "+l.Proto)
+	}
+	if l.PortLo != 0 {
+		ports := strconv.Itoa(int(l.PortLo))
+		if l.PortHi != l.PortLo {
+			ports += ":" + strconv.Itoa(int(l.PortHi))
+		}
+		parts = append(parts, "-m "+l.Proto+" --dport "+ports)
+	}
+	if l.ICMPv6 != 0 {
+		parts = append(parts, "-m icmp6 --icmpv6-type "+strconv.Itoa(int(l.ICMPv6)))
+	}
+	if l.Established {
+		parts = append(parts, "-m conntrack --ctstate RELATED,ESTABLISHED")
+	}
+	if l.Comment != "" {
+		parts = append(parts, "-m comment --comment \""+l.Comment+"\"")
+	}
+	if l.Target != "" {
+		parts = append(parts, "-j "+l.Target)
+	}
+	return strings.Join(parts, " ")
+}
+
+// icmpv6Types are the ICMPv6 types the locked rules let in: packet-too-big,
+// router solicitation and advertisement, neighbour solicitation and
+// advertisement.
+var icmpv6Types = []uint8{2, 133, 134, 135, 136}
+
+// Rules are the SFC-INPUT rules for one family. The first is a no-target
+// marker carrying the digest of the rest, so a later check can tell the
+// chain is still ours.
 //
 // Order: locks, cluster required deny and allow, server deny and allow,
 // cluster deny and allow, then the effective policy. A server rule wins over
 // a cluster rule, a required cluster rule over both.
-func Lines(family int, ls Layers, l Locks) []string {
-	body := []string{
-		"-m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT",
-		"-i lo -j ACCEPT",
-		"-i md+ -j RETURN",
-		"-i mt+ -j RETURN",
+func Rules(family int, ls Layers, l Locks) []Line {
+	body := []Line{
+		{Established: true, Target: "ACCEPT"},
+		{Iface: "lo", Target: "ACCEPT"},
+		{Iface: "md+", Target: "RETURN"},
+		{Iface: "mt+", Target: "RETURN"},
 	}
 	if family == 6 {
-		for _, t := range []string{"packet-too-big", "router-solicitation", "router-advertisement", "neighbour-solicitation", "neighbour-advertisement"} {
-			body = append(body, "-p ipv6-icmp -m icmp6 --icmpv6-type "+t+" -j ACCEPT")
+		for _, t := range icmpv6Types {
+			body = append(body, Line{Proto: "ipv6-icmp", ICMPv6: t, Target: "ACCEPT"})
 		}
 	}
 	for _, p := range l.sorted() {
 		for _, src := range sources(family, p.From) {
-			line := ""
-			if src != "" {
-				line = "-s " + src + " "
-			}
-			body = append(body, line+fmt.Sprintf("-p %s -m %s --dport %d -m comment --comment \"sfc lock %s\" -j ACCEPT", p.Proto, p.Proto, p.Port, p.Reason))
+			body = append(body, Line{Src: src, Proto: p.Proto, PortLo: p.Port, PortHi: p.Port, Comment: "sfc lock " + p.Reason, Target: "ACCEPT"})
 		}
 	}
 	pass := func(s State, required bool) {
@@ -111,11 +157,25 @@ func Lines(family int, ls Layers, l Locks) []string {
 	pass(ls.Node, false)
 	pass(ls.Cluster, false)
 	if Effective(ls.Node, ls.Cluster) == PolicyDrop {
-		body = append(body, "-m comment --comment \"sfc policy drop\" -j DROP")
+		body = append(body, Line{Comment: "sfc policy drop", Target: "DROP"})
 	}
-	h := sha256.Sum256([]byte(strings.Join(body, "\n")))
-	marker := fmt.Sprintf("-m comment --comment \"sfc revision %d/%d %s\"", ls.Node.Revision, ls.Cluster.Revision, hex.EncodeToString(h[:8]))
-	return append([]string{marker}, body...)
+	text := make([]string, len(body))
+	for i, b := range body {
+		text[i] = b.String()
+	}
+	h := sha256.Sum256([]byte(strings.Join(text, "\n")))
+	marker := Line{Comment: fmt.Sprintf("sfc revision %d/%d %s", ls.Node.Revision, ls.Cluster.Revision, hex.EncodeToString(h[:8]))}
+	return append([]Line{marker}, body...)
+}
+
+// Lines are Rules as `iptables -S` text.
+func Lines(family int, ls Layers, l Locks) []string {
+	rules := Rules(family, ls, l)
+	out := make([]string, len(rules))
+	for i, r := range rules {
+		out[i] = r.String()
+	}
+	return out
 }
 
 // sources are the prefixes of from that belong to family; [""] is anywhere.
@@ -134,177 +194,65 @@ func sources(family int, from []string) []string {
 	return out
 }
 
-func ruleLines(family int, r Rule) []string {
-	match := ""
+func ruleLines(family int, r Rule) []Line {
+	base := Line{Comment: "sfc " + r.ID, Target: "ACCEPT"}
+	if r.Action == "deny" {
+		base.Target = "DROP"
+	}
 	switch r.Proto {
 	case "tcp", "udp":
-		lo, hi, _ := PortRange(r.Ports)
-		ports := strconv.Itoa(int(lo))
-		if hi != lo {
-			ports += ":" + strconv.Itoa(int(hi))
-		}
-		match = fmt.Sprintf(" -p %s -m %s --dport %s", r.Proto, r.Proto, ports)
+		base.Proto = r.Proto
+		base.PortLo, base.PortHi, _ = PortRange(r.Ports)
 	case "icmp":
-		match = " -p icmp"
+		base.Proto = "icmp"
 		if family == 6 {
-			match = " -p ipv6-icmp"
+			base.Proto = "ipv6-icmp"
 		}
 	}
-	target := "ACCEPT"
-	if r.Action == "deny" {
-		target = "DROP"
-	}
-	out := []string{}
+	out := []Line{}
 	for _, src := range sources(family, r.From) {
-		line := ""
-		if src != "" {
-			line = "-s " + src
-		}
-		line = strings.TrimSpace(line + match + " -m comment --comment \"sfc " + r.ID + "\" -j " + target)
-		out = append(out, line)
+		l := base
+		l.Src = src
+		out = append(out, l)
 	}
 	return out
 }
 
-// Host runs iptables-save style reads and iptables-restore writes for one
-// family. Tests replace it.
+// ChainState is what a family's filter table holds of sfcd's chain.
+type ChainState struct {
+	Exists bool
+	Marker string // comment of the first SFC-INPUT rule
+	Count  int    // SFC-INPUT rules
+	Jumps  int    // rules in INPUT that jump to SFC-INPUT
+	First  bool   // INPUT's first rule is such a jump
+}
+
+// OperatorLimit bounds the operator lines one show returns.
+const OperatorLimit = 400
+
+// Host is the kernel's netfilter for sfcd's chain. Tests replace it.
 type Host interface {
-	// List is `iptables -S CHAIN`; missing reports a chain that does not
-	// exist.
-	List(ctx context.Context, family int, chain string) (lines []string, missing bool, err error)
-	// Restore is `iptables-restore --noflush` with input.
-	Restore(ctx context.Context, family int, input []byte) error
-}
-
-// Real is the host's iptables and ip6tables.
-var Real Host = execHost{}
-
-type execHost struct{}
-
-func tool(family int, restore bool) string {
-	name := "iptables"
-	if family == 6 {
-		name = "ip6tables"
-	}
-	if restore {
-		name += "-restore"
-	}
-	return name
-}
-
-func (execHost) List(ctx context.Context, family int, chain string) ([]string, bool, error) {
-	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
-	defer cancel()
-	var out, errb bytes.Buffer
-	cmd := exec.CommandContext(ctx, tool(family, false), "-w", "5", "-S", chain)
-	cmd.Stdout, cmd.Stderr = &out, &errb
-	if err := cmd.Run(); err != nil {
-		msg := errb.String()
-		if strings.Contains(msg, "No chain/target/match by that name") || strings.Contains(msg, "does not exist") {
-			return nil, true, nil
-		}
-		return nil, false, fmt.Errorf("%s -S %s: %w: %s", tool(family, false), chain, err, firstLine(msg))
-	}
-	lines := []string{}
-	for _, l := range strings.Split(out.String(), "\n") {
-		if l = strings.TrimSpace(l); l != "" {
-			lines = append(lines, l)
-		}
-	}
-	return lines, false, nil
-}
-
-func (execHost) Restore(ctx context.Context, family int, input []byte) error {
-	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
-	defer cancel()
-	var errb bytes.Buffer
-	cmd := exec.CommandContext(ctx, tool(family, true), "-w", "5", "--noflush")
-	cmd.Stdin, cmd.Stderr = bytes.NewReader(input), &errb
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("%s: %w: %s", tool(family, true), err, firstLine(errb.String()))
-	}
-	return nil
-}
-
-func firstLine(s string) string {
-	s, _, _ = strings.Cut(strings.TrimSpace(s), "\n")
-	if len(s) > 300 {
-		s = s[:300]
-	}
-	return s
-}
-
-const jumpLine = "-A INPUT -j " + Chain
-
-// inputJumps counts sfcd's jump lines in INPUT and says whether the first
-// rule of INPUT is one.
-func inputJumps(lines []string) (count int, first bool) {
-	seenRule := false
-	for _, l := range lines {
-		if !strings.HasPrefix(l, "-A INPUT") {
-			continue
-		}
-		if l == jumpLine {
-			count++
-			if !seenRule {
-				first = true
-			}
-		}
-		seenRule = true
-	}
-	return count, first
-}
-
-// applyInput is the iptables-restore input that makes SFC-INPUT hold lines
-// and leaves exactly one jump to it at the top of INPUT. Declaring the chain
-// creates it or, when it exists, flushes it; nothing else in the filter
-// table changes. The whole input commits at once or not at all.
-func applyInput(lines []string, jumps int) []byte {
-	var b strings.Builder
-	b.WriteString("*filter\n:" + Chain + " - [0:0]\n")
-	for _, l := range lines {
-		b.WriteString("-A " + Chain + " " + l + "\n")
-	}
-	for i := 0; i < jumps; i++ {
-		b.WriteString("-D INPUT -j " + Chain + "\n")
-	}
-	b.WriteString("-I INPUT 1 -j " + Chain + "\nCOMMIT\n")
-	return []byte(b.String())
-}
-
-func removeInput(jumps int) []byte {
-	var b strings.Builder
-	b.WriteString("*filter\n")
-	for i := 0; i < jumps; i++ {
-		b.WriteString("-D INPUT -j " + Chain + "\n")
-	}
-	b.WriteString("-F " + Chain + "\n-X " + Chain + "\nCOMMIT\n")
-	return []byte(b.String())
+	// State reads family's SFC-INPUT and its jumps.
+	State(ctx context.Context, family int) (ChainState, error)
+	// Write changes every family in plan in one transaction: lines makes
+	// SFC-INPUT hold exactly them with one jump at the top of INPUT; nil
+	// takes the jump and the chain out. Nothing else changes.
+	Write(ctx context.Context, plan map[int][]Line) error
+	// Operator is every input-hook chain of the server's other rules (and
+	// the chains they jump to) as readable lines; read only.
+	Operator(ctx context.Context) (lines []string, truncated bool, err error)
 }
 
 // Installed says whether family's SFC-INPUT already holds exactly lines
 // with its jump first in INPUT.
 func Installed(ctx context.Context, h Host, family int, lines []string) (bool, error) {
-	input, _, err := h.List(ctx, family, "INPUT")
-	if err != nil {
+	st, err := h.State(ctx, family)
+	if err != nil || !st.Exists {
 		return false, err
 	}
-	if jumps, first := inputJumps(input); jumps != 1 || !first {
-		return false, nil
-	}
-	chain, missing, err := h.List(ctx, family, Chain)
-	if err != nil || missing {
-		return false, err
-	}
-	rules := []string{}
-	for _, l := range chain {
-		if strings.HasPrefix(l, "-A "+Chain+" ") {
-			rules = append(rules, l)
-		}
-	}
-	// iptables -S writes matches in its own spelling, so only the marker
-	// (with the digest of what was written) and the count are compared.
-	return len(rules) == len(lines) && strings.Contains(rules[0], markerText(lines[0])), nil
+	// Only the marker (with the digest of what was written) and the count
+	// are compared.
+	return st.Jumps == 1 && st.First && st.Count == len(lines) && st.Marker == markerText(lines[0]), nil
 }
 
 func markerText(marker string) string {
@@ -312,84 +260,36 @@ func markerText(marker string) string {
 	return strings.Trim(after, "\"")
 }
 
-// Apply puts ls into SFC-INPUT for every family. When a later family fails,
-// the earlier ones are put back to previous (nil: removed), so the server is
-// never left half changed.
-func Apply(ctx context.Context, h Host, ls Layers, l Locks, previous *Layers) error {
-	for i, family := range Families {
-		if err := applyFamily(ctx, h, family, Lines(family, ls, l)); err != nil {
-			for _, done := range Families[:i] {
-				var undo error
-				if previous == nil {
-					undo = removeFamily(ctx, h, done)
-				} else {
-					undo = applyFamily(ctx, h, done, Lines(done, *previous, l))
-				}
-				err = errors.Join(err, undo)
-			}
-			return err
-		}
+// Apply puts ls into SFC-INPUT for every family in one transaction: the
+// server is never left half changed.
+func Apply(ctx context.Context, h Host, ls Layers, l Locks) error {
+	plan := map[int][]Line{}
+	for _, family := range Families {
+		plan[family] = Rules(family, ls, l)
 	}
-	return nil
-}
-
-func applyFamily(ctx context.Context, h Host, family int, lines []string) error {
-	input, _, err := h.List(ctx, family, "INPUT")
-	if err != nil {
-		return err
-	}
-	jumps, _ := inputJumps(input)
-	return h.Restore(ctx, family, applyInput(lines, jumps))
+	return h.Write(ctx, plan)
 }
 
 // Remove takes the jump and SFC-INPUT out of every family; a family without
 // the chain is left as it is.
 func Remove(ctx context.Context, h Host) error {
-	var result error
+	plan := map[int][]Line{}
 	for _, family := range Families {
-		result = errors.Join(result, removeFamily(ctx, h, family))
+		st, err := h.State(ctx, family)
+		if err != nil {
+			return err
+		}
+		if st.Exists || st.Jumps > 0 {
+			plan[family] = nil
+		}
 	}
-	return result
+	if len(plan) == 0 {
+		return nil
+	}
+	return h.Write(ctx, plan)
 }
 
-func removeFamily(ctx context.Context, h Host, family int) error {
-	_, missing, err := h.List(ctx, family, Chain)
-	if err != nil || missing {
-		return err
-	}
-	input, _, err := h.List(ctx, family, "INPUT")
-	if err != nil {
-		return err
-	}
-	jumps, _ := inputJumps(input)
-	return h.Restore(ctx, family, removeInput(jumps))
-}
-
-// MaxOperatorLines bounds the operator INPUT lines one show returns per
-// family.
-const MaxOperatorLines = 200
-
-// Operator is the operator's own INPUT rules of family as `iptables -S
-// INPUT` prints them, without sfcd's jump. It is read only.
-func Operator(ctx context.Context, h Host, family int) ([]string, bool, error) {
-	lines, _, err := h.List(ctx, family, "INPUT")
-	if err != nil {
-		return nil, false, err
-	}
-	out := []string{}
-	truncated := false
-	for _, l := range lines {
-		if l == jumpLine {
-			continue
-		}
-		if len(out) == MaxOperatorLines {
-			truncated = true
-			break
-		}
-		if len(l) > 512 {
-			l = l[:512]
-		}
-		out = append(out, l)
-	}
-	return out, truncated, nil
+// Operator is the server's other input rules as readable lines.
+func Operator(ctx context.Context, h Host) ([]string, bool, error) {
+	return h.Operator(ctx)
 }

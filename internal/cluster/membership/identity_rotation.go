@@ -15,6 +15,26 @@ type IdentityRotation struct {
 	Origin                                                  json.RawMessage
 	Expected, AcceptedIndex, ActivatedIndex, InstalledIndex uint64
 	Proof                                                   *lifecycle.IdentityProof `json:",omitempty"`
+	// Abandoned: the server was force-removed before it finished the
+	// rotation, which only it can do. The row keeps its phase and proof (an
+	// activated key stays in the entry's Keys) but no longer counts as
+	// pending, and no step applies to it any more.
+	Abandoned bool `json:",omitempty"`
+}
+
+// Settled is a rotation that no longer blocks other node changes: installed,
+// or abandoned by a forced removal.
+func (r IdentityRotation) Settled() bool { return r.Phase == "Installed" || r.Abandoned }
+
+// abandonIdentityRotations closes node's unfinished rotations; d is a fresh
+// copy (beginNode's force removal).
+func (d Directory) abandonIdentityRotations(node string) Directory {
+	for i := range d.Rotations {
+		if d.Rotations[i].Node == node && !d.Rotations[i].Settled() {
+			d.Rotations[i].Abandoned = true
+		}
+	}
+	return d
 }
 
 func (e Entry) CurrentPeer() config.Peer {
@@ -46,7 +66,7 @@ func (d Directory) BeginIdentityRotation(node, operation string, expected, index
 		return d, ErrMember
 	}
 	for _, row := range d.Rotations {
-		if row.Operation == operation || row.Node == node && row.Phase != "Installed" {
+		if row.Operation == operation || row.Node == node && !row.Settled() {
 			return d, ErrMember
 		}
 	}
@@ -59,7 +79,7 @@ func (d Directory) PrepareIdentityRotation(node, operation string, proof lifecyc
 	row, found := d.IdentityRotation(node, operation)
 	e, exists := d.Entry(node)
 	key, _ := identity.ParseKey(e.CurrentPeer().Key)
-	if !d.writable() || !found || !exists || row.Phase != "Preparing" || !proof.Valid() || proof.Cluster != d.Cluster || proof.Node != node || proof.Operation != operation || proof.Old != key {
+	if !d.writable() || !found || !exists || row.Abandoned || row.Phase != "Preparing" || !proof.Valid() || proof.Cluster != d.Cluster || proof.Node != node || proof.Operation != operation || proof.Old != key {
 		return d, ErrMember
 	}
 	if d.HistoricalMemberKey(proof.New) {
@@ -81,7 +101,7 @@ func (d Directory) PrepareIdentityRotation(node, operation string, proof lifecyc
 }
 func (d Directory) ActivateIdentityRotation(node, operation string, index uint64) (Directory, error) {
 	row, found := d.IdentityRotation(node, operation)
-	if !d.writable() || !found || row.Phase != "Prepared" || row.Proof == nil || index <= row.AcceptedIndex {
+	if !d.writable() || !found || row.Abandoned || row.Phase != "Prepared" || row.Proof == nil || index <= row.AcceptedIndex {
 		return d, ErrMember
 	}
 	topology, err := d.Topology()
@@ -111,7 +131,7 @@ func (d Directory) ActivateIdentityRotation(node, operation string, index uint64
 }
 func (d Directory) InstalledIdentityRotation(node, operation string, index uint64) (Directory, error) {
 	row, found := d.IdentityRotation(node, operation)
-	if !d.writable() || !found || row.Phase != "Activated" || index < row.ActivatedIndex {
+	if !d.writable() || !found || row.Abandoned || row.Phase != "Activated" || index < row.ActivatedIndex {
 		return d, ErrMember
 	}
 	next := clone(d)
@@ -168,6 +188,9 @@ func (d Directory) validateIdentityRotations() error {
 	}
 	for _, row := range d.Rotations {
 		if row.Failure != "" && row.Failure != "IDENTITY_PREPARE_FAILED" && row.Failure != "IDENTITY_ACTIVATE_FAILED" {
+			return ErrMember
+		}
+		if row.Abandoned && row.Phase == "Installed" {
 			return ErrMember
 		}
 		if !lifecycle.ValidID(row.Node) || !lifecycle.ValidID(row.Operation) || seen[row.Operation] || row.Expected == 0 || row.AcceptedIndex == 0 || len(row.Origin) == 0 || len(row.Origin) > 64<<10 || !json.Valid(row.Origin) {
@@ -255,7 +278,7 @@ func mustPeerKey(peer config.Peer) [32]byte { key, _ := identity.ParseKey(peer.K
 
 func (d Directory) FailIdentityRotation(node, operation, code string) (Directory, error) {
 	row, ok := d.IdentityRotation(node, operation)
-	if !ok || row.Phase == "Installed" || row.Phase == "Activated" || code != "IDENTITY_PREPARE_FAILED" && code != "IDENTITY_ACTIVATE_FAILED" || !d.writable() {
+	if !ok || row.Abandoned || row.Phase == "Installed" || row.Phase == "Activated" || code != "IDENTITY_PREPARE_FAILED" && code != "IDENTITY_ACTIVATE_FAILED" || !d.writable() {
 		return d, ErrMember
 	}
 	if row.Failure == code {

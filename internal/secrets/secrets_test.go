@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"crypto/ed25519"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -390,9 +391,10 @@ func TestSecretReferenceChangesReuseApprovalButPolicyChangesDoNot(t *testing.T) 
 	if len(f.a.Missing(f.c, f.t, plan(t, f, web(f), db(f)), 110)) != 0 {
 		t.Fatal("value revision reprompted namespace")
 	}
-	if _, err = f.a.ReadSet(f.c, f.t, g, 110); err == nil {
-		t.Fatal("mixed old/new provider revision")
+	if _, err = f.a.ReadSet(f.c, f.t, g, 110); !errors.Is(err, ErrRevisionChanged) || !errors.Is(err, ErrPolicy) {
+		t.Fatal("mixed old/new provider revision", err)
 	}
+	old := g
 	f, g = acquire(t, f, web(f), "web-instance", 2)
 	if _, err = f.a.ReadSet(f.c, f.t, g, 110); err != nil {
 		t.Fatal(err)
@@ -402,6 +404,9 @@ func TestSecretReferenceChangesReuseApprovalButPolicyChangesDoNot(t *testing.T) 
 	f.t = mustTree(t, n, err)
 	if _, err = f.t.Plan(f.c, []Use{web(f)}); err == nil {
 		t.Fatal("pending password bypass")
+	}
+	if _, err = f.a.ReadSet(f.c, f.t, old, 110); err == nil || errors.Is(err, ErrRevisionChanged) {
+		t.Fatal("policy change reported as a revision change", err)
 	}
 	o, _ = f.t.Object("common")
 	n, err = f.t.ActivatePassword(f.c, "alice", "common", o.PasswordChange, "next-verifier", true, o.Revision)

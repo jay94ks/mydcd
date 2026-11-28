@@ -83,15 +83,6 @@ func (p Policy) projectPublishedPorts(s state.State, result *ResourceProjection,
 				return err
 			}
 		}
-		if entry.PendingSync != nil && entry.PendingSync.Recreate != nil {
-			b, err := deployment.DecodeBlueprint(entry.PendingSync.Recreate.Blueprint)
-			if err != nil {
-				return err
-			}
-			if err = plan(b); err != nil {
-				return err
-			}
-		}
 		if entry.Delivery != nil {
 			if b, ok := entry.Delivery.TransitionPlan(); ok {
 				if err := plan(b); err != nil {

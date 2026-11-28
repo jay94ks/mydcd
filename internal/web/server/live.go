@@ -44,6 +44,11 @@ type liveRef struct {
 	Deleted bool   `json:"deleted,omitempty"`
 	Source  string `json:"source,omitempty"`
 	App     string `json:"app,omitempty"`
+	// An engine notice ("engine.container", "engine.node") of this server
+	// names the container and, comma-separated, what to read again
+	// (start, stop, die, oom, pressure, health; boot, lag, build).
+	Container string `json:"container,omitempty"`
+	Reasons   string `json:"reasons,omitempty"`
 }
 
 // liveFrame is one socket message.
@@ -253,7 +258,7 @@ func liveRefs(b sfc.ChangeBatch) []liveRef {
 		out = append(out, liveRef{Kind: r.Kind, Tenant: r.Tenant, Name: r.Name, Deleted: r.Deleted})
 	}
 	for _, e := range b.Events {
-		out = append(out, liveRef{Kind: e.Kind, Tenant: e.Tenant, Name: e.Node, Source: e.Source, App: e.App})
+		out = append(out, liveRef{Kind: e.Kind, Tenant: e.Tenant, Name: e.Node, Source: e.Source, App: e.App, Container: e.Container, Reasons: strings.Join(e.Reasons, ",")})
 	}
 	return out
 }

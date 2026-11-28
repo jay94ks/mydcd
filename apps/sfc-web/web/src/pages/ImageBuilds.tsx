@@ -50,6 +50,7 @@ import { sendOnce, uncertain } from '../lib/opRetry';
 import { usePoll } from '../lib/usePoll';
 import { BuildCacheTab } from './BuildCache';
 import { BuildEditPage } from './BuildEdit';
+import { registriesLive } from '../lib/liveTopics';
 
 export const NEED = '이 작업 공간의 관리 권한이 필요합니다';
 export const KIND: Record<BuildKind, [string, string]> = { git: ['⎇', 'Git'], upload: ['⇪', '업로드'], draft: ['✎', '직접 작성'] };
@@ -186,7 +187,7 @@ function ContextsView() {
   const ctxQ = usePoll((s) => buildContexts(tenant, s), [tenant]);
   const polQ = usePoll((s) => buildPolicy(tenant, s), [tenant], 0);
   const cacheQ = usePoll((s) => buildCache(tenant, s), [tenant], 0);
-  const regQ = usePoll((s) => registries(tenant, s), [tenant], 0);
+  const regQ = usePoll((s) => registries(tenant, s), [tenant], 0, registriesLive(tenant));
   const anyLive = (ctxQ.data?.items ?? []).some((c) => live(c.lastBuild));
   const buildsQ = usePoll((s) => builds(tenant, undefined, s), [tenant], anyLive ? 5000 : 30_000);
   const [filter, setFilter] = useState<Filter>('all');
@@ -583,7 +584,7 @@ export function PolicyDialog({ tenant, p, focusCache, onClose, onDone }: { tenan
   const toast = useToast();
   const m = useMutation();
   const rootsQ = usePoll((s) => tenantStorage(tenant, s), [tenant], 0);
-  const regQ = usePoll((s) => registries(tenant, s), [tenant], 0);
+  const regQ = usePoll((s) => registries(tenant, s), [tenant], 0, registriesLive(tenant));
   // 빌드하지 않는 서버(#693 build.enabled=false)는 고르지 못하게 한다. 못 읽으면 막지 않는다
   const nodesQ = usePoll((s) => nodesOverview(s, tenant).then((o) => new Map(o.nodes.map((n) => [n.id, n]))), [tenant], 0);
   const offWhy = (n: string) => buildBlocked(nodesQ.data?.get(n));

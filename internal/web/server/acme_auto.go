@@ -584,19 +584,10 @@ func (s *Server) acmeAutoScan(a *store.ACMEAuto, hosts []watchedHost, certs []ce
 		if !w.notified && a.UpdatedBy != "" && now.Sub(w.Since) >= time.Duration(a.NotifyAfterMinutes)*time.Minute {
 			w.notified = true
 			s.notify(&store.Notification{User: a.UpdatedBy, Kind: NotifyCertificate, Severity: "warning", Action: true, Tenant: w.Tenant,
-				Title: "인증서 자동 발급 대기: " + w.Host, Body: acmeAutoReasonText[w.Reason], Link: "/certificates"})
+				Text: notice("cert-auto-wait", map[string]string{"host": w.Host}, bodyIf(texts["cert-auto-wait."+w.Reason] != nil, "cert-auto-wait."+w.Reason)...), Link: "/certificates"})
 		}
 	}
 	st.mu.Lock()
 	st.waiting, st.tenants = waiting, tenants
 	st.mu.Unlock()
-}
-
-var acmeAutoReasonText = map[string]string{
-	"not-registered": "클러스터에 등록된 도메인 아래 이름이 아니라 받을 수 없습니다.",
-	"no-responder":   "DNS 공급자가 없는 도메인인데 HTTP 확인 응답기가 꺼져 있거나 클러스터에 등록되지 않았습니다.",
-	"not-assigned":   "이 호스트를 쓰는 작업 공간에 그 이름이 배정되지 않았습니다.",
-	"auto-off":       "이 도메인은 자동 발급이 꺼져 있습니다.",
-	"caa-blocked":    "CAA 레코드가 이 인증 기관을 막습니다.",
-	"rate-limit":     "인증 기관 요청 수 한도에 닿았습니다.",
 }

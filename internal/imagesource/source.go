@@ -11,6 +11,9 @@ import (
 
 // Source contains public selectors only. Provider credentials are read
 // at the native edge and must never be added to this replicated definition.
+// An empty Tenant is a cluster-owned source: managed with ManageCluster,
+// its references live in the cluster Vault realm, and every workspace may
+// use it unless that workspace turned it off.
 type Source struct {
 	Tenant, ID, Authority, Repository string
 	Enabled                           bool
@@ -61,13 +64,26 @@ func Select(definitions []Definition, tenant string, image access.Image) (*Sourc
 // Lookup preserves the winning revoked definition for public classification.
 // Select applies the deny policy; callers cannot treat a revoked match as an
 // absent credential and silently choose anonymous access.
+//
+// A workspace's own definitions win: cluster-owned definitions (empty Tenant)
+// are consulted only when none of the workspace's own definitions match.
 func Lookup(definitions []Definition, tenant string, image access.Image) (*Definition, error) {
-	best, selected := 0, -1
-	for i, e := range definitions {
+	for _, e := range definitions {
 		if e.Spec.Validate() != nil {
 			return nil, ErrSource
 		}
-		if e.Spec.Tenant != tenant {
+	}
+	e, err := lookupOwner(definitions, tenant, image)
+	if err != nil || e != nil || tenant == "" {
+		return e, err
+	}
+	return lookupOwner(definitions, "", image)
+}
+
+func lookupOwner(definitions []Definition, owner string, image access.Image) (*Definition, error) {
+	best, selected := 0, -1
+	for i, e := range definitions {
+		if e.Spec.Tenant != owner {
 			continue
 		}
 		score, match := e.Spec.Match(image)
@@ -114,9 +130,12 @@ func externalKey(s string) bool {
 	return true
 }
 
-func (s Source) Key() string { return s.Tenant + "/" + s.ID }
+// Cluster returns whether the source is cluster-owned. Its Key is "/" + ID,
+// which no workspace key can equal because workspace IDs are non-empty.
+func (s Source) Cluster() bool { return s.Tenant == "" }
+func (s Source) Key() string   { return s.Tenant + "/" + s.ID }
 func (s Source) Validate() error {
-	if !externalID(s.Tenant) || !externalID(s.ID) {
+	if s.Tenant != "" && !externalID(s.Tenant) || !externalID(s.ID) {
 		return ErrSource
 	}
 	repository := s.Repository

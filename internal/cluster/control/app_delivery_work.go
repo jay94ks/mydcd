@@ -48,10 +48,6 @@ func (p Policy) AppDeliverySyncWork(s state.State, caller [32]byte, q AppDeliver
 		target := appSyncTarget(entry)
 		out.Target = &target
 	}
-	if entry.PendingSync != nil && entry.PendingSync.Recreate != nil {
-		out.Reason = "explicit-user-recreation"
-		return out, nil
-	}
 	if t, pending := d.Transition(); pending {
 		if t.Phase == "ready" {
 			if _, err := p.continueCDSync(s, entry, q.At); err == nil {

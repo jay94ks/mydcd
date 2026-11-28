@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"slices"
 	"strings"
 
@@ -568,8 +569,11 @@ func (p Policy) NodeDrainStatus(s state.State, session access.Session, at int64,
 	if latest != nil {
 		return *latest, nil
 	}
-	return NodeDrainStatus{}, access.ErrInvalid
+	return NodeDrainStatus{}, ErrNoNodeDrain
 }
+
+// ErrNoNodeDrain: the server has no drain (or none with that operation).
+var ErrNoNodeDrain = errors.New("no such node drain")
 
 func (p Policy) nodeDrainStatus(s state.State, apps Apps, drain membership.Drain) (NodeDrainStatus, error) {
 	out := NodeDrainStatus{Schema: 1, Node: drain.Node, Operation: drain.Operation, State: "Draining", Jobs: []NodeDrainJobStatus{}}

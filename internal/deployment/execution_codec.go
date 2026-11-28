@@ -20,6 +20,9 @@ func (e Execution) validate() error {
 	if !e.validReplacement() {
 		return ErrInputs
 	}
+	if d.Images != nil && !validImages(e.TagImages(), d.Images) {
+		return ErrInputs
+	}
 	plan, e2 := json.Marshal(d.Plan)
 	if e2 != nil {
 		return e2

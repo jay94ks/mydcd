@@ -96,9 +96,11 @@ var aiHidden = []aiHiddenRule{
 
 	{"* /api/v1/system/restore*", hideHigh},
 	{"POST /api/v1/nodes/{node}/drain", hideHigh},
-	{"POST /api/v1/nodes/{node}/disks/{disk}/{action}", hideHigh}, // 포맷·마운트: 데이터가 지워질 수 있다
-	{"POST /api/v1/nodes/{node}/firewall", hideHigh},              // 방화벽: 서버 접속이 끊길 수 있다
-	{"POST /api/v1/firewall", hideHigh},                           // 클러스터 방화벽: 모든 서버 접속이 끊길 수 있다
+	{"POST /api/v1/nodes/{node}/disks/{disk}/{action}", hideHigh},        // 포맷·마운트: 데이터가 지워질 수 있다
+	{"POST /api/v1/nodes/{node}/disk-bundles", hideHigh},                 // 디스크 묶기: 구성원 디스크를 지운다
+	{"POST /api/v1/nodes/{node}/disk-bundles/{name}/{action}", hideHigh}, // 묶음 풀기·구성원 교체
+	{"POST /api/v1/nodes/{node}/firewall", hideHigh},                     // 방화벽: 서버 접속이 끊길 수 있다
+	{"POST /api/v1/firewall", hideHigh},                                  // 클러스터 방화벽: 모든 서버 접속이 끊길 수 있다
 	{"POST /api/v1/nodes/{node}/remove", hideHigh},
 	{"POST /api/v1/nodes/{node}/force-remove", hideHigh},
 	{"POST /api/v1/nodes/{node}/rotate-identity", hideHigh},
@@ -107,6 +109,7 @@ var aiHidden = []aiHiddenRule{
 	{"DELETE /api/v1/trash/{id}", hideHigh},
 	{"POST /api/v1/t/{t}/archived/{key}/purge", hideHigh},
 	{"DELETE /api/v1/t/{t}/volumes/{name}", hideHigh},
+	{"DELETE /api/v1/t/{t}/volumes/{name}/archives/{id}", hideHigh}, // discards the only copy of the data
 	{"POST /api/v1/t/{t}/networks/{name}/retire", hideHigh},
 	{"POST /api/v1/t/{t}/lifecycles/{name}/retire", hideHigh},
 	{"POST /api/v1/t/{t}/registries/{id}/delete", hideHigh},
@@ -250,6 +253,9 @@ var aiUndecided = []string{
 	"DELETE /api/v1/t/{t}/volumes/{name}/backups/{id}",
 	"POST /api/v1/t/{t}/volumes/{name}/restore",
 	"POST /api/v1/t/{t}/volumes/{name}/restores/{id}/cancel",
+	"POST /api/v1/t/{t}/volumes/{name}/archive",
+	"POST /api/v1/t/{t}/volumes/{name}/unarchive",
+	"POST /api/v1/t/{t}/volumes/{name}/archives/{id}/cancel",
 	"PUT /api/v1/t/{t}/volumes/{name}/capacity",
 	"POST /api/v1/t/{t}/volumes/{name}/move-plan",
 	"POST /api/v1/t/{t}/volumes/{name}/move",

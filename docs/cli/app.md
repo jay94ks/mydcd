@@ -22,6 +22,7 @@ sfcli app down shop
 | `app diff [-f FILE] [--save PLAN]` | 서버가 계획한 변경 목록. `--save`는 고정한 계획을 파일로 남긴다. ingress 규칙이 인증서 자동화 경로(`/.well-known/acme-challenge` 이하)를 쓰면 무시된다는 경고를 stderr에 쓴다([자세히](../reference/ingress-gateways.md#인증서-자동화-경로)) |
 | `app deploy [-f FILE \| --plan PLAN]` | 계획하고 올리고 배포를 시작한 뒤 healthy까지 기다린다. `--plan`은 `diff --save`로 남긴 계획을 그대로 배포한다. 자동화 경로 경고는 diff와 같다 |
 | `app down APP` | 앱의 컨테이너를 모두 멈추고 지운다(확인 질문). 다 지워질 때까지 기다린다 |
+| `app archive APP [--store NAME] [--no-compress]` | 내린 앱의 볼륨을 모두 압축·봉인해 보관하고 비운다. 되살리기는 `volume unarchive`. [볼륨 보관](volume.md#내린-앱의-볼륨-보관하기) |
 | `app resend APP [STEP]` | 배포가 `unknown`이면, 보냈지만 도착했는지 모르는 단계를 한 번 더 보낸다(확인 질문). 같은 명령이라 이미 도착했으면 두 번 적용되지 않는다. 그런 단계가 하나면 STEP을 빼도 된다 |
 | `app list` | tenant의 앱 목록 |
 | `app show APP` | 배포 상태, health, 마지막 작업, CD |
@@ -65,7 +66,7 @@ x-sfc:
 
 | 명령 | 하는 일 |
 |---|---|
-| `app logs APP SERVICE` | 마지막 200줄. `-f`는 Ctrl-C까지 새 줄을 계속 출력. `--tail N`, `--since`, `--until`, `--timestamps`, `--stdout`, `--stderr`, `--cursor` |
+| `app logs APP CONTAINER` | [`sfcli logs --app APP --container CONTAINER`](logs.md)의 별칭. 마지막 200줄, `-f`는 Ctrl-C까지 새 줄을 계속 출력 |
 | `app top APP SERVICE` | 프로세스 목록. `--watch [--interval 2s]`는 반복 |
 | `app stats APP SERVICE` | CPU·메모리 사용. `--watch` |
 | `app inspect APP SERVICE [--history N]` | 컨테이너 설정과 최근 수명 이벤트 |

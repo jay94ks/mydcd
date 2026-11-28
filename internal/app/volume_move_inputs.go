@@ -91,14 +91,8 @@ func (r *Runtime) observeVolumeMoveInputs(ctx context.Context, caller [32]byte, 
 			if seen[key] {
 				continue
 			}
-			var provider secrets.WriteProfile
-			for _, candidate := range read.Profiles {
-				if candidate.ID == leaf.Reference.Profile {
-					provider = candidate
-					break
-				}
-			}
-			if provider.Key == ([32]byte{}) {
+			provider, ok := leafProvider(read.Profiles, leaf)
+			if !ok {
 				return out, secrets.ErrProvider
 			}
 			selection := request.Selection

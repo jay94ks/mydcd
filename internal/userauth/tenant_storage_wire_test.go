@@ -5,6 +5,7 @@ package userauth
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -18,7 +19,7 @@ import (
 
 // Actual production Unix/QUIC framing, client selectors and connection proof.
 // ACL/membership/FSM facts are injected here and covered by control core tests.
-func TestTenantStorageActualUserWireAndGenericQuery(t *testing.T) {
+func TestTenantStorageActualUserWire(t *testing.T) {
 	for _, network := range []string{"unix", "quic"} {
 		for _, mode := range []string{"ok", "foreign-cluster", "mismatched-node", "invalid-path", "missing-generation"} {
 			t.Run(network+"/"+mode, func(t *testing.T) {
@@ -61,7 +62,14 @@ func TestTenantStorageActualUserWireAndGenericQuery(t *testing.T) {
 							return err
 						}
 						request, err := schema.Decode[Request](envelope.Body)
-						if err != nil || !request.validMethodFields() || !request.validQuerySelectors() || request.Method != "tenant-storage" || request.Tenant != "tenant" {
+						if err != nil || request.Method != "tenant-storage" {
+							return sfcp.ErrFrame
+						}
+						if _, typed, ok := request.typedMethod(); !typed || !ok {
+							return sfcp.ErrFrame
+						}
+						var q TenantStorageQuery
+						if strict(request.Params, &q) != nil || q.Tenant != "tenant" {
 							return sfcp.ErrFrame
 						}
 						if _, err = binding.binding(conn, frame.Kind, envelope); err != nil {
@@ -70,7 +78,11 @@ func TestTenantStorageActualUserWireAndGenericQuery(t *testing.T) {
 						if err = streamEOF(stream); err != nil {
 							return err
 						}
-						return binding.respond(stream, frame, sha256.Sum256(frame.Fields[0].Value), Reply{Schema: 1, Code: "ok", TenantStorage: []control.TenantStorageRoot{row}, TenantStorageViewIndex: 9, NodeStorageRootRevision: 4, NodeStorageRevision: 4})
+						data, err := json.Marshal(control.TenantStoragePage{Index: 9, RootRevision: 4, Revision: 4, Items: []control.TenantStorageRoot{row}})
+						if err != nil {
+							return err
+						}
+						return binding.respond(stream, frame, sha256.Sum256(frame.Fields[0].Value), Reply{Schema: 1, Code: "ok", Data: data})
 					}()
 					done <- serve
 					return serve
@@ -97,9 +109,9 @@ func TestTenantStorageActualUserWireAndGenericQuery(t *testing.T) {
 				client.Mesh = mesh
 				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 				defer cancel()
-				got, err := client.Query(ctx, peer, session, "tenant-storage", "tenant")
+				got, err := client.TenantStoragePage(ctx, peer, session, "tenant", "", "")
 				if mode == "ok" {
-					if err != nil || len(got.TenantStorage) != 1 || got.TenantStorage[0].Root != root {
+					if err != nil || len(got.Items) != 1 || got.Items[0].Root != root {
 						t.Fatal(got, err)
 					}
 				} else if err == nil {

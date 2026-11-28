@@ -3,23 +3,27 @@
 package userauth
 
 import (
-	"github.com/jay94ks/seafield/internal/imagecache"
 	"strings"
 	"testing"
+
+	"github.com/jay94ks/seafield/internal/imagecache"
 )
 
 func TestImageCacheQueryCannotMixTenantNodeOrCursorAuthority(t *testing.T) {
 	q := imagecache.Query{Node: "node-a", Images: []string{"sha256:" + strings.Repeat("a", 64)}}
-	base := Request{Method: "image-cache-plan", ImageCache: &q}
-	if !base.validQuerySelectors() {
-		t.Fatal("typed cache plan rejected")
+	if !(ImageCachePlanQuery{Query: q}).Valid() || !(ImageCacheStatusQuery{Operation: "original-1"}).Valid() {
+		t.Fatal("typed cache query rejected")
 	}
-	for _, edit := range []func(*Request){func(r *Request) { r.Tenant = "team" }, func(r *Request) { r.Node = "node-a" }, func(r *Request) { r.After = "cursor" }, func(r *Request) { r.Method = "whoami" }, func(r *Request) { r.ImageCache = nil }} {
-		bad := base
-		edit(&bad)
-		if bad.validQuerySelectors() {
-			t.Fatal("mixed cache scope accepted")
+	if (ImageCachePlanQuery{Query: imagecache.Query{Operation: "original-1"}}).Valid() || (ImageCacheStatusQuery{}).Valid() {
+		t.Fatal("cache plan and status selections mixed")
+	}
+	for _, raw := range []string{`{"Query":{"Node":"node-a"},"Tenant":"team"}`, `{"Operation":"original-1","Node":"node-a"}`} {
+		if strict([]byte(raw), &ImageCachePlanQuery{}) == nil && strict([]byte(raw), &ImageCacheStatusQuery{}) == nil {
+			t.Fatal("foreign cache field accepted", raw)
 		}
+	}
+	if strict([]byte(`{"Query":{"Node":"node-a"},"Tenant":"team"}`), &ImageCachePlanQuery{}) == nil {
+		t.Fatal("tenant scope accepted on a cluster cache plan")
 	}
 }
 

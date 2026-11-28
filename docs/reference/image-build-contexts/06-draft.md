@@ -2,7 +2,7 @@
 
 RQ6 구현 중인 경계다. 파일/metadata 편집·조각 전송 경로와 보존 version 게시·물리 회수의 연결을 구분한다. 아래 편집을 이미지 빌드·push 성공으로 판단하지 않는다.
 
-같은 User 목적8에서 method=`build-draft`, `Tenant`, `ImageBuildDraft: DraftRequest`를 보내고 `Reply.ImageBuildDraft: DraftResponse`를 받는다. Unix/QUIC가 같은 형식을 사용한다. 설치 member relay는 `image-build-draft-owner`이며 기존 관리 연결만 사용한다. 별도 socket/HTTP 파일 서버를 만들지 않는다.
+같은 User 목적8에서 method=`build-draft`, Params `{Tenant, Request: DraftRequest}`를 보내고 응답 `Data: DraftResponse`를 받는다. Unix/QUIC가 같은 형식을 사용한다. 설치 member relay는 `image-build-draft-owner`이며 기존 관리 연결만 사용한다. 별도 socket/HTTP 파일 서버를 만들지 않는다.
 
 | 요청 Kind | 추가 필드 | 응답 |
 |---|---|---|

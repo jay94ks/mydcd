@@ -92,3 +92,43 @@ func TestDiskMountPathRules(t *testing.T) {
 		}
 	}
 }
+
+func TestCheckPrepareStorage(t *testing.T) {
+	inv := inventory()
+	// sdb is recorded and mounted by sfcd; sde is mounted by hand.
+	inv.Disks = append(inv.Disks, observability.BlockDisk{Name: "sde", Class: "additional", Size: 50, Serial: "S-E", Parts: []observability.BlockPart{{Name: "sde1", Number: 1, Filesystem: "ext4", UUID: "u-e1", Mounts: []string{"/data/hand"}}}})
+	records := []Record{{Schema: 1, UUID: "u-data", Path: "/var/lib/sfc-disks/sdb", Disk: "sdb", Part: "sdb", Operation: "op-1", At: 1}}
+	prep := func(disk, part, uuid, sub string) control.NodeDiskOp {
+		return control.NodeDiskOp{Operation: "o", Node: "n", Action: "prepare-storage", Disk: disk, Part: part, UUID: uuid, SubPath: sub}
+	}
+	plan, err := Check(prep("sdb", "sdb", "u-data", "pool/a"), inv, nil, records, "")
+	if err != nil || !plan.Mounted || plan.Path != "/var/lib/sfc-disks/sdb" || plan.RootPath != "/var/lib/sfc-disks/sdb/pool/a" {
+		t.Fatal("recorded mount", plan, err)
+	}
+	plan, err = Check(prep("sdc", "sdc1", "u-c1", ""), inv, nil, records, "")
+	if err != nil || plan.Mounted || plan.Path != "/var/lib/sfc-disks/sdc1" || plan.RootPath != plan.Path {
+		t.Fatal("mount then root", plan, err)
+	}
+	plan, err = Check(control.NodeDiskOp{Operation: "o", Node: "n", Action: "prepare-storage", Disk: "sdd", Part: "sdd", WWN: "naa.d", Size: 400, Format: true, SubPath: "x"}, inv, nil, records, "")
+	if err != nil || !plan.Whole {
+		t.Fatal("format half", plan, err)
+	}
+	for name, c := range map[string]struct {
+		op    control.NodeDiskOp
+		roots []string
+		want  string
+	}{
+		"hand mounted":   {prep("sde", "sde1", "u-e1", "x"), nil, "not-managed"},
+		"other path":     {control.NodeDiskOp{Operation: "o", Node: "n", Action: "prepare-storage", Disk: "sdb", Part: "sdb", UUID: "u-data", MountPath: "/srv/other"}, nil, "mount-path"},
+		"root overlaps":  {prep("sdb", "sdb", "u-data", "pool"), []string{"/var/lib/sfc-disks/sdb/pool/a"}, "mount-path"},
+		"root inside":    {prep("sdb", "sdb", "u-data", "pool/a/b"), []string{"/var/lib/sfc-disks/sdb/pool"}, "mount-path"},
+		"system disk":    {prep("sda", "sda2", "u-spare", ""), nil, "system-disk"},
+		"format mounted": {control.NodeDiskOp{Operation: "o", Node: "n", Action: "prepare-storage", Disk: "sdb", Part: "sdb", Serial: "S-B", Size: 200, Format: true}, nil, "busy"},
+		"sibling root":   {prep("sdb", "sdb", "u-data", "pool/b"), []string{"/var/lib/sfc-disks/sdb/pool/a"}, ""},
+	} {
+		_, err := Check(c.op, inv, c.roots, records, "")
+		if code(err) != c.want {
+			t.Errorf("%s: got %q (%v) want %q", name, code(err), err, c.want)
+		}
+	}
+}

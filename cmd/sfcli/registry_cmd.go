@@ -120,25 +120,25 @@ func readRegistryRows(ctx context.Context, s *session, tenant string) ([]control
 		if err != nil {
 			return nil, err
 		}
-		if reply.Tenant != tenant || len(reply.Registries) > 8 {
+		if len(reply.Items) > 8 {
 			return nil, errors.New("the server sent an invalid registry page")
 		}
 		if after == "" {
-			root, revision, maintenance = reply.RegistriesRootRevision, reply.RegistriesRevision, reply.RegistryMaintenanceRootRevision
-		} else if root != reply.RegistriesRootRevision || revision != reply.RegistriesRevision || maintenance != reply.RegistryMaintenanceRootRevision {
+			root, revision, maintenance = reply.RootRevision, reply.Revision, reply.MaintenanceRootRevision
+		} else if root != reply.RootRevision || revision != reply.Revision || maintenance != reply.MaintenanceRootRevision {
 			return nil, errors.New("registries changed while reading; run the command again")
 		}
-		for _, row := range reply.Registries {
+		for _, row := range reply.Items {
 			if row.Spec.Validate(s.Client.Cluster) != nil || row.Spec.Tenant != tenant || row.Spec.Key() <= after || row.Revision == 0 {
 				return nil, errors.New("the server sent an invalid registry")
 			}
 			rows = append(rows, row)
 			after = row.Spec.Key()
 		}
-		if reply.RegistriesNext == "" {
+		if reply.Next == "" {
 			return rows, nil
 		}
-		if len(rows) > 4096 || reply.RegistriesNext != after {
+		if len(rows) > 4096 || reply.Next != after {
 			return nil, errors.New("the server sent an invalid registry page cursor")
 		}
 	}
@@ -530,14 +530,11 @@ func maintenanceState(st control.RegistryMaintenanceStatus) (cli.State, string) 
 func maintenanceProgress(c *cli.Context, g *globals, s *session, tenant, operation string) (cli.State, string, error) {
 	ctx, cancel := g.Deadline(c)
 	defer cancel()
-	reply, err := s.Client.RegistryMaintenance(ctx, s.Target, s.Stored.Session, tenant, false, control.RegistryMaintenanceQuery{Operation: operation})
+	status, err := s.Client.RegistryMaintenanceStatus(ctx, s.Target, s.Stored.Session, tenant, operation)
 	if err != nil {
 		return "", "", err
 	}
-	if reply.RegistryMaintenanceStatus == nil {
-		return cli.Accepted, "waiting for the server", nil
-	}
-	st, line := maintenanceState(*reply.RegistryMaintenanceStatus)
+	st, line := maintenanceState(status)
 	return st, line, nil
 }
 
@@ -604,14 +601,11 @@ func registryGCCommand(g *globals) *cli.Command {
 			}
 			ctx, cancel := g.Deadline(c)
 			defer cancel()
-			reply, err := s.Client.RegistryMaintenance(ctx, s.Target, s.Stored.Session, tenant, true, control.RegistryMaintenanceQuery{Action: "gc-registry", ID: name})
+			plan, err := s.Client.PlanRegistryMaintenance(ctx, s.Target, s.Stored.Session, tenant, control.RegistryMaintenanceQuery{Action: "gc-registry", ID: name})
 			if err != nil {
 				return err
 			}
-			if reply.RegistryMaintenancePlan == nil {
-				return errors.New("the server sent no gc plan")
-			}
-			return sendMaintenance(c, g, s, tenant, "registry gc "+name, id.Get(), *reply.RegistryMaintenancePlan, wait)
+			return sendMaintenance(c, g, s, tenant, "registry gc "+name, id.Get(), plan, wait)
 		}),
 	}
 }
@@ -796,18 +790,18 @@ are logged in as.`,
 			}
 			ctx, cancel := g.Deadline(c)
 			defer cancel()
-			reply, err := s.Client.RegistryCredential(ctx, s.Target, s.Stored.Session, tenant, userauth.RegistryCredentialRequest{ID: name, Repository: repo, Actions: actions})
-			defer clear(reply.RegistryCredential)
+			cred, err := s.Client.RegistryCredential(ctx, s.Target, s.Stored.Session, userauth.RegistryCredentialQuery{Tenant: tenant, ID: name, Repository: repo, Actions: actions})
+			defer clear(cred.Credential)
 			if err != nil {
 				return err
 			}
-			if err = checkRegistryCredential(s, reply, tenant, name, repo, actions); err != nil {
+			if err = checkRegistryCredential(s, cred, tenant, name, repo, actions); err != nil {
 				return fmt.Errorf("%w; nothing was printed", err)
 			}
-			if _, err = c.Out.Write(append(slices.Clone(reply.RegistryCredential), '\n')); err != nil {
+			if _, err = c.Out.Write(append(slices.Clone(cred.Credential), '\n')); err != nil {
 				return err
 			}
-			fmt.Fprintf(c.Err, "password for %s as %s, valid until %s\n", reply.RegistryAuthority, s.Stored.Username, time.Unix(reply.RegistryCredentialExpires, 0).Local().Format("15:04"))
+			fmt.Fprintf(c.Err, "password for %s as %s, valid until %s\n", cred.Authority, s.Stored.Username, time.Unix(cred.ExpiresAt, 0).Local().Format("15:04"))
 			return nil
 		}),
 	}

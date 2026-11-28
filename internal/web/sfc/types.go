@@ -136,7 +136,6 @@ type MembersPage struct {
 	NodeRuntimeRevision    uint64
 	NodeOperationEpoch     uint64 // node operation (topology) epoch, not the ledger
 	NodeConfigurationIndex uint64
-	LedgerEpoch            uint64 // ModuleEpoch, 1 when sfcd omits it
 	NodeVoters             int
 	NodeQuorum             int
 }
@@ -182,6 +181,8 @@ type FixtureStorageRoot struct {
 	// only then can fixed volumes be made on it. Closed: after a drain the
 	// node reported the root closed (Closed set); remove needs it.
 	Attested, Closed bool
+	// ArchiveDefault: the node's default Volume archive location.
+	ArchiveDefault bool
 }
 
 // StorageSpace: `node-storage-space` — the node's signed-off space sample
@@ -413,9 +414,12 @@ type AppView struct {
 	Operation               OperationSummary
 	Claims                  int
 	Health                  string `json:",omitempty"` // healthy / degraded / unhealthy / unknown
-	ObservedAt              uint64 `json:",omitempty"`
-	Retiring                bool   `json:",omitempty"`
-	CD                      *AppCD `json:",omitempty"`
+	// HealthReason: the first cause when Health is not healthy (sfcd
+	// deployment.HealthReason: Code, Key, Kind, Name, Node, Exit, Failure).
+	HealthReason *deployment.HealthReason `json:",omitempty"`
+	ObservedAt   uint64                   `json:",omitempty"`
+	Retiring     bool                     `json:",omitempty"`
+	CD           *AppCD                   `json:",omitempty"`
 }
 type AppCD struct {
 	Revision   uint64
@@ -629,11 +633,11 @@ type VaultACL struct {
 // = the script record's CAS revision, SourceRevision = that version).
 type LifecycleEntry = control.LifecycleEntry
 
-// RegistryView: `registries` (control.RegistryView) in screen form.
-// Revision is the record revision: the Expected of put (0 for a new ID),
-// start, stop and delete. Endpoint is Spec.Authority; Name and
-// Repositories are display extras.
-type RegistryView struct {
+// FixtureRegistry: one built-in registry in the fake's state. The fake
+// answers `registries` with its control.RegistryView (view). Endpoint is
+// the fixture authority until a spec carries one; Name and Repositories
+// are fixture extras the real rows do not have. Not a Conn type.
+type FixtureRegistry struct {
 	Tenant, ID, Name, Endpoint string
 	Revision, Generation       uint64
 	Active                     bool
@@ -642,35 +646,21 @@ type RegistryView struct {
 	Node, Address              string `json:",omitempty"`
 	Volume                     string `json:",omitempty"` // Spec.Volume.ID
 	Enabled, Deleted, Draining bool   `json:",omitempty"`
-	// CertificateID: hex ID of the store certificate the node reported it
-	// serves for Endpoint's host (control.RegistryObservation.Certificate).
-	CertificateID string `json:",omitempty"`
-	// ObservedAt: the node's report that the current spec serves
-	// (control.RegistryObservation.At, Unix ms); 0 = no observation.
+	// ObservedAt: the node's report that the current spec serves (Unix
+	// ms); 0 = no observation.
 	ObservedAt int64 `json:",omitempty"`
-	// Maintenance: REQ-18 real list summary (pending job, last GC).
+	// Maintenance: REQ-18 list summary (pending job, last GC).
 	Maintenance *control.RegistryMaintenanceSummary `json:",omitempty"`
-	// Spec is the stored definition; put-registry carries a changed copy.
-	Spec registry.Specification `json:"-"`
+	Spec        registry.Specification              `json:"-"`
 }
 
-// Status is the CLI's `sfcli registry show` status: deleted / stopping /
-// stopped / draining / serving (the node reported the current spec;
-// not an external TLS probe) / pending (enabled, no report yet).
-func (v RegistryView) Status() string {
-	switch {
-	case v.Deleted:
-		return "deleted"
-	case !v.Enabled && v.Active:
-		return "stopping"
-	case !v.Enabled:
-		return "stopped"
-	case v.Draining:
-		return "draining"
-	case v.ObservedAt != 0:
-		return "serving"
+// view is the row in sfcd's real shape.
+func (r FixtureRegistry) view() control.RegistryView {
+	v := control.RegistryView{Spec: r.Spec, Revision: r.Revision, Generation: r.Generation, Deleted: r.Deleted, Draining: r.Draining, Active: r.Active, Maintenance: r.Maintenance}
+	if r.ObservedAt != 0 {
+		v.Observation = &control.RegistryObservation{At: r.ObservedAt}
 	}
-	return "pending"
+	return v
 }
 
 // FixtureEvent: the fake's seed observation event (seconds). The fake

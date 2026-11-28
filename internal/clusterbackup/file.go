@@ -61,6 +61,15 @@ func KeyFromFile(raw []byte) (Key, error) {
 	return Key{}, errors.New("backup key file must hold 32 bytes or 64 hex digits")
 }
 
+// Recipient derives the long-lived recipient key of label from a key
+// file's secret (RecipientFromSeed). Password keys have none.
+func (k Key) Recipient(label string) (Recipient, error) {
+	if k.kind != kdfKeyFile {
+		return Recipient{}, ErrBackup
+	}
+	return RecipientFromSeed(k.secret, label)
+}
+
 // NewKeyFile makes a fresh key file's content (64 hex digits and a newline).
 func NewKeyFile() ([]byte, error) {
 	var b [32]byte
@@ -114,7 +123,7 @@ func decodeHeader(b []byte) (header, error) {
 	h.threads = b[33]
 	copy(h.nonce[:], b[34:42])
 	switch h.kdf {
-	case kdfKeyFile:
+	case kdfKeyFile, kdfSealed:
 		if h.memory != 0 || h.iter != 0 || h.threads != 0 {
 			return h, ErrBackup
 		}

@@ -57,7 +57,7 @@ func expireAll(t *testing.T, p Policy, s state.State, reporter ed25519.PrivateKe
 // The leader admits a SFCP renewal of an unchanged signed fact without any
 // Raft write, and refuses changed facts and expired observations.
 func TestObservationRenewalStaysOutOfRaft(t *testing.T) {
-	f, o, _ := logClearPlanFixture(t, "local")
+	f, o, _ := observedTaskFixture(t, "local")
 	apps, _ := f.p.Apps(f.s)
 	i, _ := apps.Inventory("tenant", "source-app")
 	execution, _ := apps.Execution("tenant", "source-app")
@@ -93,7 +93,7 @@ func TestObservationRenewalStaysOutOfRaft(t *testing.T) {
 // owner that keeps renewing stays live however old its fact is, and once the
 // leader expires the unrenewed observations a historical success is Unknown.
 func TestObservedHealthIsUnknownOnlyAfterRecordedExpiry(t *testing.T) {
-	f, o, _ := logClearPlanFixture(t, "local")
+	f, o, _ := observedTaskFixture(t, "local")
 	health := func(s state.State, now uint64) string {
 		t.Helper()
 		apps, err := f.p.Apps(s)

@@ -406,3 +406,16 @@ func (m *Mounts) Close() {
 		}
 	}
 }
+
+// ForgetGone drops the released records whose consumer gone says Raft no
+// longer has (its Gone was applied); a later Gone could not be signed again
+// and is not needed. It returns how many it dropped.
+func (m *Mounts) ForgetGone(gone func(Spec) bool) int {
+	n := 0
+	for _, s := range m.Released() {
+		if gone(s) && m.Forget(s.Name()) == nil {
+			n++
+		}
+	}
+	return n
+}

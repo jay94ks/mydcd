@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"net/http"
 	"path"
+	"strconv"
 	"strings"
 )
 
@@ -13,7 +14,8 @@ const notBuilt = `<!doctype html><meta charset="utf-8"><title>Seafield Cluster</
 
 // static serves the UI build with SPA fallback: unknown paths get
 // index.html so client-side routes survive reload. Hashed assets are cached
-// for a year; index.html is never cached.
+// for a year; index.html is never cached and carries the page's language
+// (pageLang) in <html lang>.
 func (s *Server) static() http.Handler {
 	files := s.opt.Static
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -40,16 +42,33 @@ func (s *Server) static() http.Handler {
 			name = "index.html"
 		}
 		if name == "index.html" {
-			if _, err := fs.Stat(files, name); err != nil {
+			index, err := fs.ReadFile(files, name)
+			if err != nil {
 				serveNotBuilt(w)
 				return
 			}
-			w.Header().Set("Cache-Control", "no-cache")
+			serveIndex(w, r, files, index)
+			return
 		} else if strings.HasPrefix(name, "assets/") {
 			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 		}
 		http.ServeFileFS(w, r, files, name)
 	})
+}
+
+func serveIndex(w http.ResponseWriter, r *http.Request, files fs.FS, index []byte) {
+	lang := pageLang(r)
+	h := w.Header()
+	h.Set("Content-Type", "text/html; charset=utf-8")
+	h.Set("Cache-Control", "no-cache")
+	h.Set("Content-Language", lang)
+	h.Add("Vary", "Accept-Language, Cookie")
+	body := withLangPreload(withPageLang(index, lang), files, lang)
+	h.Set("Content-Length", strconv.Itoa(len(body)))
+	w.WriteHeader(http.StatusOK)
+	if r.Method != http.MethodHead {
+		_, _ = w.Write(body)
+	}
 }
 
 func serveNotBuilt(w http.ResponseWriter) {

@@ -37,9 +37,10 @@ sfcli ingress unblock maint
 
 바꾸는 명령은 `--id ID`를 받고, revision이 있는 대상은 `--if-revision N`도 받는다.
 
-balance.yaml:
+balance.yaml(app.yaml route의 `balance`와 같은 모양에 `version: 1`):
 
 ```yaml
+version: 1
 method: weighted
 weights: {v1: 90, v2: 10}
 ```

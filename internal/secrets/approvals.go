@@ -7,6 +7,7 @@ import (
 	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"slices"
 	"strings"
 
@@ -140,7 +141,7 @@ func (a Approvals) SetIssuer(c access.Catalog, actor string, expected uint64, ke
 }
 func (a Approvals) Issuer(key [32]byte) (Issuer, bool) { v, ok := a.issuers[key]; return v, ok }
 func validTarget(v Target) bool {
-	if !validPurpose(v.Purpose) || v.Cluster == ([32]byte{}) || v.Realm != "" && !identifier(v.Realm) || !identifier(v.Tenant) || !identifier(v.User) || v.UserPolicy == 0 || v.RequesterKey == ([32]byte{}) || !identifier(v.App) || !identifier(v.Deployment) || !identifier(v.Group) || !identifier(v.ApprovalID) || v.IssuerPolicy == 0 || len(v.Path) < 1 || len(v.Path) > maxDepth || len(v.Services) < 1 || len(v.Nodes) < 1 || len(v.Nodes) > 256 || v.Actions != targetActions(v.Purpose) || v.Scope != namespaceScope {
+	if !validPurpose(v.Purpose) || v.Cluster == ([32]byte{}) || v.Realm != "" && !identifier(v.Realm) || !identifier(v.Tenant) && !(v.Tenant == "" && v.Realm == "" && v.Purpose == PurposeRegistrySource) || !identifier(v.User) || v.UserPolicy == 0 || v.RequesterKey == ([32]byte{}) || !identifier(v.App) || !identifier(v.Deployment) || !identifier(v.Group) || !identifier(v.ApprovalID) || v.IssuerPolicy == 0 || len(v.Path) < 1 || len(v.Path) > maxDepth || len(v.Services) < 1 || len(v.Nodes) < 1 || len(v.Nodes) > 256 || v.Actions != targetActions(v.Purpose) || v.Scope != namespaceScope {
 		return false
 	}
 	services, err := sortedIDs(v.Services)
@@ -285,6 +286,28 @@ func (a Approvals) Missing(c access.Catalog, t Tree, plan BatchPlan, now int64) 
 	return out
 }
 func selectionHash(p UsePlan) [32]byte { b, _ := json.Marshal(p); return sha256.Sum256(b) }
+
+// ErrRevisionChanged is the ReadSet refusal of a consumer whose selection
+// differs from the current one only in a secret's value or metadata
+// revision. The consumer keeps what it already received; a new value needs
+// a new consumer generation (a redeploy).
+var ErrRevisionChanged = fmt.Errorf("%w: a secret was updated after this consumer was bound; redeploy to use the new revision", ErrPolicy)
+
+// sameSelectionShape is true when a and b select the same secrets in the
+// same order under the same gates and dependencies, whatever revisions they
+// name.
+func sameSelectionShape(a, b UsePlan) bool {
+	if !sameUse(a.Use, b.Use) || !slices.Equal(a.Gates, b.Gates) || !slices.Equal(a.Dependencies, b.Dependencies) || len(a.Leaves) != len(b.Leaves) {
+		return false
+	}
+	for i := range a.Leaves {
+		x, y := a.Leaves[i], b.Leaves[i]
+		if x.Secret != y.Secret || x.Generation != y.Generation || x.SourcePosition != y.SourcePosition || x.ExpansionPosition != y.ExpansionPosition || x.Reference.Profile != y.Reference.Profile || x.Reference.Object != y.Reference.Object {
+			return false
+		}
+	}
+	return true
+}
 func sameUse(a, b Use) bool {
 	ab, _ := json.Marshal(a)
 	bb, _ := json.Marshal(b)
@@ -459,7 +482,13 @@ func (a Approvals) ReadSet(c access.Catalog, t Tree, g Grant, now int64) (UsePla
 	}
 	p := plan.Uses[0]
 	usage, exists := a.usages[usageKey(g)]
-	if !exists || !sameGrant(usage.Grant, g) || g.Realm != t.tenant || selectionHash(p) != g.Selection || len(g.Pins) != len(plan.Required) {
+	if !exists || !sameGrant(usage.Grant, g) || g.Realm != t.tenant || len(g.Pins) != len(plan.Required) {
+		return UsePlan{}, ErrPolicy
+	}
+	if selectionHash(p) != g.Selection {
+		if selectionHash(usage.Plan) == g.Selection && sameSelectionShape(p, usage.Plan) {
+			return UsePlan{}, ErrRevisionChanged
+		}
 		return UsePlan{}, ErrPolicy
 	}
 	for i, want := range plan.Required {

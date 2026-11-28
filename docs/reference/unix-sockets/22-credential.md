@@ -4,7 +4,7 @@ User kind1의 `initial-credential-stage`/`initial-credential-observe`/`initial-c
 
 ### 관측 이벤트 조회
 
-User kind1 `events`는 공통 Session/challenge 서명과 `{Tenant,Events:{Tenant,App?,Node?,Kind?,After?,Limit?}}`를 받으며 `Reply.Events:{Schema,Items,Cursor,More,Incomplete}`를 반환한다. 바깥 Tenant와 내부 Tenant는 같아야 하고 다른 method·바깥 After/Node/App·보호 입력과 섞지 않는다. 현재 tenant Read/허용 노드 또는 cluster ManageCluster를 확인하며 일반 조회의 quorum/leader 전달을 사용한다. `CURSOR_EXPIRED`와 denied/unavailable을 구분한다. [각 메시지·Item/Target/Detail·이벤트 종류·source/보존](../events.md)에 전체 형식을 정의한다. member 전용 `event-receipt`와 Observation `node-events`는 Unix User method가 아니다.
+User kind1 `events`는 typed method다. 공통 Session/challenge 서명과 `Params:{Tenant?,App?,Node?,Kind?,After?,Limit?}`(App은 Tenant가 있을 때만, After 1536바이트·Limit 100 이하)를 받으며 `Data:{Schema,Items,Cursor,More,Incomplete}`를 반환한다. Request에는 header와 Params 말고 다른 필드가 없다. 현재 tenant Read/허용 노드 또는 cluster ManageCluster를 확인하며 일반 조회의 quorum/leader 전달을 사용한다. `CURSOR_EXPIRED`와 denied/unavailable을 구분한다. [각 메시지·Item/Target/Detail·이벤트 종류·source/보존](../events.md)에 전체 형식을 정의한다. member 전용 `event-receipt`와 Observation `node-events`는 Unix User method가 아니다.
 
 `replan-app`의 payload는 `{Tenant,App,Target?}`이다. Target이 있으면 현재 후보·등록·정책/override·실행/종료 의도에 고정한 CAS이며 source fetch·health 관측 revision만으로 거부하지 않는다. Target을 생략한 기존 원 요청과 CLI의 명시 `--expected-revision`은 CD/root revision의 strict CAS를 유지한다. 현재 ManageCD·credential 동작 제한·quorum과 원 operation replay 규칙은 동일하다.
 
@@ -48,4 +48,4 @@ Registry maintenance의 선택 External=true는 승인된 외부 source를 선�
 
 일괄 이미지 정리는 [prune 메시지·행·조건·서명·원 결과](../registry-maintenance.md#일괄-정리)를 따른다. 큰 preview는 owner observations DB에 두고 User action에는 작은 조건/서명 fact만 넣는다. 내부 owner 전달은 원 사용자 Session을 보존한 Management registry-prune-owner이며 인증·tenant·현재 run/read-set 검사를 우회하지 않는다.
 
-
+User kind1 `login-records`·`own-sessions`도 typed method다. 둘 다 서명한 세션 자신의 기록만 읽고 사용자를 지정하는 필드가 없다. `login-records`는 `Params:{After?,Limit}`(Limit 1~loginlog.MaxPage, After는 로그인 기록 cursor)를 받아 `Data:{Page:{Items,Next?,Missing?},Budget?:{Left,Max}}`를 반환한다. Budget은 답한 서버가 그 사용자 이름에 남겨 둔 비밀번호·토큰 시도 횟수다. `own-sessions`는 `Params:{}`를 받아 아직 열려 있을 수 있는 세션의 성공 로그인 기록 `Data:{Items,Missing?}`를 반환한다.

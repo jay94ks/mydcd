@@ -112,6 +112,8 @@ app.yaml과 tenant 설정은 include·자동 merge 관계가 아니다. tenant �
 
 목표 입력은 서비스의 `logging: {driver: local, options: {max-size: "10m", max-file: "3", compress: "true"}}`다. `local/json-file`과 문자열 회전 옵션만 다루며 앱 소유 field로 계획/Task/spec digest·Docker 생성/관측에 연결한다. 생략은 Engine 기본 상속이고 클러스터·호스트의 기본 driver를 변경하는 선언이 아니다. 설정 변경은 컨테이너 교체가 필요하며 명시 로그 정리는 별도 재생성 동의/원 작업/Volume 보존 경계를 따른다. 이 절은 RV4의 전체 실제 검증 전 목표 계약이며 로그 삭제 완료나 외부 로그 backend 지원을 뜻하지 않는다.
 
+지워진 컨테이너의 로그를 sfcd 로그 보관소에 둘 기간은 `x-sfc.logs.keep`으로 정한다. 앱 최상위에 두면 그 앱의 모든 컨테이너에, 서비스에 두면 그 서비스의 컨테이너에 적용되고, 단독 컨테이너도 같은 키를 쓴다. 값은 node.yaml `logs.keep`과 같다(`7d`·`168h` 같은 기간 또는 `forever`). 서비스, 앱, node.yaml 순으로 범위가 좁은 설정이 이긴다. 컨테이너를 바꾸지 않으며, 각 서버가 앱의 현재 문서를 읽어 적용한다. 앱 기록이 없어지면 node.yaml 값을 쓴다. 서버 전체 상한(`logs.limit`)은 node.yaml에만 있고, 넘으면 이 기간과 상관없이 가장 오래전에 지워진 컨테이너의 로그부터 지운다.
+
 노드의 캐시 정리는 별도 시스템 관리 operation이며 app.yaml/cluster.yaml 자원으로 선언하지 않는다. 수락된 명시 이미지 삭제가 pending이면 같은 노드의 해당 원 image ID/별칭을 새 app/CD 또는 컴파일 배치가 참조하는 수락은 일시 충돌한다. 기존 수락된 실행·미제거 claim·native 사용은 정리 계획에서 먼저 보호하며 이미지 제거를 앱 새 버전이나 데이터 삭제로 바꾸지 않는다. [노드 이미지 캐시](../reference/node-image-cache.md)를 따른다.
 
 다중 배치의 `app diff`/CD diff는 원 Inventory의 종료 closure로 계산한 `Replacement.Waves`를 보여 준다. 각 항목은 한 노드의 Task 목록과 원 Key/Generation/Revision으로 고정한 종료 대상이다. 앞 노드의 종료가 뒤 노드의 Task까지 전파되는 경우 이를 순차 교체로 표시하지 않고 `ROLLING_DEPENDENCY_CONFLICT`를 반환한다. 진행 중인 원 전송/작업은 `ORIGINAL_OPERATION_PENDING`으로 구분한다. 계획은 현재 권한/원 claim을 읽은 결과이며 실제 종료·다음 노드 시작 허가가 아니다. 실제 실행에서는 원 종료와 새 세대 health를 확인한다.

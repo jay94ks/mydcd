@@ -4,8 +4,6 @@ package control
 
 import (
 	"crypto/ed25519"
-	"crypto/sha256"
-	"encoding/json"
 	"strings"
 
 	"github.com/jay94ks/seafield/internal/access"
@@ -115,14 +113,6 @@ func appView(entry appEntry, scope deployment.AppScope) AppView {
 				v.Retirement = &AppRetirementStatus{ID: retirement.ID, Status: "Retiring"}
 			}
 		}
-	}
-	v.LogClear = appLogClearView(entry, "")
-	if proof := entry.PendingSync; proof != nil && proof.Recreate != nil {
-		status := "Retiring"
-		if proof.Recreate.Closure != ([32]byte{}) {
-			status = "Retired"
-		}
-		v.Retirement = &AppRetirementStatus{ID: proof.Choice.Operation, Status: status}
 	}
 	v.CD = appCDView(entry)
 	if v.CD != nil && v.CD.Transition != nil && entry.Down == nil {
@@ -316,14 +306,6 @@ func (p Policy) reduceAppRetirement(s state.State, r AppProgress, a Apps, entry 
 	if err != nil {
 		return nil, state.ConditionFailed
 	}
-	if r.Action == "retire-finish" && entry.PendingSync != nil && entry.PendingSync.Recreate != nil {
-		encoded, _ := json.Marshal(retirement)
-		proof := *entry.PendingSync
-		recreation := *proof.Recreate
-		recreation.Closure = sha256.Sum256(append([]byte("sfc-log-clear-closure-1\x00"), encoded...))
-		proof.Recreate = &recreation
-		entry.PendingSync = &proof
-	}
 	entry.Inventory = i
 	a.entries[appKey(r.Tenant, r.App)] = entry
 	return p.appsCheckpoint(s, a, r.At)
@@ -333,7 +315,7 @@ func (p Policy) reduceAppRetirement(s state.State, r AppProgress, a Apps, entry 
 // retain their original input/Secret/Volume binding; full down cannot do so.
 // This is structural provenance, never fresh activation authority.
 func preserveRetirementBinding(s state.State, a Apps, entry appEntry, retirement deployment.RetirementView, b deployment.Binding) bool {
-	if retirement.Down || entry.Down != nil || !retirement.KeepExecution && (entry.PendingSync == nil || entry.Delivery == nil && entry.PendingSync.Recreate == nil) {
+	if retirement.Down || entry.Down != nil || !retirement.KeepExecution && (entry.PendingSync == nil || entry.Delivery == nil) {
 		return false
 	}
 	n, scope := b.Needs(), entry.Inventory.Scope()

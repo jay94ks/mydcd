@@ -1,0 +1,11 @@
+# Every daemon binary is static by design: sfcd, sfed and the bundled
+# containerd and runc must not depend on (or be swapped through) the host's
+# libraries, and sfcd and sfed check each other's executable path.
+sfcd: statically-linked-binary [usr/lib/sfc/bin/sfcd]
+sfcd: statically-linked-binary [usr/lib/sfc/bin/sfed]
+sfcd: statically-linked-binary [usr/lib/sfc/bin/sfe-runc]
+sfcd: statically-linked-binary [usr/lib/sfc/bin/containerd]
+sfcd: statically-linked-binary [usr/lib/sfc/bin/containerd-shim-runc-v2]
+# runc is a static PIE (cgo + static libseccomp); lintian reads it as a
+# shared library without dependencies.
+sfcd: shared-library-lacks-prerequisites [usr/lib/sfc/bin/runc]

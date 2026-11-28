@@ -25,7 +25,7 @@ type standaloneOptions struct {
 	method                                                                                           string
 	name, tenant, file, node, deployment, operation, newName, restart, lifetime, mode, output, after onceString
 	ttl, grace                                                                                       int64
-	preview, recreate                                                                                bool
+	preview                                                                                          bool
 	container                                                                                        *containerCLIOptions
 }
 
@@ -49,7 +49,6 @@ func parseStandaloneOptions(args []string, out io.Writer) (standaloneOptions, er
 	f.Int64Var(&o.ttl, "ttl-seconds", 0, "temporary TTL, default 3600, maximum 86400")
 	f.Int64Var(&o.grace, "grace-seconds", 0, "disconnection grace, default 600")
 	f.BoolVar(&o.preview, "preview", false, "read-only exact target plan")
-	f.BoolVar(&o.recreate, "recreate", false, "explicit log/writable-layer recreation consent")
 	o.container = addContainerReadFlags(f)
 	if len(args) == 0 {
 		return o, errors.New("standalone requires a subcommand")
@@ -89,14 +88,6 @@ func parseStandaloneOptions(args []string, out io.Writer) (standaloneOptions, er
 	case "list", "get":
 		if definition || o.operation.set || o.newName.set || o.restart.set || o.preview || o.output.set || o.method == "get" && o.after.set {
 			return o, errors.New("invalid standalone query options")
-		}
-	case "logs-clear":
-		if definition || o.newName.set || o.restart.set || o.output.set || o.after.set || o.preview == o.recreate || o.preview && o.operation.set || o.recreate && !lifecycle.ValidID(o.operation.value) {
-			return o, errors.New("logs-clear requires --preview or --recreate --operation ID")
-		}
-	case "logs-clear-status":
-		if definition || o.newName.set || o.restart.set || o.output.set || o.after.set || o.preview || o.recreate || !lifecycle.ValidID(o.operation.value) {
-			return o, errors.New("logs-clear-status requires --operation ID")
 		}
 	case "pin", "remove":
 		if definition || o.output.set || o.after.set || o.preview || !lifecycle.ValidID(o.operation.value) || o.newName.set && !lifecycle.ValidID(o.newName.value) {
@@ -139,9 +130,6 @@ func parseStandaloneOptions(args []string, out io.Writer) (standaloneOptions, er
 	if o.method != "up" && o.method != "resume" && (o.noInput || len(o.passwordFDs.values) != 0) {
 		return o, errors.New("Group input options require up or resume")
 	}
-	if o.recreate && o.method != "logs-clear" {
-		return o, errors.New("--recreate requires logs-clear")
-	}
 	if o.restart.set && o.restart.value != "no" && o.restart.value != "on-failure" && o.restart.value != "always" || o.lifetime.set && o.lifetime.value != "temp" && o.lifetime.value != "fixed" || o.mode.set && o.mode.value != "shell" && o.mode.value != "entrypoint" || o.ttl < 0 || o.ttl > 86400 || o.grace < 0 || o.grace > 86400 {
 		return o, errors.New("invalid standalone lifetime/mode/restart")
 	}
@@ -161,13 +149,6 @@ func runStandalone(ctx context.Context, args []string, c userauth.Client, peer s
 	}
 	if _, err = (cliprofile.Selection{Tenant: stored.TargetTenant}).CheckTenant(tenant, "", true); err != nil {
 		return failure(diagnostic, err, 2)
-	}
-	if o.method == "logs-clear" || o.method == "logs-clear-status" {
-		co := composeOptions{method: o.method, container: o.container, standalone: &control.StandaloneDefinition{Name: o.name.value}, operation: o.operation}
-		co.project.value = o.name.value
-		co.logClearPreview = checkerRetryFlag{set: o.preview, value: o.preview}
-		co.logClearRecreate = checkerRetryFlag{set: o.recreate, value: o.recreate}
-		return runLogClear(ctx, co, tenant, c, peer, stored, home, out, diagnostic)
 	}
 	if o.method == "list" || o.method == "get" {
 		reply, e := c.StandalonePage(ctx, peer, stored.Session, tenant, o.name.value, o.after.value)

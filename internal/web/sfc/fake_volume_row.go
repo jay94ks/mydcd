@@ -25,6 +25,8 @@ type volumeRow struct {
 	MoveID            string
 	TargetNode        string
 	MovePhase         string
+	ArchiveID         string // the archive that holds the volume (Phase Archived)
+	ArchivePhase      string
 	Retained          []volumeRetainedRow
 	// Scope and NativeBinding identify the volume in change payloads.
 	Scope         volumes.Scope
@@ -47,7 +49,7 @@ func (w *world) volumeView(v volumeRow, nowMillis uint64) control.VolumeView {
 	}
 	out := control.VolumeView{Key: v.Key, Scope: scope, Owner: volumes.Owner{Node: v.Node}, Storage: v.Storage, Revision: v.Revision,
 		Consumers: v.Consumers, CapacityBytes: v.CapacityBytes, NativeBinding: v.NativeBinding, Retain: v.Retain, Phase: v.Phase,
-		MoveID: v.MoveID, TargetNode: v.TargetNode, MovePhase: volumes.Phase(v.MovePhase)}
+		MoveID: v.MoveID, TargetNode: v.TargetNode, MovePhase: volumes.Phase(v.MovePhase), ArchiveID: v.ArchiveID, ArchivePhase: v.ArchivePhase}
 	used := v.UsedBytes
 	out.UsedBytes, out.UsageObservedAt = &used, nowMillis
 	if out.Phase == "" {

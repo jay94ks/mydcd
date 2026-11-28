@@ -75,7 +75,8 @@ func TestBuildCacheActualUserWireRejectsCorruptPages(t *testing.T) {
 								return err
 							}
 							request, err := schema.Decode[Request](envelope.Body)
-							if err != nil || !request.validMethodFields() || !request.validQuerySelectors() || request.ImageBuildCache == nil || !reflect.DeepEqual(*request.ImageBuildCache, q) {
+							var params ImageBuildCacheQuery
+							if err != nil || !typedParams(request, ImageBuildCacheMethod.Name, &params) || params.Tenant != "tenant" || !reflect.DeepEqual(params.Query, q) {
 								return sfcp.ErrFrame
 							}
 							if _, err := binding.binding(conn, frame.Kind, envelope); err != nil {
@@ -84,7 +85,7 @@ func TestBuildCacheActualUserWireRejectsCorruptPages(t *testing.T) {
 							if err := streamEOF(stream); err != nil {
 								return err
 							}
-							reply := Reply{Schema: 1, Code: "ok", ImageBuildCache: &out}
+							reply := okReply(out)
 							if mode == "deleted" {
 								reply = Reply{Schema: 1, Code: "conflict"}
 							}

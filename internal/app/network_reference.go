@@ -24,7 +24,7 @@ func heldReferenceRecord(record reconcile.Record, consumer string, source deploy
 	if consumer == "" || source.Generation == 0 || source.Revision == 0 || pin.Token == 0 || pin.Generation != source.Generation {
 		return false, reconcile.ErrLease
 	}
-	if record.State.Stopped || record.State.Pending != nil || record.State.Desired.Revision != source.Revision || !record.State.Applied.Present || record.State.Applied.Generation != source.Generation || record.State.Desired.Resource != record.State.Applied || sha256.Sum256([]byte(record.State.Applied.Spec)) != spec {
+	if record.State.Stopped || record.State.Pending != nil || record.State.Desired.Revision != source.Revision || !record.State.Applied.Present || record.State.Applied.Generation != source.Generation || record.State.Desired.Resource != record.State.Applied || committedSpecDigest(record.State.Applied.Spec) != spec {
 		return false, reconcile.ErrPending
 	}
 	return true, nil

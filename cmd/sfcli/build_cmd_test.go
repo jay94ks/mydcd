@@ -101,14 +101,14 @@ func TestImageCommandsAgainstManagedNode(t *testing.T) {
 
 func TestBuildContextFileRoundTrip(t *testing.T) {
 	sp := imagebuild.ContextSpec{Tenant: "shop", ID: "web", Kind: "git", Root: nodestorage.Reference{Node: "node-a"}, Dockerfile: "Dockerfile",
-		Arguments: map[string]string{"A": "b"}, Secrets: []imagebuild.SecretMount{{ID: "npm", Realm: "shop", Secret: "npm-token", Key: "token"}},
+		Arguments: map[string]string{"A": "b"}, Secrets: []imagebuild.SecretMount{{ID: "npm", Realm: "shop", Secret: "npm-token", Key: "token"}, {ID: "ca", Realm: "", Secret: "corp-ca", Key: "pem"}},
 		Repository: "shop/web", Tags: []string{"latest"}, Platforms: []string{"linux/amd64"},
 		Git: &imagebuild.GitContext{Repository: "https://git.example/web.git", Ref: "main", CredentialProfile: "git-read", Automatic: true}}
 	raw, err := yaml.Marshal(contextFileOf(sp))
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"kind: git", "node: node-a", "credential_profile: git-read", "secret: npm-token"} {
+	for _, want := range []string{"kind: git", "node: node-a", "credential: git-read", "source: npm-token", "source: cluster/corp-ca"} {
 		if !strings.Contains(string(raw), want) {
 			t.Fatalf("missing %q in\n%s", want, raw)
 		}
@@ -118,8 +118,47 @@ func TestBuildContextFileRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	var back buildContextFile
-	if err = readYAMLFile(path, 64<<10, &back); err != nil || back.Git == nil || back.Git.Ref != "main" || len(back.Secrets) != 1 || back.Secrets[0].Key != "token" {
+	if err = readYAMLFile(path, 64<<10, &back); err != nil || back.Git == nil || back.Git.Ref != "main" || back.Git.Credential != "git-read" || len(back.Secrets) != 2 || back.Secrets[0].Key != "token" {
 		t.Fatalf("read back: %+v %v", back, err)
+	}
+	for i, want := range sp.Secrets {
+		realm, secret := buildSecretSource("shop", back.Secrets[i].Source)
+		if realm != want.Realm || secret != want.Secret {
+			t.Fatal("secret source round trip", back.Secrets[i], realm, secret)
+		}
+	}
+}
+
+func TestBuildPolicyFileForms(t *testing.T) {
+	f := policyFileOf(imagebuild.Policy{CPUMillis: 1500, BuilderImage: "docker.io/moby/buildkit:v0.35.1-rootless", Cleanup: imagebuild.CleanupPolicy{HighWaterPercent: 80, UnusedDays: 30}})
+	raw, err := yaml.Marshal(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"cpus: 1.5", "builder: docker.io/moby/buildkit:v0.35.1-rootless", "threshold: 80%", "unused: 30d"} {
+		if !strings.Contains(string(raw), want) {
+			t.Fatalf("missing %q in\n%s", want, raw)
+		}
+	}
+	for text, want := range map[string]uint8{"80%": 80, "100%": 100} {
+		if got, ok := parseThreshold(text); !ok || got != want {
+			t.Fatal(text, got)
+		}
+	}
+	for _, bad := range []string{"80", "0%", "101%", "%", "x%"} {
+		if _, ok := parseThreshold(bad); ok {
+			t.Fatal("threshold accepted", bad)
+		}
+	}
+	for text, want := range map[string]uint32{"30d": 30, "1d": 1, "48h": 2} {
+		if got, ok := parseDays(text); !ok || got != want {
+			t.Fatal(text, got)
+		}
+	}
+	for _, bad := range []string{"0d", "30", "36h", "-1d", "d"} {
+		if _, ok := parseDays(bad); ok {
+			t.Fatal("unused accepted", bad)
+		}
 	}
 }
 

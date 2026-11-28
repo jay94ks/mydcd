@@ -158,6 +158,12 @@ func (a Authority) LeaveSystemTUN(n tenancy.Networks, p tenancy.NetworkClosure, 
 	return a.leaveTUN(n, p, sources, func() (tenancy.Networks, error) { return n.RetireSystem(p) })
 }
 
+// LeaveDrainedTUN is LeaveTUN for a drained workspace network member, on
+// its server's own closure (tenancy Networks.RetireDrained).
+func (a Authority) LeaveDrainedTUN(n tenancy.Networks, p tenancy.NetworkClosure, sources []RetiredNativeSource) (Authority, tenancy.Networks, error) {
+	return a.leaveTUN(n, p, sources, func() (tenancy.Networks, error) { return n.RetireDrained(p) })
+}
+
 func (a Authority) leaveTUN(n tenancy.Networks, p tenancy.NetworkClosure, sources []RetiredNativeSource, retire func() (tenancy.Networks, error)) (Authority, tenancy.Networks, error) {
 	v, live := n.Network(p.Tenant, p.Network)
 	if !live || v.Logical == "" || n.Cluster() != a.cluster || !a.networkQuiescent(v) || len(sources) != 2 {

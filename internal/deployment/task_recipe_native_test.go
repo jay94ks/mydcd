@@ -176,7 +176,7 @@ services:
     tmpfs: ["/scratch:size=4m,uid=10001,gid=10001,mode=0700"]
     healthcheck: {test: [CMD, /backend, --projection-probe], interval: 1s, timeout: 1s, retries: 2}
     networks: {app: {ipv4_address: %s}}
-    x-sfc: {node: node-b, secrets_from: [group/common], ready: {http: /readyz, port: 8080}}
+    x-sfc: {node: node-b, secrets: {from: [group/common]}, ready: {http: /readyz, port: 8080}}
 networks:
   app:
     x-sfc: {mtu: 1280, pools: {node-b: {cidr: %s, gateway: %s}}}
@@ -237,7 +237,7 @@ secrets:
 		t.Fatal(err)
 	}
 	material := TaskMaterial{Binding: bound, Projection: &ref, Volumes: []volumes.NativeReady{ready}, Network: ObjectRef{bridgeKey, 1, 1}, Bridge: bridge}
-	spec, err := b.ResolveTask(ctx, "db", material, f.c, c, true)
+	spec, err := b.ResolveTask(ctx, "db", material, f.c, c, true, TaskImage{})
 	if err != nil {
 		t.Fatal("real trusted Registry/recipe", err)
 	}

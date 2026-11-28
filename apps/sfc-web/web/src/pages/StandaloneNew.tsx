@@ -169,7 +169,7 @@ function RouteDialog({ onAdd, onClose, temp }: { onAdd: (r: SaRoute) => void; on
           </select>
         </Field>
       </div>
-      <Hint>앱 폼(UI-32)의 같은 카드입니다. 같은 호스트·경로를 앱이 쓰고 있으면 실행 전 확인에서 충돌로 막습니다.{temp ? ' 임시는 수명이 다하면 경로도 사라집니다.' : ''}</Hint>
+      <Hint>앱 폼의 같은 카드입니다. 같은 호스트·경로를 앱이 쓰고 있으면 실행 전 확인에서 충돌로 막습니다.{temp ? ' 임시는 수명이 다하면 경로도 사라집니다.' : ''}</Hint>
     </FormDialog>
   );
 }
@@ -736,7 +736,7 @@ export function StandaloneNewPage() {
                       <option value="cmd">명령으로 검사…</option>
                       <option value="http">HTTP로 검사…</option>
                       <option value="rule" disabled>
-                        상태 검사 규칙 고르기… (작업 공간 규칙 UI-70)
+                        상태 검사 규칙 고르기…
                       </option>
                     </select>
                   </Field>

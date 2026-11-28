@@ -17,11 +17,11 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/jay94ks/seafield/internal/access"
 	"github.com/jay94ks/seafield/internal/cli"
 	"github.com/jay94ks/seafield/internal/cluster/control"
 	"github.com/jay94ks/seafield/internal/cluster/lifecycle"
 	"github.com/jay94ks/seafield/internal/imagebuild"
-	"github.com/jay94ks/seafield/internal/imagecache"
 	"github.com/jay94ks/seafield/internal/nodestorage"
 	"github.com/jay94ks/seafield/internal/userauth"
 )
@@ -815,21 +815,43 @@ only the named entries of one --cache.`,
 
 // buildPolicyFile is build-policy.yaml (sfcli build policy set -f).
 type buildPolicyFile struct {
-	Version      int               `yaml:"version"`
-	Nodes        map[string]string `yaml:"nodes"` // server: storage root ID
-	Concurrency  uint32            `yaml:"concurrency"`
-	Timeout      string            `yaml:"timeout"`
-	CPU          float64           `yaml:"cpu"`
-	Memory       string            `yaml:"memory"`
-	Workspace    string            `yaml:"workspace"`
-	Cache        string            `yaml:"cache"`
-	Registry     string            `yaml:"registry"`
-	Platforms    []string          `yaml:"platforms"`
-	BuilderImage string            `yaml:"builder_image"`
-	Cleanup      struct {
-		HighWaterPercent uint8  `yaml:"high_water_percent"`
-		UnusedDays       uint32 `yaml:"unused_days"`
+	Version     int               `yaml:"version"`
+	Nodes       map[string]string `yaml:"nodes"` // server: storage root ID
+	Concurrency uint32            `yaml:"concurrency"`
+	Timeout     string            `yaml:"timeout"`
+	CPUs        float64           `yaml:"cpus"`
+	Memory      string            `yaml:"memory"`
+	Workspace   string            `yaml:"workspace"`
+	Cache       string            `yaml:"cache"`
+	Registry    string            `yaml:"registry"`
+	Platforms   []string          `yaml:"platforms"`
+	Builder     string            `yaml:"builder"`
+	Cleanup     struct {
+		Threshold string `yaml:"threshold"` // 80%
+		Unused    string `yaml:"unused"`    // 30d
 	} `yaml:"cleanup"`
+}
+
+// parseThreshold reads a cleanup threshold such as 80%.
+func parseThreshold(text string) (uint8, bool) {
+	n, err := strconv.ParseUint(strings.TrimSuffix(text, "%"), 10, 8)
+	if err != nil || !strings.HasSuffix(text, "%") || n == 0 || n > 100 {
+		return 0, false
+	}
+	return uint8(n), true
+}
+
+// parseDays reads a whole-day duration: 30d, or a Go duration such as 720h.
+func parseDays(text string) (uint32, bool) {
+	if rest, ok := strings.CutSuffix(text, "d"); ok {
+		n, err := strconv.ParseUint(rest, 10, 32)
+		return uint32(n), err == nil && n > 0
+	}
+	d, err := time.ParseDuration(text)
+	if err != nil || d <= 0 || d%(24*time.Hour) != 0 || d/(24*time.Hour) > 1<<31 {
+		return 0, false
+	}
+	return uint32(d / (24 * time.Hour)), true
 }
 
 func currentPolicy(ctx context.Context, s *session, tenant string) (*control.ImageBuildPolicyView, error) {
@@ -847,12 +869,12 @@ func currentPolicy(ctx context.Context, s *session, tenant string) (*control.Ima
 
 func policyFileOf(p imagebuild.Policy) buildPolicyFile {
 	f := buildPolicyFile{Version: 1, Nodes: map[string]string{}, Concurrency: p.Concurrency, Timeout: (time.Duration(p.Seconds) * time.Second).String(),
-		CPU: float64(p.CPUMillis) / 1000, Memory: cli.Size(max(p.MemoryBytes, 0)).String(), Workspace: cli.Size(max(p.WorkspaceBytes, 0)).String(),
-		Cache: cli.Size(max(p.CacheBytes, 0)).String(), Registry: p.Registry, Platforms: p.Platforms, BuilderImage: p.BuilderImage}
+		CPUs: float64(p.CPUMillis) / 1000, Memory: cli.Size(max(p.MemoryBytes, 0)).String(), Workspace: cli.Size(max(p.WorkspaceBytes, 0)).String(),
+		Cache: cli.Size(max(p.CacheBytes, 0)).String(), Registry: p.Registry, Platforms: p.Platforms, Builder: p.BuilderImage}
 	for _, n := range p.Nodes {
 		f.Nodes[n.Node] = n.Root.ID
 	}
-	f.Cleanup.HighWaterPercent, f.Cleanup.UnusedDays = p.Cleanup.HighWaterPercent, p.Cleanup.UnusedDays
+	f.Cleanup.Threshold, f.Cleanup.Unused = strconv.Itoa(int(p.Cleanup.HighWaterPercent))+"%", strconv.Itoa(int(p.Cleanup.UnusedDays))+"d"
 	return f
 }
 
@@ -924,14 +946,14 @@ func buildPolicySetCommand(g *globals) *cli.Command {
   nodes: {node-a: data}       # server: storage root
   concurrency: 2
   timeout: 30m
-  cpu: 2
+  cpus: 2
   memory: 4GiB
   workspace: 10GiB
   cache: 20GiB
   registry: shop-registry
   platforms: [linux/amd64]
-  builder_image: registry.example/moby/buildkit:v0.35
-  cleanup: {high_water_percent: 80, unused_days: 14}`,
+  builder: registry.example/moby/buildkit:v0.35
+  cleanup: {threshold: 80%, unused: 14d}`,
 		Flags: func(fs *flag.FlagSet) {
 			fs.Var(&id, "id", "operation `id` (default: a new one)")
 			fs.Var(&rev, "if-revision", "only if the policy is still at this `revision`")
@@ -972,9 +994,15 @@ func buildPolicySetCommand(g *globals) *cli.Command {
 			if err != nil {
 				return err
 			}
-			spec := imagebuild.Policy{Schema: 1, Tenant: tenant, Concurrency: f.Concurrency, Seconds: uint64(timeout / time.Second), CPUMillis: uint64(f.CPU * 1000),
+			spec := imagebuild.Policy{Schema: 1, Tenant: tenant, Concurrency: f.Concurrency, Seconds: uint64(timeout / time.Second), CPUMillis: uint64(f.CPUs * 1000),
 				MemoryBytes: memory, WorkspaceBytes: workspace, CacheBytes: cache, Registry: f.Registry, Platforms: f.Platforms,
-				Cleanup: imagebuild.CleanupPolicy{HighWaterPercent: f.Cleanup.HighWaterPercent, UnusedDays: f.Cleanup.UnusedDays}}
+			}
+			var okThreshold, okUnused bool
+			spec.Cleanup.HighWaterPercent, okThreshold = parseThreshold(f.Cleanup.Threshold)
+			spec.Cleanup.UnusedDays, okUnused = parseDays(f.Cleanup.Unused)
+			if !okThreshold || !okUnused {
+				return cli.Usagef("%s: cleanup needs threshold such as 80%% and unused such as 30d", file)
+			}
 			for _, node := range slices.Sorted(mapKeys(f.Nodes)) {
 				ref, err := storageRoot(ctx, s, tenant, cur, node, f.Nodes[node])
 				if err != nil {
@@ -982,32 +1010,14 @@ func buildPolicySetCommand(g *globals) *cli.Command {
 				}
 				spec.Nodes = append(spec.Nodes, imagebuild.NodeRoot{Node: node, Root: ref})
 			}
-			spec.BuilderImage = f.BuilderImage
-			if f.BuilderImage != "" && !strings.Contains(f.BuilderImage, "@sha256:") {
-				res, err := s.Client.ResolveImage(ctx, s.Target, s.Stored.Session, tenant, control.ImageResolveQuery{Ref: f.BuilderImage})
-				if err != nil {
-					return fmt.Errorf("%s: cannot pin builder_image %s to a digest: %w", file, f.BuilderImage, err)
-				}
-				if res.Code != "OK" || res.Image == nil {
-					hint := "give name@sha256:..."
-					if res.Code == "UNTRUSTED" {
-						hint = "trust its registry first with 'sfcli tenant trust add'"
-					}
-					return fmt.Errorf("%s: cannot pin builder_image %s to a digest (%s); %s", file, f.BuilderImage, res.Code, hint)
-				}
-				spec.BuilderImage = res.Image.Pinned
+			// A tag stays a tag: each build resolves and pulls it for that
+			// build only, and the policy never pins a digest.
+			spec.BuilderImage = f.Builder
+			if normalized, err := access.NormalizeImage(f.Builder); err == nil {
+				spec.BuilderImage = normalized
 			}
 			if spec.Validate(s.Client.Cluster) != nil {
-				return cli.Usagef("%s: invalid policy: at least one server, concurrency 1..32, timeout up to 24h, cpu and sizes above 0, cleanup high_water_percent 1..100 and unused_days above 0, a registry, platforms and a builder_image", file)
-			}
-			// The server never pulls the builder image; say now which build
-			// servers lack it instead of failing every build there later.
-			missing, checked := builderImageMissing(ctx, s, spec)
-			if len(missing) > 0 {
-				return fmt.Errorf("%s: builder_image %s is not on %s; pull it on each of those servers first (the server does not pull it)", file, spec.BuilderImage, strings.Join(missing, ", "))
-			}
-			if !checked {
-				fmt.Fprintf(c.Err, "Could not check that every build server has %s (listing server images needs a system administrator); each server must have it pulled.\n", spec.BuilderImage)
+				return cli.Usagef("%s: invalid policy: at least one server, concurrency 1..32, timeout up to 24h, cpus and sizes above 0, a registry, platforms and a builder", file)
 			}
 			expected, err := rev.Resolve(func() (uint64, error) {
 				if cur == nil {
@@ -1044,45 +1054,6 @@ func mapKeys(m map[string]string) func(func(string) bool) {
 	}
 }
 
-// builderImageMissing lists the policy servers whose Docker cache lacks the
-// pinned builder image. checked is false when a server's images could not
-// be listed (the listing is a system administrator read).
-func builderImageMissing(ctx context.Context, s *session, spec imagebuild.Policy) (missing []string, checked bool) {
-	want, err := imagecache.CanonicalReference(spec.BuilderImage)
-	if err != nil {
-		return nil, false
-	}
-	for _, n := range spec.Nodes {
-		found, ok := nodeHasImage(ctx, s, n.Node, want)
-		if !ok {
-			return nil, false
-		}
-		if !found {
-			missing = append(missing, n.Node)
-		}
-	}
-	return missing, true
-}
-
-func nodeHasImage(ctx context.Context, s *session, node, want string) (found, ok bool) {
-	q := imagecache.Query{Node: node}
-	for range 256 {
-		reply, err := s.Client.QueryImageCache(ctx, s.Target, s.Stored.Session, true, q)
-		if err != nil || reply.ImageCachePlan == nil {
-			return false, false
-		}
-		for _, image := range reply.ImageCachePlan.Images {
-			if slices.Contains(image.Aliases, want) {
-				return true, true
-			}
-		}
-		if q.After = reply.ImageCachePlan.Next; q.After == "" {
-			return false, true
-		}
-	}
-	return false, false
-}
-
 // storageRoot finds the storage root reference for a policy server: the
 // current policy's when it is the same root, else the tenant storage row.
 func storageRoot(ctx context.Context, s *session, tenant string, cur *control.ImageBuildPolicyView, node, id string) (nodestorage.Reference, error) {
@@ -1099,15 +1070,15 @@ func storageRoot(ctx context.Context, s *session, tenant string, cur *control.Im
 		if err != nil {
 			return nodestorage.Reference{}, err
 		}
-		for _, x := range p.TenantStorage {
+		for _, x := range p.Items {
 			if x.Node == node && x.ID == id && x.Allowed && !x.Draining && x.Root.ID != "" {
 				return x.Root, nil
 			}
 		}
-		if p.TenantStorageNext == "" || p.TenantStorageNext == after {
+		if p.Next == "" || p.Next == after {
 			break
 		}
-		after = p.TenantStorageNext
+		after = p.Next
 	}
 	return nodestorage.Reference{}, fmt.Errorf("server %s has no storage root %q this tenant may use (see 'sfcli node storage')", node, id)
 }

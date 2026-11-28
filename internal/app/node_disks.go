@@ -4,12 +4,14 @@ package app
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"log"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -37,11 +39,17 @@ type nodeDiskRuntime struct {
 	mu   sync.Mutex
 	db   *storage.DB
 	host nodedisks.Host
+	lvm  nodedisks.LVM
+	// dir is <state_dir>/disks; fuse bundle specs go in dir/fuse.
+	dir string
 	// warned keeps one log line per record that cannot be mounted at start
 	// (guarded by wmu: the observation loop reads it while mu is held by a
 	// long format).
 	wmu    sync.Mutex
 	warned map[string]string
+	// retries and diskSet space failed bundle activations (wmu).
+	retries map[string]activationRetry
+	diskSet string
 }
 
 type nodeDiskJournal struct {
@@ -59,7 +67,7 @@ func (r *Runtime) openNodeDisks(stateRoot string) error {
 	if err != nil {
 		return err
 	}
-	d := &nodeDiskRuntime{db: db, host: nodedisks.Real, warned: map[string]string{}}
+	d := &nodeDiskRuntime{db: db, host: nodedisks.Real, lvm: nodedisks.RealLVM, dir: filepath.Join(stateRoot, "disks"), warned: map[string]string{}}
 	rows, err := db.Scan("op/")
 	if err != nil {
 		db.Close()
@@ -159,7 +167,7 @@ func (r *Runtime) nodeDiskLocal(ctx context.Context, read control.NodeDiskRead) 
 		return control.NodeDiskResult{}, err
 	}
 	current, err := schema.Decode[control.NodeDiskRead](permit.Data)
-	if err != nil || current.Op != read.Op || current.Owner != r.Identity.Public || !bytes.Equal(access.SessionBytes(current.Session), access.SessionBytes(read.Session)) || !bytes.Equal(current.Session.Signature, read.Session.Signature) {
+	if err != nil || !control.SameNodeDiskOp(current.Op, read.Op) || current.Owner != r.Identity.Public || !bytes.Equal(access.SessionBytes(current.Session), access.SessionBytes(read.Session)) || !bytes.Equal(current.Session.Signature, read.Session.Signature) {
 		return control.NodeDiskResult{}, sfcp.ErrAdmission
 	}
 	view, err := r.Engine().ReadAtLeast(ctx, current.Index)
@@ -192,7 +200,7 @@ func (r *Runtime) nodeDiskLocal(ctx context.Context, read control.NodeDiskRead) 
 		}
 		return j.Result, err // the original outcome; never run twice
 	}
-	j = nodeDiskJournal{Request: request, Result: control.NodeDiskResult{Schema: 1, Operation: op.Operation, Node: op.Node, Action: op.Action, User: current.Session.User, Disk: op.Disk, Part: op.Part, State: "running", Step: "check", Label: op.Label, StartedAt: time.Now().Unix()}}
+	j = nodeDiskJournal{Request: request, Result: control.NodeDiskResult{Schema: 1, Operation: op.Operation, Node: op.Node, Action: op.Action, User: current.Session.User, Disk: op.Disk, Part: op.Part, Bundle: op.Bundle, State: "running", Step: "check", Label: op.Label, StartedAt: time.Now().Unix()}}
 	if err := d.save(j, nil); err != nil {
 		d.mu.Unlock()
 		return control.NodeDiskResult{}, err
@@ -273,6 +281,21 @@ func (r *Runtime) runNodeDisk(ctx context.Context, d *nodeDiskRuntime, j nodeDis
 		r.recordNodeDiskEvent(j.Result)
 		return j.Result
 	}
+	done := func() control.NodeDiskResult {
+		j.Result.State, j.Result.FinishedAt = "done", time.Now().Unix()
+		if err := d.save(j, nil); err != nil {
+			log.Printf("node disk journal: operation=%s error=%v", op.Operation, err)
+		}
+		r.recordNodeDiskEvent(j.Result)
+		return j.Result
+	}
+	switch op.Action {
+	case "bundle", "unbundle", "replace-member":
+		if err := r.runNodeDiskBundle(ctx, d, &j, op, roots, step); err != nil {
+			return fail(err)
+		}
+		return done()
+	}
 	inventory, err := r.diskInventory(ctx)
 	if err != nil {
 		return fail(nodedisks.Refusal{Code: "io", Detail: "device inventory: " + err.Error()})
@@ -285,58 +308,102 @@ func (r *Runtime) runNodeDisk(ctx context.Context, d *nodeDiskRuntime, j nodeDis
 	if err != nil {
 		return fail(err)
 	}
-	switch op.Action {
-	case "format":
+	if bundles, err := d.bundles(); err != nil {
+		return fail(err)
+	} else if err := nodedisks.FuseMemberBusy(op, plan, bundles); err != nil {
+		return fail(err)
+	}
+	format := func(plan nodedisks.Plan) error {
 		uuid, _, err := nodedisks.NewUUID()
 		if err != nil {
-			return fail(err)
+			return err
 		}
 		j.FormatUUID = uuid
 		part := op.Part
 		if plan.Whole {
 			if err := step("partition", nil); err != nil {
-				return fail(err)
+				return err
 			}
 			_, diskGUID, err1 := nodedisks.NewUUID()
 			_, partGUID, err2 := nodedisks.NewUUID()
 			if err := errors.Join(err1, err2); err != nil {
-				return fail(err)
+				return err
 			}
 			if part, err = d.host.WriteTable(ctx, op.Disk, diskGUID, partGUID); err != nil {
-				return fail(err)
+				return err
 			}
 		} else {
 			if err := step("wipe", nil); err != nil {
-				return fail(err)
+				return err
 			}
 			if err := d.host.WipePart(part); err != nil {
-				return fail(err)
+				return err
 			}
 		}
 		j.Result.Part = part
 		if err := step("format", nil); err != nil {
-			return fail(err)
+			return err
 		}
 		if err := d.host.MakeExt4(ctx, part, uuid, op.Label); err != nil {
-			return fail(err)
+			return err
 		}
 		j.Result.UUID, j.Result.Device = uuid, "/dev/"+part
-	case "mount":
+		return nil
+	}
+	mount := func(plan nodedisks.Plan) error {
 		rec := nodedisks.Record{Schema: 1, UUID: plan.Part.UUID, Path: plan.Path, Disk: plan.Disk.Name, Part: plan.Part.Name, Serial: plan.Disk.Serial, WWN: plan.Disk.WWN, Operation: op.Operation, User: j.Result.User, At: time.Now().Unix()}
 		if err := nodedisks.PreparePoint(plan.Path); err != nil {
-			return fail(err)
+			return err
 		}
 		// The record goes first: from here on sfcd mounts it at start.
 		if err := step("record", map[string][]byte{"mount/" + rec.UUID: diskJSON(rec)}); err != nil {
-			return fail(err)
+			return err
 		}
 		if err := d.host.Mount(plan.Part.Name, plan.Path); err != nil {
 			if plan.Record == nil {
 				_ = d.db.Write(map[string][]byte{"mount/" + rec.UUID: nil})
 			}
-			return fail(err)
+			return err
 		}
 		j.Result.UUID, j.Result.Device, j.Result.MountPath = rec.UUID, "/dev/"+rec.Part, rec.Path
+		return nil
+	}
+	switch op.Action {
+	case "format":
+		if err := format(plan); err != nil {
+			return fail(err)
+		}
+	case "mount":
+		if err := mount(plan); err != nil {
+			return fail(err)
+		}
+	case "prepare-storage":
+		if op.Format {
+			if err := format(plan); err != nil {
+				return fail(err)
+			}
+			// Check the mount half against the new filesystem.
+			if inventory, err = r.diskInventory(ctx); err != nil {
+				return fail(nodedisks.Refusal{Code: "io", Detail: "device inventory: " + err.Error()})
+			}
+			next := op
+			next.Format, next.Part, next.UUID, next.Size, next.TableID, next.Label = false, j.Result.Part, j.Result.UUID, 0, "", ""
+			if plan, err = nodedisks.Check(next, inventory, roots, records, r.dockerRoot(ctx)); err != nil {
+				return fail(err)
+			}
+		}
+		if plan.Mounted {
+			j.Result.UUID, j.Result.Device, j.Result.MountPath = plan.Part.UUID, "/dev/"+plan.Part.Name, plan.Path
+		} else if err := mount(plan); err != nil {
+			return fail(err)
+		}
+		if err := step("directory", nil); err != nil {
+			return fail(err)
+		}
+		if err := nodedisks.MakeRootDir(plan.Path, op.SubPath); err != nil {
+			return fail(err)
+		}
+		j.Result.RootPath = plan.RootPath
 	case "forget":
 		if err := step("record", map[string][]byte{"mount/" + plan.Record.UUID: nil}); err != nil {
 			return fail(err)
@@ -369,7 +436,7 @@ func (r *Runtime) recordNodeDiskEvent(result control.NodeDiskResult) {
 	if r.events == nil {
 		return
 	}
-	kind := map[string]string{"format": "node-disk-formatted", "mount": "node-disk-mounted", "unmount": "node-disk-unmounted", "forget": "node-disk-unmounted"}[result.Action]
+	kind := map[string]string{"format": "node-disk-formatted", "mount": "node-disk-mounted", "unmount": "node-disk-unmounted", "forget": "node-disk-unmounted", "prepare-storage": "node-disk-storage-prepared", "bundle": "node-disk-bundled", "unbundle": "node-disk-unbundled", "replace-member": "node-disk-member-replaced"}[result.Action]
 	if result.State == "failed" {
 		kind = "node-disk-failed"
 	}
@@ -378,7 +445,7 @@ func (r *Runtime) recordNodeDiskEvent(result control.NodeDiskResult) {
 	if len(user) > 63 {
 		user = user[:63]
 	}
-	e := eventlog.Event{Kind: kind, Scope: "node", At: now, Target: eventlog.Target{Node: result.Node}, Detail: eventlog.Detail{Actor: user, Operation: result.Operation, Resource: result.Part, State: result.Action, Code: result.Code}}
+	e := eventlog.Event{Kind: kind, Scope: "node", At: now, Target: eventlog.Target{Node: result.Node}, Detail: eventlog.Detail{Actor: user, Operation: result.Operation, Resource: cmp.Or(result.Part, result.Bundle), State: result.Action, Code: result.Code}}
 	if _, err := r.events.Append("node-disk/"+result.Operation, e, now); err != nil {
 		log.Printf("node disk event: operation=%s error=%v", result.Operation, err)
 	}
@@ -403,6 +470,25 @@ func (r *Runtime) reconcileNodeDisks(ctx context.Context) error {
 	if err != nil {
 		return nil // the observation loop logs inventory failures
 	}
+	// Plain disks first: a fuse bundle's members are among them. Then the
+	// bundles are turned on and the filesystems on them mounted.
+	plain := slices.DeleteFunc(slices.Clone(records), func(rec nodedisks.Record) bool { return rec.Bundle != "" })
+	mounted := r.mountNodeDiskRecords(d, plain, inventory)
+	if len(plain) == len(records) {
+		return nil
+	}
+	if activated := r.activateBundles(ctx, d, inventory); activated || mounted {
+		if inventory, err = r.diskInventory(ctx); err != nil {
+			return nil
+		}
+	}
+	r.mountNodeDiskRecords(d, slices.DeleteFunc(records, func(rec nodedisks.Record) bool { return rec.Bundle == "" }), inventory)
+	return nil
+}
+
+// mountNodeDiskRecords mounts records and says whether it mounted one.
+func (r *Runtime) mountNodeDiskRecords(d *nodeDiskRuntime, records []nodedisks.Record, inventory observability.Devices) bool {
+	mountedAny := false
 	for _, rec := range records {
 		reason := ""
 		var target *observability.BlockPart
@@ -440,12 +526,13 @@ func (r *Runtime) reconcileNodeDisks(ctx context.Context) error {
 			} else {
 				log.Printf("node disk mounted: uuid=%s device=/dev/%s path=%s", rec.UUID, target.Name, rec.Path)
 				d.warn(rec, "")
+				mountedAny = true
 				continue
 			}
 		}
 		d.warn(rec, reason)
 	}
-	return nil
+	return mountedAny
 }
 
 // warn logs once per reason change; "" clears it.

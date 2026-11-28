@@ -149,9 +149,9 @@ func TestRealManagedMemberDirectoryApprovalAndUnknownSameDB(t *testing.T) {
 		}
 		return reply
 	}
-	initial, err := client.Query(ctx, peer, session, "members", "")
+	initial, err := client.MemberPage(ctx, peer, session, "")
 	if err != nil || len(initial.Members) != 1 || initial.Members[0].Peer != genesis {
-		t.Fatal("blank directory", initial.Code, err)
+		t.Fatal("blank directory", err)
 	}
 	target := config.Peer{ID: "node-b", Key: b.Actor(), Endpoint: vacant()}
 	before := read()
@@ -307,8 +307,8 @@ func TestRealManagedMemberDirectoryApprovalAndUnknownSameDB(t *testing.T) {
 	if receipt, found := read().State.LookupResult(unknown); !found || receipt.Code != reported.Result.Code || receipt != func() state.Result { r, _ := savedView.State.LookupResult(unknown); return r }() {
 		t.Fatal("report receipt lost")
 	}
-	final, err := client.Query(ctx, peer, session, "members", "")
-	if err != nil || len(final.Members) != 2 || final.MembersRootRevision != savedView.State.Object(control.MembersKey).Revision {
+	final, err := client.MemberPage(ctx, peer, session, "")
+	if err != nil || len(final.Members) != 2 || final.RootRevision != savedView.State.Object(control.MembersKey).Revision {
 		t.Fatal("current session/directory after restart", err)
 	}
 	// Directory replies remain bounded as membership grows. Each page exposes
@@ -325,11 +325,11 @@ func TestRealManagedMemberDirectoryApprovalAndUnknownSameDB(t *testing.T) {
 		}
 	}
 	page, err := client.MemberPage(ctx, peer, session, "")
-	if err != nil || len(page.Members) != 8 || page.MembersNext != page.Members[7].Peer.ID {
+	if err != nil || len(page.Members) != 8 || page.Next != page.Members[7].Peer.ID {
 		t.Fatal("first bounded page", err)
 	}
-	last, err := client.MemberPage(ctx, peer, session, page.MembersNext)
-	if err != nil || len(last.Members) != 3 || last.MembersNext != "" || last.MembersRootRevision != page.MembersRootRevision || last.Members[0].Peer.ID <= page.MembersNext {
+	last, err := client.MemberPage(ctx, peer, session, page.Next)
+	if err != nil || len(last.Members) != 3 || last.Next != "" || last.RootRevision != page.RootRevision || last.Members[0].Peer.ID <= page.Next {
 		t.Fatal("continuation page", err)
 	}
 	if _, err := client.MemberPage(ctx, peer, session, "bad/cursor"); err == nil {

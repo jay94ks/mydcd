@@ -114,6 +114,9 @@ func ReadSnapshot(cluster [32]byte, source io.Reader) (SnapshotPoint, state.Stat
 	if err != nil {
 		return SnapshotPoint{}, state.State{}, err
 	}
+	if err = haveStateFeatures(verified.State()); err != nil {
+		return SnapshotPoint{}, state.State{}, err
+	}
 	return SnapshotPoint{RaftIndex: position, Term: meta.Term, Index: meta.Index, StateDigest: meta.Digest}, verified.State(), nil
 }
 

@@ -57,7 +57,8 @@ describe('디스크 탭 (#689, 캔버스 NodeDisks)', () => {
     expect(mountableParts(fs).map((p) => p.name)).toEqual(['sdh1']);
     const p = { name: 'sdc1', number: 1, size: 1, uuid: 'u1', mounts: ['/var/lib/sfc-disks/fast1'], storageRoots: [] };
     const dev: DNodeDevices = { node: 'n', observedAt: 0, disks: [], recorded: [{ uuid: 'u1', path: '/var/lib/sfc-disks/fast1', disk: 'sdc', part: 'sdc1' }] };
-    expect(unmountBlock(dev, p)).toEqual({ roots: [], runtime: [], fstab: false });
+    expect(unmountBlock(dev, p)).toEqual({ roots: [], runtime: [], fstab: false, fuse: [] });
+    expect(unmountBlock({ ...dev, bundles: [{ name: 'pool3', backend: 'fuse', mode: 'linear', size: 1, state: 'ok', syncPercent: 0, members: [{ disk: 'x', part: p.name, state: 'ok' }] }] }, p).fuse).toEqual(['pool3']);
     expect(unmountBlock({ ...dev, recorded: [] }, p).fstab).toBe(true);
     expect(unmountBlock(dev, { ...p, storageRoots: ['data1'] }).roots).toEqual(['data1']);
   });

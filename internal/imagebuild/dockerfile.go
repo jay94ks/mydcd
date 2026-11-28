@@ -29,7 +29,7 @@ type Source struct {
 
 func (s Source) Valid() bool {
 	named, err := reference.ParseNormalizedNamed(s.Reference)
-	return err == nil && reference.TagNameOnly(named).String() == s.Reference && len(s.Reference) <= 512 && ValidPlatform(s.Platform) && s.Stage >= 0 && s.Stage < MaxTreeEntries && s.Line >= 0 && (s.Kind == "from" || s.Kind == "copy" || s.Kind == "mount")
+	return err == nil && reference.TagNameOnly(named).String() == s.Reference && len(s.Reference) <= 512 && ValidPlatform(s.Platform) && s.Stage >= 0 && s.Stage < MaxTreeEntries && s.Line >= 0 && (s.Kind == "from" || s.Kind == "copy" || s.Kind == "mount" || s.Kind == BuilderKind && s.Stage == 0 && s.Line == 0)
 }
 
 type DockerfilePlan struct {

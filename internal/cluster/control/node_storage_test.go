@@ -376,3 +376,48 @@ func TestNodeStorageRootCapacityBoundsFixedVolumes(t *testing.T) {
 	unlimited := uint64(0)
 	f.apply("admin", "set-node-storage-policy", r.Revision, NodeStoragePolicy{Node: "node-a", ID: "hdd", CapacityBytes: &unlimited}, state.Applied)
 }
+
+func TestNodeArchiveDefaultOnePerNodeAndClearedByDrain(t *testing.T) {
+	f := newNodeStorageFixture(t)
+	for _, d := range []nodestorage.Definition{{Node: "node-a", ID: "hdd", Path: "/mnt/hdd", Tenants: []string{"tenant"}}, {Node: "node-a", ID: "slow", Path: "/mnt/slow", AllTenants: true}} {
+		f.apply("admin", "add-node-storage", 0, d, state.Applied)
+	}
+	get := func(id string) nodestorage.Root {
+		c, err := f.p.NodeStorage(f.s)
+		if err != nil {
+			t.Fatal(err)
+		}
+		r, ok := c.Root("node-a", id)
+		if !ok {
+			t.Fatal("missing root", id)
+		}
+		return r
+	}
+	hdd := get("hdd")
+	f.apply("manager", "set-node-archive-default", hdd.Revision, NodeArchiveDefault{Node: "node-a", ID: "hdd", Default: true}, state.Forbidden)
+	f.apply("admin", "set-node-archive-default", hdd.Revision+1, NodeArchiveDefault{Node: "node-a", ID: "hdd", Default: true}, state.ConditionFailed)
+	f.apply("admin", "set-node-archive-default", hdd.Revision, NodeArchiveDefault{Node: "node-a", ID: "hdd", Default: false}, state.ConditionFailed)
+	f.apply("admin", "set-node-archive-default", hdd.Revision, NodeArchiveDefault{Node: "node-a", ID: "hdd", Default: true}, state.Applied)
+	slow := get("slow")
+	f.apply("admin", "set-node-archive-default", slow.Revision, NodeArchiveDefault{Node: "node-a", ID: "slow", Default: true}, state.Applied)
+	c, _ := f.p.NodeStorage(f.s)
+	if d, ok := c.ArchiveDefault("node-a"); !ok || d.Definition.ID != "slow" || get("hdd").ArchiveDefault {
+		t.Fatal("default did not move to the newer root", d.Definition.ID, ok)
+	}
+	slow = get("slow")
+	f.apply("admin", "drain-node-storage", slow.Revision, NodeStorageSelection{"node-a", "slow"}, state.Applied)
+	c, _ = f.p.NodeStorage(f.s)
+	if _, ok := c.ArchiveDefault("node-a"); ok {
+		t.Fatal("draining root kept the archive default")
+	}
+	slow = get("slow")
+	f.apply("admin", "set-node-archive-default", slow.Revision, NodeArchiveDefault{Node: "node-a", ID: "slow", Default: true}, state.ConditionFailed)
+	hdd = get("hdd")
+	f.apply("admin", "set-node-archive-default", hdd.Revision, NodeArchiveDefault{Node: "node-a", ID: "hdd", Default: true}, state.Applied)
+	hdd = get("hdd")
+	f.apply("admin", "set-node-archive-default", hdd.Revision, NodeArchiveDefault{Node: "node-a", ID: "hdd", Default: false}, state.Applied)
+	c, _ = f.p.NodeStorage(f.s)
+	if _, ok := c.ArchiveDefault("node-a"); ok {
+		t.Fatal("cleared default kept")
+	}
+}

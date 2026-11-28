@@ -21,7 +21,7 @@ builder 신뢰/이미지 삭제 예약을 확인한다. 같은 ID와 같은 cach
 삭제 표시됐어도 보존 cache를 대상으로 삼을 수 있다. 새 빌드로 재등록하지 않는다.
 
 `sfcli build cache prune`의 진행 조회는 기존 User
-`image-builds`에 `ImageBuild:{Part:"cache-prunes",ID?,Node?}`를 보낸다. 현재 tenant/node
+`image-builds`에 `Query:{Part:"cache-prunes",ID?,Node?}`를 보낸다. 현재 tenant/node
 Read 또는 ManageRegistry를 요구한다. 페이지는 공통 Schema/Tenant/Part/RootRevision/
 Epoch/Next와 optional `CachePrunes`를 담으며 한 행은 다음 형식이다.
 

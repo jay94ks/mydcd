@@ -211,7 +211,7 @@ func TestACMEStoreLostReply(t *testing.T) {
 		t.Fatalf("committed %d times", n)
 	}
 	_, n := f.do("GET", "/api/v1/notifications", nil)
-	if strings.Contains(mustString(n), "결과 확인 필요") {
+	if strings.Contains(mustString(n), "Check the result") {
 		t.Fatalf("unknown notice for a settled retry: %v", n)
 	}
 
@@ -239,7 +239,7 @@ func TestACMEStoreLostReply(t *testing.T) {
 		t.Fatalf("committed %d times", n)
 	}
 	_, n = f.do("GET", "/api/v1/notifications", nil)
-	if !strings.Contains(mustString(n), "결과 확인 필요") {
+	if !strings.Contains(mustString(n), "Check the result") {
 		t.Fatalf("no unknown notice: %v", n)
 	}
 	// The original holds only the sealed receipt, so it can be resumed
@@ -266,7 +266,7 @@ func TestACMECAABlocksAndRenewal(t *testing.T) {
 		t.Fatalf("failure not counted: %v", out)
 	}
 	_, n := f.do("GET", "/api/v1/notifications", nil)
-	if !strings.Contains(mustString(n), "인증서 발급 실패") {
+	if !strings.Contains(mustString(n), "Certificate issuance failed") {
 		t.Fatalf("no failure notification: %v", n)
 	}
 
@@ -278,7 +278,7 @@ func TestACMECAABlocksAndRenewal(t *testing.T) {
 		t.Fatalf("issue: %v", out)
 	}
 	_, n = f.do("GET", "/api/v1/notifications", nil)
-	if !strings.Contains(mustString(n), "키 형식 바꿈") {
+	if !strings.Contains(mustString(n), "Certificate key type changed") {
 		t.Fatalf("no key type fallback notice: %v", n)
 	}
 
@@ -296,7 +296,7 @@ func TestACMECAABlocksAndRenewal(t *testing.T) {
 		t.Fatalf("renewal ran: %v issued=%d", out, ca.Issued())
 	}
 	_, n = f.do("GET", "/api/v1/notifications", nil)
-	if c := strings.Count(mustString(n), "인증서 직접 갱신 필요"); c != 1 {
+	if c := strings.Count(mustString(n), "Renew the certificate yourself"); c != 1 {
 		t.Fatalf("renewal notices %d: %v", c, n)
 	}
 }

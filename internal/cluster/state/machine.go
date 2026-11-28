@@ -7,10 +7,13 @@ package state
 import (
 	"crypto/sha256"
 	"encoding/binary"
+	"encoding/hex"
 	"errors"
 	"iter"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/jay94ks/seafield/internal/buildinfo"
 )
 
 var ErrOrder = errors.New("committed entries must be applied in order")
@@ -23,7 +26,18 @@ type Command struct {
 	Kind                         CommandKind
 	Target                       string
 	Rights                       Rights
+	// Features are the mainline feature versions this entry uses
+	// (devel/design/upgrades.md 3-2). Reducers branch on Uses; a build
+	// that does not have one of them halts instead of applying the entry.
+	// The leader submits an entry only when every member has them. Empty
+	// for everything the major's baseline does.
+	Features buildinfo.Features
 }
+
+// Uses reports whether the entry uses a version of r (for example
+// buildinfo.From(buildinfo.NetworkTransitV1)): new verdicts go behind it,
+// and an entry without it keeps the old verdict.
+func (c Command) Uses(r buildinfo.Range) bool { return c.Features.Within(r) }
 
 type CommandKind uint8
 
@@ -182,6 +196,11 @@ func commandDigest(c Command) [32]byte {
 	} else {
 		b = append(b, 0)
 	}
+	// Features join the digest only when present, so every digest already
+	// in a request ledger stays the same.
+	if !c.Features.Empty() {
+		b = append(b, c.Features.Encode()...)
+	}
 	return sha256.Sum256(b)
 }
 
@@ -239,10 +258,55 @@ func ApplyDelegated(s State, index uint64, c Command, validate Validator, reduce
 	return ApplyTransactional(s, index, c, validate, reduce, admit, delegate, nil)
 }
 
+// FeaturesUsedKey holds every feature an applied entry of this state has
+// used (hex of buildinfo.Features.Encode), so snapshots, backups and join
+// checks know what a server must have to hold this state
+// (devel/design/upgrades.md 3-2). Only Apply writes it.
+const FeaturesUsedKey = "control/features-used"
+
+// FeaturesUsed is the union of the features applied entries used; ok is
+// false when the record cannot be read (a state from a broken writer).
+func (s State) FeaturesUsed() (buildinfo.Features, bool) {
+	o := s.Object(FeaturesUsedKey)
+	if !o.Present {
+		return buildinfo.Features{}, true
+	}
+	raw, err := hex.DecodeString(o.Value)
+	if err != nil {
+		return buildinfo.Features{}, false
+	}
+	return buildinfo.DecodeFeatures(raw)
+}
+
 // ApplyTransactional preserves one ordinal/receipt while an explicitly bound
 // policy can admit related control namespaces and exact existing native sources
 // for explicitly authorized, validated cleanup in the same typed module patch.
+// An applied entry that uses features also adds them to FeaturesUsedKey.
 func ApplyTransactional(s State, index uint64, c Command, validate Validator, reduce Reducer, admit ModuleAuthorizer, delegate MutationAuthorizer, admitPatch ModulePatchAuthorizer) (State, Result, error) {
+	n, result, err := applyTransactional(s, index, c, validate, reduce, admit, delegate, admitPatch)
+	if err != nil || result.Code != Applied || c.Features.Empty() {
+		return n, result, err
+	}
+	used, ok := n.FeaturesUsed()
+	if !ok {
+		return s, Result{}, errors.New("unreadable " + FeaturesUsedKey)
+	}
+	union, ok := used.Or(c.Features)
+	if !ok {
+		return s, Result{}, errors.New("too many features used")
+	}
+	if union != used {
+		old := n.Object(FeaturesUsedKey)
+		generation := old.Generation
+		if !old.Present {
+			generation = index
+		}
+		n.putObject(FeaturesUsedKey, Object{Revision: index, Generation: generation, Value: hex.EncodeToString(union.Encode()), Present: true})
+	}
+	return n, result, nil
+}
+
+func applyTransactional(s State, index uint64, c Command, validate Validator, reduce Reducer, admit ModuleAuthorizer, delegate MutationAuthorizer, admitPatch ModulePatchAuthorizer) (State, Result, error) {
 	if index == 0 || s.index == ^uint64(0) || index != s.index+1 {
 		return s, Result{}, ErrOrder
 	}
@@ -304,7 +368,7 @@ func ApplyTransactional(s State, index uint64, c Command, validate Validator, re
 		return n, Result{Code: LedgerFull, Index: index}, nil
 	}
 	result := Result{Code: Invalid, Index: index}
-	validMutation := c.Kind == Mutate && c.Target == "" && c.Rights == 0 && len(c.Key) <= 512 && utf8.ValidString(c.Key) && len(c.Value) <= 64*1024 && (!c.Delete || c.Value == "")
+	validMutation := c.Kind == Mutate && c.Target == "" && c.Rights == 0 && len(c.Key) <= 512 && utf8.ValidString(c.Key) && len(c.Value) <= 64*1024 && (!c.Delete || c.Value == "") && c.Key != FeaturesUsedKey
 	required := namespaceRights(c.Key)
 	if c.Kind == Module || c.Kind == ModuleReport || c.Kind == ModuleUpload || c.Kind == ModuleAppDown {
 		n, result = applyModule(s, n, index, c, validate, reduce, admitPatch)

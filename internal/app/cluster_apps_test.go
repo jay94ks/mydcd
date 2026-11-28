@@ -7,6 +7,7 @@ import (
 	"net/netip"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"testing"
 
@@ -21,8 +22,9 @@ func TestEnabledClusterAppNeedsItsInstalledImage(t *testing.T) {
 		t.Fatal("no cluster app refused")
 	}
 	c.ClusterApps.Web = &config.ClusterAppWeb{Enabled: true}
-	// This test build has no web digest pin, so no image is installed.
-	if err := CheckClusterApps(c); !errors.Is(err, clusterapp.ErrImageNotFound) || err.Error() != "cluster app web: cluster app image not found" {
+	// No bundle sits beside the test binary, so no image is installed; the
+	// error names where sfcd looked.
+	if err := CheckClusterApps(c); !errors.Is(err, clusterapp.ErrImageNotFound) || !strings.HasPrefix(err.Error(), "cluster app web: cluster app image not found (looked in ") {
 		t.Fatal("enabled web without its image", err)
 	}
 	if _, err := Open(c); !errors.Is(err, clusterapp.ErrImageNotFound) {

@@ -131,7 +131,7 @@ func verifyRuntimeIdentityRotation(t *testing.T, ctx context.Context, nodes []*R
 		t.Fatal(err)
 	}
 	found := false
-	for _, row := range page.NodeLifecycle {
+	for _, row := range page.Nodes {
 		if row.Node.Member.ID == id {
 			found = row.Identity != nil && row.Identity.Operation == "replace-installed" && row.Identity.Phase == "Installed"
 		}

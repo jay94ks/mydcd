@@ -19,6 +19,7 @@ import (
 	"net/netip"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -863,8 +864,8 @@ func (s *Server) recordDelivery(h *store.Webhook, d *store.WebhookDelivery) {
 	}
 	s.log.Warn("webhook turned off after failures", "webhook", h.Name)
 	if u := nh.CreatedByID; u != "" {
-		s.notify(&store.Notification{User: u, Kind: NotifyWebhookOff, Severity: "warning", Tenant: nh.Tenant, Title: "웹훅 " + nh.Name + "이(가) 꺼졌어요",
-			Body: fmt.Sprintf("%d번 잇달아 보내지 못해 껐어요 (%s). 확인한 뒤 다시 켜 주세요.", webhookDisableAfter, d.Error), Link: "/incidents/webhooks", Action: true})
+		s.notify(&store.Notification{User: u, Kind: NotifyWebhookOff, Severity: "warning", Tenant: nh.Tenant, Text: notice("webhook-off", map[string]string{"name": nh.Name, "count": strconv.Itoa(webhookDisableAfter), "error": d.Error}, "webhook-off.body"),
+			Link: "/incidents/webhooks", Action: true})
 	}
 }
 

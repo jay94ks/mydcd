@@ -1,0 +1,8 @@
+sfcd runs on every server of a Seafield Cluster. It keeps the cluster state
+with Raft, talks to other servers over SFCP and runs containers through
+Seafield Engine (sfed), which ships in this package with its own containerd
+and runc under /usr/lib/sfc/bin. It does not use or need Docker.
+
+The package installs the sfcd and sfed systemd units but neither enables
+nor starts them; write /etc/sfc/node.yaml, run sfcd init or join, then
+systemctl enable --now sfed sfcd.

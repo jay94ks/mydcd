@@ -104,9 +104,12 @@ func (r JobResult) Valid(s JobSpec) bool {
 type JobClosure struct {
 	Schema      uint8
 	Job, Native [32]byte
-	Result      JobResult
-	At          uint64
-	Signature   []byte
+	// Builder is the image ID the build container was created from. Empty
+	// when no container was created.
+	Builder   string `json:",omitempty"`
+	Result    JobResult
+	At        uint64
+	Signature []byte
 }
 
 func JobClosureBytes(r JobClosure) []byte {
@@ -115,7 +118,7 @@ func JobClosureBytes(r JobClosure) []byte {
 	return append([]byte("sfc-imagebuild-job-closure-1\x00"), raw...)
 }
 func (c JobClosure) Valid(s JobSpec) bool {
-	return c.Schema == 1 && c.Job == s.Digest() && c.Native != ([32]byte{}) && c.At >= s.CreatedAt && c.At <= math.MaxInt64 && c.Result.Valid(s) && ed25519.Verify(s.Scope.Root.Key[:], JobClosureBytes(c), c.Signature)
+	return c.Schema == 1 && (c.Builder == "" || nativeImageID(c.Builder)) && c.Job == s.Digest() && c.Native != ([32]byte{}) && c.At >= s.CreatedAt && c.At <= math.MaxInt64 && c.Result.Valid(s) && ed25519.Verify(s.Scope.Root.Key[:], JobClosureBytes(c), c.Signature)
 }
 
 type JobRun struct {
@@ -124,12 +127,17 @@ type JobRun struct {
 	Phase    string
 	Cancel   bool
 	Inputs   []FrozenSource `json:",omitempty"`
-	Closure  *JobClosure    `json:",omitempty"`
+	// Builder is the build container's image, resolved from the policy's
+	// reference once at begin for this job only. BuilderLocal is set when
+	// the registry did not answer and the node's last pulled copy was used.
+	Builder      *FrozenSource `json:",omitempty"`
+	BuilderLocal string        `json:",omitempty"`
+	Closure      *JobClosure   `json:",omitempty"`
 }
 
 func (r JobRun) Terminal() bool { return r.Closure != nil }
 func (r JobRun) Shape() error {
-	if r.Spec.Shape() != nil || r.Revision == 0 || ValidateJobInputs(r.Spec, r.Inputs) != nil || r.Phase == "queued" && len(r.Inputs) != 0 {
+	if r.Spec.Shape() != nil || r.Revision == 0 || ValidateJobInputs(r.Spec, r.Inputs) != nil || r.Phase == "queued" && (len(r.Inputs) != 0 || r.Builder != nil) || validJobBuilder(r.Spec, r.Builder, r.BuilderLocal, false) != nil {
 		return ErrInvalid
 	}
 	switch r.Phase {
@@ -160,11 +168,13 @@ func (r JobRun) RequestCancel(expected uint64) (JobRun, error) {
 	r.Revision++
 	return r, nil
 }
-func (r JobRun) Begin(expected uint64, at uint64, inputs []FrozenSource) (JobRun, error) {
-	if r.Shape() != nil || r.Phase != "queued" || r.Cancel || expected != r.Revision || r.Revision == math.MaxUint64 || at < r.Spec.CreatedAt || at >= r.Spec.CreatedAt+r.Spec.Policy.Seconds || ValidateJobInputs(r.Spec, inputs) != nil {
+func (r JobRun) Begin(expected uint64, at uint64, inputs []FrozenSource, builder *FrozenSource, local string) (JobRun, error) {
+	if r.Shape() != nil || r.Phase != "queued" || r.Cancel || expected != r.Revision || r.Revision == math.MaxUint64 || at < r.Spec.CreatedAt || at >= r.Spec.CreatedAt+r.Spec.Policy.Seconds || ValidateJobInputs(r.Spec, inputs) != nil || ValidateJobBuilder(r.Spec, builder, local) != nil {
 		return JobRun{}, ErrConflict
 	}
 	r.Inputs = slices.Clone(inputs)
+	b := *builder
+	r.Builder, r.BuilderLocal = &b, local
 	r.Phase = "running"
 	r.Revision++
 	return r, nil
@@ -179,7 +189,7 @@ func ValidateJobInputs(spec JobSpec, inputs []FrozenSource) error {
 	}
 	for _, input := range inputs {
 		s := input.Source
-		if !s.Valid() || !slices.Contains(spec.Policy.Platforms, s.Platform) {
+		if !s.Valid() || s.Kind == BuilderKind || !slices.Contains(spec.Policy.Platforms, s.Platform) {
 			return ErrInvalid
 		}
 	}

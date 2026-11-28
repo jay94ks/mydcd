@@ -535,3 +535,18 @@ func managedTunnelName(name string) (string, string, bool) {
 	}
 	return parts[1], parts[3], true
 }
+
+// warnForeignBridges logs once at start the sfc bridges on this server that
+// no journal of this node made (network.Manager.ForeignBridges), as the TUN
+// check does for TUNs. After a re-init the earlier cluster's bridges stay
+// in the kernel, and one with the same subnet takes this cluster's routes.
+func (r *Runtime) warnForeignBridges() {
+	if r.historicalOwner || r.network == nil {
+		return
+	}
+	notes, err := r.network.ForeignBridges()
+	if err != nil || len(notes) == 0 {
+		return
+	}
+	log.Printf("this server has sfc bridges that this node's journal did not make: %s. If they are left from an earlier cluster, remove them with ip link del (a bridge with the same subnet as one of this cluster takes its traffic)", strings.Join(notes, ", "))
+}

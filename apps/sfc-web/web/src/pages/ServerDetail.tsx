@@ -29,13 +29,14 @@ import { GatewayDialog } from './Ingress';
 import { EngineTab } from './NodeEngine';
 import { FirewallTab } from './NodeFirewall';
 import { DiskGroups, type DiskDlg } from './NodeDisks';
+import { AddRootDialog } from './StorageRootAdd';
 import { DiskActionDialog } from './DiskActions';
 import { GW_NAME, gwCounters, ingress, ingressMissing, listenerList, type Gateway as GatewayKind, type GatewayConf, type IngressNode } from '../api/ingress';
 import { ContainerConsole } from '../components/ContainerConsole';
 import { useSession, useTenantRole } from '../auth/session';
 import { Sheet } from '../mobile/Sheet';
 import { M_BADGE, opLine, opTitle } from './Operations';
-import { opsLive, serverLive } from '../lib/liveTopics';
+import { ingressLive, opsLive, serverLive } from '../lib/liveTopics';
 
 export function TaskTable({ tasks, showNode = false, showApp = true }: { tasks: TaskView[]; showNode?: boolean; showApp?: boolean }) {
   const session = useSession();
@@ -550,7 +551,7 @@ function MServerOverview({ node }: { node: NodeView }) {
     </>
   );
 }
-const PHASE_KO: Record<string, string> = { ready: '준비됨', joining: '가입 대기', isolated: '격리됨', removing: '제거 중', problem: '문제', unknown: '확인 불가' };
+const PHASE_KO: Record<string, string> = { ready: '준비됨', joining: '가입 대기', isolated: '격리됨', removing: '제거 중', problem: '오류', unknown: '확인 불가' };
 
 export function ServerDetailPage() {
   const admin = !!useSession().user.systemAdmin;
@@ -723,19 +724,27 @@ function Overview({ node }: { node: NodeView }) {
   return (
     <>
       <div className="grid-2">
-        <Card title="상태">
+        <Card title="서버 정보">
+          {/* 역할·접속 주소·마지막 보고는 위 요약 타일에 있어 여기서는 되풀이하지 않는다 */}
           <KV
             items={[
-              ['상태', <PhaseBadge phase={node.phase} />],
-              ['역할', node.leader ? '투표 서버 · 리더' : node.voter ? '투표 서버' : '투표권 없음'],
+              [
+                '상태',
+                node.phaseReason ? (
+                  <span>
+                    <PhaseBadge phase={node.phase} /> <span className="small">{node.phaseReason}</span>
+                    {node.failingSince && <span className="small muted"> · {fmtTime(node.failingSince)}부터 ({ago(node.failingSince)})</span>}
+                  </span>
+                ) : (
+                  <PhaseBadge phase={node.phase} />
+                ),
+              ],
               ['작업 받기', node.admitsWork === undefined ? '—' : node.admitsWork ? '받음' : '받지 않음'],
               ...(node.build ? ([['이미지 빌드', node.build.enabled ? '빌드함' : <span><Badge tone={node.build.reason === 'UNKNOWN' ? 'un' : 'wa'}>{node.build.reason === 'UNKNOWN' ? '모름' : '빌드 안 함'}</Badge> · {buildText(node)}</span>]] as [string, React.ReactNode][]) : []),
               ...(node.cordoned ? ([['새 배치', <span><Badge tone="wa">막음</Badge> · 사유 {node.cordonReason ?? '—'}{cordonWho(node) ? ` · ${cordonWho(node)}` : ''}</span>]] as [string, React.ReactNode][]) : []),
-              ['endpoint', node.endpoint ? <code>{node.endpoint}</code> : '—'],
               ['서버 키', node.key ? <Hash value={node.key} /> : '—'],
               ['버전', node.revision ?? '—'],
               ...(node.identity ? ([['서버 신원 교체', `${identityText(node.identity.phase)} · ${node.identityRotatedAt ? fmtTime(node.identityRotatedAt) : '—'} · ${node.identity.operation}${node.identity.failure ? ` · ${node.identity.failure}` : ''}`]] as [string, React.ReactNode][]) : []),
-              ['마지막 보고', node.observedAt ? ago(node.observedAt) : '—'],
             ]}
           />
           {node.pendingOperation && (
@@ -768,7 +777,7 @@ function Containers({ id, node }: { id: string; node: NodeView }) {
       </HelpBox>
       <Card title="컨테이너" actions={<Refresh q={t} />}>
         <Load q={t}>{(p) => <TaskTable tasks={p.items} />}</Load>
-        <span className="small muted">컨테이너 관측은 sfcd REQ-1(tasks)로 받습니다.</span>
+        <span className="small muted">컨테이너 목록은 이 서버가 보낸 마지막 관측입니다.</span>
       </Card>
       {isAdmin && <ClusterAppsCard node={node} />}
     </>
@@ -873,7 +882,7 @@ function DiskTab({ id }: { id: string }) {
       <Load q={dev} what="디스크 목록을 읽지 못했습니다">
         {(d) => <DiskGroups dev={d} live={dev.live} refresh={<Refresh q={dev} poll={false} />} roots={r.data?.items ?? []} onMakeRoot={setPath} onAction={setDlg} />}
       </Load>
-      {path !== undefined && <RootDialog node={id} taken={r.data?.items ?? []} initialPath={path} onClose={() => setPath(undefined)} onDone={changed} />}
+      {path !== undefined && <AddRootDialog node={id} dev={dev.data} taken={r.data?.items ?? []} initialMount={path} onClose={() => setPath(undefined)} onDone={changed} onReload={() => dev.refresh()} />}
       {dlg && dev.data && <DiskActionDialog node={id} dlg={dlg} dev={dev.data} roots={r.data?.items ?? []} onClose={() => setDlg(undefined)} onChanged={changed} />}
     </>
   );
@@ -883,6 +892,7 @@ function Storage({ id }: { id: string }) {
   const nav = useNavigate();
   const r = usePoll((s) => nodeStorage(id, s), [id], 0, serverLive(id));
   const disks = usePoll((s) => nodeDisks(id, s), [id], 0, serverLive(id));
+  const dev = usePoll((s) => nodeDevices(id, s), [id], 0, serverLive(id));
   const [dlg, setDlg] = useState<{ kind: 'add' } | { kind: 'policy' | 'drain' | 'remove'; root: StorageRoot }>();
   const close = () => setDlg(undefined);
   const used = (x: StorageRoot) => disks.data?.find((d) => d.roots.includes(x.name));
@@ -891,10 +901,10 @@ function Storage({ id }: { id: string }) {
   return (
     <>
       <HelpBox terms="저장 경로 (node storage root) · 비우기 (drain)">
-        <b>이 탭은</b> 이 서버에서 데이터 저장소를 둘 수 있는 경로와 허용 작업 공간을 관리합니다. 경로를 더해도 OS 포맷·마운트는 하지 않습니다. 디스크는 먼저 서버에서 마운트해 두세요.
+        <b>이 탭은</b> 이 서버에서 데이터 저장소를 둘 수 있는 경로와 허용 작업 공간을 관리합니다. 경로를 더할 때 디스크를 고르면 그 마운트 위치 아래에 하위 경로를 만들고, 미사용 디스크는 포맷·마운트까지 합니다.
       </HelpBox>
       <Card
-        title="저장 경로 (UI-14)"
+        title="저장 경로"
         actions={
           <>
             <Refresh q={r} poll={false} />
@@ -968,9 +978,9 @@ function Storage({ id }: { id: string }) {
             />
           )}
         </Load>
-        <span className="small muted">이미 마운트된 절대 경로만 등록합니다. OS 포맷·마운트는 하지 않습니다.</span>
+        <span className="small muted">디스크를 고르면 하위 경로를 sfcd가 만듭니다. 직접 마운트한 곳은 ‘경로 직접 적기’로 이미 있는 경로를 적습니다.</span>
       </Card>
-      {dlg?.kind === 'add' && <RootDialog node={id} taken={r.data?.items ?? []} onClose={close} onDone={() => r.refresh()} />}
+      {dlg?.kind === 'add' && <AddRootDialog node={id} dev={dev.data} taken={r.data?.items ?? []} onClose={close} onDone={() => (r.refresh(), dev.refresh())} onReload={() => dev.refresh()} />}
       {dlg?.kind === 'policy' && <RootDialog node={id} root={dlg.root} taken={[]} onClose={close} onDone={() => r.refresh()} />}
       {(dlg?.kind === 'drain' || dlg?.kind === 'remove') && <RootStepDialog kind={dlg.kind} root={dlg.root} onClose={close} onDone={() => r.refresh()} />}
     </>
@@ -1129,7 +1139,7 @@ function RootStepDialog({ kind, root, onClose, onDone }: { kind: 'drain' | 'remo
 /** 외부 접속 게이트웨이 (캔버스 NodeDetail 'UI-5A') */
 function Gateway({ id }: { id: string }) {
   const admin = !!useSession().user.systemAdmin;
-  const q = usePoll((s) => ingress({ node: id }, s), [id], DEFAULT_POLL_MS);
+  const q = usePoll((s) => ingress({ node: id }, s), [id], DEFAULT_POLL_MS, ingressLive());
   const [edit, setEdit] = useState<IngressNode>();
   const x = q.data?.nodes.find((n) => n.node === id);
   const cols = { gridTemplateColumns: '90px minmax(0,1.3fr) minmax(0,1fr) minmax(0,1.2fr) 70px' };
@@ -1144,7 +1154,7 @@ function Gateway({ id }: { id: string }) {
   );
   return (
     <Card
-      title="외부 접속 게이트웨이 (UI-5A)"
+      title="외부 접속 게이트웨이"
       actions={
         <button className="btn" disabled={!admin || !x} title={admin ? undefined : '시스템 관리자만 바꿉니다'} onClick={() => x && setEdit(x)}>
           게이트웨이 설정
@@ -1313,7 +1323,7 @@ function MStorage({ id }: { id: string }) {
 
 /** 게이트웨이 탭: 종류별 카드 */
 function MGateway({ id }: { id: string }) {
-  const q = usePoll((s) => ingress({ node: id }, s), [id], DEFAULT_POLL_MS);
+  const q = usePoll((s) => ingress({ node: id }, s), [id], DEFAULT_POLL_MS, ingressLive());
   const x = q.data?.nodes.find((n) => n.node === id);
   const card = (kind: GatewayKind, g?: GatewayConf) => (
     <div key={kind} className={`mc${g?.state === 'error' ? ' xer' : ''}`}>

@@ -279,7 +279,7 @@ func realManagementCLI(t *testing.T, security ...bool) {
 			t.Fatal(err)
 		}
 		defer local.Mesh.Close()
-		if reply, err := local.Query(ctx, unixPeer, stored.Session, "node-cli-policy", ""); err != nil || reply.NodeCLI == nil || !reply.NodeCLI.DisableNodeCLIOperation {
+		if policy, err := local.NodeCLIPolicy(ctx, unixPeer, stored.Session); err != nil || !policy.DisableNodeCLIOperation {
 			t.Fatal("independently approved Unix policy query", err)
 		}
 		if _, err := forger.Whoami(ctx, unixPeer, forged); err == nil {

@@ -4,7 +4,8 @@
 // 관측한 장치를 시스템 / 추가 / 미사용 세 묶음으로 보인다. 시스템 디스크(locked)는 포맷·마운트 대신 수작업 안내.
 // '여기에 저장 경로 만들기…'는 기존 add-node-storage. 포맷·마운트·마운트 풀기·기록 지우기는 #689 3단계 API(DiskActions.tsx).
 import type { ReactNode } from 'react';
-import type { DBlockDisk, DBlockPart, DDiskRecord, DNodeDevices } from '../api/dto';
+import type { DBlockDisk, DBlockPart, DDiskBundle, DDiskRecord, DNodeDevices } from '../api/dto';
+import { BundleBox, bundleable, fuseCandidates } from './DiskBundles';
 import type { StorageRoot } from '../api/types';
 import { Badge, Card, HelpBox, type Tone } from '../components/ui';
 import { Menu } from '../components/Menu';
@@ -26,8 +27,11 @@ export type DiskDlg =
   | { kind: 'format'; disk: DBlockDisk; reformat: boolean }
   | { kind: 'mount'; disk: DBlockDisk; part: DBlockPart }
   | { kind: 'unmount'; disk: DBlockDisk; part: DBlockPart; path: string }
-  | { kind: 'blocked'; disk: DBlockDisk; path: string; roots: string[]; runtime: string[]; fstab: boolean }
-  | { kind: 'forget'; rec: DDiskRecord };
+  | { kind: 'blocked'; disk: DBlockDisk; path: string; roots: string[]; runtime: string[]; fstab: boolean; fuse: string[] }
+  | { kind: 'forget'; rec: DDiskRecord }
+  | { kind: 'bundle'; backend?: 'lvm' | 'fuse' }
+  | { kind: 'unbundle'; b: DDiskBundle }
+  | { kind: 'replace'; b: DDiskBundle; member: string };
 
 /** sfcd가 마운트해 기록한 것인가(마운트 풀기는 이것만) */
 export const managedRecord = (dev: DNodeDevices, p: DBlockPart) => (p.uuid ? (dev.recorded ?? []).find((r) => r.uuid === p.uuid && !r.reason) : undefined);
@@ -38,9 +42,11 @@ export const mountableParts = (d: DBlockDisk) => (d.parts ?? []).filter((p) => p
 /** 포맷 펜스: serial이나 WWN을 모르면 서버가 받지 않는다 */
 export const canFormat = (d: DBlockDisk) => !d.locked && d.class === 'unused' && !d.readOnly && !!(d.serial || d.wwn) && (d.parts ?? []).every((p) => !(p.holders ?? []).length && !p.busy && !p.swap);
 /** 마운트 풀기 막는 것: 저장 경로, 엔진 저장 위치, 운영자 마운트(fstab) */
-export function unmountBlock(dev: DNodeDevices, p: DBlockPart): { roots: string[]; runtime: string[]; fstab: boolean } {
-  return { roots: [...(p.storageRoots ?? [])], runtime: (p.purposes ?? []).includes('container-runtime') ? (p.mounts ?? []) : [], fstab: !managedRecord(dev, p) };
+export function unmountBlock(dev: DNodeDevices, p: DBlockPart): { roots: string[]; runtime: string[]; fstab: boolean; fuse: string[] } {
+  return { roots: [...(p.storageRoots ?? [])], runtime: (p.purposes ?? []).includes('container-runtime') ? (p.mounts ?? []) : [], fstab: !managedRecord(dev, p), fuse: fuseBundlesOn(dev, p.name) };
 }
+/** 이 파티션에 조각 파일을 둔 FUSE 묶음 (#819: 마운트 풀기·포맷은 busy) */
+export const fuseBundlesOn = (dev: DNodeDevices, part: string) => (dev.bundles ?? []).filter((b) => b.backend === 'fuse' && (b.members ?? []).some((m) => m.part === part)).map((b) => b.name);
 export const shortUuid = (u: string) => (u.length > 10 ? `${u.slice(0, 4)}…${u.slice(-4)}` : u);
 export const MOUNT_BASE = '/var/lib/sfc-disks';
 const SYSTEM_PATHS = ['/bin', '/boot', '/dev', '/etc', '/lib', '/lib32', '/lib64', '/libx32', '/proc', '/root', '/run', '/sbin', '/snap', '/sys', '/tmp', '/usr', '/var/lib/docker', '/var/lib/sfe', '/var/lib/sfc', '/var/lib/containerd', '/var/log', '/var/cache', '/var/tmp'];
@@ -98,13 +104,13 @@ function UseBar({ s }: { s?: { total: number; used: number } }) {
 }
 
 /** 표 줄: 파티션 하나, 그 위 LVM·RAID·암호화 장치는 아래 줄로 */
-function PartRows({ p }: { p: DBlockPart }) {
+function PartRows({ p, name }: { p: DBlockPart; name?: string }) {
   const mounts = p.mounts ?? [];
   return (
     <>
       <tr>
         <td className="mono">
-          {p.number === 0 ? '— (디스크 전체)' : p.name}
+          {name ?? (p.number === 0 ? '— (디스크 전체)' : p.name)}
         </td>
         <td className="mono small">{p.swap ? 'swap' : mounts.length ? mounts.join(', ') : '—'}</td>
         <td className="small">
@@ -131,11 +137,12 @@ function PartRows({ p }: { p: DBlockPart }) {
 }
 
 /** '이 디스크 위' 칩: 저장 경로, 엔진 저장 위치(컨테이너 실행) */
-function OnDisk({ d }: { d: DBlockDisk }) {
+function OnDisk({ d, dev }: { d: DBlockDisk; dev: DNodeDevices }) {
   const parts = d.parts ?? [];
   const roots = [...new Set(parts.flatMap((p) => p.storageRoots ?? []))];
   const runtime = parts.filter((p) => (p.purposes ?? []).includes('container-runtime')).flatMap(mountsOf);
-  if (!roots.length && !runtime.length) return null;
+  const fuse = [...new Set(parts.flatMap((p) => fuseBundlesOn(dev, p.name)))];
+  if (!roots.length && !runtime.length && !fuse.length) return null;
   return (
     <div className="row" style={{ gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
       <span className="small muted">이 디스크 위</span>
@@ -149,6 +156,11 @@ function OnDisk({ d }: { d: DBlockDisk }) {
           엔진 저장 위치 <span className="mono">{m}</span>
         </span>
       ))}
+      {fuse.map((b) => (
+        <span key={b} className="chip">
+          묶음 <b>{b}</b>의 조각 파일 (FUSE)
+        </span>
+      ))}
     </div>
   );
 }
@@ -160,11 +172,11 @@ function DiskBox({ d, dev, onMakeRoot, onAction }: { d: DBlockDisk; dev: DNodeDe
   const unmount = (p: DBlockPart) => {
     const b = unmountBlock(dev, p);
     const path = (p.mounts ?? [])[0] ?? '';
-    onAction?.(b.roots.length || b.runtime.length || b.fstab ? { kind: 'blocked', disk: d, path, ...b } : { kind: 'unmount', disk: d, part: p, path });
+    onAction?.(b.roots.length || b.runtime.length || b.fstab || b.fuse.length ? { kind: 'blocked', disk: d, path, ...b } : { kind: 'unmount', disk: d, part: p, path });
   };
   const blocked = (p: DBlockPart) => {
     const b = unmountBlock(dev, p);
-    return b.roots.length > 0 || b.runtime.length > 0 || b.fstab;
+    return b.roots.length > 0 || b.runtime.length > 0 || b.fstab || b.fuse.length > 0;
   };
   const [tone, state] = diskState(d);
   const cands = [...new Set(rootCandidates(d))];
@@ -232,7 +244,7 @@ function DiskBox({ d, dev, onMakeRoot, onAction }: { d: DBlockDisk; dev: DNodeDe
           </table>
         </div>
       )}
-      <OnDisk d={d} />
+      <OnDisk d={d} dev={dev} />
       {onAction && d.class === 'additional' && own.length > 0 && <MountOwner dev={dev} parts={own} />}
       {d.locked && <div className="note small">🔒 {LOCKED_TEXT}</div>}
       {viewOnly && <span className="small muted">LVM·RAID·암호화 장치는 보기만 합니다.</span>}
@@ -291,15 +303,18 @@ export const rootsUnder = (roots: StorageRoot[], path: string) => roots.filter((
 
 /** 디스크 탭 본문. dev가 없으면(옛 데몬) 안내만 */
 export function DiskGroups({ dev, live, refresh, roots = [], onMakeRoot, onAction }: { dev: DNodeDevices | undefined; live?: boolean; refresh?: ReactNode; roots?: StorageRoot[]; onMakeRoot: (path: string) => void; onAction?: (a: DiskDlg) => void }) {
-  const disks = dev?.disks ?? [];
+  const all = dev?.disks ?? [];
+  // 묶음 자체 장치(kind bundle)는 묶음 상자로, 구성원(bundle-member)은 그 상자 안에만 보인다
+  const disks = all.filter((d) => d.kind !== 'bundle');
+  const bundles = dev?.bundles ?? [];
   const lvm = disks.flatMap((d) => (d.parts ?? []).flatMap((p) => p.holders ?? [])).length;
   const total = disks.reduce((n, d) => n + d.size, 0);
-  const used = disks.flatMap((d) => (d.parts ?? []).flatMap((p) => [p.space, ...(p.holders ?? []).map((h) => h.space)])).reduce((n, s) => n + (s?.used ?? 0), 0);
+  const used = all.flatMap((d) => (d.parts ?? []).flatMap((p) => [p.space, ...(p.holders ?? []).map((h) => h.space)])).reduce((n, s) => n + (s?.used ?? 0), 0);
   return (
     <>
-      <HelpBox terms="디스크 (disk) · 파티션 표 (partition table) · 포맷 (format, ext4) · 마운트 (mount) · 다른 장치가 사용 중 (LVM·RAID·암호화 holder)">
+      <HelpBox terms="디스크 (disk) · 파티션 표 (partition table) · 포맷 (format, ext4) · 마운트 (mount) · 디스크 묶음 (이어 붙이기·미러 · LVM은 미사용 디스크, FUSE는 마운트된 파티션의 남는 공간) · 다른 장치가 사용 중 (LVM·RAID·암호화 holder)">
         <b>이 화면은</b> 이 서버에 붙은 디스크입니다. 마운트 지점에 따라 시스템 디스크·추가 디스크·미사용 디스크로 나눕니다.{' '}
-        {onAction ? '추가·미사용 디스크는 여기서 포맷하고 마운트할 수 있고, 그 위에 저장 경로를 만들 수 있습니다. 디스크 작업은 이 서버 혼자의 일이라 합의(Raft)에 쓰지 않고 서명된 기록에 남깁니다.' : '마운트된 곳에는 저장 경로를 만들 수 있습니다.'}
+        {onAction ? '추가·미사용 디스크는 여기서 포맷하고 마운트할 수 있고, 미사용 디스크 여러 개를 하나로 묶을 수 있고, 그 위에 저장 경로를 만들 수 있습니다. 디스크 작업은 이 서버 혼자의 일이라 합의(Raft)에 쓰지 않고 서명된 기록에 남깁니다.' : '마운트된 곳에는 저장 경로를 만들 수 있습니다.'}
       </HelpBox>
       {!dev ? (
         <div className="bn info small">
@@ -310,7 +325,7 @@ export function DiskGroups({ dev, live, refresh, roots = [], onMakeRoot, onActio
           <div className="row small muted" style={{ justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
             <span>
               {live ? '실시간 · ' : ''}
-              {hhmmss(new Date(dev.observedAt * 1000))} 기준 · 디스크 {disks.length}개{lvm ? ` · LVM 장치 ${lvm}개` : ''} · 시스템 관리자만 바꿀 수 있음
+              {hhmmss(new Date(dev.observedAt * 1000))} 기준 · 디스크 {disks.length}개{bundles.length ? ` · 디스크 묶음 ${bundles.length}개` : ''}{lvm ? ` · LVM 장치 ${lvm}개` : ''} · 시스템 관리자만 바꿀 수 있음
             </span>
             <span className="row" style={{ gap: 12, alignItems: 'center' }}>
               <span>
@@ -323,11 +338,44 @@ export function DiskGroups({ dev, live, refresh, roots = [], onMakeRoot, onActio
           {dev.truncated && <div className="note wa small">디스크가 많아 일부만 보입니다.</div>}
           {GROUPS.map((g) => {
             const list = disks.filter((d) => d.class === g.cls);
-            const missing = g.cls === 'additional' ? missingRecords(dev).filter((r) => !disks.some((d) => d.name === r.disk)) : [];
+            const pools = g.cls === 'additional' ? bundles : [];
+            const missing = g.cls === 'additional' ? missingRecords(dev).filter((r) => !all.some((d) => d.name === r.disk)) : [];
+            const canBundle = disks.filter((d) => d.class === 'unused' && bundleable(d)).length >= 2;
+            const canFuse = fuseCandidates(dev).filter((c) => !c.why).length >= 2;
+            const actions = (
+              <span className="row" style={{ gap: 8, alignItems: 'center' }}>
+                <span className="small muted">{g.sub}</span>
+                {onAction && g.cls === 'additional' && (
+                  <button type="button" className="btn sm" disabled={!canFuse} title={canFuse ? 'FUSE로 마운트된 파티션의 남는 공간을 묶습니다 · 느린 저장소(백업·registry용)' : '마운트된 파티션이 2개 이상일 때만 누를 수 있습니다'} onClick={() => onAction({ kind: 'bundle', backend: 'fuse' })}>
+                    파티션 묶기…
+                  </button>
+                )}
+                {onAction && g.cls === 'unused' && (
+                  <button type="button" className="btn sm" disabled={!canBundle} title={canBundle ? undefined : '미사용 디스크가 2개 이상일 때만 누를 수 있습니다'} onClick={() => onAction({ kind: 'bundle' })}>
+                    디스크 묶기…
+                  </button>
+                )}
+              </span>
+            );
             return (
-              <Card key={g.cls} title={g.title} actions={<span className="small muted">{g.sub}</span>}>
+              <Card key={g.cls} title={g.title} actions={actions}>
                 <div className="col" style={{ gap: 12 }}>
-                  {!list.length && !missing.length ? <span className="small muted">{g.empty}</span> : list.map((d) => <DiskBox key={d.name} d={d} dev={dev} onMakeRoot={onMakeRoot} onAction={onAction} />)}
+                  {!list.length && !missing.length && !pools.length ? <span className="small muted">{g.empty}</span> : list.map((d) => <DiskBox key={d.name} d={d} dev={dev} onMakeRoot={onMakeRoot} onAction={onAction} />)}
+                  {pools.map((b) => {
+                    const bd = all.find((d) => d.kind === 'bundle' && (d.bundle ?? d.name) === b.name);
+                    return (
+                      <BundleBox
+                        key={b.name}
+                        b={b}
+                        d={bd}
+                        roots={roots}
+                        table={(bd?.parts ?? []).map((p) => <PartRows key={p.name} p={p} name={p.number === 0 ? b.name : undefined} />)}
+                        onMakeRoot={onMakeRoot}
+                        onUnbundle={onAction && (() => onAction({ kind: 'unbundle', b }))}
+                        onReplace={onAction && ((member) => onAction({ kind: 'replace', b, member }))}
+                      />
+                    );
+                  })}
                   {missing.map((r) => (
                     <MissingBox key={r.uuid} rec={r} roots={roots} onAction={onAction} />
                   ))}

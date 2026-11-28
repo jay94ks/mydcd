@@ -85,7 +85,7 @@ balance:
   method: hash
   key: cookie:session
   locality: same-node
-  slow_start: 30
+  warmup: 30s
   retry: 1
   weights:
     stable: 4
@@ -107,7 +107,7 @@ balance:
   fallback: default
 ```
 
-방식은 기본 smooth weighted `round-robin`, 활성 요청수/가중치의 `least-request`, weighted rendezvous `hash`, 가중 `random`이다. hash 키는 source-ip·cookie:name·header:name이고 키가 없으면 순환한다. `same-node`는 현재 노드의 사용 가능한 backend를 먼저 고른다. health 실패·drain·정원 도달 backend는 후보에서 빠진다. `slow_start`는 초 단위이며 backend가 새로 healthy가 된 뒤 비중을 점진적으로 높인다.
+방식은 기본 smooth weighted `round-robin`, 활성 요청수/가중치의 `least-request`, weighted rendezvous `hash`, 가중 `random`이다. hash 키는 source-ip·cookie:name·header:name이고 키가 없으면 순환한다. `same-node`는 현재 노드의 사용 가능한 backend를 먼저 고른다. health 실패·drain·정원 도달 backend는 후보에서 빠진다. `warmup`은 시간(`30s`, 최대 `1h`)이며 backend가 새로 healthy가 된 뒤 비중을 점진적으로 높인다.
 
 그룹은 labels·version·명시 backend ID로 정의한다. 조건은 위에서부터 처음 맞는 하나만 적용한다. header/cookie/query의 equal·prefix·present, methods, source CIDR, percent를 조합할 수 있다. 비율은 같은 키에 같은 결과를 주며 percent 합계100 초과·없는 그룹·잘못된 이름은 거부한다. 그룹이 비면 default는 전체 후보로,503은 실패로 끝낸다. weight 범위는1~1024다.
 

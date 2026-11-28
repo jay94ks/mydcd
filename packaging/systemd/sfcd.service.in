@@ -1,0 +1,28 @@
+# SPDX-License-Identifier: Apache-2.0
+# Seafield Cluster node daemon. @LIBDIR@ is /usr/lib/sfc (deb, rpm) or
+# /usr/local/lib/sfc (archive); packaging/layout.sh fills it in.
+# Enable it after sfcd init or join: systemctl enable --now sfed sfcd
+[Unit]
+Description=Seafield Cluster node daemon (sfcd)
+Documentation=https://github.com/jay94ks/seafield
+Wants=network-online.target sfed.service
+After=network-online.target
+ConditionPathExists=/etc/sfc/node.yaml
+
+[Service]
+ExecStart=@LIBDIR@/bin/sfcd --config /etc/sfc/node.yaml run
+Restart=on-failure
+RestartSec=5
+# 70: the engine failed in a way a restart does not fix.
+RestartPreventExitStatus=70
+KillSignal=SIGTERM
+TimeoutStopSec=120
+LimitNOFILE=1048576
+# Shared Volume mounts of other servers survive an sfcd restart through the
+# systemd fd store (internal/fdstore, two fds per remote mount).
+NotifyAccess=main
+FileDescriptorStoreMax=256
+FileDescriptorStorePreserve=yes
+
+[Install]
+WantedBy=multi-user.target

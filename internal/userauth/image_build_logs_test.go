@@ -6,31 +6,37 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/jay94ks/seafield/internal/cluster/control"
 	"github.com/jay94ks/seafield/internal/imagebuild"
 )
 
 func TestBuildLogRequestRejectsMixedSelectorsAndUnboundedPages(t *testing.T) {
-	r := Request{Schema: 1, Method: "image-build-logs", Tenant: "tenant", ImageBuildLog: &imagebuild.LogQuery{Job: "build-one", MaxBytes: 4096}}
-	if !r.validMethodFields() || !r.validQuerySelectors() {
+	r := ImageBuildLogsQuery{Tenant: "tenant", Query: imagebuild.LogQuery{Job: "build-one", MaxBytes: 4096}}
+	if !r.Valid() {
 		t.Fatal("valid log query rejected")
 	}
-	for _, edit := range []func(*Request){
-		func(r *Request) { r.Method = "image-builds" }, func(r *Request) { r.ImageBuild = &control.ImageBuildQuery{Part: "jobs"} },
-		func(r *Request) { r.ImageBuildLog = nil }, func(r *Request) { r.Node = "node-a" }, func(r *Request) { r.Tenant = "" },
-		func(r *Request) { r.ImageBuildLog = &imagebuild.LogQuery{Job: "build-one", MaxBytes: 0} },
-		func(r *Request) {
-			r.ImageBuildLog = &imagebuild.LogQuery{Job: "build-one", MaxBytes: 4096, Tail: true}
+	for _, edit := range []func(*ImageBuildLogsQuery){
+		func(r *ImageBuildLogsQuery) { r.Tenant = "" },
+		func(r *ImageBuildLogsQuery) { r.Query = imagebuild.LogQuery{Job: "build-one", MaxBytes: 0} },
+		func(r *ImageBuildLogsQuery) {
+			r.Query = imagebuild.LogQuery{Job: "build-one", MaxBytes: 4096, Tail: true}
 			r.After = "prior-cursor"
 		},
-		func(r *Request) {
-			r.ImageBuildLog = &imagebuild.LogQuery{Job: "build-one", MaxBytes: imagebuild.MaxLogPageBytes + 1}
+		func(r *ImageBuildLogsQuery) {
+			r.Query = imagebuild.LogQuery{Job: "build-one", MaxBytes: imagebuild.MaxLogPageBytes + 1}
 		},
 	} {
 		bad := r
 		edit(&bad)
-		if bad.validMethodFields() && bad.validQuerySelectors() {
-			t.Fatal("mixed/invalid log query accepted")
+		if bad.Valid() {
+			t.Fatal("invalid log query accepted")
+		}
+	}
+	for _, raw := range []string{
+		`{"Tenant":"tenant","Query":{"Job":"build-one","MaxBytes":4096},"Node":"node-a"}`,
+		`{"Tenant":"tenant","Query":{"Job":"build-one","MaxBytes":4096},"ImageBuild":{"Part":"jobs"}}`,
+	} {
+		if strict([]byte(raw), &ImageBuildLogsQuery{}) == nil {
+			t.Fatal("mixed log query accepted", raw)
 		}
 	}
 }
@@ -42,8 +48,7 @@ func TestBuildLogTailKeepsOriginalQueryJSONWhenUnselected(t *testing.T) {
 		t.Fatal("old query encoding changed", string(raw), err)
 	}
 	q.Tail = true
-	r := Request{Schema: 1, Method: "image-build-logs", Tenant: "tenant", ImageBuildLog: &q}
-	if !r.validMethodFields() || !r.validQuerySelectors() {
+	if !(ImageBuildLogsQuery{Tenant: "tenant", Query: q}).Valid() {
 		t.Fatal("tail query refused")
 	}
 }

@@ -8,7 +8,6 @@ import (
 	"crypto/sha256"
 	"github.com/jay94ks/seafield/internal/cluster"
 	"github.com/jay94ks/seafield/internal/cluster/lifecycle"
-	"reflect"
 	"time"
 	"unicode/utf8"
 
@@ -52,22 +51,23 @@ func (r LifecycleStageResult) Valid(module bool) bool {
 func (r Request) lifecycleEditorRequest() bool {
 	return r.Method == "lifecycle-source-stage" || r.Method == "lifecycle-module-stage" || r.Method == "lifecycle-source-recover" || r.Method == "lifecycle-module-recover"
 }
-func (r Request) validLifecycleSourceFields() bool {
-	if !r.lifecycleEditorRequest() {
-		return false
-	}
-	module := r.Method == "lifecycle-module-stage" || r.Method == "lifecycle-module-recover"
-	recover := r.Method == "lifecycle-source-recover" || r.Method == "lifecycle-module-recover"
-	want := Request{Schema: r.Schema, Method: r.Method, Nonce: r.Nonce, Tenant: r.Tenant, Node: r.Node, CheckerSource: r.CheckerSource, CheckerModule: r.CheckerModule, CheckerUpload: r.CheckerUpload}
-	return r.Tenant != "" && (r.Node == "" && !recover || safeID(r.Node)) && r.CheckerSource != nil && r.CheckerSource.Validate() == nil && r.CheckerSource.Tenant == r.Tenant && r.CheckerUpload != nil && *r.CheckerUpload != ([32]byte{}) && (r.CheckerModule != nil) == module && (!module || moduleInput(*r.CheckerSource, *r.CheckerModule)) && reflect.DeepEqual(r, want)
+
+// stageResult decodes a lifecycle editor reply's Data.
+func stageResult(reply Reply) (LifecycleStageResult, bool) {
+	var r LifecycleStageResult
+	return r, len(reply.Data) != 0 && lenient(reply.Data, &r) == nil
 }
 
 func (c Client) stageLifecycle(ctx context.Context, peer sfcp.Peer, session access.Session, node, method string, d checker.SourceDescriptor, pin *checker.ModulePin, upload [32]byte, data []byte) (LifecycleStageResult, error) {
-	request := Request{Method: method, Tenant: d.Tenant, Node: node, CheckerSource: &d, CheckerModule: pin, CheckerUpload: &upload}
-	if c.Verify(session) != nil || !request.validLifecycleSourceFields() || c.Self == nil || session.Key != c.Self.Public {
+	q := CheckerStageQuery{Tenant: d.Tenant, Node: node, Source: d, Module: pin, Upload: upload}
+	if c.Verify(session) != nil || !q.validFor(method) || c.Self == nil || session.Key != c.Self.Public {
 		return LifecycleStageResult{}, sfcp.ErrAdmission
 	}
-	recover := method == "lifecycle-source-recover" || method == "lifecycle-module-recover"
+	request, err := stageRequest(method, q)
+	if err != nil {
+		return LifecycleStageResult{}, err
+	}
+	recover := recoverMethod(method)
 	length, digest := d.Length, d.Digest
 	if pin != nil {
 		length, digest = pin.Length, pin.Digest
@@ -76,7 +76,6 @@ func (c Client) stageLifecycle(ctx context.Context, peer sfcp.Peer, session acce
 		return LifecycleStageResult{}, sfcp.ErrAdmission
 	}
 	var reply Reply
-	var err error
 	if recover {
 		body, e := requestBody(request)
 		if e != nil {
@@ -89,28 +88,28 @@ func (c Client) stageLifecycle(ctx context.Context, peer sfcp.Peer, session acce
 		reply, err = c.stageCheckerArtifact(ctx, peer, session, request, data)
 	}
 	if err != nil {
-		if meta := reply.LifecycleStage; meta != nil && meta.MetadataValid() && meta.Upload == upload && meta.Descriptor.Tenant == d.Tenant && meta.Descriptor.ContentDigest() == d.ContentDigest() && (node == "" || meta.Node == node) {
-			return *meta, err
+		if meta, ok := stageResult(reply); ok && meta.MetadataValid() && meta.Upload == upload && meta.Descriptor.Tenant == d.Tenant && meta.Descriptor.ContentDigest() == d.ContentDigest() && (node == "" || meta.Node == node) {
+			return meta, err
 		}
 		return LifecycleStageResult{}, err
 	}
-	result := reply.LifecycleStage
-	if result == nil || !result.Valid(pin != nil) || result.Descriptor.ContentDigest() != d.ContentDigest() || result.Descriptor.Tenant != d.Tenant || result.Upload != upload || node != "" && result.Node != node || result.Source != nil && result.Source.Cluster != c.Cluster || result.Module != nil && (result.Module.Cluster != c.Cluster || result.Module.Module != *pin) {
+	result, ok := stageResult(reply)
+	if !ok || !result.Valid(pin != nil) || result.Descriptor.ContentDigest() != d.ContentDigest() || result.Descriptor.Tenant != d.Tenant || result.Upload != upload || node != "" && result.Node != node || result.Source != nil && result.Source.Cluster != c.Cluster || result.Module != nil && (result.Module.Cluster != c.Cluster || result.Module.Module != *pin) {
 		return LifecycleStageResult{}, sfcp.ErrFrame
 	}
-	return *result, nil
+	return result, nil
 }
 func (c Client) StageLifecycleSource(ctx context.Context, peer sfcp.Peer, session access.Session, node string, d checker.SourceDescriptor, upload [32]byte, data []byte) (LifecycleStageResult, error) {
-	return c.stageLifecycle(ctx, peer, session, node, "lifecycle-source-stage", d, nil, upload, data)
+	return c.stageLifecycle(ctx, peer, session, node, LifecycleSourceStageMethod.Name, d, nil, upload, data)
 }
 func (c Client) StageLifecycleModule(ctx context.Context, peer sfcp.Peer, session access.Session, node string, d checker.SourceDescriptor, upload [32]byte, module checker.ModuleArchive) (LifecycleStageResult, error) {
-	return c.stageLifecycle(ctx, peer, session, node, "lifecycle-module-stage", d, &module.Pin, upload, module.ZIP)
+	return c.stageLifecycle(ctx, peer, session, node, LifecycleModuleStageMethod.Name, d, &module.Pin, upload, module.ZIP)
 }
 func (c Client) RecoverLifecycleSource(ctx context.Context, peer sfcp.Peer, session access.Session, node string, d checker.SourceDescriptor, upload [32]byte) (LifecycleStageResult, error) {
-	return c.stageLifecycle(ctx, peer, session, node, "lifecycle-source-recover", d, nil, upload, nil)
+	return c.stageLifecycle(ctx, peer, session, node, LifecycleSourceRecoverMethod.Name, d, nil, upload, nil)
 }
 func (c Client) RecoverLifecycleModule(ctx context.Context, peer sfcp.Peer, session access.Session, node string, d checker.SourceDescriptor, upload [32]byte, pin checker.ModulePin) (LifecycleStageResult, error) {
-	return c.stageLifecycle(ctx, peer, session, node, "lifecycle-module-recover", d, &pin, upload, nil)
+	return c.stageLifecycle(ctx, peer, session, node, LifecycleModuleRecoverMethod.Name, d, &pin, upload, nil)
 }
 
 func (s Service) streamLifecycleSource(ctx context.Context, conn *sfcp.Session, stream sfcp.Stream, frame sfcp.Frame, header [32]byte, envelope Envelope, request Request, binding userBinding) error {
@@ -122,16 +121,17 @@ func (s Service) streamLifecycleSource(ctx context.Context, conn *sfcp.Session, 
 		}
 		return err
 	}
-	if envelope.Session == nil || !request.validLifecycleSourceFields() {
+	q, ok := request.checkerStage()
+	if envelope.Session == nil || !ok || !request.lifecycleEditorRequest() {
 		return respond(Reply{Schema: 1, Code: "denied"})
 	}
-	recover := request.Method == "lifecycle-source-recover" || request.Method == "lifecycle-module-recover"
-	module := request.Method == "lifecycle-module-stage" || request.Method == "lifecycle-module-recover"
+	recover := recoverMethod(request.Method)
+	module := moduleMethod(request.Method)
 	current, view, allowed := s.planStreamView(ctx, binding, request, envelope, s.Engine.IsLeader())
 	if allowed.Code != "ok" {
 		return respond(allowed)
 	}
-	selected, err := current.Policy.LifecycleProviderFor(view.State, *envelope.Session, time.Now().Unix(), *request.CheckerSource, request.Node, s.Self.Public, recover)
+	selected, err := current.Policy.LifecycleProviderFor(view.State, *envelope.Session, time.Now().Unix(), q.Source, q.Node, s.Self.Public, recover)
 	if err != nil {
 		return respond(Reply{Schema: 1, Code: checkerArtifactFailure(err)})
 	}
@@ -143,15 +143,15 @@ func (s Service) streamLifecycleSource(ctx context.Context, conn *sfcp.Session, 
 		if publication == nil {
 			return respond(Reply{Schema: 1, Code: "unavailable"})
 		}
-		finish, cause := publication.BeginPublication(ctx, *envelope.Session, *request.CheckerSource, *request.CheckerUpload, recover)
+		finish, cause := publication.BeginPublication(ctx, *envelope.Session, q.Source, q.Upload, recover)
 		if cause != nil {
 			return respond(Reply{Schema: 1, Code: checkerArtifactFailure(cause)})
 		}
 		defer finish()
 	}
-	metadata := LifecycleStageResult{Node: selected.Node, Owner: selected.Owner, Descriptor: request.CheckerSource.Clone(), Upload: *request.CheckerUpload}
+	metadata := LifecycleStageResult{Node: selected.Node, Owner: selected.Owner, Descriptor: q.Source.Clone(), Upload: q.Upload}
 	if !recover {
-		if err = respond(Reply{Schema: 1, Code: "continue", LifecycleStage: &metadata}); err != nil {
+		if err = respond(dataReply("continue", metadata)); err != nil {
 			return err
 		}
 	}
@@ -161,9 +161,9 @@ func (s Service) streamLifecycleSource(ctx context.Context, conn *sfcp.Session, 
 			return err
 		}
 	} else {
-		length, digest, limit := request.CheckerSource.Length, request.CheckerSource.Digest, checker.MaxScriptBytes
+		length, digest, limit := q.Source.Length, q.Source.Digest, checker.MaxScriptBytes
 		if module {
-			length, digest, limit = request.CheckerModule.Length, request.CheckerModule.Digest, checker.MaxModuleBytes
+			length, digest, limit = q.Module.Length, q.Module.Digest, checker.MaxModuleBytes
 		}
 		data, err = readUserInput(conn, stream, frame.Request, header, int(length), digest, limit)
 		if err != nil {
@@ -196,21 +196,21 @@ func (s Service) streamLifecycleSource(ctx context.Context, conn *sfcp.Session, 
 		reply.RelayedBy = s.Self.Actor()
 		return respond(reply)
 	}
-	result := LifecycleStageResult{Node: selected.Node, Owner: selected.Owner, Descriptor: request.CheckerSource.Clone(), Upload: *request.CheckerUpload}
+	result := LifecycleStageResult{Node: selected.Node, Owner: selected.Owner, Descriptor: q.Source.Clone(), Upload: q.Upload}
 	if module {
 		var fact checker.ModuleFact
 		if recover {
-			fact, err = publication.RecoverPublicationModule(ctx, *envelope.Session, *request.CheckerSource, *request.CheckerUpload, *request.CheckerModule)
+			fact, err = publication.RecoverPublicationModule(ctx, *envelope.Session, q.Source, q.Upload, *q.Module)
 		} else {
-			fact, err = publication.StagePublicationModule(ctx, *envelope.Session, *request.CheckerSource, *request.CheckerUpload, checker.ModuleArchive{Pin: *request.CheckerModule, ZIP: data})
+			fact, err = publication.StagePublicationModule(ctx, *envelope.Session, q.Source, q.Upload, checker.ModuleArchive{Pin: *q.Module, ZIP: data})
 		}
 		result.Module = &fact
 	} else if recover {
 		var fact checker.SourceFact
-		fact, err = publication.RecoverPublication(ctx, *envelope.Session, *request.CheckerSource, *request.CheckerUpload)
+		fact, err = publication.RecoverPublication(ctx, *envelope.Session, q.Source, q.Upload)
 		result.Source = &fact
 	} else {
-		result.Source, result.Diagnostics, err = publication.ValidatePublication(ctx, *envelope.Session, *request.CheckerSource, *request.CheckerUpload, data)
+		result.Source, result.Diagnostics, err = publication.ValidatePublication(ctx, *envelope.Session, q.Source, q.Upload, data)
 	}
 	if err != nil {
 		return respond(Reply{Schema: 1, Code: checkerArtifactFailure(err)})
@@ -230,7 +230,7 @@ func (s Service) streamLifecycleSource(ctx context.Context, conn *sfcp.Session, 
 	if !result.Valid(module) {
 		return sfcp.ErrFrame
 	}
-	return respond(Reply{Schema: 1, Code: "ok", Tenant: request.Tenant, LifecycleStage: &result})
+	return respond(dataReply("ok", result))
 }
 
 // LifecycleSourceQuery reads one page of a lifecycle script's source.

@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from 'vitest';
-import YAML from 'yaml';
-import { fieldPath, fieldValue, withDelivery } from './AppCd';
+import { connectPolicy, fieldPath, fieldValue } from './AppCd';
 
 describe('fieldPath', () => {
   it('서비스 칸만 받는다', () => {
@@ -25,18 +24,15 @@ describe('fieldValue', () => {
   });
 });
 
-describe('withDelivery', () => {
-  it('x-sfc.delivery만 넣고 다른 줄·주석은 둔다', () => {
-    const src = 'name: shop # 앱\nx-sfc:\n  ingress:\n    routes: []\nservices:\n  web: {image: php}\n';
-    const out = withDelivery(src, { repository: 'https://git.example/team/shop.git', branch: 'main', path: 'app.yaml', credential: '', mode: 'manual' });
-    expect(out).toContain('name: shop # 앱');
-    expect(out).toContain('  web: {image: php}');
-    const d = YAML.parse(out)['x-sfc'];
-    expect(d.ingress).toEqual({ routes: [] });
-    expect(d.delivery.source).toEqual({ kind: 'git', repository: 'https://git.example/team/shop.git', ref: 'main', path: 'app.yaml' });
-    expect(d.delivery.sync.mode).toBe('manual');
-    const withCred = YAML.parse(withDelivery(src, { repository: 'git@x:y.git', branch: 'dev', path: 'a.yaml', credential: 'git-ro', mode: 'automatic' }))['x-sfc'].delivery;
-    expect(withCred.source.credential_profile).toBe('git-ro');
-    expect(withCred.sync.mode).toBe('automatic');
+describe('connectPolicy', () => {
+  it('Git 연결 입력으로 처음 정책을 만든다(app.yaml은 그대로)', () => {
+    const p = connectPolicy({ repository: ' https://git.example/team/shop.git ', branch: 'main', path: 'app.yaml', credential: '', mode: 'manual' });
+    expect(p.source).toEqual({ kind: 'git', repository: 'https://git.example/team/shop.git', ref: 'main', path: 'app.yaml', credential: '' });
+    expect(p.enabled).toBe(true);
+    expect(p.sync).toEqual({ mode: 'manual', drift: 'report', prune: false, allowEmpty: false });
+    // sfcd 검사 범위: fetch 1..300, bytes 1..4MiB, queued·active 1
+    expect(p.limits).toEqual({ fetch: 30, bytes: 4194304, queued: 1, active: 1 });
+    expect(p.runtime).toEqual({ mode: 'require-explicit-override', expiry: 'manual-release' });
+    expect(connectPolicy({ repository: 'git@x:y.git', branch: 'dev', path: 'a.yaml', credential: 'git-ro', mode: 'automatic' }).source.credential).toBe('git-ro');
   });
 });

@@ -149,8 +149,8 @@ func TestRealServerNodeLifecycle(t *testing.T) {
 	if code, st := f.do("GET", "/api/v1/nodes/node-1/drain-status", nil); code != 200 || st["operation"] != dp["operation"] {
 		t.Fatalf("last drain status: %d %v", code, st)
 	}
-	// sfcd does not answer for a server that has no drain
-	if code, out := f.do("GET", "/api/v1/nodes/node-0/drain-status", nil); code != 403 {
+	// a server that has no drain: 404 missing, not a permission error
+	if code, out := f.do("GET", "/api/v1/nodes/node-0/drain-status", nil); code != 404 {
 		t.Fatalf("no drain: %d %v", code, out)
 	}
 	// uncordon it again so it admits work

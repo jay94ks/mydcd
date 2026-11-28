@@ -11,10 +11,11 @@
 서버 `node-c`가 `192.168.1.103:7946`에서 `192.168.1.113:7946`으로 바뀐 예다.
 
 ```sh
-# 1. 옮긴 서버에서 (sfcd는 멈춘 채로)
+# 1. 옮긴 서버에서 (sfcd만 멈춘다. 엔진 sfed는 켜 둔다)
 sudo systemctl stop sfcd
 sudo sed -i 's/^\(\s*listen:\).*/\1 192.168.1.113:7946/' /etc/sfc/node.yaml   # 또는 직접 고친다
 sudo sfcd --config /etc/sfc/node.yaml set-listen
+sudo sfcd --config /etc/sfc/node.yaml check
 
 # 2. 관리 PC에서 (다른 서버를 거쳐도 된다)
 sfcli node set-endpoint node-c 192.168.1.113:7946
@@ -27,6 +28,10 @@ sfcli node show node-c
 ```
 
 1과 2는 어느 쪽을 먼저 해도 된다. 3은 1 뒤에 한다.
+
+`sfcd check`는 엔진(sfed)에도 닿아 보므로, sfed까지 멈췄다면 설정 파일이 맞아도 실패한다. 이때 메시지는 "node configuration is valid, but the engine cannot be reached"로 시작한다. 주소를 옮길 때 sfed는 멈출 필요가 없다.
+
+바꾼 뒤 `sfcli cluster status`는 리더가 답해야 모든 투표 서버의 응답을 센다. 팔로워는 자기와 리더만 알아서, 투표 서버가 넷 이상이면 `responding`이 quorum보다 작고 `Stale: true`로 나온다. 그래서 CLI는 context가 리더의 주소를 알면 리더에게 다시 묻고, 모르거나 리더에 닿지 못하면 팔로워가 본 값이라고 한 줄 알린다(`sfcli context trust`로 리더 주소를 넣는다).
 
 - `sfcd set-listen`: node.yaml의 `listen`을 이 서버의 주소로 받아들인다. 서버는 설치할 때의 주소와 다른 `listen`으로는 켜지지 않는다(설정 파일이 섞이는 것을 막는다). 이 명령은 서버 자신의 설치 기록에 새 주소를 적고 그 서버 키로 다시 서명한다. sfcd가 돌고 있으면 거절한다. 설치할 때의 주소로 되돌리면 덧적은 주소를 지운다.
 - `sfcli node set-endpoint NODE HOST:PORT`: 시스템 관리자 명령이다(`set-node-endpoint`, CAS는 그 서버 항목의 revision). 클러스터 기록에 새 주소를 적고, 리더가 그 주소를 Raft 구성의 서버 주소로 바꾼다. 바뀐 구성이 실제로 설치된 것을 본 뒤에 항목의 주소가 새 주소가 된다. 그동안 단계는 `moving`이다. 명령은 그때까지 기다린다(`--no-wait`이면 받아들여진 뒤 바로 끝난다).

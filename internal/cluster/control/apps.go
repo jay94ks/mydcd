@@ -5,13 +5,16 @@ package control
 import (
 	"bytes"
 	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"io"
 	"slices"
 	"strings"
 
 	"github.com/jay94ks/seafield/internal/access"
 	"github.com/jay94ks/seafield/internal/cluster/state"
 	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/secrets"
 	checker "github.com/jay94ks/seafield/internal/workload/lifecycle"
 	"github.com/jay94ks/seafield/internal/workload/volumes"
 )
@@ -61,7 +64,6 @@ type appEntry struct {
 	TaskRestarts      []TaskRestartRecord  `json:",omitempty"`
 	LastVersion       uint64               `json:",omitempty"`
 	Versions          []appVersion         `json:",omitempty"`
-	LogClears         []AppLogClearRecord  `json:",omitempty"`
 	Inventory         deployment.Inventory
 	Origin            UserOperation
 	Down              *UserOperation               `json:",omitempty"`
@@ -80,7 +82,6 @@ type appRow struct {
 	TaskRestarts  []TaskRestartRecord  `json:",omitempty"`
 	LastVersion   uint64               `json:",omitempty"`
 	Versions      []appVersion         `json:",omitempty"`
-	LogClears     []AppLogClearRecord  `json:",omitempty"`
 	Inventory     json.RawMessage      `json:",omitempty"`
 	Origin        UserOperation
 	Down          *UserOperation               `json:",omitempty"`
@@ -234,13 +235,13 @@ func (p Policy) decodeApps(s state.State, raw []byte, revision uint64) (Apps, er
 			return a, ErrCatalog
 		}
 		last = key
-		entry := appEntry{Standalone: row.Standalone, LocalEdit: row.LocalEdit, Local: row.Local, CDHistory: row.CDHistory, CDHistoryNext: row.CDHistoryNext, CDDecision: row.CDDecision, TaskRestarts: row.TaskRestarts, LastVersion: row.LastVersion, Versions: row.Versions, LogClears: row.LogClears, Inventory: inventory, Origin: row.Origin, Down: row.Down, Compacted: row.Compacted, Delivery: delivery, DeliveryInput: row.DeliveryInput, Sync: row.Sync, PendingSync: row.PendingSync}
+		entry := appEntry{Standalone: row.Standalone, LocalEdit: row.LocalEdit, Local: row.Local, CDHistory: row.CDHistory, CDHistoryNext: row.CDHistoryNext, CDDecision: row.CDDecision, TaskRestarts: row.TaskRestarts, LastVersion: row.LastVersion, Versions: row.Versions, Inventory: inventory, Origin: row.Origin, Down: row.Down, Compacted: row.Compacted, Delivery: delivery, DeliveryInput: row.DeliveryInput, Sync: row.Sync, PendingSync: row.PendingSync}
 		for _, claim := range entry.Inventory.Claims() {
 			if claim.Observation != nil && !validUserRestart(entry, *claim.Observation) {
 				return a, ErrCatalog
 			}
 		}
-		if !validStandaloneMetadata(entry.Standalone, scope) || !validStandaloneExtensionOrigin(entry) || entry.Standalone != nil && (entry.Delivery != nil || entry.Sync != nil && entry.Sync.Recreate == nil || entry.Local != nil) || !validCDHistory(entry) || !validCDDecision(entry.CDDecision, scope) || !validAppVersions(entry) || p.validateAppEntryDown(entry) != nil || validateLogClearRecords(entry.LogClears, scope) != nil || validateTaskRestarts(entry.TaskRestarts, scope) != nil {
+		if !validStandaloneMetadata(entry.Standalone, scope) || !validStandaloneExtensionOrigin(entry) || entry.Standalone != nil && (entry.Delivery != nil || entry.Sync != nil || entry.Local != nil) || !validCDHistory(entry) || !validCDDecision(entry.CDDecision, scope) || !validAppVersions(entry) || p.validateAppEntryDown(entry) != nil || validateTaskRestarts(entry.TaskRestarts, scope) != nil {
 			return a, ErrCatalog
 		}
 		if validateAppDelivery(entry, disk.Uploads) != nil || validateAppLocal(entry) != nil {
@@ -313,7 +314,7 @@ func (p Policy) appsCheckpoint(s state.State, a Apps, signedAt ...uint64) (map[s
 		if versionErr != nil || !validAppVersions(e) || validateAppLocal(e) != nil {
 			return nil, state.Invalid
 		}
-		row := appRow{Standalone: e.Standalone, LocalEdit: e.LocalEdit, Local: ownLocalGrant(e.Local), CDDecision: e.CDDecision, TaskRestarts: e.TaskRestarts, LastVersion: e.LastVersion, Versions: e.Versions, LogClears: e.LogClears, Origin: e.Origin, Down: e.Down, Compacted: e.Compacted, DeliveryInput: e.DeliveryInput, Sync: e.Sync, PendingSync: e.PendingSync}
+		row := appRow{Standalone: e.Standalone, LocalEdit: e.LocalEdit, Local: ownLocalGrant(e.Local), CDDecision: e.CDDecision, TaskRestarts: e.TaskRestarts, LastVersion: e.LastVersion, Versions: e.Versions, Origin: e.Origin, Down: e.Down, Compacted: e.Compacted, DeliveryInput: e.DeliveryInput, Sync: e.Sync, PendingSync: e.PendingSync}
 		var err error
 		if e.Delivery != nil {
 			d, followErr := e.Delivery.FollowInventory(e.Delivery.Revision(), e.Inventory)
@@ -369,12 +370,6 @@ func (p Policy) authorizeApp(c access.Catalog, op UserOperation) error {
 		return c.AuthorizeSession(op.Session, p.Cluster, p.Issuer(op.Session.Issuer), op.At, q.Tenant, access.ManageCD, "")
 	case "standalone-stop", "standalone-start", "standalone-restart", "restart-task":
 		var q TaskRestartChange
-		if canonical(op.Change.Payload, &q) != nil || !q.valid() {
-			return access.ErrInvalid
-		}
-		return c.AuthorizeSession(op.Session, p.Cluster, p.Issuer(op.Session.Issuer), op.At, q.Tenant, access.Deploy, "")
-	case "clear-app-logs", "standalone-clear-logs":
-		var q AppLogClear
 		if canonical(op.Change.Payload, &q) != nil || !q.valid() {
 			return access.ErrInvalid
 		}
@@ -505,6 +500,11 @@ func (p Policy) appPlanningFromApps(s state.State, actor, tenant string, apps Ap
 	if err != nil {
 		return ctx, err
 	}
+	vault, err := p.Vault(s)
+	if err != nil {
+		return ctx, err
+	}
+	ctx.SecretRevisions = secretRevisions(vault.Trees)
 	members, err := p.Members(s)
 	if err != nil {
 		return ctx, err
@@ -633,8 +633,6 @@ func (p Policy) reduceApps(s state.State, cmd state.Command) (map[string][]byte,
 		return p.reduceCDApprover(s, a, op)
 	case "standalone-stop", "standalone-start", "standalone-restart", "restart-task":
 		return p.beginTaskRestart(s, a, op)
-	case "clear-app-logs", "standalone-clear-logs":
-		return p.beginAppLogClear(s, a, c, op)
 	case "resume-app-retirement":
 		return p.reduceAppRetirementReplay(s, a, op)
 	case "resume-app-step":
@@ -821,7 +819,11 @@ func (p Policy) reduceApps(s state.State, cmd state.Command) (map[string][]byte,
 			// rewrite its original execution. CD has its own explicit sync.
 			return nil, state.ConditionFailed
 		}
-		entry.Inventory, err = entry.Inventory.Begin(entry.Inventory.Revision(), c, ctx, plan, v.Operation, cmd.Actor, cmd.Epoch, v.Prune)
+		begin := entry.Inventory.Begin
+		if change.Action == "begin-app" {
+			begin = entry.Inventory.BeginDeploy
+		}
+		entry.Inventory, err = begin(entry.Inventory.Revision(), c, ctx, plan, v.Operation, cmd.Actor, cmd.Epoch, v.Prune)
 		if err != nil {
 			return nil, state.ConditionFailed
 		}
@@ -902,19 +904,21 @@ func (p Policy) reduceApps(s state.State, cmd state.Command) (map[string][]byte,
 }
 
 type AppView struct {
-	Replacement                   *deployment.ReplacementProgress `json:",omitempty"`
-	LogClear                      *AppLogClearStatus              `json:",omitempty"`
-	Tenant, App, Deployment       string
-	Revision                      uint64
-	Operation                     deployment.OperationSummary
-	Claims                        int
-	Retirement                    *AppRetirementStatus `json:",omitempty"`
-	Health                        string               `json:",omitempty"`
-	ObservedAt, ObservationMaxAge uint64               `json:",omitempty"`
-	DownTarget                    *[32]byte            `json:",omitempty"`
-	BeginTarget                   *[32]byte            `json:",omitempty"`
-	CD                            *AppCDView           `json:",omitempty"`
-	ImageSourceNoLongerTrusted    bool                 `json:",omitempty"`
+	Replacement             *deployment.ReplacementProgress `json:",omitempty"`
+	Tenant, App, Deployment string
+	Revision                uint64
+	Operation               deployment.OperationSummary
+	Claims                  int
+	Retirement              *AppRetirementStatus `json:",omitempty"`
+	Health                  string               `json:",omitempty"`
+	// HealthReason is the first cause when Health is not Healthy, for
+	// status display only.
+	HealthReason                  *deployment.HealthReason `json:",omitempty"`
+	ObservedAt, ObservationMaxAge uint64                   `json:",omitempty"`
+	DownTarget                    *[32]byte                `json:",omitempty"`
+	BeginTarget                   *[32]byte                `json:",omitempty"`
+	CD                            *AppCDView               `json:",omitempty"`
+	ImageSourceNoLongerTrusted    bool                     `json:",omitempty"`
 }
 type AppRetirementStatus struct {
 	ID, Status string
@@ -981,7 +985,7 @@ func (a Apps) ObservedPage(c access.Catalog, actor, tenant, after string, now ui
 		}
 		i := a.entries[appKey(tenant, row.App)].Inventory
 		if e, ok := i.Execution(); ok && e.Status() != "Stopping" && e.Status() != "Closed" {
-			row.Health = e.Health(now)
+			row.Health, row.HealthReason = e.HealthWithReason(now)
 		}
 	}
 	return rows, next, nil
@@ -1027,3 +1031,23 @@ func (a Apps) Quiescent() bool {
 
 // appsBook is the AppsKey book (books.go).
 var appsBook = Book{Key: AppsKey, Reduce: byKind(map[state.CommandKind]reducer{state.Module: Policy.reduceApps, state.ModuleReport: Policy.reduceApps, state.ModuleUpload: Policy.reduceApps, state.ModuleAppDown: Policy.reduceApps})}
+
+// secretRevisions digests the current value references behind an app
+// service's inputs from these committed trees. No value is read.
+func secretRevisions(trees map[string]secrets.Tree) func([]deployment.Source) string {
+	return func(sources []deployment.Source) string {
+		h := sha256.New()
+		for _, source := range sources {
+			_, _ = io.WriteString(h, source.Realm)
+			h.Write([]byte{0})
+			tree, ok := trees[source.Realm]
+			if !ok {
+				_, _ = io.WriteString(h, source.Object)
+				h.Write([]byte{0})
+				continue
+			}
+			tree.WriteReferences(h, source.Object)
+		}
+		return hex.EncodeToString(h.Sum(nil))
+	}
+}

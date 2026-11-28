@@ -170,8 +170,8 @@ func verifyManagedTenantRetirement(t *testing.T, ctx context.Context, r *Runtime
 	tenant, _ = catalog.Tenant("retirement")
 	selection := control.TenantRetirementSelection{Tenant: tenant.ID, Operation: "retire-tenant"}
 	change("retirement-begin", "begin-tenant-retirement", tenant.Revision, selection)
-	status, err := user.TenantRetirementPage(ctx, peer, session, tenant.ID, "")
-	if err != nil || status.TenantRetirement == nil || status.TenantRetirement.RemainingCount == 0 || status.TenantRetirement.ClosedOwners != 0 {
+	status, err := user.TenantRetirement(ctx, peer, session, tenant.ID, "")
+	if err != nil || status.RemainingCount == 0 || status.ClosedOwners != 0 {
 		t.Fatal("retained bytes did not block owner closure", err)
 	}
 	var public control.TenantRetirementStatus
@@ -183,16 +183,16 @@ func verifyManagedTenantRetirement(t *testing.T, ctx context.Context, r *Runtime
 		t.Fatal("actual original Volume deletion", err)
 	}
 	wait("actual owner-signed tenant closure", func() bool {
-		reply, err := user.TenantRetirementPage(ctx, peer, session, tenant.ID, "")
-		if err != nil || reply.TenantRetirement == nil {
+		reply, err := user.TenantRetirement(ctx, peer, session, tenant.ID, "")
+		if err != nil {
 			return false
 		}
-		public = *reply.TenantRetirement
+		public = reply
 		return public.RemainingCount == 0 && public.OwnerCount > 0 && public.ClosedOwners == public.OwnerCount
 	})
 	change("retirement-finish", "finish-tenant-retirement", public.Tenant.Revision, selection)
-	reply, err := user.TenantRetirementPage(ctx, peer, session, tenant.ID, "")
-	if err != nil || reply.TenantRetirement == nil || reply.TenantRetirement.Tenant.Phase != access.TenantDeleted {
+	reply, err := user.TenantRetirement(ctx, peer, session, tenant.ID, "")
+	if err != nil || reply.Tenant.Phase != access.TenantDeleted {
 		t.Fatal("tenant tombstone", err)
 	}
 	after, err := r.workload.Status(ctx, deployment.ResourceKey("task", "tenant", "app", "web"))

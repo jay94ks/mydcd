@@ -386,8 +386,8 @@ func testRealVaultManagedRuntime(t *testing.T, replacementWriter bool) {
 	if _, err = provider.Fetch(ctx, "group", secrets.Reference{Profile: "auth", Object: verifierRequest.ProviderObject, Revision: 1, Keys: []string{"verifier"}}); err == nil {
 		t.Fatal("value profile read protected verifier")
 	}
-	page, err := user.Query(ctx, peer, session, "vault", "tenant")
-	if err != nil || len(page.Vault) == 0 || page.VaultRootRevision == 0 || page.VaultTreeRevision != current().Trees["tenant"].Revision() {
+	page, err := user.QueryVault(ctx, peer, session, "tenant", "")
+	if err != nil || len(page.Items) == 0 || page.RootRevision == 0 || page.TreeRevision != current().Trees["tenant"].Revision() {
 		t.Fatal("actual public Vault view", err)
 	}
 	// Unknown/private fields cannot enter replicated management intents.
@@ -732,7 +732,7 @@ func testRealVaultManagedRuntime(t *testing.T, replacementWriter bool) {
 		t.Fatal(e)
 	}
 	apply("app-network", "create-tun-network", resources.Networks.Revision(), tenancy.TUNDefinition{Tenant: "other", Name: "existing", Members: []tenancy.TUNNode{{Node: "node-a", Pools: []tenancy.Subnet{{ID: "pool", Prefix: netip.MustParsePrefix("10.88.0.0/24"), Gateway: netip.MustParseAddr("10.88.0.1"), MTU: 1280}}}}}, state.Applied)
-	document := []byte("name: app\nservices:\n web:\n  image: docker.io/library/php@sha256:" + strings.Repeat("a", 64) + "\n  cpus: 0.1\n  mem_limit: 16m\n  volumes: [data:/data]\n  secrets: [password]\n  networks: {app: {ipv4_address: 10.88.0.10}}\n  x-sfc: {node: node-a, secrets_from: [data]}\nnetworks:\n app: {external: true, name: existing}\nvolumes:\n data:\n  external: true\n  x-sfc: {node: node-a}\nsecrets:\n password:\n  x-sfc: {key: key}\n")
+	document := []byte("name: app\nservices:\n web:\n  image: docker.io/library/php@sha256:" + strings.Repeat("a", 64) + "\n  cpus: 0.1\n  mem_limit: 16m\n  volumes: [data:/data]\n  secrets: [password]\n  networks: {app: {ipv4_address: 10.88.0.10}}\n  x-sfc: {node: node-a, secrets: {from: [data]}}\nnetworks:\n app: {external: true, name: existing}\nvolumes:\n data:\n  external: true\n  x-sfc: {node: node-a}\nsecrets:\n password:\n  x-sfc: {key: key}\n")
 	document = bytes.Replace(document, []byte("secrets: [password]"), []byte(fmt.Sprintf("secrets: [{source: password, target: /run/secrets/password, uid: '%d', gid: '%d', mode: '0400'}]", os.Geteuid(), os.Getegid())), 1)
 	planned, e := user.PlanApp(ctx, peer, session, "other", control.AppPlanRequest{Document: document})
 	if e != nil || planned.AppPlan == nil {
@@ -910,7 +910,7 @@ func testRealVaultManagedRuntime(t *testing.T, replacementWriter bool) {
 	inputFiles := func() []string {
 		t.Helper()
 		var files []string
-		path := filepath.Join(cfg.Node.StateDir, "workload", "inputs")
+		path := filepath.Join(cfg.Node.StateDir, "workload", "inputs-memory")
 		err := filepath.WalkDir(path, func(path string, d fs.DirEntry, err error) error {
 			if os.IsNotExist(err) {
 				return nil

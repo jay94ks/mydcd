@@ -10,9 +10,12 @@ import (
 	"fmt"
 	"github.com/jay94ks/seafield/internal/app"
 	"github.com/jay94ks/seafield/internal/buildinfo"
+	"github.com/jay94ks/seafield/internal/cluster"
 	"github.com/jay94ks/seafield/internal/config"
+	"github.com/jay94ks/seafield/internal/diskfs"
 	"github.com/jay94ks/seafield/internal/engine"
 	"github.com/jay94ks/seafield/internal/identity"
+	"github.com/jay94ks/seafield/internal/sfcimg"
 	"github.com/jay94ks/seafield/internal/sfcp"
 	"io"
 	"os"
@@ -52,7 +55,7 @@ func run(args []string, out, diagnostic io.Writer) int {
 	f.BoolVar(&version, "version", false, "print version")
 	f.BoolVar(&check, "check-config", false, "validate without opening node runtime resources")
 	f.Usage = func() {
-		fmt.Fprintln(diagnostic, "sfcd --config NODE.yaml run|check|engine-config [--output FILE|-]|init [options]|join [options]|recover [options]|restore [options]|set-listen|identity create|show DIR|adopt --plan FILE (offline source preparation)")
+		fmt.Fprintln(diagnostic, "sfcd --config NODE.yaml run|check|engine-config [--output FILE|-]|init [options]|join [options]|recover [options]|restore [options]|set-listen|identity create|show DIR|diskfs serve SPEC|diskfs check CHUNK|adopt --plan FILE (offline source preparation)")
 		f.PrintDefaults()
 	}
 	if err := f.Parse(args); err != nil {
@@ -77,6 +80,26 @@ func run(args []string, out, diagnostic io.Writer) int {
 			return fail(diagnostic, err, 1)
 		}
 		fmt.Fprintln(out, self.Actor())
+		return 0
+	}
+	if len(args) == 3 && args[0] == "diskfs" && args[1] == "check" {
+		// Reads one chunk file's headers and region map (testing aid).
+		h, allocated, err := sfcimg.Check(args[2])
+		if err != nil {
+			return fail(diagnostic, err, 1)
+		}
+		fmt.Fprintf(out, "bundle=%x mode=%d grow=%t copy=%d index=%d start=%d length=%d allocated=%d generation=%d\n", h.Bundle, h.Mode, h.Grow, h.Copy, h.Index, h.Start, h.Length, allocated, h.Generation)
+		return 0
+	}
+	if len(args) == 3 && args[0] == "diskfs" && args[1] == "serve" {
+		// One fuse disk bundle's server process; sfcd itself starts it
+		// (devel/design/node-disk-bundles.md §2-5).
+		if check || file.set {
+			return fail(diagnostic, errors.New("diskfs serve takes no --config"), 2)
+		}
+		if err := diskfs.Serve(args[2]); err != nil {
+			return fail(diagnostic, err, 1)
+		}
 		return 0
 	}
 	if len(args) == 3 && args[0] == "identity" && args[1] == "show" {
@@ -148,7 +171,10 @@ func run(args []string, out, diagnostic io.Writer) int {
 			return fail(diagnostic, err, 2)
 		}
 		if err = checkEngine(c); err != nil {
-			return fail(diagnostic, err, 1)
+			// The file itself is fine here; say so, so a check made while
+			// the engine is stopped (as during an address move) is not read
+			// as a bad node.yaml. Start sfed and check again.
+			return fail(diagnostic, fmt.Errorf("node configuration is valid, but the engine cannot be reached (start sfed and check again): %w", err), 1)
 		}
 		fmt.Fprintln(out, "valid node configuration, version=1")
 		return 0
@@ -222,11 +248,29 @@ func run(args []string, out, diagnostic io.Writer) int {
 		}
 		break
 	}
+	if ctx.Err() != nil {
+		handOffLeadership(runtime.Engine(), diagnostic)
+	}
 	if err = runtime.Close(); err != nil {
 		return fail(diagnostic, err, 1)
 	}
 	return 0
 }
+
+// handOffLeadership gives leadership away before a stop (SIGTERM, as a
+// package upgrade sends), waiting at most 10 seconds; the stop goes on either
+// way (devel/design/upgrades.md 3-5).
+func handOffLeadership(e *cluster.Engine, diagnostic io.Writer) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	switch done, err := e.HandOffLeadership(ctx); {
+	case err != nil:
+		fmt.Fprintf(diagnostic, "sfcd stopping without a leadership hand-off: %v\n", err)
+	case done:
+		fmt.Fprintln(diagnostic, "sfcd handed leadership to another voter before stopping")
+	}
+}
+
 func fail(out io.Writer, err error, code int) int { fmt.Fprintln(out, err); return code }
 
 // checkEngine reaches the network module's engine and checks its version,

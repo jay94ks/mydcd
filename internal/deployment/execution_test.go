@@ -355,6 +355,12 @@ func TestExecutionSameGoalsNoopUsesRealObjectsAndFreshProofs(t *testing.T) {
 	if x.e.Status() != "Succeeded" || x.e.Health(210) != "Degraded" || expired(x.e).Health(300) != "Unknown" {
 		t.Fatal("operation completion confused with current health")
 	}
+	if _, r := x.e.HealthWithReason(210); r == nil || r.Code != HealthTaskUnhealthy || r.Kind != "task" || r.Name != "db" || r.Key != key || r.Node == "" {
+		t.Fatalf("degraded reason = %+v", r)
+	}
+	if _, r := expired(x.e).HealthWithReason(300); r == nil || r.Code != HealthNotObserved {
+		t.Fatalf("unknown reason = %+v", r)
+	}
 }
 
 func TestExecutionStopSettlesUnknownAndClosesInReverseWithoutDeletingRetain(t *testing.T) {

@@ -32,7 +32,7 @@ export function EngineTab({ node }: { node: NodeView }) {
           items={[
             ['이름 · 버전', PENDING],
             ['API 버전', PENDING],
-            ['시작 표지 (boot)', PENDING],
+            ['부팅 ID (boot)', PENDING],
             ['이벤트 열', PENDING],
             [
               '빌드',

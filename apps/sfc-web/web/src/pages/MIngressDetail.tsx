@@ -7,14 +7,15 @@ import { Load } from '../components/states';
 import { fmtTime } from '../lib/format';
 import { usePoll } from '../lib/usePoll';
 import { MCards, MDetail, MSec, MTiles, useReadOnlyTop } from '../mobile/ReadOnly';
+import { ingressLive } from '../lib/liveTopics';
 
 const n = (x: number) => x.toLocaleString('ko-KR');
 
 export function MIngressDetail() {
   const { tenant = '', app = '' } = useParams();
   const node = useSearchParams()[0].get('node') ?? undefined;
-  const dq = usePoll((s) => ingressApp(tenant, app, s, node), [tenant, app, node], 30_000);
-  const bq = usePoll((s) => ingressBlocks(s), [], 30_000);
+  const dq = usePoll((s) => ingressApp(tenant, app, s, node), [tenant, app, node], 30_000, ingressLive(tenant));
+  const bq = usePoll((s) => ingressBlocks(s), [], 30_000, ingressLive(tenant));
   useReadOnlyTop(app, `외부 접속 · 작업 공간 ${tenant}`, '차단·분배 방식·웹훅 바꾸기는 넓은 화면에서', [tenant, app]);
   return (
     <Load q={dq} what="외부 접속을 읽지 못했습니다">

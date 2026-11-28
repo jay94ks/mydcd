@@ -28,7 +28,7 @@ export function TunnelsDialog({ tenant, name, onClose }: { tenant: string; name:
   return (
     <Dialog title={`${name} 터널 연결`} width={720} onClose={onClose} footer={<button className="btn" onClick={onClose}>닫기</button>}>
       <div className="row between">
-        <span className="small muted">이 망의 서버 쌍마다 터널 상태입니다. ‘다시 연결’은 끊긴 쌍에만 있고, 누르면 그 줄 아래에 진행이 나옵니다. 시스템 관리자만 할 수 있지만 미리 막지 않고 거절을 보여 줍니다. 계속 끊기면 서버 › Mesh 링크에서 원인을 봅니다.</span>
+        <span className="small muted">이 망의 서버 쌍마다 터널 상태입니다. ‘다시 연결’은 끊긴 쌍에만 있고, 누르면 그 줄 아래에 진행이 나옵니다. 시스템 관리자만 할 수 있지만 미리 막지 않고 거절을 보여 줍니다. 계속 끊기면 서버 › 서버 간 연결에서 원인을 봅니다.</span>
         <Refresh q={q} poll={false} />
       </div>
       {wait ? (
@@ -120,7 +120,7 @@ function ReconnectStatus({ r, error }: { r?: DTunnelReconnect; error?: unknown }
 }
 
 /**
- * 터널 다시 연결 동작(망 › 터널 연결 창과 서버 › Mesh 링크 드로어가 같이 쓴다).
+ * 터널 다시 연결 동작(망 › 터널 연결 창과 서버 › 서버 간 연결 드로어가 같이 쓴다).
  * op applied는 접수일 뿐이라 /tunnel-reconnects/op-{opId}로 끝까지 읽는다. 권한은 sfcd 거절을 그대로 보인다.
  */
 export type ReconnectTry = { path: string; body: Record<string, unknown> };

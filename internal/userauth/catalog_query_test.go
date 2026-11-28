@@ -24,15 +24,22 @@ import (
 )
 
 func TestCatalogQuerySelectorsCannotCrossScopes(t *testing.T) {
-	for _, r := range []Request{{Method: "users"}, {Method: "users", After: "opaque"}, {Method: "tenant-members", Tenant: "first"}} {
-		if !r.validMethodFields() || !r.validQuerySelectors() {
-			t.Fatal("valid selector", r.Method)
+	typed := func(method, params string) bool {
+		_, ok, valid := (Request{Schema: 1, Method: method, Params: []byte(params)}).typedMethod()
+		return ok && valid
+	}
+	for _, c := range [][2]string{{"users", `{}`}, {"users", `{"After":"opaque"}`}, {"tenant-members", `{"Tenant":"first"}`}} {
+		if !typed(c[0], c[1]) {
+			t.Fatal("valid selector", c)
 		}
 	}
-	for _, r := range []Request{{Method: "users", Tenant: "first"}, {Method: "users", Node: "node"}, {Method: "users", TargetUser: "alice"}, {Method: "tenant-members"}, {Method: "tenant-members", Tenant: "first", Node: "node"}, {Method: "users", After: strings.Repeat("x", 513)}} {
-		if r.validMethodFields() && r.validQuerySelectors() {
-			t.Fatal("foreign selector accepted", r.Method)
+	for _, c := range [][2]string{{"users", `{"Tenant":"first"}`}, {"users", `{"Node":"node"}`}, {"users", `{"Username":"alice"}`}, {"tenant-members", `{}`}, {"tenant-members", `{"Tenant":"first","Node":"node"}`}, {"users", `{"After":"` + strings.Repeat("x", 513) + `"}`}} {
+		if typed(c[0], c[1]) {
+			t.Fatal("foreign selector accepted", c)
 		}
+	}
+	if _, _, ok := (Request{Schema: 1, Method: "users", Tenant: "first", Params: []byte(`{}`)}).typedMethod(); ok {
+		t.Fatal("old selector field accepted beside Params")
 	}
 }
 
@@ -163,34 +170,34 @@ func TestCatalogQueriesActualRaftUnixAndQUIC(t *testing.T) {
 				}
 				clients[name], sessions[name] = c, s
 			}
-			reply, err := clients["admin"].UsersPage(ctx, target, sessions["admin"], "")
-			if err != nil || len(reply.Users) != 3 || reply.RootRevision == 0 || reply.UsersRevision == 0 {
-				t.Fatal("actual users", reply.Code, err)
+			reply, err := clients["admin"].Users(ctx, target, sessions["admin"], "")
+			if err != nil || len(reply.Users) != 3 || reply.Revision == 0 {
+				t.Fatal("actual users", err)
 			}
 			raw, _ := json.Marshal(reply)
 			if strings.Contains(string(raw), "VerifierRef") || strings.Contains(string(raw), "must-not-escape") {
 				t.Fatal("verifier escaped wire")
 			}
 			for _, name := range []string{"manager", "viewer"} {
-				if _, err := clients[name].UsersPage(ctx, target, sessions[name], ""); err == nil {
+				if _, err := clients[name].Users(ctx, target, sessions[name], ""); err == nil {
 					t.Fatal("non-admin users query", name)
 				}
 			}
-			members, err := clients["manager"].TenantMembersPage(ctx, target, sessions["manager"], "first", "")
-			if err != nil || len(members.TenantMembers) != 3 || members.TenantRevision == 0 || members.TenantMembersRevision != reply.UsersRevision {
-				t.Fatal("actual membership", members.Code, err)
+			members, err := clients["manager"].TenantMembers(ctx, target, sessions["manager"], "first", "")
+			if err != nil || len(members.Members) != 3 || members.TenantRevision == 0 || members.Revision != reply.Revision {
+				t.Fatal("actual membership", err)
 			}
-			if _, err = clients["manager"].TenantMembersPage(ctx, target, sessions["manager"], "second", ""); err == nil {
+			if _, err = clients["manager"].TenantMembers(ctx, target, sessions["manager"], "second", ""); err == nil {
 				t.Fatal("cross-tenant membership leak")
 			}
-			if _, err = clients["viewer"].TenantMembersPage(ctx, target, sessions["viewer"], "first", ""); err == nil {
+			if _, err = clients["viewer"].TenantMembers(ctx, target, sessions["viewer"], "first", ""); err == nil {
 				t.Fatal("viewer membership leak")
 			}
 			// Prove that a signed scope ceiling still constrains a live admin.
 			narrow := sessions["admin"]
 			narrow.Scopes = []access.Scope{{Tenant: "*", Actions: []access.Action{access.Read}}}
 			narrow.Signature = ed25519.Sign(node.Private, access.SessionBytes(narrow))
-			if _, err = clients["admin"].UsersPage(ctx, target, narrow, ""); err == nil {
+			if _, err = clients["admin"].Users(ctx, target, narrow, ""); err == nil {
 				t.Fatal("admin bypassed signed scope")
 			}
 			view, err := e.Read(ctx, true)
@@ -211,12 +218,12 @@ func TestCatalogQueriesActualRaftUnixAndQUIC(t *testing.T) {
 			if err != nil || changed.Result == nil || changed.Result.Code != state.Applied {
 				t.Fatal("actual signed membership change", changed.Code, err)
 			}
-			updated, err := clients["manager"].TenantMembersPage(ctx, target, sessions["manager"], "first", "")
-			if err != nil || updated.TenantMembersRevision <= members.TenantMembersRevision || updated.RootRevision <= members.RootRevision {
+			updated, err := clients["manager"].TenantMembers(ctx, target, sessions["manager"], "first", "")
+			if err != nil || updated.Revision <= members.Revision {
 				t.Fatal("current revision not published", err)
 			}
 			// Restore with an ordinary signed user operation for the next transport.
-			for _, row := range updated.TenantMembers {
+			for _, row := range updated.Members {
 				if row.User == "viewer" {
 					m.Revision = row.Revision
 				}

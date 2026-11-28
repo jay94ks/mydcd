@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/jay94ks/seafield/internal/registry"
+	"github.com/jay94ks/seafield/internal/userauth"
 	"github.com/jay94ks/seafield/internal/web/sfc"
 )
 
@@ -41,13 +42,13 @@ func (s *Server) handleRegistryCredential(w http.ResponseWriter, r *http.Request
 	tenant, id := r.PathValue("t"), r.PathValue("id")
 	ctx, cancel := s.callCtx(r)
 	defer cancel()
-	var cred sfc.RegistryCredential
+	var cred userauth.RegistryCredential
 	err = ws.do(ctx, func(ctx context.Context, c sfc.Conn) error {
 		var err error
 		cred, err = c.RegistryCredential(ctx, tenant, sfc.RegistryCredentialRequest{ID: id, Repository: repo, Actions: actions})
 		return err
 	})
-	defer clear(cred.Token)
+	defer clear(cred.Credential)
 	if err != nil {
 		s.writeBackendError(w, ws, err)
 		return
@@ -62,7 +63,7 @@ func (s *Server) handleRegistryCredential(w http.ResponseWriter, r *http.Request
 		Repository string   `json:"repository"`
 		Access     []string `json:"access"`
 		ExpiresAt  string   `json:"expiresAt"`
-	}{id, cred.Authority, ws.user.Username, string(cred.Token), repo, actions, rfc3339(time.Unix(cred.ExpiresAt, 0))})
+	}{id, cred.Authority, ws.user.Username, string(cred.Credential), repo, actions, rfc3339(time.Unix(cred.ExpiresAt, 0))})
 	defer clear(body)
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")

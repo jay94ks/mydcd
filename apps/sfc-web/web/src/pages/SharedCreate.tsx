@@ -421,7 +421,7 @@ export function ManagedVolumeDialog({ tenant, taken, onClose, onDone }: { tenant
       steps={[create.step]}
       summary={[
         ['이름', <code key="n">{name}</code>],
-        ['앱 이름 공간', app],
+        ['소속 앱', app],
         ['서버', node],
         ['용량', size ? `${size} GiB` : '정하지 않음 (관측만)'],
         ['소유자', <code key="o">{owner}</code>],
@@ -431,7 +431,7 @@ export function ManagedVolumeDialog({ tenant, taken, onClose, onDone }: { tenant
       <Field label="이름" error={nameErr}>
         <input className="mono" value={name} onChange={(e) => setName(e.target.value.trim())} placeholder="shop-media" />
       </Field>
-      <Field label="앱 이름 공간" error={appErr} hint="이 앱의 이름 공간에 만듭니다. 아직 배포하지 않은 앱 이름도 됩니다">
+      <Field label="소속 앱" error={appErr} hint="이 앱 이름 아래에 만듭니다. 아직 배포하지 않은 앱 이름도 됩니다">
         <input className="mono" list="sa-apps" value={app} onChange={(e) => setApp(e.target.value.trim())} />
         <datalist id="sa-apps">
           {appNames.map((a) => (
@@ -600,7 +600,7 @@ export function VaultGroupDialog({ scope, items, onClose, onDone }: { scope: Vau
   const nameErr = nameProblem(name, items.filter((v) => v.parent === root).map((v) => v.id), '항목');
   const pwErr = locked && pw[1] && pw[0] !== pw[1] ? '비밀번호가 다릅니다' : undefined;
   const valid = !!name && !nameErr && (!locked || (pw[0].length >= 8 && pw[0] === pw[1] && !!profile));
-  // 뿌리 묶음의 ID는 작업 공간 이름이다
+  // 최상위 묶음의 ID는 작업 공간 이름이다
   const create = useStep('묶음 만들기 (vault-create)', scope.base, () => ({ kind: 'group', parent: root, id: name }));
   const lock = useSecretStep('묶음 비밀번호 설정 (vault-password)', `${scope.base}/password`, () => vaultPathOf(scope, root, name), (path) => ({ path, password: pw[0], profile }), 'password');
   useEffect(() => () => setPw(['', '']), []);
@@ -672,7 +672,7 @@ export function VaultSecretDialog({ scope, items, group, onClose, onDone }: { sc
   const root = scope.root;
   const groups = groupsOf(items).filter((g) => g.status === 'active');
   const [name, setName] = useState('');
-  // 부모 묶음 ID. 뿌리는 작업 공간 이름
+  // 부모 묶음 ID. 최상위는 작업 공간 이름
   const [parent, setParent] = useState(group ?? root);
   const [keysText, setKeysText] = useState('value');
   const [values, setValues] = useState<Record<string, [string, string]>>({});

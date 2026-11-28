@@ -68,15 +68,26 @@ func (r *Runtime) resolveImageBuildBaseOwner(ctx context.Context, read control.I
 }
 
 func (r *Runtime) resolveImageBuildBase(ctx context.Context, spec imagebuild.JobSpec, source imagebuild.Source) (string, error) {
+	pinned, _, err := r.resolveImageBuildSource(ctx, spec, source)
+	return pinned, err
+}
+
+// unreachableOwner is the code for a source owner this node cannot reach.
+const unreachableOwner = "OWNER_UNREACHABLE"
+
+// resolveImageBuildSource also reports why a resolution failed: the
+// target's or the registry's code, or unreachableOwner. The code is a
+// diagnosis only; the error stays the authority.
+func (r *Runtime) resolveImageBuildSource(ctx context.Context, spec imagebuild.JobSpec, source imagebuild.Source) (string, string, error) {
 	read, err := r.imageBuildBaseWork(ctx, spec, source)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	if read.Target.Code != "" {
 		if read.Target.Code == "UNTRUSTED" {
-			return "", imagebuild.ErrUntrustedBase
+			return "", read.Target.Code, imagebuild.ErrUntrustedBase
 		}
-		return "", imagebuild.ErrSourceFetch
+		return "", read.Target.Code, imagebuild.ErrSourceFetch
 	}
 	var result control.ImageBuildBaseResult
 	if read.Target.Owner == r.Identity.Public {
@@ -84,27 +95,30 @@ func (r *Runtime) resolveImageBuildBase(ctx context.Context, spec imagebuild.Job
 	} else {
 		peer, known := r.Mesh.Peer(sfcp.Identity(read.Target.Owner))
 		if !known || !peer.Member {
-			return "", sfcp.ErrAdmission
+			return "", unreachableOwner, sfcp.ErrAdmission
 		}
 		raw, _ := json.Marshal(read)
 		reply, cause := cluster.CallManagement(ctx, r.Mesh, r.Identity, r.controlPolicy.Cluster, peer, cluster.ManagementRequest{Method: "image-build-base-owner", Input: raw})
-		if cause != nil || reply.Code != "ok" {
-			return "", sfcp.ErrAdmission
+		if cause != nil {
+			return "", unreachableOwner, sfcp.ErrAdmission
+		}
+		if reply.Code != "ok" {
+			return "", "", sfcp.ErrAdmission
 		}
 		result, err = schema.Decode[control.ImageBuildBaseResult](reply.Data)
 	}
 	if err != nil || !result.Valid(read) {
-		return "", sfcp.ErrAdmission
+		return "", "", sfcp.ErrAdmission
 	}
 	view, err := r.currentView(ctx)
 	if err != nil || view.Local {
-		return "", sfcp.ErrAdmission
+		return "", "", sfcp.ErrAdmission
 	}
 	if err := r.controlPolicy.ValidateImageBuildBaseResult(view.State, read, result, time.Now().Unix()); err != nil {
-		return "", err
+		return "", "", err
 	}
 	if result.Result.Code != "OK" || result.Result.Image == nil {
-		return "", imagebuild.ErrSourceFetch
+		return "", result.Result.Code, imagebuild.ErrSourceFetch
 	}
-	return result.Result.Image.Pinned, nil
+	return result.Result.Image.Pinned, "", nil
 }

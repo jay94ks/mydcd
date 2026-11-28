@@ -326,6 +326,9 @@ func (r *Runtime) appCommand(method, caller string, input []byte, v cluster.View
 	if method == "virtual-bridge-closed" {
 		return r.controlPolicy.ResolveBridgeClosedReport(v.State, key, input)
 	}
+	if method == "network-leave-report" {
+		return r.controlPolicy.ResolveNetworkLeaveReport(v.State, key, input)
+	}
 	if method == "system-network-report" {
 		return r.controlPolicy.ResolveSystemNetworkReport(v.State, key, input)
 	}
@@ -404,6 +407,22 @@ func (r *Runtime) appCommand(method, caller string, input []byte, v cluster.View
 			}
 		}
 		return cmd, nil
+	}
+	if method == "volume-archive-report" {
+		cmd, err := r.controlPolicy.ResolveVolumeArchiveReport(v.State, key, input)
+		if err != nil {
+			return cmd, err
+		}
+		if _, found := v.State.LookupResult(cmd); !found {
+			report, err := schema.Decode[control.VolumeArchiveReport](input)
+			if err != nil || !access.Recent(report.At, time.Now().Unix(), 300) {
+				return cmd, sfcp.ErrAdmission
+			}
+		}
+		return cmd, nil
+	}
+	if method == "volume-archive-key-report" {
+		return r.controlPolicy.ResolveVolumeArchiveKeyReport(v.State, key, input)
 	}
 	if method == "volume-backup-report" {
 		cmd, err := r.controlPolicy.ResolveVolumeBackupReport(v.State, key, input)
@@ -688,6 +707,11 @@ func (r *Runtime) advanceApps(ctx context.Context, v cluster.View, apps control.
 		}
 		inventory, _ := apps.Inventory(app.Tenant, app.App)
 		_, retiring := inventory.Retirement()
+		if e.ImagesPending() && !retiring && r.Engine().IsLeader() {
+			// Task steps wait (Execution.dependencies) until the leader
+			// records the deploy's tag resolutions.
+			r.resolveDeployImages(app, e)
+		}
 		for _, step := range e.Steps() {
 			metadata := step.Kind == "delivery" && step.Owner == ([32]byte{}) && step.Completion == deployment.Committed && r.Engine().IsLeader()
 			// Delivery metadata belongs to the consensus leader, including a
@@ -812,26 +836,32 @@ func (r *Runtime) reconcileManaged(v cluster.View) error {
 			return err
 		},
 		func() error {
+			// A workload failure is reported, but advancement still runs:
+			// other apps' committed steps must not wait on it.
+			var workloadErr error
 			if r.workload != nil {
 				current, apps, err := currentApps()
 				if err != nil {
 					return err
 				}
 				if _, err = r.reconcileAppWorkloads(r.ctx, current, apps); err != nil {
-					return fmt.Errorf("app workload reconciliation: %w", err)
+					if r.ctx.Err() != nil {
+						return err
+					}
+					workloadErr = fmt.Errorf("app workload reconciliation: %w", err)
 				}
 			}
 			if err := r.advanceCurrentApps(r.ctx); err != nil {
-				return fmt.Errorf("app advancement: %w", err)
+				return errors.Join(workloadErr, fmt.Errorf("app advancement: %w", err))
 			}
 			current, apps, err := currentApps()
 			if err != nil {
-				return err
+				return errors.Join(workloadErr, err)
 			}
 			if err = r.expireAppObservations(r.ctx, current, apps); err != nil {
-				return fmt.Errorf("app observation expiry: %w", err)
+				return errors.Join(workloadErr, fmt.Errorf("app observation expiry: %w", err))
 			}
-			return nil
+			return workloadErr
 		})
 }
 
@@ -907,18 +937,6 @@ func (r *Runtime) reconcileManagedOwners(v cluster.View) (dnsVisited bool, err e
 		for _, app := range apps.Records() {
 			if inventory, exists := apps.Inventory(app.Tenant, app.App); exists && inventory.ReplacementReady(uint64(time.Now().Unix())) {
 				return false, r.appProgress(r.ctx, v, app, "advance-wave", "", nil)
-			}
-			if operation, ready := apps.LogClearContinuation(app.Tenant, app.App); ready {
-				allowed, err := r.controlPolicy.LogClearContinuationReady(v.State, r.Identity.Public, app.Tenant, app.App)
-				if err != nil {
-					return false, err
-				}
-				if !allowed {
-					continue
-				}
-				report := r.newAppProgress(v, app, "recreate-continue", "", nil)
-				report.Operation = operation
-				return false, r.sendAppProgress(r.ctx, report)
 			}
 		}
 	}

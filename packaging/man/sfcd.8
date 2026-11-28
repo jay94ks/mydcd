@@ -1,0 +1,46 @@
+.\" SPDX-License-Identifier: Apache-2.0
+.TH SFCD 8 "" "Seafield Cluster" "System Administration"
+.SH NAME
+sfcd \- Seafield Cluster node daemon
+.SH SYNOPSIS
+.B sfcd \-\-config
+.I node.yaml
+.I command
+.RI [ options ]
+.SH DESCRIPTION
+.B sfcd
+runs on every server of a Seafield Cluster. It keeps the cluster state with
+Raft, talks to the other servers over SFCP and runs containers through
+Seafield Engine
+.RB ( sfed ),
+which ships with it in
+.IR /usr/lib/sfc/bin .
+.PP
+Commands: check (validate node.yaml and reach the engine), init (create a
+cluster on this server), join (join an existing cluster), run (the
+service), engine-config (write
+.I /etc/sfe/daemon.json
+from node.yaml). Run
+.B sfcd \-\-help
+for all of them.
+.PP
+The package installs the
+.B sfcd.service
+and
+.B sfed.service
+units without enabling them. After init or join:
+.B systemctl enable \-\-now sfed sfcd
+.SH FILES
+.TP
+.I /etc/sfc/node.yaml
+the server's configuration.
+.TP
+.I /var/lib/sfc
+cluster state and the server identity. Removing the package keeps it.
+.TP
+.I /run/sfcdp.sock
+management socket for
+.BR sfcli (1).
+.SH SEE ALSO
+.BR sfcli (1),
+https://github.com/jay94ks/seafield/tree/main/docs

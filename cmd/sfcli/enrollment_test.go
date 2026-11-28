@@ -236,11 +236,11 @@ func TestRealManagedEnrollmentCLIAndSameRoot(t *testing.T) {
 	if page, err := client.Resources(ctx, peer, stored.Session, userauth.ResourcesQuery{Tenant: "tenant-one"}); err != nil || page.RootRevision != queryView.State.Object(control.ResourcesKey).Revision || page.Items == nil {
 		t.Fatal("actual resources page", page, err)
 	}
-	for _, method := range []string{"registries", "node-storage", "vault", "apps", "app-uploads"} {
+	if page, e := client.RegistryPage(ctx, peer, stored.Session, "tenant-one", ""); e != nil || page.RootRevision != queryView.State.Object(control.RegistriesKey).Revision || len(page.Items) != 0 || page.Next != "" {
+		t.Fatal("actual typed registries page", e)
+	}
+	for _, method := range []string{"apps", "app-uploads"} {
 		tenantID := "tenant-one"
-		if method == "node-storage" {
-			tenantID = ""
-		}
 		reply, queryErr := client.Query(ctx, peer, stored.Session, method, tenantID)
 		if queryErr != nil || reply.Code != "ok" || reply.RootRevision != queryView.State.Object(control.CatalogKey).Revision {
 			t.Fatal("actual query adapter", method, reply.Code, queryErr)
@@ -255,12 +255,6 @@ func TestRealManagedEnrollmentCLIAndSameRoot(t *testing.T) {
 		}
 		rootField, rootKey := "", ""
 		switch method {
-		case "registries":
-			rootField, rootKey = "RegistriesRootRevision", control.RegistriesKey
-		case "node-storage":
-			rootField, rootKey = "NodeStorageRootRevision", control.NodeStorageKey
-		case "vault":
-			rootField, rootKey = "VaultRootRevision", control.VaultKey
 		case "apps", "app-uploads":
 			rootField, rootKey = "AppsRootRevision", control.AppsKey
 		}
@@ -289,11 +283,17 @@ func TestRealManagedEnrollmentCLIAndSameRoot(t *testing.T) {
 	if page, e := client.VolumeRestorePage(ctx, peer, stored.Session, "tenant-one", ""); e != nil || page.RootRevision != volumesRoot || page.Items == nil {
 		t.Fatal("actual volume restores page", e)
 	}
+	if page, e := client.NodeStoragePage(ctx, peer, stored.Session, "", ""); e != nil || page.RootRevision != queryView.State.Object(control.NodeStorageKey).Revision || page.Items == nil {
+		t.Fatal("actual node storage page", e)
+	}
+	if page, e := client.QueryVault(ctx, peer, stored.Session, "tenant-one", ""); e != nil || page.RootRevision != queryView.State.Object(control.VaultKey).Revision || page.Items == nil {
+		t.Fatal("actual vault page", e)
+	}
 	if page, e := client.Lifecycles(ctx, peer, stored.Session, userauth.LifecyclesQuery{Tenant: "tenant-one"}); e != nil || page.RootRevision != queryView.State.Object(control.LifecycleKey).Revision || len(page.Items) != 0 {
 		t.Fatal("actual lifecycles", page, e)
 	}
-	if denied, e := client.RegistryPage(ctx, peer, stored.Session, "", ""); e == nil || denied.Code != "denied" {
-		t.Fatal("missing tenant accepted", denied.Code, e)
+	if _, e := client.RegistryPage(ctx, peer, stored.Session, "", ""); e == nil {
+		t.Fatal("missing tenant accepted")
 	}
 	if _, e := client.Resources(ctx, peer, stored.Session, userauth.ResourcesQuery{Tenant: "tenant-one", After: strings.Repeat("a", 513)}); e == nil {
 		t.Fatal("oversized cursor accepted")

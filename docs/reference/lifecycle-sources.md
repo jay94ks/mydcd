@@ -7,16 +7,16 @@
 User method `lifecycle-source-stage`의 Request는 다음과 같다. digest/Upload는 실제32바이트 배열이며 예제의 배열은 표시용 축약이다.
 
 ```json
-{"Schema":1,"Method":"lifecycle-source-stage","Nonce":[0],"Tenant":"tenant","Node":"node-a","CheckerSource":{"Tenant":"tenant","Digest":[0],"Length":123,"SDK":1,"Modules":[]},"CheckerUpload":[0]}
+{"Schema":1,"Method":"lifecycle-source-stage","Nonce":[0],"Params":{"Tenant":"tenant","Node":"node-a","Source":{"Tenant":"tenant","Digest":[0],"Length":123,"SDK":1,"Modules":[]},"Upload":[0]}}
 ```
 
-`Node`는 생략할 수 있다. 현재 tenant 정책·node ACL·설치 상태를 만족하는 provider 중 접속한 노드를 우선하고 이후 노드 이름순으로 고른다. 원본은 UTF-8,1–256KiB다. `CheckerSource`는 SHA-256·바이트 길이·SDK1·정확한 module lock을 고정하며 `Modules`는 현재 `Resolver.Modules`의 정렬된 부분집합이다. `CheckerUpload`는 client가 보존하는 원 업로드의 nonzero32바이트 ID다. 새 ID로 실패/불명을 우회하거나 재시도마다 ID를 생성하지 않는다.
+typed method다. `Params`는 `CheckerStageQuery{Tenant,Node?,Source,Module?,Upload}`이고 응답은 `Data`에 담긴다. `Node`는 생략할 수 있다. 현재 tenant 정책·node ACL·설치 상태를 만족하는 provider 중 접속한 노드를 우선하고 이후 노드 이름순으로 고른다. 원본은 UTF-8,1–256KiB다. `Source`는 SHA-256·바이트 길이·SDK1·정확한 module lock을 고정하며 `Modules`는 현재 `Resolver.Modules`의 정렬된 부분집합이다. `Upload`는 client가 보존하는 원 업로드의 nonzero32바이트 ID다. 새 ID로 실패/불명을 우회하거나 재시도마다 ID를 생성하지 않는다.
 
 서버의 kind2 `continue` 뒤 기존 User kind4로 원 바이트를24KiB씩 보내고 EOF한다. request ID·Envelope digest·연속 offset·전체 길이/SHA-256·EOF를 확인한 후 검사한다. 원 provider는 바이트 수신 전에 기존 upload hold를 확보하고 현재 ManageServices·provider node 권한·`lifecycle-source-upload` credential ceiling·활성 정책을 quorum으로 확인한다. Entry와 provider가 다르면 원 사용자 Session·Body·서명을 보존한 기존 member relay를 사용한다. 노드 키로 사용자 승인을 대체하지 않는다.
 
-module ZIP은 같은 User 연결에서 **별도의 유한 요청** `lifecycle-module-stage`로 보낸다. 위 Request의 Method를 바꾸고 `CheckerModule`에 root lock에 포함된 정확한 `ModulePin{Path,Version,Digest,Length}`를 추가한다. ZIP은 기존 검사·길이/SHA-256·tenant cache 예산과 최대64MiB를 따른다. 자동 다운로드·외부 resolver·현재 lock에 없는 버전 선택은 하지 않는다. 응답의 Node를 보존하고 나머지 ZIP/root에도 같은 provider·descriptor·Upload를 사용한다. 원본을 먼저 보냈는데 필요한 ZIP이 없으면 fact를 발급하지 않고 missing으로 응답한다.
+module ZIP은 같은 User 연결에서 **별도의 유한 요청** `lifecycle-module-stage`로 보낸다. 위 Request의 Method를 바꾸고 Params의 `Module`에 root lock에 포함된 정확한 `ModulePin{Path,Version,Digest,Length}`를 추가한다. ZIP은 기존 검사·길이/SHA-256·tenant cache 예산과 최대64MiB를 따른다. 자동 다운로드·외부 resolver·현재 lock에 없는 버전 선택은 하지 않는다. 응답의 Node를 보존하고 나머지 ZIP/root에도 같은 provider·descriptor·Upload를 사용한다. 원본을 먼저 보냈는데 필요한 ZIP이 없으면 fact를 발급하지 않고 missing으로 응답한다.
 
-최종 `Reply.LifecycleStage`:
+kind2 `continue`와 최종 응답의 `Data`(`LifecycleStageResult`):
 
 ```text
 {
@@ -35,7 +35,7 @@ source 성공은 `Source` 하나, module 성공은 `Module` 하나다. 진단 �
 
 전송 유실 뒤 자동 재전송하지 않는다. kind2 준비 응답의 Node·Owner·Descriptor·Upload는 원 provider 선택을 보존하는 metadata이고 성공 fact가 아니다. SDK는 준비 응답을 받은 후 결과가 유실되면 이 metadata를 오류와 함께 반환할 수 있다.
 
-`lifecycle-source-recover`는 같은 Tenant·명시 원 Node·CheckerSource·CheckerUpload를 보내고 body 없이 EOF한다. `lifecycle-module-recover`는 같은 필드와 원 CheckerModule을 보낸다. 기존 hold/원 fact만 조회하며 source/ZIP·새 upload·검사 성공을 합성하지 않는다. 정책이 꺼졌어도 원 기록 복구 권한과 현재 Session은 검사한다. 새 source 등록이나 실행 권한은 별도 현재 정책을 따른다. recover의 fact는 이전 보관 사실이며 새로운 타입 검사 결과가 아니다.
+`lifecycle-source-recover`는 같은 Params(Tenant·명시 원 Node·Source·Upload)를 보내고 body 없이 EOF한다. `lifecycle-module-recover`는 같은 필드와 원 Module을 보낸다. 기존 hold/원 fact만 조회하며 source/ZIP·새 upload·검사 성공을 합성하지 않는다. 정책이 꺼졌어도 원 기록 복구 권한과 현재 Session은 검사한다. 새 source 등록이나 실행 권한은 별도 현재 정책을 따른다. recover의 fact는 이전 보관 사실이며 새로운 타입 검사 결과가 아니다.
 
 공개 오류는 `denied`, `missing`, `invalid`, `unknown`, `unavailable`로 제한하고 provider DB 경로·원 오류문·계정/Secret 값을 노출하지 않는다. 정책 비활성화·다른 tenant/provider 권한은 거부하고, 저장 sync/전송 불명은 원 ID로 보존한다.
 

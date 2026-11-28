@@ -22,6 +22,7 @@ import (
 	"github.com/jay94ks/seafield/internal/observability"
 	"github.com/jay94ks/seafield/internal/registryclient"
 	"github.com/jay94ks/seafield/internal/secrets"
+	"github.com/jay94ks/seafield/internal/userauth"
 )
 
 // REQ-17 in sfcd's real shape (docs/reference/external-registries.md):
@@ -120,18 +121,18 @@ func (f *Fake) CloseExternalRegistryReaders() {
 	f.w.extReal().settle(1 << 62)
 }
 
-func (c *fakeConn) ExternalRegistryPage(ctx context.Context, tenant, after string) (ExternalRegistryPage, error) {
+func (c *fakeConn) ExternalRegistryPage(ctx context.Context, tenant, after string) (userauth.ExternalRegistriesPage, error) {
 	const m = "external-registries"
 	if len(after) > 512 {
-		return ExternalRegistryPage{}, fail(m, CodeInvalid, "after")
+		return userauth.ExternalRegistriesPage{}, fail(m, CodeInvalid, "after")
 	}
 	if err := c.appRead(ctx, m, tenant); err != nil {
-		return ExternalRegistryPage{}, err
+		return userauth.ExternalRegistriesPage{}, err
 	}
 	defer c.unlock()
 	e := c.f.w.extReal()
 	e.settle(c.f.now().Unix())
-	out := ExternalRegistryPage{RootRevision: e.root}
+	out := userauth.ExternalRegistriesPage{RootRevision: e.root}
 	for _, k := range sortedKeys(e.rows) {
 		x := e.rows[k]
 		if x.spec.Tenant != tenant || k <= after {
@@ -162,6 +163,9 @@ func extUses(spec imagesource.Source, user string, key [32]byte, node string) ma
 				NodeKey: pub32(FixtureKey(node)), RequesterKey: key}}
 		}
 		rows[0].Sources = append(rows[0].Sources, ref.ID)
+		if spec.Cluster() {
+			rows[0].RegistrySources = append(rows[0].RegistrySources, ref.ID)
+		}
 		uses[ref.Realm] = rows
 	}
 	return uses

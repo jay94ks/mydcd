@@ -981,9 +981,9 @@ func (r *Raft) leaderLoop() {
 
 		case lost := <-r.peerLostCh:
 			r.mainThreadSaturation.working()
-			if f, ok := r.leaderState.replState[lost.id]; ok && f.LastContact().Before(lost.at) {
+			if f, ok := r.leaderState.replState[lost.id]; ok && f.contact(r.config().PeerContact).Before(lost.at) {
 				r.logger.Warn("lost connection to follower", "server-id", lost.id)
-				f.clearLastContact()
+				f.clearLastContact(lost.at)
 				r.checkLeaderLease()
 			}
 
@@ -1115,7 +1115,7 @@ func (r *Raft) checkLeaderLease() time.Duration {
 				continue
 			}
 			f := r.leaderState.replState[server.ID]
-			diff := now.Sub(f.LastContact())
+			diff := now.Sub(f.contact(r.config().PeerContact))
 			if diff <= leaseTimeout {
 				contacted++
 				if diff > maxDiff {

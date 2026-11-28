@@ -18,6 +18,7 @@ import (
 	"sync"
 
 	"github.com/jay94ks/seafield/internal/registry"
+	"github.com/jay94ks/seafield/internal/userauth"
 	"github.com/jay94ks/seafield/internal/web/sfc"
 )
 
@@ -62,7 +63,7 @@ func (s *Server) registryClient(ctx context.Context, ws *webSession, tenant, id,
 	}
 	var authority string
 	login := func(ctx context.Context) (string, []byte, error) {
-		var cred sfc.RegistryCredential
+		var cred userauth.RegistryCredential
 		err := ws.do(ctx, func(ctx context.Context, c sfc.Conn) error {
 			var err error
 			cred, err = c.RegistryCredential(ctx, tenant, sfc.RegistryCredentialRequest{ID: id, Repository: repo, Actions: actions})
@@ -74,10 +75,10 @@ func (s *Server) registryClient(ctx context.Context, ws *webSession, tenant, id,
 		if authority == "" {
 			authority = cred.Authority
 		} else if authority != cred.Authority {
-			clear(cred.Token)
+			clear(cred.Credential)
 			return "", nil, &httpErr{http.StatusConflict, "registry-changed", "the registry address changed"}
 		}
-		return ws.user.Username, cred.Token, nil
+		return ws.user.Username, cred.Credential, nil
 	}
 	// The first credential also tells the address.
 	user, secret, err := login(ctx)

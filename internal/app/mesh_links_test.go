@@ -3,6 +3,7 @@
 package app
 
 import (
+	"errors"
 	"testing"
 	"time"
 
@@ -53,5 +54,23 @@ func TestMeshLinksDialOnlyPeersWithoutSessionAndBackOff(t *testing.T) {
 	links.due(at, []sfcp.Peer{a}, isConnected)
 	if _, ok := links.peers[b.Key]; ok {
 		t.Fatal("removed peer kept")
+	}
+}
+
+// A dial failing the same way is logged once, again when the failure changes,
+// and once when it recovers.
+func TestMeshLinksLogEachOutcomeChangeOnce(t *testing.T) {
+	var links meshLinks
+	peer := sfcp.Peer{ID: "a", Key: sfcp.Identity{1}}
+	now := time.Now()
+	links.due(now, []sfcp.Peer{peer}, func(sfcp.Identity) bool { return false })
+	refused, lost := errors.New("refused"), errors.New("lost")
+	for i, step := range []struct {
+		err  error
+		want bool
+	}{{nil, false}, {refused, true}, {refused, false}, {lost, true}, {nil, true}, {nil, false}} {
+		if got := links.logged(peer.Key, step.err); got != step.want {
+			t.Fatalf("step %d: logged = %v", i, got)
+		}
 	}
 }

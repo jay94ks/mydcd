@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"encoding/base32"
 	"encoding/json"
+	"errors"
 	"slices"
 	"strings"
 
@@ -852,6 +853,35 @@ func builtinHeld(members membership.Directory, tree secrets.Tree, r secrets.Refe
 	}
 	for _, v := range h.Holders {
 		if members.VoterKey(v) {
+			return true
+		}
+	}
+	return false
+}
+
+// AppBindingRevisionChanged is true when request's binding is refused only
+// because a secret it reads was updated after the binding was made. The app
+// keeps running with what it already received; a redeploy applies the new
+// revision.
+func (p Policy) AppBindingRevisionChanged(s state.State, request AppBindingRequest) bool {
+	a, err := p.readOnlyApps(s)
+	if err != nil {
+		return false
+	}
+	b, ok := a.Binding(request.Task)
+	if !ok || b.Digest() != request.Digest {
+		return false
+	}
+	v, err := p.Vault(s)
+	if err != nil {
+		return false
+	}
+	c, err := p.Catalog(s)
+	if err != nil {
+		return false
+	}
+	for _, g := range b.ProjectionGrants() {
+		if _, err := v.Approvals.ReadSet(c, v.Trees[g.Realm], g, request.At); errors.Is(err, secrets.ErrRevisionChanged) {
 			return true
 		}
 	}

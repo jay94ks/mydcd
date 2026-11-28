@@ -72,3 +72,43 @@ func TestSourceContainsOnlyScopedReferencesAndOwnsCopies(t *testing.T) {
 		}
 	}
 }
+
+func TestClusterSourceIsOwnedByClusterRealmAndLosesToWorkspaceSource(t *testing.T) {
+	image, err := access.PinImage("ghcr.io/team/app@sha256:" + strings.Repeat("a", 64))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cluster := Source{ID: "ghcr", Authority: "ghcr.io", Repository: "**", Enabled: true, Auth: "token", Credential: &Credential{ID: "login", UsernameKey: "username", PasswordKey: "token"}}
+	if cluster.Validate() != nil || !cluster.Cluster() || cluster.Key() != "/ghcr" {
+		t.Fatal("cluster-owned source rejected", cluster.Validate())
+	}
+	foreign := Own(cluster)
+	foreign.Credential.Realm = "tenant"
+	if foreign.Validate() == nil {
+		t.Fatal("cluster source referenced a workspace realm")
+	}
+	defs := []Definition{{Spec: cluster}}
+	got, err := Lookup(defs, "tenant", image)
+	if err != nil || got == nil || got.Spec.ID != "ghcr" {
+		t.Fatal("workspace without its own source did not use the cluster source", got, err)
+	}
+	if got, err = Lookup(defs, "", image); err != nil || got == nil || got.Spec.ID != "ghcr" {
+		t.Fatal("cluster lookup", got, err)
+	}
+	// A workspace's own match wins even when it is broader than the cluster's.
+	own := Source{Tenant: "tenant", ID: "mine", Authority: "ghcr.io", Repository: "**", Enabled: true, Auth: "none"}
+	narrow := Own(cluster)
+	narrow.Repository = "team/app"
+	defs = []Definition{{Spec: narrow}, {Spec: own}}
+	if got, err = Lookup(defs, "tenant", image); err != nil || got == nil || got.Spec.ID != "mine" {
+		t.Fatal("cluster source beat the workspace source", got, err)
+	}
+	if got, err = Lookup(defs, "other", image); err != nil || got == nil || got.Spec.ID != "ghcr" {
+		t.Fatal("another workspace saw a foreign source", got, err)
+	}
+	// A revoked workspace source still blocks: it never falls back to the cluster.
+	defs = []Definition{{Spec: narrow}, {Spec: own, Deleted: true}}
+	if _, err = Select(defs, "tenant", image); err == nil {
+		t.Fatal("revoked workspace source fell back to the cluster source")
+	}
+}

@@ -477,14 +477,24 @@ func (p Policy) authorizeResource(s state.State, c access.Catalog, op UserOperat
 // resourcesBook is the ResourcesKey book (books.go).
 var resourcesBook = Book{Key: ResourcesKey, Reduce: byKind(map[state.CommandKind]reducer{state.ModuleReport: reduceResourceReport, state.Module: Policy.reduceResources})}
 
-// reduceResourceReport takes a node's resource report: a closed Bridge or a
-// system network report. A report from anyone else is refused.
+// reduceResourceReport takes a node's resource report: a closed Bridge, a
+// workspace network leave or a system network report. A report from anyone
+// else is refused.
 func reduceResourceReport(p Policy, s state.State, cmd state.Command) (map[string][]byte, state.Code) {
 	if !nodeActor(cmd) {
 		return refuseKind(p, s, cmd)
 	}
-	if bridgeClosedValue(cmd.Value) {
+	return p.reduceNodeResourceReport(s, cmd)
+}
+
+// reduceNodeResourceReport reduces a node's report on the resources root by
+// its kind.
+func (p Policy) reduceNodeResourceReport(s state.State, cmd state.Command) (map[string][]byte, state.Code) {
+	switch reportKind(cmd.Value) {
+	case bridgeClosedKind:
 		return p.reduceBridgeClosedReport(s, cmd)
+	case networkLeaveKind:
+		return p.reduceNetworkLeaveReport(s, cmd)
 	}
 	return p.reduceSystemNetworkReport(s, cmd)
 }

@@ -3623,3 +3623,53 @@ func TestRaft_LaggingFollowerTakesPromotedLeader(t *testing.T) {
 		t.Fatal("refused the leader this server already follows")
 	}
 }
+
+// MyDC: with PeerContact, packets of any kind stand in for heartbeats. While
+// the transport reports fresh contact the leader sends no periodic
+// heartbeat, keeps its lease and the followers elect no one; once contact
+// stops, heartbeats come back.
+func TestRaft_PeerContactReplacesHeartbeat(t *testing.T) {
+	var fresh atomic.Bool
+	fresh.Store(true)
+	conf := inmemConfig(t)
+	conf.HeartbeatTimeout = 100 * time.Millisecond
+	conf.LeaderLeaseTimeout = 100 * time.Millisecond
+	conf.HeartbeatInterval = 20 * time.Millisecond
+	conf.PeerContact = func(ServerID) time.Time {
+		if fresh.Load() {
+			return time.Now()
+		}
+		return time.Time{}
+	}
+	c := MakeCluster(3, t, conf)
+	defer c.Close()
+	leader := c.Leader()
+	term := leader.getCurrentTerm()
+	follower := c.Followers()[0]
+	raw := func() time.Time {
+		follower.lastContactLock.RLock()
+		defer follower.lastContactLock.RUnlock()
+		return follower.lastContact
+	}
+	time.Sleep(100 * time.Millisecond) // let startup traffic settle
+	before := raw()
+	time.Sleep(500 * time.Millisecond) // 25 heartbeat intervals, 5 timeouts
+	if after := raw(); after.Sub(before) > 30*time.Millisecond {
+		t.Fatalf("periodic heartbeat sent despite fresh contact: %s", after.Sub(before))
+	}
+	if leader.getState() != Leader || leader.getCurrentTerm() != term || follower.getCurrentTerm() != term {
+		t.Fatal("leadership changed while contact was fresh")
+	}
+	if time.Since(follower.LastContact()) > 50*time.Millisecond {
+		t.Fatal("follower did not count transport contact from its leader")
+	}
+	fresh.Store(false)
+	before = raw()
+	time.Sleep(200 * time.Millisecond)
+	if !raw().After(before) {
+		t.Fatal("heartbeats did not resume without transport contact")
+	}
+	if leader.getState() != Leader || leader.getCurrentTerm() != term {
+		t.Fatal("leadership changed after heartbeats resumed")
+	}
+}

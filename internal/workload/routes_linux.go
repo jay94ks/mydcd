@@ -97,11 +97,12 @@ func inspectTaskRoute(h *netlink.Handle, want netlink.Route) (bool, error) {
 	return true, nil
 }
 
-func containerRoutes(ctx context.Context, s ContainerSpec, bridge network.BridgeSpec, got container.InspectResponse, apply bool) (bool, error) {
-	if err := ValidateContainerRoutes(s, bridge); err != nil {
+func containerRoutes(ctx context.Context, s ContainerSpec, bridges []network.BridgeSpec, got container.InspectResponse, apply bool) (bool, error) {
+	if err := ValidateContainerRoutes(s, bridges...); err != nil {
 		return false, err
 	}
-	if len(s.Routes) == 0 {
+	routes := s.allRoutes()
+	if len(routes) == 0 {
 		return true, nil
 	}
 	if err := ctx.Err(); err != nil {
@@ -117,11 +118,10 @@ func containerRoutes(ctx context.Context, s ContainerSpec, bridge network.Bridge
 		return false, err
 	}
 	all := true
-	for _, r := range s.Routes {
-		local := s.IPv6
-		if r.Gateway.Is4() {
-			local = s.IPv4
-		}
+	networks := s.Networks()
+	for _, ar := range routes {
+		r := ar.route
+		local := routeFamily(networks[ar.at], r.Gateway)
 		index := 0
 		for _, link := range links {
 			addresses, e := h.AddrList(link, netlink.FAMILY_ALL)

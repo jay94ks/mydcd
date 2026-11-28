@@ -397,12 +397,12 @@ func (s *Server) backupFailed(cfg store.AutoBackup, code string) {
 	if cfg.UpdatedByID == "" {
 		return
 	}
-	body := "예약된 백업을 쓰지 못했습니다(" + code + "). 설정 화면에서 '지금 백업'을 누르거나 자동 작업 계정을 확인해 주세요."
+	body := "backup-failed.body"
 	if code == ErrAutomationMissing {
-		body = "자동 작업 계정이 없어 예약된 백업을 쓰지 못했습니다. 설정 화면에서 자동 작업 계정을 만들거나 '지금 백업'을 눌러 주세요."
+		body = "backup-failed.no-automation"
 	}
 	s.notify(&store.Notification{User: cfg.UpdatedByID, Kind: NotifyWebBackup, Severity: "warning", Action: true,
-		Title: "웹 데이터 자동 백업을 하지 못했습니다", Body: body, Link: "/settings"})
+		Text: notice("backup-failed", map[string]string{"code": code}, body), Link: "/settings"})
 }
 
 // POST /system/restore-from {tenant, volume, path} → 202 {restorePending,

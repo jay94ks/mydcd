@@ -218,7 +218,7 @@ function DesktopStandalone() {
         actions={
           <>
             <span className="pill">작업 공간 {tenant}</span>
-            <button className="btn" title="지금 바로 다시 읽기" onClick={() => q.refresh()}>
+            <button className="btn" title="지금 바로 다시 읽기" onClick={() => q.refreshByUser()}>
               ↻ 새로고침
             </button>
             <button className="btn" disabled={!canDeploy} title={canDeploy ? undefined : NEED} onClick={() => setDlg({ kind: 'quick' })}>

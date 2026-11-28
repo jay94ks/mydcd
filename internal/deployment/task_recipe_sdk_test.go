@@ -50,13 +50,13 @@ func TestTaskRecipeSDKResolvesAllMountsAndCurrentTrust(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer docker.Close()
-	spec, err := b.ResolveTask(context.Background(), "db", material, f.c, docker, false)
+	spec, err := b.ResolveTask(context.Background(), "db", material, f.c, docker, false, TaskImage{})
 	if err != nil || spec.Process == nil || spec.Process.ImageID != image || spec.Inputs == nil || len(spec.Volumes) != 1 || len(spec.Tmpfs) != 1 || spec.Process.Command[0] != "mysqld" {
 		t.Fatal("single-file recipe/actual SDK mapping", spec, err)
 	}
 	bad := cloneTaskMaterial(material)
 	bad.Volumes = nil
-	if _, err = b.ResolveTask(context.Background(), "db", bad, f.c, docker, true); err == nil {
+	if _, err = b.ResolveTask(context.Background(), "db", bad, f.c, docker, true, TaskImage{}); err == nil {
 		t.Fatal("missing original materialization admitted")
 	}
 	tenant, _ := f.c.Tenant("tenant")
@@ -64,7 +64,7 @@ func TestTaskRecipeSDKResolvesAllMountsAndCurrentTrust(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = b.ResolveTask(context.Background(), "db", material, current, docker, false); err == nil {
+	if _, err = b.ResolveTask(context.Background(), "db", material, current, docker, false, TaskImage{}); err == nil {
 		t.Fatal("cached image bypassed current tenant trust")
 	}
 	if count.Load() != 1 {

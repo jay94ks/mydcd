@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useEffect, useState } from 'react';
-import { API_MODE } from '../api/client';
+import { API_MODE, apiEvents } from '../api/client';
 
 /**
  * 실시간 반영 (devel/design/web-live-updates.md, docs/reference/web-api/56-live.md).
@@ -17,6 +17,9 @@ export interface LiveRef {
   /** 서버 보고(kind node-observation): 관측 종류와 그 관측이 속한 앱 */
   source?: string;
   app?: string;
+  /** 엔진 사건(kind engine.container·engine.node): 컨테이너 ID와, 쉼표로 이은 다시 읽을 까닭 */
+  container?: string;
+  reasons?: string;
 }
 
 type Frame = { type: 'changes'; index: number; resync?: boolean; refs?: LiveRef[] } | { type: 'state'; state: 'live' | 'reconnecting' } | { type: 'error'; code: string };
@@ -151,12 +154,19 @@ function open() {
       if (f.state === 'live') {
         failures = 0;
         setStatus({ state: 'live', retryIn: undefined, since: undefined });
+        // 웹 데몬이 sfcd를 다시 보고 있다: 끊김 띠가 떠 있으면 앱 셸이 곧바로 다시 확인한다
+        apiEvents.dispatchEvent(new Event('live'));
       } else setStatus({ state: 'retrying', retryIn: undefined, since: status.since ?? new Date() });
       return;
     }
     if (f.type === 'error') {
-      ended = true;
-      wanted = false;
+      // 로그인이 끝난 것만 멈춘다(재로그인 다이얼로그가 맡고, 다시 로그인하면 앱 셸이 새로 연다).
+      // 다른 오류는 소켓이 닫힌 뒤 보통처럼 간격을 두고 다시 잇는다.
+      if (f.code === 'session-expired') {
+        ended = true;
+        wanted = false;
+        apiEvents.dispatchEvent(new Event('session-expired'));
+      }
       return;
     }
     if (f.type !== 'changes') return;
@@ -183,14 +193,26 @@ function open() {
   };
 }
 
+/** 망이 돌아오거나 탭이 다시 보이면 기다리던 간격을 건너뛰고 지금 다시 잇는다 */
+function wake() {
+  if (wanted && !socket && document.visibilityState !== 'hidden') {
+    failures = 0;
+    open();
+  }
+}
+
 /** 앱 셸이 로그인 동안 부른다. 돌려준 함수로 닫는다. */
 export function startLive(): () => void {
   if (API_MODE === 'mock') return () => {};
   wanted = true;
   failures = 0;
   open();
+  window.addEventListener('online', wake);
+  document.addEventListener('visibilitychange', wake);
   return () => {
     wanted = false;
+    window.removeEventListener('online', wake);
+    document.removeEventListener('visibilitychange', wake);
     window.clearTimeout(retryTimer);
     window.clearInterval(countdown);
     socket?.close();
@@ -244,4 +266,4 @@ export function resetLiveForTest() {
 }
 
 /** 시험용: 소켓 없이 참조·resync를 넣는다 */
-export const liveTestHooks = { deliver, resyncAll };
+export const liveTestHooks = { deliver, resyncAll, wake };

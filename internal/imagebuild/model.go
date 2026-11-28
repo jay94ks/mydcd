@@ -16,6 +16,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/containerd/platforms"
+	"github.com/jay94ks/seafield/internal/access"
 	"github.com/jay94ks/seafield/internal/cluster/lifecycle"
 	"github.com/jay94ks/seafield/internal/nodestorage"
 )
@@ -79,7 +80,9 @@ func (p Policy) Validate(cluster [32]byte) error {
 	if p.Schema != 1 || cluster == ([32]byte{}) || !lifecycle.ValidID(p.Tenant) || len(p.Nodes) == 0 || len(p.Nodes) > 64 || p.Concurrency == 0 || p.Concurrency > 32 || p.Seconds == 0 || p.Seconds > 86400 || p.CPUMillis == 0 || p.CPUMillis > 256000 || p.MemoryBytes <= 0 || p.WorkspaceBytes <= 0 || p.WorkspaceBytes > MaxExpandedBytes || p.CacheBytes <= 0 || !lifecycle.ValidID(p.Registry) || len(p.Platforms) == 0 || len(p.Platforms) > 16 || p.Cleanup.HighWaterPercent == 0 || p.Cleanup.HighWaterPercent > 100 || p.Cleanup.UnusedDays == 0 {
 		return ErrInvalid
 	}
-	if image, err := parseCanonical(p.BuilderImage); err != nil || len(p.BuilderImage) > 512 || image.Digest().Algorithm().String() != "sha256" {
+	// The builder may be a tag: it is never pinned in the policy, and each
+	// build creates its container from the image the node has for it then.
+	if image, err := access.NormalizeImage(p.BuilderImage); err != nil || len(p.BuilderImage) > 512 || image != p.BuilderImage {
 		return ErrInvalid
 	}
 	seen := map[string]bool{}

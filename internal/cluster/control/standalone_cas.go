@@ -56,27 +56,8 @@ func (entry appEntry) standaloneTarget() [32]byte {
 			controls = append(controls, sha256.Sum256(StandalonePolicyBytes(*row.Policy)))
 		}
 	}
-	// The accepted clear moves from PendingSync to history/Sync while its
-	// closure, status and replacement receipts advance. Hash its one original
-	// user intent throughout that move, without hashing those mutable reports.
-	clears := map[[32]byte]bool{}
-	addClear := func(sync *AppDeliverySync) {
-		if sync != nil && sync.Recreate != nil && sync.User != nil {
-			clears[appRegistrationDigest(*sync.User)] = true
-		}
-	}
-	addClear(entry.PendingSync)
-	addClear(entry.Sync)
-	for _, row := range entry.LogClears {
-		addClear(&row.Source)
-	}
-	var logClears [][32]byte
-	for intent := range clears {
-		logClears = append(logClears, intent)
-	}
 	less := func(a, b [32]byte) int { return bytes.Compare(a[:], b[:]) }
 	slices.SortFunc(controls, less)
-	slices.SortFunc(logClears, less)
 	var down [32]byte
 	if entry.Down != nil {
 		down = appRegistrationDigest(*entry.Down)
@@ -87,8 +68,10 @@ func (entry appEntry) standaloneTarget() [32]byte {
 		Metadata StandaloneMetadata
 		Down     [32]byte
 		Controls [][32]byte
-		Clears   [][32]byte
-	}{entry.Inventory.Scope(), appRegistrationDigest(entry.Origin), metadata, down, controls, logClears})
+		// Clears is always nil since the log-clear recreate path was removed;
+		// it stays so the target bytes of existing entries do not change.
+		Clears [][32]byte
+	}{entry.Inventory.Scope(), appRegistrationDigest(entry.Origin), metadata, down, controls, nil})
 	if err != nil {
 		return [32]byte{}
 	}

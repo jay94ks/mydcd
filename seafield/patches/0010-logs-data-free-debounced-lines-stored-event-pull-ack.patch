@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Claude <noreply@anthropic.com>
 Date: Fri, 27 Nov 2026 08:38:08 +0000
-Subject: [PATCH 10/20] logs: data-free debounced 'lines stored' event, pull +
+Subject: [PATCH 10/21] logs: data-free debounced 'lines stored' event, pull +
  ack deletes taken lines
 
 

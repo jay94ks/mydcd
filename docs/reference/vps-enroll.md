@@ -81,6 +81,14 @@ systemctl enable --now sfcd
 4. 초대에 서명한 뒤 같은 연결 방식으로 초대 파일, 위 node.yaml, 서비스 파일을 쓰고 `sfcd join`을 한 뒤 서비스를 켠다. 실패하면 2분 뒤 다시 시도한다.
 5. 새 서버의 호스트 키는 미리 알 수 없어서 처음 접속은 응답한 키를 그대로 믿는다. 그 뒤로 리더는 서버 이름과 공인 IP별로 그 키를 메모리에 기억하고, 다른 키가 응답하면 접속을 끊는다. 리더가 바뀌면 새 리더는 다시 처음 접속부터 믿는다. 중간에서 가로챈 쪽이 얻을 수 있는 것은 투표권 없는 가입 하나뿐이고, 클러스터 마스터 키나 공급자 키는 얻지 못한다. 그래서 SSH로 설치하는 서버는 투표 서버가 될 수 없다(`--script` 없이 `--voter`는 거절된다). 이상하면 `sfcli node remove`로 뺀다.
 
+## 지우면 안 되는 패키지
+
+iwinv의 Ubuntu 이미지(지금 Ubuntu 26.04 LTS 64bit, EOL 2031-04, 커널 7.0.0-14-generic)는 VPS를 만들 때 "iproute2, isc-dhcp, initscripts, systemd-resolve 패키지를 지우지 마세요"라고 알린다. 26.04에서는 DHCP를 `dhcpcd-base`와 `systemd-networkd`가 맡으므로, 지우면 안 되는 패키지는 `iproute2`, `isc-dhcp`(`isc-dhcp-client` 등), `initscripts`, `systemd-resolved`, `dhcpcd-base`, `systemd-networkd` 여섯 개다. 이 패키지나 이들이 의존하는 패키지가 지워지면 서버의 네트워크와 DNS가 끊긴다. 이미지에 없는 패키지는 없는 그대로 두고 새로 설치하지 않는다.
+
+- SSH 설치는 패키지를 하나도 지우지 않는다. 리더의 SSH 셸은 `apt`/`apt-get`의 `remove`·`purge`·`autoremove`·`autopurge`, `dpkg -r`/`-P`가 든 명령과, 위 여섯 패키지를 설치하는 명령을 서버에 보내기 전에 거절한다.
+- 사용자 스크립트에도 `apt autoremove`나 최소 설치 정리를 넣지 않는다. Docker를 지워야 하면 패키지 이름으로만 지우고 autoremove는 부르지 않는다. 먼저 `apt-get -s remove 이름`으로 위 여섯 패키지가 같이 지워지지 않는지 본다.
+- 이 커널은 Seafield 엔진 요구 조건(6.5 이상, cgroup v2, PSI)을 만족한다.
+
 ## 실제 계정에서 확인할 것
 
 - iwinv 인스턴스의 호스트 이름이 인스턴스 이름과 같은지, 공인 IP가 VPS 네트워크 장치에 직접 붙는지(`listen`에 쓸 수 있는지)

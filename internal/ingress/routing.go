@@ -8,6 +8,7 @@ import (
 	"errors"
 	"github.com/jay94ks/seafield/internal/reconcile"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -172,6 +173,10 @@ type backendState struct {
 }
 type Balancer struct {
 	backends map[string]*backendState
+	// retiring holds older generations of a backend ID that were drained
+	// when their successor took the ID (a same-node surge): they are never
+	// selected and only settle their pins. Keyed by retireKey.
+	retiring map[string]*backendState
 	floors   map[string]uint64
 	ticket   uint64
 	maxAge   uint64
@@ -181,7 +186,20 @@ func NewBalancer(maxAge uint64) (*Balancer, error) {
 	if maxAge == 0 {
 		return nil, ErrRoute
 	}
-	return &Balancer{backends: map[string]*backendState{}, floors: map[string]uint64{}, maxAge: maxAge}, nil
+	return &Balancer{backends: map[string]*backendState{}, retiring: map[string]*backendState{}, floors: map[string]uint64{}, maxAge: maxAge}, nil
+}
+
+func retireKey(id string, generation uint64) string {
+	return id + "\x00" + strconv.FormatUint(generation, 10)
+}
+
+// entry is the serving or retiring state of one exact backend generation.
+func (b *Balancer) entry(id string, generation uint64) (*backendState, bool) {
+	if s, ok := b.backends[id]; ok && s.spec.Generation == generation {
+		return s, true
+	}
+	s, ok := b.retiring[retireKey(id, generation)]
+	return s, ok
 }
 
 // ObserveHealth distinguishes an actual health response from an unobserved
@@ -189,7 +207,7 @@ func NewBalancer(maxAge uint64) (*Balancer, error) {
 func (b *Balancer) ObserveHealth(s Backend, observed bool) error {
 	if !observed {
 		s.Healthy = false
-		if prior, ok := b.backends[s.ID]; ok && prior.spec.Generation == s.Generation {
+		if prior, ok := b.entry(s.ID, s.Generation); ok {
 			s.Healthy, s.ObservedAt = prior.spec.Healthy, prior.spec.ObservedAt
 		} else {
 			s.ObservedAt = 0
@@ -198,13 +216,30 @@ func (b *Balancer) ObserveHealth(s Backend, observed bool) error {
 	return b.Update(s)
 }
 
-// Update never changes an in-use backend's generation/capacity. First Drain,
-// settle all users, remove it, then introduce the new generation explicitly.
+// Update never changes an in-use backend's generation/capacity. A newer
+// generation may take an ID only once the current one is Draining: the old one
+// then retires beside it and settles its own pins (a same-node surge), so the
+// ID keeps serving. Otherwise first Drain, settle, remove, then introduce.
 func (b *Balancer) Update(s Backend) error {
 	if s.ID == "" || s.Generation == 0 || s.Weight <= 0 || s.Weight > 1024 || s.Capacity <= 0 {
 		return ErrRoute
 	}
+	if r, ok := b.retiring[retireKey(s.ID, s.Generation)]; ok {
+		if r.spec.Capacity != s.Capacity || s.ObservedAt < r.spec.ObservedAt || !s.Draining {
+			return ErrRoute
+		}
+		r.spec = s
+		return nil
+	}
 	old, ok := b.backends[s.ID]
+	if ok && old.spec.Generation < s.Generation && old.spec.Draining && s.Generation > b.floors[s.ID] {
+		if len(b.backends)+len(b.retiring) >= 1024 {
+			return ErrRoute
+		}
+		b.retiring[retireKey(s.ID, old.spec.Generation)] = old
+		delete(b.backends, s.ID)
+		ok = false
+	}
 	if ok {
 		if old.spec.Generation != s.Generation || old.spec.Capacity != s.Capacity || s.ObservedAt < old.spec.ObservedAt || old.spec.Draining && !s.Draining {
 			return ErrRoute
@@ -218,7 +253,7 @@ func (b *Balancer) Update(s Backend) error {
 		}
 		return nil
 	}
-	if s.Generation <= b.floors[s.ID] || len(b.backends) >= 1024 {
+	if s.Generation <= b.floors[s.ID] || len(b.backends)+len(b.retiring) >= 1024 {
 		return ErrRoute
 	}
 	l, err := reconcile.NewLeases(s.Generation, s.Capacity)
@@ -236,18 +271,22 @@ func (b *Balancer) Acquire(now uint64) (BackendLease, error) {
 	return b.AcquireWith(now, Balance{}, Selection{})
 }
 func (b *Balancer) Release(l BackendLease) error {
-	s, ok := b.backends[l.Backend]
+	s, ok := b.entry(l.Backend, l.Lease.Generation)
 	if !ok {
 		return ErrRoute
 	}
 	return s.leases.Release(l.Lease)
 }
 func (b *Balancer) Remove(id string, generation uint64) error {
-	s, ok := b.backends[id]
-	if !ok || s.spec.Generation != generation || !s.leases.CanRetire() {
+	s, ok := b.entry(id, generation)
+	if !ok || !s.leases.CanRetire() {
 		return ErrRoute
 	}
-	delete(b.backends, id)
+	if b.backends[id] == s {
+		delete(b.backends, id)
+	} else {
+		delete(b.retiring, retireKey(id, generation))
+	}
 	return nil
 }
 
@@ -266,10 +305,16 @@ type BalanceJournal struct {
 
 func (b *Balancer) Checkpoint() BalanceJournal {
 	j := BalanceJournal{Schema: 1, MaxAge: b.maxAge, Ticket: b.ticket, Floors: map[string]uint64{}}
-	for _, v := range b.backends {
-		j.Backends = append(j.Backends, BackendRecord{Spec: v.spec, Pins: v.leases.Checkpoint(), Current: v.current, HealthySince: v.healthySince})
+	for _, states := range []map[string]*backendState{b.backends, b.retiring} {
+		for _, v := range states {
+			j.Backends = append(j.Backends, BackendRecord{Spec: v.spec, Pins: v.leases.Checkpoint(), Current: v.current, HealthySince: v.healthySince})
+		}
 	}
-	sort.Slice(j.Backends, func(i, k int) bool { return j.Backends[i].Spec.ID < j.Backends[k].Spec.ID })
+	// Older generations of one ID first, so Restore replays each succession.
+	sort.Slice(j.Backends, func(i, k int) bool {
+		a, c := j.Backends[i].Spec, j.Backends[k].Spec
+		return a.ID < c.ID || a.ID == c.ID && a.Generation < c.Generation
+	})
 	for k, v := range b.floors {
 		j.Floors[k] = v
 	}
@@ -281,9 +326,12 @@ func RestoreBalancer(j BalanceJournal) (*Balancer, error) {
 		return nil, ErrRoute
 	}
 	b.ticket = j.Ticket
-	for _, r := range j.Backends {
-		if _, ok := b.backends[r.Spec.ID]; ok {
-			return nil, ErrRoute
+	for at, r := range j.Backends {
+		if at > 0 {
+			prior := j.Backends[at-1].Spec
+			if prior.ID == r.Spec.ID && (prior.Generation >= r.Spec.Generation || !prior.Draining) {
+				return nil, ErrRoute
+			}
 		}
 		if err := b.Update(r.Spec); err != nil {
 			return nil, err
@@ -292,8 +340,9 @@ func RestoreBalancer(j BalanceJournal) (*Balancer, error) {
 		if err != nil || r.Pins.Generation != r.Spec.Generation || r.Pins.Capacity != r.Spec.Capacity || r.Pins.Draining != r.Spec.Draining {
 			return nil, ErrRoute
 		}
-		b.backends[r.Spec.ID].leases = pins
-		b.backends[r.Spec.ID].current, b.backends[r.Spec.ID].healthySince = r.Current, r.HealthySince
+		restored, _ := b.entry(r.Spec.ID, r.Spec.Generation)
+		restored.leases = pins
+		restored.current, restored.healthySince = r.Current, r.HealthySince
 	}
 	for id, floor := range j.Floors {
 		if id == "" || floor == 0 || b.floors[id] > floor {
@@ -301,8 +350,20 @@ func RestoreBalancer(j BalanceJournal) (*Balancer, error) {
 		}
 		b.floors[id] = floor
 	}
+	for id, v := range b.backends {
+		// A retiring generation whose successor was already removed.
+		if v.spec.Draining && v.spec.Generation < j.Floors[id] {
+			b.retiring[retireKey(id, v.spec.Generation)] = v
+			delete(b.backends, id)
+		}
+	}
 	for id := range b.backends {
 		if j.Floors[id] != b.backends[id].spec.Generation {
+			return nil, ErrRoute
+		}
+	}
+	for _, r := range b.retiring {
+		if j.Floors[r.spec.ID] <= r.spec.Generation {
 			return nil, ErrRoute
 		}
 	}

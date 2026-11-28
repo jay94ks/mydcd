@@ -8,7 +8,7 @@ import "testing"
 // without its frame rules, sender rules and limits fails here, not at run
 // time.
 func TestPurposeTableComplete(t *testing.T) {
-	defined := []Purpose{VolumeFS}
+	defined := []Purpose{VolumeFS, Topic}
 	for p := Handshake; p <= ChangeWatch; p++ {
 		defined = append(defined, p)
 	}
@@ -26,7 +26,7 @@ func TestPurposeTableComplete(t *testing.T) {
 			}
 		}
 		streams := p != Handshake && p != Packet
-		if streams != (s.limit > 0) || s.perPeer > s.limit {
+		if streams != (s.limit > 0 || s.unlimited) || s.perPeer > s.limit || s.unlimited && s.limit != 0 {
 			t.Fatalf("purpose %s limits %d/%d", s.name, s.limit, s.perPeer)
 		}
 		if s.local && (p == Handshake || p == Packet) {

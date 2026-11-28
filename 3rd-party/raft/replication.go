@@ -70,6 +70,9 @@ type followerReplication struct {
 	// received from the follower (successful or not). This is used to check
 	// whether the leader should step down (Raft.checkLeaderLease()).
 	lastContact time.Time
+	// lostAt is when the transport last reported this follower lost;
+	// transport contact from before it does not count.
+	lostAt time.Time
 	// lastContactLock protects 'lastContact'.
 	lastContactLock sync.RWMutex
 
@@ -102,12 +105,47 @@ type followerReplication struct {
 }
 
 // clearLastContact forgets the last contact after the transport reported the
-// connection to this follower lost, so the lease check stops counting it
-// until it answers again.
-func (s *followerReplication) clearLastContact() {
+// connection to this follower lost at the given time, so the lease check
+// stops counting it until it answers again. Transport contact from before
+// the loss is ignored too.
+func (s *followerReplication) clearLastContact(lostAt time.Time) {
 	s.lastContactLock.Lock()
 	s.lastContact = time.Time{}
+	s.lostAt = lostAt
 	s.lastContactLock.Unlock()
+}
+
+// contact is the later of the last Raft reply and, with Config.PeerContact,
+// the last packet of any kind from the follower after any reported loss.
+func (s *followerReplication) contact(pc func(ServerID) time.Time) time.Time {
+	s.lastContactLock.RLock()
+	last, lostAt := s.lastContact, s.lostAt
+	s.lastContactLock.RUnlock()
+	if pc == nil {
+		return last
+	}
+	s.peerLock.RLock()
+	id := s.peer.ID
+	s.peerLock.RUnlock()
+	if t := pc(id); t.After(last) && t.After(lostAt) {
+		return t
+	}
+	return last
+}
+
+// heartbeatDue reports whether a periodic heartbeat to id is needed: always
+// without Config.PeerContact, otherwise only when nothing has arrived from
+// id for the heartbeat interval (Jay 2026-11-28: other traffic is enough).
+func (r *Raft) heartbeatDue(id ServerID) bool {
+	c := r.config()
+	if c.PeerContact == nil {
+		return true
+	}
+	interval := c.HeartbeatInterval
+	if interval <= 0 {
+		interval = c.HeartbeatTimeout / 10
+	}
+	return time.Since(c.PeerContact(id)) >= interval
 }
 
 // notifyAll is used to notify all the waiting verify futures
@@ -416,8 +454,10 @@ func (r *Raft) heartbeat(s *followerReplication, stopCh chan struct{}) {
 	var resp AppendEntriesResponse
 	for {
 		// Wait for the next heartbeat interval or forced notify
+		forced := false
 		select {
 		case <-s.notifyCh:
+			forced = true
 		case <-heartbeatWait(r.config()):
 		case <-stopCh:
 			return
@@ -426,6 +466,9 @@ func (r *Raft) heartbeat(s *followerReplication, stopCh chan struct{}) {
 		s.peerLock.RLock()
 		peer := s.peer
 		s.peerLock.RUnlock()
+		if !forced && !r.heartbeatDue(peer.ID) {
+			continue
+		}
 
 		start := time.Now()
 		if err := r.trans.AppendEntries(peer.ID, peer.Address, &req, &resp); err != nil {

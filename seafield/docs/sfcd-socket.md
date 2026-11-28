@@ -183,6 +183,13 @@ sfcd는 허락한 pull에만 답한다. Task나 빌드에 쓸 이미지를 엔�
 | 가짜 엔진 어댑터를 Seafield 기준으로 | sfcd 구조 리팩터(R18) |
 | 이름·소켓 이름 변경 | 제품 이름 변경(#691) |
 
+### 엔진 기능을 더하거나 바꾸는 순서 (Jay 2026-11-28 13:29 KST)
+
+1. Seafield 총괄이 가짜 엔진 어댑터(`tests/enginefake`)에 먼저 새 동작을 넣고 시험한다.
+2. 담당 스레드는 그 가짜 어댑터를 상대로 sfcd 쪽을 구현한다.
+3. 실제 엔진 패치는 2와 함께 진행해도 된다.
+4. 기준은 언제나 실제 구현이다(Jay 13:38 KST). 가짜와 실제가 다르면 가짜를 실제에 맞춰 고친다. 가짜에만 있는 기능은 두지 않는다.
+
 처리기는 전송과 묶지 않고 op 구조체를 받고 돌려주는 함수로 쓰고, 등록은 R18 틀에 맡긴다. 본문은 위 "프레임과 본문"을 따른다.
 
 eventbus 사건(웹 실시간 반영 스레드와 합의): Topic `engine`. Kind `engine.container` {Tenant, App, Container, Node, Reasons}, Reasons ∈ start, stop, die, oom, pressure, health. Kind `engine.node` {Node, Reasons}, Reasons ∈ boot, lag, build. 값은 싣지 않고 참조만, 컨테이너마다 300ms 모아 한 번 발행. `eventbus.Event`에 `Container`, `Reasons []string` 필드를 더한다. Tenant 빈 컨테이너는 ManageCluster로 거른다. 구현: `internal/app/engine_bus.go`. `boot`는 사건의 boot가 바뀔 때, `lag`는 엔진 보기를 모두 다시 읽어야 할 때(새 boot나 사건 유실) 보낸다. `build`는 엔진이 빌드 사건을 내기 시작하면 더한다. `seafield.memory`는 `oom`으로 보낸다.

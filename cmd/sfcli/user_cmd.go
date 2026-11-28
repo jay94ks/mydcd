@@ -71,17 +71,17 @@ func userListCommand(g *globals) *cli.Command {
 			after, revision := "", uint64(0)
 			for {
 				ctx, cancel := g.Deadline(c)
-				reply, err := s.Client.UsersPage(ctx, s.Target, s.Stored.Session, after)
+				reply, err := s.Client.Users(ctx, s.Target, s.Stored.Session, after)
 				cancel()
 				if err != nil {
 					return err
 				}
-				if after != "" && reply.UsersRevision != revision {
+				if after != "" && reply.Revision != revision {
 					return errors.New("users changed while reading them; try again")
 				}
-				revision = reply.UsersRevision
+				revision = reply.Revision
 				users = append(users, reply.Users...)
-				if after = reply.UsersNext; after == "" {
+				if after = reply.Next; after == "" {
 					break
 				}
 			}
@@ -105,14 +105,7 @@ func userListCommand(g *globals) *cli.Command {
 func readUser(c *cli.Context, g *globals, s *session, username string) (access.User, error) {
 	ctx, cancel := g.Deadline(c)
 	defer cancel()
-	reply, err := s.Client.UserCredentials(ctx, s.Target, s.Stored.Session, username)
-	if err != nil {
-		return access.User{}, err
-	}
-	if reply.CredentialUser == nil {
-		return access.User{}, fmt.Errorf("no user %s", username)
-	}
-	return *reply.CredentialUser, nil
+	return s.Client.UserCredentials(ctx, s.Target, s.Stored.Session, username)
 }
 
 func userShowCommand(g *globals) *cli.Command {

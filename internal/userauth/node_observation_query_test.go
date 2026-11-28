@@ -39,7 +39,7 @@ func TestNodeObservationMethodsAreTyped(t *testing.T) {
 		"usage with tenant":  {Schema: 1, Method: "node-tenant-usage", Params: json.RawMessage(`{"Tenant":"tenant","Node":"node-a"}`)},
 		"bad node":           {Schema: 1, Method: "node-summary", Params: json.RawMessage(`{"Node":"../node"}`)},
 		"foreign field":      {Schema: 1, Method: "node-disks", Params: json.RawMessage(`{"App":"app"}`)},
-		"old field":          {Schema: 1, Method: "mesh-links", TargetUser: "other", Params: json.RawMessage(`{}`)},
+		"old field":          {Schema: 1, Method: "mesh-links", After: "other", Params: json.RawMessage(`{}`)},
 		"old shape":          {Schema: 1, Method: "node-summary", Tenant: "tenant"},
 	} {
 		if r.validMethodFields() {

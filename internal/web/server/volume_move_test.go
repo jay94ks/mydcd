@@ -15,7 +15,7 @@ func TestVolumeMoveGroupApproval(t *testing.T) {
 	fake.SetGroupPassword("shop", "shop-db", "open-sesame")
 	base := "/api/v1/t/shop/volumes/mysql-data"
 	_, p := f.do("POST", base+"/move-plan", map[string]any{"node": "node-a"})
-	doc := strings.Replace(p["yaml"].(string), "      node: node-b\n", "      node: node-b\n      secrets_from: [group/shop-db]\n", 1)
+	doc := strings.Replace(p["yaml"].(string), "      node: node-b\n", "      node: node-b\n      secrets: {from: [group/shop-db]}\n", 1)
 	if doc == p["yaml"] {
 		t.Fatalf("no db service node line: %s", doc)
 	}

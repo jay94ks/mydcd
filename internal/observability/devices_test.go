@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -190,5 +191,57 @@ func TestDevicesStayWithinBudget(t *testing.T) {
 	}
 	if (Devices{Disks: disks}).valid() {
 		t.Fatal("oversized inventory accepted")
+	}
+}
+
+func TestInspectDevicesListsLVMBundles(t *testing.T) {
+	h := fakeHost{t, t.TempDir()}
+	h.write("sys/block/sda/size", "2000\n")
+	h.write("sys/block/sda/dev", "8:0\n")
+	h.image("sda", ext4Image(0x33, ""))
+	// sdb and sdc are the PVs of mirror bundle "my-pool": rimage sub-volumes
+	// over each, and the data volume (dm-2) mounted at /var/lib/sfc-disks/p.
+	for i, disk := range []string{"sdb", "sdc"} {
+		h.write("sys/block/"+disk+"/size", "4000\n")
+		h.write("sys/block/"+disk+"/dev", "8:"+strconv.Itoa(16*(i+1))+"\n")
+		h.write("sys/block/"+disk+"/serial", "S-"+disk+"\n")
+		h.image(disk, make([]byte, 4096))
+		sub := "dm-" + strconv.Itoa(i)
+		h.write("sys/block/"+disk+"/holders/"+sub, "")
+		h.write("sys/block/"+sub+"/size", "3900\n")
+		h.write("sys/block/"+sub+"/dev", "253:"+strconv.Itoa(i)+"\n")
+		h.write("sys/block/"+sub+"/dm/name", "sfc--my--pool-data_rimage_"+strconv.Itoa(i)+"\n")
+		h.write("sys/block/"+sub+"/dm/uuid", "LVM-x"+strconv.Itoa(i)+"\n")
+		h.write("sys/block/"+sub+"/holders/dm-2", "")
+	}
+	h.write("sys/block/dm-2/size", "3900\n")
+	h.write("sys/block/dm-2/dev", "253:2\n")
+	h.write("sys/block/dm-2/dm/name", "sfc--my--pool-data\n")
+	h.write("sys/block/dm-2/dm/uuid", "LVM-y\n")
+	h.image("dm-2", ext4Image(0x44, ""))
+	h.write("proc/mountinfo", strings.Join([]string{
+		"25 1 8:0 / / rw - ext4 /dev/sda rw",
+		"26 25 253:2 / /var/lib/sfc-disks/p rw - ext4 /dev/mapper/sfc--my--pool-data rw",
+	}, "\n")+"\n")
+	h.write("proc/swaps", "Filename Type Size Used Priority\n")
+	src := deviceSources{Sys: filepath.Join(h.root, "sys"), Dev: filepath.Join(h.root, "dev"), MountInfo: filepath.Join(h.root, "proc/mountinfo"), Swaps: filepath.Join(h.root, "proc/swaps")}
+	d, err := inspectDevices(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	names := []string{}
+	for _, disk := range d.Disks {
+		names = append(names, disk.Name+":"+disk.Class+":"+disk.Bundle+":"+disk.Kind)
+	}
+	if strings.Join(names, ",") != "dm-2:additional:my-pool:bundle,sda:system::,sdb:bundle-member:my-pool:,sdc:bundle-member:my-pool:" {
+		t.Fatal(names)
+	}
+	if p := d.Disks[0].Parts; len(p) != 1 || p[0].Filesystem != "ext4" || p[0].Mounts[0] != "/var/lib/sfc-disks/p" {
+		t.Fatalf("bundle device %+v", d.Disks[0])
+	}
+	for name, want := range map[string][2]string{"sfc--my--pool-data": {"my-pool", ""}, "sfc--a-data_rmeta_1": {"a", "rmeta_1"}, "vg-root": {}, "sfc--a-other": {}, "sfc--A-data": {}} {
+		if b, sub := LVMBundle(name); b != want[0] || sub != want[1] {
+			t.Error(name, b, sub)
+		}
 	}
 }

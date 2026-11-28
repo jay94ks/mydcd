@@ -21,7 +21,7 @@ func TestSecretSupply(t *testing.T) {
 		return alice.AppPlan(ctx, AppPlanRequest{Tenant: "shop", Document: []byte(doc), Project: "php-shop"})
 	}
 	dbBlock := "      node: node-b\n"
-	withEnv := strings.Replace(phpShopYAML, dbBlock, dbBlock+"      secret_env:\n        - {source: mysql, name: MYSQL_ROOT_PASSWORD}\n", 1)
+	withEnv := strings.Replace(phpShopYAML, dbBlock, dbBlock+"      secrets:\n        env:\n          - {source: mysql, name: MYSQL_ROOT_PASSWORD}\n", 1)
 	withEnv = strings.Replace(withEnv, "      - mysql-data:/var/lib/mysql\n", "      - mysql-data:/var/lib/mysql\n    secrets:\n      - {source: tls, target: /etc/app/key.pem, mode: 0440}\n      - plain\n", 1)
 	p, err := plan(withEnv)
 	if err != nil {
@@ -40,7 +40,7 @@ func TestSecretSupply(t *testing.T) {
 			t.Fatalf("want %s, got %v", code, err)
 		}
 	}
-	refused(strings.Replace(withEnv, "    secrets:\n", "    environment: {MYSQL_ROOT_PASSWORD: x}\n    secrets:\n", 1), "SECRET_ENV_CONFLICT")
+	refused(strings.Replace(withEnv, "    secrets:\n      - {source: tls", "    environment: {MYSQL_ROOT_PASSWORD: x}\n    secrets:\n      - {source: tls", 1), "SECRET_ENV_CONFLICT")
 	refused(strings.Replace(withEnv, "name: MYSQL_ROOT_PASSWORD", "name: 1BAD", 1), "SECRET_ENV_INVALID")
 	refused(strings.Replace(withEnv, "/etc/app/key.pem", "/proc/x", 1), "SECRET_TARGET_FORBIDDEN")
 	refused(strings.Replace(withEnv, "/etc/app/key.pem", "/etc/hosts", 1), "SECRET_TARGET_FORBIDDEN")

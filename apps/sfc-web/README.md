@@ -67,9 +67,9 @@ docker run -d --name sfc-web \
 
 ## cluster app image 묶음 만들기
 
-sfcd가 cluster app으로 띄우려면 이미지를 OCI layout 묶음으로 서버의 `/usr/local/lib/sfc/images/sfc-web/`에 두고, sfcd가 믿는 릴리스 키로 서명한 릴리스 정보를 함께 넣는다(cluster apps 3.3절). 공식 릴리스 키가 아닌 키로 직접 빌드한 이미지를 돌릴 때는 그 공개키를 서버의 `/etc/sfc/release-keys/`에 둔다. sfcd를 다시 빌드할 필요는 없다.
+sfcd가 cluster app으로 띄우려면 이미지를 OCI layout 묶음으로 sfcd 옆의 이미지 디렉터리(`sfc-web-image` 패키지면 `/usr/lib/sfc/images/sfc-web/`, tar.gz면 `/usr/local/lib/sfc/images/sfc-web/`)에 두고, sfcd가 믿는 릴리스 키로 서명한 릴리스 정보를 함께 넣는다(cluster apps 3.3절). 공식 릴리스 키가 아닌 키로 직접 빌드한 이미지를 돌릴 때는 그 공개키를 서버의 `/etc/sfc/release-keys/`에 둔다. sfcd를 다시 빌드할 필요는 없다.
 
-공식 릴리스는 플랫폼마다 서명된 묶음 `sfc-web-image_<태그>_linux_<arch>.tar.gz`를 함께 올린다. 서버에서 `tar -xzf sfc-web-image_*.tar.gz -C /usr/local/lib/sfc/images/`로 풀면 `sfc-web/`이 되고, 공식 릴리스 키는 sfcd에 들어 있으므로 키 파일을 따로 두지 않는다.
+공식 릴리스는 이 묶음을 `sfc-web-image` deb·rpm 패키지와 tar.gz에 넣고, 플랫폼마다 서명된 묶음 `sfc-web-image_<태그>_linux_<arch>.tar.gz`도 따로 올린다. tar.gz로 설치한 서버에서 `tar -xzf sfc-web-image_*.tar.gz -C /usr/local/lib/sfc/images/`로 풀면 `sfc-web/`이 되고, 공식 릴리스 키는 sfcd에 들어 있으므로 키 파일을 따로 두지 않는다.
 
 ```sh
 # 키는 한 번만 만든다. lab.key(개인키)는 서버에 두지 않는다

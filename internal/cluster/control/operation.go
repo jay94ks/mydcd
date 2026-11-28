@@ -134,7 +134,7 @@ func (op UserOperation) Command() (state.Command, error) {
 	if StandaloneCASAllowed(op.Change) {
 		c.Kind = state.ModuleAppCAS
 	}
-	if AppBeginCASAllowed(op.Change) || AppLocalCASAllowed(op.Change) || AppCDDecisionCASAllowed(op.Change) || AppCDTargetCASAllowed(op.Change) || AppLogClearCASAllowed(op.Change) || TaskRestartCASAllowed(op.Change) {
+	if AppBeginCASAllowed(op.Change) || AppLocalCASAllowed(op.Change) || AppCDDecisionCASAllowed(op.Change) || AppCDTargetCASAllowed(op.Change) || TaskRestartCASAllowed(op.Change) {
 		if UploadCASAllowed(op.Change.Action) || AppDownCASAllowed(op.Change) || AppFieldCASAllowed(op.Change) || StandaloneCASAllowed(op.Change) && standaloneControlAction(op.Change.Action) == "" {
 			return state.Command{}, access.ErrDenied
 		}
@@ -233,8 +233,12 @@ func (p Policy) AdmitModule(s state.State, command state.Command) bool {
 		_, err := p.registryMaintenanceReport(s, command)
 		return err == nil
 	}
-	if command.Key == ResourcesKey && strings.HasPrefix(command.Actor, "node/") && bridgeClosedValue(command.Value) {
+	if command.Key == ResourcesKey && strings.HasPrefix(command.Actor, "node/") && reportKind(command.Value) == bridgeClosedKind {
 		_, err := p.bridgeClosedReport(s, command)
+		return err == nil
+	}
+	if command.Key == ResourcesKey && strings.HasPrefix(command.Actor, "node/") && reportKind(command.Value) == networkLeaveKind {
+		_, err := p.networkLeaveReport(s, command)
 		return err == nil
 	}
 	if command.Key == ResourcesKey && strings.HasPrefix(command.Actor, "node/") {
@@ -272,6 +276,14 @@ func (p Policy) AdmitModule(s state.State, command state.Command) bool {
 		}
 		if restoreReportValue([]byte(command.Value)) {
 			_, err := p.restoreReport(s, command)
+			return err == nil
+		}
+		if volumeArchiveReportValue([]byte(command.Value)) {
+			_, err := p.archiveReport(s, command)
+			return err == nil
+		}
+		if volumeArchiveKeyReportValue([]byte(command.Value)) {
+			_, err := p.archiveKeyReport(s, command)
 			return err == nil
 		}
 		_, err := p.backupReport(s, command)

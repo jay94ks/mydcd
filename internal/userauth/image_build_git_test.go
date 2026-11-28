@@ -60,7 +60,8 @@ func TestGitSaveActualUserWireKeepsUserProofAndRejectsChangedOwnerEvidence(t *te
 							return err
 						}
 						request, err := schema.Decode[Request](envelope.Body)
-						if err != nil || !request.validMethodFields() || !request.validQuerySelectors() || request.Method != "save-build-git" || request.ImageBuildGit == nil || request.ImageBuildGit.Plan != plan || request.ImageBuildGit.Result != readResult || request.ImageBuildGit.Authorize(session, time.Now().Unix()) != nil {
+						var q SaveBuildGitQuery
+						if err != nil || !typedParams(request, SaveBuildGitMethod.Name, &q) || q.Tenant != "tenant" || q.Request.Plan != plan || q.Request.Result != readResult || q.Request.Authorize(session, time.Now().Unix()) != nil {
 							return sfcp.ErrFrame
 						}
 						if _, err := binding.binding(conn, frame.Kind, envelope); err != nil {
@@ -90,7 +91,7 @@ func TestGitSaveActualUserWireKeepsUserProofAndRejectsChangedOwnerEvidence(t *te
 						if mode == "changed" {
 							out.Saved.Plan.Commit = strings.Repeat("b", 40)
 						}
-						return binding.respond(stream, frame, sha256.Sum256(frame.Fields[0].Value), Reply{Schema: 1, Code: "ok", ImageBuildGit: &out})
+						return binding.respond(stream, frame, sha256.Sum256(frame.Fields[0].Value), okReply(out))
 					}()
 					done <- serve
 					return serve
@@ -154,19 +155,21 @@ func TestGitSaveUserRequestCannotCarryForeignSelectors(t *testing.T) {
 	_, c, s, node := journalFixture(t)
 	now := uint64(time.Now().Unix())
 	q := imagebuild.GitSaveRequest{Plan: imagebuild.GitSavePlan{Schema: 1, Tenant: "tenant", Context: "source", ID: "save", Creator: s.User, Root: nodestorage.Reference{Cluster: c.Cluster, Node: "node", Key: node.Public, ID: "data", Generation: 1, Path: "/srv/sfc"}, ContextRevision: 1, PolicyRevision: 1, Dockerfile: "Dockerfile", ExpandedLimit: 1 << 20, Commit: strings.Repeat("a", 40), Tree: [32]byte{7}, CreatedAt: now, ExpiresAt: now + 600}}
-	r := Request{Schema: 1, Method: "save-build-git", Tenant: "tenant", Nonce: [32]byte{1}, ImageBuildGit: &q}
-	if !r.validMethodFields() {
+	r := SaveBuildGitQuery{Tenant: "tenant", Request: q}
+	if !r.Valid() {
 		t.Fatal("valid fixed source request rejected")
 	}
-	for _, change := range []func(*Request){func(r *Request) { r.Method = "whoami" }, func(r *Request) { r.After = "cursor" }, func(r *Request) { r.ImageBuildGit = nil }, func(r *Request) { r.ImageBuild = &control.ImageBuildQuery{Part: "contexts"} }, func(r *Request) { r.Secret = []byte("private") }} {
-		bad := r
-		change(&bad)
-		if bad.validMethodFields() {
-			t.Fatal("mixed source selector accepted")
-		}
+	if (SaveBuildGitQuery{Request: q}).Valid() || (SaveBuildGitQuery{Tenant: "tenant"}).Valid() {
+		t.Fatal("source request without tenant or plan accepted")
 	}
-	raw, err := json.Marshal(Request{Schema: 1, Method: "whoami"})
-	if err != nil || strings.Contains(string(raw), "ImageBuildGit") {
-		t.Fatal("optional Git selector changed old wire shape", err)
+	raw, err := json.Marshal(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range []string{`"After":"cursor"`, `"ImageBuild":{"Part":"contexts"}`, `"Secret":"cHJpdmF0ZQ=="`} {
+		bad := strings.TrimSuffix(string(raw), "}") + "," + field + "}"
+		if strict([]byte(bad), &SaveBuildGitQuery{}) == nil {
+			t.Fatal("mixed source selector accepted", field)
+		}
 	}
 }

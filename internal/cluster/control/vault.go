@@ -42,6 +42,13 @@ type VaultAge struct {
 	Realm, ID string
 	Seconds   int64
 }
+
+// VaultRegistryShared turns a cluster-realm Group's RegistryShared flag on or
+// off (vault-registry-shared). Expected is the group's revision.
+type VaultRegistryShared struct {
+	Realm, ID string
+	Shared    bool
+}
 type VaultProfile struct {
 	Realm   string
 	Profile secrets.WriteProfile
@@ -220,6 +227,12 @@ func vaultRealm(change Change) (string, error) {
 			return "", ErrCatalog
 		}
 		realm = x.Realm
+	case "vault-registry-shared":
+		var x VaultRegistryShared
+		if canonical(change.Payload, &x) != nil {
+			return "", ErrCatalog
+		}
+		realm = x.Realm
 	case "vault-set-profile":
 		var x VaultProfile
 		if canonical(change.Payload, &x) != nil {
@@ -393,6 +406,10 @@ func (p Policy) reduceVault(s state.State, cmd state.Command) (map[string][]byte
 			var x VaultAge
 			_ = canonical(change.Payload, &x)
 			tree, err = tree.SetApprovalAge(c, change.Principal, x.ID, change.Expected, x.Seconds)
+		case "vault-registry-shared":
+			var x VaultRegistryShared
+			_ = canonical(change.Payload, &x)
+			tree, err = tree.SetRegistryShared(c, change.Principal, x.ID, change.Expected, x.Shared)
 		case "vault-set-profile":
 			var x VaultProfile
 			_ = canonical(change.Payload, &x)

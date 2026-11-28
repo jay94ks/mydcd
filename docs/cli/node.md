@@ -19,6 +19,7 @@
 | `node disks [NODE] [--all]` | 디스크 크기·여유·용도 |
 | `node tenants NODE` | 작업 공간별 CPU·메모리 사용량과 할당 |
 | `node diagnostics NODE [--out FILE]` | 비밀이 없는 진단 묶음(tar.gz)을 새 파일로 저장 |
+| `node logs NODE NAME` | 그 서버의 클러스터 앱(예: `web`) 로그. `--container C`는 그 서버가 보관한 아무 컨테이너 로그. [`sfcli logs --node`](logs.md)의 별칭(시스템 관리자) |
 | `node images NODE` | 서버에 캐시된 컨테이너 이미지와 쓰는 곳 |
 
 ## 서버 넣기
@@ -103,16 +104,17 @@ sfcli node remove node-c        # 비어 있으면 클러스터에서 뺀다
 | `node storage space [NODE]` | 지금 관측한 파일시스템별 여유 공간(예약이 아니다) |
 | `node storage add NODE NAME --path DIR [--tenants a,b \| --all-tenants] [--capacity SIZE]` | 등록. 작업 공간을 주지 않으면 아무도 못 쓴다. `--capacity`의 기본은 `unlimited` |
 | `node storage set NODE NAME [--add-tenants a,b] [--remove-tenants c] [--all-tenants=true\|false] [--capacity SIZE\|unlimited]` | 쓸 수 있는 작업 공간과 용량 한도. 바뀌는 것만 보낸다. 이미 허용된 작업 공간을 더하거나 없는 것을 빼면, 모든 작업 공간이 허용된 동안 목록을 고치면 거절된다. `--all-tenants=false`는 `--add-tenants`로 새 목록을 시작한다 |
+| `node storage archive-default NODE NAME [--clear]` | 내린 앱의 볼륨을 보관할 때 쓸 이 서버의 기본 보관 위치. 서버마다 하나이고, 새로 정하면 앞의 것은 풀린다. `--clear`는 NAME을 기본에서 뺀다. 기본이 없으면 그 서버의 `default` 저장 경로에 보관한다. drain하는 디렉터리는 기본이 될 수 없고, drain하면 기본에서 빠진다 |
 | `node storage drain NODE NAME` | 새 볼륨을 두지 않는다 |
 | `node storage remove NODE NAME` | 비운 디렉터리를 등록에서 뺀다 |
 
 ## 방화벽
 
-node.yaml `firewall.managed: true`인 서버로 들어오는 연결 규칙을 다룬다. 운영자 iptables 규칙은 그대로 두고 그 앞에서 판정한다. 시스템 관리자 명령이다. 자세한 동작: [서버 방화벽](../reference/node-firewall.md). 모든 서버에 같이 걸리는 클러스터 값은 [`sfcli firewall`](cluster.md#방화벽)이다.
+node.yaml `firewall.managed: true`인 서버로 들어오는 연결 규칙을 다룬다. 운영자 iptables·nftables 규칙은 그대로 두고 그 앞에서 판정한다. 시스템 관리자 명령이다. 자세한 동작: [서버 방화벽](../reference/node-firewall.md). 모든 서버에 같이 걸리는 클러스터 값은 [`sfcli firewall`](cluster.md#방화벽)이다.
 
 | 명령 | 하는 일 |
 |---|---|
-| `node firewall show NODE` | 정책(지금 적용 중인 값), 잠금 규칙, 클러스터 필수 규칙, 서버 규칙(필수 규칙에 일부 가려지면 표시), 클러스터 일반 규칙, 서버에 원래 있던 INPUT 규칙(읽기만) |
+| `node firewall show NODE` | 정책(지금 적용 중인 값), 잠금 규칙, 클러스터 필수 규칙, 서버 규칙(필수 규칙에 일부 가려지면 표시), 클러스터 일반 규칙, 서버에 원래 있던 들어오는 연결 규칙(nft 표현식, 읽기만) |
 | `node firewall allow\|deny NODE tcp/PORT\|udp/PORT\|icmp\|any [--from PREFIX]... [--comment TEXT]` | 규칙 하나 추가. 포트 범위는 `tcp/30000-30100`. deny가 allow보다 먼저 |
 | `node firewall update NODE RULE [--action] [--match] [--from]... [--from-anywhere] [--comment]` | 준 칸만 바꾼다 |
 | `node firewall remove NODE RULE...` | 규칙 빼기 |

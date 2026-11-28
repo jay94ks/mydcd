@@ -1,0 +1,17 @@
+# SPDX-License-Identifier: Apache-2.0
+# rpmlint findings that are deliberate (devel/design/install-packages.md).
+# Packages are not GPG-signed; the release signs SHA256SUMS instead (7절).
+addFilter("no-signature")
+# Every binary is a static Go build (runc: static PIE with libseccomp), so it
+# runs regardless of the host's libraries.
+addFilter("position-independent-executable-suggested")
+addFilter("statically-linked-binary")
+# The three packages always ship together at one version.
+addFilter("requires-on-release")
+# sfc-web-image is a signed OCI image bundle: data under /usr/lib/sfc/images.
+addFilter("sfc-web-image.* package-with-huge-docs")
+addFilter("sfc-web-image.* only-non-binary-in-usr-lib")
+# Program names.
+addFilter("spelling-error .*'(sfcd|sfcli|sfed|runc|containerd|Raft|SFCP|Seafield|yaml|systemctl)'")
+# The rm in %postun is the text of a message, not a command.
+addFilter("dangerous-command-in-%postun rm")

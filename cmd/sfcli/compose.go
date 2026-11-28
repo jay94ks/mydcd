@@ -31,7 +31,7 @@ type composeOptions struct {
 	condition                                       onceString
 	sourceOperation                                 onceString
 	retrySource                                     checkerRetryFlag
-	logClearPreview, logClearRecreate               checkerRetryFlag
+	logClearPreview                                 checkerRetryFlag
 	passwordFDs                                     groupPasswordFDs
 	noInput                                         bool
 }
@@ -48,7 +48,6 @@ func parseComposeDefaults(args []string, diagnostic io.Writer, defaults cliprofi
 	f.SetOutput(diagnostic)
 	o.container = addContainerReadFlags(f)
 	f.Var(&o.logClearPreview, "preview", "show exact restart or log-clear plan without mutation")
-	f.Var(&o.logClearRecreate, "recreate", "explicitly consent to container recreation and irreversible local log/writable-layer loss")
 	f.Var(&o.file, "f", "single app.yaml specification")
 	f.Var(&o.file, "file", "single app.yaml specification")
 	f.Var(&o.project, "p", "project name")
@@ -69,13 +68,13 @@ func parseComposeDefaults(args []string, diagnostic io.Writer, defaults cliprofi
 	}
 	rest := f.Args()
 	if len(rest) == 0 {
-		return o, errors.New("compose requires config, plan, diff, up, resume, down, ps, status, wait, logs, top, stats, logs-clear or logs-clear-status")
+		return o, errors.New("compose requires config, plan, diff, up, resume, down, ps, status, wait, logs, top, stats, restart or exec")
 	}
 	o.method = rest[0]
 	if err := f.Parse(rest[1:]); err != nil {
 		return o, errors.New("invalid compose options")
 	}
-	if containerReadMethod(o.method) || o.method == "restart" || o.method == "logs-clear" || o.method == "exec" {
+	if containerReadMethod(o.method) || o.method == "restart" || o.method == "exec" {
 		trailing := f.Args()
 		if len(trailing) == 0 {
 			return o, errors.New("container query requires a service")
@@ -98,18 +97,18 @@ func parseComposeDefaults(args []string, diagnostic io.Writer, defaults cliprofi
 	invalidReadFlag := false
 	if !containerReadMethod(o.method) {
 		f.Visit(func(v *flag.Flag) {
-			invalidReadFlag = invalidReadFlag || containerReadFlag(v.Name) && !((o.method == "restart" || o.method == "logs-clear") && v.Name == "instance") && !(o.method == "exec" && containerExecFlag(v.Name)) && !(o.method == "exec-status" && v.Name == "json")
+			invalidReadFlag = invalidReadFlag || containerReadFlag(v.Name) && !(o.method == "restart" && v.Name == "instance") && !(o.method == "exec" && containerExecFlag(v.Name)) && !(o.method == "exec-status" && v.Name == "json")
 		})
 	}
 	if invalidReadFlag {
 		return o, errors.New("container observation options require logs, top or stats")
 	}
-	if o.method != "restart" && o.method != "logs-clear" && o.logClearPreview.set || o.method != "logs-clear" && o.logClearRecreate.set {
-		return o, errors.New("--preview/--recreate require compose logs-clear")
+	if o.method != "restart" && o.logClearPreview.set {
+		return o, errors.New("--preview requires compose restart")
 	}
 	switch o.method {
 	case "restart", "restart-status":
-		if o.project.value == "" || o.file.set || o.plan.set || o.output.set || o.deployment.set || o.node.set || o.logClearRecreate.set {
+		if o.project.value == "" || o.file.set || o.plan.set || o.output.set || o.deployment.set || o.node.set {
 			return o, errors.New("restart/restart-status requires -p PROJECT without deployment overrides")
 		}
 		if o.method == "restart" {
@@ -127,23 +126,6 @@ func parseComposeDefaults(args []string, diagnostic io.Writer, defaults cliprofi
 			if !(containerops.Selection{App: o.project.value, Service: o.container.service, Instance: o.container.instance.value}).Valid() || o.container.execSpec().Validate() != nil {
 				return o, errors.New("exec requires SERVICE -- ARG [ARG ...] and valid -i/-t options")
 			}
-		}
-	case "logs-clear":
-		if o.project.value == "" || o.file.set || o.plan.set || o.output.set || o.deployment.set || o.node.set || o.logClearPreview.value == o.logClearRecreate.value || o.logClearPreview.value && o.operation.set || o.logClearRecreate.value && o.operation.value == "" {
-			return o, errors.New("logs-clear requires -p PROJECT SERVICE and either --preview or explicit --recreate --operation ID")
-		}
-		if o.logClearRecreate.value && !(control.AppLogClearQuery{Selection: containerops.Selection{App: o.project.value}, Operation: o.operation.value}).Valid(false) {
-			return o, errors.New("invalid log-clear operation")
-		}
-		if !(control.AppLogClearQuery{Selection: containerops.Selection{App: o.project.value, Service: o.container.service, Instance: o.container.instance.value}}).Valid(true) {
-			return o, errors.New("invalid log-clear service/instance")
-		}
-	case "logs-clear-status":
-		if !(control.AppLogClearQuery{Selection: containerops.Selection{App: o.project.value}, Operation: o.operation.value}).Valid(false) {
-			return o, errors.New("invalid log-clear app/operation")
-		}
-		if o.project.value == "" || o.operation.value == "" || o.file.set || o.plan.set || o.output.set || o.deployment.set || o.node.set {
-			return o, errors.New("logs-clear-status requires -p PROJECT --operation ID")
 		}
 	case "logs", "top", "stats", "inspect":
 		if o.project.value == "" || o.file.set || o.plan.set || o.output.set || o.deployment.set || o.node.set {
@@ -180,7 +162,7 @@ func parseComposeDefaults(args []string, diagnostic io.Writer, defaults cliprofi
 	default:
 		return o, errors.New("compose command not implemented")
 	}
-	if o.plan.set && o.method != "up" || o.operation.set && o.method != "up" && o.method != "resume" && o.method != "down" && o.method != "wait" && o.method != "status" && o.method != "logs-clear" && o.method != "logs-clear-status" && o.method != "exec" && o.method != "exec-status" && o.method != "restart" && o.method != "restart-status" {
+	if o.plan.set && o.method != "up" || o.operation.set && o.method != "up" && o.method != "resume" && o.method != "down" && o.method != "wait" && o.method != "status" && o.method != "exec" && o.method != "exec-status" && o.method != "restart" && o.method != "restart-status" {
 		return o, errors.New("--plan requires up; --operation requires up, down, resume, wait or status")
 	}
 	if o.condition.set && o.method != "wait" {
@@ -255,9 +237,6 @@ func runComposeDefaults(ctx context.Context, args []string, client userauth.Clie
 	}
 	if o.method == "restart" || o.method == "restart-status" {
 		return runTaskRestart(ctx, o, tenant, client, target, stored, home, out, diagnostic)
-	}
-	if o.method == "logs-clear" || o.method == "logs-clear-status" {
-		return runLogClear(ctx, o, tenant, client, target, stored, home, out, diagnostic)
 	}
 	if o.method == "exec" || o.method == "exec-status" || containerReadMethod(o.method) && (o.container.follow.value || o.container.watch.value) {
 		return runContainerStream(ctx, o, tenant, client, target, stored, home, out, diagnostic)

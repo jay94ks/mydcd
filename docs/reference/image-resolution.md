@@ -17,14 +17,16 @@ sfcli --tenant payments image resolve docker.io/library/alpine:latest
 {
   "Schema": 1,
   "Method": "image-resolve",
-  "Tenant": "payments",
-  "ImageResolve": { "Ref": "ghcr.io/my-org/app:release" }
+  "Params": {
+    "Tenant": "payments",
+    "Query": { "Ref": "ghcr.io/my-org/app:release" }
+  }
 }
 ```
 
-위 본문에는 기존 공통 Nonce도 포함해야 한다. `Ref`는 비어 있지 않은 최대1024바이트 이미지 이름이며 tag·digest를 허용한다. `alpine`은 `docker.io/library/alpine:latest`로 정규화한다. 로컬 image ID, URL·인증 정보·공백을 포함한 이름은 `INVALID_IMAGE`다. Node/After나 다른 method의 selector를 섞지 않는다.
+위 본문에는 기존 공통 Nonce도 포함해야 한다. `Ref`는 비어 있지 않은 최대1024바이트 이미지 이름이며 tag·digest를 허용한다. `alpine`은 `docker.io/library/alpine:latest`로 정규화한다. 로컬 image ID, URL·인증 정보·공백을 포함한 이름은 `INVALID_IMAGE`다. typed method라 `Params`에 다른 필드를 넣지 않는다.
 
-성공한 User Reply의 `ImageResolve` 필드는 다음 구조다. 아래 digest는 실제 조회값으로 채워진다.
+성공한 응답의 `Data`는 다음 구조다. 아래 digest는 실제 조회값으로 채워진다.
 
 | 필드 | 형식·의미 |
 |---|---|

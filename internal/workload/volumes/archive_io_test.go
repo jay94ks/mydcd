@@ -67,7 +67,7 @@ func TestRestoreArchiveIOFailurePreservesPartialAndErrno(t *testing.T) {
 					return f.Sync()
 				}
 			}
-			if err = restoreArchive(context.Background(), dest, bytes.NewReader(archive.Bytes()), receipt, options, files); !errors.Is(err, expected) {
+			if err = restoreArchive(context.Background(), dest, seekerOpener(bytes.NewReader(archive.Bytes()), receipt), receipt, options, files); !errors.Is(err, expected) {
 				t.Fatal("lost original filesystem errno", stage, err)
 			}
 			before, err := os.ReadFile(filepath.Join(target, "one"))

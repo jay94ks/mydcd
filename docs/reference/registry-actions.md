@@ -19,14 +19,14 @@ sfcli op show start-private-43
 
 | 필드 | 내용 |
 |---|---|
-| Request.Method | registry-action-plan |
-| Request.Tenant | 선택한 tenant |
-| Request.RegistryAction | `{Action:"start-registry" 또는 "stop-registry",ID:"private"}` |
-| Request.After/Node | 비워 둠. 다른 method의 selector 혼합 금지 |
-| Reply.RegistryActionPlan | 아래 계획. 오류는 denied/conflict/unavailable |
+| Request.Method | registry-action-plan (typed method) |
+| Request.Params.Tenant | 선택한 tenant |
+| Request.Params.Query | `{Action:"start-registry" 또는 "stop-registry",ID:"private"}` |
+| Request.Params의 다른 필드 | 허용하지 않음 |
+| Reply.Data | 아래 계획. 오류는 denied/conflict/unavailable |
 
 ```json
-{"Schema":1,"Method":"registry-action-plan","Tenant":"team-a","RegistryAction":{"Action":"stop-registry","ID":"private"}}
+{"Schema":1,"Method":"registry-action-plan","Params":{"Tenant":"team-a","Query":{"Action":"stop-registry","ID":"private"}}}
 ```
 
 이는 추가 본문 필드의 예시다. 실제 client는 기존 Nonce·Session·채널 challenge 서명을 포함한다. JSON의 필드 이름은 위처럼 대문자로 시작하고 schema는1이다.

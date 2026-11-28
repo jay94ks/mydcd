@@ -229,3 +229,25 @@ func TestLogoutEndsOpenStreams(t *testing.T) {
 		t.Fatal("log follow still open after logout")
 	}
 }
+
+// tail=0 (the log tab's follow, history read separately) opens a stream:
+// sfcd takes 1..10000 history lines, so the daemon asks for lines since now.
+func TestStreamTailZeroFollowsNewLinesOnly(t *testing.T) {
+	f, _ := newFakeFixture(t)
+	fakeLogin(t, f, "alice")
+	for _, q := range []string{"&tail=0", ""} {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		req, _ := http.NewRequestWithContext(ctx, "GET", f.http.URL+"/api/v1/t/shop/apps/php-shop/stream?kind=logs&service=web"+q, nil)
+		resp, err := f.hc.Do(req)
+		if err != nil || resp.StatusCode != 200 {
+			cancel()
+			t.Fatalf("tail %q: %v %v", q, resp, err)
+		}
+		sc := bufio.NewScanner(resp.Body)
+		if !sc.Scan() || !strings.HasPrefix(sc.Text(), "event: target") {
+			t.Fatalf("tail %q first line: %q", q, sc.Text())
+		}
+		resp.Body.Close()
+		cancel()
+	}
+}

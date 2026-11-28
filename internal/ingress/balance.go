@@ -18,8 +18,8 @@ type Balance struct {
 	Method           string                  `json:",omitempty" yaml:"method,omitempty"`
 	Key              string                  `json:",omitempty" yaml:"key,omitempty"`
 	Locality         string                  `json:",omitempty" yaml:"locality,omitempty"`
-	SlowStartMS      int                     `json:",omitempty" yaml:"slow_start_ms,omitempty"`
-	SlowStartSeconds int                     `json:",omitempty" yaml:"slow_start,omitempty"`
+	SlowStartMS      int                     `json:",omitempty" yaml:"-"` // yaml `warmup: 30s` (balance_yaml.go)
+	SlowStartSeconds int                     `json:",omitempty" yaml:"-"`
 	Retry            int                     `json:",omitempty" yaml:"retry,omitempty"`
 	Weights          map[string]int          `json:",omitempty" yaml:"weights,omitempty"`
 	Groups           map[string]BackendGroup `json:",omitempty" yaml:"groups,omitempty"`

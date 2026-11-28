@@ -7,6 +7,7 @@ import (
 	"crypto/ed25519"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"slices"
 	"strings"
@@ -275,10 +276,13 @@ func (r *Runtime) fetchBuiltinLeaf(ctx context.Context, q control.AppInputFetch)
 		return secrets.Fetched{}, err
 	}
 	self := r.commandIdentity().Public
+	var failures []error
 	if members.VoterKey(self) {
-		if value, err := r.readAppInputLeaf(ctx, q); err == nil {
+		value, err := r.readAppInputLeaf(ctx, q)
+		if err == nil {
 			return value, nil
 		}
+		failures = append(failures, fmt.Errorf("local: %w", err))
 	}
 	var holders [][32]byte
 	// Holders of the current revision go first; a pinned older revision is
@@ -301,7 +305,6 @@ func (r *Runtime) fetchBuiltinLeaf(ctx context.Context, q control.AppInputFetch)
 		}
 		return 0
 	})
-	failure := error(secrets.ErrProvider)
 	for _, peer := range peers {
 		call, cancel := context.WithTimeout(ctx, 10*time.Second)
 		value, err := r.fetchAppInputFrom(call, q, peer)
@@ -309,9 +312,14 @@ func (r *Runtime) fetchBuiltinLeaf(ctx context.Context, q control.AppInputFetch)
 		if err == nil {
 			return value, nil
 		}
-		failure = err
+		// Keep every voter's answer: the last one alone (often a voter that
+		// never held this revision) hides why the holders refused.
+		failures = append(failures, fmt.Errorf("voter %x (holder %t): %w", peer.Key[:4], slices.Contains(holders, [32]byte(peer.Key)), err))
 	}
-	return secrets.Fetched{}, failure
+	if len(failures) == 0 {
+		return secrets.Fetched{}, secrets.ErrProvider
+	}
+	return secrets.Fetched{}, errors.Join(failures...)
 }
 
 // openBuiltinVerifier opens a group's builtin password verifier from this

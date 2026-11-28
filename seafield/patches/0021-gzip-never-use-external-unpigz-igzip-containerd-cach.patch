@@ -1,0 +1,52 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: seafield <seafield@invalid>
+Date: Sat, 28 Nov 2026 04:06:54 +0000
+Subject: [PATCH 21/21] gzip: never use external unpigz/igzip; containerd
+ caches the helper path and pulls break when pigz is removed
+
+
+diff --git a/cmd/dockerd/seafield_gzip.go b/cmd/dockerd/seafield_gzip.go
+new file mode 100644
+index 0000000..3afb703
+--- /dev/null
++++ b/cmd/dockerd/seafield_gzip.go
+@@ -0,0 +1,19 @@
++package main
++
++import "os"
++
++// Seafield: never hand gzip layers to an external unpigz/igzip.
++//
++// containerd looks the helper up once per process and keeps the path, so a
++// package manager removing pigz while the engine runs breaks every later
++// pull ("fork/exec /usr/bin/unpigz: no such file or directory"). The Go
++// decompressor is used instead. The containerd daemon the engine starts
++// inherits these, so the same holds there. An operator who sets a variable
++// explicitly keeps their value.
++func init() {
++	for _, name := range []string{"CONTAINERD_DISABLE_PIGZ", "CONTAINERD_DISABLE_IGZIP", "MOBY_DISABLE_PIGZ"} {
++		if _, ok := os.LookupEnv(name); !ok {
++			_ = os.Setenv(name, "1")
++		}
++	}
++}
+diff --git a/cmd/dockerd/seafield_gzip_test.go b/cmd/dockerd/seafield_gzip_test.go
+new file mode 100644
+index 0000000..63eb1e6
+--- /dev/null
++++ b/cmd/dockerd/seafield_gzip_test.go
+@@ -0,0 +1,14 @@
++package main
++
++import (
++	"os"
++	"testing"
++)
++
++func TestSeafieldGzipHelpersDisabled(t *testing.T) {
++	for _, name := range []string{"CONTAINERD_DISABLE_PIGZ", "CONTAINERD_DISABLE_IGZIP", "MOBY_DISABLE_PIGZ"} {
++		if v, ok := os.LookupEnv(name); !ok || v == "" {
++			t.Fatalf("%s not set by init", name)
++		}
++	}
++}

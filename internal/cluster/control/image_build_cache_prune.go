@@ -189,7 +189,7 @@ func (p Policy) ImageBuildCachePruneWork(s state.State, caller [32]byte, q Image
 		if err != nil {
 			return work, err
 		}
-		if _, err := c.CheckImageTrust(q.Tenant, work.Source.Policy.BuilderImage); err != nil {
+		if _, err := c.CheckImageRefTrust(q.Tenant, work.Source.Policy.BuilderImage); err != nil {
 			work.Blocked = "UNTRUSTED_BUILDER"
 			return work, nil
 		}
@@ -270,7 +270,7 @@ func (p Policy) reduceImageBuildCachePrune(s state.State, b ImageBuildCatalog, o
 	if p.buildRootCurrent(s, c, op.Session, op.At, q.Tenant, source.Run.Spec.Scope.Root) != nil {
 		return b, state.Forbidden
 	}
-	if _, err = c.CheckImageTrust(q.Tenant, source.Run.Spec.Policy.BuilderImage); err != nil {
+	if _, err = c.CheckImageRefTrust(q.Tenant, source.Run.Spec.Policy.BuilderImage); err != nil {
 		return b, state.Forbidden
 	}
 	if p.imageCacheAvailable(s, q.Node, source.Run.Spec.Policy.BuilderImage) != nil {

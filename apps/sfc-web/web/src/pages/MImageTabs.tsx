@@ -11,6 +11,7 @@ import { MCards, MDetail, MSec, MTiles, useReadOnlyTop } from '../mobile/ReadOnl
 import { buildStatus, cacheTotal, policyText, source } from './ImageBuilds';
 import { ORIGIN, PULL } from './ImageTrust';
 import { RegistryCert, STATUS } from './Registry';
+import { registriesLive } from '../lib/liveTopics';
 
 function useTop(tab: string, wide: string) {
   const { tenant } = useTenantRole();
@@ -20,7 +21,7 @@ function useTop(tab: string, wide: string) {
 
 export function MRegistryTab() {
   const tenant = useTop('내장 저장소', '저장소 만들기·켜기·끄기·한도 바꾸기는 넓은 화면에서');
-  const q = usePoll((s) => registries(tenant, s), [tenant]);
+  const q = usePoll((s) => registries(tenant, s), [tenant], 0, registriesLive(tenant));
   return (
     <Load q={q} what="저장소 목록을 읽지 못했습니다">
       {(p) => {

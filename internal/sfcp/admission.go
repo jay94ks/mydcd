@@ -34,6 +34,17 @@ type Gate struct {
 	features buildinfo.Features
 	// own is this node's announced feature set.
 	own buildinfo.Features
+	// version is the build version the peer announced (tag 128), "" when
+	// none.
+	version string
+	// common is features ∩ own, computed once at the handshake
+	// (setPeerFeatures) so frames are checked without decoding sets.
+	common buildinfo.Features
+}
+
+// setPeerFeatures records what the peer announced and the common set.
+func (g *Gate) setPeerFeatures(f buildinfo.Features) {
+	g.features, g.common = f, f.And(g.own)
 }
 
 func NewGate(cluster, challenge [32]byte) (*Gate, error) {
@@ -81,7 +92,7 @@ func (g *Gate) Admit(f Frame, p Policy, earlyData, datagram bool) error {
 	if k.allow == nil || !k.allow(p) {
 		return ErrAdmission
 	}
-	if needs := needsOf(f.Purpose, f.Kind); g.features.And(g.own).And(needs) != needs {
+	if needs := needsOf(f.Purpose, f.Kind); len(needs) > 0 && !g.common.Meets(needs...) {
 		return ErrAdmission
 	}
 	return nil

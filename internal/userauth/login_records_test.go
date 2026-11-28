@@ -3,6 +3,7 @@
 package userauth
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/jay94ks/seafield/internal/access"
@@ -11,21 +12,26 @@ import (
 
 func TestLoginRecordFieldsOnlyWhereTheyBelong(t *testing.T) {
 	hint := &loginlog.Client{Client: "Firefox", Address: "203.0.113.5"}
-	q := &loginlog.Query{Limit: 10}
 	for _, c := range []struct {
-		r  Request
-		ok bool
+		params string
+		ok     bool
 	}{
-		{Request{Schema: 1, Method: "login-records", LoginQuery: q}, true},
-		{Request{Schema: 1, Method: "login-records"}, false},
-		{Request{Schema: 1, Method: "login-records", LoginQuery: &loginlog.Query{User: "bob", Limit: 10}}, false},
-		{Request{Schema: 1, Method: "login-records", LoginQuery: &loginlog.Query{Limit: 0}}, false},
-		{Request{Schema: 1, Method: "login-records", LoginQuery: q, Tenant: "shop"}, false},
-		{Request{Schema: 1, Method: "whoami", LoginQuery: q}, false},
+		{`{"Limit":10}`, true},
+		{`{}`, false},
+		{`{"User":"bob","Limit":10}`, false},
+		{`{"Limit":0}`, false},
+		{`{"Limit":10,"After":"x"}`, false},
 	} {
-		if got := c.r.validLoginFields(); got != c.ok {
-			t.Errorf("%s %+v: valid=%v", c.r.Method, c.r, got)
+		r := Request{Schema: 1, Method: "login-records", Params: json.RawMessage(c.params)}
+		if _, typed, got := r.typedMethod(); !typed || got != c.ok {
+			t.Errorf("login-records %s: valid=%v", c.params, got)
 		}
+	}
+	if _, typed, ok := (Request{Schema: 1, Method: "own-sessions", Params: json.RawMessage(`{}`)}).typedMethod(); !typed || !ok {
+		t.Error("own-sessions refused")
+	}
+	if _, _, ok := (Request{Schema: 1, Method: "login-records", Tenant: "shop", Params: json.RawMessage(`{"Limit":10}`)}).typedMethod(); ok {
+		t.Error("login-records with a tenant accepted")
 	}
 	// The login client hint now travels in the login methods' own params.
 	if !(KeyLoginQuery{LoginClient: hint}).Valid() || !(KeyLoginQuery{}).Valid() || (KeyLoginQuery{LoginClient: &loginlog.Client{Client: "a\x00b"}}).Valid() {

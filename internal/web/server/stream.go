@@ -89,7 +89,8 @@ func boolParam(r *http.Request, name string, def bool) bool {
 
 // GET /api/v1/t/{t}/apps/{app}/stream?kind=logs|top|stats&service=&instance=
 // &tail=&stdout=&stderr=&interval=: a Server-Sent Events stream of one
-// container's log follow or top/stats watch. Events are named after the
+// container's log follow or top/stats watch. tail 0 (or none) sends no
+// history, only new lines. Events are named after the
 // record type (stdout, stderr, sample, output-eof) plus "end" and "error";
 // data is the JSON record. Server pings become SSE comments.
 func (s *Server) handleStream(w http.ResponseWriter, r *http.Request, ws *webSession) {
@@ -107,7 +108,14 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request, ws *webSes
 			writeError(w, http.StatusBadRequest, "bad-request", "tail must be 0..10000")
 			return
 		}
+		// tail 0 (or none): only lines from now on. sfcd takes 1..10000
+		// lines of history, so ask for the last line since now.
+		since := ""
+		if tail == 0 {
+			tail, since = 1, s.now().UTC().Format(time.RFC3339Nano)
+		}
 		spec = sfc.LogsFollowSpec(sel, tail, boolParam(r, "stdout", true), boolParam(r, "stderr", true))
+		spec.Query.Since = since
 	case "top", "stats":
 		iv := 5 * time.Second
 		if v := q.Get("interval"); v != "" {

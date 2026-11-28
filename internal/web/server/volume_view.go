@@ -34,6 +34,8 @@ type volumeView struct {
 	MoveID            string           `json:",omitempty"`
 	TargetNode        string           `json:",omitempty"`
 	MovePhase         string           `json:",omitempty"`
+	ArchiveID         string           `json:",omitempty"` // the archive that holds it (Phase Archived)
+	ArchivePhase      string           `json:",omitempty"`
 	Retained          []volumeRetained `json:",omitempty"`
 	// Scope and NativeBinding go back to sfcd in change payloads.
 	Scope         volumes.Scope `json:"-"`
@@ -49,7 +51,7 @@ type volumeRetained struct {
 func volumeRow(v control.VolumeView) volumeView {
 	out := volumeView{Key: v.Key, Tenant: v.Scope.Tenant, Name: v.Scope.ID, App: v.Scope.App, Kind: "shared", Node: v.Owner.Node, Storage: v.Storage,
 		Revision: v.Revision, Consumers: v.Consumers, CapacityBytes: v.CapacityBytes, Retain: v.Retain, Phase: v.Phase, MoveID: v.MoveID,
-		TargetNode: v.TargetNode, MovePhase: string(v.MovePhase), UsedBytes: v.UsedBytes, UsageObservedAt: v.UsageObservedAt, Scope: v.Scope, NativeBinding: v.NativeBinding}
+		TargetNode: v.TargetNode, MovePhase: string(v.MovePhase), ArchiveID: v.ArchiveID, ArchivePhase: v.ArchivePhase, UsedBytes: v.UsedBytes, UsageObservedAt: v.UsageObservedAt, Scope: v.Scope, NativeBinding: v.NativeBinding}
 	if v.Kind == "node-fixed" {
 		out.Kind = "fixed"
 	}

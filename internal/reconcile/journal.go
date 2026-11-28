@@ -261,6 +261,39 @@ func (j *Journal) Desired(key string, d Desired, capacity int) error {
 	return j.save(key, e, r)
 }
 
+// Relayout swaps the local layout of the committed Desired at the same
+// revision and generation, and of a pending Apply of that generation, when
+// same reports the two specs as one native object laid out differently (the
+// caller's driver decides). A new local layout of unchanged committed input
+// is not a new Desired, so SetDesired would refuse it; nothing else moves.
+// It reports whether the record changed.
+func (j *Journal) Relayout(key string, revision, generation uint64, spec string, same func(old, next string) bool) (bool, error) {
+	j.life.RLock()
+	defer j.life.RUnlock()
+	e, err := j.entry(key, false)
+	if err != nil {
+		return false, err
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.failed {
+		return false, ErrJournalUncertain
+	}
+	d := e.r.State.Desired
+	if e.r.Schema != 1 || d.Revision != revision || !d.Present || d.Generation != generation || d.Spec == spec || !same(d.Spec, spec) {
+		return false, nil
+	}
+	r := cloneRecord(e.r)
+	r.State.Desired.Spec = spec
+	if p := r.State.Pending; p != nil && p.Kind == Apply && p.Target.Generation == generation && p.Target.Spec == d.Spec {
+		p.Target.Spec = spec
+	}
+	if err := Validate(r.State); err != nil {
+		return false, err
+	}
+	return true, j.save(key, e, r)
+}
+
 func (j *Journal) Read(key string) (Record, error) {
 	j.life.RLock()
 	defer j.life.RUnlock()
@@ -539,6 +572,15 @@ func (j *Journal) Step(ctx context.Context, key string, driver Driver) error {
 		r.Retirement = nil
 	}
 	if outcome == EffectApplied && op.Kind == Apply {
+		// A same-generation in-place Apply keeps the same native effect, so
+		// the earlier operation's witness moves to the new Applied target.
+		if c := r.Checkpoint; c != nil && (c.Operation != op.ID || c.Target != op.Target) {
+			if c.Target.Generation == op.Target.Generation {
+				r.Checkpoint = &EffectCheckpoint{Operation: op.ID, Target: op.Target, Data: append([]byte(nil), c.Data...)}
+			} else {
+				r.Checkpoint = nil
+			}
+		}
 		var l *Leases
 		if r.Pins == nil {
 			l, _ = NewLeases(op.Target.Generation, r.Capacity)

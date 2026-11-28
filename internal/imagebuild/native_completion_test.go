@@ -97,7 +97,7 @@ func TestNativeQueuedCancellationCanCloseWithoutAllocatingWorkspace(t *testing.T
 		t.Fatal(err)
 	}
 	run.Spec.ID = "lost-running"
-	run, err = run.Begin(run.Revision, 101, nil)
+	run, err = run.Begin(run.Revision, 101, nil, testBuilderPin(run.Spec), "")
 	if err != nil {
 		t.Fatal(err)
 	}

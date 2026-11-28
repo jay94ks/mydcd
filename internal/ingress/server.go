@@ -411,7 +411,7 @@ func (i *instance) health() {
 					i.lastHealthFailure, i.lastHealthFailureMS = reason, time.Since(started).Milliseconds()
 				}
 				r := i.copyRecord()
-				current, exists := backendByID(r.Spec, b.ID)
+				current, exists := backendByID(r.Spec, b.ID, b.Generation)
 				if !exists || !sameBackend(current, b) {
 					i.mu.Unlock()
 					continue // an old in-flight probe cannot update its replacement
@@ -627,7 +627,7 @@ func (i *instance) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	for _, svc := range s.Services {
 		if svc.ID == route.Service {
 			for _, b := range svc.Backends {
-				if b.ID == pin.Backend {
+				if b.ID == pin.Backend && b.Generation == pin.Lease.Generation {
 					selected = b
 				}
 			}
@@ -775,7 +775,10 @@ func requestSelection(r *http.Request, s Spec) Selection {
 	}
 	for _, service := range s.Services {
 		for _, backend := range service.Backends {
-			q.Backends[backend.ID] = backend
+			// The newest generation of an ID is the one that can be selected.
+			if prior, listed := q.Backends[backend.ID]; !listed || prior.Generation < backend.Generation {
+				q.Backends[backend.ID] = backend
+			}
 		}
 	}
 	var entropy [8]byte

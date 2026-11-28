@@ -100,6 +100,8 @@ func (s *Server) routes() {
 	m.HandleFunc("GET /api/v1/nodes/{node}/disks", a(s.handleNodeDisks))
 	m.HandleFunc("POST /api/v1/nodes/{node}/disks/{disk}/{action}", a(s.handleNodeDiskOp))
 	m.HandleFunc("GET /api/v1/nodes/{node}/disk-operations/{operation}", a(s.handleNodeDiskStatus))
+	m.HandleFunc("POST /api/v1/nodes/{node}/disk-bundles", a(s.handleNodeDiskBundle))
+	m.HandleFunc("POST /api/v1/nodes/{node}/disk-bundles/{name}/{action}", a(s.handleNodeDiskBundleOp))
 	m.HandleFunc("GET /api/v1/firewall", a(s.handleClusterFirewall))
 	m.HandleFunc("POST /api/v1/firewall", a(s.handleClusterFirewallChange))
 	m.HandleFunc("GET /api/v1/nodes/{node}/firewall", a(s.handleNodeFirewall))
@@ -220,10 +222,11 @@ func (s *Server) routes() {
 		return c.VolumeBackups(ctx, t, after)
 	}))
 	tenantPage("vault", pageOf(func(ctx context.Context, c sfc.Conn, t, after string) (sfc.Page[sfc.VaultView], error) {
-		return c.Vault(ctx, t, after)
+		return screenVault(ctx, c, t, after)
 	}))
 	tenantPage("lifecycles", pageOf(func(ctx context.Context, c sfc.Conn, t, after string) (sfc.Page[sfc.LifecycleEntry], error) {
-		return c.Lifecycles(ctx, t, after)
+		p, err := c.Lifecycles(ctx, t, after)
+		return sfc.Page[sfc.LifecycleEntry]{Items: p.Items, Next: p.Next, Revision: p.RootRevision}, err
 	}))
 	m.HandleFunc("GET /api/v1/t/{t}/registries", a(s.handleRegistries))
 	m.HandleFunc("POST /api/v1/t/{t}/images/resolve", a(s.handleImageResolve))
@@ -398,6 +401,10 @@ func (s *Server) routes() {
 	m.HandleFunc("DELETE /api/v1/t/{t}/volumes/{name}/backups/{id}", a(s.handleVolumeBackupSelection(sfc.ActionDeleteVolumeBackup)))
 	m.HandleFunc("POST /api/v1/t/{t}/volumes/{name}/restore", a(s.handleVolumeRestore))
 	m.HandleFunc("POST /api/v1/t/{t}/volumes/{name}/restores/{id}/cancel", a(s.handleVolumeRestoreCancel))
+	m.HandleFunc("POST /api/v1/t/{t}/volumes/{name}/archive", a(s.handleVolumeArchive))
+	m.HandleFunc("POST /api/v1/t/{t}/volumes/{name}/unarchive", a(s.handleArchiveSelection(sfc.ActionUnarchiveVolume)))
+	m.HandleFunc("POST /api/v1/t/{t}/volumes/{name}/archives/{id}/cancel", a(s.handleArchiveSelection(sfc.ActionCancelArchive)))
+	m.HandleFunc("DELETE /api/v1/t/{t}/volumes/{name}/archives/{id}", a(s.handleArchiveSelection(sfc.ActionDiscardArchive)))
 	m.HandleFunc("PUT /api/v1/t/{t}/volumes/{name}/capacity", a(s.handleVolumeCapacity))
 	m.HandleFunc("POST /api/v1/t/{t}/volumes/{name}/move-plan", a(s.handleVolumeMovePlan))
 	m.HandleFunc("POST /api/v1/t/{t}/volumes/{name}/move", a(s.handleVolumeMove))

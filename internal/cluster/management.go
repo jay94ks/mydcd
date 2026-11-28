@@ -348,7 +348,7 @@ func (e *Engine) builtinManagement(ctx context.Context, caller sfcp.Identity, r 
 // command, even if its first write is followed by a timeout or connection loss.
 func CallManagement(ctx context.Context, mesh *sfcp.Transport, self *identity.Identity, cluster [32]byte, peer sfcp.Peer, r ManagementRequest) (ManagementReply, error) {
 	if self == nil || sfcp.Identity(self.Public) != mesh.LocalKey() {
-		return ManagementReply{}, sfcp.ErrAdmission
+		return ManagementReply{}, fmt.Errorf("%w: the signing key is not this node's transport key", sfcp.ErrAdmission)
 	}
 	r.Schema = 1
 	if _, err := rand.Read(r.Nonce[:]); err != nil {

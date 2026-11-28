@@ -23,10 +23,17 @@ const PHASE_FROM_STATUS: Record<string, V.NodePhase> = { ready: 'ready', degrade
 const summaryPhase = (s: D.DNodeSummary): V.NodePhase => PHASE_FROM_STATUS[s.status?.toLowerCase()] ?? (s.ready === undefined ? 'unknown' : s.ready ? 'ready' : 'problem');
 const PHASE_FROM_MEMBER: Record<D.DMember['phase'], V.NodePhase> = { active: 'ready', isolated: 'isolated', pending: 'joining', removed: 'removing' };
 
+/** 가입 대기·제거 중·격리는 그 단계가 더 알려 주므로 그대로, 나머지만 늦으면 대기 중 */
+const waitingPhase = (s: D.DNodeSummary): V.NodePhase => {
+  const p = summaryPhase(s);
+  return s.waiting && p !== 'joining' && p !== 'removing' && p !== 'isolated' ? 'waiting' : p;
+};
+
 export function fromSummary(s: D.DNodeSummary): V.NodeView {
   return {
     id: s.node,
-    phase: summaryPhase(s),
+    // 늦은 서버는 사실 그대로 '대기 중'(Jay 2026-11-28, R18). 다른 값은 그 전에 저장된 것
+    phase: waitingPhase(s),
     voter: !!s.role && s.role !== 'non-voter' && s.role !== 'pending',
     leader: s.role === 'leader',
     roleUnknown: s.role ? undefined : true,
@@ -43,6 +50,7 @@ export function fromSummary(s: D.DNodeSummary): V.NodeView {
     observedAt: unix(s.observedAt),
     observeLimitSeconds: s.observeLimitSeconds,
     build: s.build,
+    admitsWork: s.admitsWork,
   };
 }
 
@@ -63,6 +71,38 @@ export const BUILD_OFF_TEXT = '이 서버는 지금 빌드를 하지 않아요 (
 export function buildText(n?: { build?: { enabled: boolean; reason?: string } }): string | undefined {
   if (!n?.build) return undefined;
   return n.build.enabled ? '빌드함' : BUILD_OFF[n.build.reason ?? ''] ?? `빌드하지 않음(${n.build.reason ?? '이유 모름'})`;
+}
+
+/** 오류 사유. sfcd는 아직 사유 코드를 주지 않아(unready) 가입 정보로 알 수 있는 것만 가른다 */
+const STEP_KO: Record<string, string> = {
+  certificates: '인증서',
+  'ingress-blocks': '외부 접속 차단',
+  'route-gates': '외부 접속 경로',
+  'node-storage': '저장 경로',
+  managed: '공유 자원',
+  'system-network': '시스템 망',
+  'cluster-apps': '클러스터 앱',
+  registries: '이미지 저장소',
+  'node-lifecycle': '상태 검사',
+  'tenant-retirements': '작업 공간 폐기',
+  'event-log': '사건 기록',
+};
+export const stepText = (s: string) => (STEP_KO[s] ? `${STEP_KO[s]}(${s})` : s);
+const LOG_HINT = '자세한 오류는 그 서버 sfcd 로그의 "reconciliation failed" 줄에 있습니다';
+/** 오류 사유(#845 뒤 sfcd reason 코드). 코드가 없는 이전 웹 서버면 가입 정보로 알 수 있는 것만 */
+export function problemReason(n: { admitsWork?: boolean; reason?: string; failedSteps?: string[] }): string {
+  switch (n.reason) {
+    case 'MODULE_PASS_FAILED': {
+      const steps = (n.failedSteps ?? []).map(stepText);
+      return `${steps.length ? `${steps.join(' · ')} 맞추기가 실패하고 있습니다` : '이 서버의 sfcd가 맡은 일을 맞추지 못하고 있습니다'}. ${LOG_HINT}`;
+    }
+    case 'HOST_READ_FAILED':
+      return '서버의 CPU·메모리를 읽지 못하고 있습니다';
+    case 'UNKNOWN':
+      return '사유를 보내지 않는 이전 버전 서버입니다. 서버를 업그레이드하면 사유가 보입니다';
+  }
+  if (n.admitsWork === false) return '작업을 받지 않는 서버라 준비됨으로 세지 않습니다';
+  return `이 서버의 sfcd가 맡은 일(네트워크·외부 접속·저장소 등)을 맞추지 못하고 있습니다. ${LOG_HINT}`;
 }
 
 /** members(가입 정보) + node-summary(관측)를 합친다. 관측이 없으면 가입 정보만. */
@@ -97,6 +137,12 @@ export function mergeNodes(members: D.DMember[], summaries: D.DNodeSummary[]): V
     };
   });
   for (const s of summaries) if (!members.some((m) => m.id === s.node)) out.push(fromSummary(s));
+  for (const n of out) {
+    if (n.phase !== 'problem') continue;
+    const s = sum.get(n.id);
+    n.phaseReason = problemReason({ admitsWork: n.admitsWork ?? s?.admitsWork, reason: s?.reason, failedSteps: s?.failedSteps });
+    n.failingSince = unix(s?.failingSince);
+  }
   return out;
 }
 
@@ -224,6 +270,7 @@ export async function nodeDevices(id: string, signal?: AbortSignal): Promise<D.D
   return {
     ...r.devices,
     recorded: fix(r.devices.recorded),
+    bundles: fix(r.devices.bundles).map((b) => ({ ...b, members: fix(b.members) })),
     disks: fix(r.devices.disks).map((d) => ({
       ...d,
       purposes: fix(d.purposes),
@@ -231,9 +278,34 @@ export async function nodeDevices(id: string, signal?: AbortSignal): Promise<D.D
     })),
   };
 }
-export type DiskAction = D.DDiskOp['action'];
+export type DiskAction = Exclude<D.DDiskOp['action'], 'bundle' | 'unbundle' | 'replace-member'>;
+/** 디스크 묶음 멤버: lvm은 미사용 디스크 {disk, serial|wwn, size} */
+export interface BundleMember {
+  disk: string;
+  serial?: string;
+  wwn?: string;
+  size?: number;
+}
+/** fuse 구성원 (#819): 마운트된 파티션, 파일 시스템 UUID, 내줄 크기(64MiB 이상), mirror 사본 번호(1…, linear는 없음) */
+export interface FuseMember {
+  disk: string;
+  part: string;
+  uuid: string;
+  bytes: number;
+  /** mirror만 1…, linear는 보내지 않는다(sfcd는 linear에 copy가 있으면 invalid) */
+  copy?: number;
+}
+/** 디스크 묶기 (#811, #819): lvm은 미사용 디스크를 지우고 묶어 ext4로 포맷·마운트. fuse는 마운트된 파티션에 조각 파일을 두고 묶는다(포맷 안 함) */
+export const diskBundle = (
+  node: string,
+  body: { opId: string; name: string; mode: 'linear' | 'mirror'; mountPath?: string; label?: string } & ({ backend: 'lvm'; members: BundleMember[] } | { backend: 'fuse'; members: FuseMember[]; allocation: 'reserve' | 'grow' }),
+) =>
+  api.post<D.DDiskOp>(`/nodes/${enc(node)}/disk-bundles`, body);
+/** 묶음 풀기(unbundle) · 미러 구성원 교체(replace-member) */
+export const diskBundleAction = (node: string, name: string, action: 'unbundle' | 'replace-member', body: { opId: string; old?: BundleMember; new?: BundleMember }) =>
+  api.post<D.DDiskOp>(`/nodes/${enc(node)}/disk-bundles/${enc(name)}/${action}`, body);
 /** 디스크 작업 (#689 3단계): 시스템 관리자만. 같은 opId를 다시 보내면 처음 결과를 돌려준다 */
-export const diskAction = (node: string, disk: string, action: DiskAction, body: { opId: string; part: string; serial?: string; wwn?: string; size?: number; tableId?: string; uuid?: string; mountPath?: string; label?: string }) =>
+export const diskAction = (node: string, disk: string, action: DiskAction, body: { opId: string; part: string; serial?: string; wwn?: string; size?: number; tableId?: string; uuid?: string; mountPath?: string; label?: string; format?: boolean; subPath?: string }) =>
   api.post<D.DDiskOp>(`/nodes/${enc(node)}/disks/${enc(disk)}/${action}`, body);
 /** 서버 방화벽 (node-firewall, 시스템 관리자). 응답은 늘 200이고 실패는 code로 온다 */
 export const nodeFirewall = (node: string, signal?: AbortSignal) => api.get<D.DFirewallResult>(`/nodes/${enc(node)}/firewall`, signal);
@@ -331,9 +403,9 @@ export async function dashboard(tenant: string | undefined, signal?: AbortSignal
   const nodes = arr(d.nodes).map(fromSummary);
   const apps = arr(d.apps).map(toApp).filter((a) => !a.retiring);
   const attention: V.AttentionItem[] = [
-    ...apps.filter((a) => a.health === 'degraded' || a.health === 'unhealthy').map((a) => ({ kind: 'problem' as const, text: `${a.tenant}/${a.app} · ${a.health === 'unhealthy' ? '문제' : '일부 문제'}`, at: a.observedAt ?? d.asOf, link: appPath(a.tenant, a.app) })),
+    ...apps.filter((a) => a.health === 'degraded' || a.health === 'unhealthy').map((a) => ({ kind: 'problem' as const, text: `${a.tenant}/${a.app} · ${a.health === 'unhealthy' ? '오류' : '일부 오류'}`, at: a.observedAt ?? d.asOf, link: appPath(a.tenant, a.app) })),
     ...nodes.filter((n) => n.disk && n.disk.used / n.disk.total >= 0.8).map((n) => ({ kind: 'disk' as const, text: `${n.id} 디스크 ${Math.round((n.disk!.used / n.disk!.total) * 100)}% 사용`, at: n.observedAt ?? d.asOf, link: `/servers/${n.id}` })),
-    ...nodes.filter((n) => n.phase === 'unknown' || n.phase === 'problem').map((n) => ({ kind: 'problem' as const, text: `${n.id} ${n.phase === 'unknown' ? '연락 안 됨' : '일부 문제'}`, at: n.observedAt ?? d.asOf, link: `/servers/${n.id}` })),
+    ...nodes.filter((n) => n.phase === 'unknown' || n.phase === 'problem').map((n) => ({ kind: 'problem' as const, text: `${n.id} ${n.phase === 'unknown' ? '연락 안 됨' : '오류'}`, at: n.observedAt ?? d.asOf, link: `/servers/${n.id}` })),
     ...unknownOps.map((o) => ({ kind: 'unknown-op' as const, text: `작업 ${o.id.slice(0, 8)} · ${o.action}${o.target ? ` · ${o.target}` : ''}`, at: o.submittedAt, link: `/system/ops?focus=${o.id}` })),
     ...apps.filter((a) => a.health === 'progressing').map((a) => ({ kind: 'progress' as const, text: `${a.app} · ${a.lastOp?.status ?? '진행 중'}`, at: a.observedAt ?? d.asOf, link: appPath(a.tenant, a.app) })),
   ];
@@ -507,7 +579,7 @@ export const volumeMovePlan = async (t: string, name: string, body: { app?: stri
   const p = await api.post<D.DVolumeMovePlan>(`${volumePath(t, name)}/move-plan`, body);
   return { ...p, services: arr(p.services) };
 };
-/** 보관함 하나: 작업 공간 보관함(/t/{t}/vault) 또는 클러스터 보관함(/vault, 시스템 관리자, 웹 계약 대기). root는 뿌리 묶음 ID */
+/** 보관함 하나: 작업 공간 보관함(/t/{t}/vault) 또는 클러스터 보관함(/vault, 시스템 관리자, 웹 계약 대기). root는 최상위 묶음 ID */
 export interface VaultScope {
   base: string;
   root: string;
@@ -516,7 +588,7 @@ export interface VaultScope {
 export const tenantVault = (t: string): VaultScope => ({ base: `/t/${enc(t)}/vault`, root: t, cluster: false });
 export const CLUSTER_VAULT: VaultScope = { base: '/vault', root: 'cluster', cluster: true };
 export const vault = (t: string, signal?: AbortSignal, after = '') => vaultList(tenantVault(t), signal, after);
-/** 보관함 목록. 클러스터 보관함은 initialized(false면 아직 없음)와 root(뿌리 묶음 ID)가 붙는다. 뿌리 묶음 행은 parent가 "" */
+/** 보관함 목록. 클러스터 보관함은 initialized(false면 아직 없음)와 root(최상위 묶음 ID)가 붙는다. 최상위 묶음 행은 parent가 "" */
 export const vaultList = async (scope: VaultScope, signal?: AbortSignal, after = '') => {
   const r = await api.get<D.ListPage<D.DVault> & { initialized?: boolean; root?: string }>(`${scope.base}${after ? `?after=${enc(after)}` : ''}`, signal);
   return {
@@ -770,7 +842,8 @@ export const standaloneList = async (t: string, all: boolean, signal?: AbortSign
   page(await api.get<D.ListPage<D.DStandalone>>(`/t/${enc(t)}/standalone${q({ all: all ? 1 : undefined })}`, signal), (x) => toStandalone(t, x));
 export const standaloneGet = async (t: string, name: string, signal?: AbortSignal) => toStandalone(t, (await api.get<{ item: D.DStandalone }>(`/t/${enc(t)}/standalone/${enc(name)}`, signal)).item);
 export async function standalonePlan(t: string, yaml: string): Promise<V.StandalonePlanView> {
-  const p = await api.post<D.DStandalonePlan>(`/t/${enc(t)}/standalone/plan`, { yaml, diff: true });
+  // 데몬 계약은 { yaml }만 받는다(모르는 필드는 400 bad-request). 줄 차이는 changes의 before/after로 만든다.
+  const p = await api.post<D.DStandalonePlan>(`/t/${enc(t)}/standalone/plan`, { yaml });
   return {
     name: p.name,
     revision: p.revision,
@@ -779,8 +852,18 @@ export async function standalonePlan(t: string, yaml: string): Promise<V.Standal
     limits: p.limits,
     changes: arr(p.changes).map((c) => ({ field: c.field, change: c.before === undefined || c.before === null ? 'add' : c.after === undefined || c.after === null ? 'remove' : 'update' })),
     impact: arr(p.impact).map((i) => ({ kind: i.kind, name: i.target, level: i.blocking ? 'block' : 'info', text: i.code && !i.detail.includes(i.code) ? `${i.detail} (${i.code})` : i.detail })),
-    diff: p.diff ? parseDiff(p.diff) : [],
+    diff: p.diff ? parseDiff(p.diff) : changeLines(arr(p.changes)),
   };
+}
+const shown = (v: unknown) => (typeof v === 'string' ? v : JSON.stringify(v));
+/** 바뀌는 필드를 줄 차이로: 이전 값은 -, 새 값은 + */
+export function changeLines(changes: { field: string; before?: unknown; after?: unknown }[]): V.DiffLine[] {
+  const out: V.DiffLine[] = [];
+  for (const c of changes) {
+    if (c.before !== undefined && c.before !== null) out.push({ op: '-', text: `${c.field}: ${shown(c.before)}` });
+    if (c.after !== undefined && c.after !== null) out.push({ op: '+', text: `${c.field}: ${shown(c.after)}` });
+  }
+  return out;
 }
 /** 단독 컨테이너를 컨테이너 상세(로그·자원·프로세스·터미널)가 여는 모양으로 */
 export const standaloneTask = (s: V.StandaloneView): V.TaskView => ({
@@ -1239,7 +1322,7 @@ export interface RaftCompactView {
   entries: Record<string, number>;
   last?: RaftCompactRun;
 }
-/** SFCP 기능 표·서버별 알린 기능·클러스터 교집합 (UI-17) */
+/** 기능 집합(그룹 › 집합 › 버전)·서버별 알린 기능·클러스터 교집합 (UI-17) */
 export const clusterFeatures = (signal?: AbortSignal) => api.get<D.DClusterFeatures>('/cluster/features', signal);
 export const raftCompact = (signal?: AbortSignal) => api.get<RaftCompactView>('/raft/compact', signal);
 /** 압축 미리보기 (데몬 #387). 수락 때 sfcd가 다시 검사한다 */

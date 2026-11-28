@@ -81,7 +81,7 @@ func TestServiceCallActualUserWireBoundsDigestEOFAndProbe(t *testing.T) {
 						digest := sha256.Sum256(frame.Fields[0].Value)
 						if mode == "probe" || mode == "probe-redirect" {
 							probeRequests.Add(1)
-							if q.Method != "cd-probe" || q.CDProbe == nil {
+							if _, ok := paramsOf(q, CDProbeMethod); !ok {
 								return sfcp.ErrFrame
 							}
 							if e = streamEOF(stream); e != nil {
@@ -91,22 +91,23 @@ func TestServiceCallActualUserWireBoundsDigestEOFAndProbe(t *testing.T) {
 								return binding.respond(stream, frame, digest, Reply{Schema: 1, Code: "not-leader", Leader: "other-provider"})
 							}
 							result := deployment.GitProbeResult{Node: "node", Commit: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Size: 42}
-							return binding.respond(stream, frame, digest, Reply{Schema: 1, Code: "ok", CDProbe: &result})
+							return binding.respond(stream, frame, digest, dataReply("ok", result))
 						}
-						if q.Method != "service-call" || q.ServiceCall == nil || q.ServiceInput == nil {
+						call, ok := q.serviceCall()
+						if !ok {
 							return sfcp.ErrFrame
 						}
 						if e = binding.respond(stream, frame, digest, Reply{Schema: 1, Code: "continue"}); e != nil {
 							return e
 						}
 						var body []byte
-						if q.ServiceInput.Length == 0 {
-							if q.ServiceInput.Digest != sha256.Sum256(nil) {
+						if call.Input.Length == 0 {
+							if call.Input.Digest != sha256.Sum256(nil) {
 								return sfcp.ErrFrame
 							}
 							e = streamEOF(stream)
 						} else {
-							body, e = readUserInput(conn, stream, frame.Request, digest, q.ServiceInput.Length, q.ServiceInput.Digest, servicecall.MaxBody)
+							body, e = readUserInput(conn, stream, frame.Request, digest, call.Input.Length, call.Input.Digest, servicecall.MaxBody)
 						}
 						if e != nil {
 							return binding.respond(stream, frame, digest, Reply{Schema: 1, Code: "invalid"})
@@ -117,7 +118,7 @@ func TestServiceCallActualUserWireBoundsDigestEOFAndProbe(t *testing.T) {
 							return nil
 						}
 						result := servicecall.Result{Task: "task", Node: "node", Status: 200, Body: bytes.Repeat([]byte("r"), servicecall.MaxResponse), Headers: map[string]string{"Content-Type": "text/plain"}}
-						return binding.respond(stream, frame, digest, Reply{Schema: 1, Code: "ok", ServiceCall: &result})
+						return binding.respond(stream, frame, digest, dataReply("ok", result))
 					}()
 					completed <- cause
 					return cause
@@ -166,7 +167,7 @@ func TestServiceCallActualUserWireBoundsDigestEOFAndProbe(t *testing.T) {
 						case "extra":
 							input.Length--
 						}
-						raw, e := requestBody(Request{Method: "service-call", Tenant: "tenant", ServiceCall: &q, ServiceInput: &input})
+						raw, e := requestBody(callRequest(q, input))
 						if e != nil {
 							t.Fatal(e)
 						}
@@ -208,11 +209,12 @@ func TestServiceCallRelayBindsExactTaskAndReadShapes(t *testing.T) {
 	_, c, session, node := journalFixture(t)
 	q := servicecall.Request{App: "shop", Service: "api", Port: 8080, Path: "/", Method: "POST"}
 	input := ServiceCallInput{Digest: sha256.Sum256(nil)}
-	request := Request{Schema: 1, Method: "service-call", Tenant: "tenant", ServiceCall: &q, ServiceInput: &input}
+	request := callRequest(q, input)
+	request.Schema = 1
 	if !request.validMethodFields() || !request.validQuerySelectors() {
 		t.Fatal("valid request")
 	}
-	for _, change := range []func(*Request){func(r *Request) { r.After = "cursor" }, func(r *Request) { r.Node = "node" }, func(r *Request) { r.TargetUser = "foreign" }, func(r *Request) { r.CDProbe = &deployment.GitProbeRequest{} }, func(r *Request) { r.Method = "catalog" }} {
+	for _, change := range []func(*Request){func(r *Request) { r.After = "cursor" }, func(r *Request) { r.Node = "node" }, func(r *Request) { r.Tenant = "tenant" }, func(r *Request) { r.Method = "catalog" }} {
 		bad := request
 		change(&bad)
 		if bad.validMethodFields() && bad.validQuerySelectors() {
@@ -244,9 +246,8 @@ func TestServiceCallAndRQ7ReadSelectorsRemainDisjoint(t *testing.T) {
 	input := ServiceCallInput{Digest: sha256.Sum256(nil)}
 	probe := deployment.GitProbeRequest{App: "shop", Repository: "https://git.example/repo.git", Branch: "main", Path: "app.yaml"}
 	requests := []Request{
-		{Method: "tenant-storage", Tenant: "tenant", Node: "node-a", After: "cursor"},
-		{Method: "service-call", Tenant: "tenant", ServiceCall: &call, ServiceInput: &input},
-		{Method: "cd-probe", Tenant: "tenant", CDProbe: &probe},
+		callRequest(call, input),
+		probeRequest(probe),
 	}
 	for _, original := range requests {
 		t.Run(original.Method, func(t *testing.T) {
@@ -254,9 +255,10 @@ func TestServiceCallAndRQ7ReadSelectorsRemainDisjoint(t *testing.T) {
 				t.Fatal("valid merged feature rejected")
 			}
 			changes := []func(*Request){
-				func(r *Request) { r.ServiceCall = &call; r.ServiceInput = &input },
-				func(r *Request) { r.CDProbe = &probe },
+				func(r *Request) { r.Params = callRequest(call, input).Params },
+				func(r *Request) { r.Params = probeRequest(probe).Params },
 				func(r *Request) { r.Params = json.RawMessage("{}") },
+				func(r *Request) { r.Tenant = "tenant" },
 			}
 			for i, change := range changes {
 				if i == 0 && original.Method == "service-call" || i == 1 && original.Method == "cd-probe" {
@@ -274,14 +276,25 @@ func TestServiceCallAndRQ7ReadSelectorsRemainDisjoint(t *testing.T) {
 
 func TestRQ8QueryAdmissionPreservesRQ7ReadMethods(t *testing.T) {
 	_, client, session, _ := journalFixture(t)
-	// No transport is installed. Supported SDK queries must reach the existing
-	// transport admission boundary, rather than fail as unsupported methods.
-	for _, request := range []Request{
-		{Method: "tenant-storage", Tenant: "tenant"},
-		{Method: "cd-probe", Tenant: "tenant", CDProbe: &deployment.GitProbeRequest{App: "shop", Repository: "https://git.example/repo.git", Branch: "main", Path: "app.yaml"}},
-	} {
-		if _, err := client.query(context.Background(), client.Peers[0], session, request); !errors.Is(err, sfcp.ErrAdmission) {
-			t.Fatal("query did not reach transport admission", request.Method, err)
-		}
+	// No transport is installed. The typed probe must reach the existing
+	// transport admission boundary; the generic query no longer carries it.
+	probe := deployment.GitProbeRequest{App: "shop", Repository: "https://git.example/repo.git", Branch: "main", Path: "app.yaml"}
+	if _, err := client.ProbeCD(context.Background(), client.Peers[0], session, "tenant", probe); !errors.Is(err, sfcp.ErrAdmission) {
+		t.Fatal("probe did not reach transport admission", err)
 	}
+	if _, err := client.query(context.Background(), client.Peers[0], session, probeRequest(probe)); err == nil || errors.Is(err, sfcp.ErrAdmission) {
+		t.Fatal("generic query still carries cd-probe", err)
+	}
+}
+
+// probeRequest is a typed cd-probe request for tenant "tenant".
+func probeRequest(q deployment.GitProbeRequest) Request {
+	params, _ := json.Marshal(CDProbeQuery{Tenant: "tenant", Probe: q})
+	return Request{Method: CDProbeMethod.Name, Params: params}
+}
+
+// callRequest is a typed service-call request for tenant "tenant".
+func callRequest(q servicecall.Request, input ServiceCallInput) Request {
+	params, _ := json.Marshal(ServiceCallQuery{Tenant: "tenant", Call: q, Input: input})
+	return Request{Method: ServiceCallMethod.Name, Params: params}
 }

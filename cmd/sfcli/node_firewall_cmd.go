@@ -103,7 +103,7 @@ func nodeFirewallShowCommand(g *globals) *cli.Command {
 	return &cli.Command{
 		Name:  "show",
 		Args:  "NODE",
-		Short: "Show a server's firewall rules, locked rules and the operator's own INPUT rules",
+		Short: "Show a server's firewall rules, locked rules and the server's other input rules (nft expressions)",
 		Run: g.withSession(func(c *cli.Context, s *session, args []string) error {
 			node, err := nodeArg(args, "firewall show")
 			if err != nil {
@@ -173,14 +173,11 @@ func nodeFirewallShowCommand(g *globals) *cli.Command {
 				if v.Cluster != nil {
 					rows.Add("cluster", "-", "policy "+v.Cluster.Policy, fmt.Sprintf("cluster revision %d (sfcli firewall show)", v.Cluster.Revision))
 				}
-				for _, line := range v.Operator4 {
-					rows.Add("server ipv4", "-", line, "read only")
-				}
-				for _, line := range v.Operator6 {
-					rows.Add("server ipv6", "-", line, "read only")
+				for _, line := range v.Operator {
+					rows.Add("server", "-", line, "nft expression, read only")
 				}
 				if v.OperatorTruncated {
-					rows.Add("server", "-", "…", "more INPUT rules not shown")
+					rows.Add("server", "-", "…", "more input rules not shown")
 				}
 				return rows
 			})

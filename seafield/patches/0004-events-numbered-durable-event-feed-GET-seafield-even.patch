@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: seafield <seafield@invalid>
 Date: Fri, 27 Nov 2026 08:06:30 +0000
-Subject: [PATCH 04/20] events: numbered durable event feed (GET
+Subject: [PATCH 04/21] events: numbered durable event feed (GET
  /seafield/events)
 
 

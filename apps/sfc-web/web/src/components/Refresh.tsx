@@ -25,7 +25,7 @@ export function Refresh({ q, poll = true }: { q: Loaded<unknown>; poll?: boolean
           </select>
         </label>
       )}
-      <button type="button" className="btn sm" onClick={q.refresh} disabled={q.loading}>
+      <button type="button" className="btn sm" onClick={q.refreshByUser} disabled={q.manual}>
         ↻ 새로고침
       </button>
     </span>

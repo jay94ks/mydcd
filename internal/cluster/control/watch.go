@@ -4,12 +4,15 @@ package control
 
 import (
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/json"
+	"hash/fnv"
 	"slices"
 	"strings"
 
 	"github.com/jay94ks/seafield/internal/access"
 	"github.com/jay94ks/seafield/internal/cluster/state"
+	"github.com/jay94ks/seafield/internal/network/services"
 )
 
 // A change watch tells a reader WHICH records a committed change touched,
@@ -20,13 +23,20 @@ import (
 
 // WatchKey names one record a reader can query.
 type WatchKey struct {
-	// Kind is "app", "volume", "network", "node" or "tenant".
+	// Kind is "app", "volume", "network", "node", "tenant", "registry",
+	// "registry-maintenance" (a built-in registry's GC and prune jobs, named
+	// by the registry ID), "ingress", "dns", "certificate", "domain" or
+	// "acme-responder".
 	Kind string
 	// Tenant is the owning tenant, "" for a cluster record (a node, a
 	// member of the system network).
 	Tenant string `json:",omitempty"`
 	// Name is the record's own name in that query: the app name, the
-	// volume key, the network ID, the node ID, the tenant ID.
+	// volume key, the network ID, the node ID, the tenant ID, the registry
+	// ID, the network ID of a managed DNS, the certificate ID, the domain.
+	// An ingress record is named by its part: "block/<id>", "host-policy",
+	// "balance/<app>/<route>", "drain/<app>/<node>", "gateway/<node>",
+	// "cluster-app-route/<app>" or "history".
 	Name string
 }
 
@@ -40,12 +50,33 @@ type WatchRef struct {
 // WatchRecords is the record → content digest map of one book.
 type WatchRecords map[WatchKey][32]byte
 
-// WatchBooks is every book a change watch follows, by its root key.
-var WatchBooks = []string{AppsKey, VolumesKey, ResourcesKey, MembersKey, CatalogKey}
+// WatchBooks is every book a change watch follows, by its root key. Managed
+// DNS is one row per network under services.ManagedDNSPrefix.
+var WatchBooks = []string{AppsKey, VolumesKey, ResourcesKey, MembersKey, CatalogKey, RegistriesKey, RegistryMaintenanceKey, IngressManagementKey, CertificatesKey, services.ManagedDNSPrefix}
 
 // WatchBookRevision is the root row revision of book: it moves with every
-// write to the book, so an unchanged revision means unchanged records.
-func WatchBookRevision(s state.State, book string) uint64 { return s.Object(book).Revision }
+// write to the book, so an unchanged revision means unchanged records. A
+// book of many rows (a key prefix) folds every row's key and revision.
+func WatchBookRevision(s state.State, book string) uint64 {
+	if !strings.HasSuffix(book, "/") {
+		return s.Object(book).Revision
+	}
+	rows := s.Objects(book)
+	keys := make([]string, 0, len(rows))
+	for k := range rows {
+		keys = append(keys, k)
+	}
+	slices.Sort(keys)
+	h := fnv.New64a()
+	for _, k := range keys {
+		var rev [8]byte
+		binary.BigEndian.PutUint64(rev[:], rows[k].Revision)
+		h.Write([]byte(k))
+		h.Write([]byte{0})
+		h.Write(rev[:])
+	}
+	return h.Sum64()
+}
 
 func watchDigest(v any) ([32]byte, bool) {
 	raw, err := json.Marshal(v)
@@ -148,10 +179,98 @@ func (p Policy) WatchRecords(s state.State, book string) (WatchRecords, error) {
 				return nil, ErrCatalog
 			}
 		}
+	case RegistriesKey:
+		r, err := p.Registries(s)
+		if err != nil {
+			return nil, err
+		}
+		for _, e := range r.Entries() {
+			if !out.add(WatchKey{"registry", e.Spec.Tenant, e.Spec.ID}, e) {
+				return nil, ErrCatalog
+			}
+		}
+	case RegistryMaintenanceKey:
+		j, err := p.RegistryMaintenanceJobs(s)
+		if err != nil {
+			return nil, err
+		}
+		for _, row := range j.Records {
+			if row.Change.External != nil {
+				continue
+			}
+			if !out.add(WatchKey{"registry-maintenance", row.Change.Tenant, row.Change.RegistryID()}, row) {
+				return nil, ErrCatalog
+			}
+		}
+	case IngressManagementKey:
+		b, err := p.IngressManagement(s)
+		if err != nil {
+			return nil, err
+		}
+		if !b.watchRecords(out) {
+			return nil, ErrCatalog
+		}
+	case CertificatesKey:
+		c, err := p.Certificates(s)
+		if err != nil {
+			return nil, err
+		}
+		for _, e := range c.Certificates {
+			if !out.add(WatchKey{"certificate", "", e.Certificate.Metadata.ID.String()}, e) {
+				return nil, ErrCatalog
+			}
+		}
+		for _, d := range c.Domains {
+			if !out.add(WatchKey{"domain", "", d.Name}, d) {
+				return nil, ErrCatalog
+			}
+		}
+		if c.ACMEResponder != nil && !out.add(WatchKey{"acme-responder", "", "acme-responder"}, c.ACMEResponder) {
+			return nil, ErrCatalog
+		}
+	case services.ManagedDNSPrefix:
+		sources, err := p.ManagedDNS(s)
+		if err != nil {
+			return nil, err
+		}
+		for _, v := range sources {
+			if !out.add(WatchKey{"dns", v.Definition.Tenant, v.Definition.Network}, v) {
+				return nil, ErrCatalog
+			}
+		}
 	default:
 		return nil, ErrCatalog
 	}
 	return out, nil
+}
+
+// watchRecords names the ingress book's records. Mappings are not here:
+// they follow from app goals, whose "app" records already move.
+func (b IngressManagement) watchRecords(out WatchRecords) bool {
+	ok := true
+	add := func(tenant, name string, v any) { ok = out.add(WatchKey{"ingress", tenant, name}, v) && ok }
+	for _, r := range b.Blocks {
+		add(r.Block.Tenant, "block/"+r.Block.ID, r)
+	}
+	for _, r := range b.HostPolicies {
+		add(r.Tenant, "host-policy", r)
+	}
+	for _, r := range b.Balances {
+		add(r.Tenant, "balance/"+r.App+"/"+r.Route, r)
+	}
+	for _, r := range b.Drains {
+		add(r.Tenant, "drain/"+r.App+"/"+r.Node, r)
+	}
+	for _, r := range b.NodeGatewaysRecords {
+		add("", "gateway/"+r.Node, r)
+	}
+	for _, r := range b.ClusterAppRoutes {
+		add("", "cluster-app-route/"+r.App, r)
+	}
+	for _, r := range b.History {
+		add(r.Tenant, "history", r)
+	}
+	return ok
 }
 
 // WatchDiff is every record that differs between older and newer, in a

@@ -257,7 +257,7 @@ func (f *externalRegistryAppNative) checkRunning(t *testing.T, ctx context.Conte
 		t.Fatal("actual app did not consume private metadata and image blobs")
 	}
 	page, err := f.user.ExternalRegistryPage(ctx, f.peer, f.session, "tenant", "")
-	if err != nil || len(page.ExternalRegistries) != len(f.readers) {
+	if err != nil || len(page.Items) != len(f.readers) {
 		t.Fatal("actual external source management page", err)
 	}
 	encoded, _ = json.Marshal(page)

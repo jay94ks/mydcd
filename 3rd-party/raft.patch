@@ -33,7 +33,7 @@
  		mainThreadSaturation:  newSaturationMetric([]string{"raft", "thread", "main", "saturation"}, 1*time.Second),
  		preVoteDisabled:       conf.PreVoteDisabled || !transportSupportPreVote,
  		noLegacyTelemetry:     conf.NoLegacyTelemetry,
-@@ -1171,6 +1183,41 @@
+@@ -1171,12 +1183,55 @@
  	return fmt.Sprintf("Node at %s [%v]", r.localAddr, r.getState())
  }
  
@@ -75,6 +75,20 @@
  // LastContact returns the time of last contact by a leader.
  // This only makes sense if we are currently a follower.
  func (r *Raft) LastContact() time.Time {
+ 	r.lastContactLock.RLock()
+ 	last := r.lastContact
+ 	r.lastContactLock.RUnlock()
++	// With Config.PeerContact any packet from the known leader counts.
++	if pc := r.config().PeerContact; pc != nil {
++		if _, id := r.LeaderWithID(); id != "" && id != r.localID {
++			if t := pc(id); t.After(last) {
++				return t
++			}
++		}
++	}
+ 	return last
+ }
+ 
 --- a/commands.go
 +++ b/commands.go
 @@ -66,6 +66,12 @@
@@ -92,7 +106,7 @@
  // GetRPCHeader - See WithRPCHeader.
 --- a/config.go
 +++ b/config.go
-@@ -150,6 +150,16 @@
+@@ -150,6 +150,26 @@
  	// from a leader before we attempt an election.
  	HeartbeatTimeout time.Duration
  
@@ -106,10 +120,20 @@
 +	// for votes.
 +	HeartbeatInterval time.Duration
 +
++	// PeerContact, when set, reports when any packet of any kind last
++	// arrived from a server over the transport (zero if never). Raft then
++	// counts it as contact with that server: the leader skips a periodic
++	// heartbeat to a follower it heard from within the heartbeat interval,
++	// its lease check counts that contact, and a follower counts packets
++	// from its leader as contact from the leader. Heartbeats forced by
++	// PeerConnected or a notify still go out. The transport keeps its own
++	// idle ping, so an idle connection still produces packets.
++	PeerContact func(ServerID) time.Time
++
  	// ElectionTimeout specifies the time in candidate state without contact
  	// from a leader before we attempt an election.
  	ElectionTimeout time.Duration
-@@ -382,7 +392,13 @@
+@@ -382,7 +402,13 @@
  	if config.LeaderLeaseTimeout > config.HeartbeatTimeout {
  		return fmt.Errorf("LeaderLeaseTimeout (%s) cannot be larger than heartbeat timeout (%s)", config.LeaderLeaseTimeout, config.HeartbeatTimeout)
  	}
@@ -229,9 +253,9 @@
  
 +		case lost := <-r.peerLostCh:
 +			r.mainThreadSaturation.working()
-+			if f, ok := r.leaderState.replState[lost.id]; ok && f.LastContact().Before(lost.at) {
++			if f, ok := r.leaderState.replState[lost.id]; ok && f.contact(r.config().PeerContact).Before(lost.at) {
 +				r.logger.Warn("lost connection to follower", "server-id", lost.id)
-+				f.clearLastContact()
++				f.clearLastContact(lost.at)
 +				r.checkLeaderLease()
 +			}
 +
@@ -252,6 +276,15 @@
  		case <-r.followerNotifyCh:
  			//  Ignore since we are not a follower
  
+@@ -1053,7 +1115,7 @@
+ 				continue
+ 			}
+ 			f := r.leaderState.replState[server.ID]
+-			diff := now.Sub(f.LastContact())
++			diff := now.Sub(f.contact(r.config().PeerContact))
+ 			if diff <= leaseTimeout {
+ 				contacted++
+ 				if diff > maxDiff {
 @@ -1410,6 +1472,10 @@
  		rpc.Respond(nil, err)
  		return
@@ -384,7 +417,7 @@
  // getLatestConfiguration reads the configuration from a copy of the main
 --- a/raft_test.go
 +++ b/raft_test.go
-@@ -3501,3 +3501,125 @@
+@@ -3501,3 +3501,175 @@
  		t.Fatalf("expected pre-vote to not be granted, but it was granted, %+v", resp)
  	}
  }
@@ -510,9 +543,69 @@
 +		t.Fatal("refused the leader this server already follows")
 +	}
 +}
++
++// MyDC: with PeerContact, packets of any kind stand in for heartbeats. While
++// the transport reports fresh contact the leader sends no periodic
++// heartbeat, keeps its lease and the followers elect no one; once contact
++// stops, heartbeats come back.
++func TestRaft_PeerContactReplacesHeartbeat(t *testing.T) {
++	var fresh atomic.Bool
++	fresh.Store(true)
++	conf := inmemConfig(t)
++	conf.HeartbeatTimeout = 100 * time.Millisecond
++	conf.LeaderLeaseTimeout = 100 * time.Millisecond
++	conf.HeartbeatInterval = 20 * time.Millisecond
++	conf.PeerContact = func(ServerID) time.Time {
++		if fresh.Load() {
++			return time.Now()
++		}
++		return time.Time{}
++	}
++	c := MakeCluster(3, t, conf)
++	defer c.Close()
++	leader := c.Leader()
++	term := leader.getCurrentTerm()
++	follower := c.Followers()[0]
++	raw := func() time.Time {
++		follower.lastContactLock.RLock()
++		defer follower.lastContactLock.RUnlock()
++		return follower.lastContact
++	}
++	time.Sleep(100 * time.Millisecond) // let startup traffic settle
++	before := raw()
++	time.Sleep(500 * time.Millisecond) // 25 heartbeat intervals, 5 timeouts
++	if after := raw(); after.Sub(before) > 30*time.Millisecond {
++		t.Fatalf("periodic heartbeat sent despite fresh contact: %s", after.Sub(before))
++	}
++	if leader.getState() != Leader || leader.getCurrentTerm() != term || follower.getCurrentTerm() != term {
++		t.Fatal("leadership changed while contact was fresh")
++	}
++	if time.Since(follower.LastContact()) > 50*time.Millisecond {
++		t.Fatal("follower did not count transport contact from its leader")
++	}
++	fresh.Store(false)
++	before = raw()
++	time.Sleep(200 * time.Millisecond)
++	if !raw().After(before) {
++		t.Fatal("heartbeats did not resume without transport contact")
++	}
++	if leader.getState() != Leader || leader.getCurrentTerm() != term {
++		t.Fatal("leadership changed after heartbeats resumed")
++	}
++}
 --- a/replication.go
 +++ b/replication.go
-@@ -77,6 +77,12 @@
+@@ -70,6 +70,9 @@
+ 	// received from the follower (successful or not). This is used to check
+ 	// whether the leader should step down (Raft.checkLeaderLease()).
+ 	lastContact time.Time
++	// lostAt is when the transport last reported this follower lost;
++	// transport contact from before it does not count.
++	lostAt time.Time
+ 	// lastContactLock protects 'lastContact'.
+ 	lastContactLock sync.RWMutex
+ 
+@@ -77,6 +80,12 @@
  	// used to apply backoff.
  	failures uint64
  
@@ -525,23 +618,58 @@
  	// notifyCh is notified to send out a heartbeat, which is used to check that
  	// this server is still leader.
  	notifyCh chan struct{}
-@@ -95,6 +101,15 @@
+@@ -95,6 +104,50 @@
  	allowPipeline bool
  }
  
 +// clearLastContact forgets the last contact after the transport reported the
-+// connection to this follower lost, so the lease check stops counting it
-+// until it answers again.
-+func (s *followerReplication) clearLastContact() {
++// connection to this follower lost at the given time, so the lease check
++// stops counting it until it answers again. Transport contact from before
++// the loss is ignored too.
++func (s *followerReplication) clearLastContact(lostAt time.Time) {
 +	s.lastContactLock.Lock()
 +	s.lastContact = time.Time{}
++	s.lostAt = lostAt
 +	s.lastContactLock.Unlock()
++}
++
++// contact is the later of the last Raft reply and, with Config.PeerContact,
++// the last packet of any kind from the follower after any reported loss.
++func (s *followerReplication) contact(pc func(ServerID) time.Time) time.Time {
++	s.lastContactLock.RLock()
++	last, lostAt := s.lastContact, s.lostAt
++	s.lastContactLock.RUnlock()
++	if pc == nil {
++		return last
++	}
++	s.peerLock.RLock()
++	id := s.peer.ID
++	s.peerLock.RUnlock()
++	if t := pc(id); t.After(last) && t.After(lostAt) {
++		return t
++	}
++	return last
++}
++
++// heartbeatDue reports whether a periodic heartbeat to id is needed: always
++// without Config.PeerContact, otherwise only when nothing has arrived from
++// id for the heartbeat interval (Jay 2026-11-28: other traffic is enough).
++func (r *Raft) heartbeatDue(id ServerID) bool {
++	c := r.config()
++	if c.PeerContact == nil {
++		return true
++	}
++	interval := c.HeartbeatInterval
++	if interval <= 0 {
++		interval = c.HeartbeatTimeout / 10
++	}
++	return time.Since(c.PeerContact(id)) >= interval
 +}
 +
  // notifyAll is used to notify all the waiting verify futures
  // if the follower believes we are still the leader.
  func (s *followerReplication) notifyAll(leader bool) {
-@@ -168,6 +183,9 @@
+@@ -168,6 +221,9 @@
  		// follower. See https://github.com/hashicorp/raft/issues/282.
  		case <-randomTimeout(r.config().CommitTimeout):
  			lastLogIdx, _ := r.getLastLog()
@@ -551,7 +679,7 @@
  			shouldStop = r.replicateTo(s, lastLogIdx)
  		}
  
-@@ -243,6 +261,7 @@
+@@ -243,6 +299,7 @@
  
  	// Update the last contact
  	s.setLastContact()
@@ -559,16 +687,30 @@
  
  	// Update s based on success
  	if resp.Success {
-@@ -399,7 +418,7 @@
+@@ -397,9 +454,11 @@
+ 	var resp AppendEntriesResponse
+ 	for {
  		// Wait for the next heartbeat interval or forced notify
++		forced := false
  		select {
  		case <-s.notifyCh:
 -		case <-randomTimeout(r.config().HeartbeatTimeout / 10):
++			forced = true
 +		case <-heartbeatWait(r.config()):
  		case <-stopCh:
  			return
  		}
-@@ -426,6 +445,17 @@
+@@ -407,6 +466,9 @@
+ 		s.peerLock.RLock()
+ 		peer := s.peer
+ 		s.peerLock.RUnlock()
++		if !forced && !r.heartbeatDue(peer.ID) {
++			continue
++		}
+ 
+ 		start := time.Now()
+ 		if err := r.trans.AppendEntries(peer.ID, peer.Address, &req, &resp); err != nil {
+@@ -426,6 +488,17 @@
  			}
  			s.setLastContact()
  			failures = 0
@@ -586,7 +728,7 @@
  			labels := []metrics.Label{{Name: "peer_id", Value: string(peer.ID)}}
  			metrics.MeasureSinceWithLabels([]string{"raft", "replication", "heartbeat"}, start, labels)
  
-@@ -494,6 +524,9 @@
+@@ -494,6 +567,9 @@
  			shouldStop = r.pipelineSend(s, pipeline, &nextIndex, lastLogIdx)
  		case <-randomTimeout(r.config().CommitTimeout):
  			lastLogIdx, _ := r.getLastLog()
@@ -596,7 +738,7 @@
  			shouldStop = r.pipelineSend(s, pipeline, &nextIndex, lastLogIdx)
  		}
  	}
-@@ -552,6 +585,7 @@
+@@ -552,6 +628,7 @@
  
  			// Update the last contact
  			s.setLastContact()
@@ -604,7 +746,7 @@
  
  			// Abort pipeline if not successful
  			if !resp.Success {
-@@ -566,6 +600,18 @@
+@@ -566,6 +643,18 @@
  	}
  }
  

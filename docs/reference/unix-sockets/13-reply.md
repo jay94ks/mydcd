@@ -9,12 +9,11 @@
 | `Ticket`, `Session` | 위 인증 객체 |
 | `User`, `Tenants` | `{ID,Username,Revision,SystemAdmin}`, `{ID,Revision,Role}[]`; Role=`manager`/`viewer` |
 | `Result`, `Found` | `{Code:uint8,Index:uint64,Revision:uint64,Generation:uint64}`, bool 원 결과 존재 여부 |
-| `*RootRevision`, `*Revision`, `*Index`, `ModuleEpoch`, `NodeOperationEpoch`, `VaultWriteEpoch` | uint64: 위 method별 명시 root/자원/관측 기준 |
+| `*RootRevision`, `*Revision`, `*Index`, `ModuleEpoch`, `NodeOperationEpoch` | uint64: 위 method별 명시 root/자원/관측 기준 |
 | `NodeVoters`, `NodeQuorum` | int: 실제 적용된 투표 구성 |
-| `Members`, `NodeLifecycle`, `NodeStorage`, `Resources`, `Volumes`, `VolumeBackups`, `VolumeRestores`, `Apps`, `Uploads`, `Vault`, `Lifecycles`, `Registries` | 해당 method 표의 typed 객체 배열 |
+| `Members`, `NodeLifecycle`, `Resources`, `Apps`, `Uploads` | 해당 method 표의 typed 객체 배열 |
 | `*Next` | string: 다음 페이지 cursor |
-| `Invitation`, `NodeStorageSpace`, `TenantRetirement`, `LegacyTarget`, `LegacyRetirement`, `VolumeUsage`, `VolumeSource`, `AppOperation`, `AppCDField`, `AppCDRegistration`, `AppPlan`, `VaultPlan`, `VaultWritePlan`, `VaultObservation`, `VaultApproval`, `CheckerSource`, `CheckerModule` | method별 공개 결과 객체. 정확한 타입/필드 순서는 [Reply 선언](../../../internal/userauth/service.go) 참조 |
-| `RegistryCredential`, `RegistryAuthority`, `RegistryCredentialExpires` | bytes, string, int64 Unix초: 파생 단기 자격·대상·만료 |
+| `Invitation`, `TenantRetirement`, `LegacyTarget`, `LegacyRetirement`, `AppOperation`, `AppCDField`, `AppCDRegistration`, `AppPlan`, `VaultObservation`, `VaultApproval` | method별 공개 결과 객체. 정확한 타입/필드 순서는 [Reply 선언](../../../internal/userauth/service.go) 참조 |
 
 | Reply.Code | 의미·후속 동작 |
 |---|---|

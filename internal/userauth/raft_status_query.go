@@ -14,6 +14,7 @@ import (
 
 	"github.com/hashicorp/raft"
 	"github.com/jay94ks/seafield/internal/access"
+	"github.com/jay94ks/seafield/internal/buildinfo"
 	"github.com/jay94ks/seafield/internal/cluster"
 	"github.com/jay94ks/seafield/internal/cluster/control"
 	"github.com/jay94ks/seafield/internal/identity"
@@ -29,6 +30,15 @@ type RaftNodeStatus struct {
 	LastContact, ObservedAt                                       uint64
 	Lag                                                           *uint64 `json:",omitempty"`
 	Stale                                                         bool
+	// Waiting: the server did not answer this query in time; its row may
+	// be old or empty ("대기 중", node-observation-topics.md 6-1).
+	Waiting bool `json:",omitempty"`
+	// Version is the server's build version from its latest report (this
+	// server's own for its row), "" when unknown (upgrades.md 3-5).
+	Version string `json:",omitempty"`
+	// Features are the feature names the server last reported (its own row:
+	// this build's), empty for the major's baseline.
+	Features []string `json:",omitempty"`
 }
 
 type RaftStatus struct {
@@ -98,8 +108,9 @@ func (s Service) raftStatusReply(ctx context.Context, view cluster.View, session
 		}
 	}
 	reports := []observability.Report{}
+	var waiting []string
 	if s.NodeObservations != nil {
-		reports, err = s.NodeObservations(ctx, view)
+		reports, waiting, err = s.NodeObservations(ctx, view)
 		if err != nil {
 			return Reply{Schema: 1, Code: "unavailable"}
 		}
@@ -127,7 +138,7 @@ func (s Service) raftStatusReply(ctx context.Context, view cluster.View, session
 		}
 	}
 	for _, entry := range directory.Entries {
-		row := RaftNodeStatus{Node: entry.Peer.ID, Role: "pending", Stale: true}
+		row := RaftNodeStatus{Node: entry.Peer.ID, Role: "pending", Stale: true, Waiting: slices.Contains(waiting, entry.Peer.ID)}
 		server, installed := servers[row.Node]
 		if installed {
 			if server.Suffrage == raft.Voter {
@@ -139,6 +150,9 @@ func (s Service) raftStatusReply(ctx context.Context, view cluster.View, session
 		if report, found := remote[row.Node]; found {
 			fact := report.Consensus
 			row.Term, row.ObservedAt = fact.Term, report.At
+			if report.Host != nil {
+				row.Version, row.Features = report.Host.Version, report.Host.Features
+			}
 			row.Stale = !observability.Fresh(report.At, now) || fact.Term != local.Term
 			applied := fact.AppliedIndex
 			row.AppliedIndex = &applied
@@ -160,6 +174,7 @@ func (s Service) raftStatusReply(ctx context.Context, view cluster.View, session
 		}
 		if row.Node == s.Engine.ObservedNodeID() {
 			row.Term, row.ObservedAt, row.Stale = local.Term, now, false
+			row.Version, row.Features = buildinfo.Version(), buildinfo.Own.Names()
 			if installed {
 				row.Role = local.Role
 				if server.Suffrage != raft.Voter {

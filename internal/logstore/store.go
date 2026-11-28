@@ -50,6 +50,9 @@ type Info struct {
 	First, Last uint64 // 0, 0 when empty
 	Size        int64
 	Dropped     uint64 // records dropped by the cap or the engine, ever
+	// Gone is when sfcd saw the container no longer exists on the engine
+	// (zero while it exists). Only logs of gone containers are pruned.
+	Gone time.Time
 }
 
 const (
@@ -82,6 +85,7 @@ type clog struct {
 	last    uint64
 	dropped uint64
 	cleared time.Time     // records at or before this were cleared by a user
+	gone    time.Time     // the container was seen gone at this time
 	notify  chan struct{} // closed and replaced on every append
 	removed bool
 }
@@ -91,6 +95,9 @@ type seg struct {
 	last  uint64
 	size  int64
 }
+
+// Root is the store's directory.
+func (s *Store) Root() string { return s.root }
 
 // Open opens (or creates) the store at root.
 func Open(root string) (*Store, error) {
@@ -147,7 +154,8 @@ func (l *clog) saveMeta() error {
 		Meta
 		Dropped uint64
 		Cleared time.Time
-	}{l.meta, l.dropped, l.cleared})
+		Gone    time.Time `json:",omitzero"`
+	}{l.meta, l.dropped, l.cleared, l.gone})
 	tmp := filepath.Join(l.dir, "meta.json.tmp")
 	if err := os.WriteFile(tmp, b, 0o600); err != nil {
 		return err
@@ -161,11 +169,12 @@ func (l *clog) load() error {
 	var extra struct {
 		Dropped uint64
 		Cleared time.Time
+		Gone    time.Time
 	}
 	if raw, err := os.ReadFile(filepath.Join(l.dir, "meta.json")); err == nil {
 		_ = json.Unmarshal(raw, &extra)
 	}
-	l.dropped, l.cleared = extra.Dropped, extra.Cleared
+	l.dropped, l.cleared, l.gone = extra.Dropped, extra.Cleared, extra.Gone
 	names, err := filepath.Glob(filepath.Join(l.dir, "*.seg"))
 	if err != nil {
 		return err
@@ -387,7 +396,7 @@ func (s *Store) Info(id string) (Info, error) {
 	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	in := Info{Meta: l.meta, Last: l.last, Dropped: l.dropped}
+	in := Info{Meta: l.meta, Last: l.last, Dropped: l.dropped, Gone: l.gone}
 	for i, sg := range l.segs {
 		if i == 0 {
 			in.First = sg.first
@@ -608,4 +617,59 @@ func (s *Store) TrimWhere(match func(Meta) bool, t time.Time) (logs, removed int
 		removed += n
 	}
 	return logs, removed, nil
+}
+
+// MarkGone records that id's container no longer exists on the engine. The
+// first time counts; a log already marked keeps its time.
+func (s *Store) MarkGone(id string, at time.Time) error {
+	l, err := s.get(id, nil)
+	if err != nil {
+		return err
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.removed {
+		return ErrNotFound
+	}
+	if !l.gone.IsZero() {
+		return nil
+	}
+	l.gone = at.UTC()
+	return l.saveMeta()
+}
+
+// Prune removes logs of gone containers: those gone for keep(log) or
+// longer (keep <= 0 keeps that log), then, while the store holds more than maxTotal
+// bytes (maxTotal <= 0: no limit), the longest-gone ones first. Logs of
+// containers that still exist are never pruned; their own cap bounds them.
+// It returns the containers whose logs were removed.
+func (s *Store) Prune(now time.Time, keep func(Info) time.Duration, maxTotal int64) ([]string, error) {
+	all, err := s.List()
+	if err != nil {
+		return nil, err
+	}
+	var total int64
+	var gone []Info
+	for _, in := range all {
+		total += in.Size
+		if !in.Gone.IsZero() {
+			gone = append(gone, in)
+		}
+	}
+	slices.SortFunc(gone, func(a, b Info) int { return a.Gone.Compare(b.Gone) })
+	var removed []string
+	for _, in := range gone {
+		k := keep(in)
+		expired := k > 0 && now.Sub(in.Gone) >= k
+		over := maxTotal > 0 && total > maxTotal
+		if !expired && !over {
+			continue
+		}
+		if err := s.Delete(in.Container); err != nil && !errors.Is(err, ErrNotFound) {
+			return removed, err
+		}
+		total -= in.Size
+		removed = append(removed, in.Container)
+	}
+	return removed, nil
 }

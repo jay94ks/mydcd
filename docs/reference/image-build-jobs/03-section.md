@@ -1,7 +1,7 @@
 ## 조회·취소·기록 삭제
 
-User `image-builds {Tenant,ImageBuild:{Part:"jobs",ID?:context,Job?:job},After?}`를 사용한다.
-현재 Read 또는 ManageRegistry의 같은 snapshot 페이지이며 `Reply.ImageBuild.Jobs`는 최대8개다.
+User `image-builds` Params `{Tenant,Query:{Part:"jobs",ID?:context,Job?:job},After?}`를 사용한다.
+현재 Read 또는 ManageRegistry의 같은 snapshot 페이지이며 `Data.Jobs`는 최대8개다.
 각 행은 `{ID,Context,Node,User,Phase,Version:[32],Number,Revision,CreatedAt,ClosedAt,Cancel,Deleted,Result?}`다.
 Result는 `{Code,Image,Bytes}`이며 phase와 별도로 가짜 결과를 만들지 않는다. 원 Session·서명·Secret 값은
 공개하지 않는다. 관련 namespace가 바뀌면 metadata cursor는 conflict다.

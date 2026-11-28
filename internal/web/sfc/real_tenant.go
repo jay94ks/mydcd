@@ -222,31 +222,15 @@ func (c *realConn) RegistryCatalogue(ctx context.Context, tenant string, q contr
 }
 
 func (c *realConn) PlanRegistryMaintenance(ctx context.Context, tenant string, q control.RegistryMaintenanceQuery) (control.RegistryMaintenancePlan, error) {
-	const m = "registry-maintenance-plan"
-	reply, err := realCall(ctx, c, m, func(u userauth.Client, s access.Session) (userauth.Reply, error) {
-		return u.RegistryMaintenance(ctx, c.peer, s, tenant, true, q)
+	return realCall(ctx, c, "registry-maintenance-plan", func(u userauth.Client, s access.Session) (control.RegistryMaintenancePlan, error) {
+		return u.PlanRegistryMaintenance(ctx, c.peer, s, tenant, q)
 	})
-	if err != nil {
-		return control.RegistryMaintenancePlan{}, err
-	}
-	if reply.RegistryMaintenancePlan == nil {
-		return control.RegistryMaintenancePlan{}, missingReply(m)
-	}
-	return *reply.RegistryMaintenancePlan, nil
 }
 
 func (c *realConn) RegistryMaintenanceStatus(ctx context.Context, tenant, operation string) (control.RegistryMaintenanceStatus, error) {
-	const m = "registry-maintenance-status"
-	reply, err := realCall(ctx, c, m, func(u userauth.Client, s access.Session) (userauth.Reply, error) {
-		return u.RegistryMaintenance(ctx, c.peer, s, tenant, false, control.RegistryMaintenanceQuery{Operation: operation})
+	return realCall(ctx, c, "registry-maintenance-status", func(u userauth.Client, s access.Session) (control.RegistryMaintenanceStatus, error) {
+		return u.RegistryMaintenanceStatus(ctx, c.peer, s, tenant, operation)
 	})
-	if err != nil {
-		return control.RegistryMaintenanceStatus{}, err
-	}
-	if reply.RegistryMaintenanceStatus == nil {
-		return control.RegistryMaintenanceStatus{}, missingReply(m)
-	}
-	return *reply.RegistryMaintenanceStatus, nil
 }
 
 func (c *realConn) RegistryPrune(ctx context.Context, tenant string, q control.RegistryPruneQuery, after string, results bool) (control.RegistryPruneView, error) {

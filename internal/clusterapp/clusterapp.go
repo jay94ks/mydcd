@@ -7,7 +7,10 @@ package clusterapp
 
 import (
 	"errors"
+	"fmt"
+	"os"
 	"path/filepath"
+	"strings"
 
 	v1 "github.com/google/go-containerregistry/pkg/v1"
 	"github.com/google/go-containerregistry/pkg/v1/layout"
@@ -43,8 +46,50 @@ type Port struct {
 	Protocol string // tcp
 }
 
-// ImageDir is where a release installs cluster app image bundles.
-const ImageDir = "/usr/local/lib/sfc/images"
+// ImageDirs are where the release that exe (sfcd's own executable) came from
+// installs cluster app image bundles, nearest first
+// (devel/design/install-packages.md 4). The packages and the archive keep the
+// real sfcd in <prefix>/lib/sfc/bin, so its bundles are in the sibling
+// <prefix>/lib/sfc/images: /usr/lib/sfc/images for a deb or rpm,
+// /usr/local/lib/sfc/images for the archive. An sfcd placed straight in
+// <prefix>/bin finds <prefix>/lib/sfc/images. Symlinks in exe are resolved
+// first, so /usr/bin/sfcd finds the bundles of /usr/lib/sfc/bin/sfcd.
+func ImageDirs(exe string) []string {
+	if real, err := filepath.EvalSymlinks(exe); err == nil {
+		exe = real
+	}
+	bin := filepath.Dir(exe)
+	return []string{
+		filepath.Clean(filepath.Join(bin, "..", "images")),
+		filepath.Clean(filepath.Join(bin, "..", "lib", "sfc", "images")),
+	}
+}
+
+// FindImageDir returns the first of dirs that holds image i's bundle. When
+// none does, the error is ErrImageNotFound and names every place it looked.
+func FindImageDir(dirs []string, i Image) (string, error) {
+	tried := make([]string, 0, len(dirs))
+	for _, dir := range dirs {
+		bundle := filepath.Join(dir, i.Layout)
+		if i.Layout != "" {
+			if st, err := os.Stat(bundle); err == nil && st.IsDir() {
+				return dir, nil
+			}
+		}
+		tried = append(tried, bundle)
+	}
+	return "", fmt.Errorf("%w (looked in %s)", ErrImageNotFound, strings.Join(tried, ", "))
+}
+
+// InstalledImageDir is FindImageDir over the ImageDirs of the running
+// executable.
+func InstalledImageDir(i Image) (string, error) {
+	exe, err := os.Executable()
+	if err != nil {
+		return "", errors.Join(ErrImageNotFound, err)
+	}
+	return FindImageDir(ImageDirs(exe), i)
+}
 
 // ErrImageNotFound: the cluster app image is not installed on this node. The
 // node daemon package ships each cluster app image as an optional package, so a

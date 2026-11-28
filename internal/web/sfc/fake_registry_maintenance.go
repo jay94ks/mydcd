@@ -129,7 +129,7 @@ func (w *world) imagesInUse(tenant string, images ...string) bool {
 
 // --- targets ---
 
-func (w *world) registryRow(tenant, id string) *RegistryView {
+func (w *world) registryRow(tenant, id string) *FixtureRegistry {
 	for i := range w.registries {
 		if r := &w.registries[i]; r.Tenant == tenant && r.ID == id {
 			return r
@@ -138,12 +138,12 @@ func (w *world) registryRow(tenant, id string) *RegistryView {
 	return nil
 }
 
-func (w *world) registryRun(r *RegistryView) control.RegistryRunRef {
+func (w *world) registryRun(r *FixtureRegistry) control.RegistryRunRef {
 	return control.RegistryRunRef{Generation: r.Generation, SpecRevision: r.Revision, Spec: r.Spec, Owner: pub32(FixtureKey(r.Spec.Node)), Principal: "registry/" + r.Tenant + "/" + r.ID,
 		DefinitionDigest: fakeDigest("registry-definition", r.Tenant, r.ID, itoa(r.Revision)), OriginDigest: fakeDigest("registry-origin", r.Tenant, r.ID, itoa(r.Generation))}
 }
 
-func registryServing(r *RegistryView) bool {
+func registryServing(r *FixtureRegistry) bool {
 	return !r.Deleted && r.Spec.Enabled && r.Active && !r.Draining && r.ObservedAt != 0
 }
 

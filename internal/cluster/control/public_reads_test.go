@@ -19,7 +19,7 @@ import (
 )
 
 func TestPublicReadProjectionUsesCurrentTasksAndKeepsUnknownNativeFactsUnknown(t *testing.T) {
-	f, _, _ := logClearPlanFixture(t, "local")
+	f, _, _ := observedTaskFixture(t, "local")
 	before, _ := state.Encode(f.s)
 	page, err := f.p.PublicRead(f.s, f.session, 10, "network-users", "tenant", PublicReadQuery{Name: "services"}, "")
 	if err != nil || len(page.Rows) != 1 || page.Rows[0].User == nil {
@@ -171,7 +171,7 @@ func TestCordonPublicMetadataUsesOriginalSignedActorTimeAndClearsOnUncordon(t *t
 }
 
 func TestNetworkUsersConsumesOnlyFreshEndpointEvidenceAndOwnsPointer(t *testing.T) {
-	f, o, _ := logClearPlanFixture(t, "local")
+	f, o, _ := observedTaskFixture(t, "local")
 	for _, mode := range []string{"present", "absent", "missing", "unknown", "legacy"} {
 		o.Sequence++
 		o.Healthy = mode != "missing" && mode != "unknown"

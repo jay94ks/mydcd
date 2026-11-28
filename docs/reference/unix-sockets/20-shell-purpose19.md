@@ -8,8 +8,8 @@
 
 | Method | Request의 추가 필드 | Reply의 공개 필드 |
 |---|---|---|
-| `node-shell-policy` | 없음 | `NodeShellPolicy:{Enabled,MaxSessions,IdleSeconds,Account,Nodes,Grants,Revision,Index,RootRevision}`, `NodeShellRootRevision` |
-| `node-shell-sessions` | `After?:string`, `State?:"open"\|"closed"`, `Node?:string` | `NodeShellSessions:{Schema:1,Index,RootRevision,Sessions,Next,Total}`, `NodeShellRootRevision` |
+| `node-shell-policy` | typed `Params:{}` | `Data:{Enabled,MaxSessions,IdleSeconds,Account,Nodes,Grants,Revision,Index,RootRevision}` |
+| `node-shell-sessions` | typed `Params:{After?,State?:"open"\|"closed",Node?}` | `Data:{Schema:1,Index,RootRevision,Sessions,Next,Total}` |
 
 `Nodes`는 `{Node,Shell,Sudo,Enabled,Ready,NotReady?}`이고 `Grants`는 `{User,Nodes:[node ID,...]}`다. `Sessions`는 최대 8개이며 원 SessionID의 문자열 오름차순이다. `State=open`은 queued/opened/closing, closed는 종료, 생략/빈 값은 전체 상태다. `Node`는 선택 노드 ID이며 생략/빈 값이면 모든 허용 노드다. closed의 공개 목록은 노드별 최근200개(ClosedAt 내림차순, 동률 SessionID 오름차순 선택)이며 열린 세션은 숨기지 않는다. 현재 사용자 권한·보존 한도·필터를 적용한 뒤 `Total`과 페이지를 계산한다. Total은 After와 무관한 해당 조건의 전체 공개 수, Next는 다음 페이지가 있을 때만 마지막 반환 ID다. 같은 필터에서 Next를 After로 보낸다. 목록 숨김으로 원 operation 결과/서명/owner receipt/event를 삭제하지 않는다. 관리자는 전체, 그 밖의 `node-shell` scope 사용자는 자기 grant/노드·자기 세션만 읽는다. 현재 계정·credential·issuer와 scope를 매 조회 확인하며 과거 grant가 현재 접근권을 대신하지 않는다.
 

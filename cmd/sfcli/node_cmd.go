@@ -39,6 +39,7 @@ func nodeCommand(g *globals) *cli.Command {
 			nodeRotateKeyCommand(g),
 			nodeSetEndpointCommand(g),
 			nodeDiagnosticsCommand(g),
+			nodeLogsCommand(g),
 			nodeDisksCommand(g),
 			nodeFirewallCommandTree(g),
 			nodeTenantsCommand(g),
@@ -66,7 +67,6 @@ type nodeDirectory struct {
 	Revision           uint64                `json:"revision"`
 	RuntimeRevision    uint64                `json:"runtime_revision"`
 	OperationEpoch     uint64                `json:"operation_epoch"`
-	ModuleEpoch        uint64                `json:"-"`
 	ConfigurationIndex uint64                `json:"configuration_index"`
 	Voters             int                   `json:"voters"`
 	Quorum             int                   `json:"quorum"`
@@ -97,7 +97,7 @@ func (d nodeDirectory) view(node string) (membership.NodeView, bool) {
 func readNodes(ctx context.Context, s *session) (nodeDirectory, error) {
 	var d nodeDirectory
 	after := ""
-	var first *userauth.Reply
+	var first *userauth.MembersReply
 	for {
 		reply, err := s.Client.MemberPage(ctx, s.Target, s.Stored.Session, after)
 		if err != nil {
@@ -106,10 +106,10 @@ func readNodes(ctx context.Context, s *session) (nodeDirectory, error) {
 		if first == nil {
 			snapshot := reply
 			first = &snapshot
-		} else if first.MembersRootRevision != reply.MembersRootRevision || first.NodeRuntimeRevision != reply.NodeRuntimeRevision || first.NodeOperationEpoch != reply.NodeOperationEpoch {
+		} else if first.RootRevision != reply.RootRevision || first.RuntimeRevision != reply.RuntimeRevision || first.OperationEpoch != reply.OperationEpoch {
 			return d, errors.New("the node list changed while it was read; try again")
 		}
-		if len(reply.Members) > 8 || len(reply.NodeLifecycle) > len(reply.Members) || len(d.Members)+len(reply.Members) > 1024 {
+		if len(reply.Members) > 8 || len(reply.Nodes) > len(reply.Members) || len(d.Members)+len(reply.Members) > 1024 {
 			return d, errors.New("server sent an invalid node page")
 		}
 		last := after
@@ -120,18 +120,17 @@ func readNodes(ctx context.Context, s *session) (nodeDirectory, error) {
 			last = entry.Peer.ID
 		}
 		d.Members = append(d.Members, reply.Members...)
-		d.Nodes = append(d.Nodes, reply.NodeLifecycle...)
-		if reply.MembersNext == "" {
+		d.Nodes = append(d.Nodes, reply.Nodes...)
+		if reply.Next == "" {
 			break
 		}
-		if reply.MembersNext != last {
+		if reply.Next != last {
 			return d, errors.New("server sent an invalid node page cursor")
 		}
-		after = reply.MembersNext
+		after = reply.Next
 	}
-	d.Revision, d.RuntimeRevision, d.OperationEpoch = first.MembersRootRevision, first.NodeRuntimeRevision, first.NodeOperationEpoch
-	d.ModuleEpoch, d.ConfigurationIndex = max(1, first.ModuleEpoch), first.NodeConfigurationIndex
-	d.Voters, d.Quorum = first.NodeVoters, first.NodeQuorum
+	d.Revision, d.RuntimeRevision, d.OperationEpoch = first.RootRevision, first.RuntimeRevision, first.OperationEpoch
+	d.ConfigurationIndex, d.Voters, d.Quorum = first.ConfigurationIndex, first.Voters, first.Quorum
 	return d, nil
 }
 
@@ -191,7 +190,21 @@ and lifecycle state.`,
 				return cli.Print(c.Out, g.output.Format(), nodes, func() cli.Rows {
 					t := cli.Rows{Header: []string{"node", "state", "ready", "scheduling", "stale", "build"}}
 					for _, n := range nodes {
-						t.Add(n.Node, n.State, n.Ready, scheduling(n.Scheduling), n.Stale, buildText(n.Build))
+						state := n.State
+						if n.Waiting {
+							// The server did not answer in time; the
+							// row is what was stored before.
+							state = "waiting"
+						} else if n.State == "unready" && n.Reason != "" {
+							// Fixed codes only; the error text is in that
+							// server's log.
+							state = "unready (" + n.Reason
+							if len(n.FailedSteps) > 0 {
+								state += ": " + strings.Join(n.FailedSteps, ",")
+							}
+							state += ")"
+						}
+						t.Add(n.Node, state, n.Ready, scheduling(n.Scheduling), n.Stale, buildText(n.Build))
 					}
 					return t
 				})

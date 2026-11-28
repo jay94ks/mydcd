@@ -32,7 +32,7 @@ import { CdPauseDialog, CdTab } from './AppCd';
 import { AppIncidentTab } from './AppIncident';
 import { appLive } from '../lib/liveTopics';
 
-/** app.yaml에서 화면에 그릴 자원 나무를 뽑는다. 원문이 기준이고, 모르는 키는 무시한다. */
+/** app.yaml에서 화면에 그릴 앱 구성을 뽑는다. 원문이 기준이고, 모르는 키는 무시한다. */
 interface Shape {
   services: { name: string; image: string; node: string; replicas: number; networks: string[]; volumes: string[]; secrets: string[] }[];
   networks: string[];
@@ -302,7 +302,7 @@ function Overview({ a, shape, srcError }: { a: AppView; shape?: Shape; srcError?
           />
           {a.lastOp?.failed && <div className="note er small">마지막 작업이 실패했습니다. 버전 기록에서 바뀐 점을 확인하세요.</div>}
         </Card>
-        <Card title="자원 나무 (app.yaml 기준)">
+        <Card title="앱 구성 (app.yaml 기준)">
           {srcError ? (
             <ErrorBand error={srcError} what="실행 중 app.yaml을 읽지 못했습니다" />
           ) : !shape ? (
@@ -375,7 +375,7 @@ function Edit({ a, current }: { a: AppView; current?: string }) {
       {!canDeploy && <div className="note wa small">이 작업 공간에서는 읽기 권한만 있어 검사까지만 할 수 있습니다.</div>}
       <div className="row">
         <Segmented
-          label="고치는 방식"
+          label="편집 방식"
           value={view}
           onChange={setView}
           options={[

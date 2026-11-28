@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -238,8 +239,8 @@ func (s *Server) runOrder(ctx context.Context, c *store.ACMECert, o *store.ACMEO
 		return
 	}
 	if kt != c.KeyTypes[0] {
-		s.notify(&store.Notification{User: c.OwnerID, Kind: NotifyCertificate, Severity: "warning", Title: "인증서 키 형식 바꿈: " + c.Name,
-			Body: fmt.Sprintf("%s 대신 %s로 받습니다", c.KeyTypes[0], kt), Link: "/certificates/" + c.Name})
+		s.notify(&store.Notification{User: c.OwnerID, Kind: NotifyCertificate, Severity: "warning", Text: notice("cert-key-type", map[string]string{"name": c.Name, "from": string(c.KeyTypes[0]), "to": string(kt)}, "cert-key-type.body"),
+			Link: "/certificates/" + c.Name})
 	}
 	o.KeyType = kt
 	// each name gets DNS-01 through its connected domain's provider (whose
@@ -477,7 +478,7 @@ func (s *Server) acmeAfterFailure(c *store.ACMECert, o *store.ACMEOrder) {
 	if who == "" {
 		who = cur.OwnerID
 	}
-	s.notify(&store.Notification{User: who, Kind: NotifyCertificate, Severity: "error", Title: "인증서 발급 실패: " + c.Name, Body: o.ErrorCode,
+	s.notify(&store.Notification{User: who, Kind: NotifyCertificate, Severity: "error", Text: notice("cert-issue-failed", map[string]string{"name": c.Name, "code": o.ErrorCode}, bodyIf(o.ErrorCode != "", "op-failed.code")...),
 		Link: "/certificates/" + c.Name})
 }
 
@@ -548,7 +549,7 @@ func (s *Server) acmeTick() {
 				c.Warned = d
 				_ = s.opt.Store.PutACMECert(c)
 				s.notify(&store.Notification{User: c.OwnerID, Kind: NotifyCertificate, Severity: "warning", Action: true,
-					Title: fmt.Sprintf("인증서 만료 %d일 전: %s", d, c.Name), Link: "/certificates/" + c.Name})
+					Text: notice("cert-expiring", map[string]string{"name": c.Name, "days": strconv.Itoa(d)}), Link: "/certificates/" + c.Name})
 				break
 			}
 		}
@@ -572,7 +573,7 @@ func (s *Server) acmeTick() {
 			c.RenewBlocked = now
 			_ = s.opt.Store.PutACMECert(c)
 			s.notify(&store.Notification{User: c.OwnerID, Kind: NotifyCertificate, Severity: "warning", Action: true,
-				Title: "인증서 직접 갱신 필요: " + c.Name, Body: "웹 자동 작업 계정이 없어 자동으로 갱신하지 못합니다. 자동 작업 계정을 만들거나 발급을 눌러 주세요.", Link: "/certificates/" + c.Name})
+				Text: notice("cert-manual-renew", map[string]string{"name": c.Name}, "cert-manual-renew.body"), Link: "/certificates/" + c.Name})
 		}
 	}
 }

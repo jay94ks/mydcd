@@ -39,6 +39,10 @@ func buildJobReportFixture(t *testing.T, f *nodeStorageFixture, report ImageBuil
 	}
 	report.Schema, report.Kind, report.Cluster, report.Owner = 1, "job", f.p.Cluster, r.Run.Spec.Scope.Root.Key
 	report.Tenant, report.Expected, report.RootRevision, report.Epoch = "tenant", r.Run.Revision, f.s.Object(ImageBuildKey).Revision, f.s.ModuleEpoch()
+	if report.Action == "begin" && report.Builder == nil {
+		// Fixture policies pin the builder: it resolves only to itself.
+		report.Builder = testBuilder(r.Run.Spec)
+	}
 	if report.At == 0 {
 		report.At = 3
 		if report.Closure != nil {
@@ -160,4 +164,8 @@ func TestBuildJobConcurrencyAndQueuedCancellationRequireOwnerSettlement(t *testi
 	if _, err := f.p.ImageBuildPage(f.s, f.sessions["manager"], 4, "other", ImageBuildQuery{Part: "jobs"}, ""); err == nil {
 		t.Fatal("cross-tenant jobs exposed")
 	}
+}
+
+func testBuilder(spec imagebuild.JobSpec) *imagebuild.FrozenSource {
+	return &imagebuild.FrozenSource{Source: imagebuild.BuilderSource(spec, "linux/amd64"), Image: spec.Policy.BuilderImage}
 }

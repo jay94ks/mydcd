@@ -32,11 +32,11 @@ tenant 입력 반환의 완료를 뜻하지 않는다.
 
 ### Git 보관의 사용자 메시지와 CLI
 
-User purpose8 method=`save-build-git`의 요청은 `{Tenant,ImageBuildGit:{Plan,Proof}}`다. Unix TLS/QUIC에서 같은 형식을 쓰고, 원 owner가 다르면 설치 member `image-build-git-owner`로 한 번 전달한다. 노드별 비인증 Git/파일 RPC를 만들지 않는다. 현재 tenant ManageRegistry·publish-build-git operation ceiling·creator·등록 root/owner·현재 context/policy revision과 원 plan 기한을 확인한다.
+User purpose8 method=`save-build-git`의 요청은 Params `{Tenant,Request:{Plan,Proof}}`다. Unix TLS/QUIC에서 같은 형식을 쓰고, 원 owner가 다르면 설치 member `image-build-git-owner`로 한 번 전달한다. 노드별 비인증 Git/파일 RPC를 만들지 않는다. 현재 tenant ManageRegistry·publish-build-git operation ceiling·creator·등록 root/owner·현재 context/policy revision과 원 plan 기한을 확인한다.
 
 Proof는 `{Schema:1,Plan:[32],At,ExpiresAt,Nonce:[32],Signature:base64}`다. 사용자 session key가 `sfc-imagebuild-git-request-1\0`과 Signature=null인 표준 JSON을 서명한다. Plan은 `sfc-imagebuild-git-save-1\0`과 원 GitSavePlan JSON의 SHA-256이며 최대120초·현재 session 만료 이내다. 짧은 proof 갱신은 같은 원 plan을 재조회하는 것이며 plan의 ID/commit/기한·권한을 바꾸지 않는다.
 
-Reply.ImageBuildGit은 `{Schema:1,Plan:[32],Code,Saved?}`다. Code=`SAVED|PENDING|SOURCE_FETCH|INVALID_CONTEXT`이며 Saved는 SAVED일 때만 앞 절의 원 owner 증거다. 외부 Git 오류 body/credential/파일 원문을 실패 응답에 넣지 않는다. fetch 전에 기록된 원 save를 조회하고 이미 준비된/부분 원본이면 network fetch/generator를 다시 실행하지 않는다. 새로운 fetch 실패는 native staging이나 root pin을 만들지 않는다. fetch 자체는 editor mutex 밖에서 수행하고 실제 파일 쓰기/인계는 draft와 같은 gate를 사용한다.
+응답 `Data`는 `{Schema:1,Plan:[32],Code,Saved?}`다. Code=`SAVED|PENDING|SOURCE_FETCH|INVALID_CONTEXT`이며 Saved는 SAVED일 때만 앞 절의 원 owner 증거다. 외부 Git 오류 body/credential/파일 원문을 실패 응답에 넣지 않는다. fetch 전에 기록된 원 save를 조회하고 이미 준비된/부분 원본이면 network fetch/generator를 다시 실행하지 않는다. 새로운 fetch 실패는 native staging이나 root pin을 만들지 않는다. fetch 자체는 editor mutex 밖에서 수행하고 실제 파일 쓰기/인계는 draft와 같은 gate를 사용한다.
 
 ```sh
 sfcli build context upload source --id publish-git-one

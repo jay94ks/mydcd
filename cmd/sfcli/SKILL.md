@@ -81,7 +81,7 @@ Every change gets an operation ID before it is sent, and sfcli prints it.
 | Task | Command |
 |---|---|
 | Deploy or update an app | `sfcli app diff -f app.yaml`, then `sfcli app deploy -f app.yaml` |
-| App state and logs | `sfcli app show APP`, `sfcli app logs APP SERVICE [--tail N]` |
+| App state and logs | `sfcli app show APP`, `sfcli logs --app APP --container CONTAINER [--tail N]` (server-kept logs, incl. cluster apps: `sfcli logs --node NODE NAME`) |
 | Run one command in a container | `sfcli app exec APP SERVICE -- COMMAND...` |
 | Servers | `sfcli node list`, `sfcli node show NODE` |
 | Cluster health | `sfcli cluster status`, `sfcli events` |

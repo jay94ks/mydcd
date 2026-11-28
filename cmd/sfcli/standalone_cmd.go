@@ -705,34 +705,22 @@ func printExtension(c *cli.Context, g *globals, s *session, id string, result *s
 	return sendErr
 }
 
+// standaloneLogsCommand is `sfcli standalone logs NAME`, an alias of
+// `sfcli logs --standalone NAME`.
 func standaloneLogsCommand(g *globals) *cli.Command {
 	var follow bool
 	return &cli.Command{
 		Name:  "logs",
 		Args:  "NAME",
-		Short: "Print a standalone's container logs",
-		Long:  `Prints the last 200 lines. -f keeps printing new lines until Ctrl-C.`,
-		Flags: func(fs *flag.FlagSet) {
-			fs.BoolVar(&follow, "f", false, "follow new lines")
-			fs.String("tail", "", "last `N` lines (at most 10000)")
-			fs.String("since", "", "from this RFC3339 `time`")
-			fs.String("until", "", "up to this RFC3339 `time`")
-			fs.String("cursor", "", "continue from this `CURSOR`")
-			fs.Bool("timestamps", false, "show timestamps")
-			fs.Bool("stdout", false, "only standard output")
-			fs.Bool("stderr", false, "only standard error")
-			fs.String("max-bytes", "", "print at most `N` bytes")
-		},
+		Short: "Print a standalone's container logs (same as sfcli logs --standalone)",
+		Long:  `Same as sfcli logs --standalone NAME. Prints the last 200 lines. -f keeps printing new lines until Ctrl-C.`,
+		Flags: func(fs *flag.FlagSet) { logsFlags(fs, &follow) },
 		Run: g.withSession(func(c *cli.Context, s *session, args []string) error {
 			name, err := standaloneName(args, "logs", 0)
 			if err != nil {
 				return err
 			}
-			flow := append([]string{"logs", name}, forward(c, "tail", "since", "until", "cursor", "timestamps", "stdout", "stderr", "max-bytes")...)
-			if follow {
-				flow = append(flow, "--follow")
-			}
-			return g.containerReadWith(c, s, follow, g.standaloneFlow, g.standaloneJSON, flow)
+			return g.runLogs(c, s, logsTarget{Standalone: name}, follow)
 		}),
 	}
 }

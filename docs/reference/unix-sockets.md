@@ -48,21 +48,21 @@ member `image-build-base-token-owner` 요청은
 전달한다. 현재 quorum·running/unknown의 원 source binding·실제 registry challenge를 확인하고
 동일 reader의 Additional(최대7개)도 같은 job/owner·credential generation/ReadSet·pull scope로 확인하며 token/password를 관측·Raft·로그에 기록하지 않는다.
 
-User `image-builds {Tenant,ImageBuild:{Part:"caches",ID?:context,Node?:node},After?}`는
+User `image-builds` Params `{Tenant,Query:{Part:"caches",ID?:context,Node?:node},After?}`는
 현재 조회 가능한 cache 범위를 중복 없이 나열하고 원 node의 마지막 SDK 요약을 붙인다.
-`Reply.ImageBuild.Caches/InventoryRoot`와 최대4행·노드별 UNAVAILABLE/미관측·삭제된 job의
+`Data.Caches/InventoryRoot`와 최대4행·노드별 UNAVAILABLE/미관측·삭제된 job의
 캐시 보존 및 member `image-build-caches-owner`의 [전체 형식](image-build-jobs/12-section.md)을 따른다.
 
-User `image-build-cache {Tenant,ImageBuildCache:{Job} 또는 {Job:"",Cache:[32],Node},After?}`는 원 job의
-context/root/builder 캐시의 마지막 실제 SDK 관측을 읽는다. 응답의 `ImageBuildCache`는
+User `image-build-cache` Params `{Tenant,Query:{Job} 또는 {Job:"",Cache:[32],Node},After?}`는 원 job의
+context/root/builder 캐시의 마지막 실제 SDK 관측을 읽는다. 응답의 `Data`는
 공유 job/epoch와 node-local `Page`·outer `Next`를 담고, 미관측/성공/최근 관측 실패·시각을
 구분한다. 내부 member `image-build-cache-owner`는 원 owner에서 현재 사용자 권한을
 재검사한다. [전체 필드·페이지·오류](image-build-jobs/10-section.md)를 따른다.
 조회만으로 daemon 기동·build 재실행·cache 삭제를 하지 않는다. `Page.Cleanup?`은 원
 job의 빌드 종료 자동 정리 의도/SDK 결과이며 [단계·불명 의미](image-build-jobs/11-section.md)를 따른다.
 
-User `image-build-logs {Tenant,ImageBuildLog:{Job,MaxBytes:1..24576,Tail?:true},After?}`의
-`Reply.ImageBuildLog`는 `{Tenant,Job,Root:[32],Epoch,Phase,Next,Page:{Schema:1,Job:[32],Offset,Next,Total,Data,Available,Truncated,Gap,Unclosed}}`다.
+User `image-build-logs` Params `{Tenant,Query:{Job,MaxBytes:1..24576,Tail?:true},After?}`의
+응답 `Data`는 `{Tenant,Job,Root:[32],Epoch,Phase,Next,Page:{Schema:1,Job:[32],Offset,Next,Total,Data,Available,Truncated,Gap,Unclosed}}`다.
 공통 Schema/Nonce/Session proof를 사용하고 Data는 가린 bytes의 base64 JSON이다.
 Tail은 같은 snapshot의 마지막 MaxBytes 바이트를 선택하며 After와 혼합하지 않는다.
 이후 Tail 없이 Next를 After로 보내면 새로 추가된 bytes를 이어 읽는다.
@@ -70,9 +70,9 @@ member `image-build-logs-owner`는 현재 사용자 권한을 원 owner에서 �
 Management relay다. [로그 포맷·cursor·한도·종료 의미](image-build-jobs/08-section.md)를
 따르며 native 로그 EOF를 작업 완료로 취급하거나 로그 본문을 Raft에 저장하지 않는다.
 
-User `save-build-git {Tenant,ImageBuildGit:{Plan,Proof}}`와 `Reply.ImageBuildGit:{Schema,Plan,Code,Saved?}`는 [Git 보관 메시지](image-build-contexts/14-git-archive.md#git-보관의-사용자-메시지와-cli)를 따른다. 현재 사용자/등록 scope와 원 session-key proof는 member image-build-git-owner relay에서도 확인한다. native 보관과 creator의 publish-build-git/Raft 게시를 구분하며 기존 purpose8/schema1을 사용한다.
+User `save-build-git` Params `{Tenant,Request:{Plan,Proof}}`와 응답 `Data:{Schema,Plan,Code,Saved?}`는 [Git 보관 메시지](image-build-contexts/14-git-archive.md#git-보관의-사용자-메시지와-cli)를 따른다. 현재 사용자/등록 scope와 원 session-key proof는 member image-build-git-owner relay에서도 확인한다. native 보관과 creator의 publish-build-git/Raft 게시를 구분하며 기존 purpose8/schema1을 사용한다.
 
-User `build-draft Kind:freeze`의 Freeze plan/Proof·`Reply.ImageBuildDraft.Frozen`과 관리 `publish-build-draft`의 payload/Expected·원 creator 승인은 [freeze/게시 메시지](image-build-contexts/12-draft-freeze.md)를 따른다. 같은 User 목적8/member owner relay이며 node 증거만으로 version을 게시하지 않는다.
+User `build-draft Kind:freeze`의 Freeze plan/Proof·응답 `Data.Frozen`과 관리 `publish-build-draft`의 payload/Expected·원 creator 승인은 [freeze/게시 메시지](image-build-contexts/12-draft-freeze.md)를 따른다. 같은 User 목적8/member owner relay이며 node 증거만으로 version을 게시하지 않는다.
 
 같은 User `build-draft Kind:result`는 `{Context,Scope,Edit,Proof}`와 `Proof.Transfer:{Kind:"result"}`를 사용한다. Data/Freeze/cursor를 보내지 않는다. 원 metadata 결과의 `OK`는 `{Revision,Digest,Edit:{Edit,Draft,Revision}}`, 나머지 `PENDING|DISCARDED|NOT_INITIALIZED`는 결과 필드가 없는 동일 DraftResponse다. 현재 권한/원 지문을 확인하는 조회이며 과거 편집을 실행하지 않는다. 설정 변경/삭제·원 pin 반환 뒤의 [메시지/CLI 계약](image-build-contexts/06-draft.md#과거-편집의-원-결과-조회)을 따른다.
 
@@ -85,7 +85,7 @@ Frozen/Saved와 optional Reclaimed, `PENDING|DISCARDED|NOT_INITIALIZED`의 정�
 [형식/수명](image-build-contexts/15-freeze-git.md)을 따른다. 현재 본문 가용성을
 추정하거나 원 plan 갱신·fetch·파일/pin·seal 저장·게시를 실행하지 않는다.
 
-User `build-draft {Tenant,ImageBuildDraft:{Context,Kind:"plan"|"tree"|"file"|"edit"|"file-part"|"file-status"|"file-seal",...}}`와 `Reply.ImageBuildDraft`의 scope/사용자 proof·원 편집 결과·8개 tree 항목·24KiB inline 파일/원 조각·File progress 포맷은 [draft 메시지](image-build-contexts/06-draft.md)를 따른다. owner relay는 같은 member Management `image-build-draft-owner`다. 노드 로컬 입력 편집은 version 게시/배포 변경이 아니다. CAS가 지나간 pending 파일의 owner 회수 뒤에는 원 조각/상태/seal 요청을 충돌로 거부하며, 완료한 원 edit 결과와 메시지 형식은 유지한다. [본문 정리](image-build-contexts/13-draft.md)를 따른다.
+User `build-draft` Params `{Tenant,Request:{Context,Kind:"plan"|"tree"|"file"|"edit"|"file-part"|"file-status"|"file-seal",...}}`와 응답 `Data`의 scope/사용자 proof·원 편집 결과·8개 tree 항목·24KiB inline 파일/원 조각·File progress 포맷은 [draft 메시지](image-build-contexts/06-draft.md)를 따른다. owner relay는 같은 member Management `image-build-draft-owner`다. 노드 로컬 입력 편집은 version 게시/배포 변경이 아니다. CAS가 지나간 pending 파일의 owner 회수 뒤에는 원 조각/상태/seal 요청을 충돌로 거부하며, 완료한 원 edit 결과와 메시지 형식은 유지한다. [본문 정리](image-build-contexts/13-draft.md)를 따른다.
 
 
 빌드 Secret은 [job 승인·메시지 명세](image-build-jobs/02-secret.md)의 optional Plan.Uses와 signed terminal report.Secrets를 사용한다. `image-build-secret-inputs`는 member Management의 `{Selection:{Tenant,Job,Snapshot},At}` metadata 조회이며 실제 값은 기존 SecretFetch에서 선택적인 `AppInputFetch.ImageBuild`로 원 job/ReadSet에 고정한다. 관리 Unix socket에서 Secret 원문을 조회하거나 새 끝점을 만들지 않는다.
@@ -94,7 +94,7 @@ User `build-draft {Tenant,ImageBuildDraft:{Context,Kind:"plan"|"tree"|"file"|"ed
 
 이미지 빌드 job의 User `image-build-job-plan`·`image-builds`의 `Part:"jobs"`와 signed `begin-image-build/cancel-image-build/delete-image-build-job`은 같은 purpose8·원 인증/CAS 코어를 사용한다. [Spec/Change/Jobs/owner report 포맷](image-build-jobs.md)을 따르며 Secret 값·ZIP bytes·빌드 로그를 Raft에 넣지 않는다.
 
-User `build-context-content {Tenant,ImageBuildContent:{Version:[32],Part:"tree"|"dockerfile"|"file",Path?,Offset?},After?}`와 `Reply.ImageBuildContent`는 [보존 버전 조회](image-build-contexts/04-dockerfile.md)를 사용한다. 현재 Read/ManageRegistry·owner/root/epoch·보존 version을 검사하며 원 bytes를 Raft에 넣지 않는다. `image-build-content-owner`는 같은 member Management의 native owner 조회이고 별도 socket을 열지 않는다.
+User `build-context-content` Params `{Tenant,Query:{Version:[32],Part:"tree"|"dockerfile"|"file",Path?,Offset?},After?}`와 응답 `Data`는 [보존 버전 조회](image-build-contexts/04-dockerfile.md)를 사용한다. 현재 Read/ManageRegistry·owner/root/epoch·보존 version을 검사하며 원 bytes를 Raft에 넣지 않는다. `image-build-content-owner`는 같은 member Management의 native owner 조회이고 별도 socket을 열지 않는다.
 
 Sfc의 로컬 관리 끝점은 **`unix:///run/sfcdp.sock`**이다. `sfcd`가 생성하며 `sfcli`와 로컬 관리 클라이언트가 접속한다. 프로토콜은 **AF_UNIX stream → TLS → SFCP 인증 → Unix record → SFCP frame/TLV → 업무 payload** 순서다.
 

@@ -63,7 +63,7 @@ func (p Policy) ExternalRegistries(s state.State) ([]ExternalRegistryEntry, erro
 			return nil, ErrCatalog
 		}
 		last = e.Spec.Key()
-		if _, ok := c.Tenant(e.Spec.Tenant); !ok {
+		if _, ok := c.Tenant(e.Spec.Tenant); !ok && !e.Spec.Cluster() {
 			return nil, ErrCatalog
 		}
 		var put ExternalRegistryPut
@@ -140,6 +140,36 @@ func externalRegistryScopes(entries []ExternalRegistryEntry, managed Registries)
 	return nil
 }
 
+// validSourceOwner accepts a workspace ID or "" for a cluster-owned source.
+func validSourceOwner(tenant string) bool { return tenant == "" || validID(tenant) }
+
+// authorizeSourceOwner is the management permission over a source's owner:
+// ManageCluster for a cluster-owned source, else ManageRegistry (plus Deploy
+// on the reader node for a bind) in that workspace.
+func (p Policy) authorizeSourceOwner(c access.Catalog, session access.Session, at int64, tenant, node string, cleanup bool) error {
+	if tenant == "" {
+		return c.AuthorizeSession(session, p.Cluster, p.Issuer(session.Issuer), at, "", access.ManageCluster, "")
+	}
+	if cleanup {
+		return c.AuthorizeSessionCleanup(session, p.Cluster, p.Issuer(session.Issuer), at, tenant, access.ManageRegistry)
+	}
+	if node != "" && c.AuthorizeSession(session, p.Cluster, p.Issuer(session.Issuer), at, tenant, access.Deploy, node) != nil {
+		return access.ErrDenied
+	}
+	return c.AuthorizeSession(session, p.Cluster, p.Issuer(session.Issuer), at, tenant, access.ManageRegistry, node)
+}
+
+// authorizeAcceptedSourceOwner re-checks an accepted bind for later reader work.
+func (p Policy) authorizeAcceptedSourceOwner(c access.Catalog, origin UserOperation, tenant, node string) error {
+	if tenant == "" {
+		return c.AuthorizeAccepted(origin.Session, p.Cluster, origin.At, "", access.ManageCluster, "")
+	}
+	if c.AuthorizeAccepted(origin.Session, p.Cluster, origin.At, tenant, access.ManageRegistry, node) != nil {
+		return access.ErrDenied
+	}
+	return c.AuthorizeAccepted(origin.Session, p.Cluster, origin.At, tenant, access.Deploy, node)
+}
+
 func (p Policy) authorizeExternalRegistry(c access.Catalog, op UserOperation) error {
 	if err := c.OperationAllowed(op.Session, op.Change.Action); err != nil {
 		return err
@@ -154,24 +184,19 @@ func (p Policy) authorizeExternalRegistry(c access.Catalog, op UserOperation) er
 		q = RegistrySelection{put.Spec.Tenant, put.Spec.ID}
 	case "bind-external-registry":
 		var bind ExternalRegistryBind
-		if canonical(op.Change.Payload, &bind) != nil || !validID(bind.Tenant) || !validID(bind.ID) || !validID(bind.Node) || bind.Definition == ([32]byte{}) {
+		if canonical(op.Change.Payload, &bind) != nil || !validSourceOwner(bind.Tenant) || !validID(bind.ID) || !validID(bind.Node) || bind.Definition == ([32]byte{}) {
 			return access.ErrInvalid
 		}
-		if c.AuthorizeSession(op.Session, p.Cluster, p.Issuer(op.Session.Issuer), op.At, bind.Tenant, access.Deploy, bind.Node) != nil {
-			return access.ErrDenied
-		}
-		return c.AuthorizeSession(op.Session, p.Cluster, p.Issuer(op.Session.Issuer), op.At, bind.Tenant, access.ManageRegistry, bind.Node)
+		return p.authorizeSourceOwner(c, op.Session, op.At, bind.Tenant, bind.Node, false)
 	case "delete-external-registry", "unbind-external-registry":
-		if canonical(op.Change.Payload, &q) != nil || !validID(q.Tenant) || !validID(q.ID) {
+		if canonical(op.Change.Payload, &q) != nil || !validSourceOwner(q.Tenant) || !validID(q.ID) {
 			return access.ErrInvalid
 		}
 	default:
 		return access.ErrInvalid
 	}
-	if op.Change.Action == "delete-external-registry" || op.Change.Action == "unbind-external-registry" {
-		return c.AuthorizeSessionCleanup(op.Session, p.Cluster, p.Issuer(op.Session.Issuer), op.At, q.Tenant, access.ManageRegistry)
-	}
-	return c.AuthorizeSession(op.Session, p.Cluster, p.Issuer(op.Session.Issuer), op.At, q.Tenant, access.ManageRegistry, "")
+	cleanup := op.Change.Action == "delete-external-registry" || op.Change.Action == "unbind-external-registry"
+	return p.authorizeSourceOwner(c, op.Session, op.At, q.Tenant, "", cleanup)
 }
 
 // Public projection intentionally excludes accepted operation/session proofs.
@@ -197,7 +222,14 @@ func (p Policy) ExternalRegistryPage(s state.State, session access.Session, at i
 	if err != nil {
 		return nil, "", err
 	}
-	if tenant == "" || len(after) > 512 || c.AuthorizeSession(session, p.Cluster, p.Issuer(session.Issuer), at, tenant, access.Read, "") != nil && c.AuthorizeSession(session, p.Cluster, p.Issuer(session.Issuer), at, tenant, access.ManageRegistry, "") != nil {
+	if len(after) > 512 {
+		return nil, "", access.ErrDenied
+	}
+	if tenant == "" {
+		if c.AuthorizeSession(session, p.Cluster, p.Issuer(session.Issuer), at, "", access.ManageCluster, "") != nil {
+			return nil, "", access.ErrDenied
+		}
+	} else if c.AuthorizeSession(session, p.Cluster, p.Issuer(session.Issuer), at, tenant, access.Read, "") != nil && c.AuthorizeSession(session, p.Cluster, p.Issuer(session.Issuer), at, tenant, access.ManageRegistry, "") != nil {
 		return nil, "", access.ErrDenied
 	}
 	entries, err := p.ExternalRegistries(s)
@@ -206,7 +238,9 @@ func (p Policy) ExternalRegistryPage(s state.State, session access.Session, at i
 	}
 	var rows []ExternalRegistryView
 	for _, e := range entries {
-		if e.Spec.Tenant != tenant || e.Spec.Key() <= after {
+		// A workspace page also lists the cluster-owned sources it may use;
+		// they sort first ("/" + ID) and are read-only for the workspace.
+		if e.Spec.Tenant != tenant && !e.Spec.Cluster() || e.Spec.Key() <= after {
 			continue
 		}
 		if len(rows) == 8 {
@@ -369,7 +403,9 @@ func (p Policy) externalRegistryDefinitions(s state.State, tenant string) ([]ima
 	}
 	var definitions []imagesource.Definition
 	for _, entry := range entries {
-		if entry.Spec.Tenant == tenant {
+		// Cluster-owned sources are candidates for every workspace; Lookup
+		// still prefers the workspace's own definitions.
+		if entry.Spec.Tenant == tenant || entry.Spec.Cluster() {
 			definitions = append(definitions, imagesource.Definition{Spec: imagesource.Own(entry.Spec), Deleted: entry.Deleted})
 		}
 	}

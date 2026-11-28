@@ -66,7 +66,7 @@ func (a Inventory) BeginMoved(expected uint64, c access.Catalog, ctx PlanningCon
 	if !found {
 		return a, inputError("VOLUME_MOVE_CLOSURE_REQUIRED", binding.Scope.ID)
 	}
-	return a.begin(expected, c, ctx, b, id, submitter, epoch, false, []volumes.Binding{binding})
+	return a.begin(expected, c, ctx, b, id, submitter, epoch, false, []volumes.Binding{binding}, false)
 }
 
 // VolumeMovePlacement describes a proposed placement, not an ownership grant.
@@ -181,5 +181,5 @@ func (a Inventory) BeginMovedGroup(expected uint64, c access.Catalog, ctx Planni
 			return a, inputError("VOLUME_MOVE_CLOSURE_REQUIRED", binding.Scope.ID)
 		}
 	}
-	return a.begin(expected, c, ctx, b, id, submitter, epoch, false, bindings)
+	return a.begin(expected, c, ctx, b, id, submitter, epoch, false, bindings, false)
 }

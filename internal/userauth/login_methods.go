@@ -102,5 +102,5 @@ func sessionlessReply(v any) Reply {
 // replyData decodes an "ok" reply's Data strictly.
 func replyData[T any](reply Reply) (T, bool) {
 	var v T
-	return v, len(reply.Data) != 0 && strict(reply.Data, &v) == nil
+	return v, len(reply.Data) != 0 && lenient(reply.Data, &v) == nil
 }

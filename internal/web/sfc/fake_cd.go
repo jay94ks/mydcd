@@ -148,6 +148,9 @@ func (c *fakeConn) applyCD(op UserOperation, actor string, next uint64) error {
 		return errForbidden
 	}
 	a := w.apps[q.Tenant+"/"+q.App]
+	if a != nil && a.view.CD == nil && ch.Action == ActionConfigureAppCD {
+		return c.attachCD(a, q, ch.Expected, next)
+	}
 	if a == nil || a.view.CD == nil {
 		return errCAS
 	}
@@ -196,6 +199,23 @@ func (c *fakeConn) applyCD(op UserOperation, actor string, next uint64) error {
 		return errors.New("action")
 	}
 	cd.Revision = next
+	return nil
+}
+
+// attachCD is the first policy of an app deployed without CD, as sfcd's
+// attachUserCD: policy revision 0, no target, CAS = the app's revision; the
+// app's current execution becomes the running candidate.
+func (c *fakeConn) attachCD(a *fakeApp, q control.AppCDChange, expected, next uint64) error {
+	if q.Choice != nil || q.PolicyRevision != 0 || q.Target != nil || expected != a.view.Revision {
+		return errCAS
+	}
+	if q.Policy == nil || q.Policy.Source.Repository == "" || !slices.Contains([]string{"automatic", "manual"}, q.Policy.Sync.Mode) {
+		return errors.New("payload")
+	}
+	p := *q.Policy
+	a.view.CD = &AppCD{Revision: next, Policy: &p, PolicyRevision: 1, Repository: p.Source.Repository,
+		Branch: strings.TrimPrefix(p.Source.Ref, "refs/heads/"), Mode: p.Sync.Mode}
+	a.view.Revision = next
 	return nil
 }
 

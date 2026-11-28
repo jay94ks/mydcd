@@ -46,11 +46,14 @@ func (r BridgeClosedReport) Command() (state.Command, error) {
 	return cmd, err
 }
 
-// bridgeClosedValue tells a bridge report from a system network report,
-// which shares the resources root.
-func bridgeClosedValue(raw string) bool {
+// reportKind tells the node reports that share the resources root apart:
+// bridgeClosedKind, networkLeaveKind, or "" for a system network report.
+func reportKind(raw string) string {
 	var head struct{ Kind string }
-	return json.Unmarshal([]byte(raw), &head) == nil && head.Kind == bridgeClosedKind
+	if json.Unmarshal([]byte(raw), &head) != nil {
+		return ""
+	}
+	return head.Kind
 }
 
 func (p Policy) ResolveBridgeClosedReport(s state.State, caller [32]byte, raw []byte) (state.Command, error) {

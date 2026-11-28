@@ -9,49 +9,60 @@ import (
 	"github.com/jay94ks/seafield/internal/access"
 	"github.com/jay94ks/seafield/internal/cluster"
 	"github.com/jay94ks/seafield/internal/cluster/control"
+	"github.com/jay94ks/seafield/internal/cluster/lifecycle"
 	"github.com/jay94ks/seafield/internal/registryclient"
 	"github.com/jay94ks/seafield/internal/schema"
 	"github.com/jay94ks/seafield/internal/sfcp"
 )
 
-func (s Service) externalRegistryProbe(ctx context.Context, view cluster.View, q Request, session access.Session) Reply {
-	if s.ExternalRegistryProber == nil || q.ExternalRegistryProbe == nil {
-		return Reply{Schema: 1, Code: "unavailable"}
+// ExternalRegistryProbeQuery asks the source's bound server to log in to
+// it, and optionally to read one image.
+type ExternalRegistryProbeQuery struct {
+	Tenant string
+	Query  control.ExternalRegistryProbeQuery
+}
+
+func (q ExternalRegistryProbeQuery) Valid() bool {
+	return lifecycle.ValidID(q.Tenant) && q.Query.Valid()
+}
+
+// RegistryLoginTestMethod runs the probe on the owner, then checks on a fresh
+// view that the same server still owns the source and the result is recent.
+var RegistryLoginTestMethod = define(Method[ExternalRegistryProbeQuery, control.ExternalRegistryProbeResult]{Name: "registry-login-test"}, true, func(ctx context.Context, s Service, view cluster.View, session access.Session, q ExternalRegistryProbeQuery) (control.ExternalRegistryProbeResult, string) {
+	var zero control.ExternalRegistryProbeResult
+	if s.ExternalRegistryProber == nil {
+		return zero, "unavailable"
 	}
-	read, err := s.Policy.PlanExternalRegistryProbe(view.State, session, time.Now().Unix(), q.Tenant, *q.ExternalRegistryProbe)
+	read, err := s.Policy.PlanExternalRegistryProbe(view.State, session, time.Now().Unix(), q.Tenant, q.Query)
 	if err != nil {
-		return Reply{Schema: 1, Code: "denied"}
+		return zero, "denied"
 	}
 	data, err := s.ExternalRegistryProber(ctx, read)
 	if err != nil {
-		return Reply{Schema: 1, Code: "unavailable"}
+		return zero, "unavailable"
 	}
 	result, err := schema.Decode[control.ExternalRegistryProbeResult](data)
 	if err != nil || !result.Valid(read) {
-		return Reply{Schema: 1, Code: "unavailable"}
+		return zero, "unavailable"
 	}
 	latest, err := s.Engine.Read(ctx, true)
 	if err != nil || latest.Local {
-		return Reply{Schema: 1, Code: "unavailable"}
+		return zero, "unavailable"
 	}
 	now := time.Now().Unix()
 	owner, err := s.Policy.ExternalRegistryProbeOwner(latest.State, read, now)
 	if err != nil || owner != result.Owner || result.At > now || now-result.At > 30 {
-		return Reply{Schema: 1, Code: "denied"}
+		return zero, "denied"
 	}
-	return Reply{Schema: 1, Code: "ok", Tenant: q.Tenant, ExternalRegistryProbe: &result}
-}
+	return result, "ok"
+})
 
 func (c Client) ProbeExternalRegistry(ctx context.Context, peer sfcp.Peer, session access.Session, tenant string, q control.ExternalRegistryProbeQuery) (control.ExternalRegistryProbeResult, error) {
-	if tenant == "" || !q.Valid() {
-		return control.ExternalRegistryProbeResult{}, sfcp.ErrAdmission
-	}
-	reply, err := c.query(ctx, peer, session, Request{Method: "registry-login-test", Tenant: tenant, ExternalRegistryProbe: &q})
+	result, err := call(ctx, c, peer, session, RegistryLoginTestMethod, ExternalRegistryProbeQuery{Tenant: tenant, Query: q})
 	if err != nil {
 		return control.ExternalRegistryProbeResult{}, err
 	}
-	result := reply.ExternalRegistryProbe
-	if result == nil || reply.Tenant != tenant || result.Selection.Tenant != tenant || result.Selection.ID != q.ID || result.Selection.Generation == 0 {
+	if result.Selection.Tenant != tenant || result.Selection.ID != q.ID || result.Selection.Generation == 0 {
 		return control.ExternalRegistryProbeResult{}, sfcp.ErrFrame
 	}
 	image := q.Image
@@ -67,5 +78,5 @@ func (c Client) ProbeExternalRegistry(ctx context.Context, peer sfcp.Peer, sessi
 	if !result.Valid(read) {
 		return control.ExternalRegistryProbeResult{}, sfcp.ErrFrame
 	}
-	return *result, nil
+	return result, nil
 }

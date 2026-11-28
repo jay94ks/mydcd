@@ -16,13 +16,14 @@ import (
 // storage root of that server. The join is by mount point at read time;
 // the inventory itself stays a measurement.
 func (p Policy) nodeDevices(s state.State, node string, reports map[string]observability.Report, now uint64) (*NodeDevicesView, error) {
-	view := &NodeDevicesView{Node: node, Disks: []NodeBlockDiskView{}, Recorded: []observability.RecordedMount{}, Stale: true, ObservationMaxAge: observability.MaxAge}
+	view := &NodeDevicesView{Node: node, Disks: []NodeBlockDiskView{}, Recorded: []observability.RecordedMount{}, Bundles: []observability.BlockBundle{}, Stale: true, ObservationMaxAge: observability.MaxAge}
 	report, known := reports["devices"]
 	if !known || report.Devices == nil {
 		return view, nil
 	}
 	view.ObservedAt, view.Stale, view.Truncated = report.At, !observability.Fresh(report.At, now), report.Devices.Truncated
 	view.Recorded = append(view.Recorded, report.Devices.Recorded...)
+	view.Bundles = append(view.Bundles, report.Devices.Bundles...)
 	for _, d := range report.Devices.Disks {
 		disk := NodeBlockDiskView{BlockDisk: d, Parts: []NodeBlockPartView{}, Purposes: []string{}}
 		disk.BlockDisk.Parts = nil

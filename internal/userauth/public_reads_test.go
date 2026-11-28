@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"github.com/jay94ks/seafield/internal/cluster/control"
-	"github.com/jay94ks/seafield/internal/deployment"
 	"github.com/jay94ks/seafield/internal/sfcp"
 	"strings"
 	"testing"
@@ -136,8 +135,6 @@ func TestFileGrantReplyUsesOriginalFolderGrantScope(t *testing.T) {
 func TestRQ10SDKQueryMethodsKeepEarlierTypedConsumers(t *testing.T) {
 	_, client, session, _ := journalFixture(t)
 	requests := []Request{
-		{Method: "tenant-storage", Tenant: "tenant"},
-		{Method: "cd-probe", Tenant: "tenant", CDProbe: &deployment.GitProbeRequest{App: "shop", Repository: "https://git.example/repo.git", Branch: "main", Path: "app.yaml"}},
 		{Method: "standalone-list", Tenant: "tenant", Standalone: &control.StandaloneQuery{}},
 		{Method: "standalone-get", Tenant: "tenant", Standalone: &control.StandaloneQuery{Name: "debug"}},
 	}

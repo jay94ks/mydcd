@@ -56,7 +56,7 @@ function MeshGraph({ nodes, links, selected, onSelect, onLink }: { nodes: NodeVi
   // 선 위 글자가 읽히도록 바탕색 테두리
   const halo = { paintOrder: 'stroke', stroke: 'var(--surface)', strokeWidth: 4, strokeLinejoin: 'round' } as const;
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label="서버 간 Mesh 링크 그래프" style={{ width: '100%', height: 'auto', maxHeight: 360 }}>
+    <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label="서버 간 연결 그래프" style={{ width: '100%', height: 'auto', maxHeight: 360 }}>
       {links.map((l) => {
         const a = pos.get(l.a);
         const b = pos.get(l.b);
@@ -68,6 +68,12 @@ function MeshGraph({ nodes, links, selected, onSelect, onLink }: { nodes: NodeVi
             <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke="transparent" strokeWidth={14} />
             <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} stroke={stroke[l.state]} strokeWidth={l.state === 'up' ? 2.5 : 2} strokeDasharray={l.state === 'pending' ? '6 5' : l.state === 'slow' ? '2 3' : undefined} />
             {x.arrow && <polygon points={x.arrow.map((p) => `${p.x},${p.y}`).join(' ')} fill={stroke[l.state]} />}
+            {l.state === 'down' && (
+              // 끊김은 색 말고도 가운데 ✕로 구분한다
+              <text x={(a.x + b.x) / 2} y={(a.y + b.y) / 2 + 5} fontSize="15" fontWeight="700" textAnchor="middle" fill="var(--danger)" style={halo} aria-hidden="true">
+                ✕
+              </text>
+            )}
             {text && x.label && (
               <text x={x.label.x} y={x.label.y} fontSize="11" textAnchor="middle" fill="var(--text-2)" style={halo}>
                 {text}
@@ -128,7 +134,7 @@ function LinkDrawer({ l, onClose, onDone }: { l: MeshLink; onClose: () => void; 
         <dt>마지막 관측</dt>
         <dd>{l.observedAt ? ago(l.observedAt) : '—'}</dd>
       </dl>
-      <span className="small muted">링크 관측은 REQ-13. 망 화면의 ‘터널 연결 보기’에서 경로를 바꿀 수 있습니다.</span>
+      <span className="small muted">서버 사이 연결의 지연·손실은 각 서버가 잰 값입니다. 망 화면의 ‘터널 연결 보기’에서 경로를 바꿀 수 있습니다.</span>
       {act.view}
       <div className="row" style={{ justifyContent: 'flex-end', alignItems: 'center' }}>
         <span className="small muted">시스템 관리자만 · 진행은 터널 연결 창과 같음</span>
@@ -252,8 +258,8 @@ export function ServersPage() {
         }
       />
       <Tabs label="서버 탭" items={SERVER_TABS} />
-      <HelpBox terms="서버 (node) · Mesh 링크 (서버 간 망, TUN tunnel) · 투표 서버 (voter) · 투표권 없음 (non-voter) · 저장 경로 (node storage root)">
-        <b>이 화면은</b> 클러스터에 참여한 서버 목록과 서버끼리 이어진 Mesh 링크 그래프를 함께 봅니다. 서버를 고르면 그래프에서 강조되고 아래에 그 서버의 디스크 목록이 나옵니다. 새 서버는 '서버 추가'에서 가입을 승인하고, 새 서버에서 안내된 명령을 실행해 가입시킵니다.
+      <HelpBox terms="서버 (node) · 서버 간 연결 (mesh link, TUN tunnel) · 투표 서버 (voter) · 투표권 없음 (non-voter) · 저장 경로 (node storage root)">
+        <b>이 화면은</b> 클러스터에 참여한 서버 목록과 서버끼리 이어진 서버 간 연결 그래프를 함께 봅니다. 서버를 고르면 그래프에서 강조되고 아래에 그 서버의 디스크 목록이 나옵니다. 새 서버는 '서버 추가'에서 가입을 승인하고, 새 서버에서 안내된 명령을 실행해 가입시킵니다.
       </HelpBox>
       <Load q={nodes} what="서버 목록을 불러오지 못했습니다">
         {(p) => {
@@ -266,7 +272,7 @@ export function ServersPage() {
                     [
                       ['all', '전체'],
                       ['ready', '준비됨'],
-                      ['problem', '문제 있음'],
+                      ['problem', '오류'],
                       ['joining', '가입 대기'],
                     ] as const
                   ).map(([v, l]) => (
@@ -288,15 +294,25 @@ export function ServersPage() {
                       <span className="row between">
                         <b>{n.id}</b>
                         <span className="row">
-                          <PhaseBadge phase={n.phase} />
+                          <PhaseBadge phase={n.phase} reason={n.phaseReason} />
                           {n.cordoned && (
                             <Badge tone="wa" title={cordonNote(n)}>
                               새 배치 막음
                             </Badge>
                           )}
+                          {n.admitsWork === false && (
+                            <Badge tone="un" title="작업(컨테이너)을 받지 않는 서버입니다. 오류가 아닙니다">
+                              작업 안 받음
+                            </Badge>
+                          )}
                           {!n.roleUnknown && <span className="small muted">{n.leader ? '투표 서버 · 리더' : n.voter ? '투표 서버' : '투표권 없음'}</span>}
                         </span>
                       </span>
+                      {n.phaseReason && (
+                        <span className="small" style={{ color: 'var(--er)', textAlign: 'left', whiteSpace: 'normal' }}>
+                          {n.phaseReason}
+                        </span>
+                      )}
                       <UsageBar label="CPU" used={n.cpuPercent} total={n.cpuPercent === undefined ? undefined : 100} text={n.cpuPercent === undefined ? '—' : `${Math.round(n.cpuPercent)}%`} />
                       <UsageBar label="메모리" used={n.memory?.used} total={n.memory?.total} text={n.memory ? `${fmtBytes(n.memory.used)}/${fmtBytes(n.memory.total)}` : n.memUsed !== undefined ? `${fmtBytes(n.memUsed)} 사용` : '—'} />
                       <UsageBar label="디스크" used={n.disk?.used} total={n.disk?.total} text={n.disk ? `${pct(n.disk.used, n.disk.total)}%` : '—'} />
@@ -347,7 +363,7 @@ export function ServersPage() {
                 </span>
               </Card>
               <div className="primary col" style={{ gap: 20 }}>
-                <Card title="Mesh 링크" actions={<Refresh q={mesh} poll={false} />}>
+                <Card title="서버 간 연결" actions={<Refresh q={mesh} poll={false} />}>
                   <Load q={mesh}>
                     {(m) => (
                       <>
@@ -360,7 +376,7 @@ export function ServersPage() {
                             <span style={{ color: 'var(--wa-strong)' }}>┅</span> 느림·손실
                           </span>
                           <span>
-                            <span style={{ color: 'var(--danger)' }}>━</span> 끊김
+                            <span style={{ color: 'var(--danger)' }}>━✕━</span> 끊김
                           </span>
                           <span>
                             <span style={{ color: 'var(--faint)' }}>╌</span> 가입 대기
@@ -397,7 +413,7 @@ export function ServersPage() {
                             </tbody>
                           </table>
                         </div>
-                        <span className="small muted">링크 관측은 sfcd REQ-13이 들어오면 실제 값으로 바뀝니다.</span>
+                        <span className="small muted">지연·손실은 서버가 아직 재지 않으면 비어 있습니다.</span>
                       </>
                     )}
                   </Load>
@@ -406,7 +422,7 @@ export function ServersPage() {
                   <Card title={`${selected} 디스크`} actions={<Refresh q={disks} />}>
                     <Load q={disks}>{(d) => <DisksTable disks={d} />}</Load>
                     <span className="small muted">
-                      사용량은 관측값이며 사용 한도 보장이 아닙니다. 같은 파일 시스템을 공유하는 경로는 남은 공간을 한 번만 셉니다. 시스템·컨테이너 디스크는 REQ-12.
+                      사용량은 관측값이며 사용 한도 보장이 아닙니다. 같은 파일 시스템을 공유하는 경로는 남은 공간을 한 번만 셉니다. 시스템·컨테이너 디스크 사용량은 아직 보여 주지 않습니다.
                     </span>
                   </Card>
                 )}
@@ -598,53 +614,52 @@ export function ConsensusPage() {
   );
 }
 
-/** SFCP 기능 (canvas v268): 이 major의 기능 표, 클러스터 교집합, 서버마다 알린 기능 */
+/** 기능 집합 (canvas v268 'SFCP 기능'을 group › set › version으로 나눔): 집합마다 클러스터가 쓰는 버전, 서버마다 알린 기능 */
 function FeaturesCard() {
   const q = usePoll((s) => clusterFeatures(s), [], DEFAULT_POLL_MS);
   const missing = q.error instanceof ApiError && (q.error.status === 404 || q.error.status === 405);
   if (missing) return null;
   const f = q.data;
-  const on = new Set(f?.cluster ?? []);
-  const off = (f?.features ?? []).filter((x) => !on.has(x.id));
-  const lacking = (id: number) => (f?.nodes ?? []).filter((n) => !n.features.includes(id)).map((n) => n.node);
-  const name = (id: number) => f?.features.find((x) => x.id === id)?.name ?? String(id);
   return (
-    <Card title="SFCP 기능" actions={f && <span className="small muted">프로토콜 major {f.major} · 서버가 연결할 때 알린 값</span>}>
-      <Load q={q} what="SFCP 기능을 불러오지 못했습니다" rows={3}>
+    <Card title="기능 집합" actions={f && <span className="small muted">프로토콜 major {f.major} · 서버마다 보고한 기능으로 계산</span>}>
+      <Load q={q} what="기능 집합을 불러오지 못했습니다" rows={3}>
         {(f) => (
           <>
-            {f.features.length === 0 ? (
-              <span className="muted">이 판(major {f.major})에는 아직 추가 기능이 없습니다.</span>
+            {f.groups.length === 0 ? (
+              <span className="muted">이 판에는 아직 추가 기능이 없습니다.</span>
             ) : (
               <div className="table-wrap">
                 <table className="tbl">
                   <thead>
                     <tr>
-                      <th>번호</th>
-                      <th>기능</th>
-                      <th>설명</th>
-                      <th>클러스터</th>
+                      <th>그룹</th>
+                      <th>기능 집합</th>
+                      <th>버전</th>
+                      <th>클러스터가 쓰는 버전</th>
+                      <th>최신을 막는 서버</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {f.features.map((x) => (
-                      <tr key={x.id}>
-                        <td className="mono">{x.id}</td>
-                        <td className="mono">{x.name}</td>
-                        <td>{x.desc}</td>
-                        <td>{on.has(x.id) ? <Badge tone="ok">켜짐</Badge> : <Badge tone="un">꺼짐</Badge>}</td>
-                      </tr>
-                    ))}
+                    {f.groups.flatMap((g) =>
+                      g.sets.map((set) => (
+                        <tr key={set.name}>
+                          <td className="mono">{g.name}</td>
+                          <td className="mono">{set.name.startsWith(`${g.name}-`) ? set.name.slice(g.name.length + 1) : set.name}</td>
+                          <td>
+                            {set.versions.map((v) => (
+                              <div key={v.name}>
+                                <b className="mono">v{v.version}</b> {v.postfix && v.postfix !== 'mainline' && <Badge tone="wa">{v.postfix.toLowerCase()}</Badge>}
+                                {v.desc && ` · ${v.desc}`}
+                              </div>
+                            ))}
+                          </td>
+                          <td>{set.cluster > 0 ? <Badge tone="ok">v{set.cluster}</Badge> : <Badge tone="un">쓰지 않음</Badge>}</td>
+                          <td className={set.behind.length ? undefined : 'muted'}>{set.behind.length ? set.behind.join(', ') : '—'}</td>
+                        </tr>
+                      )),
+                    )}
                   </tbody>
                 </table>
-              </div>
-            )}
-            {off.length > 0 && (
-              <div className="note info">
-                클러스터의 모든 서버가 이 기능을 지원해야 켜져요.{' '}
-                {off.length === 1
-                  ? `지원하지 않거나 꺼져 있는 서버: ${lacking(off[0].id).join(', ') || '없음'}`
-                  : off.map((x) => `${x.name}: ${lacking(x.id).join(', ') || '없음'}`).join(' · ')}
               </div>
             )}
             {f.nodes.length > 0 && (
@@ -655,11 +670,6 @@ function FeaturesCard() {
                       <th>서버</th>
                       <th>빌드</th>
                       <th>지금 연결</th>
-                      {f.features.map((x) => (
-                        <th key={x.id}>
-                          {x.name} ({x.id})
-                        </th>
-                      ))}
                       <th>알린 기능</th>
                     </tr>
                   </thead>
@@ -670,18 +680,17 @@ function FeaturesCard() {
                           <Link to={`/servers/${n.node}`}>{n.node}</Link>
                         </td>
                         <td className="mono small">{n.build ?? '—'}</td>
-                        <td>{n.seen ? <Badge tone="ok">연결됨</Badge> : <Badge tone="wa">{n.build ? '끊김 · 마지막 보고' : '보고 없음'}</Badge>}</td>
-                        {f.features.map((x) => (
-                          <td key={x.id}>{n.features.includes(x.id) ? '✓' : '—'}</td>
-                        ))}
-                        <td className="muted">{n.features.length ? n.features.map(name).join(', ') : n.build ? `없음 (${n.build} 기본 기능)` : '없음'}</td>
+                        <td>{n.seen ? <Badge tone="ok">연결됨</Badge> : <Badge tone="wa">{n.build ? `끊김 · 마지막 보고${n.reportedAt ? ` ${ago(new Date(n.reportedAt * 1000).toISOString())}` : ''}` : '보고 없음'}</Badge>}</td>
+                        <td className="mono small">{n.features.length ? n.features.join(', ') : <span className="muted">{n.build ? `없음 (${n.build} 기본 기능)` : '없음'}</span>}</td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
             )}
-            <span className="small muted">켜진 기능은 모든 서버가 알린 기능의 교집합입니다. 꺼져 있는 서버는 마지막으로 알린 값으로 세고, 한 번도 알리지 않은 서버가 있으면 모든 기능이 꺼집니다. 기록(Raft)에 남기지 않는 지금 값입니다.</span>
+            <span className="small muted">
+              클러스터는 모든 서버가 가진 가장 높은 mainline 버전을 씁니다. 접미사가 붙은 버전(예: preview)은 두 서버가 똑같이 알릴 때만 그 둘 사이에서 쓰고, 기록(Raft)에는 쓰지 않습니다. 끊긴 서버는 마지막 보고로 세고, 보고가 없는 서버가 하나라도 있으면 아무 기능도 쓰지 않습니다.
+            </span>
           </>
         )}
       </Load>

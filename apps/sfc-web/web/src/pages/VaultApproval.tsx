@@ -161,7 +161,7 @@ export function ApprovalCard({ tenant, items, canDeploy, onApproved }: { tenant:
 
   return (
     <section className="card">
-      <h2>묶음 승인 (UI-72)</h2>
+      <h2>묶음 승인</h2>
       {waits.length === 0 && cdRows.length === 0 ? (
         <span className="small muted">{pend.loading || cd.loading ? '불러오는 중…' : '기다리는 묶음 승인이 없습니다. 비밀번호로 보호된 묶음을 쓰는 앱 배포·빌드·외부 저장소 연결은 여기서 승인합니다.'}</span>
       ) : (

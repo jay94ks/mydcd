@@ -48,6 +48,11 @@ type Transport struct {
 	own buildinfo.Features
 	// features caches the cluster feature intersection (features.go).
 	features featureCache
+	// version is the build version this node announces (handshake tag 128):
+	// buildinfo.Version(), except in tests. versionLogged keeps the
+	// once-per-peer log lines (version.go); guarded by mu.
+	version       string
+	versionLogged map[Identity]string
 	// engine is the local engine socket (engine.go).
 	engine engineState
 	// inboundOnly keeps this node from dialing other nodes over QUIC; it
@@ -75,8 +80,10 @@ type Transport struct {
 	packetsDelivered   atomic.Uint64
 	peerLost           func(Peer)
 	peerFound          func(Peer)
-	packetsDropped     atomic.Uint64
-	packetDropReasons  [6]atomic.Uint64
+	// contacts holds, per member ID, when any packet from it last arrived.
+	contacts          sync.Map // string -> *peerContact
+	packetsDropped    atomic.Uint64
+	packetDropReasons [6]atomic.Uint64
 }
 type Session struct {
 	transport       *Transport
@@ -101,7 +108,7 @@ func NewTransport(self *identity.Identity, cluster [32]byte, lookup Lookup) (*Tr
 		return nil, ErrAdmission
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	return &Transport{publicSlots: make(chan struct{}, 4), self: self, cluster: cluster, lookup: lookup, ctx: ctx, cancel: cancel, connections: map[*quic.Conn]struct{}{}, handlers: map[Purpose]Handler{}, managementHandlers: map[Purpose]ManagementHandler{}, localConnections: map[*localConnection]struct{}{}, localSessions: map[Identity]*Session{}, own: buildinfo.Own, workers: make(chan struct{}, 64), closeDone: make(chan struct{}), limits: newPurposeLimits()}, nil
+	return &Transport{publicSlots: make(chan struct{}, 4), self: self, cluster: cluster, lookup: lookup, ctx: ctx, cancel: cancel, connections: map[*quic.Conn]struct{}{}, handlers: map[Purpose]Handler{}, managementHandlers: map[Purpose]ManagementHandler{}, localConnections: map[*localConnection]struct{}{}, localSessions: map[Identity]*Session{}, own: buildinfo.Own, version: buildinfo.Version(), workers: make(chan struct{}, 64), closeDone: make(chan struct{}), limits: newPurposeLimits()}, nil
 }
 
 // NewTransportWithPurposeLookup keeps current identity/control admission
@@ -212,13 +219,16 @@ func (t *Transport) Listen(address string) error {
 	return nil
 }
 
-// Every SFCP connection sends a QUIC PING after keepAlivePeriod without
-// other packets and is closed after idleTimeout without any. This is what
-// detects a lost peer within seconds; Raft heartbeats run far less often
-// (see cluster.newEngine) and only learn about the loss through OnPeerLost.
+// Liveness is one mechanism (Jay 2026-11-28 10:42–10:45 KST): any packet
+// received from a peer, of any kind, counts as contact (LastReceived), and
+// only when nothing at all has arrived for keepAlivePeriod does the
+// connection send a QUIC PING. Traffic that is already flowing therefore
+// carries no extra heartbeat. A connection with nothing received for
+// idleTimeout is closed and OnPeerLost fires. Raft sends no periodic
+// heartbeat of its own; it reads LastReceived (cluster.newEngine).
 const (
-	keepAlivePeriod = time.Second
-	idleTimeout     = 3 * time.Second
+	keepAlivePeriod = 10 * time.Second
+	idleTimeout     = 30 * time.Second
 	shutdownMessage = "shutdown"
 )
 
@@ -403,6 +413,11 @@ func (t *Transport) authenticate(parent context.Context, c *quic.Conn, client bo
 		return nil, errors.New("SFCP missing native connection path")
 	}
 	session := &Session{transport: t, conn: c, peer: peer, gate: gate, path: path, peerChallenge: peerChallenge, authenticatedAt: uint64(time.Now().UnixMilli())}
+	if peer.ID != "" {
+		contact := t.contactOf(peer.ID)
+		contact.touch()
+		path.contact.Store(contact)
+	}
 	t.observeMemberSession(session, peer)
 	return session, nil
 }
@@ -451,7 +466,7 @@ func (t *Transport) serve(s *Session) {
 			}
 			<-t.workers
 			parsing = false
-			if t.limits[first.Purpose] == nil {
+			if t.limits[first.Purpose] == nil && !purposes[first.Purpose].unlimited {
 				t.serverFailure("quic", "dispatch", s.peer.Key, first, ErrAdmission)
 				stream.CancelWrite(2)
 				return
@@ -607,6 +622,34 @@ func (t *Transport) OnPeerConnected(f func(Peer)) {
 	t.mu.Unlock()
 }
 
+// peerContact is the last time any packet from one peer arrived.
+type peerContact struct{ at atomic.Int64 }
+
+func (c *peerContact) touch() { c.at.Store(time.Now().UnixNano()) }
+
+func (t *Transport) contactOf(id string) *peerContact {
+	if c, ok := t.contacts.Load(id); ok {
+		return c.(*peerContact)
+	}
+	c, _ := t.contacts.LoadOrStore(id, &peerContact{})
+	return c.(*peerContact)
+}
+
+// LastReceived is when any packet (data, ACK or PING alike) last arrived
+// from the member id over an authenticated connection; zero if never. It is
+// the one liveness signal: Raft uses it instead of its own heartbeats.
+func (t *Transport) LastReceived(id string) time.Time {
+	c, ok := t.contacts.Load(id)
+	if !ok {
+		return time.Time{}
+	}
+	n := c.(*peerContact).at.Load()
+	if n == 0 {
+		return time.Time{}
+	}
+	return time.Unix(0, n)
+}
+
 // ConnectedSince reports since when this node has had at least one
 // authenticated connection to key without a gap, and whether it has one now.
 // Callers use it to trust that a peer that would report a change has stayed
@@ -663,11 +706,20 @@ func (s *Session) Peer() Peer { return s.peer }
 // connection to the peer is direct.
 func (s *Session) Via() string { return s.via }
 
+// PeerVersion is the build version the peer announced in this session's
+// handshake (tag 128), or "" when its build does not announce one.
+func (s *Session) PeerVersion() string {
+	if s.gate == nil {
+		return ""
+	}
+	return s.gate.version
+}
+
 // PeerFeatures is the feature set the peer announced in this session's
 // handshake (live: it changes only by reconnecting with another build).
 func (s *Session) PeerFeatures() buildinfo.Features {
 	if s.gate == nil {
-		return 0
+		return buildinfo.Features{}
 	}
 	return s.gate.features
 }
@@ -676,10 +728,10 @@ func (s *Session) PeerFeatures() buildinfo.Features {
 // the features it needs. Send helpers check it before writing a frame.
 func (s *Session) Supports(p Purpose, kind uint8) bool {
 	needs := needsOf(p, kind)
-	if needs == 0 {
+	if len(needs) == 0 {
 		return true
 	}
-	return s.gate != nil && s.gate.features.And(s.gate.own).And(needs) == needs
+	return s.gate != nil && s.gate.common.Meets(needs...)
 }
 func (s *Session) Challenge() [32]byte     { return s.gate.challenge }
 func (s *Session) PeerChallenge() [32]byte { return s.peerChallenge }

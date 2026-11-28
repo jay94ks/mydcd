@@ -46,9 +46,6 @@ func addMutationIdentity(output map[string]any, home string, c userauth.Client, 
 	if control.AppBeginCASAllowed(op.Change) {
 		output["cas"] = "app-begin-target"
 	}
-	if control.AppLogClearCASAllowed(op.Change) {
-		output["cas"] = "app-log-clear-target"
-	}
 	if control.AppCDTargetCASAllowed(op.Change) {
 		output["cas"] = "app-sync-target"
 		if op.Change.Action == "configure-app-cd" {

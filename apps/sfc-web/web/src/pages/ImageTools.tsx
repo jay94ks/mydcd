@@ -35,6 +35,7 @@ import { emptyStandalone, standaloneToYaml } from '../lib/standalone';
 import { usePoll } from '../lib/usePoll';
 import { when } from './WebBackup';
 import { agoMs, short, usedText, usesOf } from './ImageList';
+import { registriesLive } from '../lib/liveTopics';
 
 const TAG_RE = /^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$/;
 const REPO_RE = /^[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*(?:\/[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*)*$/;
@@ -512,7 +513,7 @@ export function ImageUploadPage() {
   const { tenant, canDeploy } = useTenantRole();
   const navigate = useNavigate();
   const toast = useToast();
-  const regs = usePoll((s) => registries(tenant, s), [tenant], 0);
+  const regs = usePoll((s) => registries(tenant, s), [tenant], 0, registriesLive(tenant));
   const usable = (regs.data?.items ?? []).filter((r) => !r.deleted && r.enabled);
   const [regId, setRegId] = useState('');
   const reg = usable.find((r) => r.id === regId) ?? usable[0];

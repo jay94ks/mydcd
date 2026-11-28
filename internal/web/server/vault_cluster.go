@@ -35,7 +35,7 @@ type clusterVaultPage struct {
 // GET /vault?after= → {items, next, revision, asOf, initialized, root?}
 func (s *Server) handleClusterVault(w http.ResponseWriter, r *http.Request, ws *webSession) {
 	read(s, w, r, ws, func(ctx context.Context, c sfc.Conn) (clusterVaultPage, error) {
-		p, err := c.Vault(ctx, "", r.URL.Query().Get("after"))
+		p, err := screenVault(ctx, c, "", r.URL.Query().Get("after"))
 		if err != nil {
 			return clusterVaultPage{}, err
 		}

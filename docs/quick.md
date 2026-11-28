@@ -4,10 +4,15 @@
 
 ## 준비
 
-- Linux 머신에 같은 버전의 `sfcli`, `sfcd`를 준비하고 PATH에 둔다. 소스 빌드는 [CLI·설정](configuration/cli.md)을 따른다.
+- Linux 머신에 같은 버전의 패키지를 설치한다. 릴리스마다 deb·rpm·tar.gz가 있다([설치 패키지](../packaging/README.md)). 서버에는 `sfcli`와 `sfcd`(Seafield 엔진 포함)를, 웹 UI를 띄울 서버에는 `sfc-web-image`도 깐다. 관리용 PC에는 `sfcli`만 있으면 된다. 패키지는 서비스를 켜지 않는다. 소스 빌드는 [CLI·설정](configuration/cli.md)을 따른다.
+
+  ```sh
+  sudo apt install ./sfcli_0.1.0_amd64.deb ./sfcd_0.1.0_amd64.deb      # Debian·Ubuntu
+  sudo dnf install ./sfcli-0.1.0-1.x86_64.rpm ./sfcd-0.1.0-1.x86_64.rpm # Fedora·RHEL 계열
+  ```
 - 각 노드는 고유 ID·개인키·영속 상태 디렉터리를 사용한다. 아래 명령은 노드 설정/상태 경로를 만들 수 있는 관리자 권한으로 실행한다. 원격 관리용 CLI의 wallet·프로필은 명령을 실행하는 Linux user의 `~/.sfc`에 저장된다.
 - 노드끼리는 설정한 **UDP 7443**으로 양방향 통신할 수 있어야 한다. SFCP는 QUIC를 사용한다. 로컬 관리는 기본 `unix:///run/sfcdp.sock`이며 TLS/사용자 인증도 수행한다. 소켓은0600이므로 해당 소켓에 접근 가능한 사용자로 로컬 CLI를 실행한다.
-- 이 가이드에서는 제어 클러스터를 먼저 구성하기 위해 network/workload/ingress를 비활성화한다. 앱을 배포하려면 Docker Engine, 모듈 활성화, 노드/tenant 예산과 이름 있는 망·Volume 등의 준비가 추가로 필요하다.
+- 이 가이드에서는 제어 클러스터를 먼저 구성하기 위해 network/workload/ingress를 비활성화한다. 앱을 배포하려면 모듈 활성화, 노드/tenant 예산과 이름 있는 망·Volume 등의 준비가 추가로 필요하다.
 
 3대 예시는 다음 주소를 사용한다. 실제 네트워크에 맞게 바꾸며 `listen`에는 다른 노드가 접근할 수 있는 해당 머신의 주소를 쓴다. 부팅 직후 DHCP가 아직 그 주소를 붙이지 않았으면 sfcd는 주소가 붙을 때까지 기다렸다가 연다.
 

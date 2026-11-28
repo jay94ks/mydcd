@@ -9,15 +9,18 @@ import (
 )
 
 func TestCacheInventoryRequestKeepsNodeFilterInsideItsTypedRead(t *testing.T) {
-	r := Request{Schema: 1, Method: "image-builds", Tenant: "tenant", ImageBuild: &control.ImageBuildQuery{Part: "caches", Node: "node-a", ID: "source"}}
-	if !r.validMethodFields() || !r.validQuerySelectors() {
+	q := ImageBuildsQuery{Tenant: "tenant", Query: control.ImageBuildQuery{Part: "caches", Node: "node-a", ID: "source"}}
+	if !q.Valid() {
 		t.Fatal("valid cache inventory rejected")
 	}
-	for _, edit := range []func(*Request){func(r *Request) { r.Node = "node-a" }, func(r *Request) { r.ImageBuild = &control.ImageBuildQuery{Part: "jobs", Node: "node-a"} }, func(r *Request) { r.ImageBuild = &control.ImageBuildQuery{Part: "caches", Job: "other"} }, func(r *Request) { r.ImageBuild = &control.ImageBuildQuery{Part: "caches", Upload: "other"} }, func(r *Request) { r.ImageBuild = &control.ImageBuildQuery{Part: "caches", Node: "../other"} }} {
-		bad := r
-		edit(&bad)
-		if bad.validMethodFields() && bad.validQuerySelectors() {
-			t.Fatal("mixed/foreign cache selector accepted")
+	for _, query := range []control.ImageBuildQuery{{Part: "jobs", Node: "node-a"}, {Part: "caches", Job: "other"}, {Part: "caches", Upload: "other"}, {Part: "caches", Node: "../other"}} {
+		bad := q
+		bad.Query = query
+		if bad.Valid() {
+			t.Fatal("mixed/foreign cache selector accepted", query)
 		}
+	}
+	if strict([]byte(`{"Tenant":"tenant","Query":{"Part":"caches","Node":"node-a"},"Node":"node-a"}`), &ImageBuildsQuery{}) == nil {
+		t.Fatal("outer node selector accepted")
 	}
 }

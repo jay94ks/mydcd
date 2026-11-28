@@ -848,16 +848,16 @@ func (f *managedRegistryNative) verifyRevokedUser(t *testing.T, ctx context.Cont
 	if _, err = user.SelectTenant(ctx, peer, session, "registry-other"); err != nil {
 		t.Fatal("foreign tenant reader fixture isn't authenticated", err)
 	}
-	if reply, e := user.RegistryCredential(ctx, peer, session, "registry-other", userauth.RegistryCredentialRequest{ID: "private", Repository: "fixture", Actions: []string{"pull"}}); e == nil {
-		clear(reply.RegistryCredential)
+	if reply, e := user.RegistryCredential(ctx, peer, session, userauth.RegistryCredentialQuery{Tenant: "registry-other", ID: "private", Repository: "fixture", Actions: []string{"pull"}}); e == nil {
+		clear(reply.Credential)
 		t.Fatal("foreign tenant acquired private registry credential")
 	}
-	credential, err := user.RegistryCredential(ctx, peer, session, "tenant", userauth.RegistryCredentialRequest{ID: "private", Repository: "fixture", Actions: []string{"pull"}})
+	credential, err := user.RegistryCredential(ctx, peer, session, userauth.RegistryCredentialQuery{Tenant: "tenant", ID: "private", Repository: "fixture", Actions: []string{"pull"}})
 	if err != nil {
 		t.Fatal("current registry reader credential", err)
 	}
-	defer clear(credential.RegistryCredential)
-	token := f.tokenFor(t, ctx, "registry-reader", credential.RegistryCredential, "repository:fixture:pull")
+	defer clear(credential.Credential)
+	token := f.tokenFor(t, ctx, "registry-reader", credential.Credential, "repository:fixture:pull")
 	if _, _, status := f.request(t, ctx, "GET", "/v2/fixture/manifests/owned", token, nil, nil); status != 200 {
 		t.Fatal("authorized reader pull refused", status)
 	}

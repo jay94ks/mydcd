@@ -266,11 +266,11 @@ func verifyRestrictedTaskRestartNative(t *testing.T, ctx context.Context, root s
 		t.Fatal("restart-only credential did not return authorization refusal", err, reply.Code, reply.Result)
 	}
 	current, err := admin.UserCredentials(ctx, peer, session, account.Username)
-	if err != nil || current.CredentialUser == nil {
+	if err != nil {
 		t.Fatal(err)
 	}
-	revision := current.CredentialUser.Revision
-	disabled, err := current.CredentialUser.WithPrivateKeyDisabled("autofix-key")
+	revision := current.Revision
+	disabled, err := current.WithPrivateKeyDisabled("autofix-key")
 	if err != nil {
 		t.Fatal(err)
 	}

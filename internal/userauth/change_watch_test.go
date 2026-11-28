@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
+	"slices"
 	"testing"
 	"time"
 
@@ -307,8 +309,30 @@ func TestChangeWatchActualRaftUnix(t *testing.T) {
 		}
 	}
 	r := event(ea)
-	if len(r.Events) != 1 || r.Events[0] != (ChangeEvent{Topic: eventbus.TopicReport, Kind: eventbus.KindNodeObservation, Node: "node", Source: "task/a/web", Tenant: "a", App: "web"}) {
+	if len(r.Events) != 1 || !reflect.DeepEqual(r.Events[0], ChangeEvent{Topic: eventbus.TopicReport, Kind: eventbus.KindNodeObservation, Node: "node", Source: "task/a/web", Tenant: "a", App: "web"}) {
 		t.Fatal("alice events", r)
+	}
+	// Engine notices of one container arrive as one, with their reasons.
+	en := start(alice, 0, eventbus.TopicEngine)
+	defer en.cancel()
+	first(en)
+	bus.Publish(eventbus.Event{Topic: eventbus.TopicEngine, Kind: eventbus.KindEngineNode, Node: "node", Reasons: []string{"boot"}, Changed: true})
+	bus.Publish(eventbus.Event{Topic: eventbus.TopicEngine, Kind: eventbus.KindEngineContainer, Node: "node", Tenant: "a", App: "web", Container: "c1", Reasons: []string{"die"}, Changed: true})
+	bus.Publish(eventbus.Event{Topic: eventbus.TopicEngine, Kind: eventbus.KindEngineContainer, Node: "node", Tenant: "a", App: "web", Container: "c1", Reasons: []string{"start"}, Changed: true})
+	var reasons []string
+	for !slices.Contains(reasons, "start") {
+		for _, e := range event(en).Events {
+			if e.Kind == eventbus.KindNodeObservation {
+				continue
+			}
+			if e.Kind != eventbus.KindEngineContainer || e.Container != "c1" || e.Tenant != "a" {
+				t.Fatal("alice engine events", e)
+			}
+			reasons = append(reasons, e.Reasons...)
+		}
+	}
+	if !slices.Contains(reasons, "die") {
+		t.Fatal("reasons", reasons)
 	}
 }
 

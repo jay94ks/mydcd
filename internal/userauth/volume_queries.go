@@ -44,6 +44,14 @@ type (
 	VolumeRestoresPage = VolumeRows[control.VolumeRestoreView]
 )
 
+// VolumeArchivesPage is one page of Volume archives with the public
+// recipient keys new packages are sealed to. Keys.Revision is what
+// set-volume-archive-admin-key expects.
+type VolumeArchivesPage struct {
+	VolumeRows[control.VolumeArchiveView]
+	Keys control.VolumeArchiveKeys
+}
+
 // VolumeQuery names one volume of a tenant.
 type VolumeQuery struct {
 	Tenant string
@@ -98,6 +106,10 @@ func (c Client) VolumeBackupPage(ctx context.Context, target sfcp.Peer, session 
 
 func (c Client) VolumeRestorePage(ctx context.Context, target sfcp.Peer, session access.Session, tenant, after string) (VolumeRestoresPage, error) {
 	return call(ctx, c, target, session, VolumeRestoresMethod, VolumePageQuery{Tenant: tenant, After: after})
+}
+
+func (c Client) VolumeArchivePage(ctx context.Context, target sfcp.Peer, session access.Session, tenant, after string) (VolumeArchivesPage, error) {
+	return call(ctx, c, target, session, VolumeArchivesMethod, VolumePageQuery{Tenant: tenant, After: after})
 }
 
 func (c Client) VolumeUsage(ctx context.Context, target sfcp.Peer, session access.Session, tenant string, selector control.VolumeSelector) (VolumeUsageReply, error) {
@@ -192,7 +204,7 @@ var (
 	VolumesMethod = define(Method[VolumePageQuery, VolumesPage]{Name: "volumes"}, true, func(ctx context.Context, s Service, view cluster.View, session access.Session, q VolumePageQuery) (VolumesPage, string) {
 		page, code := volumeRows(s, view, session, q, control.Volumes.Page)
 		if code == "ok" && s.NodeObservations != nil && len(page.Items) != 0 {
-			if reports, err := s.NodeObservations(ctx, view); err == nil {
+			if reports, _, err := s.NodeObservations(ctx, view); err == nil {
 				control.AttachVolumeUsage(page.Items, reports, uint64(time.Now().UnixMilli()))
 			}
 		}
@@ -203,6 +215,17 @@ var (
 	})
 	VolumeRestoresMethod = define(Method[VolumePageQuery, VolumeRestoresPage]{Name: "volume-restores"}, true, func(_ context.Context, s Service, view cluster.View, session access.Session, q VolumePageQuery) (VolumeRestoresPage, string) {
 		return volumeRows(s, view, session, q, control.Volumes.RestorePage)
+	})
+	VolumeArchivesMethod = define(Method[VolumePageQuery, VolumeArchivesPage]{Name: "volume-archives"}, true, func(_ context.Context, s Service, view cluster.View, session access.Session, q VolumePageQuery) (VolumeArchivesPage, string) {
+		rows, code := volumeRows(s, view, session, q, control.Volumes.ArchivePage)
+		if code != "ok" {
+			return VolumeArchivesPage{}, code
+		}
+		v, err := s.Policy.Volumes(view.State)
+		if err != nil {
+			return VolumeArchivesPage{}, "unavailable"
+		}
+		return VolumeArchivesPage{VolumeRows: rows, Keys: v.ArchiveKeys()}, "ok"
 	})
 
 	// VolumeUsageMethod asks the owner to measure one volume and answers only

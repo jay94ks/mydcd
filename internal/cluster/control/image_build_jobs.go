@@ -136,7 +136,7 @@ func (p Policy) planImageBuildJob(s state.State, c access.Catalog, b ImageBuildC
 	if !ok || registry.Deleted || !registry.Spec.Enabled || registry.Generation == 0 {
 		return ImageBuildJobPlan{}, access.ErrConflict
 	}
-	if _, err := c.CheckImageTrust(tenant, policy.Spec.BuilderImage); err != nil {
+	if _, err := c.CheckImageRefTrust(tenant, policy.Spec.BuilderImage); err != nil {
 		return ImageBuildJobPlan{}, access.ErrDenied
 	}
 	if p.imageCacheAvailable(s, ctx.Spec.Root.Node, policy.Spec.BuilderImage) != nil {
@@ -229,7 +229,7 @@ func (p Policy) reduceImageBuildJob(s state.State, b ImageBuildCatalog, op UserO
 }
 
 func validateImageBuildJob(r ImageBuildJobRecord, cluster [32]byte) error {
-	if !validImageBuildSecretGrants(r) || !validImageBuildSources(r.Run.Spec, r.Run.Inputs, r.Sources) {
+	if !validImageBuildSecretGrants(r) || !validImageBuildSources(r.Run.Spec, r.Run.Read(), r.Sources) {
 		return ErrCatalog
 	}
 	spec := r.Run.Spec
@@ -261,7 +261,7 @@ func validateImageBuildJob(r ImageBuildJobRecord, cluster [32]byte) error {
 	if r.Progress != nil {
 		last := *r.Progress
 		if last.Action == "begin" {
-			last.Inputs = r.Run.Inputs
+			last.Inputs, last.Builder, last.BuilderLocal = r.Run.Inputs, r.Run.Builder, r.Run.BuilderLocal
 			last.Sources = r.Sources
 		}
 		if !last.Valid(spec) || last.Expected == 0 || last.Expected >= r.Run.Revision || last.Expected+1 != r.Run.Revision && !(r.CancelledBy != nil && last.Expected+2 == r.Run.Revision && r.CancelledBy.Change.Expected+1 == r.Run.Revision) {
@@ -286,12 +286,12 @@ func validateImageBuildJob(r ImageBuildJobRecord, cluster [32]byte) error {
 	}
 	if r.Begin != nil {
 		begin := *r.Begin
-		begin.Inputs = r.Run.Inputs
+		begin.Inputs, begin.Builder, begin.BuilderLocal = r.Run.Inputs, r.Run.Builder, r.Run.BuilderLocal
 		begin.Sources = r.Sources
 		if begin.Action != "begin" || !begin.Valid(spec) || begin.Expected != 1 || r.Run.Phase == "queued" || r.CancelledBy != nil && r.CancelledBy.Change.Expected <= begin.Expected {
 			return ErrCatalog
 		}
-	} else if r.Run.Phase == "running" || r.Run.Phase == "unknown" || len(r.Run.Inputs) != 0 || len(r.Sources) != 0 || r.Run.Terminal() && r.Run.Closure.Result.Code == "OK" {
+	} else if r.Run.Phase == "running" || r.Run.Phase == "unknown" || len(r.Run.Inputs) != 0 || r.Run.Builder != nil || len(r.Sources) != 0 || r.Run.Terminal() && r.Run.Closure.Result.Code == "OK" {
 		return ErrCatalog
 	}
 	if r.Begin == nil && r.OwnerSteps > 0 && (r.OwnerSteps != 1 || r.Progress.Action != "complete") {

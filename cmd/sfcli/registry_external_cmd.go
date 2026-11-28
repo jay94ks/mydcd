@@ -54,22 +54,22 @@ func readExternalRows(ctx context.Context, s *session, tenant string) ([]control
 		if err != nil {
 			return nil, err
 		}
-		if reply.Tenant != tenant || len(reply.ExternalRegistries) > 8 || after != "" && reply.ExternalRegistriesRootRevision != root {
+		if len(reply.Items) > 8 || after != "" && reply.RootRevision != root {
 			return nil, errors.New("external sources changed while reading; run the command again")
 		}
-		root = reply.ExternalRegistriesRootRevision
+		root = reply.RootRevision
 		previous := after
-		for _, row := range reply.ExternalRegistries {
+		for _, row := range reply.Items {
 			if row.Spec.Validate() != nil || row.Spec.Tenant != tenant || row.Revision == 0 || row.Spec.Key() <= after {
 				return nil, errors.New("the server sent an invalid external source")
 			}
 			rows = append(rows, row)
 			after = row.Spec.Key()
 		}
-		if reply.ExternalRegistriesNext == "" {
+		if reply.Next == "" {
 			return rows, nil
 		}
-		if len(rows) > 4096 || after <= previous || reply.ExternalRegistriesNext != after {
+		if len(rows) > 4096 || after <= previous || reply.Next != after {
 			return nil, errors.New("the server sent an invalid external source cursor")
 		}
 	}

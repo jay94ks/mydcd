@@ -50,7 +50,7 @@ func (r ImageBuildCacheInventoryRow) Valid(q ImageBuildQuery, observed bool) boo
 	if q.Part != "caches" || !q.Valid() || r.Cache == ([32]byte{}) || r.Owner == ([32]byte{}) || r.RepresentativeSnapshot == ([32]byte{}) || !validID(r.Node) || !validID(r.Context) || !validID(r.Root) || !validID(r.RepresentativeJob) || r.RootGeneration == 0 || len(r.Builder) > 512 || q.Node != "" && q.Node != r.Node || q.ID != "" && q.ID != r.Context {
 		return false
 	}
-	if pin, err := access.PinImage(r.Builder); err != nil || pin.Reference != r.Builder {
+	if pin, err := access.ParseImage(r.Builder); err != nil || pin.Reference != r.Builder {
 		return false
 	}
 	if !observed {

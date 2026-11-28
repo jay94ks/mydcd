@@ -307,3 +307,11 @@ func TestLiveWatchRolesForgetDuringRead(t *testing.T) {
 		t.Fatal("stale roles kept", reads, err)
 	}
 }
+
+// An engine notice keeps its container and reasons for the screens.
+func TestLiveRefsEngineNotice(t *testing.T) {
+	refs := liveRefs(sfc.ChangeBatch{Events: []userauth.ChangeEvent{{Topic: "engine", Kind: "engine.container", Node: "n1", Tenant: "shop", App: "web", Container: "c1", Reasons: []string{"die", "start"}}}})
+	if len(refs) != 1 || refs[0] != (liveRef{Kind: "engine.container", Tenant: "shop", Name: "n1", App: "web", Container: "c1", Reasons: "die,start"}) {
+		t.Fatal(refs)
+	}
+}

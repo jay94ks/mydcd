@@ -35,6 +35,7 @@ import { fmtBytes } from '../lib/format';
 import { usePoll } from '../lib/usePoll';
 import { sendOnce, uncertain } from '../lib/opRetry';
 import { ApprovalPrompt } from './VaultApproval';
+import { registriesLive } from '../lib/liveTopics';
 
 const NEED = '이 작업 공간의 저장소 관리 권한이 필요합니다';
 
@@ -304,7 +305,7 @@ function FormFields({
       )}
       <label className="row small" style={{ gap: 8 }}>
         <input type="checkbox" checked={f.trust} onChange={(e) => set({ trust: e.target.checked })} />
-        이미지 신뢰 출처(UI-82)에{' '}
+        이미지 신뢰 출처에{' '}
         {rules.map((r, i) => (
           <code key={i}>
             {r.registry}/{r.repository}
@@ -326,7 +327,7 @@ export function ExternalTab() {
   const [params, setParams] = useSearchParams();
   const list = usePoll((s) => externalRegistries(tenant, s), [tenant]);
   const secretsQ = usePoll((s) => vault(tenant, s), [tenant], 0);
-  const builtinQ = usePoll(() => registries(tenant), [tenant], 0);
+  const builtinQ = usePoll((s) => registries(tenant, s), [tenant], 0, registriesLive(tenant));
   const secrets = useMemo(() => (secretsQ.data?.items ?? []).filter((s) => s.kind === 'object' && s.status === 'active'), [secretsQ.data]);
   const builtin = useMemo(() => (builtinQ.data?.items ?? []).map((r) => r.endpoint), [builtinQ.data]);
   const [sel, setSel] = useState<string>();
@@ -378,7 +379,7 @@ export function ExternalTab() {
       disabledReason: !canDeploy ? NEED : !r.reader ? '연결된 서버가 없습니다' : r.reader.draining ? '이미 해제하는 중입니다' : undefined,
       onSelect: () => setUnbind(r),
     },
-    { label: '이 저장소의 이미지 보기', disabledReason: '서버 기능 대기 (외부 저장소 이미지 목록, REQ-18)' },
+    { label: '이 저장소의 이미지 보기', disabledReason: '아직 지원하지 않습니다(외부 저장소 이미지 목록)' },
     { label: '쓰는 곳 보기', onSelect: () => (setSel(r.id), setTimeout(() => usersRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 50)) },
     { sep: true, label: '' },
     { label: '등록 해제…', danger: true, disabledReason: r.deleted ? '이미 지웠습니다' : canDeploy ? undefined : NEED, onSelect: () => setDel(r) },
@@ -455,7 +456,7 @@ export function ExternalTab() {
                 </div>
                 <span className="small muted">
                   상태는 마지막 로그인 시험과 서버들의 실제 이미지 받기 결과 중 최근 것입니다. 저장소마다 읽는 서버 하나를 연결해야 받기·시험이 되고, 로그인 시험은 그 읽는 서버가 대신 합니다. 설정을 바꾸면 읽던 서버가 멈추므로 다시
-                  연결합니다. 등록된 외부 저장소는 이미지 신뢰 출처(UI-82)에도 같은 주소·경로로 들어가며, 신뢰 출처에서 빼면 받기가 막힙니다. 내장 저장소 주소는 여기 등록할 수 없습니다.
+                  연결합니다. 등록된 외부 저장소는 이미지 신뢰 출처에도 같은 주소·경로로 들어가며, 신뢰 출처에서 빼면 받기가 막힙니다. 내장 저장소 주소는 여기 등록할 수 없습니다.
                 </span>
               </div>
             )

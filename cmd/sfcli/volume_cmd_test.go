@@ -147,11 +147,21 @@ func TestVolumeCommandLineErrorsBeforeLogin(t *testing.T) {
 		{"volume", "resize", "shop/data", "--size", "2TiB"},
 		{"volume", "backup", "limits", "set", "--max-size", "1GiB"},
 		{"volume", "backup", "limits", "set", "--node", "n", "--max-backups", "300"},
+		{"volume", "archive", "shop/data", "--name", "Bad"},
+		{"volume", "archive", "shop/data", "--max-size", "1"},
+		{"volume", "archive", "shop/data", "--store", "Bad"},
+		{"volume", "archive", "data"},
+		{"volume", "archive", "admin-key", "extra"},
+		{"volume", "archive", "show"},
+		{"volume", "unarchive"},
+		{"volume", "unarchive", "shop/data", "a", "b"},
+		{"app", "archive"},
+		{"app", "archive", "shop", "--name", "Bad"},
 		{"volume", "nope"},
 	} {
 		var out, diagnostic bytes.Buffer
 		code := run(args, &out, &diagnostic)
-		if code != 2 && !(code == 1 && args[2] == "put") {
+		if code != 2 && !(code == 1 && len(args) > 2 && args[2] == "put") {
 			t.Errorf("sfcli %s: exit %d, want 2: %s", strings.Join(args, " "), code, diagnostic.String())
 		}
 		if strings.Contains(diagnostic.String(), "allet") {
@@ -165,7 +175,7 @@ func TestVolumeHelpListsGroup(t *testing.T) {
 	if code := run([]string{"volume", "--help"}, &out, &diagnostic); code != 0 {
 		t.Fatal(code, diagnostic.String())
 	}
-	for _, word := range []string{"list", "create", "delete", "register", "backup", "restore", "move", "files"} {
+	for _, word := range []string{"list", "create", "delete", "register", "backup", "restore", "move", "archive", "unarchive", "files"} {
 		if !strings.Contains(out.String(), "\n  "+word) {
 			t.Errorf("volume help lacks %s:\n%s", word, out.String())
 		}
@@ -250,6 +260,25 @@ func TestVolumeCommandsAgainstManagedNode(t *testing.T) {
 	}
 	n.run(2, "volume", "backup", "limits", "set", "--tenant", "shop", "--max-size", "1GiB")
 	n.run(2, "volume", "resize", "shop/data", "--tenant", "shop")
+
+	// Archives: an empty list, then the administrator's key from a key
+	// file. Only its public half is sent and shown.
+	if got := strings.TrimSpace(n.run(0, "volume", "archive", "list", "--tenant", "shop", "-o", "json")); got != "[]" {
+		t.Fatalf("empty archive list: %s", got)
+	}
+	keyFile := filepath.Join(n.root, "archive.key")
+	n.run(0, "cluster", "backup", "keygen", "--out", keyFile)
+	n.run(0, "volume", "archive", "admin-key", "--key-file", keyFile, "-y", "--id", "archive-key")
+	var keys archiveKeysView
+	if err := json.Unmarshal([]byte(n.run(0, "volume", "archive", "admin-key", "-o", "json")), &keys); err != nil || len(keys.Admin) != 64 || keys.Revision != 1 {
+		t.Fatalf("archive keys %+v %v", keys, err)
+	}
+	if raw, _ := os.ReadFile(keyFile); strings.Contains(keys.Admin, strings.TrimSpace(string(raw))) {
+		t.Fatal("the key file's secret was sent")
+	}
+	n.run(0, "volume", "archive", "admin-key", "--key-file", keyFile, "-y", "--id", "archive-key-again") // already set: nothing sent
+	n.run(1, "volume", "unarchive", "shop/data", "--tenant", "shop", "-y")                               // no archive
+	n.run(1, "app", "archive", "none", "--tenant", "shop", "-y")                                         // no volume
 
 	// Delete cancels a pending creation or deletes the volume.
 	n.run(0, "volume", "delete", "shop/data", "--tenant", "shop", "-y", "--no-wait", "--id", "delete-data")

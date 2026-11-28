@@ -115,6 +115,11 @@ func TrustKeys(keys ...ed25519.PublicKey) Trust {
 // Empty: no key is trusted, so no release manifest verifies.
 func (t Trust) Empty() bool { return len(t.keys) == 0 }
 
+// Verify reports whether sig is a signature of message by a trusted key.
+// The release workflow signs SHA256SUMS with the same key
+// (tools/clusterapp-bundle sign-file).
+func (t Trust) Verify(message, sig []byte) bool { return t.verify(message, sig) }
+
 func (t Trust) verify(message, sig []byte) bool {
 	for _, k := range t.keys {
 		if ed25519.Verify(k, message, sig) {

@@ -70,7 +70,7 @@ func (w *world) resolveImageReal(tenant, ref string, now int64) (control.ImageRe
 	_, trusted := access.MatchImageTrust(rules, authority, repository)
 	r.Trust = control.ImageTrustCheck{Trusted: trusted, Rules: rules}
 
-	var managed *RegistryView
+	var managed *FixtureRegistry
 	other := false
 	for i := range w.registries {
 		reg := &w.registries[i]
@@ -178,7 +178,7 @@ func (w *world) resolveImageReal(tenant, ref string, now int64) (control.ImageRe
 
 // registryAuthority: the authority a built-in registry serves (Spec when the
 // registry was put through put-registry, else the fixture Endpoint).
-func registryAuthority(r RegistryView) string {
+func registryAuthority(r FixtureRegistry) string {
 	if r.Spec.Authority != "" {
 		return r.Spec.Authority
 	}

@@ -26,6 +26,7 @@
 | 0018 | 0014 사본 갱신(`CheckPeerExe`) | 동작 변화 없음 |
 | 0019 | `--version`이 엔진 이름을 찍고, 소켓 그룹 기본값을 없앰 | `sfed --version`은 "Seafield engine (sfed) version …". `--group`(`group`) 기본값이 `docker`에서 없음으로 바뀌어 소켓 그룹은 root다(0003대로 mode 0600). |
 | 0020 | 기본 runtime(`runc`, `io.containerd.runc.v2`)의 실행 파일이 sfed 옆의 `sfe-runc`. exec마다 하위 cgroup에서 돌고, `exec_die` 속성이 늘어남 | 컨테이너 실행은 같다. `runc exec`만 `--cgroup sfe-exec-<exec ID>`가 붙는다. `exec_die`는 첫 프로세스가 끝난 뒤 남은 프로세스를 최대 2초 더 기다린다(업스트림도 출력 스트림을 2초 기다린다). `sfe-runc`가 없으면 경고 한 번 남기고 업스트림처럼 `runc`를 쓴다. `docker info`의 runtime 경로가 `sfe-runc`로 보인다. [더한 것](additions.md#exec-프로세스-묶음-감독) |
+| 0021 | gzip 레이어를 풀 때 외부 `unpigz`·`igzip`을 쓰지 않음(시작할 때 `CONTAINERD_DISABLE_PIGZ`·`CONTAINERD_DISABLE_IGZIP`·`MOBY_DISABLE_PIGZ`를 `1`로, 이미 정한 값은 그대로) | 업스트림은 `unpigz`가 있으면 쓰고 그 경로를 프로세스가 끝날 때까지 기억한다. 엔진이 도는 중에 pigz 패키지가 지워지면 그 뒤 pull이 모두 "fork/exec /usr/bin/unpigz: no such file or directory"로 실패했다. 이제 Go 내장 gzip만 쓰므로 서버에 pigz가 없어도 된다. 엔진이 띄우는 containerd도 같은 환경을 물려받는다. 큰 레이어 풀기는 조금 느릴 수 있다 |
 
 ## 패치하지 않고 설정으로 하는 것
 

@@ -59,7 +59,7 @@ func (d Directory) Quiescent() bool {
 		}
 	}
 	for _, rotation := range d.Rotations {
-		if rotation.Phase != "Installed" {
+		if !rotation.Settled() {
 			return false
 		}
 	}
@@ -213,6 +213,9 @@ func (d Directory) beginNode(node, id string, action lifecycle.Action, expected,
 	}
 	if action == lifecycle.Remove || action == lifecycle.ForceRemove {
 		plan, planErr := d.PlanNodeChange(node, true)
+		if action == lifecycle.ForceRemove {
+			plan, planErr = d.PlanForceRemoval(node)
+		}
 		if planErr != nil || len(plan.Blockers) != 0 {
 			return d, ErrMember
 		}
@@ -231,6 +234,9 @@ func (d Directory) beginNode(node, id string, action lifecycle.Action, expected,
 	n, err := d.keepTopology(t)
 	if err != nil {
 		return d, err
+	}
+	if action == lifecycle.ForceRemove {
+		n = n.abandonIdentityRotations(node)
 	}
 	current, _ := t.Node(node)
 	op := NodeOperation{Node: node, ID: id, Action: action, Generation: current.Generation, Epoch: epoch, Origin: bytes.Clone(origin)}

@@ -59,27 +59,7 @@ func (b Blueprint) inputMetadata(service string, requester [32]byte) (Needs, err
 		}
 		n.Lifecycle = selection
 	}
-	for _, selector := range s.Sfc.Sources {
-		realm := b.d.Tenant
-		id := selector.Secret
-		if selector.Group != "" {
-			id = selector.Group
-		}
-		if selector.Scope == "cluster" {
-			realm = ""
-		} else if v := b.d.Input.Sfc.Vault; v != nil {
-			if selector.Secret != "" {
-				if o, ok := v.Tree.Secrets[id]; ok {
-					id = o.ID
-				}
-			} else {
-				if o, ok := v.Tree.Groups[id]; ok {
-					id = o.ID
-				}
-			}
-		}
-		n.Sources = append(n.Sources, Source{realm, id})
-	}
+	n.Sources = selectorSources(b.d.Input, b.d.Tenant, s)
 	for _, mount := range s.Secrets {
 		def := b.d.Input.Secrets[mount.Source]
 		if len(s.Sfc.Sources) == 0 {
@@ -90,7 +70,7 @@ func (b Blueprint) inputMetadata(service string, requester [32]byte) (Needs, err
 			if def.Name != "" {
 				id = def.Name
 			}
-			source := Source{b.d.Tenant, id}
+			source := Source{Realm: b.d.Tenant, Object: id}
 			if !slices.Contains(n.Sources, source) {
 				n.Sources = append(n.Sources, source)
 			}
@@ -111,7 +91,7 @@ func (b Blueprint) inputMetadata(service string, requester [32]byte) (Needs, err
 			if def.Name != "" {
 				id = def.Name
 			}
-			source := Source{b.d.Tenant, id}
+			source := Source{Realm: b.d.Tenant, Object: id}
 			if !slices.Contains(n.Sources, source) {
 				n.Sources = append(n.Sources, source)
 			}
@@ -132,6 +112,65 @@ func (b Blueprint) inputMetadata(service string, requester [32]byte) (Needs, err
 		return Needs{}, ErrInputs
 	}
 	return n, nil
+}
+
+// selectorSources resolves a service's `secrets_from` selectors to Vault
+// objects: tenant realm by default, the cluster realm for cluster/NAME, and
+// app-local Vault aliases to their object IDs.
+func selectorSources(c Compose, tenant string, s ComposeService) []Source {
+	var out []Source
+	for _, selector := range s.Sfc.Sources {
+		realm := tenant
+		id := selector.Secret
+		if selector.Group != "" {
+			id = selector.Group
+		}
+		if selector.Scope == "cluster" {
+			realm = ""
+		} else if v := c.Sfc.Vault; v != nil {
+			if selector.Secret != "" {
+				if o, ok := v.Tree.Secrets[id]; ok {
+					id = o.ID
+				}
+			} else {
+				if o, ok := v.Tree.Groups[id]; ok {
+					id = o.ID
+				}
+			}
+		}
+		out = append(out, Source{Realm: realm, Object: id})
+	}
+	return out
+}
+
+// secretInputSources is every Vault object a service's inputs read: its
+// selectors, or without them the names of its mounted and env secrets (the
+// same rule as inputMetadata).
+func secretInputSources(c Compose, tenant string, s ComposeService) []Source {
+	out := selectorSources(c, tenant, s)
+	if len(s.Sfc.Sources) != 0 {
+		return out
+	}
+	add := func(name string) {
+		def := c.Secrets[name]
+		if def.File == "" && !def.External {
+			return
+		}
+		id := name
+		if def.Name != "" {
+			id = def.Name
+		}
+		if source := (Source{Realm: tenant, Object: id}); !slices.Contains(out, source) {
+			out = append(out, source)
+		}
+	}
+	for _, mount := range s.Secrets {
+		add(mount.Source)
+	}
+	for _, env := range s.Sfc.SecretEnv {
+		add(env.Source)
+	}
+	return out
 }
 
 // InputMetadata is an owned permission/selection recipe for planning. It has

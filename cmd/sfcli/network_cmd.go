@@ -453,6 +453,9 @@ type netStep struct {
 	// Closure, when set, is the member whose owner must first report that
 	// nothing uses it; the payload's closure is filled in from that report.
 	Closure *netMember
+	// Leaving, when set, is a drained member that leaves on its own server's
+	// closure (sfcd sends it): the step sends nothing and only waits.
+	Leaving *netMember
 	Done    bool
 }
 
@@ -494,9 +497,17 @@ func nextNetworkStep(v *netState, want *networkSpec) (netStep, error) {
 		return netStep{Done: true}, nil
 	}
 	if want == nil {
-		// Delete: each server leaves on its owner's closure; the last one
-		// to leave removes the network. A server whose change is in
-		// progress finishes that first (op resume continues it).
+		// Delete: every server stops new use first, then each leaves on its
+		// own once nothing uses it there (sfcd sends its closure); the last
+		// one to leave removes the network. So the delete finishes on the
+		// cluster even when this client stops after the drains. A server
+		// whose change is in progress finishes that first (op resume
+		// continues it).
+		for i := range v.Members {
+			if m := &v.Members[i]; m.phase() == "" && !m.Source.Draining {
+				return leaveStep(v, m), nil
+			}
+		}
 		for i := range v.Members {
 			if m := &v.Members[i]; m.phase() == "" {
 				return leaveStep(v, m), nil
@@ -593,17 +604,19 @@ func keepMTU(v *netState, want *networkSpec) *networkSpec {
 
 // memberStep is the next step when the file only adds or removes servers
 // and every staying server keeps its addresses: one join-tun-network per
-// added server, then drain-network and leave-tun-network per removed one.
+// added server, then drain-network per removed one, which then leaves on its
+// own.
 // The other servers keep their devices; only their routes change. ok is
 // false when the change needs the fenced path (addresses or MTU change, or
 // a change already in progress).
-// leaveStep drains one server, then has it leave on its owner's closure.
+// leaveStep drains one server; a drained server then leaves on its own
+// once nothing uses it there, and the step only waits for that.
 func leaveStep(v *netState, m *netMember) netStep {
 	if !m.Source.Draining {
 		return netStep{Label: "stop new use on " + m.Source.Node, Key: fmt.Sprintf("d%s-%d", m.Source.Node, m.Source.Revision), Action: "drain-network", Expected: m.Source.Revision,
 			Payload: control.NetworkSelection{Tenant: v.Tenant, ID: m.Source.ID}}
 	}
-	return netStep{Label: "remove " + m.Source.Node, Key: fmt.Sprintf("l%s-%d", m.Source.Node, m.Source.Revision), Action: "leave-tun-network", Expected: m.Source.Revision, Closure: m}
+	return netStep{Label: "remove " + m.Source.Node, Leaving: m}
 }
 
 func memberStep(v *netState, want *networkSpec) (netStep, bool) {
@@ -713,8 +726,32 @@ func applyNetwork(c *cli.Context, g *globals, s *session, opID, tenant, name str
 		if step.Done {
 			return cli.Done, "network " + name + " is up to date", nil
 		}
-		if mode == netShow && step.Closure == nil {
+		if mode == netShow && step.Closure == nil && step.Leaving == nil {
 			return cli.Accepted, "next: " + step.Label, nil
+		}
+		if step.Leaving != nil {
+			// The server sends its own leave; this only waits for it.
+			_, detail, err := readClosure(c, g, s, step.Leaving)
+			if err != nil {
+				return cli.Accepted, "", err
+			}
+			if detail == "" {
+				detail = "waiting for " + step.Leaving.Source.Node + " to leave"
+			}
+			if detail != waiting {
+				waiting = detail
+				fmt.Fprintf(c.Err, "Waiting: %s.\n", detail)
+			}
+			if mode != netWait {
+				return cli.Accepted, detail, nil
+			}
+			select {
+			case <-c.Ctx.Done():
+				fmt.Fprintf(c.Err, "Stopped waiting. The servers finish this on their own; follow it with: sfcli op show %s\n", opID)
+				return cli.Accepted, detail, cli.ExitError{Code: exitUnknown}
+			case <-time.After(3 * time.Second):
+			}
+			continue
 		}
 		if step.Closure != nil {
 			closure, detail, err := readClosure(c, g, s, step.Closure)
@@ -740,11 +777,7 @@ func applyNetwork(c *cli.Context, g *globals, s *session, opID, tenant, name str
 			if mode == netShow {
 				return cli.Accepted, "next: " + step.Label, nil
 			}
-			if step.Action == "leave-tun-network" {
-				step.Payload = *closure
-			} else {
-				step.Payload = control.NetworkChangeFence{Tenant: tenant, ID: step.Closure.Source.ID, Generation: step.Closure.Change.Generation, Closed: *closure}
-			}
+			step.Payload = control.NetworkChangeFence{Tenant: tenant, ID: step.Closure.Source.ID, Generation: step.Closure.Change.Generation, Closed: *closure}
 		}
 		waiting = ""
 		fmt.Fprintf(c.Err, "%s: %s\n", name, step.Label)
@@ -1118,9 +1151,11 @@ func networkDeleteCommand(g *globals) *cli.Command {
 		Name:  "delete",
 		Args:  "NETWORK",
 		Short: "Delete a network once no container uses it",
-		Long: `Delete a network. New use stops at once (DNS is turned off first);
-the network is removed when no container uses it any more. Stop the apps on
-it first. With --no-wait, or when interrupted, continue with
+		Long: `Delete a network. DNS is turned off first, then new use stops on every
+server; each server leaves on its own once no container uses the network
+there, and the last one removes it. Stop the apps on it first. Once new use
+has stopped everywhere the delete finishes on the cluster even if this
+command stops; with --no-wait, or when interrupted earlier, continue with
 'sfcli op resume ID'.`,
 		Flags: func(fs *flag.FlagSet) {
 			fs.Var(&id, "id", "operation `ID` (default: a new one)")

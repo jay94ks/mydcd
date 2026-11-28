@@ -10,21 +10,20 @@ import (
 
 func TestDraftRequestRejectsMixedSelectorsAndMutationWithoutProof(t *testing.T) {
 	q := imagebuild.DraftRequest{Context: "editable", Kind: "plan"}
-	r := Request{Schema: 1, Method: "build-draft", Tenant: "tenant", Nonce: [32]byte{1}, ImageBuildDraft: &q}
-	if !r.validMethodFields() {
+	r := BuildDraftQuery{Tenant: "tenant", Request: q}
+	if !r.Valid() {
 		t.Fatal("draft plan request rejected")
 	}
-	for _, mutate := range []func(*Request){
-		func(r *Request) { r.Method = "whoami" },
-		func(r *Request) { r.After = "foreign-cursor" },
-		func(r *Request) { r.Node = "other" },
-		func(r *Request) { r.ImageBuildContent = &imagebuild.ContentQuery{Version: [32]byte{1}, Part: "tree"} },
-		func(r *Request) { r.ImageBuildDraft = nil },
+	if (BuildDraftQuery{Request: q}).Valid() {
+		t.Fatal("draft without tenant accepted")
+	}
+	for _, raw := range []string{
+		`{"Tenant":"tenant","Request":{"Context":"editable","Kind":"plan"},"After":"foreign-cursor"}`,
+		`{"Tenant":"tenant","Request":{"Context":"editable","Kind":"plan"},"Node":"other"}`,
+		`{"Tenant":"tenant","Request":{"Context":"editable","Kind":"plan"},"Query":{"Part":"tree"}}`,
 	} {
-		bad := r
-		mutate(&bad)
-		if bad.validMethodFields() {
-			t.Fatal("mixed draft selector accepted")
+		if strict([]byte(raw), &BuildDraftQuery{}) == nil {
+			t.Fatal("mixed draft selector accepted", raw)
 		}
 	}
 	bad := q

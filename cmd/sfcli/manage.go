@@ -35,12 +35,12 @@ func managementHelp(out io.Writer) {
 	fmt.Fprintln(out, "sfcli [--config FILE] manage prune")
 	fmt.Fprintln(out, "sfcli --tenant TENANT manage app-source --app NAME [--deployment ID] [--revision VERSION] [--section source|local-services|overlays] [--raw]")
 	fmt.Fprintln(out, "sfcli --tenant TENANT manage app-revisions --app NAME [--deployment ID] [--after CURSOR]")
-	fmt.Fprintln(out, "Node storage metadata: add-node-storage, set-node-storage-policy, drain-node-storage, remove-node-storage (system administrator; node storage provides typed convenience commands).")
+	fmt.Fprintln(out, "Node storage metadata: add-node-storage, set-node-storage-policy, set-node-archive-default, drain-node-storage, remove-node-storage (system administrator; node storage provides typed convenience commands).")
 	fmt.Fprintln(out, "Lifecycle metadata: set-lifecycle-policy, put-lifecycle-script, retire-lifecycle-script, delete-lifecycle-script (tenant manage-services; signed staged artifact metadata only, no raw source/Secret in change files).")
 	fmt.Fprintln(out, "Registry metadata: put-registry, start-registry, stop-registry, delete-registry (explicit tenant/ID and record CAS; put/start require manage-registry and manage-volumes on the selected node). Stop/delete retain Volume data; a desired definition does not mean a live TLS server.")
 	fmt.Fprintln(out, "External registry metadata: put-external-registry, delete-external-registry (tenant manage-registry; Vault key references only, immutable authority/repository and record CAS). registry external-list/external-show read public references. App registry Secret use requires the original Group approval/Binding. External CA/credential is scoped to the OCI client, not daemon-wide trust. RQ6 native acceptance is pending; unavailable credentials never fall back to anonymous.")
 	fmt.Fprintln(out, `Change file: {"schema":1,"action":"create-tenant","expected":0,"payload":{"ID":"example"}}`)
-	fmt.Fprintln(out, "Actions: put-user, issue-initial-credential (owner fact only), add-credential, disable-credential, clear-app-logs, set-node-cli-policy, create-tenant, set-nodes, set-membership, set-trust, revoke-session, invite-node, promote-node, set-node-quota, reserve-task, drain-reservation, release-reservation, create-tun-network, drain-network, leave-tun-network, create-volume, acquire-volume, release-volume, begin-volume-backup, cancel-volume-backup, delete-volume-backup, begin-volume-restore, cancel-volume-restore, begin-app-upload, put-app-part, abort-app-upload, begin-app, down-app, rotate-app-history, rotate-ledger")
+	fmt.Fprintln(out, "Actions: put-user, issue-initial-credential (owner fact only), add-credential, disable-credential, set-node-cli-policy, create-tenant, set-nodes, set-membership, set-trust, revoke-session, invite-node, promote-node, set-node-quota, reserve-task, drain-reservation, release-reservation, create-tun-network, drain-network, leave-tun-network, create-volume, acquire-volume, release-volume, begin-volume-backup, cancel-volume-backup, delete-volume-backup, begin-volume-restore, cancel-volume-restore, begin-app-upload, put-app-part, abort-app-upload, begin-app, down-app, rotate-app-history, rotate-ledger")
 	fmt.Fprintln(out, "Vault changes moved to sfcli secret (sfcli secret --help).")
 	fmt.Fprintln(out, "Requires auth: user. An existing request ID only queries its original result. Explicit resume submits that unchanged original. Prune removes only confirmed intents older than the current quorum ledger epoch; unknown intents are retained.")
 }
@@ -88,7 +88,7 @@ func runManagementTarget(ctx context.Context, args []string, client userauth.Cli
 		if len(args) != 1 {
 			return failure(diagnostic, errors.New("manage self-credentials takes no arguments"), 2)
 		}
-		reply, err := client.Query(ctx, target, session, "my-credentials", "")
+		reply, err := client.MyCredentials(ctx, target, session)
 		if err != nil {
 			return userFailure(diagnostic, err)
 		}
@@ -199,9 +199,6 @@ func runManagementRecord(ctx context.Context, method string, fresh bool, client 
 	if control.StandaloneCASAllowed(op.Change) {
 		output["cas"] = "standalone-target"
 		output["expected_revision"] = op.Change.Expected
-	}
-	if control.AppLogClearCASAllowed(op.Change) {
-		output["cas"] = "app-log-clear-target"
 	}
 	if control.AppBeginCASAllowed(op.Change) {
 		output["cas"] = "app-begin-target"

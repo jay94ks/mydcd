@@ -1,0 +1,19 @@
+#!/bin/sh
+# SPDX-License-Identifier: Apache-2.0
+# Purge keeps the cluster state and identity: deleting them cannot be undone
+# (devel/design/install-packages.md 5).
+set -e
+case "$1" in
+remove)
+	[ -d /run/systemd/system ] && systemctl daemon-reload || true
+	;;
+purge)
+	[ -d /run/systemd/system ] && systemctl daemon-reload || true
+	cat <<'MSG' >&2
+sfcd: kept /etc/sfc, /var/lib/sfc, /etc/sfe and /var/lib/sfe (cluster state,
+identity and engine data). To delete them for good:
+  rm -rf /etc/sfc /var/lib/sfc /etc/sfe /var/lib/sfe
+MSG
+	;;
+esac
+exit 0

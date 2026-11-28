@@ -303,7 +303,7 @@ func TestRQ15NodeQueriesActualRaftUnixQUICAndCLI(t *testing.T) {
 			t.Fatal("current ordinary-user login", err)
 		}
 		page, err := target.client.NodeShellSessions(f.ctx, target.peer, ordinary, "", control.NodeShellSessionsQuery{State: "open", Node: f.peers[0].ID})
-		if err != nil || page.NodeShellSessions == nil || page.NodeShellSessions.Total != 0 || len(page.NodeShellSessions.Sessions) != 0 || page.NodeShellSessions.Next != "" {
+		if err != nil || page.Total != 0 || len(page.Sessions) != 0 || page.Next != "" {
 			t.Fatal("ordinary user saw another user's rows/count/cursor", err)
 		}
 		if _, err := target.client.NodeDrainStatus(f.ctx, target.peer, ordinary, control.NodeDrainQuery{Node: f.peers[0].ID}); err == nil {
@@ -331,14 +331,14 @@ func verifyRQ15NodeQueries(t *testing.T, ctx context.Context, client Client, pee
 		{control.NodeShellSessionsQuery{State: "closed", Node: peer.ID}, "closed-99", 10, 0, ""},
 		{control.NodeShellSessionsQuery{State: "open", Node: "node-b"}, "", 0, 0, ""},
 	} {
-		var reply Reply
+		var reply control.NodeShellSessionsPage
 		var err error
 		if test.filter == (control.NodeShellSessionsQuery{}) {
 			reply, err = client.NodeShellSessions(ctx, peer, session, test.after)
 		} else {
 			reply, err = client.NodeShellSessions(ctx, peer, session, test.after, test.filter)
 		}
-		if err != nil || reply.NodeShellSessions == nil {
+		if err != nil {
 			t.Fatal("actual User shell query", err)
 		}
 		public, err := json.Marshal(reply)
@@ -346,7 +346,7 @@ func verifyRQ15NodeQueries(t *testing.T, ctx context.Context, client Client, pee
 			t.Fatal(err)
 		}
 		rq15PublicNodeQuery(t, public)
-		page := reply.NodeShellSessions
+		page := reply
 		if page.Total != test.total || len(page.Sessions) != test.count || page.Next != test.next {
 			t.Fatal("filtered wire count or cursor", test.filter, page.Total, len(page.Sessions), page.Next)
 		}
@@ -367,10 +367,10 @@ func verifyRQ15NodeQueries(t *testing.T, ctx context.Context, client Client, pee
 		all := append([]control.NodeShellSession{}, page.Sessions...)
 		for next := page.Next; next != ""; {
 			more, err := client.NodeShellSessions(ctx, peer, session, next, test.filter)
-			if err != nil || more.NodeShellSessions == nil {
+			if err != nil {
 				t.Fatal("actual User shell query next page", err)
 			}
-			all, next = append(all, more.NodeShellSessions.Sessions...), more.NodeShellSessions.Next
+			all, next = append(all, more.Sessions...), more.Next
 		}
 		args := []string{"node", "shell", "sessions"}
 		if test.filter.State != "" {
@@ -400,7 +400,7 @@ func verifyRQ15NodeQueries(t *testing.T, ctx context.Context, client Client, pee
 	if _, err := client.NodeShellSessions(ctx, peer, session, "", control.NodeShellSessionsQuery{State: "opened"}); err == nil {
 		t.Fatal("invalid SDK state filter accepted")
 	}
-	if _, err := client.query(ctx, peer, session, Request{Method: "node-shell-sessions", State: "opened"}); err == nil {
+	if _, err := client.query(ctx, peer, session, Request{Method: "node-shell-sessions", Params: json.RawMessage(`{"State":"opened"}`)}); err == nil {
 		t.Fatal("invalid state filter bypassed the actual User handler")
 	}
 }

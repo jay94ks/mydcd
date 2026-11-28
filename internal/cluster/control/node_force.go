@@ -3,6 +3,8 @@
 package control
 
 import (
+	"slices"
+
 	"github.com/jay94ks/seafield/internal/access"
 	"github.com/jay94ks/seafield/internal/cluster/lifecycle"
 	"github.com/jay94ks/seafield/internal/cluster/state"
@@ -37,12 +39,27 @@ func (p Policy) PlanNodeForceRemoval(s state.State, session access.Session, at i
 	}
 	out := NodeForcePlan{NodeRemovePlan: base, Operation: q.Operation}
 	out.Blockers = []NodeBlocker{}
+	// The server's own unfinished key rotation does not block a forced
+	// removal (membership PlanForceRemoval): pending is read from that plan.
+	d, err := p.Members(s)
+	if err != nil {
+		return NodeForcePlan{}, err
+	}
+	forced, err := d.PlanForceRemoval(q.Node)
+	if err != nil {
+		return NodeForcePlan{}, err
+	}
 	for _, blocker := range base.Blockers {
 		switch blocker.Code {
-		case "LAST_VOTER", "QUORUM_LOSS", "NODE_OPERATION_PENDING", "CONFIGURATION_NOT_INSTALLED":
+		case "NODE_OPERATION_PENDING":
+			if slices.Contains(forced.Blockers, blocker.Code) {
+				out.Blockers = append(out.Blockers, blocker)
+			}
+		case "LAST_VOTER", "QUORUM_LOSS", "CONFIGURATION_NOT_INSTALLED":
 			out.Blockers = append(out.Blockers, blocker)
 		}
 	}
+	out.PendingOperation = forced.PendingOperation
 	// Retained Task/Volume/root rows describe stranded original resources.
 	// They remain pinned and do not pretend that an owner closure was observed.
 	out.Removable = false
@@ -82,7 +99,7 @@ func (p Policy) CheckNodeForceProbe(s state.State, q NodeForceChange, expected u
 	if probe.Responding {
 		return state.NodeStillResponding
 	}
-	plan, err := d.PlanNodeChange(q.ID, true)
+	plan, err := d.PlanForceRemoval(q.ID)
 	if err != nil {
 		return state.Invalid
 	}

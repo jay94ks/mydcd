@@ -583,7 +583,9 @@ func (o *DNSOwner) origin(ctx context.Context, p DNSOwnerPolicy, b *network.Serv
 				continue
 			}
 			s, err := workload.DecodeContainer(r.State.Applied.Spec)
-			if err != nil || s.Bridge != b.Lease().Key || s.BridgeGeneration != b.Lease().Pin.Generation || s.IPv4 != peer && s.IPv6 != peer {
+			if err != nil || !slices.ContainsFunc(s.Networks(), func(a workload.TaskAttachment) bool {
+				return a.Bridge == b.Lease().Key && a.BridgeGeneration == b.Lease().Pin.Generation && (a.IPv4 == peer || a.IPv6 == peer)
+			}) {
 				continue
 			}
 			native, running, err := tasks.NetworkIdentity(ctx, key, found.Generation)

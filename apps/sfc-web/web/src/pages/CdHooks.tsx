@@ -9,7 +9,7 @@ import { ApiError } from '../api/client';
 import type { DCdState } from '../api/dto';
 import type { AppView } from '../api/types';
 import { CD_EVENTS, CD_KIND_NAME, createCdLink, deleteLink, putLink, webhookLinks, webhooks, type CdGate, type CdHookKind, type CdLinkInput, type Webhook, type WebhookLink } from '../api/webhooks';
-import { Badge, Card, Field } from '../components/ui';
+import { Badge, Card, Field, ScreenIds } from '../components/ui';
 import { ErrorBand, Load } from '../components/states';
 import { Dialog } from '../components/Dialog';
 import { Menu } from '../components/Menu';
@@ -71,7 +71,7 @@ export function CdHooksCard({ a, cd, canManage, onChange }: { a: AppView; cd: DC
     <Card
       title={
         <h2>
-          자동 배포 웹훅 <span className="ids">UI-44</span>
+          자동 배포 웹훅 <ScreenIds ids="UI-44" />
         </h2>
       }
       actions={
@@ -142,7 +142,7 @@ export function CdHooksCard({ a, cd, canManage, onChange }: { a: AppView; cd: DC
         <div className="col" style={{ gap: 8, fontSize: 13, lineHeight: '20px' }}>
           <div className="note small" style={{ background: 'var(--surface-2)' }}>
             · 배포 전 확인은 동기화 모드가 <b>‘수동’</b>(승인 후 배포)일 때만 겁니다. 웹훅이 통과를 주면 sfc-web이 <b>배포 확인 계정</b>(자동 작업 계정 sfc-autofix에 이 앱의 ApproveCD만 준 것)으로 승인해 실행합니다.
-            <br />· 시간 초과·잘못된 답은 기본이 <b>보류</b>입니다(사람 승인 대기, 연결 설정에서 통과·거부로 바꿀 수 있음). 웹훅이 승인을 대신할 수는 있어도 비밀값 묶음 승인(UI-42)처럼 사람이 해야 하는 승인은 건너뛰지 못합니다.
+            <br />· 시간 초과·잘못된 답은 기본이 <b>보류</b>입니다(사람 승인 대기, 연결 설정에서 통과·거부로 바꿀 수 있음). 웹훅이 승인을 대신할 수는 있어도 비밀값 묶음 승인처럼 사람이 해야 하는 승인은 건너뛰지 못합니다.
             <br />· 배포 후 확인이 실패하면 자동 배포를 멈추고, 고르면 되돌리기를 승인 요청으로 엽니다. 웹훅이 되돌리기를 직접 실행하지는 않습니다.
             <br />· 요청에 비밀값·환경 변수 값은 넣지 않습니다(키 이름만).
           </div>
@@ -265,7 +265,7 @@ export function CdGateNote({ a, cd }: { a: AppView; cd: DCdState }) {
   if (g.state === 'held' || g.state === 'timeout' || g.state === 'failed')
     return (
       <div className="note wa small">
-        <b>{c} 보류</b> · {name}: {g.state === 'held' ? `“${g.reason ?? '이유 없음'}”` : g.state === 'timeout' ? '시간 안에 답하지 않았습니다' : g.reason ?? `응답을 받지 못했습니다${g.status ? ` (${g.status})` : ''}`}. 사람이 승인(UI-42)하면 실행됩니다.
+        <b>{c} 보류</b> · {name}: {g.state === 'held' ? `“${g.reason ?? '이유 없음'}”` : g.state === 'timeout' ? '시간 안에 답하지 않았습니다' : g.reason ?? `응답을 받지 못했습니다${g.status ? ` (${g.status})` : ''}`}. 사람이 승인하면 실행됩니다.
       </div>
     );
   if (g.state === 'rejected')

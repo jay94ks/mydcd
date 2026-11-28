@@ -107,7 +107,7 @@ func TestAppSourceVersionsKeepExactBytesOldRevisionsAndCurrentReadScope(t *testi
 }
 
 func TestLegacyAppOriginalIsExplicitlyUnavailable(t *testing.T) {
-	f, _, _ := logClearPlanFixture(t, "local")
+	f, _, _ := observedTaskFixture(t, "local")
 	q := AppSourceSelection{App: "source-app"}
 	page, err := f.p.AppRevisions(f.s, f.session, 10, "tenant", q, "")
 	if err != nil || len(page.Versions) != 1 || page.Versions[0].OriginalRetained || page.Versions[0].Digest != ([32]byte{}) {

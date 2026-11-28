@@ -27,7 +27,7 @@ node CLI 제한이 켜져 있으면 본인 변경에도 기존 독립 승인·�
 
 전역 --reason/--incident-id/--approved-by는 user-auth 관리 명령의 첫 UserOperation에만 고정되는 표시 metadata다. result/resume의 원 사유·서명·ID를 교체하지 않고, claimed approved-by는 독립 승인으로 취급하지 않는다. Credential.Operations는 현재 역할/Session scope에 더하는 typed action ceiling이며 권한을 부여하지 않는다.
 
-`app check/diff/deploy`의 Secret 전달 선언은 [파일/환경 변수 공급](../../reference/secret-delivery.md)을 따른다. `x-sfc.secret_env`는 앱 소유 참조이고 Vault 값을 생성/변경하는 명령이 아니다. 계획/diff의 `SecretEnvRequiresNewGeneration`은 해당 서비스 이름 목록이며 새 Task 세대의 필요성을 표시한다. 현재 권한·Group 승인·원 Binding·정산 정책은 유지한다.
+`app check/diff/deploy`의 Secret 전달 선언은 [파일/환경 변수 공급](../../reference/secret-delivery.md)을 따른다. `x-sfc.secrets.env`는 앱 소유 참조이고 Vault 값을 생성/변경하는 명령이 아니다. 계획/diff의 `SecretEnvRequiresNewGeneration`은 해당 서비스 이름 목록이며 새 Task 세대의 필요성을 표시한다. 현재 권한·Group 승인·원 Binding·정산 정책은 유지한다.
 
 `app logs --cursor`는 같은 사용자·tenant/app/service/instance·원 Task/native와 로그 옵션의 가림 완료 구간만 이어 읽는다. 현재 Read/owner permit을 매번 요구하며 follow/다른 종류의 조회와 혼합하지 않는다. cursor가 배포·로그 삭제·권한 확대를 실행하지 않는다.
 

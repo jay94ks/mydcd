@@ -120,6 +120,26 @@ func (e *Engine) serveSFCD(ctx context.Context, st *enginemux.Stream) {
 			return
 		}
 		e.answer(st, f.Purpose, engineops.Reply{OpID: q.OpID, Result: engineops.Applied})
+	case sfcp.EngineExec:
+		var q struct {
+			engineops.Request
+			ExecID string
+		}
+		dec := json.NewDecoder(bytes.NewReader(body))
+		dec.DisallowUnknownFields()
+		if req.Op != "kill" || dec.Decode(&q) != nil || q.ExecID == "" {
+			e.refuse(st, f.Purpose, req.OpID)
+			return
+		}
+		result, reason := e.killExec(q.ExecID)
+		if result != engineops.Applied {
+			e.answer(st, f.Purpose, engineops.Reply{OpID: q.OpID, Result: result, Reason: reason})
+			return
+		}
+		e.answer(st, f.Purpose, struct {
+			engineops.Reply
+			Tree string `json:",omitempty"`
+		}{engineops.Reply{OpID: q.OpID, Result: engineops.Applied}, "ended"})
 	default:
 		e.refuse(st, f.Purpose, req.OpID)
 	}

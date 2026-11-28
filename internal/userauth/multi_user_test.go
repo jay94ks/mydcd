@@ -297,9 +297,9 @@ func TestMultiUserPasswordIdleRebindAndSelfCredentialActualRuntime(t *testing.T)
 		t.Fatal(ctx.Err())
 	case <-timer.C:
 	}
-	self, err := c.Query(ctx, target, session, "my-credentials", "")
-	if err != nil || self.SelfCredentials == nil || self.SelfCredentials.ID != "alice" {
-		t.Fatal("original password session after idle", self.Code, err)
+	self, err := c.MyCredentials(ctx, target, session)
+	if err != nil || self.ID != "alice" {
+		t.Fatal("original password session after idle", err)
 	}
 	conn, err = c.Mesh.Dial(ctx, target)
 	if err != nil || conn.PeerChallenge() == oldChallenge {
@@ -314,7 +314,7 @@ func TestMultiUserPasswordIdleRebindAndSelfCredentialActualRuntime(t *testing.T)
 	remote := c
 	remote.Mesh = newMesh(peer)
 	remote.Peers = []sfcp.Peer{peer}
-	if _, err = remote.Query(ctx, peer, session, "my-credentials", ""); err != nil {
+	if _, err = remote.MyCredentials(ctx, peer, session); err != nil {
 		t.Fatal("original session on fresh network connection", err)
 	}
 	mutate := func(s access.Session, id, action string, expected uint64, payload any) Reply {
@@ -334,10 +334,10 @@ func TestMultiUserPasswordIdleRebindAndSelfCredentialActualRuntime(t *testing.T)
 	if r := mutate(session, "revoke-idle-original", "revoke-session", session.AccountRevision, control.SessionRevocation{User: session.User, Session: session.ID}); r.Result == nil || r.Result.Code != state.Applied {
 		t.Fatal("revoke exact idle session", r.Code)
 	}
-	if _, err = c.Query(ctx, target, session, "my-credentials", ""); err == nil {
+	if _, err = c.MyCredentials(ctx, target, session); err == nil {
 		t.Fatal("revoked idle session survived Unix request")
 	}
-	if _, err = remote.Query(ctx, peer, session, "my-credentials", ""); err == nil {
+	if _, err = remote.MyCredentials(ctx, peer, session); err == nil {
 		t.Fatal("revoked idle session rebound on QUIC")
 	}
 	session, err = c.LoginCredential(ctx, target, "alice", access.Password, "password", password)
@@ -374,7 +374,7 @@ func TestMultiUserPasswordIdleRebindAndSelfCredentialActualRuntime(t *testing.T)
 	if r := mutate(session, "own-browser", "add-credential", session.AccountRevision, addition); r.Result == nil || r.Result.Code != state.Applied {
 		t.Fatal("own browser key", r.Code)
 	}
-	if _, err = c.Query(ctx, target, session, "my-credentials", ""); err == nil {
+	if _, err = c.MyCredentials(ctx, target, session); err == nil {
 		t.Fatal("old account session survived credential change")
 	}
 	keyToken, err := c.LoginCredential(ctx, target, "carol", access.Token, "own-key", readToken)
@@ -393,12 +393,12 @@ func TestMultiUserPasswordIdleRebindAndSelfCredentialActualRuntime(t *testing.T)
 	if err != nil {
 		t.Fatal("new browser credential login", err)
 	}
-	owned, err := c.Query(ctx, target, keySession, "my-credentials", "")
-	if err != nil || owned.SelfCredentials == nil || owned.SelfCredentials.ID != "alice" || owned.SelfCredentials.Revision != keySession.AccountRevision || owned.SelfCredentials.Revision <= session.AccountRevision {
+	owned, err := c.MyCredentials(ctx, target, keySession)
+	if err != nil || owned.ID != "alice" || owned.Revision != keySession.AccountRevision || owned.Revision <= session.AccountRevision {
 		t.Fatal("REQ-26 own account revision after key addition", err)
 	}
 	foundBrowser := false
-	for _, credential := range owned.SelfCredentials.Credentials {
+	for _, credential := range owned.Credentials {
 		foundBrowser = foundBrowser || credential.ID == "browser" && credential.Enabled && credential.PublicKey == browser.Public
 	}
 	if !foundBrowser {
@@ -407,7 +407,7 @@ func TestMultiUserPasswordIdleRebindAndSelfCredentialActualRuntime(t *testing.T)
 	if r := mutate(keySession, "disable-browser", "disable-credential", keySession.AccountRevision, access.CredentialDisable{User: "alice", Credential: "browser"}); r.Result == nil || r.Result.Code != state.Applied {
 		t.Fatal("self disable", r.Code)
 	}
-	if _, err = c.Query(ctx, target, keySession, "my-credentials", ""); err == nil {
+	if _, err = c.MyCredentials(ctx, target, keySession); err == nil {
 		t.Fatal("self-disabled credential retained a session")
 	}
 	if _, err = c.Login(ctx, target, "alice", browser.Private); err == nil {
@@ -417,8 +417,8 @@ func TestMultiUserPasswordIdleRebindAndSelfCredentialActualRuntime(t *testing.T)
 	if err != nil {
 		t.Fatal("remaining password credential lost", err)
 	}
-	info, err := c.Query(ctx, target, fresh, "my-credentials", "")
-	if err != nil || info.SelfCredentials == nil || info.SelfCredentials.Credentials[0].ID == "" {
+	info, err := c.MyCredentials(ctx, target, fresh)
+	if err != nil || len(info.Credentials) == 0 || info.Credentials[0].ID == "" {
 		t.Fatal("own public credentials", err)
 	}
 	encoded, _ := json.Marshal(info)
@@ -430,7 +430,7 @@ func TestMultiUserPasswordIdleRebindAndSelfCredentialActualRuntime(t *testing.T)
 	if r := mutate(fresh, "revoke-original", "revoke-session", fresh.AccountRevision, control.SessionRevocation{User: fresh.User, Session: fresh.ID}); r.Result == nil || r.Result.Code != state.Applied {
 		t.Fatal("self revoke", r.Code)
 	}
-	if _, err = remote.Query(ctx, peer, fresh, "my-credentials", ""); err == nil {
+	if _, err = remote.MyCredentials(ctx, peer, fresh); err == nil {
 		t.Fatal("revoked session rebound on another connection")
 	}
 }

@@ -144,7 +144,8 @@ export interface OpReply {
 
 // ── 서버 ────────────────────────────────────────────────
 
-export type NodePhase = 'ready' | 'joining' | 'isolated' | 'removing' | 'problem' | 'unknown';
+/** waiting: 이번 조회에서 서버가 2초 안에 답하지 않아 그 전 값을 보임(R18) */
+export type NodePhase = 'ready' | 'joining' | 'isolated' | 'removing' | 'problem' | 'unknown' | 'waiting';
 export interface Usage {
   used: number;
   total: number;
@@ -156,6 +157,10 @@ export interface NodeView {
   systemAddress?: string;
   key?: string;
   phase: NodePhase;
+  /** 단계가 오류(problem)일 때 그 사유(사람이 읽는 글) */
+  phaseReason?: string;
+  /** 오류가 이어진 시작 시각(ISO, 관리자만) */
+  failingSince?: string;
   voter: boolean;
   leader: boolean;
   /** 작업 공간 보기라 역할을 받지 못함(데몬 #373) */
@@ -486,7 +491,7 @@ export interface SecretView {
   keys: string[];
   group?: string;
   revision: number;
-  /** sfcd 객체 ID(이전 데몬은 path 끝)와 부모 ID(뿌리는 작업 공간 이름) */
+  /** sfcd 객체 ID(이전 데몬은 path 끝)와 부모 ID(최상위는 작업 공간 이름) */
   id: string;
   parent: string;
   status: 'active' | 'password-pending' | 'revoking' | 'retired' | 'reference-pending';

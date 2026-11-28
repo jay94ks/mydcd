@@ -19,8 +19,9 @@ func moduleInput(d checker.SourceDescriptor, pin checker.ModulePin) bool {
 }
 
 func (c Client) moduleReply(target sfcp.Peer, d checker.SourceDescriptor, pin checker.ModulePin, reply Reply) (checker.ModuleFact, error) {
-	fact := reply.CheckerModule
-	if reply.Code != "ok" || reply.Tenant != d.Tenant || reply.Node != hex.EncodeToString(target.Key[:]) || reply.CheckerSource != nil || fact == nil || fact.Verify() != nil || fact.Cluster != c.Cluster || fact.Owner != [32]byte(target.Key) || fact.Tenant != d.Tenant || fact.Module != pin {
+	var value checker.ModuleFact
+	fact := &value
+	if reply.Code != "ok" || len(reply.Data) == 0 || strict(reply.Data, fact) != nil || reply.Node != hex.EncodeToString(target.Key[:]) || fact.Verify() != nil || fact.Cluster != c.Cluster || fact.Owner != [32]byte(target.Key) || fact.Tenant != d.Tenant || fact.Module != pin {
 		return checker.ModuleFact{}, sfcp.ErrAdmission
 	}
 	return fact.Clone(), nil
@@ -32,7 +33,11 @@ func (c Client) StageCheckerModule(ctx context.Context, target sfcp.Peer, sessio
 	}
 	d = d.Clone()
 	pin := archive.Pin
-	reply, err := c.stageCheckerArtifact(ctx, target, session, Request{CheckerUpload: c.checkerUpload, Method: "checker-module-stage", Tenant: d.Tenant, CheckerSource: &d, CheckerModule: &pin}, archive.ZIP)
+	request, err := c.checkerRequest(CheckerModuleStageMethod.Name, d, &pin)
+	if err != nil {
+		return checker.ModuleFact{}, err
+	}
+	reply, err := c.stageCheckerArtifact(ctx, target, session, request, archive.ZIP)
 	if err != nil {
 		return checker.ModuleFact{}, err
 	}
@@ -44,7 +49,11 @@ func (c Client) RecoverCheckerModule(ctx context.Context, target sfcp.Peer, sess
 		return checker.ModuleFact{}, sfcp.ErrAdmission
 	}
 	d = d.Clone()
-	body, err := requestBody(Request{CheckerUpload: c.checkerUpload, Method: "checker-module-recover", Tenant: d.Tenant, CheckerSource: &d, CheckerModule: &pin})
+	request, err := c.checkerRequest(CheckerModuleRecoverMethod.Name, d, &pin)
+	if err != nil {
+		return checker.ModuleFact{}, err
+	}
+	body, err := requestBody(request)
 	if err != nil {
 		return checker.ModuleFact{}, err
 	}

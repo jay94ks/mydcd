@@ -15,8 +15,8 @@ sfcli --tenant tenant-a build list source
 있어야 한다. job ID와 삭제 이력은 재사용하지 않으며 tenant당 미종결 job은 최대128개다.
 
 User purpose8 `image-build-job-plan` 요청은
-`{Tenant,ImageBuildJob:{ID,Context,Version:[32]}}`다. 공통 Schema/Nonce/Session proof를
-사용하며 `Reply.ImageBuildJobPlan`은 `{Schema:1,Spec,Change,RootRevision,Epoch,Index,Uses?}`다.
+Params `{Tenant,Query:{ID,Context,Version:[32]}}`다. 공통 Schema/Nonce/Session proof를
+사용하며 응답 `Data`는 `{Schema:1,Spec,Change,RootRevision,Epoch,Index,Uses?}`다.
 Spec은 `Schema,Cluster,Tenant,ID,Version,Number,Scope,Seal,Context,Policy,ContextRevision,PolicyRevision,RegistryAuthority,RegistryGeneration,RegistrySpec,Commit?,CreatedAt`이다.
 컨텍스트의 공개 ARG와 Vault 참조는 포함하되 Secret·Git/Docker 자격의 값은 포함하지 않는다.
 Spec metadata는24KiB 이내다. version의 원 Dockerfile 경로를 사용하며 현재 context의

@@ -24,7 +24,7 @@ func validID(s string) bool {
 var replacedFields = map[string][]string{
 	"put-registry":          {"Spec"},
 	"put-external-registry": {"Spec"},
-	"vault-move":            {"Parent"}, "vault-approval-age": {"Seconds"},
+	"vault-move":            {"Parent"}, "vault-approval-age": {"Seconds"}, "vault-registry-shared": {"Shared"},
 	"set-volume-capacity":     {"Bytes"},
 	"set-lifecycle-policy":    {"Enabled", "Build", "Execution", "Resolver", "CompiledCacheBytes"},
 	"reconfigure-tun-network": {"Target"},

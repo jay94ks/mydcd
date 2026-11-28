@@ -149,6 +149,12 @@ func (m *Manager) inspectNetwork(ctx context.Context, key string, resource recon
 	if !matchBridge(got.Network, s, id) {
 		return BridgeLease{}, client.NetworkInspectResult{}, engine.ErrOwnership
 	}
+	// An applied Bridge with no pending operation never reaches the driver's
+	// Inspect, so after a restart this is where the engine hooks learn it
+	// again; otherwise every container join is answered not-ready.
+	if m.driver.Hooks != nil && resource.Present {
+		m.driver.Hooks.Adopt(got.Network.ID, key, resource.Generation, s.MTU)
+	}
 	return BridgeLease{Key: key, NetworkID: got.Network.ID, NetworkName: got.Network.Name, Spec: s}, got, nil
 }
 func (m *Manager) Return(l BridgeLease) error { return m.journal.Return(l.Key, l.Consumer, l.Pin) }

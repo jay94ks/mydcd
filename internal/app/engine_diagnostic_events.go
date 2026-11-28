@@ -19,6 +19,7 @@ import (
 	"github.com/jay94ks/seafield/internal/reconcile"
 	"github.com/jay94ks/seafield/internal/schema"
 	"github.com/jay94ks/seafield/internal/storage"
+	"github.com/jay94ks/seafield/internal/workload"
 	"github.com/moby/moby/api/types/events"
 )
 
@@ -69,7 +70,7 @@ func (r *Runtime) ownedDockerEvent(ctx context.Context, message events.Message) 
 		if !resource.Present {
 			continue
 		}
-		id, err := r.docker.Identity("container", key, resource)
+		id, err := r.docker.Identity("container", key, workload.TaskIdentityResource(resource))
 		if err == nil && id.Matches(labels["name"], labels) {
 			generation = resource.Generation
 			out.Name = id.Name

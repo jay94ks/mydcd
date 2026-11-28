@@ -16,6 +16,12 @@ type ServerVersion struct {
 	Protocol  uint8
 	Commit    string `json:",omitempty"`
 	BuildTime string `json:",omitempty"`
+	// Features are what this sfcd announces (buildinfo written names), and
+	// ClusterFeatures what every server of its Raft configuration announces
+	// as it last saw them: the features the cluster may use now
+	// (devel/design/upgrades.md 3-3 rule 9). Empty for the major's baseline.
+	Features        []string `json:",omitempty"`
+	ClusterFeatures []string `json:",omitempty"`
 }
 
 func localServerVersion() ServerVersion {

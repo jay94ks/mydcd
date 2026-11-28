@@ -305,19 +305,22 @@ type storageRow struct {
 	// CapacityBytes: most bytes its fixed volumes may reserve; 0 = no limit.
 	CapacityBytes uint64 `json:"capacityBytes"`
 	// Default: the root the server registered for itself (id "default").
-	Default    bool   `json:"default"`
-	Generation uint64 `json:"generation"`
-	Revision   uint64 `json:"revision"`
-	Draining   bool   `json:"draining"`
-	Attested   bool   `json:"attested"`
-	Closed     bool   `json:"closed"`
-	Volumes    *int   `json:"volumes,omitempty"`
+	Default bool `json:"default"`
+	// ArchiveDefault: the server's default Volume archive location
+	// (set-node-archive-default); store left out of an archive goes here.
+	ArchiveDefault bool   `json:"archiveDefault"`
+	Generation     uint64 `json:"generation"`
+	Revision       uint64 `json:"revision"`
+	Draining       bool   `json:"draining"`
+	Attested       bool   `json:"attested"`
+	Closed         bool   `json:"closed"`
+	Volumes        *int   `json:"volumes,omitempty"`
 }
 
 func newStorageRow(r sfc.StorageRoot) storageRow {
 	d := r.Definition
 	return storageRow{Node: d.Node, ID: d.ID, Path: d.Path, Tenants: append([]string{}, d.Tenants...), AllTenants: d.AllTenants, CapacityBytes: d.CapacityBytes, Default: d.ID == nodestorage.DefaultRootID,
-		Generation: r.Generation, Revision: r.Revision, Draining: r.Draining, Attested: r.Attestation != nil, Closed: r.Closed != nil}
+		Generation: r.Generation, Revision: r.Revision, Draining: r.Draining, ArchiveDefault: r.ArchiveDefault, Attested: r.Attestation != nil, Closed: r.Closed != nil}
 }
 
 func storageRows(ctx context.Context, c sfc.Conn, items []sfc.StorageRoot) []storageRow {

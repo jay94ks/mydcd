@@ -8,9 +8,9 @@ builder digest로 묶어 여러 job이 같은 cache를 재사용해도 중복 �
 사용자 요청은 기존 `image-builds`의 새 part다.
 
 ```text
-Request = {Schema:1,Method:"image-builds",Nonce:[32],Tenant,
-           ImageBuild:{Part:"caches",ID?:context,Node?:node,Upload:""},After?}
-Reply.ImageBuild = {Schema:1,Tenant,Part:"caches",RootRevision,Epoch,
+Request = {Schema:1,Method:"image-builds",Nonce:[32],Params:{Tenant,
+           Query:{Part:"caches",ID?:context,Node?:node,Upload:""},After?}}
+Reply.Data = {Schema:1,Tenant,Part:"caches",RootRevision,Epoch,
   InventoryRoot:[32],Next?,Caches:[{
     Cache:[32],Owner:[32],RepresentativeSnapshot:[32],
     Node,Context,Root,Builder,RepresentativeJob,RootGeneration,

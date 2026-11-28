@@ -594,7 +594,7 @@ function LoginsCard({ creds, local }: { creds?: OwnCredentials; local: StoredKey
           )}
         </Load>
       )}
-      <Link to="/system/operations/web" className="small">
+      <Link to="/system/ops/web" className="small">
         전체 기록 (작업 기록 › 웹)
       </Link>
     </Card>
@@ -804,7 +804,7 @@ function PrefsCard() {
             ))}
           </select>
         </Field>
-        <Field label="화면 밝기">
+        <Field label="화면 테마">
           <select value={v.theme} onChange={(e) => set('theme', e.target.value as UiPrefs['theme'])} disabled={!st.data}>
             <option value="system">시스템 설정 따름</option>
             <option value="light">밝게</option>
@@ -821,7 +821,7 @@ function PrefsCard() {
             ))}
           </select>
         </Field>
-        <Field label="표 밀도">
+        <Field label="표 줄 간격">
           <select value={v.density} onChange={(e) => set('density', e.target.value as UiPrefs['density'])} disabled={!st.data}>
             <option value="normal">보통</option>
             <option value="compact">좁게</option>

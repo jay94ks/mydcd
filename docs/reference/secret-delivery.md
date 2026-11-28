@@ -17,10 +17,11 @@ services:
         gid: "10001"
         mode: "0400"
     x-sfc:
-      secrets_from: [group/application-secrets]
-      secret_env:
-        - source: database-password
-          name: APP_DB_PASSWORD
+      secrets:
+        from: [group/application-secrets]
+        env:
+          - source: database-password
+            name: APP_DB_PASSWORD
 secrets:
   signing-key:
     x-sfc: {key: SIGNING_KEY}
@@ -28,7 +29,7 @@ secrets:
     x-sfc: {key: DB_PASSWORD}
 ```
 
-`source`는 top-level `secrets` 별칭이다. `secrets_from`은 순서대로 병합할 Secret/Group 목록이며 마지막 키가 이긴다. 외부 Secret 별칭도 기존 이름 해석·승인 규칙을 따른다. 별칭이나 키가 없으면 다른 값으로 대체하지 않는다.
+`source`는 top-level `secrets` 별칭이다. `x-sfc.secrets.from`은 순서대로 병합할 Secret/Group 목록이며 마지막 키가 이긴다. 외부 Secret 별칭도 기존 이름 해석·승인 규칙을 따른다. 별칭이나 키가 없으면 다른 값으로 대체하지 않는다.
 
 ## 파일
 
@@ -38,7 +39,7 @@ secrets:
 
 ## 환경 변수
 
-서비스의 `x-sfc.secret_env`는 `{source, name}` 목록이다. `name`은 최대 256바이트의 `[A-Za-z_][A-Za-z0-9_]*`이며 중복을 허용하지 않는다. 일반 `environment`에 같은 이름이 있으면 `SECRET_ENV_CONFLICT`, 잘못된 이름/중복은 `INVALID_SECRET_ENV`, 없는 별칭/키는 `SECRET_BINDING_REQUIRED`로 계획을 거부한다.
+서비스의 `x-sfc.secrets.env`는 `{source, name}` 목록이다. `name`은 최대 256바이트의 `[A-Za-z_][A-Za-z0-9_]*`이며 중복을 허용하지 않는다. 일반 `environment`에 같은 이름이 있으면 `SECRET_ENV_CONFLICT`, 잘못된 이름/중복은 `INVALID_SECRET_ENV`, 없는 별칭/키는 `SECRET_BINDING_REQUIRED`로 계획을 거부한다.
 
 값은 UTF-8·NUL 없음·키당 최대 64KiB이며 실제 환경 전체는 1MiB 이하다. 바이너리 개인키 등은 파일 공급을 사용한다. Secret은 이미지의 같은 이름 기본 환경 값을 교체하고, 앱의 일반 환경 값과 충돌하면 거부한다. 보호 projection은 데몬 소유 0600으로 보관하고 컨테이너에 마운트하지 않는다. Docker create에서만 값을 읽어 native 설정을 만들며 공유 Process/Task recipe·Raft·계획·관리 응답에는 값을 복사하지 않는다.
 

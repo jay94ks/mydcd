@@ -68,17 +68,7 @@ func verifyTunnelReconnectUserNative(t *testing.T, ctx context.Context, source, 
 		if err := source.storeNodeObservation(sfcp.Identity(source.Identity.Public), raw); err != nil {
 			t.Fatal(err)
 		}
-		other, known := source.Mesh.Peer(sfcp.Identity(second.Identity.Public))
-		if !known {
-			t.Fatal("other control missing")
-		}
-		conn, err := source.Mesh.Dial(ctx, other)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err = conn.Report(ctx, sfcp.KindNodeObservation, raw); err != nil {
-			t.Fatal("actual signed down observation relay", err)
-		}
+		// The other control reads it over the Topic channel when queried.
 	}
 	if !found {
 		t.Fatal("actual down PairID not captured")

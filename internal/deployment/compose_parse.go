@@ -206,9 +206,11 @@ func (c *Compose) normalize() error {
 		c.Sfc.Schema = 1
 	}
 	for name, s := range c.Services {
-		image, e := access.PinImage(s.Image)
+		// A tag stays a tag: it is resolved when a deployment creates its
+		// containers, never pinned in the app definition.
+		image, e := access.ParseImage(s.Image)
 		if e != nil {
-			return inputError("PINNED_IMAGE_REQUIRED", "services."+name+".image")
+			return inputError("INVALID_IMAGE", "services."+name+".image")
 		}
 		s.Image = image.Reference
 		if s.ReadOnly == nil {
@@ -363,6 +365,9 @@ func (c Compose) validate() error {
 		if err := validateServicePlacement(s); err != nil {
 			return err
 		}
+		if len(s.Sfc.Socket) != 0 {
+			return inputError("INVALID_FIELD", "services."+name+".x-sfc.secrets.socket") // sfev.sock is not served yet
+		}
 		p := "services." + name
 		if workload.ValidatePublishedPorts(s.Ports) != nil {
 			return inputError("INVALID_PUBLISHED_PORTS", p+".ports")
@@ -376,8 +381,8 @@ func (c Compose) validate() error {
 		if !identifier(name) || s.Sfc.Node != "" && !identifier(s.Sfc.Node) || s.Standalone != c.Standalone || s.ReadOnly == nil || !c.Standalone && !*s.ReadOnly || !slices.Equal(s.CapDrop, []string{"ALL"}) || !slices.Equal(s.SecurityOpt, []string{"no-new-privileges:true"}) || len(s.WorkingDir) > 1024 || s.WorkingDir != "" && !strings.HasPrefix(s.WorkingDir, "/") || s.WorkingDir != "" && (path.Clean(s.WorkingDir) != s.WorkingDir || strings.ContainsAny(s.WorkingDir, "\x00\r\n")) || !c.Standalone && (s.TTY || s.StdinOpen) || len(s.Environment) > 128 || len(s.Networks) > 16 || len(s.Volumes) > 64 || len(s.Secrets)+len(s.Sfc.SecretEnv) > 256 {
 			return inputError("INVALID_SERVICE", p)
 		}
-		if _, e := access.PinImage(s.Image); e != nil {
-			return inputError("PINNED_IMAGE_REQUIRED", p)
+		if _, e := access.ParseImage(s.Image); e != nil {
+			return inputError("INVALID_IMAGE", p)
 		}
 		if _, e := nanoCPU(s.CPUs); e != nil {
 			return inputError("INVALID_CPU", p)

@@ -20,6 +20,7 @@ import (
 	"github.com/jay94ks/seafield/internal/cluster/control"
 	"github.com/jay94ks/seafield/internal/cluster/state"
 	"github.com/jay94ks/seafield/internal/deployment"
+	"github.com/jay94ks/seafield/internal/engine"
 	"github.com/jay94ks/seafield/internal/reconcile"
 	"github.com/jay94ks/seafield/internal/schema"
 	"github.com/jay94ks/seafield/internal/storage"
@@ -368,321 +369,381 @@ func (r *Runtime) reconcileAppWorkloads(ctx context.Context, v cluster.View, app
 	if r.workload == nil {
 		return false, nil
 	}
-	for _, work := range appWorkloads(apps, r.Identity.Public) {
-		app, e, step, stage := work.app, work.execution, work.step, work.stage
-		if stage.Held() {
-			original, _ := stage.HeldSource()
-			source := deployment.ObjectRef{Key: step.Key, Revision: original.Result.Revision, Generation: original.Result.Generation}
-			binding, bound := apps.Binding(source)
-			if !bound {
-				return false, deployment.ErrInputs
-			}
-			material, err := r.controlPolicy.AppTaskMaterial(v.State, source)
-			if err != nil || material.Binding.Digest() != binding.Digest() {
-				return false, deployment.ErrInputs
-			}
-			record, err := r.workload.View(step.Key)
-			if err != nil {
+	works := appWorkloads(apps, r.Identity.Public)
+	r.forgetStaleAppInputs(works)
+	var failures []error
+	for _, work := range works {
+		progressed, err := r.reconcileAppWorkload(ctx, v, apps, work)
+		if err != nil {
+			if ctx.Err() != nil {
 				return false, err
 			}
-			reuse, err := appTaskRecipeState(record, source)
-			if err != nil || !reuse {
-				return false, deployment.ErrInputs
-			}
-			spec, err := workload.DecodeContainer(record.State.Desired.Spec)
-			taskID, idErr := deployment.ResourceIDFromKey("task", app.Tenant, app.App, step.Key)
-			if err != nil || idErr != nil || !e.MatchesTaskRecipe(taskID, material, spec) {
-				return false, deployment.ErrInputs
-			}
-			// Continue only the original local journal. No Desired(new target),
-			// image re-resolution or replacement request is manufactured here.
-			if err = r.workload.Step(ctx, step.Key); err != nil {
-				return false, err
-			}
-			status, err := r.workload.Status(ctx, step.Key)
-			if err != nil {
-				return false, err
-			}
-			if status.NativeID != stage.Previous.Native {
-				return false, deployment.ErrInputs
-			}
-			status, err = r.observeAppCheckers(ctx, v, binding, source, status)
-			if err != nil {
-				return false, err
-			}
-			if err = r.publishTaskMeasurement(v, app, original, status); err != nil {
-				return false, err
-			}
-			if r.freshAppTaskObservation(original, status) {
-				continue
-			}
-			o, err := r.appTaskObservation(app, original, status)
-			if err != nil {
-				return false, err
-			}
-			return true, r.appProgress(ctx, v, app, "observe", step.Key, &o)
+			// One app's failure must not hold back the other apps on this
+			// node: record it with its app and step and go on.
+			failures = append(failures, fmt.Errorf("app %s/%s %s %s: %w", work.app.Tenant, work.app.App, work.step.Kind, work.step.Key, err))
+			continue
 		}
-		source := deployment.ObjectRef{Key: step.Key, Generation: stage.Result.Generation, Revision: stage.Result.Revision}
-		switch step.Kind {
-		case "volume":
-			material, err := r.controlPolicy.AppVolumeMaterial(v.State, source)
+		if progressed {
+			return true, errors.Join(failures...)
+		}
+	}
+	return false, errors.Join(failures...)
+}
+
+// reconcileAppWorkload advances one owned step. It reports true after it
+// sent one progress report; the caller then starts a fresh pass.
+func (r *Runtime) reconcileAppWorkload(ctx context.Context, v cluster.View, apps control.Apps, work appWorkload) (bool, error) {
+	app, e, step, stage := work.app, work.execution, work.step, work.stage
+	if stage.Held() {
+		original, _ := stage.HeldSource()
+		source := deployment.ObjectRef{Key: step.Key, Revision: original.Result.Revision, Generation: original.Result.Generation}
+		binding, bound := apps.Binding(source)
+		if !bound {
+			return false, deployment.ErrInputs
+		}
+		material, err := r.controlPolicy.AppTaskMaterial(v.State, source)
+		if err != nil || material.Binding.Digest() != binding.Digest() {
+			return false, deployment.ErrInputs
+		}
+		record, err := r.workload.View(step.Key)
+		if err != nil {
+			return false, err
+		}
+		reuse, err := appTaskRecipeState(record, source)
+		if err != nil || !reuse {
+			return false, deployment.ErrInputs
+		}
+		spec, err := workload.DecodeContainer(record.State.Desired.Spec)
+		taskID, idErr := deployment.ResourceIDFromKey("task", app.Tenant, app.App, step.Key)
+		if err != nil || idErr != nil || !e.MatchesTaskRecipe(taskID, material, spec) {
+			return false, deployment.ErrInputs
+		}
+		// Continue only the original local journal. No Desired(new target),
+		// image re-resolution or replacement request is manufactured here.
+		if err = r.workload.Step(ctx, step.Key); err != nil {
+			return false, err
+		}
+		status, err := r.workload.Status(ctx, step.Key)
+		if err != nil {
+			return false, err
+		}
+		if status.NativeID != stage.Previous.Native {
+			return false, deployment.ErrInputs
+		}
+		status, err = r.observeAppCheckers(ctx, v, binding, source, status)
+		if err != nil {
+			return false, err
+		}
+		if err = r.publishTaskMeasurement(v, app, original, status); err != nil {
+			return false, err
+		}
+		if r.freshAppTaskObservation(original, status) {
+			return false, nil
+		}
+		o, err := r.appTaskObservation(app, original, status)
+		if err != nil {
+			return false, err
+		}
+		return true, r.appProgress(ctx, v, app, "observe", step.Key, &o)
+	}
+	source := deployment.ObjectRef{Key: step.Key, Generation: stage.Result.Generation, Revision: stage.Result.Revision}
+	switch step.Kind {
+	case "volume":
+		material, err := r.controlPolicy.AppVolumeMaterial(v.State, source)
+		if err != nil {
+			return false, err
+		}
+		key := volumes.NativeKey(material.Spec)
+		record, err := r.nativeVolumes.View(key)
+		if err != nil && !errors.Is(err, storage.ErrMissing) {
+			return false, err
+		}
+		capacity := record.Capacity
+		// A move/restore prepares an exclusive staging slot before this
+		// app owns the materialization. Its existing Applied journal must
+		// adopt the current app consumer limit as well. The local policy
+		// only detects a change; the quorum permit authorizes the resize.
+		resources, err := r.controlPolicy.Resources(v.State)
+		if err != nil {
+			return false, err
+		}
+		currentCapacity, err := appVolumeConsumerCapacity(resources.Quotas, app, step, material, r.Identity.Public)
+		if err != nil {
+			return false, err
+		}
+		capacityChanged := capacity != currentCapacity
+		if !record.State.Applied.Present || record.State.Pending != nil && record.State.Pending.Phase == reconcile.Prepared || capacityChanged {
+			raw, _ := json.Marshal(control.NativeRequest{Source: source})
+			reply, err := r.appCall(ctx, "app-native-permit", raw)
 			if err != nil {
 				return false, err
 			}
-			key := volumes.NativeKey(material.Spec)
-			record, err := r.nativeVolumes.View(key)
-			if err != nil && !errors.Is(err, storage.ErrMissing) {
-				return false, err
-			}
-			capacity := record.Capacity
-			// A move/restore prepares an exclusive staging slot before this
-			// app owns the materialization. Its existing Applied journal must
-			// adopt the current app consumer limit as well. The local policy
-			// only detects a change; the quorum permit authorizes the resize.
-			resources, err := r.controlPolicy.Resources(v.State)
-			if err != nil {
-				return false, err
-			}
-			currentCapacity, err := appVolumeConsumerCapacity(resources.Quotas, app, step, material, r.Identity.Public)
-			if err != nil {
-				return false, err
-			}
-			capacityChanged := capacity != currentCapacity
-			if !record.State.Applied.Present || record.State.Pending != nil && record.State.Pending.Phase == reconcile.Prepared || capacityChanged {
-				raw, _ := json.Marshal(control.NativeRequest{Source: source})
-				reply, err := r.appCall(ctx, "app-native-permit", raw)
-				if err != nil {
-					return false, err
-				}
-				permit, err := schema.Decode[control.NativePermit](reply.Data)
-				expected, _ := json.Marshal(material)
-				if err != nil || permit.Source != source || permit.Owner != r.Identity.Public || permit.Kind != "volume" || permit.Spec != sha256.Sum256(expected) || permit.MaxConsumers < 1 {
-					return false, deployment.ErrInputs
-				}
-				capacity = permit.MaxConsumers
-				// A previously published native volume cannot be recreated from
-				// an empty local journal, including after external reuse.
-				registry, err := r.controlPolicy.Volumes(v.State)
-				if err != nil {
-					return false, err
-				}
-				if _, exists := registry.Native(app.Tenant, app.App, material.Spec.Scope.ID); exists && record.State.LastID == 0 {
-					return false, volumes.ErrNativeVolume
-				}
-			}
-			if capacity < 1 {
+			permit, err := schema.Decode[control.NativePermit](reply.Data)
+			expected, _ := json.Marshal(material)
+			if err != nil || permit.Source != source || permit.Owner != r.Identity.Public || permit.Kind != "volume" || permit.Spec != sha256.Sum256(expected) || permit.MaxConsumers < 1 {
 				return false, deployment.ErrInputs
 			}
-			if _, err = r.nativeVolumes.Desired(material.Spec, max(source.Revision, record.State.Desired.Revision), material.Generation, capacity); err != nil {
-				return false, err
-			}
-			if err = r.nativeVolumes.Step(ctx, key); err != nil {
-				return false, err
-			}
-			ready, err := r.nativeVolumes.Ready(ctx, key, r.Identity.Private)
-			if err != nil {
-				return false, err
-			}
-			if r.freshAppObservation(stage, ready.Owner.Native, false) {
-				continue
-			}
-			o, err := r.appObservation(app, stage, ready.Owner.Native, false)
-			if err != nil {
-				return false, err
-			}
+			capacity = permit.MaxConsumers
+			// A previously published native volume cannot be recreated from
+			// an empty local journal, including after external reuse.
 			registry, err := r.controlPolicy.Volumes(v.State)
 			if err != nil {
 				return false, err
 			}
-			registered, exists := registry.Native(app.Tenant, app.App, ready.Spec.Scope.ID)
-			if appVolumeObservationOnly(stage, registered, ready, exists) {
-				// Registration is already committed. Refresh only this original
-				// owner's fact; other stages cannot starve it with root CAS churn.
-				return true, r.appProgress(ctx, v, app, "observe", step.Key, &o)
+			if _, exists := registry.Native(app.Tenant, app.App, material.Spec.Scope.ID); exists && record.State.LastID == 0 {
+				return false, volumes.ErrNativeVolume
 			}
-			report := r.newAppProgress(v, app, "volume-ready", step.Key, &o)
-			report.Volume = &ready
-			return true, r.sendAppProgress(ctx, report)
-		case "inputs":
-			service, idErr := deployment.ResourceIDFromKey("inputs", app.Tenant, app.App, step.Key)
-			if idErr != nil {
-				return false, idErr
-			}
-			task, ok := e.Stage(deployment.ResourceKey("task", app.Tenant, app.App, service))
-			if !ok || task.Result == nil {
-				continue
-			}
-			taskRef := deployment.ObjectRef{Key: task.Key, Generation: task.Result.Generation, Revision: task.Result.Revision}
-			b, ok := apps.Binding(taskRef)
-			if !ok {
-				continue
-			}
-			ref, err := r.PrepareAppInputs(ctx, control.AppBindingRequest{Task: taskRef, Digest: b.Digest()})
-			if err != nil {
-				return false, err
-			}
-			native := "projection/" + fmtBinding(ref.Binding)
-			if r.freshAppObservation(stage, native, false) {
-				continue
-			}
-			o, err := r.appObservation(app, stage, native, false)
-			if err != nil {
-				return false, err
-			}
+		}
+		if capacity < 1 {
+			return false, deployment.ErrInputs
+		}
+		if _, err = r.nativeVolumes.Desired(material.Spec, max(source.Revision, record.State.Desired.Revision), material.Generation, capacity); err != nil {
+			return false, err
+		}
+		if err = r.nativeVolumes.Step(ctx, key); err != nil {
+			return false, err
+		}
+		ready, err := r.nativeVolumes.Ready(ctx, key, r.Identity.Private)
+		if err != nil {
+			return false, err
+		}
+		if r.freshAppObservation(stage, ready.Owner.Native, false) {
+			return false, nil
+		}
+		o, err := r.appObservation(app, stage, ready.Owner.Native, false)
+		if err != nil {
+			return false, err
+		}
+		registry, err := r.controlPolicy.Volumes(v.State)
+		if err != nil {
+			return false, err
+		}
+		registered, exists := registry.Native(app.Tenant, app.App, ready.Spec.Scope.ID)
+		if appVolumeObservationOnly(stage, registered, ready, exists) {
+			// Registration is already committed. Refresh only this original
+			// owner's fact; other stages cannot starve it with root CAS churn.
 			return true, r.appProgress(ctx, v, app, "observe", step.Key, &o)
-		case "task":
-			if apps.StandaloneStopped(app.Tenant, app.App) {
-				status, err := r.workload.Status(ctx, step.Key)
-				if err != nil {
-					return false, err
-				}
-				if r.freshAppTaskObservation(stage, status) {
-					continue
-				}
-				o, err := r.appTaskObservation(app, stage, status)
-				if err != nil {
-					return false, err
-				}
-				return true, r.appProgress(ctx, v, app, "observe", step.Key, &o)
+		}
+		report := r.newAppProgress(v, app, "volume-ready", step.Key, &o)
+		report.Volume = &ready
+		return true, r.sendAppProgress(ctx, report)
+	case "inputs":
+		service, idErr := deployment.ResourceIDFromKey("inputs", app.Tenant, app.App, step.Key)
+		if idErr != nil {
+			return false, idErr
+		}
+		task, ok := e.Stage(deployment.ResourceKey("task", app.Tenant, app.App, service))
+		if !ok || task.Result == nil {
+			return false, nil
+		}
+		taskRef := deployment.ObjectRef{Key: task.Key, Generation: task.Result.Generation, Revision: task.Result.Revision}
+		b, ok := apps.Binding(taskRef)
+		if !ok {
+			return false, nil
+		}
+		request := control.AppBindingRequest{Task: taskRef, Digest: b.Digest()}
+		ref, err := r.PrepareAppInputs(ctx, request)
+		if err != nil {
+			request.At = time.Now().Unix()
+			if r.controlPolicy.AppBindingRevisionChanged(v.State, request) {
+				// A secret was updated after this deployment: the app keeps
+				// what it already has and needs a redeploy for the new value.
+				// Not an error of this pass; said once per binding.
+				r.noteStaleAppInputs(app, step.Key, b.Digest())
+				return r.observeStaleAppInputs(ctx, v, apps, app, stage, step.Key, request)
 			}
-			taskID, idErr := deployment.ResourceIDFromKey("task", app.Tenant, app.App, step.Key)
-			if idErr != nil {
-				return false, idErr
-			}
-			b, ok := apps.Binding(source)
-			if !ok {
-				service, idErr := deployment.ResourceIDFromKey("task", app.Tenant, app.App, step.Key)
-				if idErr != nil {
-					return false, idErr
-				}
-				if inputs, exists := e.Stage(deployment.ResourceKey("inputs", app.Tenant, app.App, service)); exists && (inputs.Result == nil || inputs.Result.Code != state.Applied) {
-					continue
-				}
-				return true, r.appProgress(ctx, v, app, "bind-inputs", step.Key, nil)
-			}
-			material, err := r.controlPolicy.AppTaskMaterial(v.State, source)
-			if err != nil {
-				return false, err
-			}
-			if material.Projection != nil {
-				input, ok := e.Stage(material.Projection.Key)
-				if !ok || input.Observation == nil || !input.Observation.Applied {
-					continue
-				}
-			}
-			record, err := r.workload.View(step.Key)
-			if err != nil && !errors.Is(err, storage.ErrMissing) {
-				return false, err
-			}
-			var spec workload.ContainerSpec
-			capacity := record.Capacity
-			reuse, err := appTaskRecipeState(record, source)
-			if err != nil {
-				return false, err
-			}
-			// Prepare exact source inputs outside the native actor's authority
-			// callback/lock. Cached reads remain content checked; no runner Ready
-			// is inferred from source/cache preparation or its finite build job.
-			if !reuse {
-				if err := r.queueAppCheckers(ctx, v, b, source); err != nil {
-					return false, err
-				}
-			}
-			if reuse {
-				resource := record.State.Desired.Resource
-				spec, err = workload.DecodeContainer(resource.Spec)
-				if err != nil || !e.MatchesTaskRecipe(taskID, material, spec) {
-					return false, deployment.ErrInputs
-				}
-			} else {
-				permit, err := r.appInputPermit(ctx, control.AppBindingRequest{Task: source, Digest: b.Digest()})
-				if err != nil {
-					return false, err
-				}
-				// Another app may have committed observations while the permit
-				// was read. Consume its minimum committed index now instead of
-				// comparing it with the immutable view from the loop's start.
-				authorized, err := r.Engine().Read(ctx, false)
-				if err != nil {
-					return false, err
-				}
-				if authorized.State.Index() < permit.CommandIndex {
-					return false, fmt.Errorf("task %s local index %d below permit %d: %w", step.Key, authorized.State.Index(), permit.CommandIndex, deployment.ErrInputs)
-				}
-				material, err = r.controlPolicy.AppTaskMaterial(authorized.State, source)
-				if err != nil {
-					return false, err
-				}
-				if material.Binding.Digest() != b.Digest() {
-					return false, deployment.ErrInputs
-				}
-				catalog, err := r.controlPolicy.Catalog(authorized.State)
-				if err != nil {
-					return false, err
-				}
-				capacity = permit.MaxConsumers
-				taskImage, imageErr := appTaskImage(authorized.State, source)
-				if imageErr != nil {
-					return false, imageErr
-				}
-				auth, authErr := r.appRegistryImageAuth(ctx, source, b.Digest(), taskImage)
-				if authErr != nil {
-					return false, authErr
-				}
-				spec, err = e.ResolveTask(ctx, taskID, material, catalog, r.docker, true, auth)
-				if code := deployment.PreparationFailure(err); code != "" && stage.Observation == nil {
-					// Retrying cannot change a fixed goal on a digest-pinned
-					// image; end the deployment instead of reading its source again.
-					o, oerr := r.appFailureObservation(app, stage, code)
-					if oerr != nil {
-						return false, oerr
-					}
-					log.Printf("app task %s cannot start: %v", step.Key, err)
-					return true, r.appProgress(ctx, v, app, "observe", step.Key, &o)
-				}
-				if err != nil {
-					return false, err
-				}
-				if spec.Process == nil {
-					return false, deployment.ErrInputs
-				}
-				// An earlier bare-config cache delete may be Unknown even though
-				// this exact image was loaded again. Do not publish a new recipe
-				// until that original deletion's shared admission fence is gone.
-				if _, err = r.appRegistryImagePermit(ctx, source, b.Digest(), spec.Image, spec.Process.ImageID); err != nil {
-					return false, err
-				}
-			}
-			if err = r.workload.Desired(step.Key, source.Revision, source.Generation, &spec, capacity); err != nil {
-				return false, err
-			}
-			if err = r.workload.Step(ctx, step.Key); err != nil {
-				return false, err
-			}
+			return false, err
+		}
+		r.clearStaleAppInputs(step.Key)
+		native := "projection/" + fmtBinding(ref.Binding)
+		if r.freshAppObservation(stage, native, false) {
+			return false, nil
+		}
+		o, err := r.appObservation(app, stage, native, false)
+		if err != nil {
+			return false, err
+		}
+		return true, r.appProgress(ctx, v, app, "observe", step.Key, &o)
+	case "task":
+		if apps.StandaloneStopped(app.Tenant, app.App) {
 			status, err := r.workload.Status(ctx, step.Key)
 			if err != nil {
 				return false, err
 			}
-			status, err = r.observeAppCheckers(ctx, v, b, source, status)
-			if err != nil {
-				return false, err
+			if r.freshAppTaskObservation(stage, status) {
+				return false, nil
 			}
-			gate, err := r.observeAppScopeChecks(ctx, v, b, source, status)
-			if err != nil {
-				return false, err
-			}
-			if err := r.publishTaskMeasurement(v, app, stage, status); err != nil {
-				return false, err
-			}
-			if r.freshAppTaskObservation(stage, status, gate) {
-				continue
-			}
-			o, err := r.appTaskObservation(app, stage, status, gate)
+			o, err := r.appTaskObservation(app, stage, status)
 			if err != nil {
 				return false, err
 			}
 			return true, r.appProgress(ctx, v, app, "observe", step.Key, &o)
 		}
+		taskID, idErr := deployment.ResourceIDFromKey("task", app.Tenant, app.App, step.Key)
+		if idErr != nil {
+			return false, idErr
+		}
+		b, ok := apps.Binding(source)
+		if !ok {
+			service, idErr := deployment.ResourceIDFromKey("task", app.Tenant, app.App, step.Key)
+			if idErr != nil {
+				return false, idErr
+			}
+			if inputs, exists := e.Stage(deployment.ResourceKey("inputs", app.Tenant, app.App, service)); exists && (inputs.Result == nil || inputs.Result.Code != state.Applied) {
+				return false, nil
+			}
+			return true, r.appProgress(ctx, v, app, "bind-inputs", step.Key, nil)
+		}
+		material, err := r.controlPolicy.AppTaskMaterial(v.State, source)
+		if err != nil {
+			return false, err
+		}
+		if material.Projection != nil {
+			input, ok := e.Stage(material.Projection.Key)
+			if !ok || input.Observation == nil || !input.Observation.Applied {
+				return false, nil
+			}
+		}
+		record, err := r.workload.View(step.Key)
+		if err != nil && !errors.Is(err, storage.ErrMissing) {
+			return false, err
+		}
+		var spec workload.ContainerSpec
+		capacity := record.Capacity
+		reuse, err := appTaskRecipeState(record, source)
+		if err != nil {
+			return false, err
+		}
+		// Prepare exact source inputs outside the native actor's authority
+		// callback/lock. Cached reads remain content checked; no runner Ready
+		// is inferred from source/cache preparation or its finite build job.
+		if !reuse {
+			if err := r.queueAppCheckers(ctx, v, b, source); err != nil {
+				return false, err
+			}
+		}
+		if reuse {
+			resource := record.State.Desired.Resource
+			spec, err = workload.DecodeContainer(resource.Spec)
+			if err != nil || !e.MatchesTaskRecipe(taskID, material, spec) {
+				return false, deployment.ErrInputs
+			}
+		} else {
+			permit, err := r.appInputPermit(ctx, control.AppBindingRequest{Task: source, Digest: b.Digest()})
+			if err != nil {
+				return false, err
+			}
+			// Another app may have committed observations while the permit
+			// was read. Consume its minimum committed index now instead of
+			// comparing it with the immutable view from the loop's start.
+			authorized, err := r.Engine().Read(ctx, false)
+			if err != nil {
+				return false, err
+			}
+			if authorized.State.Index() < permit.CommandIndex {
+				return false, fmt.Errorf("task %s local index %d below permit %d: %w", step.Key, authorized.State.Index(), permit.CommandIndex, deployment.ErrInputs)
+			}
+			material, err = r.controlPolicy.AppTaskMaterial(authorized.State, source)
+			if err != nil {
+				return false, err
+			}
+			if material.Binding.Digest() != b.Digest() {
+				return false, deployment.ErrInputs
+			}
+			catalog, err := r.controlPolicy.Catalog(authorized.State)
+			if err != nil {
+				return false, err
+			}
+			capacity = permit.MaxConsumers
+			taskImage, imageErr := appTaskImage(authorized.State, source)
+			if imageErr != nil {
+				return false, imageErr
+			}
+			// A tag is made from the deploy's digest, or from this
+			// server's copy when the deploy could not resolve it.
+			local := ""
+			if tag, ok := deployment.TagReference(taskImage); ok {
+				local, _ = r.imageTags.Get(app.Tenant, tag)
+			}
+			image, tag, failure := e.TaskImageFor(taskImage, local)
+			if failure != "" && stage.Observation == nil {
+				o, oerr := r.appFailureObservation(app, stage, failure)
+				if oerr != nil {
+					return false, oerr
+				}
+				log.Printf("app task %s cannot start: image %s: %s", step.Key, taskImage, failure)
+				return true, r.appProgress(ctx, v, app, "observe", step.Key, &o)
+			}
+			if image.Digest != "" {
+				taskImage = image.Digest
+			}
+			var auth engine.RegistryAuth
+			if image.Source == "" {
+				var authErr error
+				if auth, authErr = r.appRegistryImageAuth(ctx, source, b.Digest(), taskImage); authErr != nil {
+					return false, authErr
+				}
+			} else {
+				log.Printf("app task %s: image %s: %s, using this server's copy %s", step.Key, tag, image.Source, image.Digest)
+			}
+			spec, err = e.ResolveTask(ctx, taskID, material, catalog, r.docker, image.Source == "", image, auth)
+			if err == nil && tag != "" && image.Source == "" {
+				if err := r.imageTags.Set(app.Tenant, tag, image.Digest, time.Now()); err != nil {
+					log.Printf("app task %s: remembering image %s: %v", step.Key, tag, err)
+				}
+			}
+			if code := deployment.PreparationFailure(err); code != "" && stage.Observation == nil {
+				// Retrying cannot change a fixed goal on a digest-pinned
+				// image; end the deployment instead of reading its source again.
+				o, oerr := r.appFailureObservation(app, stage, code)
+				if oerr != nil {
+					return false, oerr
+				}
+				log.Printf("app task %s cannot start: %v", step.Key, err)
+				return true, r.appProgress(ctx, v, app, "observe", step.Key, &o)
+			}
+			if err != nil {
+				return false, err
+			}
+			if spec.Process == nil {
+				return false, deployment.ErrInputs
+			}
+			// An earlier bare-config cache delete may be Unknown even though
+			// this exact image was loaded again. Do not publish a new recipe
+			// until that original deletion's shared admission fence is gone.
+			if _, err = r.appRegistryImagePermit(ctx, source, b.Digest(), spec.Image, spec.Process.ImageID); err != nil {
+				return false, err
+			}
+		}
+		if err = r.workload.Desired(step.Key, source.Revision, source.Generation, &spec, capacity); err != nil {
+			return false, err
+		}
+		if err = r.workload.Step(ctx, step.Key); err != nil {
+			return false, err
+		}
+		status, err := r.workload.Status(ctx, step.Key)
+		if err != nil {
+			return false, err
+		}
+		status, err = r.observeAppCheckers(ctx, v, b, source, status)
+		if err != nil {
+			return false, err
+		}
+		gate, err := r.observeAppScopeChecks(ctx, v, b, source, status)
+		if err != nil {
+			return false, err
+		}
+		if err := r.publishTaskMeasurement(v, app, stage, status); err != nil {
+			return false, err
+		}
+		if r.freshAppTaskObservation(stage, status, gate) {
+			return false, nil
+		}
+		o, err := r.appTaskObservation(app, stage, status, gate)
+		if err != nil {
+			return false, err
+		}
+		return true, r.appProgress(ctx, v, app, "observe", step.Key, &o)
 	}
 	return false, nil
 }
@@ -711,4 +772,73 @@ func appVolumeConsumerCapacity(quotas tenancy.Quotas, app control.AppView, step 
 		return 0, deployment.ErrInputs
 	}
 	return min(global.MaxConsumers, scoped.MaxConsumers), nil
+}
+
+// noteStaleAppInputs logs once per inputs step and binding that its secret was updated
+// after the deployment, so the operator knows a redeploy applies it.
+func (r *Runtime) noteStaleAppInputs(app control.AppView, step string, digest [32]byte) {
+	r.inputPermitMu.Lock()
+	defer r.inputPermitMu.Unlock()
+	if r.staleInputs == nil {
+		r.staleInputs = map[string][32]byte{}
+	}
+	if seen, ok := r.staleInputs[step]; ok && seen == digest {
+		return
+	}
+	r.staleInputs[step] = digest
+	log.Printf("app %s/%s %s: a secret was updated after this deployment; the running app keeps its current value until the app is deployed again", app.Tenant, app.App, step)
+}
+
+// clearStaleAppInputs forgets step once its inputs are current again, so a
+// later secret update is said again.
+func (r *Runtime) clearStaleAppInputs(step string) {
+	r.inputPermitMu.Lock()
+	defer r.inputPermitMu.Unlock()
+	delete(r.staleInputs, step)
+}
+
+// forgetStaleAppInputs keeps only the steps this node still owns, so the
+// log-once record stays as large as the current inputs steps.
+func (r *Runtime) forgetStaleAppInputs(works []appWorkload) {
+	r.inputPermitMu.Lock()
+	defer r.inputPermitMu.Unlock()
+	if len(r.staleInputs) == 0 {
+		return
+	}
+	owned := make(map[string]bool, len(works))
+	for _, work := range works {
+		owned[work.step.Key] = true
+	}
+	for step := range r.staleInputs {
+		if !owned[step] {
+			delete(r.staleInputs, step)
+		}
+	}
+}
+
+// observeStaleAppInputs keeps the inputs step's observation of the files
+// already published for request while they still exist. Nothing is read or
+// written again.
+func (r *Runtime) observeStaleAppInputs(ctx context.Context, v cluster.View, apps control.Apps, app control.AppView, stage deployment.StageRecord, step string, request control.AppBindingRequest) (bool, error) {
+	source, ok := apps.BindingSource(request.Digest)
+	if !ok || source.Inputs.Key == "" {
+		return false, nil
+	}
+	store, err := r.appProjectionStore()
+	if err != nil {
+		return false, err
+	}
+	gone, err := store.Gone(workload.InputRef{Key: source.Inputs.Key, Generation: request.Task.Generation, Binding: request.Digest})
+	if err != nil || gone {
+		return false, err
+	}
+	native := "projection/" + fmtBinding(request.Digest)
+	if r.freshAppObservation(stage, native, false) {
+		return false, nil
+	}
+	o, err := r.appObservation(app, stage, native, false)
+	if err != nil {
+		return false, err
+	}
+	return true, r.appProgress(ctx, v, app, "observe", step, &o)
 }

@@ -534,6 +534,30 @@ type gatewaysFile struct {
 	Local    *ingress.Gateway `yaml:"local,omitempty"`
 }
 
+// balanceFile is balance.yaml: `version: 1` and one route balance, in the
+// same shape as an app.yaml route's `balance`.
+type balanceFile struct{ ingress.Balance }
+
+func (f *balanceFile) UnmarshalYAML(n *yaml.Node) error {
+	if n.Kind != yaml.MappingNode {
+		return errors.New("balance.yaml must be a mapping")
+	}
+	rest := *n
+	rest.Content = nil
+	version := ""
+	for i := 0; i+1 < len(n.Content); i += 2 {
+		if n.Content[i].Value == "version" {
+			version = n.Content[i+1].Value
+			continue
+		}
+		rest.Content = append(rest.Content, n.Content[i], n.Content[i+1])
+	}
+	if version != "1" {
+		return errors.New("balance.yaml needs version: 1")
+	}
+	return rest.Decode(&f.Balance)
+}
+
 func decodeYAMLFile(c *cli.Context, path string, limit int, v any) error {
 	raw, err := readInputFile(c, path, limit)
 	if err != nil {
@@ -658,6 +682,7 @@ func ingressBalanceCommand(g *globals) *cli.Command {
 		Args:  "APP ROUTE",
 		Short: "Set how a route spreads requests over its backends",
 		Long: `Replaces the load balancing of one route with balance.yaml, for example:
+  version: 1
   method: weighted
   weights: {v1: 90, v2: 10}
 The app.yaml route keeps its own setting; this one wins until changed.`,
@@ -673,10 +698,11 @@ The app.yaml route keeps its own setting; this one wins until changed.`,
 			if file == "" {
 				return cli.Usagef("balance needs -f balance.yaml")
 			}
-			var b ingress.Balance
-			if err := decodeYAMLFile(c, file, 32<<10, &b); err != nil {
+			var f balanceFile
+			if err := decodeYAMLFile(c, file, 32<<10, &f); err != nil {
 				return err
 			}
+			b := f.Balance
 			if err := b.Validate(); err != nil {
 				return fmt.Errorf("%s: %w", file, err)
 			}

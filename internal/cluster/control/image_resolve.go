@@ -44,7 +44,13 @@ type ImageResolveRead struct {
 	Query    ImageResolveQuery
 	Resolver [32]byte
 	Target   ImageResolveTarget
+	// Deploy, instead of Session, authorizes a deploy resolving its own
+	// tags: the app's running operation still waits for them and names
+	// Query.Ref.
+	Deploy *ImageResolveDeploy `json:",omitempty"`
 }
+
+type ImageResolveDeploy struct{ App, Operation string }
 type ImageResolveResult struct {
 	Normalized, Kind, Source, Code string
 	Trust                          ImageTrustCheck
@@ -139,6 +145,33 @@ func (p Policy) PlanImageResolve(s state.State, session access.Session, at int64
 	return ImageResolveRead{Session: session, Tenant: tenant, Query: q, Resolver: resolver, Target: target}, nil
 }
 
+// PlanDeployImageResolve plans a deploy's resolution of one of its own tags.
+// Only the app's running operation, while it still waits for its tags, may
+// resolve, and only tags its tasks name; the reader is the deploy, not a user.
+func (p Policy) PlanDeployImageResolve(s state.State, at int64, tenant string, d ImageResolveDeploy, q ImageResolveQuery, resolver [32]byte) (ImageResolveRead, error) {
+	p, err := p.Current(s)
+	if err != nil {
+		return ImageResolveRead{}, err
+	}
+	c, err := p.Catalog(s)
+	if err != nil {
+		return ImageResolveRead{}, err
+	}
+	a, err := p.readOnlyApps(s)
+	if err != nil {
+		return ImageResolveRead{}, err
+	}
+	e, ok := a.Execution(tenant, d.App)
+	if !q.Valid() || !ok || e.ActiveOperation() != d.Operation || !e.ImagesPending() || !slices.Contains(e.TagImages(), q.Ref) {
+		return ImageResolveRead{}, access.ErrDenied
+	}
+	target, err := p.imageResolveTarget(s, c, at, tenant, q.Ref, resolver)
+	if err != nil {
+		return ImageResolveRead{}, err
+	}
+	return ImageResolveRead{Tenant: tenant, Query: q, Resolver: resolver, Target: target, Deploy: &d}, nil
+}
+
 // User reads and accepted build jobs share selection, revocation, trust and
 // source-reader ownership. Their authentication remains at their callers.
 func (p Policy) imageResolveTarget(s state.State, c access.Catalog, at int64, tenant, ref string, resolver [32]byte) (ImageResolveTarget, error) {
@@ -201,7 +234,9 @@ func (p Policy) imageResolveTarget(s state.State, c access.Catalog, at int64, te
 					if entry.Reader == nil || entry.Reader.Draining {
 						target.Code = "SOURCE_NOT_READY"
 					} else {
-						selection := ExternalRegistryReadSelection{Tenant: tenant, ID: entry.Spec.ID, Generation: entry.Reader.Generation}
+						// The reader belongs to the source's owner: a cluster-owned
+						// source is read through its cluster reader for any workspace.
+						selection := ExternalRegistryReadSelection{Tenant: entry.Spec.Tenant, ID: entry.Spec.ID, Generation: entry.Reader.Generation}
 						target.External = &selection
 						target.Owner = entry.Reader.Owner
 						work, cause := p.ExternalRegistryWork(s, entry.Reader.Owner, ExternalRegistryWorkRequest{Selection: selection, At: at})
@@ -235,7 +270,13 @@ func (p Policy) imageResolveTarget(s state.State, c access.Catalog, at int64, te
 }
 
 func (p Policy) CurrentImageResolve(s state.State, read ImageResolveRead, at int64) (ImageResolveRead, error) {
-	current, err := p.PlanImageResolve(s, read.Session, at, read.Tenant, read.Query, read.Resolver)
+	var current ImageResolveRead
+	var err error
+	if read.Deploy != nil {
+		current, err = p.PlanDeployImageResolve(s, at, read.Tenant, *read.Deploy, read.Query, read.Resolver)
+	} else {
+		current, err = p.PlanImageResolve(s, read.Session, at, read.Tenant, read.Query, read.Resolver)
+	}
 	if err != nil || !current.Target.Same(read.Target) {
 		return ImageResolveRead{}, access.ErrDenied
 	}

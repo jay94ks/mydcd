@@ -54,3 +54,31 @@ func TestKeygenSignVerify(t *testing.T) {
 		t.Fatal("signed a bundle with two manifests")
 	}
 }
+
+func TestSignFileVerifyFile(t *testing.T) {
+	dir := t.TempDir()
+	key := filepath.Join(dir, "release.key")
+	if err := keygen([]string{"-out", key}); err != nil {
+		t.Fatal(err)
+	}
+	sums := filepath.Join(dir, "SHA256SUMS")
+	if err := os.WriteFile(sums, []byte("00  sfcd_0.1.0_amd64.deb\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := signFile([]string{"-key", key, "-file", sums}); err != nil {
+		t.Fatal(err)
+	}
+	pub := filepath.Join(dir, "release.pub")
+	if err := verifyFile([]string{"-pub", pub, "-file", sums}); err != nil {
+		t.Fatal(err)
+	}
+	if err := verifyFile([]string{"-builtin", "-file", sums}); err == nil {
+		t.Fatal("a key sfcd does not build in verified")
+	}
+	if err := os.WriteFile(sums, []byte("11  sfcd_0.1.0_amd64.deb\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := verifyFile([]string{"-pub", pub, "-file", sums}); err == nil {
+		t.Fatal("a changed SHA256SUMS verified")
+	}
+}

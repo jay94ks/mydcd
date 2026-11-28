@@ -174,4 +174,16 @@ func TestRemoteMountsEndToEnd(t *testing.T) {
 	if _, err := os.Stat(dir); !os.IsNotExist(err) {
 		t.Fatal("mount point left", err)
 	}
+	// A sweep on a read older than the last grant keeps the root; one
+	// after it, with no consumer left, stops serving it.
+	none := func(volumes.NativeReady) bool { return false }
+	if n := home.Sweep(time.Now().Add(-time.Hour), none); n != 0 {
+		t.Fatal("swept a root granted after the read", n)
+	}
+	if n := home.Sweep(time.Now(), none); n != 1 {
+		t.Fatal("unused root kept", n)
+	}
+	if _, err := m.Hold(ctx, remote.Spec{Scope: scope, Consumer: volumes.Consumer{ID: "late", Generation: 1, Writable: true, Runner: "node-b", RunnerKey: "00"}, Home: hk}); err == nil {
+		t.Fatal("unknown consumer granted")
+	}
 }

@@ -115,6 +115,9 @@ type Change struct {
 	Key, Action, Reason string
 	Current             ObjectRef
 	Retain              bool
+	// Interruption, for a replaced Task, says why its service stops while
+	// it is replaced (InterruptionCodes); "" when other replicas serve.
+	Interruption string `json:",omitempty"`
 }
 
 func sameConfig(claim Claim, step Step) bool {
@@ -219,15 +222,22 @@ func (a Inventory) Changes(b Blueprint, prune bool) ([]Change, error) {
 		}
 		out = append(out, Change{Key: old.Step.Key, Action: action, Current: ObjectRef{old.Step.Key, old.Result.Revision, old.Result.Generation}, Retain: old.Step.Retain})
 	}
+	annotateInterruptions(b.d.Steps, out)
 	slices.SortFunc(out, func(x, y Change) int { return strings.Compare(x.Key, y.Key) })
 	return out, nil
 }
 
 func (a Inventory) Begin(expected uint64, c access.Catalog, ctx PlanningContext, b Blueprint, id, submitter string, epoch uint64, prune bool) (Inventory, error) {
-	return a.begin(expected, c, ctx, b, id, submitter, epoch, prune, nil)
+	return a.begin(expected, c, ctx, b, id, submitter, epoch, prune, nil, false)
 }
 
-func (a Inventory) begin(expected uint64, c access.Catalog, ctx PlanningContext, b Blueprint, id, submitter string, epoch uint64, prune bool, moved []volumes.Binding) (Inventory, error) {
+// BeginDeploy is Begin for an explicit user deploy (begin-app). It also
+// replaces an edited Task kept alone on its node (DeployReplacementPlan).
+func (a Inventory) BeginDeploy(expected uint64, c access.Catalog, ctx PlanningContext, b Blueprint, id, submitter string, epoch uint64, prune bool) (Inventory, error) {
+	return a.begin(expected, c, ctx, b, id, submitter, epoch, prune, nil, true)
+}
+
+func (a Inventory) begin(expected uint64, c access.Catalog, ctx PlanningContext, b Blueprint, id, submitter string, epoch uint64, prune bool, moved []volumes.Binding, edits bool) (Inventory, error) {
 	if expected != a.d.Revision || !a.scope(b) || a.d.Stopping || a.d.Retirement != nil || len(a.d.History) >= 127 || epoch < a.d.MinEpoch[submitter] {
 		return a, ErrInputs
 	}
@@ -255,7 +265,7 @@ func (a Inventory) begin(expected uint64, c access.Catalog, ctx PlanningContext,
 				return a, inputError("TRANSITION_REQUIRED", change.Key)
 			}
 		}
-		plan, err := a.ReplacementPlan(b, prune)
+		plan, err := a.replacementPlan(b, prune, edits)
 		if err != nil {
 			return a, err
 		}

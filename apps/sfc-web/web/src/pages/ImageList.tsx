@@ -277,11 +277,11 @@ const COLS: { key: string; label: string; off?: string }[] = [
   { key: 'size', label: '크기' },
   { key: 'at', label: '올린 시각' },
   { key: 'used', label: '쓰는 앱' },
-  { key: 'platform', label: '플랫폼', off: '레이어 보기(UI-89) 뒤에 채웁니다' },
+  { key: 'platform', label: '플랫폼', off: '레이어 보기 뒤에 채웁니다' },
   {
     key: 'layers',
     label: '레이어 수',
-    off: '레이어 보기(UI-89) 뒤에 채웁니다',
+    off: '레이어 보기 뒤에 채웁니다',
   },
   { key: 'build', label: '빌드 번호', off: '빌드 뒤에 채웁니다' },
 ];

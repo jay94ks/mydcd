@@ -247,3 +247,29 @@ func Unmount(path string) error {
 	}
 	return nil
 }
+
+// MakeRootDir makes sub (control.ValidDiskSubPath) under mount, each missing
+// part 0700, without leaving the mounted filesystem and without following a
+// symlink. An existing directory is kept as it is.
+func MakeRootDir(mount, sub string) error {
+	fd, err := unix.Openat2(unix.AT_FDCWD, mount, &unix.OpenHow{Flags: unix.O_RDONLY | unix.O_DIRECTORY | unix.O_CLOEXEC, Resolve: unix.RESOLVE_NO_SYMLINKS | unix.RESOLVE_NO_MAGICLINKS})
+	if err != nil {
+		return refuse("mount-path", "open "+mount+": "+err.Error())
+	}
+	if sub == "" {
+		return unix.Close(fd)
+	}
+	for _, part := range strings.Split(sub, "/") {
+		if err := unix.Mkdirat(fd, part, 0o700); err != nil && !errors.Is(err, unix.EEXIST) {
+			_ = unix.Close(fd)
+			return refuse("mount-path", "create "+part+" under "+mount+": "+err.Error())
+		}
+		next, err := unix.Openat2(fd, part, &unix.OpenHow{Flags: unix.O_RDONLY | unix.O_DIRECTORY | unix.O_CLOEXEC, Resolve: unix.RESOLVE_BENEATH | unix.RESOLVE_NO_SYMLINKS | unix.RESOLVE_NO_MAGICLINKS | unix.RESOLVE_NO_XDEV})
+		_ = unix.Close(fd)
+		if err != nil {
+			return refuse("mount-path", mount+"/"+sub+" is not a plain directory on that disk: "+err.Error())
+		}
+		fd = next
+	}
+	return unix.Close(fd)
+}

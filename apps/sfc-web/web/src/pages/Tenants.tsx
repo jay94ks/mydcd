@@ -576,7 +576,7 @@ function NodesTab({ tenant, revision, allowed, readOnly, onDone }: { tenant: str
   ];
   return (
     <div className="grid-2">
-      <Card title="허용 서버·사용 한도 (UI-16)" actions={<Refresh q={limits} poll={false} />}>
+      <Card title="허용 서버·사용 한도" actions={<Refresh q={limits} poll={false} />}>
         {allowed === undefined && <div className="note">서버 기능 대기 · 허용 서버 목록은 sfcd가 아직 알려 주지 않아 허용 칸을 보여 주거나 바꿀 수 없습니다. 사용 한도는 바꿀 수 있습니다.</div>}
         <Load q={limits}>
           {() =>
@@ -602,7 +602,7 @@ function NodesTab({ tenant, revision, allowed, readOnly, onDone }: { tenant: str
                       return (
                         <tr key={n}>
                           <td>{n}</td>
-                          <td>{allowed === undefined ? <span className="muted" title="REQ-32 대기">모름</span> : admin ? <input type="checkbox" aria-label={`${n} 허용`} checked={e.on} onChange={(x) => set(n, { on: x.target.checked })} /> : e.on ? '허용' : '—'}</td>
+                          <td>{allowed === undefined ? <span className="muted" title="서버가 아직 알려 주지 않습니다">모름</span> : admin ? <input type="checkbox" aria-label={`${n} 허용`} checked={e.on} onChange={(x) => set(n, { on: x.target.checked })} /> : e.on ? '허용' : '—'}</td>
                           {admin && e.on ? (
                             <>
                               <td>

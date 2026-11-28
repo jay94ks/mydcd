@@ -4,7 +4,7 @@
 - 키·digest 같은 고정 길이 바이트(`[32]byte`)는 hex 문자열, 가변 바이트(`[]byte`)는 base64, 시각은 sfcd가 준 Unix 초 정수 그대로다. 웹이 만든 시각(`asOf`, `expiresAt`, 작업 기록 시각)은 RFC 3339 UTC다.
 - 쿠키 `sfc_web_session`: HttpOnly, SameSite=Strict, Path=/, 기본 Secure. 값은 서버 세션 ID이며 DB에는 해시만 남는다.
 - GET이 아닌 모든 `/api/` 요청은 헤더 `X-SFC-Web: 1`이 필요하다. 없거나 `Origin`이 다른 호스트면 403 `csrf`.
-- 화면 파일: `/api/` 밖의 GET은 화면 빌드에서 찾고, 없으면 `index.html`을 준다(화면 경로를 새로고침해도 된다. `/system/domains/example.com`처럼 점이 들어 있어도 같다). `assets/` 아래에 없는 파일만 진짜 404다.
+- 화면 파일: `/api/` 밖의 GET은 화면 빌드에서 찾고, 없으면 `index.html`을 준다(화면 경로를 새로고침해도 된다. `/system/domains/example.com`처럼 점이 들어 있어도 같다). `assets/` 아래에 없는 파일만 진짜 404다. `index.html`은 화면 언어를 `<html lang="ko|en">`에 넣어 준다. 순서: 쿠키 `sfc_lang_user`(로그인한 계정의 기본 언어, 화면이 적고 로그아웃 때 지움) → 쿠키 `sfc_lang`(이 브라우저의 언어) → `Accept-Language`(품질 순으로 처음 맞는 `ko*`·`en*`) → `en`. 응답에 `Content-Language`, `Vary: Accept-Language, Cookie`가 붙는다. 화면은 `document.documentElement.lang`을 처음 언어로 쓴다(CSP `script-src 'self'`라 인라인 값은 쓰지 않는다). 한국어가 아니면 그 언어 문구 묶음 `assets/lang-<언어>-<해시>.js`가 정확히 하나 있을 때 `<link rel="modulepreload">`를 `</head>` 앞에 넣는다.
 - 보안 헤더: CSP `default-src 'self'; script-src 'self'; ...`(외부·inline script 금지), `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`. API 응답은 `Cache-Control: no-store`.
 - 요청 본문은 알 수 없는 필드를 거부한다. 본문 최대 8 MiB(app.yaml 4 MiB).
 

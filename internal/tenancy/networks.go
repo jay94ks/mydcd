@@ -345,6 +345,18 @@ func (n Networks) RetireSystem(p NetworkClosure) (Networks, error) {
 	return n.retire(p)
 }
 
+// RetireDrained removes one drained workspace network member on its own
+// server's signed closure. A user already drained it (drain-network, with
+// cleanup permission); the server only settles that drain once its native
+// sources are gone, so a delete finishes without the client that started it.
+func (n Networks) RetireDrained(p NetworkClosure) (Networks, error) {
+	v, ok := n.networks[key(p.Tenant, p.Network)]
+	if p.Tenant == "" || !ok || v.System {
+		return n, ErrPolicy
+	}
+	return n.retire(p)
+}
+
 func (n Networks) retire(p NetworkClosure) (Networks, error) {
 	if ch, exists := n.changes[key(p.Tenant, p.Network)]; exists && changeActive(ch) {
 		return n, ErrPolicy

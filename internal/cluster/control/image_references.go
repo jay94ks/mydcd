@@ -259,7 +259,7 @@ func (p Policy) ImageReferences(s state.State, tenant, node string) ([]ImageRefe
 		if !job.Run.Terminal() {
 			row := base
 			row.Kind = "image-build-builder"
-			row.Image = spec.Policy.BuilderImage
+			row.Image = job.Run.BuilderImage()
 			if err := add(row); err != nil {
 				return nil, err
 			}

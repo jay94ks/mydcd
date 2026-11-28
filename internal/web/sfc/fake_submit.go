@@ -340,6 +340,8 @@ func (c *fakeConn) apply(op UserOperation, actor string, next uint64) (bool, err
 		return true, c.applyNetworkChange(op, actor, next)
 	case ActionBeginVolumeMove:
 		return true, c.applyVolumeMove(op, actor, next)
+	case ActionArchiveVolume, ActionCancelArchive, ActionUnarchiveVolume, ActionDiscardArchive, ActionSetArchiveAdminKey:
+		return true, c.applyVolumeArchive(op, actor, next)
 	case ActionRotateLedger:
 		var v control.LedgerWindow
 		if decodePayload(ch.Payload, &v) != nil {

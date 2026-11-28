@@ -20,11 +20,7 @@ import (
 // stored or logged here; userauth wipes its encoded copy after sending.
 
 func (c *realConn) WriteVault(ctx context.Context, tenant string, receiver config.Peer, q SecretWrite) (SecretWriteReply, error) {
-	reply, err := c.secretInput(ctx, receiver, userauth.SecretRequest{Realm: q.Realm, ID: q.ID, Mode: q.Mode, Values: q.Values})
-	if err != nil {
-		return SecretWriteReply{}, err
-	}
-	return SecretWriteReply{Code: reply.Code, Observation: reply.VaultObservation}, nil
+	return c.secretInput(ctx, receiver, userauth.SecretRequest{Realm: q.Realm, ID: q.ID, Mode: q.Mode, Values: q.Values})
 }
 
 func (c *realConn) ApproveVault(ctx context.Context, tenant string, approver config.Peer, q VaultApprove) (string, error) {

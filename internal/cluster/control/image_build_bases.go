@@ -55,16 +55,19 @@ func (p Policy) ImageBuildBaseRead(s state.State, caller [32]byte, q ImageBuildB
 		return ImageBuildBaseRead{}, access.ErrInvalid
 	}
 	work, err := p.ImageBuildJobWork(s, caller, ImageBuildJobWorkQuery{Tenant: q.Tenant, ID: q.Job, At: q.At})
-	if err != nil || !work.Allowed || work.Run.Spec.Digest() != q.Snapshot || !slices.Contains(work.Run.Spec.Policy.Platforms, q.Source.Platform) {
+	// The builder runs on the node's own platform, not a target platform.
+	builder := q.Source.Kind == imagebuild.BuilderKind
+	if err != nil || !work.Allowed || work.Run.Spec.Digest() != q.Snapshot || builder && q.Source.Reference != work.Run.Spec.Policy.BuilderImage || !builder && !slices.Contains(work.Run.Spec.Policy.Platforms, q.Source.Platform) {
 		return ImageBuildBaseRead{}, access.ErrDenied
 	}
 	reference := q.Source.Reference
 	if work.Run.Phase != "queued" {
-		index := slices.IndexFunc(work.Run.Inputs, func(input imagebuild.FrozenSource) bool { return input.Source == q.Source })
+		frozen := work.Run.Frozen()
+		index := slices.IndexFunc(frozen, func(input imagebuild.FrozenSource) bool { return input.Source == q.Source })
 		if index < 0 {
 			return ImageBuildBaseRead{}, access.ErrDenied
 		}
-		reference = work.Run.Inputs[index].Image
+		reference = frozen[index].Image
 	}
 	c, err := p.Catalog(s)
 	if err != nil {

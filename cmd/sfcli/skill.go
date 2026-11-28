@@ -14,7 +14,7 @@ import (
 // share/sfc beside the bin directory (/usr/local/share/sfc/SKILL.md).
 func skillCandidates(exe string) []string {
 	dir := filepath.Dir(exe)
-	return []string{filepath.Join(dir, "SKILL.md"), filepath.Join(dir, "..", "share", "sfcli", "SKILL.md")}
+	return []string{filepath.Join(dir, "SKILL.md"), filepath.Join(dir, "..", "share", "sfc", "SKILL.md")}
 }
 
 // skillPath is the installed SKILL.md, or "" with the place a package puts it.

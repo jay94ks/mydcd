@@ -40,6 +40,8 @@ func (r *Runtime) networkConsumerPermit(ctx context.Context, key string, d recon
 		return network.ConsumerBudget{}, view, projection, sfcp.ErrAdmission
 	}
 	kind, owner := "bridge", ""
+	// The permit hashes the committed source, not a TUN's local layout.
+	committed := committedSpecDigest(d.Resource.Spec)
 	if spec, err := network.DecodeBridge(d.Resource.Spec); err == nil && !spec.Lifecycle.Drain {
 		owner = spec.Owner
 	} else if spec, err := network.DecodeTunnel(d.Resource.Spec); err == nil && !spec.Lifecycle.Drain {
@@ -60,7 +62,7 @@ func (r *Runtime) networkConsumerPermit(ctx context.Context, key string, d recon
 		return network.ConsumerBudget{}, view, projection, err
 	}
 	permit, err := schema.Decode[control.NativePermit](reply.Data)
-	if err != nil || reply.Local || reply.Schema != 1 || reply.Code != "ok" || permit.Source != ref || permit.Owner != r.Identity.Public || permit.Kind != kind || permit.Spec != sha256.Sum256([]byte(d.Resource.Spec)) || permit.MaxConsumers < 1 || permit.MaxConsumers > 65536 {
+	if err != nil || reply.Local || reply.Schema != 1 || reply.Code != "ok" || permit.Source != ref || permit.Owner != r.Identity.Public || permit.Kind != kind || permit.Spec != committed || permit.MaxConsumers < 1 || permit.MaxConsumers > 65536 {
 		return network.ConsumerBudget{}, view, projection, sfcp.ErrAdmission
 	}
 	if permit.Consumers == nil || !permit.Consumers.Valid() || permit.Consumers.Scope.Owner != r.owner || permit.Consumers.Scope.Node != r.installation.record.Root.Self.ID || permit.MaxConsumers != min(permit.Consumers.NodeMaxConsumers, permit.Consumers.TenantMaxConsumers) {
@@ -75,4 +77,19 @@ func (r *Runtime) networkConsumerPermit(ctx context.Context, key string, d recon
 		return network.ConsumerBudget{}, view, projection, err
 	}
 	return *permit.Consumers, view, projection, nil
+}
+
+// committedSpecDigest hashes a journal spec as the cluster committed it. A
+// tenant TUN's journal holds its local layout (network.LocalHostRoutes), while
+// permits and app references carry the digest of the committed source.
+func committedSpecDigest(raw string) [32]byte {
+	spec, err := network.DecodeTunnel(raw)
+	if err != nil || len(spec.HostRoutes) == 0 && len(spec.HostSources) == 0 {
+		return sha256.Sum256([]byte(raw))
+	}
+	b, err := json.Marshal(spec.CommittedLayout())
+	if err != nil {
+		return sha256.Sum256([]byte(raw))
+	}
+	return sha256.Sum256(b)
 }

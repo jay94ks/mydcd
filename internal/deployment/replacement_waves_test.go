@@ -21,7 +21,22 @@ func replacementPlanFixture(t *testing.T) (Inventory, Blueprint) {
 
 func replacementCoreFixture(t *testing.T) (Inventory, Blueprint, *fixture, PlanningContext) {
 	t.Helper()
+	return replacementEditFixture(t, nil, func(input Compose) {
+		web := input.Services["web"]
+		web.Image = strings.ReplaceAll(web.Image, strings.Repeat("a", 64), strings.Repeat("b", 64))
+		input.Services["web"] = web
+	})
+}
+
+// replacementEditFixture deploys the original app (after prepare, if any),
+// then applies edit to its input and compiles the edited target against the
+// same claims.
+func replacementEditFixture(t *testing.T, prepare, edit func(Compose)) (Inventory, Blueprint, *fixture, PlanningContext) {
+	t.Helper()
 	f, input, ctx := replicaFixture(t)
+	if prepare != nil {
+		prepare(input)
+	}
 	i := &IngressDeclaration{Node: "node-a", Host: "app.test", Listeners: []ListenerDeclaration{{Address: "192.0.2.11:8080"}}, Runtime: IngressRuntime{MaxRequests: 2, MaxConnections: 8, MaxHeaderBytes: 4096, MaxBodyBytes: 1 << 20, BufferBytes: 128 << 10, RequestTimeoutMS: 30000, DialTimeoutMS: 1000, ResponseHeaderTimeoutMS: 2000, HealthIntervalMS: 100}}
 	i.Backend.Service, i.Backend.Port, i.Backend.HealthPath = "web", 8080, "/readyz"
 	input.Sfc.Ingress = i
@@ -62,9 +77,7 @@ func replacementCoreFixture(t *testing.T) (Inventory, Blueprint, *fixture, Plann
 		}
 	}
 	slices.SortFunc(inventory.d.Claims, func(a, b Claim) int { return strings.Compare(a.Step.Key, b.Step.Key) })
-	web := input.Services["web"]
-	web.Image = strings.ReplaceAll(web.Image, strings.Repeat("a", 64), strings.Repeat("b", 64))
-	input.Services["web"] = web
+	edit(input)
 	target, err := CompileApp(input, f.c, ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -111,6 +124,34 @@ func TestReplacementPlanUsesExactNativeClosureAndLeavesOtherNodeUntouched(t *tes
 	again, err := inventory.ReplacementPlan(target, false)
 	if err != nil || again.Waves[0].Targets[0].Generation == plan.Waves[0].Targets[0].Generation {
 		t.Fatal("preflight aliases mutable inventory state")
+	}
+}
+
+// A single Task kept on its node is replaced in one wave on that node. Before,
+// only replicas or a relocation got a plan, so editing one service's command
+// was refused as TRANSITION_REQUIRED on every redeploy.
+func TestReplacementPlanCoversOneTaskEditedOnItsNode(t *testing.T) {
+	inventory, target, _, _ := replacementEditFixture(t, func(input Compose) {
+		web := input.Services["web"]
+		web.Sfc.Node, web.Sfc.Nodes, web.Sfc.PerNode = "node-a", nil, 0
+		input.Services["web"] = web
+	}, func(input Compose) {
+		web := input.Services["web"]
+		web.Command = &Arguments{"php-fpm", "--nodaemonize"}
+		input.Services["web"] = web
+	})
+	key := ResourceKey("task", "tenant", "php-mysql", "web")
+	if old, err := inventory.ReplacementPlan(target, false); err != nil || old != nil {
+		t.Fatal("CD/drain plan changed", old, err)
+	}
+	plan, err := inventory.DeployReplacementPlan(target, false)
+	if err != nil || plan == nil || !plan.Valid("tenant", "php-mysql") || plan.BlockedCode != "" || len(plan.Waves) != 1 || !slices.Equal(plan.Waves[0].Tasks, []string{key}) {
+		t.Fatal("one edited Task got no replacement plan", plan, err)
+	}
+	for _, ref := range plan.Waves[0].Targets {
+		if ref.Key == ResourceKey("task", "tenant", "php-mysql", "db") {
+			t.Fatal("unchanged database stopped", ref)
+		}
 	}
 }
 

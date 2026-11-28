@@ -19,7 +19,7 @@ import (
 func findVaultObject(ctx context.Context, c sfc.Conn, tenant, id string) (sfc.VaultView, error) {
 	after := ""
 	for {
-		p, err := c.Vault(ctx, tenant, after)
+		p, err := screenVault(ctx, c, tenant, after)
 		if err != nil {
 			return sfc.VaultView{}, err
 		}

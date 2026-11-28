@@ -7,7 +7,7 @@ import { api } from '../api/client';
 export interface UiPrefs {
   /** IANA 시간대. 비면 브라우저 시간대 */
   timeZone?: string;
-  /** 화면 밝기(캔버스 v224 DarkTheme). 기본은 시스템 설정 따름 */
+  /** 화면 테마(캔버스 v224 DarkTheme). 기본은 시스템 설정 따름 */
   theme?: 'system' | 'light' | 'dark';
   /** 자동 갱신 기본 주기(초). 0 = 멈춤 */
   pollSeconds?: number;
@@ -35,7 +35,7 @@ let themeMq: MediaQueryList | undefined;
 const followSystem = () => {
   document.documentElement.dataset.theme = themeMq?.matches ? 'dark' : 'light';
 };
-/** 화면 밝기를 적용한다. 'system'이면 운영 체제 설정이 바뀔 때도 따라간다 */
+/** 화면 테마를 적용한다. 'system'이면 운영 체제 설정이 바뀔 때도 따라간다 */
 export function applyTheme(t: Theme | undefined) {
   try {
     const want: Theme = t === 'light' || t === 'dark' ? t : 'system';
@@ -66,7 +66,7 @@ export function applyStoredTheme() {
   applyTheme(t === 'light' || t === 'dark' ? t : 'system');
 }
 
-/** 받은 값을 화면에 적용한다: 시간대·기본 갱신 주기는 다음 그리기부터, 표 밀도·밝기는 바로 */
+/** 받은 값을 화면에 적용한다: 시간대·기본 갱신 주기는 다음 그리기부터, 표 줄 간격·밝기는 바로 */
 export function applyPrefs(p: UiPrefs) {
   current = { ...p, timeZone: validTimeZone(p.timeZone) };
   try {

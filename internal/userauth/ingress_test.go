@@ -22,7 +22,7 @@ func TestIngressesRequestCarriesOnlyItsQuery(t *testing.T) {
 	}
 	for name, r := range map[string]Request{
 		"tenant field":  {Schema: 1, Method: "ingresses", Tenant: "other", Params: params},
-		"target user":   {Schema: 1, Method: "ingresses", TargetUser: "other", Params: params},
+		"target user":   {Schema: 1, Method: "ingresses", After: "other", Params: params},
 		"secret":        {Schema: 1, Method: "ingresses", Secret: []byte("private"), Params: params},
 		"bad part":      {Schema: 1, Method: "ingresses", Params: json.RawMessage(`{"Part":"everything"}`)},
 		"unknown field": {Schema: 1, Method: "ingresses", Params: json.RawMessage(`{"Part":"mappings","Admin":true}`)},

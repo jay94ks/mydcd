@@ -82,7 +82,64 @@ func vpsHostKeyCheck(pinned []byte, seen *[]byte) ssh.HostKeyCallback {
 	}
 }
 
+// vpsProtectedPackages are what iwinv's Ubuntu images need to keep their
+// network and DNS (the vendor's warning, plus dhcpcd-base and
+// systemd-networkd that do DHCP on 26.04; plan X23): removing any of them,
+// or a package they depend on, cuts the server off. One that is not on the
+// image is left absent, never installed (Jay 2026-11-28).
+var vpsProtectedPackages = []string{"iproute2", "isc-dhcp", "initscripts", "systemd-resolved", "dhcpcd-base", "systemd-networkd"}
+
+// vpsRemovesPackages reports whether command would remove packages. The SSH
+// installer never removes any: a removal (autoremove above all) can take a
+// protected package or one it depends on with it, so every command is
+// refused before it reaches the server. Removing Docker by package name,
+// should it ever be needed, must first prove with a simulated run that no
+// protected package goes with it.
+func vpsRemovesPackages(command string) bool {
+	fields := strings.FieldsFunc(command, func(r rune) bool { return r == ' ' || r == '\t' || r == ';' || r == '&' || r == '|' || r == '\n' })
+	for i, f := range fields {
+		switch f {
+		case "autoremove", "autopurge":
+			return true
+		case "remove", "purge":
+			if i > 0 && (strings.HasSuffix(fields[i-1], "apt") || strings.HasSuffix(fields[i-1], "apt-get") || strings.HasPrefix(fields[i-1], "-")) {
+				return true
+			}
+		case "-r", "-P", "--remove", "--purge":
+			if i > 0 && strings.HasSuffix(fields[i-1], "dpkg") {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// vpsInstallsProtected reports whether command installs a protected package
+// (isc-dhcp-client and the like included), which must stay as the image has it.
+func vpsInstallsProtected(command string) bool {
+	fields := strings.FieldsFunc(command, func(r rune) bool { return r == ' ' || r == '\t' || r == ';' || r == '&' || r == '|' || r == '\n' })
+	install := false
+	for _, f := range fields {
+		switch {
+		case f == "install" || f == "reinstall":
+			install = true
+		case strings.HasSuffix(f, "apt") || strings.HasSuffix(f, "apt-get") || strings.HasSuffix(f, "dpkg"):
+			install = false
+		case install:
+			for _, p := range vpsProtectedPackages {
+				if strings.HasPrefix(f, p) {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
 func (s sshShell) Run(ctx context.Context, command string, stdin io.Reader) ([]byte, error) {
+	if vpsRemovesPackages(command) || vpsInstallsProtected(command) {
+		return nil, fmt.Errorf("refusing to change packages on a VPS: %v stay as the image has them", vpsProtectedPackages)
+	}
 	session, err := s.c.NewSession()
 	if err != nil {
 		return nil, err

@@ -1,0 +1,25 @@
+#!/bin/sh
+# SPDX-License-Identifier: Apache-2.0
+# Never enables or starts a unit on first install, never touches another
+# package (devel/design/install-packages.md 3, 5).
+set -e
+if [ "$1" = configure ]; then
+	if [ -d /run/systemd/system ]; then
+		systemctl daemon-reload || true
+		# Upgrade: restart only what runs (P-c). sfed keeps containers alive
+		# across its restart (live-restore).
+		if [ -n "$2" ]; then
+			deb-systemd-invoke try-restart sfed.service sfcd.service || true
+		fi
+	fi
+	if [ -z "$2" ]; then
+		cat <<'MSG'
+sfcd is installed but not enabled. Next steps:
+  1. write /etc/sfc/node.yaml (examples in /usr/share/doc/sfcd/examples)
+  2. sfcd --config /etc/sfc/node.yaml check
+  3. sfcd --config /etc/sfc/node.yaml init ...   (or join ...)
+  4. systemctl enable --now sfed sfcd
+MSG
+	fi
+fi
+exit 0

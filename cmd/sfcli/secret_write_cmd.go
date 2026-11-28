@@ -291,7 +291,7 @@ func (g *globals) startSecretWrite(c *cli.Context, s *session, f *changeFlags, r
 		if intent.Request.Object != q.Object || intent.Request.Kind != q.Kind {
 			return cli.ExitError{Code: 1, Err: fmt.Errorf("operation %s is already used by another write", q.ID)}
 		}
-		fmt.Fprintf(c.Err, "Continuing write %s.\n", q.ID)
+		fmt.Fprintf(c.Err, "Continuing write %s. It keeps the values it was started with; values given now are not used. For new values, run again with a new --id (or none).\n", q.ID)
 		return g.finishSecretWrite(c, s, intent, true, values)
 	case !errors.Is(err, userauth.ErrOperationMissing):
 		return err
@@ -309,7 +309,7 @@ func (g *globals) startSecretWrite(c *cli.Context, s *session, f *changeFlags, r
 		if plan.Request.Object != q.Object || plan.Request.Kind != q.Kind {
 			return cli.ExitError{Code: 1, Err: fmt.Errorf("write %s already exists on the server for %s; pick another --id", q.ID, plan.Request.Object)}
 		}
-		fmt.Fprintf(c.Err, "Write %s was started elsewhere; following it without sending values again.\n", q.ID)
+		fmt.Fprintf(c.Err, "Write %s was started elsewhere; following it without sending values again. Values given now are not used; for new values, run again with a new --id (or none).\n", q.ID)
 		if err = g.recordRealm(s, "secret-write", summary, q.ID, realm); err != nil {
 			return err
 		}
@@ -588,15 +588,20 @@ func secretPutCommand(g *globals) *cli.Command {
 	return &cli.Command{
 		Name:  "put",
 		Args:  "NAME [KEY...]",
-		Short: "Write values of a secret to the external Vault",
+		Short: "Write new values of a secret (builtin vault or external Vault)",
 		Long: `Writes the named keys (all keys of the secret when none are named). Each
 value comes from --file KEY=PATH, or from standard input when it is not a
 terminal and one key is left, or else from a hidden prompt. Values are raw
-bytes; nothing is trimmed. The object in the external Vault is replaced:
-keys not named are left out of it.
+bytes; nothing is trimmed. The values go to the secret's profile: the
+builtin vault on the voters, or the external Vault object, which is
+replaced (keys not named are left out of it). Each put makes a new
+revision; running apps keep the revision they started with until they are
+deployed again.
 
 If the reply is lost, run 'sfcli op resume ID': a value that may have reached
-the writer node is never sent again.`,
+the writer node is never sent again. Running put again with the same --id
+continues that write with its original values; the values given then are
+not used.`,
 		Flags: func(fs *flag.FlagSet) {
 			v.register(fs)
 			f.register(fs, false, true)

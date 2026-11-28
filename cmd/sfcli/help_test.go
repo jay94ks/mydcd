@@ -58,7 +58,7 @@ func TestImageCommandHelp(t *testing.T) {
 		"build --help":            {"context", "draft", "run", "cache", "policy"},
 		"build context --help":    {"upload", "versions", "cat"},
 		"build draft --help":      {"put", "freeze"},
-		"build policy set --help": {"builder_image", "concurrency"},
+		"build policy set --help": {"builder:", "concurrency"},
 	} {
 		var out, diagnostic bytes.Buffer
 		if code := run(strings.Fields(args), &out, &diagnostic); code != 0 {

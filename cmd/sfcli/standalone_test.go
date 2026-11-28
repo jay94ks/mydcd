@@ -15,7 +15,7 @@ import (
 )
 
 func TestStandaloneCLIUsesExplicitOwnerSelectionAndBoundedLifetime(t *testing.T) {
-	for _, args := range [][]string{{"up", "debug", "-f", "debug.yaml", "--operation", "create", "--mode", "shell", "--ttl-seconds", "3600"}, {"pin", "debug", "--name", "kept", "--operation", "pin"}, {"remove", "kept", "--operation", "remove"}, {"attach", "debug", "--operation", "connect", "-it"}, {"exec", "debug", "--operation", "run", "-it", "--", "/bin/sh", "-c", "echo x"}, {"logs", "debug", "--follow"}, {"stats", "debug", "--watch", "--interval", "2s"}, {"logs-clear", "debug", "--preview"}, {"logs-clear", "debug", "--recreate", "--operation", "clear"}} {
+	for _, args := range [][]string{{"up", "debug", "-f", "debug.yaml", "--operation", "create", "--mode", "shell", "--ttl-seconds", "3600"}, {"pin", "debug", "--name", "kept", "--operation", "pin"}, {"remove", "kept", "--operation", "remove"}, {"attach", "debug", "--operation", "connect", "-it"}, {"exec", "debug", "--operation", "run", "-it", "--", "/bin/sh", "-c", "echo x"}, {"logs", "debug", "--follow"}, {"stats", "debug", "--watch", "--interval", "2s"}} {
 		o, err := parseStandaloneOptions(args, io.Discard)
 		if err != nil {
 			t.Fatal(args, err)
@@ -24,7 +24,7 @@ func TestStandaloneCLIUsesExplicitOwnerSelectionAndBoundedLifetime(t *testing.T)
 			t.Fatal("ordinary app selection leaked", o.container.query)
 		}
 	}
-	for _, args := range [][]string{{"up", "debug", "-f", "debug.yaml"}, {"up", "debug", "-f", "debug.yaml", "--operation", "create", "--ttl-seconds", "86401"}, {"attach", "debug", "--operation", "connect", "--", "/bin/sh"}, {"start", "debug"}, {"pin", "debug"}, {"logs-clear", "debug", "--operation", "clear"}, {"list", "debug"}} {
+	for _, args := range [][]string{{"up", "debug", "-f", "debug.yaml"}, {"up", "debug", "-f", "debug.yaml", "--operation", "create", "--ttl-seconds", "86401"}, {"attach", "debug", "--operation", "connect", "--", "/bin/sh"}, {"start", "debug"}, {"pin", "debug"}, {"list", "debug"}} {
 		if _, err := parseStandaloneOptions(args, io.Discard); err == nil {
 			t.Fatal("invalid standalone syntax accepted", args)
 		}

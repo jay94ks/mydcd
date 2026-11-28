@@ -71,21 +71,30 @@ const CODE_TEXT: Record<string, string> = {
 };
 
 export function errorText(e: unknown): { code: string; title: string; message: string } {
-  if (e instanceof ApiError) return { code: e.code, title: CODE_TEXT[e.code] ?? e.code, message: e.body.message ?? '' };
+  if (e instanceof ApiError) return { code: e.code, title: CODE_TEXT[e.code] ?? '요청을 처리하지 못했습니다', message: e.body.message ?? '' };
   const m = (e as Error)?.message ?? String(e);
+  // 화면이 직접 '없음'을 알린 경우(예: 이 앱이 없거나 볼 권한이 없음)는 화면 오류가 아니라 사실 그대로 보인다.
+  if ((e as Error)?.name === 'NotFound') return { code: 'not-found', title: m || CODE_TEXT['not-found'], message: '' };
   return { code: 'client', title: '화면 오류', message: m };
+}
+
+const HANGUL = /[\uac00-\ud7a3]/;
+
+/** 오류 띠 본문 줄: 사용자 문장만. 코드와 영어 원문은 '자세히'로 보낸다. */
+export function errorLine(e: unknown): string {
+  const t = errorText(e);
+  return t.message && t.message !== t.title && HANGUL.test(t.message) ? `${t.title} · ${t.message}` : t.title;
 }
 
 /** ㉚ 오류 띠: 무엇이·왜(코드)·기준 시각·다음 행동, 원문은 '자세히' */
 export function ErrorBand({ error, what = '불러오지 못했습니다', onRetry, at }: { error: unknown; what?: string; onRetry?: () => void; at?: Date }) {
   const t = errorText(error);
-  const raw = error instanceof ApiError ? JSON.stringify(error.body, null, 2) : t.message;
+  const raw = `코드: ${t.code}\n${error instanceof ApiError ? JSON.stringify(error.body, null, 2) : t.message}`;
   return (
     <div className="errband" role="alert">
       <span className="title">{what}</span>
       <span>
-        {t.title} <code>({t.code})</code>
-        {t.message && t.message !== t.title ? ` · ${t.message}` : ''}
+        {errorLine(error)}
         {at ? <span className="muted"> · {hhmmss(at)} 기준</span> : null}
       </span>
       <div className="row">
@@ -116,7 +125,7 @@ export function Load<T>({ q, children, what, rows }: { q: Loaded<T>; children: (
   }, [q.loading]);
 
   if (q.data === undefined) {
-    if (q.error) return <ErrorBand error={q.error} what={what} onRetry={q.refresh} />;
+    if (q.error) return <ErrorBand error={q.error} what={what} onRetry={q.refreshByUser} />;
     return (
       <div className="col">
         <Skeleton rows={rows} />
@@ -126,8 +135,8 @@ export function Load<T>({ q, children, what, rows }: { q: Loaded<T>; children: (
   }
   return (
     <>
-      {q.loading && <div className="progress-line" aria-hidden="true" />}
-      {q.error ? <ErrorBand error={q.error} what="다시 읽지 못해 이전 내용을 보여 줍니다" onRetry={q.refresh} at={q.asOf} /> : null}
+      {q.manual && <div className="progress-line" aria-hidden="true" />}
+      {q.error ? <ErrorBand error={q.error} what="다시 읽지 못해 이전 내용을 보여 줍니다" onRetry={q.refreshByUser} at={q.asOf} /> : null}
       {children(q.data)}
     </>
   );

@@ -87,16 +87,17 @@ func (p Policy) imageBuildSourceBindings(s state.State, c access.Catalog, spec i
 
 // ImageBuildBeginSources is a local deterministic projection of the same
 // fresh quorum state used by begin admission; it performs no registry I/O.
-func (p Policy) ImageBuildBeginSources(s state.State, caller [32]byte, q ImageBuildJobWorkQuery, inputs []imagebuild.FrozenSource) ([]ImageBuildSourceBinding, error) {
+func (p Policy) ImageBuildBeginSources(s state.State, caller [32]byte, q ImageBuildJobWorkQuery, inputs []imagebuild.FrozenSource, builder *imagebuild.FrozenSource, local string) ([]ImageBuildSourceBinding, error) {
 	work, err := p.ImageBuildJobWork(s, caller, q)
-	if err != nil || !work.Allowed || work.Run.Phase != "queued" || imagebuild.ValidateJobInputs(work.Run.Spec, inputs) != nil {
+	if err != nil || !work.Allowed || work.Run.Phase != "queued" || imagebuild.ValidateJobInputs(work.Run.Spec, inputs) != nil || imagebuild.ValidateJobBuilder(work.Run.Spec, builder, local) != nil {
 		return nil, access.ErrDenied
 	}
 	c, err := p.Catalog(s)
 	if err != nil {
 		return nil, err
 	}
-	return p.imageBuildSourceBindings(s, c, work.Run.Spec, inputs, q.At)
+	read := ImageBuildJobReport{Inputs: inputs, Builder: builder, BuilderLocal: local}.read()
+	return p.imageBuildSourceBindings(s, c, work.Run.Spec, read, q.At)
 }
 
 func (p Policy) ExternalRegistryImageBuildsPending(s state.State, selection ExternalRegistryReadSelection) (bool, error) {

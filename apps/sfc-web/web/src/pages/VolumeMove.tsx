@@ -70,7 +70,7 @@ export function MoveCard({ tenant, v, canDeploy, onRefresh, onStart }: { tenant:
   const retained = v.retained.filter((r) => r.state !== 'removed');
   const blocked = moveBlocked(v, canDeploy);
   return (
-    <Card title="이관 (UI-64)">
+    <Card title="이관">
       {p ? (
         <ol style={{ margin: 0, paddingLeft: 18, fontSize: 13, lineHeight: '22px' }}>
           <li style={cls(true, false)}>

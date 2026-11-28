@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"strings"
 	"time"
 
@@ -40,6 +41,33 @@ func (e *Error) Error() string {
 }
 func (e *Error) Unwrap() error { return e.Cause }
 
+// staleLocal reports a management stream that could not open because the
+// shared Unix connection closed first: another call on it was cancelled
+// mid-exchange (record framing cannot resume, so the whole connection
+// closes), or its reuse window ended while the call waited its turn.
+// Nothing was sent, so the call dials a fresh connection once.
+func staleLocal(ctx context.Context, err error) bool {
+	return ctx.Err() == nil && errors.Is(err, net.ErrClosed)
+}
+
+// openUser dials target and opens one management stream on it, dialing
+// once more when the shared Unix connection closed under it (staleLocal).
+func (c Client) openUser(ctx context.Context, target sfcp.Peer) (*sfcp.Session, sfcp.Stream, error) {
+	for retried := false; ; retried = true {
+		conn, err := c.Mesh.Dial(ctx, target)
+		if err != nil {
+			return nil, nil, &Error{Code: "transport", Phase: sfcp.NotSent, Cause: err, stage: "dial"}
+		}
+		stream, err := conn.OpenManagement(ctx)
+		if err == nil {
+			return conn, stream, nil
+		}
+		if retried || !staleLocal(ctx, err) {
+			return nil, nil, &Error{Code: "transport", Phase: sfcp.NotSent, Cause: err, stage: "open"}
+		}
+	}
+}
+
 type Client struct {
 	OperationReason *control.OperationReason
 	checkerUpload   *[32]byte
@@ -65,6 +93,7 @@ func (c Client) exchangePurpose(ctx context.Context, target sfcp.Peer, makeEnvel
 	if c.Mesh == nil || c.Self == nil || c.Self.Public != [32]byte(c.Mesh.LocalKey()) {
 		return Reply{}, target, sfcp.ErrAdmission
 	}
+	retried := false
 	for attempt := 0; attempt < 2; attempt++ {
 		conn, err := c.Mesh.Dial(ctx, target)
 		if err != nil {
@@ -100,7 +129,7 @@ func (c Client) exchangePurpose(ctx context.Context, target sfcp.Peer, makeEnvel
 			}
 			defer clear(response.Fields[0].Value)
 			stage = "validate"
-			if strict(response.Fields[0].Value, &reply) != nil || reply.Schema != 1 {
+			if lenient(response.Fields[0].Value, &reply) != nil || reply.Schema != 1 {
 				return sfcp.ErrFrame
 			}
 			if reply.Code != "unknown" {
@@ -110,7 +139,13 @@ func (c Client) exchangePurpose(ctx context.Context, target sfcp.Peer, makeEnvel
 		}()
 		if err != nil {
 			clear(reply.InitialCredentialToken)
-			return Reply{}, target, &Error{Code: "transport", Phase: lifetime.Abandon().Phase(), Cause: err, stage: stage}
+			phase := lifetime.Abandon().Phase()
+			if stage == "open" && phase == sfcp.NotSent && !retried && staleLocal(ctx, err) {
+				retried = true
+				attempt-- // the same attempt again, on a fresh connection
+				continue
+			}
+			return Reply{}, target, &Error{Code: "transport", Phase: phase, Cause: err, stage: stage}
 		}
 		if reply.Code == "ok" {
 			return reply, target, nil
@@ -159,29 +194,11 @@ func (c Client) Prepare(ctx context.Context, target sfcp.Peer, session access.Se
 		change.Payload, _ = json.Marshal(q)
 	}
 	key := control.CommandKey(change.Action)
-	var epoch, root uint64
-	switch key {
-	case control.NodeShellKey, control.MembersKey:
-		method := "node-shell-policy"
-		if key == control.MembersKey {
-			method = "members"
-		}
-		view, err := c.Query(ctx, target, session, method, "")
-		if err != nil {
-			return control.UserOperation{}, err
-		}
-		epoch, root = view.ModuleEpoch, view.NodeShellRootRevision
-		if key == control.MembersKey {
-			root = view.MembersRootRevision
-		}
-	default:
-		view, err := c.Whoami(ctx, target, session)
-		if err != nil {
-			return control.UserOperation{}, err
-		}
-		epoch, root = view.ModuleEpoch, view.Root(key)
+	view, err := c.Whoami(ctx, target, session)
+	if err != nil {
+		return control.UserOperation{}, err
 	}
-	return c.prepareOperation(session, id, change, epoch, root, time.Now().Unix())
+	return c.prepareOperation(session, id, change, view.ModuleEpoch, view.Root(key), time.Now().Unix())
 }
 
 // The query above owns current admission and the snapshot; this signing tail
@@ -325,27 +342,7 @@ func (c Client) verifyAt(session access.Session, now int64) error {
 }
 
 func (c Client) Query(ctx context.Context, target sfcp.Peer, session access.Session, method, tenant string) (Reply, error) {
-	if method == "tenant-storage" {
-		return c.TenantStoragePage(ctx, target, session, tenant, "", "")
-	}
 	return c.query(ctx, target, session, Request{Method: method, Tenant: tenant})
-}
-
-// MemberPage returns at most eight entries with the same committed root CAS.
-// A caller collecting multiple pages must reject a changed root revision.
-func (c Client) MemberPage(ctx context.Context, target sfcp.Peer, session access.Session, after string) (Reply, error) {
-	return c.query(ctx, target, session, Request{Method: "members", After: after})
-}
-
-// Combining definitions and maintenance summaries requires both
-// RegistriesRootRevision and RegistryMaintenanceRootRevision to stay unchanged.
-func (c Client) RegistryPage(ctx context.Context, target sfcp.Peer, session access.Session, tenant, after string) (Reply, error) {
-	return c.query(ctx, target, session, Request{Method: "registries", Tenant: tenant, After: after})
-}
-
-// Combining pages requires the same ExternalRegistriesRootRevision.
-func (c Client) ExternalRegistryPage(ctx context.Context, target sfcp.Peer, session access.Session, tenant, after string) (Reply, error) {
-	return c.query(ctx, target, session, Request{Method: "external-registries", Tenant: tenant, After: after})
 }
 
 func (c Client) AppPage(ctx context.Context, target sfcp.Peer, session access.Session, tenant, after string) (Reply, error) {
@@ -367,54 +364,6 @@ func (c Client) AppUploadPage(ctx context.Context, target sfcp.Peer, session acc
 }
 func (c Client) PlanApp(ctx context.Context, target sfcp.Peer, session access.Session, tenant string, request control.AppPlanRequest) (Reply, error) {
 	return c.query(ctx, target, session, Request{Method: "app-plan", Tenant: tenant, AppPlan: &request})
-}
-
-func (c Client) NodeInvitation(ctx context.Context, target sfcp.Peer, session access.Session, node string) (membership.Invitation, error) {
-	reply, err := c.query(ctx, target, session, Request{Method: "node-invitation", Node: node})
-	if err != nil {
-		return membership.Invitation{}, err
-	}
-	if reply.Invitation == nil {
-		return membership.Invitation{}, sfcp.ErrAdmission
-	}
-	inv := *reply.Invitation
-	err = c.verifyNodeInvitation(inv, node, nil)
-	var untrusted *UntrustedSourceError
-	if errors.As(err, &untrusted) {
-		// The node the CLI talks to relays the request to the leader, which
-		// signs as itself. That leader need not be pinned: the pinned node's
-		// own member list vouches for it.
-		var members []membership.Entry
-		if members, err = c.memberEntry(ctx, target, session, inv.Source.ID); err == nil {
-			err = c.verifyNodeInvitation(inv, node, members)
-		}
-	}
-	if err != nil {
-		return membership.Invitation{}, err
-	}
-	return inv, nil
-}
-
-// memberEntry pages the member list of target (a pinned node) up to the
-// entry for id. It returns that one entry, or none.
-func (c Client) memberEntry(ctx context.Context, target sfcp.Peer, session access.Session, id string) ([]membership.Entry, error) {
-	after := ""
-	for range 512 {
-		page, err := c.MemberPage(ctx, target, session, after)
-		if err != nil {
-			return nil, err
-		}
-		for _, e := range page.Members {
-			if e.Peer.ID == id {
-				return []membership.Entry{e}, nil
-			}
-		}
-		if page.MembersNext == "" || page.MembersNext <= after {
-			return nil, nil
-		}
-		after = page.MembersNext
-	}
-	return nil, nil
 }
 
 // UntrustedSourceError: a node invitation is signed by a node this context
@@ -485,7 +434,7 @@ func (c Client) query(ctx context.Context, target sfcp.Peer, session access.Sess
 		return Reply{}, sfcp.ErrAdmission
 	}
 	method := r.Method
-	if !nodeShellQuery(method) && method != "standalone-list" && method != "standalone-get" && method != "standalone-plan" && method != "cd-probe" && method != "tenant-storage" && method != "events" && method != "login-records" && method != "own-sessions" && method != "app-cd-toggle-plan" && method != "image-cache-plan" && method != "image-cache-status" && method != "registry-action-plan" && method != "external-registry-bind-plan" && method != "registry-login-test" && method != "image-resolve" && method != "registry-maintenance-plan" && method != "registry-maintenance-status" && method != "image-usages" && method != "registry-catalog" && method != "registry-prune-preview" && method != "registry-prune-results" && method != "external-registry-pulls" && method != "task-restart-plan" && method != "task-restart-status" && method != "raft-status" && method != "app-source" && method != "app-revisions" && method != "my-credentials" && method != "users" && method != "tenant-members" && method != "app-log-clear-plan" && method != "app-log-clear-status" && method != "user-credentials" && method != "node-cli-policy" && method != "container-observe" && method != "tenant-retirement" && method != "members" && method != "node-invitation" && method != "node-storage" && method != "node-storage-space" && method != "apps" && method != "app-operation" && method != "app-cd-field" && method != "app-cd-history" && method != "app-cd-diff" && method != "app-cd-registration" && method != "app-uploads" && method != "app-plan" && method != "vault" && method != "vault-approval-plan" && method != "vault-write-plan" && method != "registries" && method != "external-registries" && method != "image-builds" && method != "build-zip-transfer" && method != "check-build-context" && method != "build-context-content" && method != "image-build-cache" && method != "image-build-logs" && method != "image-build-job-plan" && method != "build-draft" && method != "save-build-git" {
+	if method != "standalone-list" && method != "standalone-get" && method != "standalone-plan" && method != "app-cd-toggle-plan" && method != "task-restart-plan" && method != "task-restart-status" && method != "raft-status" && method != "app-source" && method != "app-revisions" && method != "container-observe" && method != "members" && method != "node-invitation" && method != "apps" && method != "app-operation" && method != "app-cd-field" && method != "app-cd-history" && method != "app-cd-diff" && method != "app-cd-registration" && method != "app-uploads" && method != "app-plan" {
 		return Reply{}, fmt.Errorf("unsupported user query")
 	}
 	body, err := requestBody(r)
@@ -494,12 +443,6 @@ func (c Client) query(ctx context.Context, target sfcp.Peer, session access.Sess
 	}
 	reply, _, err := c.exchange(ctx, target, func(conn *sfcp.Session) (Envelope, error) {
 		return Envelope{Body: body, Session: &session, Signature: ed25519.Sign(c.Self.Private, access.RequestBytes(session, conn.PeerChallenge(), body))}, nil
-	}, method != "cd-probe") // Installed Git profiles stay on the explicitly selected provider.
+	}, true)
 	return reply, err
-}
-
-// TenantRetirementPage is an authenticated system-admin observation, including
-// a Deleted tombstone. It never creates or resumes a deletion.
-func (c Client) TenantRetirementPage(ctx context.Context, target sfcp.Peer, session access.Session, tenant, after string) (Reply, error) {
-	return c.query(ctx, target, session, Request{Method: "tenant-retirement", Tenant: tenant, After: after})
 }

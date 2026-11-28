@@ -5,7 +5,6 @@ package sfcp
 import (
 	"crypto/ed25519"
 	"crypto/rand"
-	"encoding/binary"
 	"io"
 
 	"github.com/jay94ks/seafield/internal/buildinfo"
@@ -24,7 +23,7 @@ func (t *Transport) authenticateStream(stream io.ReadWriter, key Identity, peer 
 	}
 	gate.own = t.own
 	hello := func(ch [32]byte) Frame {
-		return Frame{Purpose: Handshake, Kind: 1, Request: 1, Fields: []Field{{Tag: 1, Required: true, Value: t.self.Public[:]}, {Tag: 2, Required: true, Value: t.cluster[:]}, {Tag: 3, Required: true, Value: ch[:]}, featuresField(t.own)}}
+		return Frame{Purpose: Handshake, Kind: 1, Request: 1, Fields: []Field{{Tag: 1, Required: true, Value: t.self.Public[:]}, {Tag: 2, Required: true, Value: t.cluster[:]}, {Tag: 3, Required: true, Value: ch[:]}, versionField(t.version), featuresField(t.own)}}
 	}
 	proof := func(ch []byte) Frame {
 		var v [32]byte
@@ -57,7 +56,11 @@ func (t *Transport) authenticateStream(stream io.ReadWriter, key Identity, peer 
 			return nil, [32]byte{}, err
 		}
 		copy(peerChallenge[:], other.Fields[2].Value)
-		gate.features = helloFeatures(other)
+		gate.setPeerFeatures(helloFeatures(other))
+		gate.version = helloVersion(other)
+		if err = t.checkPeerVersion(peer, gate.version); err != nil {
+			return nil, [32]byte{}, err
+		}
 		signed, err := read(2)
 		if err != nil {
 			return nil, [32]byte{}, err
@@ -78,19 +81,33 @@ func (t *Transport) authenticateStream(stream io.ReadWriter, key Identity, peer 
 			return nil, [32]byte{}, err
 		}
 		copy(peerChallenge[:], other.Fields[2].Value)
-		gate.features = helloFeatures(other)
+		gate.setPeerFeatures(helloFeatures(other))
+		gate.version = helloVersion(other)
+		// A major mismatch is logged now but returned only when the
+		// exchange ends, so the client reads this side's hello first and
+		// logs the mismatch too (it closes on reading it).
+		major := t.checkPeerVersion(peer, gate.version)
+		failed := func(err error) error {
+			if major != nil {
+				return major
+			}
+			return err
+		}
 		if err = WriteFrame(stream, hello(challenge)); err != nil {
-			return nil, [32]byte{}, err
+			return nil, [32]byte{}, failed(err)
 		}
 		if err = WriteFrame(stream, proof(other.Fields[2].Value)); err != nil {
-			return nil, [32]byte{}, err
+			return nil, [32]byte{}, failed(err)
 		}
 		signed, err := read(2)
 		if err != nil {
-			return nil, [32]byte{}, err
+			return nil, [32]byte{}, failed(err)
 		}
 		if err = verify(signed); err != nil {
-			return nil, [32]byte{}, err
+			return nil, [32]byte{}, failed(err)
+		}
+		if major != nil {
+			return nil, [32]byte{}, major
 		}
 		if err = WriteFrame(stream, hello([32]byte(other.Fields[2].Value))); err != nil {
 			return nil, [32]byte{}, err
@@ -100,25 +117,25 @@ func (t *Transport) authenticateStream(stream io.ReadWriter, key Identity, peer 
 }
 
 // tagFeatures is the optional handshake hello extension that announces the
-// sender's feature set (buildinfo feature table), 8 bytes little endian. A
-// build that does not know the tag skips it (tag >= 128), and a hello without
-// it announces the major's baseline. Tag 128 is the build version (upgrades.md
-// U2).
+// sender's feature set: for each feature in order, its 32-bit code
+// (group, set, version) little endian, a postfix length byte and the postfix
+// (buildinfo.Features.Encode). A build that does not know the tag skips it
+// (tag >= 128), and a hello without it announces the major's baseline. Tag
+// 128 is the build version (version.go).
 const tagFeatures = 129
 
 func featuresField(f buildinfo.Features) Field {
-	v := make([]byte, 8)
-	binary.LittleEndian.PutUint64(v, uint64(f))
-	return Field{Tag: tagFeatures, Value: v}
+	return Field{Tag: tagFeatures, Value: f.Encode()}
 }
 
 // helloFeatures reads the announced feature set; a missing or malformed
 // extension is the baseline, never an error, so the field can only ever add.
 func helloFeatures(f Frame) buildinfo.Features {
 	for _, field := range f.Fields {
-		if field.Tag == tagFeatures && len(field.Value) == 8 {
-			return buildinfo.Features(binary.LittleEndian.Uint64(field.Value))
+		if field.Tag == tagFeatures {
+			s, _ := buildinfo.DecodeFeatures(field.Value)
+			return s
 		}
 	}
-	return 0
+	return buildinfo.Features{}
 }

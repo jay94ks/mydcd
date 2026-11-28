@@ -15,7 +15,6 @@ import (
 	"time"
 
 	dockerspec "github.com/moby/docker-image-spec/specs-go/v1"
-	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/api/types/mount"
 	apinetwork "github.com/moby/moby/api/types/network"
 	"github.com/moby/moby/api/types/volume"
@@ -757,73 +756,4 @@ func (e *Engine) Pulls() []string {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	return append([]string(nil), e.pulls...)
-}
-
-// Execs.
-
-type execProcess struct {
-	ID, Container string
-	Config        container.ExecCreateRequest
-	Running       bool
-	ExitCode      int
-	// Output is what a start returns (a test sets it with ExecOutput).
-	Output []byte
-}
-
-func execRoutes() {
-	handle("POST", "/containers/*/exec", (*Engine).execCreate)
-	handle("GET", "/exec/*/json", (*Engine).execInspect)
-	handle("POST", "/exec/*/start", (*Engine).execStart)
-	handle("POST", "/exec/*/resize", func(_ *Engine, w http.ResponseWriter, _ *http.Request, _ []string) { w.WriteHeader(http.StatusCreated) })
-}
-
-func (e *Engine) execCreate(w http.ResponseWriter, r *http.Request, a []string) {
-	var req container.ExecCreateRequest
-	if err := readJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	e.withContainer(w, a[0], func(c *ctr) {
-		if !c.State.Running {
-			writeError(w, http.StatusConflict, "container "+c.ID+" is not running")
-			return
-		}
-		x := &execProcess{ID: newID(), Container: c.ID, Config: req}
-		e.execs[x.ID] = x
-		writeJSON(w, http.StatusCreated, map[string]string{"Id": x.ID})
-	})
-}
-
-func (e *Engine) execInspect(w http.ResponseWriter, _ *http.Request, a []string) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	x := e.execs[a[0]]
-	if x == nil {
-		writeError(w, http.StatusNotFound, "No such exec instance: "+a[0])
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"ID": x.ID, "ContainerID": x.Container, "Running": x.Running, "ExitCode": x.ExitCode, "ProcessConfig": map[string]any{"entrypoint": firstOf(nil, x.Config.Cmd), "arguments": restOf(nil, x.Config.Cmd), "tty": x.Config.Tty, "user": x.Config.User}, "OpenStdin": x.Config.AttachStdin, "OpenStdout": x.Config.AttachStdout, "OpenStderr": x.Config.AttachStderr, "Pid": 0})
-}
-
-// execStart runs a detached exec to completion at once (exit code 0). An
-// attached start needs the upgrade protocol, which the fake does not serve.
-func (e *Engine) execStart(w http.ResponseWriter, r *http.Request, a []string) {
-	var req container.ExecStartRequest
-	if err := readJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	if !req.Detach {
-		e.notImplemented(w, "POST /exec/*/start (attached)")
-		return
-	}
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	x := e.execs[a[0]]
-	if x == nil {
-		writeError(w, http.StatusNotFound, "No such exec instance: "+a[0])
-		return
-	}
-	x.Running = false
-	w.WriteHeader(http.StatusOK)
 }

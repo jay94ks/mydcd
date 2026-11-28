@@ -285,7 +285,7 @@ func verifyNativePublicAppReads(t *testing.T, ctx context.Context, r *Runtime, r
 		t.Fatal(err)
 	}
 	cordoned := false
-	for _, node := range memberPage.NodeLifecycle {
+	for _, node := range memberPage.Nodes {
 		if node.Node.Member.ID == "node-a" {
 			_, e := time.Parse(time.RFC3339, node.Scheduling.CordonedAt)
 			cordoned = node.Scheduling.Enabled && node.Scheduling.CordonedBy == "admin" && e == nil

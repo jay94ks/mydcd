@@ -19,24 +19,28 @@ sfcli --tenant payments registry gc private --id image-gc-43
 
 Unix와 네트워크 SFCP의 기존 User envelope·로그인·request proof·유한 EOF 계약을 사용한다. 다른 selector·Node·After는 허용하지 않는다.
 
-| Method | 입력 | Reply의 고유 필드 |
-|---|---|---|
-| `registry-maintenance-plan` | `Tenant`, `RegistryMaintenance:{Action,ID,Repository,Reference,Digest,External?}` | `RegistryMaintenancePlan` |
-| `registry-maintenance-status` | `Tenant`, `RegistryMaintenance:{Operation}` | `RegistryMaintenanceStatus` |
+두 method는 typed method다. 요청은 `Params`, 응답은 `Data`에 담는다.
 
-계획 Action은 `delete-registry-image` 또는 `gc-registry`다. External은 선택 bool이며 생략/false는 내장, true는 외부 source를 선택한다. GC와 상태 조회에는 true를 허용하지 않는다. GC의 Repository/Reference/Digest, 계획의 Operation, 상태 조회의 Action/ID/Repository/Reference/Digest는 빈 문자열이어야 한다. Schema/Nonce 등 공통 필드는 [Unix 소켓 API](unix-sockets.md)를 따른다.
+| Method | `Params` | `Data` |
+|---|---|---|
+| `registry-maintenance-plan` | `{Tenant,Query:{Action,ID,Repository,Reference,Digest,External?}}` | 계획(아래) |
+| `registry-maintenance-status` | `{Tenant,Operation}` | 상태(아래) |
+
+계획 Action은 `delete-registry-image` 또는 `gc-registry`다. External은 선택 bool이며 생략/false는 내장, true는 외부 source를 선택한다. GC와 상태 조회에는 true를 허용하지 않는다. GC의 Repository/Reference/Digest와 계획의 Operation은 빈 문자열이어야 한다. 상태 조회는 Tenant와 Operation만 받는다. Schema/Nonce 등 공통 필드는 [Unix 소켓 API](unix-sockets.md)를 따른다.
 
 ```json
 {
   "Method": "registry-maintenance-plan",
-  "Tenant": "payments",
-  "RegistryMaintenance": {
-    "Action": "delete-registry-image",
-    "ID": "private",
-    "Repository": "team/app",
-    "Reference": "stable",
-    "Digest": "sha256:<64 lowercase hex>",
-    "Operation": ""
+  "Params": {
+    "Tenant": "payments",
+    "Query": {
+      "Action": "delete-registry-image",
+      "ID": "private",
+      "Repository": "team/app",
+      "Reference": "stable",
+      "Digest": "sha256:<64 lowercase hex>",
+      "Operation": ""
+    }
   }
 }
 ```
@@ -134,10 +138,10 @@ sfcli op show prune-45
 
 ### 메시지와 공개 페이지
 
-| Method | 입력 | 응답 |
+| Method (typed) | `Params` | `Data` |
 |---|---|---|
-| `registry-prune-preview` | `Tenant`, `RegistryPrune:{ID,External?,Part,Conditions,Fact?}`, `After?` | `Reply.RegistryPrune:{Schema:1,Tenant,Plan,Page}` |
-| `registry-prune-results` | `Tenant`, `RegistryPrune:{Operation,Part:"items"}`, `After?` | 같은 형식의 원 항목 결과 페이지. 현재 Read 또는 ManageRegistry |
+| `registry-prune-preview` | `{Tenant,Query:{ID,External?,Part,Conditions,Fact?},After?}` | `{Schema:1,Tenant,Plan,Page}` |
+| `registry-prune-results` | `{Tenant,Query:{Operation,Part:"items"},After?}` | 같은 형식의 원 항목 결과 페이지. 현재 Read 또는 ManageRegistry |
 
 `Part`는 preview에서 `items` 또는 `retained`다. 첫 요청에는 Fact/After가 없고, 후속 페이지는 첫 응답의 Fact와 원 Conditions를 그대로 보낸다. section을 바꿀 때 After를 비운다. preview Fact는 발행부터600초 유효하며 대상 run/source·조건이 달라지면 거부한다. 일반 `registry-maintenance-plan`은 일괄 action의 우회 입력으로 사용할 수 없다.
 

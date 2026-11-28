@@ -53,15 +53,20 @@ func TestBuildFileActualUnixAndQUICUsesBoundedOriginalSnapshot(t *testing.T) {
 								return err
 							}
 							request, err := schema.Decode[Request](envelope.Body)
-							if err != nil || !request.validMethodFields() || !request.validQuerySelectors() {
+							if err != nil {
 								return sfcp.ErrFrame
 							}
 							if kind == "retained" {
-								if request.Method != "build-context-content" || request.ImageBuildContent == nil || *request.ImageBuildContent != q {
+								var params BuildContextContentQuery
+								if !typedParams(request, BuildContextContentMethod.Name, &params) || params.Tenant != "tenant" || params.Query != q {
 									return sfcp.ErrFrame
 								}
-							} else if request.Method != "build-draft" || request.ImageBuildDraft == nil || !request.ImageBuildDraft.Valid() || request.ImageBuildDraft.Kind != "file" || request.ImageBuildDraft.Scope == nil || *request.ImageBuildDraft.Scope != scope || request.ImageBuildDraft.Path != dq.Path || request.ImageBuildDraft.Revision != dq.Revision || *request.ImageBuildDraft.Digest != digest || request.ImageBuildDraft.RequiresProof() {
-								return sfcp.ErrFrame
+							} else {
+								var params BuildDraftQuery
+								d := &params.Request
+								if !typedParams(request, BuildDraftMethod.Name, &params) || params.Tenant != "tenant" || d.Kind != "file" || d.Scope == nil || *d.Scope != scope || d.Path != dq.Path || d.Revision != dq.Revision || d.Digest == nil || *d.Digest != digest || d.RequiresProof() {
+									return sfcp.ErrFrame
+								}
 							}
 							if _, err := binding.binding(conn, frame.Kind, envelope); err != nil {
 								return err
@@ -73,14 +78,14 @@ func TestBuildFileActualUnixAndQUICUsesBoundedOriginalSnapshot(t *testing.T) {
 							if mode == "wrong-file" {
 								file.Entry.Path = "private"
 							}
-							reply := Reply{Schema: 1, Code: "ok"}
+							var reply Reply
 							if kind == "retained" {
 								read := control.ImageBuildContentRead{Query: q, Scope: imagebuild.UploadScope{Cluster: client.Cluster}, Tenant: "tenant", Seal: imagebuild.SealReceipt{Tree: [32]byte{2}}, Epoch: 1}
 								out := control.ImageBuildContentPage{Page: imagebuild.ContentPage{Schema: 1, Version: q.Version, Tree: read.Seal.Tree, Part: "file", File: &file}, Root: read.Snapshot(), Epoch: 1}
 								if mode == "changed" {
 									out.Page.File.Offset++
 								}
-								reply.ImageBuildContent = &out
+								reply = okReply(out)
 							} else {
 								out := imagebuild.DraftResponse{Schema: 1, Scope: scope, Code: "OK", Revision: dq.Revision, Digest: &digest, Content: &file}
 								if mode == "changed" {
@@ -89,7 +94,7 @@ func TestBuildFileActualUnixAndQUICUsesBoundedOriginalSnapshot(t *testing.T) {
 								if mode == "pending" {
 									out = imagebuild.DraftResponse{Schema: 1, Scope: scope, Code: "PENDING"}
 								}
-								reply.ImageBuildDraft = &out
+								reply = okReply(out)
 							}
 							if mode == "conflict" {
 								reply = Reply{Schema: 1, Code: "conflict"}

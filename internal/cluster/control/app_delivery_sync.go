@@ -32,7 +32,6 @@ type AppCDChange struct {
 // User and Member are original signed inputs, never fabricated begin-app ops.
 type AppDeliverySync struct {
 	Local                  *AppLocalGrant `json:",omitempty"`
-	Recreate               *AppRecreation `json:",omitempty"`
 	Choice                 AppDeliveryChoice
 	Plan, Intent, Artifact [32]byte
 	Epoch                  uint64
@@ -51,9 +50,6 @@ func appRegistrationDigest(origin UserOperation) [32]byte {
 func (sync AppDeliverySync) verify(origin UserOperation, scope deployment.AppScope) error {
 	if sync.Local != nil && sync.Local.verify(origin, scope, nil) != nil {
 		return ErrCatalog
-	}
-	if sync.Recreate != nil {
-		return sync.verifyRecreation(origin, scope)
 	}
 	if sync.Epoch == 0 || sync.Plan == ([32]byte{}) || sync.Intent == ([32]byte{}) || sync.Artifact == ([32]byte{}) || sync.Choice.Candidate == ([32]byte{}) || sync.Choice.Registration != appRegistrationDigest(origin) || deployment.ResourceKey("task", scope.Tenant, scope.App, sync.Choice.Operation) == "" || (sync.User == nil) == (sync.Member == nil) {
 		return ErrCatalog
@@ -240,7 +236,7 @@ func (p Policy) acceptCDSync(s state.State, entry appEntry, choice AppDeliveryCh
 }
 
 func (p Policy) continueCDSync(s state.State, entry appEntry, at uint64) (appEntry, error) {
-	if entry.Delivery == nil || entry.PendingSync != nil && entry.PendingSync.Recreate != nil {
+	if entry.Delivery == nil {
 		return entry, ErrCatalog
 	}
 	d := *entry.Delivery
@@ -321,11 +317,8 @@ func clearDeliveryInput(a Apps, entry appEntry) (Apps, appEntry) {
 }
 
 func (p Policy) validateAppEntryDown(entry appEntry) error {
-	if entry.Standalone != nil && (entry.PendingSync == nil || entry.PendingSync.Recreate == nil) {
+	if entry.Standalone != nil {
 		return p.validateStandaloneDown(entry)
-	}
-	if entry.PendingSync != nil && entry.PendingSync.Recreate != nil {
-		return validatePendingRecreation(entry)
 	}
 	if entry.Delivery == nil {
 		return p.validateAppDownTarget(entry.Inventory, entry.Origin, entry.Down, entry.downTarget(), "")

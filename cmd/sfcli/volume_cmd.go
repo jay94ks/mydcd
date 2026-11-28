@@ -29,7 +29,7 @@ import (
 func volumeCommand(g *globals) *cli.Command {
 	return &cli.Command{
 		Name:  "volume",
-		Short: "Volumes: list, create, back up, restore, move and copy files",
+		Short: "Volumes: list, create, back up, restore, move, archive and copy files",
 		Long: `Volumes hold app data on one server. An app volume is named APP/VOLUME;
 a volume registered on an existing node directory belongs to the tenant
 and is named VOLUME.`,
@@ -46,6 +46,8 @@ and is named VOLUME.`,
 			volumeBackupCommand(g),
 			volumeRestoreCommand(g),
 			volumeMoveCommand(g),
+			volumeArchiveCommand(g),
+			volumeUnarchiveCommand(g),
 			volumeFilesCommand(g),
 		},
 	}
@@ -531,6 +533,8 @@ func volumeProgress(ctx context.Context, s *session, action string, raw []byte) 
 			return progress{j.Phase, false, false}, nil
 		}
 		return progress{}, fmt.Errorf("restore %s not found", q.ID)
+	case "archive-volume", "cancel-volume-archive", "unarchive-volume", "discard-volume-archive":
+		return archiveProgress(ctx, s, action, raw)
 	}
 	return progress{}, fmt.Errorf("%s is not a volume change", action)
 }

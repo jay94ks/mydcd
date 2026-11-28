@@ -44,6 +44,7 @@ func newRoot(g *globals) *cli.Command {
 			whoamiCommand(g),
 			enrollCommand(g),
 			versionCommand(g),
+			logsCommand(g),
 			appCommand(g),
 			cli.OpCommand(openOps, &g.output, handlers(g)),
 			tenantCommand(g),

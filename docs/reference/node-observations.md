@@ -18,9 +18,18 @@ node-summary·디스크·Mesh·tenant 사용량은8행씩 반환한다. 관측·
 
 관측의 `ObservedAt`, `ObservationMaxAge`, 연결 시각은 **Unix 밀리초**다. 현재 관측 신선도 한도는120,000ms다. 사용자 Session·관리 operation의 Unix초와 구분한다.
 
+## 관측이 서버 사이를 오가는 길
+
+서버는 자기 관측을 SFCP Topic 채널(purpose 26)의 `obs/<서버>/<T-obs-src>[/…]`에 발행하고, 읽을 일이 있는 서버만 구독한다.
+
+- 위 조회를 받은 서버는 모든 정식 구성원의 `obs/#`를 구독하고, 각 서버가 지금 값을 다시 발행해 맞춰질 때까지 최대 2초 기다린다. 세션이 없는 서버는 기다리지 않는다. 구독은 마지막 조회 뒤 150초 동안 남아, 이어지는 조회는 기다리지 않는다.
+- report 이벤트를 보는 사용자 watch(웹 화면, AI 기능)가 열려 있는 동안 그 서버는 `obs/#`를 push로 늘 구독한다.
+- 발행은 내용이 바뀌었거나 같은 값을 60초 동안 보내지 않았을 때만 한다. 메시지 TTL은 150초다.
+- 측정은 이 서버의 관측을 읽는 곳이 있으면 30초(±10%)마다, 없으면 5분마다 한다. 읽는 곳이 새로 생기면 바로 한 번 잰다.
+
 ## 노드 현황
 
-Nodes의 각 행은 `{Node,State,Ready,Stale,ObservedAt,ObservationMaxAge,Usage?,Admin?}`다. 상태는 unknown/pending/ready/unready 또는 현재 격리·복원·제거 단계다. 보고가 없거나 오래되면 Ready를 만들지 않는다. Ready와 `CanAcceptChanges`는 특정 앱의 배치·자원 예약·실행 허가가 아니다. `CanAcceptChanges`는 이번 조회가 fresh quorum 경로를 통과했는지를 나타내는 거친 상태다.
+Nodes의 각 행은 `{Node,State,Ready,Stale,Waiting?,ObservedAt,ObservationMaxAge,Usage?,Admin?}`다. `Waiting`은 그 서버가 이번 조회의 기다림(최대 2초) 안에 답하지 않았다는 뜻이고, 행은 그 전에 저장된 값이다(화면은 "대기 중"). `raft-status`의 Nodes 행에도 같은 `Waiting`이 있다. 상태는 unknown/pending/ready/unready 또는 현재 격리·복원·제거 단계다. `AdmitsWork`는 그 서버가 작업(앱·빌드)을 받는지다. 작업을 받지 않는 서버도 보고가 신선하고 맞추기가 성공하면 State는 ready이고, Ready만 false다. State가 unready면 `Reason?`이 고정 코드로 이유를 준다: `MODULE_PASS_FAILED`(맞추기 단계나 그 단계가 쓰는 사건 기록이 실패), `HOST_READ_FAILED`(호스트 CPU·메모리를 못 읽음), `UNKNOWN`(그 서버가 이유를 보내지 않는 이전 버전). 클러스터 관리자에게는 `FailedSteps?`(실패한 맞추기 단계 이름, 예 `node-storage`, `registries`, `event-log`)와 `FailingSince?`(실패가 이어진 시작 시각, Unix ms)도 준다. 오류 원문은 비밀이 섞일 수 있어 응답에 넣지 않고 그 서버의 sfcd 로그에만 남는다. 보고가 없거나 오래되면 Ready를 만들지 않는다. Ready와 `CanAcceptChanges`는 특정 앱의 배치·자원 예약·실행 허가가 아니다. `CanAcceptChanges`는 이번 조회가 fresh quorum 경로를 통과했는지를 나타내는 거친 상태다.
 
 tenant 행은 자기 `Usage`만 포함한다. `{Tenant,Node,CPUUsed?,MemoryUsed?,Containers?,Problems?,ReservedCPU,ReservedMemory,QuotaCPU,QuotaMemory,QuotaRevision,ObservedAt,Stale,Complete}`를 반환한다. CPUUsed는 nanocores, 메모리는 바이트다. 예약량·한도는 현재 공유 정책에서 읽고 실제 사용량과 구분한다. Container/Problems는 앱 Task의 실제 owner 검사를 거친 수치다. 일부를 검사하지 못하면 Complete=false이며 확실한 전체 수량/사용량으로 표시하지 않는다.
 
@@ -65,7 +74,7 @@ raft-status는 **연결한 노드에서 처리**하고 리더로 자동 전달�
 
 응답에는 Leader,Term,CommitIndex,AppliedIndex,ConfigurationIndex,Voters,Quorum,RespondingVoters,ObservedBy,ObservedAt,ContactMaxAge,Stale,Local,Nodes,NodesNext,NodesRootRevision,Elections,ElectionEventsDropped,ObservationStorageError?,Ledger,Writes?,WritesSince?가 있다. configuration은 이미 내구 적용한 FSM 구성이다. 리더는 같은 term에서 최근 SDK heartbeat 한도 안에 받은 실제 ACK만 응답한 voter로 센다. follower는 같은 한도 안에 leader 연락을 받았을 때 자신과 그 leader만 센다(다른 follower는 세지 않는다). 그때 leader 행의 Role은 `leader`, 자신과 leader 행의 LastContact는 그 연락 시각이다. 과반을 확인하지 못하거나 follower에게 최근 leader 연락이 없으면 Stale=true다.
 
-Nodes는32행씩이며 각 행은 `{Node,Role,Term,MatchIndex?,AppliedIndex?,SnapshotIndex?,LogBytes?,LogEntries?,LastContact,ObservedAt,Lag?,Stale}`다. 리더는 성공한 AppendEntries의 정확한 prefix와 성공한 Snapshot ACK로 MatchIndex를 관측한다. follower의 LastLog를 일치한 prefix로 취급하지 않는다. AppliedIndex는 내구 FSM 위치에, 그 뒤로 상태를 바꾸지 않는 확정 항목(read barrier, leader no-op)을 더한 위치다. 다음 command·configuration 항목은 FSM이 내구 게시한 뒤에야 넘는다. 그래서 상태 변경이 없는 동안에도 CommitIndex를 따라간다. 다른 서버의 AppliedIndex는 그 서버가 보고한 값이다. follower는 자기 위치·역할과 leader 힌트를 중심으로 반환한다. cursor는 term/configuration·현재 catalog/membership·signed scope에 고정하고 변경 시 conflict다. ACK 카운터는 페이지마다 관측 시각을 가진다.
+Nodes는32행씩이며 각 행은 `{Node,Role,Term,MatchIndex?,AppliedIndex?,SnapshotIndex?,LogBytes?,LogEntries?,LastContact,ObservedAt,Lag?,Stale,Version?,Features?}`다. Version은 그 서버의 마지막 보고에 실린 빌드 버전(`major.minor.build`, 응답한 서버 자신은 자기 버전)이고 모르면 없다. Features는 그 보고에 실린 기능 이름(major의 기본 기능만 쓰면 없음)이다. 리더는 성공한 AppendEntries의 정확한 prefix와 성공한 Snapshot ACK로 MatchIndex를 관측한다. follower의 LastLog를 일치한 prefix로 취급하지 않는다. AppliedIndex는 내구 FSM 위치에, 그 뒤로 상태를 바꾸지 않는 확정 항목(read barrier, leader no-op)을 더한 위치다. 다음 command·configuration 항목은 FSM이 내구 게시한 뒤에야 넘는다. 그래서 상태 변경이 없는 동안에도 CommitIndex를 따라간다. 다른 서버의 AppliedIndex는 그 서버가 보고한 값이다. follower는 자기 위치·역할과 leader 힌트를 중심으로 반환한다. cursor는 term/configuration·현재 catalog/membership·signed scope에 고정하고 변경 시 conflict다. ACK 카운터는 페이지마다 관측 시각을 가진다.
 
 Local에는 SDK 역할·term·commit/last index, 내구 FSM 위치, snapshot index/bytes/time·주기·TrailingLogs, log first/last/count/bytes와 각 known flag가 있다. 재시작 직후 내구 applied 위치와 SDK의 live commit/last 위치가 아직 일치하는 prefix를 이루지 않으면 새 합의 표본은 사용 불가로 남긴다. live commit을 내구 applied 값으로 보정하지 않으며, host·disk 등 독립적인 정상 표본은 계속 게시한다. LogBytes는 Raft Bolt DB 파일 크기이며 stable metadata·할당 공간을 포함한다. 정확한 command payload 합계로 표시하지 않는다. snapshot 시각은 실제 파일 snapshot ID의 밀리초 시각이다.
 

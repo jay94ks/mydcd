@@ -43,11 +43,15 @@ func CheckClusterApps(c config.Node) error {
 // against this node's release keys (devel/design/cluster-apps.md 3.3).
 func openClusterAppImage(name string) (clusterapp.Bundle, error) {
 	image, _ := clusterapp.Lookup(name)
+	dir, err := clusterapp.InstalledImageDir(image)
+	if err != nil {
+		return clusterapp.Bundle{}, err
+	}
 	trust, err := clusterapp.LoadTrust(clusterapp.KeyDir)
 	if err != nil {
 		return clusterapp.Bundle{}, err
 	}
-	return clusterapp.Open(clusterapp.ImageDir, image, trust)
+	return clusterapp.Open(dir, image, trust)
 }
 
 // loadedClusterAppImage is a cluster app image pulled into the Engine: the

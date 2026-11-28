@@ -95,7 +95,7 @@ func TestRealBoundaryReportsDatagramsAndRevocation(t *testing.T) {
 		t.Fatal("report ACK preceded owner storage", err)
 	}
 	// One frame of three items: the refused one is dropped alone.
-	accepted, err := session.ReportBatch(ctx, KindNodeObservation, [][]byte{[]byte("one"), []byte("refuse"), payload})
+	accepted, err := session.ReportBatch(ctx, KindEventBatch, [][]byte{[]byte("one"), []byte("refuse"), payload})
 	if err != nil || len(accepted) != 3 || !accepted[0] || accepted[1] || !accepted[2] {
 		t.Fatal("batch receipt", accepted, err)
 	}
@@ -104,7 +104,7 @@ func TestRealBoundaryReportsDatagramsAndRevocation(t *testing.T) {
 	}
 	// Items that do not fit one frame go in the next.
 	big := bytes.Repeat([]byte("x"), 40<<10)
-	if accepted, err = session.ReportBatch(ctx, KindNodeObservation, [][]byte{big, big, big}); err != nil || !accepted[0] || !accepted[1] || !accepted[2] {
+	if accepted, err = session.ReportBatch(ctx, KindEventBatch, [][]byte{big, big, big}); err != nil || !accepted[0] || !accepted[1] || !accepted[2] {
 		t.Fatal("split batch", accepted, err)
 	}
 	if err = session.Report(ctx, KindWorkloadReport, payload); err != nil {

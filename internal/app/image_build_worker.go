@@ -202,7 +202,7 @@ func (r *Runtime) consumeImageBuildJob(ctx context.Context, spec imagebuild.JobS
 	jobctx, stop := context.WithDeadline(ctx, deadline)
 	defer stop()
 	if work.Run.Phase == "queued" {
-		inputs, err := r.freezeImageBuildInputs(jobctx, spec)
+		inputs, builder, local, err := r.freezeImageBuildInputs(jobctx, spec)
 		if err != nil {
 			return r.finishImageBuild(ctx, spec, imageBuildFailure(err, jobctx.Err() != nil))
 		}
@@ -224,11 +224,11 @@ func (r *Runtime) consumeImageBuildJob(ctx context.Context, spec imagebuild.JobS
 			if err != nil || view.Local {
 				return sfcp.ErrAdmission
 			}
-			sources, err := r.controlPolicy.ImageBuildBeginSources(view.State, r.Identity.Public, control.ImageBuildJobWorkQuery{Tenant: spec.Tenant, ID: spec.ID, At: time.Now().Unix()}, inputs)
+			sources, err := r.controlPolicy.ImageBuildBeginSources(view.State, r.Identity.Public, control.ImageBuildJobWorkQuery{Tenant: spec.Tenant, ID: spec.ID, At: time.Now().Unix()}, inputs, builder, local)
 			if err != nil {
 				return err
 			}
-			if err := r.publishImageBuildJob(jobctx, work, control.ImageBuildJobReport{Action: "begin", Inputs: inputs, Sources: sources}); err != nil {
+			if err := r.publishImageBuildJob(jobctx, work, control.ImageBuildJobReport{Action: "begin", Inputs: inputs, Builder: builder, BuilderLocal: local, Sources: sources}); err != nil {
 				return err
 			}
 		}
@@ -261,6 +261,11 @@ func (r *Runtime) consumeImageBuildJob(ctx context.Context, spec imagebuild.JobS
 	if !record.StartSent && !record.Removed {
 		if work.Run.Phase == "unknown" {
 			return r.finishImageBuild(ctx, spec, imagebuild.JobResult{Code: "BUILD_FAILED"})
+		}
+		if !record.CreateSent {
+			if err := r.pullImageBuildBuilder(jobctx, spec, work.Run); err != nil {
+				return r.finishImageBuild(ctx, spec, imageBuildFailure(err, jobctx.Err() != nil))
+			}
 		}
 		if err := native.Create(jobctx, spec); err != nil {
 			latest, cause := native.Record(spec)

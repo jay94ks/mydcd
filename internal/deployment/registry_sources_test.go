@@ -23,7 +23,7 @@ func addRegistryInputFixture(t *testing.T, f *fixture) Source {
 	tree, err = tree.ActivatePassword(f.c, "admin", object.ID, object.PasswordChange, "registry-verifier", true, object.Revision)
 	f.tree("tenant", tree, err)
 	f.add("tenant", secrets.Object{ID: "registry-login", Parent: "registry-group", Kind: secrets.Secret, Reference: secrets.Reference{Profile: "vault", Object: "tenant/registry-login", Revision: 1, Keys: []string{"DB_HOST", "DB_PASSWORD", "password", "username"}}})
-	return Source{"tenant", "registry-login"}
+	return Source{Realm: "tenant", Object: "registry-login"}
 }
 
 func TestRegistryAuxiliaryInputsShareApprovalAndLifetimeWithoutAppKeyOverride(t *testing.T) {
@@ -191,5 +191,95 @@ func TestBlueprintRegistrySourcesUseSameSelectionForPlanningAndPreparation(t *te
 	ctx.ExternalRegistries[0].Deleted = true
 	if reopened.CheckRegistrySources(ctx.ExternalRegistries) == nil {
 		t.Fatal("revoked source used by frozen preparation")
+	}
+}
+
+// sharedRegistryFixture adds a RegistryShared cluster group with one login.
+func sharedRegistryFixture(t *testing.T) *fixture {
+	t.Helper()
+	f := makeFixture(t)
+	f.add("", secrets.Object{ID: "hub", Parent: "root", Kind: secrets.Group})
+	f.add("", secrets.Object{ID: "hub-login", Parent: "hub", Kind: secrets.Secret, Reference: secrets.Reference{Profile: "global-vault", Object: "shared/hub", Revision: 1, Keys: []string{"password", "username"}}})
+	tree := f.trees[""]
+	group, _ := tree.Object("hub")
+	tree, err := tree.SetRegistryShared(f.c, "admin", "hub", group.Revision, true)
+	f.tree("", tree, err)
+	return f
+}
+
+func (f *fixture) tryReserve(needs ...Needs) error {
+	_, err := f.bindings.Reserve(f.bindings.Revision(), f.c, f.trees, f.a, f.v, needs, 100, nil)
+	return err
+}
+
+func TestRegistrySharedSecretServesOnlyClusterSourcePulls(t *testing.T) {
+	f := sharedRegistryFixture(t)
+	n := f.web()
+	n.RegistrySources = []Source{{Realm: "", Object: "hub-login", Shared: true}}
+	f.approveAll(n)
+	if err := f.tryReserve(n); err != nil {
+		t.Fatal("cluster source pull refused", err)
+	}
+	// The same credential chosen by a workspace-owned source (no Shared
+	// mark) must not log in anywhere with it.
+	own := f.web()
+	own.RegistrySources = []Source{{Realm: "", Object: "hub-login"}}
+	if err := f.tryReserve(own); err == nil {
+		t.Fatal("workspace source read a RegistryShared secret")
+	}
+	// Naming the same shared object as an env source too passes the merged
+	// approval plan but is refused when the app input grant is reserved.
+	both := f.web()
+	both.Sources = append(both.Sources, Source{Realm: "", Object: "hub-login"})
+	both.RegistrySources = []Source{{Realm: "", Object: "hub-login", Shared: true}}
+	if _, err := Required(f.cluster, f.c, f.trees, []Needs{both}); err != nil {
+		t.Fatal("approval plan", err)
+	}
+	if err := f.tryReserve(both); err == nil {
+		t.Fatal("RegistryShared secret reserved as an app env source")
+	}
+	// An app source can never carry the mark.
+	forged := f.web()
+	forged.Sources = append(forged.Sources, Source{Realm: "", Object: "hub-login", Shared: true})
+	if err := f.tryReserve(forged); err == nil {
+		t.Fatal("app source carried the shared mark")
+	}
+	// The mark is only for cluster realm references.
+	wrong := f.web()
+	wrong.RegistrySources = []Source{{Realm: "tenant", Object: "defaults", Shared: true}}
+	if err := f.tryReserve(wrong); err == nil {
+		t.Fatal("shared mark on a workspace realm")
+	}
+}
+
+func TestFrozenRegistrySourcesMarkOnlyClusterOwnedSources(t *testing.T) {
+	input := smallCompose(t)
+	cred := &imagesource.Credential{Realm: "", ID: "hub-login", UsernameKey: "username", PasswordKey: "password"}
+	cluster := imagesource.Source{ID: "docker", Authority: "docker.io", Repository: "library/**", Enabled: true, Auth: "password", Credential: cred}
+	b := Blueprint{d: blueprintRecord{Tenant: "tenant"}}
+	if err := b.freezeRegistrySources(input, []imagesource.Definition{{Spec: imagesource.Own(cluster)}}); err != nil {
+		t.Fatal(err)
+	}
+	if len(b.d.RegistrySources) == 0 {
+		t.Fatal("nothing frozen")
+	}
+	for name, sources := range b.d.RegistrySources {
+		if len(sources) != 1 || !sources[0].Shared {
+			t.Fatal("cluster source credential not marked", name, sources)
+		}
+	}
+	own := cluster
+	own.Tenant = "tenant"
+	b = Blueprint{d: blueprintRecord{Tenant: "tenant"}}
+	if err := b.freezeRegistrySources(input, []imagesource.Definition{{Spec: imagesource.Own(own)}}); err != nil {
+		t.Fatal(err)
+	}
+	if len(b.d.RegistrySources) == 0 {
+		t.Fatal("nothing frozen")
+	}
+	for name, sources := range b.d.RegistrySources {
+		if len(sources) != 1 || sources[0].Shared {
+			t.Fatal("workspace source credential marked shared", name, sources)
+		}
 	}
 }

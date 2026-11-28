@@ -201,10 +201,11 @@ func TestBuildZIPUpload32KiBActualUserAndMemberManagementWire(t *testing.T) {
 							return err
 						}
 						request, err := schema.Decode[Request](envelope.Body)
-						if err != nil || request.Method != "build-zip-transfer" || !request.validMethodFields() || !request.validQuerySelectors() || request.ImageBuildTransfer == nil || request.ImageBuildTransfer.Authorize(scope, session, time.Now().Unix()) != nil {
+						var params BuildZIPTransferQuery
+						if err != nil || !typedParams(request, BuildZIPTransferMethod.Name, &params) || params.Tenant != scope.Tenant || params.Request.Authorize(scope, session, time.Now().Unix()) != nil {
 							return sfcp.ErrFrame
 						}
-						transfer := *request.ImageBuildTransfer
+						transfer := params.Request
 						if !bytes.Equal(transfer.Data, payload) || transfer.Record != record || transfer.Proof.Record != record || (transfer.Proof.Session != nil) != record || !record && bytes.Contains(envelope.Body, []byte(`"Record"`)) {
 							return sfcp.ErrFrame
 						}
@@ -228,7 +229,7 @@ func TestBuildZIPUpload32KiBActualUserAndMemberManagementWire(t *testing.T) {
 						if err != nil || !result.Valid(scope, transfer) {
 							return sfcp.ErrFrame
 						}
-						return binding.respond(stream, frame, sha256.Sum256(frame.Fields[0].Value), Reply{Schema: 1, Code: "ok", ImageBuildIO: &result})
+						return binding.respond(stream, frame, sha256.Sum256(frame.Fields[0].Value), okReply(result))
 					}()
 					finished <- serve
 					return serve

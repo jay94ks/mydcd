@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Claude <noreply@anthropic.com>
 Date: Fri, 27 Nov 2026 09:05:28 +0000
-Subject: [PATCH 14/20] sfcp: copy of the cluster's pkg/sfcp wire and enginemux
+Subject: [PATCH 14/21] sfcp: copy of the cluster's pkg/sfcp wire and enginemux
  (checked by seafield/sfcp-copy.sh)
 
 

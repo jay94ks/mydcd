@@ -197,7 +197,7 @@ func (r *Runtime) checkMoveNativeNetwork(ctx context.Context, v cluster.View, pr
 	if err != nil {
 		return err
 	}
-	if native == "" || record.State.Pending != nil || record.State.Desired.Revision != row.Source.Revision || !record.State.Applied.Present || record.State.Applied.Generation != row.Source.Generation || record.State.Applied != record.State.Desired.Resource || record.State.Applied.Spec != string(raw) {
+	if native == "" || record.State.Pending != nil || record.State.Desired.Revision != row.Source.Revision || !record.State.Applied.Present || record.State.Applied.Generation != row.Source.Generation || record.State.Applied != record.State.Desired.Resource || committedSpecDigest(record.State.Applied.Spec) != sha256.Sum256(raw) {
 		return sfcp.ErrAdmission
 	}
 	return nil

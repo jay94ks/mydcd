@@ -20,7 +20,7 @@ import (
 
 // REQ-20 in the fake. Per task (tenant/app/service/instance) the fake keeps
 // exits, check results, log lines and injected secret values. The detail
-// is derived from the current app.yaml (environment, secrets_from,
+// is derived from the current app.yaml (environment, secrets.from,
 // volumes, networks, ports); Fake.SetTaskDrift sets drift. Logs start with
 // 300 generated lines; Fake.AddTaskLog appends, Fake.SetTaskSecretValue
 // names a value the task was given (masked on read), Fake.KillTask records
@@ -39,7 +39,7 @@ type taskState struct {
 func taskKey(t Task) string { return t.Tenant + "/" + t.App + "/" + t.Service + "/" + t.Instance }
 
 // nativeIDOf: a Docker container ID per task generation (a recreation,
-// e.g. clear-app-logs, gives a new one).
+// e.g. a restart, gives a new one).
 func nativeIDOf(t Task) string {
 	return fmt.Sprintf("%x", digestOf([]byte(t.Tenant+t.App+t.Service+t.Instance+"#"+fmt.Sprint(t.Generation))))[:12]
 }
@@ -122,8 +122,10 @@ func (c *fakeConn) TaskDetail(ctx context.Context, tenant string, sel ContainerS
 			Tmpfs       any      `yaml:"tmpfs"`
 			Secrets     []any    `yaml:"secrets"`
 			XSfc        struct {
-				Sources   deployment.SecretSources        `yaml:"secrets_from"`
-				SecretEnv []struct{ Source, Name string } `yaml:"secret_env"`
+				Secrets struct {
+					From deployment.SecretSources        `yaml:"from"`
+					Env  []struct{ Source, Name string } `yaml:"env"`
+				} `yaml:"secrets"`
 			} `yaml:"x-sfc"`
 		} `yaml:"services"`
 	}
@@ -149,11 +151,11 @@ func (c *fakeConn) TaskDetail(ctx context.Context, tenant string, sel ContainerS
 			out.Env = append(out.Env, TaskEnv{Key: k, Value: v})
 		}
 	}
-	// secret_env shows only the reference, never the value.
-	for _, e := range s.XSfc.SecretEnv {
+	// secrets.env shows only the reference, never the value.
+	for _, e := range s.XSfc.Secrets.Env {
 		out.Env = append(out.Env, TaskEnv{Key: e.Name, Secret: "secret:" + e.Source})
 	}
-	for _, src := range s.XSfc.Sources {
+	for _, src := range s.XSfc.Secrets.From {
 		if src.Scope == "cluster" {
 			continue
 		}

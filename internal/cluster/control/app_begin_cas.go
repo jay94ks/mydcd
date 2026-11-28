@@ -50,12 +50,11 @@ func (entry appEntry) beginTarget() [32]byte {
 		Quiescent    bool
 		Retirement   string
 		TaskRestarts []TaskRestartRecord `json:",omitempty"`
-		LogClears    []AppLogClearRecord `json:",omitempty"`
 	}
 	target.Scope, target.Origin = entry.Inventory.Scope(), entry.downTarget()
 	target.Down, target.Pending = entry.Down, entry.PendingSync
 	target.Quiescent = entry.Inventory.Quiescent()
-	target.TaskRestarts, target.LogClears = entry.TaskRestarts, entry.LogClears
+	target.TaskRestarts = entry.TaskRestarts
 	if active, ok := entry.Inventory.Active(); ok {
 		active.CompletedAt = 0
 		target.Active = &active

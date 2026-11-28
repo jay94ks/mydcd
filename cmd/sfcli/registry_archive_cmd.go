@@ -50,22 +50,22 @@ func registryCredential(ctx context.Context, s *session, tenant, id, repository 
 	if err != nil {
 		return "", nil, 0, cli.Usagef("%q is not a valid repository", repository)
 	}
-	reply, err := s.Client.RegistryCredential(ctx, s.Target, s.Stored.Session, tenant, userauth.RegistryCredentialRequest{ID: id, Repository: repo, Actions: actions})
+	cred, err := s.Client.RegistryCredential(ctx, s.Target, s.Stored.Session, userauth.RegistryCredentialQuery{Tenant: tenant, ID: id, Repository: repo, Actions: actions})
 	if err != nil {
-		clear(reply.RegistryCredential)
+		clear(cred.Credential)
 		return "", nil, 0, err
 	}
-	if err = checkRegistryCredential(s, reply, tenant, id, repo, actions); err != nil {
-		clear(reply.RegistryCredential)
+	if err = checkRegistryCredential(s, cred, tenant, id, repo, actions); err != nil {
+		clear(cred.Credential)
 		return "", nil, 0, err
 	}
-	return reply.RegistryAuthority, reply.RegistryCredential, reply.RegistryCredentialExpires, nil
+	return cred.Authority, cred.Credential, cred.ExpiresAt, nil
 }
 
-func checkRegistryCredential(s *session, reply userauth.Reply, tenant, id, repo string, actions []string) error {
-	grant, err := registry.ParseLogin(string(reply.RegistryCredential), time.Now().Unix())
+func checkRegistryCredential(s *session, reply userauth.RegistryCredential, tenant, id, repo string, actions []string) error {
+	grant, err := registry.ParseLogin(string(reply.Credential), time.Now().Unix())
 	trusted := slices.ContainsFunc(s.Client.Peers, func(p sfcp.Peer) bool { return [32]byte(p.Key) == grant.Issuer })
-	if err != nil || !trusted || grant.Cluster != s.Client.Cluster || grant.Tenant != tenant || grant.Registry != id || grant.Repository != repo || !slices.Equal(grant.Actions, actions) || grant.Authority != reply.RegistryAuthority || grant.Subject.Session == nil || !bytes.Equal(access.SessionBytes(*grant.Subject.Session), access.SessionBytes(s.Stored.Session)) {
+	if err != nil || !trusted || grant.Cluster != s.Client.Cluster || grant.Tenant != tenant || grant.Registry != id || grant.Repository != repo || !slices.Equal(grant.Actions, actions) || grant.Authority != reply.Authority || grant.Subject.Session == nil || !bytes.Equal(access.SessionBytes(*grant.Subject.Session), access.SessionBytes(s.Stored.Session)) {
 		return errors.New("the server sent a password for another registry, repository or session")
 	}
 	return nil

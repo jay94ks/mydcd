@@ -71,7 +71,7 @@ const instances: IngressInstance[] = [
         service: 'web',
         servicePort: 8080,
         network: 'shop-net',
-        certificates: [{ id: '9c41d2e85f30a7b16c94e0d3f8a2b57e1c06d49a3b8e72f5c1d0a6e94b3f7e07a', alg: 'ecdsa' }],
+        certificates: [{ id: '9c41d2e85f30a7b16c94e0d3f8a2b57e1c06d49a3b8e72f5c1d0a6e94b3f7e07', alg: 'ecdsa' }],
         backends: [
           { task: 'web-1', node: 'node-a', address: '10.240.10.10', port: 8080, weight: 1, generation: 7, group: 'stable', health: ok(3), rps: 208, p95Ms: 170 },
           { task: 'web-2', node: 'node-b', address: '10.240.11.12', port: 8080, weight: 1, generation: 7, group: 'stable', health: ok(2), rps: 204, p95Ms: 190 },
@@ -91,7 +91,7 @@ const instances: IngressInstance[] = [
         service: 'admin',
         servicePort: 8081,
         network: 'shop-net',
-        certificates: [{ id: '9c41d2e85f30a7b16c94e0d3f8a2b57e1c06d49a3b8e72f5c1d0a6e94b3f7e07a', alg: 'ecdsa' }],
+        certificates: [{ id: '9c41d2e85f30a7b16c94e0d3f8a2b57e1c06d49a3b8e72f5c1d0a6e94b3f7e07', alg: 'ecdsa' }],
         backends: [{ task: 'web-1', node: 'node-a', address: '10.240.10.10', port: 8081, weight: 1, generation: 7, health: ok(3), rps: 0 }],
         rps: 0,
         p95Ms: 0,
@@ -131,7 +131,7 @@ const instances: IngressInstance[] = [
         service: 'api',
         servicePort: 9000,
         network: 'shop-net',
-        certificates: [{ id: '4e7b19c0d35a82f6e1b04c9d7a3f58e2b6c10d94a7e35f8b2c6d01e9a4f73b28', alg: 'ecdsa' }],
+        certificates: [{ id: '9c41d2e85f30a7b16c94e0d3f8a2b57e1c06d49a3b8e72f5c1d0a6e94b3f7e07', alg: 'ecdsa' }],
         backends: [
           { task: 'api-1', node: 'node-b', address: '10.240.11.20', port: 9000, weight: 1, generation: 3, health: ok(4), rps: 118, p95Ms: 210 },
           { task: 'api-2', node: 'node-b', address: '10.240.11.21', port: 9000, weight: 1, generation: 3, health: ok(5), rps: 115, p95Ms: 1800, slow: true },

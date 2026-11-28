@@ -31,6 +31,7 @@ deletes the directory itself.`,
 			nodeStorageSpaceCommand(g),
 			nodeStorageAddCommand(g),
 			nodeStorageSetCommand(g),
+			nodeStorageArchiveDefaultCommand(g),
 			nodeStorageSelectCommand(g, "drain", "Stop placing new volumes in a storage directory", "drain-node-storage"),
 			nodeStorageSelectCommand(g, "remove", "Forget a drained, empty storage directory", "remove-node-storage"),
 		},
@@ -53,14 +54,14 @@ func readStorage(ctx context.Context, s *session, node string) (storageList, err
 		if err != nil {
 			return l, err
 		}
-		if !first && (l.Revision != reply.NodeStorageRevision || l.RootRevision != reply.NodeStorageRootRevision) {
+		if !first && (l.Revision != reply.Revision || l.RootRevision != reply.RootRevision) {
 			return l, errors.New("storage changed while it was read; try again")
 		}
-		l.Revision, l.RootRevision = reply.NodeStorageRevision, reply.NodeStorageRootRevision
-		if len(reply.NodeStorage) > 8 || len(l.Roots)+len(reply.NodeStorage) > 1024 {
+		l.Revision, l.RootRevision = reply.Revision, reply.RootRevision
+		if len(reply.Items) > 8 || len(l.Roots)+len(reply.Items) > 1024 {
 			return l, errors.New("server sent an invalid storage page")
 		}
-		for _, root := range reply.NodeStorage {
+		for _, root := range reply.Items {
 			key := root.Definition.Node + "/" + root.Definition.ID
 			if key <= after || node != "" && root.Definition.Node != node || root.Reference(s.Client.Cluster).Validate() != nil {
 				return l, errors.New("server sent an invalid storage page")
@@ -68,10 +69,10 @@ func readStorage(ctx context.Context, s *session, node string) (storageList, err
 			l.Roots = append(l.Roots, root)
 			after = key
 		}
-		if reply.NodeStorageNext == "" {
+		if reply.Next == "" {
 			return l, nil
 		}
-		if len(reply.NodeStorage) == 0 || reply.NodeStorageNext != after {
+		if len(reply.Items) == 0 || reply.Next != after {
 			return l, errors.New("server sent an invalid storage cursor")
 		}
 	}
@@ -136,9 +137,13 @@ func nodeStorageListCommand(g *globals) *cli.Command {
 					return err
 				}
 				return cli.Print(c.Out, g.output.Format(), l, func() cli.Rows {
-					t := cli.Rows{Header: []string{"node", "name", "path", "state", "tenants", "capacity"}}
+					t := cli.Rows{Header: []string{"node", "name", "path", "state", "tenants", "capacity", "archive"}}
 					for _, r := range l.Roots {
-						t.Add(r.Definition.Node, r.Definition.ID, r.Definition.Path, storageState(r), storageTenantsText(r.Definition), storageCapacityText(r.Definition.CapacityBytes))
+						archive := ""
+						if r.ArchiveDefault {
+							archive = "default"
+						}
+						t.Add(r.Definition.Node, r.Definition.ID, r.Definition.Path, storageState(r), storageTenantsText(r.Definition), storageCapacityText(r.Definition.CapacityBytes), archive)
 					}
 					return t
 				})
@@ -157,8 +162,8 @@ func nodeStorageListCommand(g *globals) *cli.Command {
 				if err != nil {
 					return err
 				}
-				items = append(items, reply.TenantStorage...)
-				if after = reply.TenantStorageNext; after == "" {
+				items = append(items, reply.Items...)
+				if after = reply.Next; after == "" {
 					break
 				}
 			}
@@ -240,10 +245,10 @@ func nodeStorageSpaceCommand(g *globals) *cli.Command {
 				if err != nil {
 					return err
 				}
-				if reply.NodeStorageRevision != l.Revision || reply.NodeStorageRootRevision != l.RootRevision || reply.NodeStorageSpace == nil || reply.NodeStorageSpace.Root != root.Reference(s.Client.Cluster) || !reply.NodeStorageSpace.Directory.MatchesOriginal(root.Attestation.Directory) {
+				if reply.Revision != l.Revision || reply.RootRevision != l.RootRevision || reply.Space.Root != root.Reference(s.Client.Cluster) || !reply.Space.Directory.MatchesOriginal(root.Attestation.Directory) {
 					return errors.New("storage changed while space was read; try again")
 				}
-				samples = append(samples, *reply.NodeStorageSpace)
+				samples = append(samples, reply.Space)
 			}
 			pools, err := nodestorage.AggregateSpaces(samples)
 			if err != nil {
@@ -410,6 +415,52 @@ what its fixed volumes already reserve is refused.`,
 			}
 			return g.apply(c, s, change{Summary: "node storage set " + node + " " + name, ID: f.id.Get(), Action: "set-node-storage-policy",
 				Expected: f.expect(r.Revision), Payload: q}, false)
+		},
+	}
+}
+
+func nodeStorageArchiveDefaultCommand(g *globals) *cli.Command {
+	var f changeFlags
+	var clearDefault bool
+	return &cli.Command{
+		Name:  "archive-default",
+		Args:  "NODE NAME",
+		Short: "Make a storage directory the server's default Volume archive location (system administrator)",
+		Long: `Archived Volumes of a taken-down app go to this directory unless the
+archive names another one. A server has at most one default; making a new
+one replaces the old. --clear stops NAME being the default. Without a
+default, an archive stays in the directory the Volume is in. A draining
+directory cannot be the default, and draining one clears it.`,
+		Flags: func(fs *flag.FlagSet) {
+			fs.BoolVar(&clearDefault, "clear", false, "stop NAME being the default")
+			f.register(fs, false, false)
+		},
+		Run: func(c *cli.Context, args []string) error {
+			node, name, err := nodeAndName(args, "archive-default")
+			if err != nil {
+				return err
+			}
+			s, err := g.open(c)
+			if err != nil {
+				return err
+			}
+			defer s.Close()
+			ctx, cancel := g.Deadline(c)
+			defer cancel()
+			l, err := readStorage(ctx, s, node)
+			if err != nil {
+				return err
+			}
+			r, ok := l.find(node, name)
+			if !ok {
+				return fmt.Errorf("no storage %s on %s", name, node)
+			}
+			summary := "node storage archive-default " + node + " " + name
+			if clearDefault {
+				summary += " --clear"
+			}
+			return g.apply(c, s, change{Summary: summary, ID: f.id.Get(), Action: "set-node-archive-default",
+				Expected: f.expect(r.Revision), Payload: control.NodeArchiveDefault{Node: node, ID: name, Default: !clearDefault}}, false)
 		},
 	}
 }

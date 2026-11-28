@@ -650,7 +650,7 @@ function PolicyCard({ tenant, canDeploy, onChanged }: { tenant: string; canDeplo
   const res = p ? buildRes(p.build) : BUILD_DEFAULTS;
   const bad = !(cacheBytes >= 0) ? '컴파일 캐시 상한을 GiB로 넣으세요.' : compiled && cacheBytes < res.artifactBytes ? `컴파일하면 캐시 상한이 빌드 결과물 한도(${fmtBytes(res.artifactBytes)}) 이상이어야 합니다.` : compiled && !v.node ? '컴파일하려면 빌드 서버가 필요합니다.' : compiled && !(Number.isInteger(jobs) && jobs >= 1 && jobs <= 16) ? '동시 빌드 작업은 1~16입니다.' : compiled && !/@sha256:[0-9a-f]{64}$/.test(v.image.trim()) ? '빌드 이미지는 digest로 고정해야 합니다 (이름@sha256:…).' : compiled && !/^go1\.\d+(\.\d+)?$/.test(v.toolchain.trim()) ? '툴체인은 go1.24 같은 Go 버전입니다.' : undefined;
   return (
-    <Card title={<h2>상태 검사 정책 (UI-91)</h2>} actions={p && <span className="mono small muted">policy rev {p.revision}</span>}>
+    <Card title={<h2>상태 검사 정책</h2>} actions={p && <span className="mono small muted">policy rev {p.revision}</span>}>
       {q.error !== undefined && <MutationError error={q.error} />}
       {q.data && !q.data.configured && <span className="small muted">정책이 아직 없습니다. 저장하면 기본값(해석 실행, 동시 4개, 5초)으로 시작합니다.</span>}
       <div className="g2" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))' }}>

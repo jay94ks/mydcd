@@ -52,7 +52,7 @@ func beginMoveThroughCLI(t *testing.T, ctx context.Context, root string, input d
 	// the normal signed producer, without creating or publishing a report.
 	wait("normal target disk report before fresh move-plan measurement", func() bool {
 		view := read()
-		reports, err := source.nodeObservations(ctx, view)
+		reports, err := source.storedNodeObservations(ctx, view)
 		if err != nil {
 			t.Fatal("original node observation store", err)
 		}

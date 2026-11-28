@@ -108,18 +108,18 @@ func TestPublishedPortsDockerSDKOptionsAndExactInspection(t *testing.T) {
 	if len(options.Config.ExposedPorts) != 4 {
 		t.Fatal("SDK targets missing")
 	}
-	if !d.matchContainer(context.Background(), f.native, f.spec, id, f.bridge.lease, nil) {
+	if !d.matchContainer(context.Background(), f.native, f.spec, id, []network.BridgeLease{f.bridge.lease}, nil) {
 		t.Fatal("configured stopped original did not match")
 	}
 	_ = f.onStart()
-	if !d.matchContainer(context.Background(), f.native, f.spec, id, f.bridge.lease, nil) {
+	if !d.matchContainer(context.Background(), f.native, f.spec, id, []network.BridgeLease{f.bridge.lease}, nil) {
 		t.Fatal("selected original bindings did not match")
 	}
 	// Docker's configured default bind address can be specific when HostIP
 	// was omitted. It is still the exact original native, not a new allocator.
 	defaultPort := dockernet.MustParsePort("9001/tcp")
 	f.native.NetworkSettings.Ports[defaultPort][0].HostIP = netip.MustParseAddr("127.0.0.1")
-	if !d.matchContainer(context.Background(), f.native, f.spec, id, f.bridge.lease, nil) {
+	if !d.matchContainer(context.Background(), f.native, f.spec, id, []network.BridgeLease{f.bridge.lease}, nil) {
 		t.Fatal("Docker default host address rejected")
 	}
 	for name, mutate := range map[string]func(*startFixture){
@@ -143,7 +143,7 @@ func TestPublishedPortsDockerSDKOptionsAndExactInspection(t *testing.T) {
 			mutate(f)
 			id, _ := f.engine.Identity("container", "task", f.op.Target)
 			d := DockerDriver{Engine: f.engine, Network: f.bridge}
-			if d.matchContainer(context.Background(), f.native, f.spec, id, f.bridge.lease, nil) {
+			if d.matchContainer(context.Background(), f.native, f.spec, id, []network.BridgeLease{f.bridge.lease}, nil) {
 				t.Fatal("foreign publication adopted")
 			}
 		})

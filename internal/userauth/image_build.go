@@ -7,7 +7,6 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/sha256"
-	"errors"
 	"fmt"
 	"time"
 
@@ -23,18 +22,17 @@ func (c Client) PlanImageBuildJob(ctx context.Context, target sfcp.Peer, session
 	if tenant == "" || !q.Valid() {
 		return control.ImageBuildJobPlan{}, sfcp.ErrAdmission
 	}
-	reply, err := c.query(ctx, target, session, Request{Method: "image-build-job-plan", Tenant: tenant, ImageBuildJob: &q})
+	plan, err := call(ctx, c, target, session, ImageBuildJobPlanMethod, ImageBuildJobPlanQuery{Tenant: tenant, Query: q})
 	if err != nil {
 		return control.ImageBuildJobPlan{}, err
 	}
-	plan := reply.ImageBuildJobPlan
-	if plan == nil || plan.Schema != 1 || plan.Spec.Cluster != c.Cluster || plan.Spec.Tenant != tenant || plan.Spec.ID != q.ID || plan.Spec.Version != q.Version || plan.Spec.Context.ID != q.Context || plan.Spec.Validate() != nil || plan.Change.Tenant != tenant || plan.Change.ID != q.ID || plan.Change.Context != q.Context || plan.Change.Version != q.Version || plan.Change.At != plan.Spec.CreatedAt || plan.Change.Snapshot != plan.Spec.Digest() || plan.Epoch == 0 || plan.Index == 0 || plan.RootRevision == 0 {
+	if plan.Schema != 1 || plan.Spec.Cluster != c.Cluster || plan.Spec.Tenant != tenant || plan.Spec.ID != q.ID || plan.Spec.Version != q.Version || plan.Spec.Context.ID != q.Context || plan.Spec.Validate() != nil || plan.Change.Tenant != tenant || plan.Change.ID != q.ID || plan.Change.Context != q.Context || plan.Change.Version != q.Version || plan.Change.At != plan.Spec.CreatedAt || plan.Change.Snapshot != plan.Spec.Digest() || plan.Epoch == 0 || plan.Index == 0 || plan.RootRevision == 0 {
 		return control.ImageBuildJobPlan{}, sfcp.ErrFrame
 	}
-	if !control.ValidImageBuildSecretUses(*plan, session) {
+	if !control.ValidImageBuildSecretUses(plan, session) {
 		return control.ImageBuildJobPlan{}, sfcp.ErrFrame
 	}
-	return *plan, nil
+	return plan, nil
 }
 
 func (c Client) BuildContextContent(ctx context.Context, target sfcp.Peer, session access.Session, tenant string, q imagebuild.ContentQuery, after string) (control.ImageBuildContentPage, error) {
@@ -54,14 +52,14 @@ func (c Client) BuildContextContent(ctx context.Context, target sfcp.Peer, sessi
 			return control.ImageBuildContentPage{}, sfcp.ErrAdmission
 		}
 	}
-	reply, err := c.query(ctx, target, session, Request{Method: "build-context-content", Tenant: tenant, ImageBuildContent: &q, After: after})
+	page, err := call(ctx, c, target, session, BuildContextContentMethod, BuildContextContentQuery{Tenant: tenant, Query: q, After: after})
 	if err != nil {
 		return control.ImageBuildContentPage{}, err
 	}
-	if reply.ImageBuildContent == nil || !validBuildContentPage(*reply.ImageBuildContent, q, offset, root) {
+	if !validBuildContentPage(page, q, offset, root) {
 		return control.ImageBuildContentPage{}, sfcp.ErrFrame
 	}
-	return *reply.ImageBuildContent, nil
+	return page, nil
 }
 func validBuildContentPage(page control.ImageBuildContentPage, q imagebuild.ContentQuery, offset uint64, root [32]byte) bool {
 	if !page.Page.Valid(q) || page.Page.PageOffset() != offset || page.Root == ([32]byte{}) || page.Epoch == 0 || root != ([32]byte{}) && page.Root != root {
@@ -78,14 +76,10 @@ func (c Client) CheckBuildContext(ctx context.Context, target sfcp.Peer, session
 	if tenant == "" || !q.Valid() {
 		return control.ImageBuildSourceResult{}, sfcp.ErrAdmission
 	}
-	reply, err := c.query(ctx, target, session, Request{Method: "check-build-context", Tenant: tenant, ImageBuildSource: &q})
+	out, err := call(ctx, c, target, session, CheckBuildContextMethod, CheckBuildContextQuery{Tenant: tenant, Query: q})
 	if err != nil {
 		return control.ImageBuildSourceResult{}, err
 	}
-	if reply.ImageBuildSource == nil {
-		return control.ImageBuildSourceResult{}, sfcp.ErrFrame
-	}
-	out := *reply.ImageBuildSource
 	if out.Schema != 1 || out.Context != q.ID || out.ContextRevision == 0 || out.PolicyRevision == 0 || out.Epoch == 0 {
 		return control.ImageBuildSourceResult{}, sfcp.ErrFrame
 	}
@@ -123,29 +117,16 @@ func (c Client) transferBuildZIP(ctx context.Context, target sfcp.Peer, session 
 	if scope.Validate() != nil || scope.Cluster != c.Cluster || scope.Creator != session.User || !q.Valid() || q.Kind == "part" && len(q.Data) != scope.PartLength(q.Index) {
 		return control.ImageBuildIOResult{}, sfcp.ErrAdmission
 	}
-	reply, err := c.query(ctx, target, session, Request{Method: "build-zip-transfer", Tenant: scope.Tenant, ImageBuildTransfer: &q})
+	out, err := call(ctx, c, target, session, BuildZIPTransferMethod, BuildZIPTransferQuery{Tenant: scope.Tenant, Request: q})
 	if err != nil {
 		return control.ImageBuildIOResult{}, err
 	}
-	if reply.ImageBuildIO == nil || !reply.ImageBuildIO.Valid(scope, q) {
+	if !out.Valid(scope, q) {
 		return control.ImageBuildIOResult{}, sfcp.ErrFrame
 	}
-	return *reply.ImageBuildIO, nil
+	return out, nil
 }
 
-func imageBuildError(err error) Reply {
-	code := "unavailable"
-	if errors.Is(err, access.ErrDenied) {
-		code = "denied"
-	}
-	if errors.Is(err, access.ErrInvalid) || errors.Is(err, imagebuild.ErrInvalid) {
-		code = "invalid"
-	}
-	if errors.Is(err, access.ErrConflict) || errors.Is(err, imagebuild.ErrConflict) || errors.Is(err, imagebuild.ErrExpired) {
-		code = "conflict"
-	}
-	return Reply{Schema: 1, Code: code}
-}
 func (c Client) ImageBuilds(ctx context.Context, target sfcp.Peer, session access.Session, tenant string, q control.ImageBuildQuery, after string) (control.ImageBuildPage, error) {
 	if tenant == "" || !q.Valid() {
 		return control.ImageBuildPage{}, sfcp.ErrAdmission
@@ -153,14 +134,10 @@ func (c Client) ImageBuilds(ctx context.Context, target sfcp.Peer, session acces
 	if _, _, err := registryclient.CatalogueCursor(after); err != nil {
 		return control.ImageBuildPage{}, err
 	}
-	reply, err := c.query(ctx, target, session, Request{Method: "image-builds", Tenant: tenant, ImageBuild: &q, After: after})
+	page, err := call(ctx, c, target, session, ImageBuildsMethod, ImageBuildsQuery{Tenant: tenant, Query: q, After: after})
 	if err != nil {
 		return control.ImageBuildPage{}, err
 	}
-	if reply.ImageBuild == nil {
-		return control.ImageBuildPage{}, sfcp.ErrFrame
-	}
-	page := *reply.ImageBuild
 	if page.Schema != 1 || page.Tenant != tenant || page.Part != q.Part || page.Epoch == 0 || len(page.Policies)+len(page.Contexts)+len(page.Versions)+len(page.Uploads)+len(page.Jobs)+len(page.CachePrunes) > 8 || len(page.Missing) > 256 {
 		return control.ImageBuildPage{}, sfcp.ErrFrame
 	}

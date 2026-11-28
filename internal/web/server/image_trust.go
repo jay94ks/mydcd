@@ -53,7 +53,7 @@ func registryAuthorities(ctx context.Context, c sfc.Conn, tenant string) (map[st
 		}
 		for _, r := range p.Items {
 			if !r.Deleted {
-				out[r.Endpoint] = true
+				out[r.Spec.Authority] = true
 			}
 		}
 		if p.Next == "" {

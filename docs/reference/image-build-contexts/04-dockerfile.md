@@ -2,9 +2,9 @@
 
 `build context ls CONTEXT [--version N]`, `build context cat CONTEXT PATH [--version N]`는 현재 선택 tenant의 **삭제되지 않은 immutable version**을 읽는다. VERSION_HEX는 `build-versions`의 ID를 소문자 64자리 hex로 표현한 값이다. `--tenant`·`--after`를 지원하며 각 호출은 한 페이지만 JSON으로 출력한다. mutable draft 파일 경로나 호스트 경로를 조회하는 기능이 아니다.
 
-같은 User purpose8 kind1 요청은 `{Schema:1,Method:"build-context-content",Tenant,ImageBuildContent:{Version:[32],Part:"tree"|"dockerfile"|"file",Path?,Offset?},After?,Nonce:[32]}`다. 일반 User 본문과 마찬가지로 고정 배열 `UserKey`의 영 값도 canonical JSON에 포함한다. 현재 Session의 tenant Read 또는 ManageRegistry·원 owner/node/root ACL을 검사한다. 원 upload가 consume된 version을 가리키고 실제 회수되지 않았어야 한다. 다른 tenant의 ID·삭제된 version·미소비/회수된 원 upload를 요청하면 내용을 반환하지 않는다. consume된 보존 version은 upload 전송 기한이 지나도 현재 사용자 권한으로 읽을 수 있다.
+같은 User purpose8 kind1 요청은 `{Schema:1,Method:"build-context-content",Params:{Tenant,Query:{Version:[32],Part:"tree"|"dockerfile"|"file",Path?,Offset?},After?},Nonce:[32]}`다. 일반 User 본문과 마찬가지로 고정 배열 `UserKey`의 영 값도 canonical JSON에 포함한다. 현재 Session의 tenant Read 또는 ManageRegistry·원 owner/node/root ACL을 검사한다. 원 upload가 consume된 version을 가리키고 실제 회수되지 않았어야 한다. 다른 tenant의 ID·삭제된 version·미소비/회수된 원 upload를 요청하면 내용을 반환하지 않는다. consume된 보존 version은 upload 전송 기한이 지나도 현재 사용자 권한으로 읽을 수 있다.
 
-성공 Reply의 `ImageBuildContent`는 `{Page:{Schema:1,Version:[32],Tree:[32],Part,Offset,Total,Entries?,Data?,Next?,File?},Root:[32],Epoch,Next?}`다.
+성공 응답의 `Data`는 `{Page:{Schema:1,Version:[32],Tree:[32],Part,Offset,Total,Entries?,Data?,Next?,File?},Root:[32],Epoch,Next?}`다.
 
 | Part | Offset/Total 단위 | 본문·한도 |
 |---|---|---|

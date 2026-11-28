@@ -22,7 +22,7 @@ func TestTaskQuerySelectorsCannotContaminateOtherMethods(t *testing.T) {
 		tasks(`{"Node":"","Tenant":"","App":"app","Standalone":"job"}`),
 		tasks(`{"Node":"","Tenant":"","App":"","TargetUser":"other"}`),
 		tasks(`{}`),
-		{Schema: 1, Method: "tasks", TargetUser: "other", Params: json.RawMessage(`{"Node":"","Tenant":"","App":""}`)},
+		{Schema: 1, Method: "tasks", After: "other", Params: json.RawMessage(`{"Node":"","Tenant":"","App":""}`)},
 		{Method: "tasks", Node: "node-a"},
 	} {
 		if q.validMethodFields() {

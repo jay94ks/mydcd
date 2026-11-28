@@ -523,14 +523,14 @@ func TestStaticFallback(t *testing.T) {
 		b, _ := io.ReadAll(resp.Body)
 		return resp.StatusCode, string(b), resp.Header
 	}
-	if code, body, h := get("/apps/shop/web"); code != 200 || body != "<html>app</html>" || h.Get("Cache-Control") != "no-cache" {
+	if code, body, h := get("/apps/shop/web"); code != 200 || body != `<html lang="en">app</html>` || h.Get("Cache-Control") != "no-cache" {
 		t.Fatalf("spa fallback: %d %q %v", code, body, h)
 	}
 	if code, _, h := get("/assets/app-1a.js"); code != 200 || !strings.Contains(h.Get("Cache-Control"), "immutable") {
 		t.Fatalf("asset: %d %v", code, h)
 	}
 	// a client route with a dot in it is not a file
-	if code, body, _ := get("/system/domains/example.com"); code != 200 || body != "<html>app</html>" {
+	if code, body, _ := get("/system/domains/example.com"); code != 200 || body != `<html lang="en">app</html>` {
 		t.Fatalf("dotted route: %d %q", code, body)
 	}
 	if code, _, _ := get("/assets/missing.js"); code != 404 {
@@ -550,6 +550,12 @@ func TestPrefs(t *testing.T) {
 	code, out := f.do("GET", "/api/v1/prefs", nil)
 	if code != 200 || out["prefs"].(map[string]any)["tenant"] != "shop" {
 		t.Fatalf("get prefs: %d %v", code, out)
+	}
+	// language: "", ko or en (the account's default language)
+	for lang, want := range map[any]int{"": 204, "ko": 204, "en": 204, "fr": 400, 1: 400} {
+		if code, out := f.do("PUT", "/api/v1/prefs", map[string]any{"prefs": map[string]any{"language": lang}}); code != want {
+			t.Fatalf("language %v: %d %v", lang, code, out)
+		}
 	}
 }
 

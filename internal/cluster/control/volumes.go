@@ -52,6 +52,8 @@ type volumeCheckpoint struct {
 	Restores     []VolumeRestore     `json:",omitempty"`
 	Creations    []VolumeCreation    `json:",omitempty"`
 	Moves        []VolumeMove        `json:",omitempty"`
+	Archives     []VolumeArchive     `json:",omitempty"`
+	ArchiveKeys  *VolumeArchiveKeys  `json:",omitempty"`
 }
 type Volumes struct {
 	files        map[string]VolumeFileJob
@@ -62,6 +64,8 @@ type Volumes struct {
 	restores     map[string]VolumeRestore
 	creations    map[string]VolumeCreation
 	moves        map[string]VolumeMove
+	archives     map[string]VolumeArchive
+	archiveKeys  VolumeArchiveKeys
 }
 
 func volumeKey(s volumes.Scope) string { return s.Key() }
@@ -74,7 +78,7 @@ func (p Policy) Volumes(s state.State) (Volumes, error) {
 	if err != nil {
 		return Volumes{}, err
 	}
-	v := Volumes{files: map[string]VolumeFileJob{}, entries: map[string]registeredVolume{}, backupLimits: map[string]VolumeBackupLimit{}, backups: map[string]VolumeBackup{}, restores: map[string]VolumeRestore{}, creations: map[string]VolumeCreation{}, moves: map[string]VolumeMove{}}
+	v := Volumes{files: map[string]VolumeFileJob{}, entries: map[string]registeredVolume{}, backupLimits: map[string]VolumeBackupLimit{}, backups: map[string]VolumeBackup{}, restores: map[string]VolumeRestore{}, creations: map[string]VolumeCreation{}, moves: map[string]VolumeMove{}, archives: map[string]VolumeArchive{}}
 	if raw == nil {
 		return v, v.validateOriginalStorage(s)
 	}
@@ -182,6 +186,24 @@ func (p Policy) Volumes(s state.State) (Volumes, error) {
 		return v, ErrCatalog
 	}
 	last = ""
+	for _, row := range disk.Archives {
+		key := backupKey(row.Binding.Scope, row.Binding.ID)
+		if key <= last {
+			return v, ErrCatalog
+		}
+		last = key
+		v.archives[key] = row
+	}
+	if disk.ArchiveKeys != nil {
+		if disk.ArchiveKeys.Revision == 0 {
+			return v, ErrCatalog
+		}
+		v.archiveKeys = *disk.ArchiveKeys
+	}
+	if p.validateArchives(v) != nil {
+		return v, ErrCatalog
+	}
+	last = ""
 	for _, j := range disk.Files {
 		if j.ID <= last || !validVolumeFileJob(j, p.Cluster) {
 			return v, ErrCatalog
@@ -203,7 +225,7 @@ func (p Policy) volumeCheckpoint(s state.State, v Volumes) (map[string][]byte, s
 	if p.validateVolumeDeletions(v) != nil {
 		return nil, state.ConditionFailed
 	}
-	if v.validateOriginalStorage(s) != nil || p.validateMoves(v) != nil || !v.copyBudgetsOK() {
+	if v.validateOriginalStorage(s) != nil || p.validateMoves(v) != nil || !v.copyBudgetsOK() || p.validateArchives(v) != nil {
 		return nil, state.ConditionFailed
 	}
 	if v.Revision == ^uint64(0) || v.volumeReservations() > maxVolumes || v.volumeMetadataSlots() > maxVolumes {
@@ -229,6 +251,11 @@ func (p Policy) volumeCheckpoint(s state.State, v Volumes) (map[string][]byte, s
 	disk.Creations = v.Creations()
 	disk.Moves = v.Moves()
 	disk.Files = v.VolumeFiles()
+	disk.Archives = v.Archives()
+	if v.archiveKeys.Revision != 0 {
+		keys := v.archiveKeys
+		disk.ArchiveKeys = &keys
+	}
 	raw, err := json.Marshal(disk)
 	if err != nil {
 		return nil, state.Invalid
@@ -303,6 +330,20 @@ func (p Policy) authorizeVolume(c access.Catalog, op UserOperation) error {
 		scope, cleanup = r.Backup.Scope, true
 	case "set-volume-capacity", "set-volume-backup-limit":
 		return c.AuthorizeSession(op.Session, p.Cluster, p.Issuer(op.Session.Issuer), op.At, "", access.ManageCluster, "")
+	case "set-volume-archive-admin-key":
+		return c.AuthorizeSession(op.Session, p.Cluster, p.Issuer(op.Session.Issuer), op.At, "", access.ManageCluster, "")
+	case "archive-volume":
+		var r VolumeArchiveBegin
+		if canonical(op.Change.Payload, &r) != nil {
+			return access.ErrInvalid
+		}
+		scope = r.Scope
+	case "unarchive-volume", "cancel-volume-archive", "discard-volume-archive":
+		var r VolumeArchiveSelection
+		if canonical(op.Change.Payload, &r) != nil {
+			return access.ErrInvalid
+		}
+		scope, cleanup = r.Scope, op.Change.Action != "unarchive-volume"
 	case "begin-volume-backup":
 		var r VolumeBackupBegin
 		if canonical(op.Change.Payload, &r) != nil {
@@ -368,6 +409,12 @@ func (p Policy) reduceVolumes(s state.State, cmd state.Command) (map[string][]by
 		if restoreReportValue([]byte(cmd.Value)) {
 			return p.reduceRestoreReport(s, cmd)
 		}
+		if volumeArchiveReportValue([]byte(cmd.Value)) {
+			return p.reduceArchiveReport(s, cmd)
+		}
+		if volumeArchiveKeyReportValue([]byte(cmd.Value)) {
+			return p.reduceArchiveKeyReport(s, cmd)
+		}
 		return p.reduceBackupReport(s, cmd)
 	}
 	if cmd.Kind != state.Module || !strings.HasPrefix(cmd.Actor, "user/") {
@@ -410,6 +457,9 @@ func (p Policy) reduceVolumes(s state.State, cmd state.Command) (map[string][]by
 	}
 	if isRestoreAction(change.Action) {
 		return p.reduceRestoreChange(s, c, v, op)
+	}
+	if isArchiveAction(change.Action) {
+		return p.reduceArchiveChange(s, c, v, op)
 	}
 	if strings.Contains(change.Action, "volume-backup") {
 		return p.reduceBackupChange(s, c, v, op)
@@ -460,6 +510,9 @@ func (p Policy) reduceVolumes(s state.State, cmd state.Command) (map[string][]by
 	key := volumeKey(scope)
 	entry, ok := v.entries[key]
 	if !ok || entry.State.Scope() != scope || entry.State.Revision() != change.Expected {
+		return nil, state.ConditionFailed
+	}
+	if v.Archived(scope) {
 		return nil, state.ConditionFailed
 	}
 	if change.Action == "acquire-volume" {
@@ -572,6 +625,11 @@ type VolumeView struct {
 	MoveID, TargetNode      string        `json:",omitempty"`
 	MovePhase               volumes.Phase `json:",omitempty"`
 	MoveExpiresAt           int64         `json:",omitempty"` // the move plan's end; a move not yet copying cannot continue after it
+	// ArchiveID and ArchivePhase name the archive that holds the Volume
+	// (Phase "Archived" from Packing until Restored, Cancelled, Failed or
+	// Discarded).
+	ArchiveID    string `json:",omitempty"`
+	ArchivePhase string `json:",omitempty"`
 	// UsedBytes: allocated bytes of the owner's last bounded scan
 	// (observability.VolumeUsage, not Raft state); nil = unknown (no fresh
 	// scan, too large to scan, or the owner is not reporting).
@@ -629,6 +687,9 @@ func (v Volumes) Page(c access.Catalog, actor, tenant, after string) ([]VolumeVi
 					view.MoveExpiresAt = j.ExpiresAt
 				}
 			}
+		}
+		if j, ok := v.activeArchive(key); ok {
+			view.Phase, view.ArchiveID, view.ArchivePhase = "Archived", j.Binding.ID, j.Phase
 		}
 		views[key] = view
 	}
